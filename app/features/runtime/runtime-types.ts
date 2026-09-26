@@ -284,7 +284,7 @@ export function isRunInputsLine(line: LogLine): boolean {
  * both recognises it (counting) and re-creates it (backward paging across a run
  * boundary), so the shape lives here, on the shared wire type.
  */
-export const RUN_BOUNDARY_TAG = "run·resumed";
+const RUN_BOUNDARY_TAG = "run·resumed";
 
 /** True for a synthetic run boundary rather than a stored console line. */
 export function isRunBoundary(line: LogLine): boolean {

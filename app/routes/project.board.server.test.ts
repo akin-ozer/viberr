@@ -232,6 +232,8 @@ describe("create-task carries the metadata fields from the form", () => {
       title: "Bare probe",
       goal: "a goal long enough to pass the floor",
     });
+    // The create toast names the column the task landed in (board-page.tsx).
+    expect("stageName" in result ? result.stageName : null).toBe("Triage");
     const key = z.object({ key: z.string() }).parse(result).key;
     const fm = readTaskFile({
       projectSlug: "viberr-core",

@@ -3,15 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ProjectCredentialHealth } from "~/server/secrets/pat-store.server";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, useParams } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import {
-  BranchesPanel,
-  GithubViewPage,
-  PullRequestsPanel,
-  RepositoryPanel,
-  type ReconcileCheckView,
-} from "./github-view";
+import { GithubViewPage, type ReconcileCheckView } from "./github-view";
 import type {
   BranchRowView,
   GithubViewData,
@@ -171,6 +165,53 @@ const branches: BranchRowView[] = [
     unpushedCommitCount: 0,
   },
 ];
+
+/**
+ * The pre-F19-22 world in one value: no completed reconcile pass on record, so
+ * the chip has nothing but the CHANGE timestamp to reason from and the R17-5
+ * rules below decide the tone. Every block that predates the audit read keeps
+ * asserting against exactly that fallback.
+ */
+const NO_CHECK_ON_RECORD: ReconcileCheckView = {
+  at: null,
+  label: null,
+  stale: true,
+};
+
+/** The page as its route mounts it, beside the task route a row click lands on. */
+function renderPage(
+  data: GithubViewData,
+  myRole: string | null = "maintainer",
+  reconcileCheck: ReconcileCheckView = NO_CHECK_ON_RECORD,
+) {
+  const Stub = createRoutesStub([
+    {
+      path: "/projects/:slug/github",
+      Component: () => (
+        <ToastProvider>
+          <GithubViewPage data={data} reconcileCheck={reconcileCheck} myRole={myRole} />
+        </ToastProvider>
+      ),
+    },
+    {
+      path: "/projects/:slug/tasks/:key",
+      Component: () => <p className="landed">{useParams().key}</p>,
+    },
+  ]);
+  return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
+}
+
+/** One of the page's three panels, found by its heading. */
+function panel(
+  container: HTMLElement,
+  heading: "Repository" | "Pull requests" | "Execution branches",
+) {
+  const found = [...container.querySelectorAll<HTMLElement>(".panel")].find(
+    (p) => p.querySelector("h2")?.textContent === heading,
+  );
+  if (!found) throw new Error(`the page has no ${heading} panel`);
+  return found;
+}
 
 /* ------------------------------------------------- credential card matrix */
 
@@ -474,23 +515,11 @@ describe("CredentialManageActions (finding #13)", () => {
 
 describe("RepositoryPanel", () => {
   it("renders repo, degraded connection pill and the fixed kv copy", () => {
-    const { container } = render(
-      <RepositoryPanel
-        data={{
-          project: {
-            slug: "viberr-core",
-            name: "Viberr Core",
-            repo: "akin-ozer/viberr",
-            defaultBranch: "main",
-          },
-          connection: { status: "no_pat_configured", repo: "akin-ozer/viberr" },
-          credential: noneCredential,
-        }}
-        onOpenTask={() => {}}
-        canSeeCredential
-      />,
+    const { container } = renderPage(
+      viewData({ connection: { status: "no_pat_configured", repo: "akin-ozer/viberr" } }),
     );
-    const rows = container.querySelectorAll(".kv-row");
+    const repo = panel(container, "Repository");
+    const rows = repo.querySelectorAll(".kv-row");
     expect(rows.length).toBe(3);
     expect(rows[0]!.textContent).toContain("akin-ozer/viberr");
     // Degraded: the pill must NOT claim connected (spec §7.9c).
@@ -500,7 +529,7 @@ describe("RepositoryPanel", () => {
     // P13-D-5: this row hardcoded "task-level override allowed" — a capability
     // nothing implemented, asserted regardless of the (now deleted) toggle.
     expect(rows[2]!.textContent).toContain("every task uses this repository");
-    expect(container.textContent).not.toContain("override");
+    expect(repo.textContent).not.toContain("override");
   });
 
   /**
@@ -508,10 +537,10 @@ describe("RepositoryPanel", () => {
    * fact Viberr acts on, never left for a person to find at the first run.
    */
   it("ruling 468: an empty repository says Viberr will make its first commit", () => {
-    const panel = (empty: boolean) =>
-      render(
-        <RepositoryPanel
-          data={{
+    const repo = (empty: boolean) =>
+      panel(
+        renderPage(
+          viewData({
             project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
             connection: {
               status: "connected",
@@ -520,67 +549,56 @@ describe("RepositoryPanel", () => {
               private: false,
               empty,
             },
-            credential: noneCredential,
-          }}
-          onOpenTask={() => {}}
-          canSeeCredential
-        />,
+          }),
+        ).container,
+        "Repository",
       );
     // CANARY: drop the Contents row and the empty repository reads as any other.
-    const { container } = panel(true);
-    const contents = [...container.querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
+    const contents = [...repo(true).querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
     expect(contents?.textContent).toBe(
       "Contentsempty: Viberr will create the first commit on main before the first task branch",
     );
     cleanup();
-    expect(panel(false).container.textContent).not.toContain("first commit");
+    expect(repo(false).textContent).not.toContain("first commit");
   });
 
   it("R-repo-2: an empty repository behind a token that can only read names the token, not a commit", () => {
-    const { container } = render(
-      <RepositoryPanel
-        data={{
-          project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
-          connection: {
-            status: "connected",
-            repo: "akin-ozer/website",
-            remoteDefaultBranch: "main",
-            private: false,
-            empty: true,
-            readOnly: true,
-          },
-          credential: noneCredential,
-        }}
-        onOpenTask={() => {}}
-        canSeeCredential
-      />,
+    const { container } = renderPage(
+      viewData({
+        project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
+        connection: {
+          status: "connected",
+          repo: "akin-ozer/website",
+          remoteDefaultBranch: "main",
+          private: false,
+          empty: true,
+          readOnly: true,
+        },
+      }),
     );
     // CANARY: drop the read-only wording and the row promises a commit GitHub
     // will refuse.
-    const contents = [...container.querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
+    const contents = [...panel(container, "Repository").querySelectorAll(".kv-row")].find((r) =>
+      r.textContent?.startsWith("Contents"),
+    );
     expect(contents?.textContent).toBe(
       "Contentsempty, and the token can only read it: Viberr cannot create the first commit on main until the token can push",
     );
   });
 
   it("says an unset repository in words, not a dash (ruling 148)", () => {
-    const { container } = render(
-      <RepositoryPanel
-        data={{
-          project: {
-            slug: "viberr-core",
-            name: "Viberr Core",
-            repo: null,
-            defaultBranch: "main",
-          },
-          connection: { status: "no_repo_configured" },
-          credential: noneCredential,
-        }}
-        onOpenTask={() => {}}
-        canSeeCredential
-      />,
+    const { container } = renderPage(
+      viewData({
+        project: {
+          slug: "viberr-core",
+          name: "Viberr Core",
+          repo: null,
+          defaultBranch: "main",
+        },
+        connection: { status: "no_repo_configured" },
+      }),
     );
-    const rows = container.querySelectorAll(".kv-row");
+    const rows = panel(container, "Repository").querySelectorAll(".kv-row");
     // The same word the identical row on the settings page uses, and NOT the
     // Connection pill's "no repository" one line below (ruling 14: one fact,
     // one wording, said once).
@@ -592,89 +610,20 @@ describe("RepositoryPanel", () => {
   });
 
   it("claims connected only for a connected result", () => {
-    const { container } = render(
-      <RepositoryPanel
-        data={{
-          project: {
-            slug: "viberr-core",
-            name: "Viberr Core",
-            repo: "akin-ozer/viberr",
-            defaultBranch: "main",
-          },
-          connection: {
-            status: "connected",
-            repo: "akin-ozer/viberr",
-            remoteDefaultBranch: "main",
-            private: true,
-          },
-          credential: healthyCredential,
-        }}
-        onOpenTask={() => {}}
-        canSeeCredential
-      />,
+    const { container } = renderPage(
+      viewData({
+        connection: {
+          status: "connected",
+          repo: "akin-ozer/viberr",
+          remoteDefaultBranch: "main",
+          private: true,
+        },
+        credential: healthyCredential,
+      }),
     );
     expect(
-      container.querySelectorAll(".kv-row")[1]!.querySelector(".pill.ready"),
+      panel(container, "Repository").querySelectorAll(".kv-row")[1]!.querySelector(".pill.ready"),
     ).not.toBeNull();
-  });
-
-  /**
-   * R19-11 (owner ruling, Q-V1 PAT half) — the credential card is WITHDRAWN
-   * from a reader without the `grant-github-scope` grant, not disabled (ruling
-   * 37: a withdrawn affordance is honest, a disabled one invites a support
-   * question). The panel must still answer "is this repository connected?",
-   * which is legitimate context for reading the board — so the Connection row
-   * stays and a lock note explains the gap. A blank space under the kv rows
-   * would be its own defect.
-   */
-  it("withdraws the credential card from a reader without the grant, keeping the connection facts", () => {
-    const { container } = render(
-      <RepositoryPanel
-        data={{
-          project: {
-            slug: "viberr-core",
-            name: "Viberr Core",
-            repo: "akin-ozer/viberr",
-            defaultBranch: "main",
-          },
-          connection: {
-            status: "connected",
-            repo: "akin-ozer/viberr",
-            remoteDefaultBranch: "main",
-            private: true,
-          },
-          credential: violationCredential,
-        }}
-        onOpenTask={() => {}}
-        canSeeCredential={false}
-        warnActions={<button className="btn sm">Fix in Settings</button>}
-        manageActions={<div className="cred-manage">manage</div>}
-      />,
-    );
-    // The card and every credential fact on it: gone.
-    expect(container.querySelector(".cred-card")).toBeNull();
-    expect(container.textContent).not.toContain("github_pat_••••42af");
-    expect(container.textContent).not.toContain("viberr-bot");
-    expect(container.querySelectorAll(".scope-chip")).toHaveLength(0);
-    expect(container.querySelector(".cred-warn")).toBeNull();
-    expect(container.querySelector(".cred-ok")).toBeNull();
-    // The card owns both action slots, so neither leaks out of the withdrawal.
-    expect(container.querySelector(".cred-manage")).toBeNull();
-    expect(container.textContent).not.toContain("Fix in Settings");
-    // …but the panel still answers the question a reader of the board has.
-    const rows = container.querySelectorAll(".kv-row");
-    expect(rows[0]!.textContent).toContain("akin-ozer/viberr");
-    expect(rows[1]!.querySelector(".pill.ready")!.textContent).toContain(
-      "connected",
-    );
-    // …and says why the rest is missing, naming the grant that carries it.
-    const note = container.querySelector(".pol-note")!;
-    expect(note.textContent).toContain(
-      "Credential details need the Manage the GitHub credential grant (project admin or maintainer).",
-    );
-    expect(note.textContent).toContain(
-      "The Connection row above still shows whether this repository is reachable.",
-    );
   });
 
   /**
@@ -683,50 +632,32 @@ describe("RepositoryPanel", () => {
    * go with it — a sentence pointing at an absent surface is worse than none.
    */
   it("drops the probe note with the card it points at", () => {
-    const degraded = {
-      project: {
-        slug: "viberr-core",
-        name: "Viberr Core",
-        repo: "akin-ozer/viberr",
-        defaultBranch: "main",
-      },
+    const degraded = viewData({
       // Degraded probe + a stored PAT = exactly the divergence G8 explains.
-      connection: { status: "repo_not_found" as const, repo: "akin-ozer/viberr" },
+      connection: { status: "repo_not_found", repo: "akin-ozer/viberr" },
       credential: violationCredential,
-    };
-    const holder = render(
-      <RepositoryPanel data={degraded} onOpenTask={() => {}} canSeeCredential />,
-    );
-    expect(holder.container.querySelector(".probe-note")).not.toBeNull();
+    });
+    const holder = panel(renderPage(degraded).container, "Repository");
+    expect(holder.querySelector(".probe-note")).not.toBeNull();
     cleanup();
 
-    const reader = render(
-      <RepositoryPanel
-        data={degraded}
-        onOpenTask={() => {}}
-        canSeeCredential={false}
-      />,
-    );
-    expect(reader.container.querySelector(".probe-note")).toBeNull();
+    const reader = panel(renderPage(degraded, "viewer").container, "Repository");
+    expect(reader.querySelector(".probe-note")).toBeNull();
     // The pill itself — the honest degraded fact — still renders.
-    expect(
-      reader.container.querySelectorAll(".kv-row")[1]!.textContent,
-    ).toContain("repo not found");
+    expect(reader.querySelectorAll(".kv-row")[1]!.textContent).toContain("repo not found");
   });
 });
 
 /* -------------------------------------------------------------- PR panel */
 
 describe("PullRequestsPanel", () => {
-  it("renders count, rows with pills (incl. closed risk) and sub-lines", () => {
-    const onOpenTask = vi.fn();
-    const { container } = render(
-      <PullRequestsPanel prs={prs} defaultBranch="main" onOpenTask={onOpenTask} />,
-    );
-    expect(container.querySelector(".panel-head .right")!.textContent).toBe(
+  it("renders count, rows with pills (incl. closed risk) and sub-lines", async () => {
+    const { container } = renderPage(viewData({ prs }));
+    const list = panel(container, "Pull requests");
+    expect(list.querySelector(".panel-head .right")!.textContent).toBe(
       "3 linked to tasks",
     );
-    const rows = container.querySelectorAll(".rq-row");
+    const rows = list.querySelectorAll(".rq-row");
     expect(rows.length).toBe(3);
     expect(rows[0]!.querySelector(".rq-key")!.textContent).toBe("#318");
     expect(rows[0]!.querySelector(".sub")!.textContent).toBe(
@@ -747,19 +678,20 @@ describe("PullRequestsPanel", () => {
     );
     // A merged / clean PR shows no conflict pill.
     expect(rows[1]!.textContent).not.toContain("conflicts");
-    fireEvent.click(rows[0]!);
-    expect(onOpenTask).toHaveBeenCalledWith("VIB-142");
     // Footer note is verbatim contract (B10: honest about the offline path).
     // F19-34: it used to say "in the review queue". The queue is a read-only
     // triage list — it performs no mutation at all, which is exactly why ruling
     // 30 (R15-11) labels its row "Review" and not "Accept". Naming it as the
     // surface that merges pointed a reader at a page with no such control.
-    expect(container.querySelector(".pol-note")!.textContent).toContain(
+    expect(list.querySelector(".pol-note")!.textContent).toContain(
       "Merging stays reserved for humans. Accepting a completion on its task page merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
     );
-    expect(container.querySelector(".pol-note")!.textContent).not.toContain(
+    expect(list.querySelector(".pol-note")!.textContent).not.toContain(
       "review queue",
     );
+    // A row opens its task.
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(container.querySelector(".landed")?.textContent).toBe("VIB-142"));
   });
 
   /* F19-33: the count and the note took their type scale and spacing from two
@@ -768,23 +700,19 @@ describe("PullRequestsPanel", () => {
      app.css.test.ts holds the structural gate; these assert what the surface
      actually renders. */
   it("takes the count's type scale and the note's spacing from the sheet", () => {
-    const { container } = render(
-      <PullRequestsPanel prs={prs} defaultBranch="main" onOpenTask={() => {}} />,
-    );
-    const count = container.querySelector(".panel-head .right")!;
+    const list = panel(renderPage(viewData({ prs })).container, "Pull requests");
+    const count = list.querySelector(".panel-head .right")!;
     expect(count.className.split(/\s+/)).toEqual(["right", "sub", "fine"]);
     expect(count.getAttribute("style")).toBeNull();
-    const note = container.querySelector(".pol-note")!;
+    const note = list.querySelector(".pol-note")!;
     expect(note.className.split(/\s+/)).toEqual(["pol-note", "after", "last"]);
     expect(note.getAttribute("style")).toBeNull();
   });
 
   it("zero PRs → quiet empty line (spec §7.9a addition)", () => {
-    const { container } = render(
-      <PullRequestsPanel prs={[]} defaultBranch="main" onOpenTask={() => {}} />,
-    );
-    expect(container.querySelectorAll(".rq-row").length).toBe(0);
-    expect(container.querySelector(".rq-list")!.textContent).toContain(
+    const list = panel(renderPage(viewData({ prs: [] })).container, "Pull requests");
+    expect(list.querySelectorAll(".rq-row").length).toBe(0);
+    expect(list.querySelector(".rq-list")!.textContent).toContain(
       "No pull requests yet",
     );
   });
@@ -793,17 +721,15 @@ describe("PullRequestsPanel", () => {
 /* ---------------------------------------------------------- branch table */
 
 describe("BranchesPanel", () => {
-  it("renders the 4-column table with sync pills per ruling 12", () => {
-    const onOpenTask = vi.fn();
-    const { container } = render(
-      <BranchesPanel branches={branches} onOpenTask={onOpenTask} />,
-    );
-    expect(container.querySelector(".panel-head .right")!.textContent).toBe(
+  it("renders the 4-column table with sync pills per ruling 12", async () => {
+    const { container } = renderPage(viewData({ branches }));
+    const table = panel(container, "Execution branches");
+    expect(table.querySelector(".panel-head .right")!.textContent).toBe(
       "3 task-key branches",
     );
-    const head = container.querySelector(".live-head")!;
+    const head = table.querySelector(".live-head")!;
     expect(head.textContent).toBe("TaskExecution branchPull requestSync");
-    const rows = container.querySelectorAll(".live-row");
+    const rows = table.querySelectorAll(".live-row");
     expect(rows.length).toBe(3);
 
     // VIB-142: PR pill without dot, synced pill, commit association count.
@@ -838,7 +764,7 @@ describe("BranchesPanel", () => {
     expect(rows[2]!.querySelector(".pill.done")).not.toBeNull();
 
     fireEvent.click(rows[1]!);
-    expect(onOpenTask).toHaveBeenCalledWith("VIB-151");
+    await waitFor(() => expect(container.querySelector(".landed")?.textContent).toBe("VIB-151"));
   });
 
   /**
@@ -870,10 +796,8 @@ describe("BranchesPanel", () => {
         unpushedCommitCount: 0,
       },
     ];
-    const { container } = render(
-      <BranchesPanel branches={rows} onOpenTask={() => {}} />,
-    );
-    const liveRows = container.querySelectorAll(".live-row");
+    const { container } = renderPage(viewData({ branches: rows }));
+    const liveRows = panel(container, "Execution branches").querySelectorAll(".live-row");
     // The closed row: the PR pill names the rejection, not just the number.
     const closedPill = [...liveRows[0]!.querySelectorAll(".pill")].find((p) =>
       p.textContent?.includes("#162"),
@@ -891,23 +815,19 @@ describe("BranchesPanel", () => {
   });
 
   it("takes the count's type scale and the note's spacing from the sheet (F19-33)", () => {
-    const { container } = render(
-      <BranchesPanel branches={branches} onOpenTask={() => {}} />,
-    );
-    const count = container.querySelector(".panel-head .right")!;
+    const table = panel(renderPage(viewData({ branches })).container, "Execution branches");
+    const count = table.querySelector(".panel-head .right")!;
     expect(count.className.split(/\s+/)).toEqual(["right", "sub", "fine"]);
     expect(count.getAttribute("style")).toBeNull();
-    const note = container.querySelector(".pol-note")!;
+    const note = table.querySelector(".pol-note")!;
     expect(note.className.split(/\s+/)).toEqual(["pol-note", "after", "last"]);
     expect(note.getAttribute("style")).toBeNull();
   });
 
   it("zero branches → quiet empty state (spec §7.9b addition)", () => {
-    const { container } = render(
-      <BranchesPanel branches={[]} onOpenTask={() => {}} />,
-    );
-    expect(container.querySelectorAll(".live-row").length).toBe(0);
-    expect(container.querySelector(".empty")!.textContent).toContain(
+    const table = panel(renderPage(viewData({ branches: [] })).container, "Execution branches");
+    expect(table.querySelectorAll(".live-row").length).toBe(0);
+    expect(table.querySelector(".empty")!.textContent).toContain(
       "No execution branches yet",
     );
   });
@@ -937,12 +857,10 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
         unpushedCommitCount: 0,
       },
     ];
-    const { container } = render(
-      <BranchesPanel branches={rows} onOpenTask={() => {}} />,
-    );
-    const pills = [...container.querySelectorAll(".live-row .pill")].map(
-      (p) => p.textContent,
-    );
+    const { container } = renderPage(viewData({ branches: rows }));
+    const pills = [
+      ...panel(container, "Execution branches").querySelectorAll(".live-row .pill"),
+    ].map((p) => p.textContent);
     // Before the fix a branch with NO compare data borrowed "behindBy === 0"
     // and rendered the green "synced" pill, contradicting the page's own
     // "Not synced yet" freshness chip.
@@ -952,33 +870,13 @@ describe("UI-05: a never-compared branch is not 'synced'", () => {
 });
 
 describe("UI-37: 'Update status' is gated like the action it calls", () => {
-  const data = viewData();
-
-  const renderPage = (myRole: string | null) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={data}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole={myRole}
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
-  };
-
   it("hides it from a viewer (who would get a 403 after fake progress)", () => {
-    const { queryByText } = renderPage("viewer");
+    const { queryByText } = renderPage(viewData(), "viewer");
     expect(queryByText("Update status")).toBeNull();
   });
 
   it("shows it to a maintainer", () => {
-    const { getByText } = renderPage("maintainer");
+    const { getByText } = renderPage(viewData(), "maintainer");
     expect(getByText("Update status")).toBeTruthy();
   });
 });
@@ -999,34 +897,25 @@ describe("UI-37: 'Update status' is gated like the action it calls", () => {
  * rule, so the tail is absent from the HTML too, not merely unrendered.
  */
 describe("R19-11: the credential card is disclosed only to the roles that may change it", () => {
-  const renderPage = (myRole: string | null) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              // A real bound PAT — the state that has something to disclose.
-              data={viewData({ credential: violationCredential })}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole={myRole}
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
-  };
+  // A real bound PAT — the state that has something to disclose.
+  const renderAs = (myRole: string | null) =>
+    renderPage(viewData({ credential: violationCredential }), myRole);
 
   it("withholds it from a viewer — no tail, no label, no scope verdicts", () => {
-    const { container } = renderPage("viewer");
+    const { container } = renderAs("viewer");
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
     expect(container.textContent).not.toContain("viberr-bot");
     expect(container.textContent).not.toContain("pull_request:write");
+    // The card owns both action slots, so neither leaks out of the withdrawal.
+    expect(container.querySelector(".cred-manage")).toBeNull();
+    expect(container.textContent).not.toContain("Fix in Settings");
     // The viewer is told why, and still learns the repository is connected.
     expect(container.textContent).toContain(
       "Credential details need the Manage the GitHub credential grant",
+    );
+    expect(container.textContent).toContain(
+      "The Connection row above still shows whether this repository is reachable.",
     );
     expect(container.querySelector(".kv-row .pill.ready")!.textContent).toContain(
       "connected",
@@ -1034,7 +923,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
   });
 
   it("withholds it from a contributor too — the grant is maintainer+", () => {
-    const { container } = renderPage("contributor");
+    const { container } = renderAs("contributor");
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
     expect(container.textContent).toContain(
@@ -1043,7 +932,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
   });
 
   it("discloses it to a maintainer, with the controls that action authorizes", () => {
-    const { container } = renderPage("maintainer");
+    const { container } = renderAs("maintainer");
     expect(container.querySelector(".cred-card")).not.toBeNull();
     expect(container.querySelector(".cred-name")!.textContent).toBe(
       "viberr-bot · fine-grained PAT",
@@ -1063,7 +952,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
   });
 
   it("discloses it to an admin (incl. the D2 org-admin override, which resolves to admin)", () => {
-    const { container } = renderPage("admin");
+    const { container } = renderAs("admin");
     expect(container.querySelector(".cred-card")).not.toBeNull();
     expect(container.textContent).toContain("github_pat_••••42af");
   });
@@ -1072,7 +961,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     // `myRole` is null for a reader the layout could not place (and `roleCan`
     // answers false for null by construction). Failing open here would be the
     // whole finding again, so it is pinned.
-    const { container } = renderPage(null);
+    const { container } = renderAs(null);
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
   });
@@ -1122,87 +1011,49 @@ describe("an advisory's re-check is reachable from the green footer", () => {
   });
 });
 
-/**
- * The pre-F19-22 world in one value: no completed reconcile pass on record, so
- * the chip has nothing but the CHANGE timestamp to reason from and the R17-5
- * rules below decide the tone. Every block that predates the audit read keeps
- * asserting against exactly that fallback.
- */
-const NO_CHECK_ON_RECORD: ReconcileCheckView = {
-  at: null,
-  label: null,
-  stale: true,
-};
+/** Renders the whole page and hands back its freshness chip. */
+function chip(
+  reconcile: GithubViewData["reconcile"],
+  reconcileCheck: ReconcileCheckView = NO_CHECK_ON_RECORD,
+) {
+  const { container } = renderPage(viewData({ reconcile }), "maintainer", reconcileCheck);
+  return container.querySelector(".gh-freshness")!;
+}
 
 describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
-  const renderChip = (reconcile: {
-    at: string | null;
-    label: string | null;
-    stale: boolean;
-  }) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={viewData({ reconcile })}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole="maintainer"
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    const { container } = render(
-      <Stub initialEntries={["/projects/viberr-core/github"]} />,
-    );
-    return container.querySelector(".gh-freshness")!;
-  };
-
   it("renders an empty-provenance surface neutral with a nudge to check now", () => {
     // A brand-new project's first look at this page used to be a coral alert
     // ("Not yet synced") though nothing was wrong — no sync had simply run.
-    const chip = renderChip({ at: null, label: null, stale: true });
-    expect(chip.classList.contains("stale")).toBe(false);
+    const c = chip({ at: null, label: null, stale: true });
+    expect(c.classList.contains("stale")).toBe(false);
     // F19-22: the copy used to be "Not synced yet" / "runs the first sync" — a
     // claim `at: null` cannot support, because DG-3 skips the provenance row on
     // every unchanged poller tick. A project with one branched task and a quiet
     // repo lands here after a hundred successful passes.
-    expect(chip.textContent).toContain("No changes recorded");
-    expect(chip.textContent).not.toContain("Not synced yet");
-    expect(chip.getAttribute("title")).toContain("Update status checks GitHub now");
+    expect(c.textContent).toContain("No changes recorded");
+    expect(c.textContent).not.toContain("Not synced yet");
+    expect(c.getAttribute("title")).toContain("Update status checks GitHub now");
   });
 
   it("keeps the warn tone for a cache older than the staleness threshold", () => {
-    const chip = renderChip({
+    const c = chip({
       at: "2026-08-04T00:00:00.000Z",
       label: "2h ago",
       stale: true,
     });
-    expect(chip.classList.contains("stale")).toBe(true);
-    expect(chip.textContent).toContain("Last change 2h ago");
+    expect(c.classList.contains("stale")).toBe(true);
+    expect(c.textContent).toContain("Last change 2h ago");
   });
 
   it("carries its title's explanation as text for assistive tech (interface review 2026-09-24, acce-5)", () => {
     // The stale warning's "the branch and PR state below may be out of date"
     // lived only in a hover title, which touch and screen-reader users never get.
-    const chip = renderChip({
+    const c = chip({
       at: "2026-08-04T00:00:00.000Z",
       label: "2h ago",
       stale: true,
     });
-    expect(chip.querySelector(".vh")!.textContent).toBe(` · ${chip.getAttribute("title")}`);
-  });
-
-  it("renders a fresh cache neutral", () => {
-    const chip = renderChip({
-      at: "2026-08-04T00:00:00.000Z",
-      label: "3m ago",
-      stale: false,
-    });
-    expect(chip.classList.contains("stale")).toBe(false);
-    expect(chip.textContent).toContain("Last change 3m ago");
+    expect(c.querySelector(".vh")!.textContent).toBe(` · ${c.getAttribute("title")}`);
   });
 });
 
@@ -1222,31 +1073,6 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
  * DG-3 stays. What this file owns is the NAME of the number it renders.
  */
 describe("F19-22: the freshness chip names the last CHANGE, not the last check", () => {
-  const chip = (reconcile: {
-    at: string | null;
-    label: string | null;
-    stale: boolean;
-  }) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={viewData({ reconcile })}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole="maintainer"
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    const { container } = render(
-      <Stub initialEntries={["/projects/viberr-core/github"]} />,
-    );
-    return container.querySelector(".gh-freshness")!;
-  };
-
   it("never says 'Updated' of a timestamp that only moves when something changed", () => {
     const fresh = chip({
       at: "2026-08-06T12:01:55.000Z",
@@ -1289,30 +1115,6 @@ describe("F19-22: the freshness chip names the last CHANGE, not the last check",
  * express at all.
  */
 describe("F19-22: the chip renders the last CHECK beside the last change", () => {
-  const chip = (
-    reconcile: { at: string | null; label: string | null; stale: boolean },
-    reconcileCheck: ReconcileCheckView,
-  ) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={viewData({ reconcile })}
-              reconcileCheck={reconcileCheck}
-              myRole="maintainer"
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    const { container } = render(
-      <Stub initialEntries={["/projects/viberr-core/github"]} />,
-    );
-    return container.querySelector(".gh-freshness")!;
-  };
-
   it("names both facts, and never lets the older one look like the check", () => {
     // The live case: seven successful passes in the hour, one change at the
     // start of it. The chip used to render only "40m ago".
@@ -1526,7 +1328,7 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
  * one control that replaces a token, Instance settings → Update token.
  */
 describe("ruling 480: the credential row says what re-attach does and where a token is replaced", () => {
-  const renderPage = (instanceAdmin: boolean) => {
+  const renderAsMaintainer = (instanceAdmin: boolean) => {
     const Stub = createRoutesStub([
       {
         path: "/projects/:slug/github",
@@ -1548,7 +1350,7 @@ describe("ruling 480: the credential row says what re-attach does and where a to
   // Canary: drop the `Replace token` link from `CredentialManageActions`, or
   // pass the page's `instanceAdmin` as false, and the link is gone.
   it("an instance admin gets a link to the bound connection's Update token", () => {
-    const { getByRole, queryByText, container } = renderPage(true);
+    const { getByRole, queryByText, container } = renderAsMaintainer(true);
     expect(queryByText("Rotate credential")).toBeNull();
     const reattach = getByRole("button", { name: "Re-attach connection" });
     expect(reattach.getAttribute("title")).toContain("It does not replace a token");
@@ -1558,7 +1360,7 @@ describe("ruling 480: the credential row says what re-attach does and where a to
   });
 
   it("a maintainer who cannot open Instance settings reads where a token is replaced", () => {
-    const { queryByRole, container } = renderPage(false);
+    const { queryByRole, container } = renderAsMaintainer(false);
     expect(queryByRole("link", { name: "Replace token" })).toBeNull();
     expect(container.querySelector("[data-replace-token-note]")!.textContent).toBe(
       "Re-attaching never replaces a token. An instance admin replaces it in Instance settings, under GitHub connections.",

@@ -36,37 +36,6 @@ export function isTelemetryLine(line: LogLine): boolean {
   return line.ev === "meta" && TELEMETRY_TAGS.has(line.tag);
 }
 
-/** One console entry: a real row, or a collapsed telemetry block. */
-export type ConsoleEntry<T> =
-  | { kind: "line"; line: T }
-  | { kind: "telemetry"; count: number; tags: string[] };
-
-/**
- * Collapse runs of telemetry lines. `raw` mode passes the array through
- * untouched — the raw toggle's whole contract is "what the provider sent".
- */
-export function collapseTelemetry<T extends { display: LogLine }>(
-  rows: readonly T[],
-  raw: boolean,
-): ConsoleEntry<T>[] {
-  if (raw) return rows.map((line) => ({ kind: "line", line }));
-  const out: ConsoleEntry<T>[] = [];
-  for (const row of rows) {
-    if (!isTelemetryLine(row.display)) {
-      out.push({ kind: "line", line: row });
-      continue;
-    }
-    const last = out[out.length - 1];
-    if (last && last.kind === "telemetry") {
-      last.count += 1;
-      if (!last.tags.includes(row.display.tag)) last.tags.push(row.display.tag);
-      continue;
-    }
-    out.push({ kind: "telemetry", count: 1, tags: [row.display.tag] });
-  }
-  return out;
-}
-
 /** The collapsed row's own copy — names what was folded and where it went.
  *  The plurals are inline, not `countLabel`, under ruling 457
  *  (shared/text/plural.ts). */

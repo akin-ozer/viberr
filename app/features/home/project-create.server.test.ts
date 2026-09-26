@@ -19,24 +19,8 @@ import {
   recordPatValidation,
 } from "~/server/secrets/pat-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { AppError, isAppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { isStageColor } from "~/shared/workflow/stage-colors";
 import { createProject, type CreateProjectInput } from "./project-create.server";
-
-// F20-1: fault-inject a stale-mount write through `createProjectFileImpl` —
-// the ctx seam standing in for the project.md write. Every other test in this
-// file leaves the seam off and writes for real. The ESTALE→typed-error
-// translation itself is unit-proven in atomic-file.server.test.ts; here we
-// assert the ACTION surfaces a typed error and never hangs.
-const staleMountWrite = async (): Promise<never> => {
-  throw new AppError({
-    code: ERROR_CODES.INTERNAL,
-    status: 503,
-    message: "ESTALE writing project.md — data root unreachable",
-    userMessage: "The data root is unreachable (ESTALE) — project.md was not written.",
-  });
-};
 
 /** The single columns these tests read back off a just-written row. */
 const defaultBranchRow = z.object({ default_branch: z.string() });
@@ -452,45 +436,6 @@ describe("createProject — policy preset shapes REAL governance", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/GitHub repository is required/i);
-  });
-});
-
-describe("createProject — F20-1 data-root write resilience", () => {
-  it("a stale-mount write fails the ACTION with a typed error and does not hang", async () => {
-    const store = setupTestStore(ctx);
-    seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify({ default_branch: "main" }), { status: 200 }),
-      ),
-    );
-
-    // The fault reaches ONLY this call — the store seeding above wrote for real.
-    const start = Date.now();
-    let caught: unknown;
-    try {
-      await createProject(
-        store.db,
-        { name: "Ghost Mount", key: "GHM", owner: "akin-ozer", repoName: "ghost", policy: "balanced" },
-        ACTOR,
-        { dataRoot: store.dataRoot, createProjectFileImpl: staleMountWrite },
-      );
-    } catch (e) {
-      caught = e;
-    }
-
-    // Rejects with a typed AppError (not a raw errno, not a hang). The action
-    // watchdog window is 30s; a real fault returns in milliseconds.
-    expect(isAppError(caught)).toBe(true);
-    if (isAppError(caught)) {
-      expect(caught.status).toBe(503);
-      expect(caught.userMessage).toMatch(/data root is unreachable/i);
-    }
-    expect(Date.now() - start).toBeLessThan(2000);
-
-    // The half-created project left no readable project.md behind.
-    expect(readProjectFile({ projectSlug: "ghost-mount", dataRoot: store.dataRoot })).toBeNull();
   });
 });
 

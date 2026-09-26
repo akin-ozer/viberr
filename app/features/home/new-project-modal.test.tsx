@@ -208,6 +208,20 @@ describe("ruling 462: the modal can ask for the repository to be created", () =>
   });
 });
 
+describe("F15-04: creating a project lands you in it", () => {
+  it("navigates to the new project's board instead of the home grid", async () => {
+    // CANARY: drop the success effect's `navigate(…/board)` and the stub never
+    // leaves the modal's route.
+    const { container, getByText, findByText } = renderModal(
+      { connections: ["akin-ozer"], connectionHealth: { "akin-ozer": "valid" } },
+      async () => ({ ok: true, key: "NEW", slug: "new-project", storePath: "projects/new-project" }),
+    );
+    fireEvent.change(container.querySelector("#np-name")!, { target: { value: "New Project" } });
+    fireEvent.click(getByText("Create project"));
+    await findByText("board");
+  });
+});
+
 describe("#20: the server's refusal is announced, not just drawn", () => {
   it("renders the create failure in a live region", async () => {
     const { container, getByPlaceholderText, getByText } = renderModal(

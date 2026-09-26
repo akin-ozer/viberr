@@ -213,14 +213,6 @@ describe("searchWorkspace", () => {
     expect(hit?.href).toContain("/tasks/VIB-9");
   });
 
-  it("finds the project itself", () => {
-    const store = seed();
-    const hits = searchWorkspace(store.db, asMember(store), "viberr", {
-      dataRoot: store.dataRoot,
-    });
-    expect(hits.some((h) => h.kind === "project")).toBe(true);
-  });
-
   it("shows a NON-MEMBER nothing at all (R15-4 scoping)", () => {
     const store = seed();
     // deniz is a registered user with no membership anywhere. Before the

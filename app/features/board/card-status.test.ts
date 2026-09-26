@@ -140,6 +140,8 @@ describe("cardProblems: everything wrong, most severe first", () => {
       expect(cardProblems(task({ validation: v }))).toEqual([]);
     }
     expect(cardProblems(task({ validation: "failing", displayReadiness: "merged" }))).toEqual([]);
+    // N20-14: a force-accepted card owes nobody a verdict, so the bypass goes too.
+    expect(cardProblems(task({ validation: "bypassed", displayReadiness: "accepted" }))).toEqual([]);
   });
 
   it("checks and reviews speak only when actionable (P13-D-28)", () => {

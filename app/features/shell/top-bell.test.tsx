@@ -133,6 +133,8 @@ describe("the bell's list is never older than the counts it sits under (ruling 4
 
   it("an open right after the pointer's arrival still needs no second fetch", async () => {
     const view = await mountWorkspaceReady({ unread: 1, list: [notification(1)] });
+    // Nothing is fetched for a bell nobody reached for.
+    expect(view.listLoads).toHaveLength(0);
     fireEvent.pointerEnter(bellOf(view));
     await waitFor(() => expect(view.listLoads).toHaveLength(1));
     fireEvent.click(bellOf(view));

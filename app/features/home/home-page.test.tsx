@@ -389,45 +389,6 @@ describe("B-FD4: the Settings tiles are admin-only links", () => {
   });
 });
 
-describe("F15-04: creating a project lands you in it", () => {
-  it("navigates to the new project's board instead of the home grid", async () => {
-    let landedOn: string | null = null;
-    const Stub = createRoutesStub([
-      {
-        path: "/",
-        Component: () => (
-          <ToastProvider>
-            <HomePage data={baseData([card()])} theme="system" />
-          </ToastProvider>
-        ),
-        action: () => ({
-          ok: true,
-          key: "NEW",
-          slug: "new-project",
-          storePath: "/data/projects/new-project",
-          repoWarning: null,
-        }),
-      },
-      {
-        path: "/projects/:slug/board",
-        Component: () => {
-          landedOn = "board";
-          return <p>board</p>;
-        },
-      },
-    ]);
-    const { getAllByText, getByText, getByPlaceholderText } = render(
-      <Stub initialEntries={["/"]} />,
-    );
-    fireEvent.click(getAllByText("New project")[0]!.closest("button")!);
-    fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
-      target: { value: "New Project" },
-    });
-    fireEvent.click(getByText("Create project").closest("button")!);
-    await waitFor(() => expect(landedOn).toBe("board"));
-  });
-});
-
 describe("R15-5: ⌘K is one shortcut app-wide", () => {
   it("opens the palette from Home instead of focusing the project finder", () => {
     const { container } = renderHome(baseData([card()]));

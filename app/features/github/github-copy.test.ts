@@ -2,17 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   grantScopeToast,
   reconcileToast,
-  RECONCILE_DONE_TOAST,
   RECONCILE_START_TOAST,
 } from "./github-copy";
 
 describe("reconcile toast matrix", () => {
-  it("keeps the two verbatim strings (P11-14: 'Update status' wording)", () => {
+  it("keeps the start string verbatim (P11-14: 'Update status' wording)", () => {
     expect(RECONCILE_START_TOAST).toBe(
       "Updating branch and PR status from GitHub…",
-    );
-    expect(RECONCILE_DONE_TOAST).toBe(
-      "Status updated. Every branch and PR maps to its task key",
     );
   });
 
@@ -24,7 +20,7 @@ describe("reconcile toast matrix", () => {
         failed: 0,
         allFailuresOffline: false,
       }),
-    ).toBe(RECONCILE_DONE_TOAST);
+    ).toBe("Status updated. Every branch and PR maps to its task key");
   });
 
   it("no PAT / no repo → honest configuration copy", () => {

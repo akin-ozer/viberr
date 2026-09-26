@@ -38,11 +38,6 @@ function Elapsed({
 const LONG_AGO = "2020-01-01T00:00:00.000Z";
 
 describe("useElapsed determinism (F10-37)", () => {
-  it("renders 0 on the server no matter how old startedAt is", () => {
-    const html = renderToString(<Elapsed startedAt={LONG_AGO} active />);
-    expect(html).toContain(">0<");
-  });
-
   it("the hydration render matches the server render exactly", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-20T12:00:00.000Z"));

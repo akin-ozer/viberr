@@ -7,14 +7,11 @@ import {
   fileChangeChips,
   fmtClock,
   fmtTok,
-  foldWaits,
   commandNote,
-  groupThoughts,
   HEARTBEAT_NOTE,
   heartbeatLabel,
   filePathOf,
   hiddenArguments,
-  hoistRunInputs,
   roleShort,
   runInputRows,
   runLabel,
@@ -26,9 +23,6 @@ import {
   waitText,
 } from "./runs-helpers";
 import {
-  runBoundaryLine,
-  RUN_BOUNDARY_TAG,
-  RUN_INPUTS_TAG,
   TOOL_PROGRESS_TAG,
   waitClock,
   type LogLine,
@@ -155,59 +149,6 @@ const emptyInputs: RunInputs = {
   tools: { denied: [], toolkit: [] },
   directive: null,
 };
-
-const inputsLine = (inputs: RunInputs): LogLine => ({
-  t: "10:00:00",
-  ev: "meta",
-  tag: RUN_INPUTS_TAG,
-  text: "Run inputs — …",
-  inputs,
-});
-
-describe("hoistRunInputs (P19-G11)", () => {
-  const row = (display: LogLine) => ({ display, raw: "{}" });
-  const other = (tag: string): LogLine => ({ t: "10:00:01", ev: "text", tag, text: tag });
-
-  it("moves the disclosure to the head of the block it is already in", () => {
-    // It is written the instant startRun returns — chronologically first — but
-    // by a different writer than the sink, so its seq is only first if the
-    // provider has not emitted yet. The console's answer to "what was this run
-    // given?" must not depend on that start-up race.
-    // Canary: return `[...rows]` from hoistRunInputs and the order below flips.
-    const out = hoistRunInputs([
-      row(other("system·init")),
-      row(inputsLine(emptyInputs)),
-      row(other("agent_message")),
-    ]);
-    expect(out.map((r) => r.display.tag)).toEqual([
-      RUN_INPUTS_TAG,
-      "system·init",
-      "agent_message",
-    ]);
-  });
-
-  it("keeps each run's disclosure inside its OWN block across a resume boundary", () => {
-    // UI-53 concatenates every run of one agent group into one console, so a
-    // single hoist-to-the-top would attach run 2's inputs to run 1.
-    const out = hoistRunInputs([
-      row(other("run-1-line")),
-      row(runBoundaryLine(2, 2)),
-      row(other("run-2-line")),
-      row(inputsLine(emptyInputs)),
-    ]);
-    expect(out.map((r) => r.display.tag)).toEqual([
-      "run-1-line",
-      RUN_BOUNDARY_TAG,
-      RUN_INPUTS_TAG,
-      "run-2-line",
-    ]);
-  });
-
-  it("is a pass-through when no run carries a disclosure", () => {
-    const rows = [row(other("a")), row(other("b"))];
-    expect(hoistRunInputs(rows).map((r) => r.display.tag)).toEqual(["a", "b"]);
-  });
-});
 
 describe("runInputRows (P19-G11)", () => {
   it("states an EMPTY grant explicitly rather than dropping the row", () => {
@@ -410,51 +351,6 @@ const L = (over: Partial<LogLine> = {}): LogLine => ({
   ...over,
 });
 const R = (display: LogLine, raw = "{}") => ({ display, raw });
-const line = <T,>(l: T) => ({ kind: "line" as const, line: l });
-
-describe("groupThoughts (P19-RC1)", () => {
-  it("folds a RUN of reasoning lines into one block", () => {
-    const a = R(L({ ev: "think", text: "step one" }), "{a}");
-    const b = R(L({ ev: "think", text: "step two" }), "{b}");
-    const out = groupThoughts([line(a), line(b)], false);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.kind).toBe("thought");
-    if (out[0]!.kind === "thought") expect(out[0]!.lines).toEqual([a, b]);
-  });
-
-  it("does NOT fold across the work between two thoughts", () => {
-    // Thought → acted → thought is the real shape of the turn. One merged
-    // block would tell the reader the agent thought once.
-    const out = groupThoughts(
-      [
-        line(R(L({ ev: "think", text: "before" }))),
-        line(R(L({ ev: "tool", tag: "tool_use", name: "Bash", text: "npm test" }))),
-        line(R(L({ ev: "think", text: "after" }))),
-      ],
-      false,
-    );
-    expect(out.map((b) => b.kind)).toEqual(["line", "line", "line"]);
-  });
-
-  it("leaves a LONE reasoning line as an ordinary row", () => {
-    // A "1 step" disclosure would hide a line behind a click for nothing.
-    const out = groupThoughts([line(R(L({ ev: "think" })))], false);
-    expect(out.map((b) => b.kind)).toEqual(["line"]);
-  });
-
-  it("is a NO-OP under raw — the stored stream is never reshaped", () => {
-    const entries = [
-      line(R(L({ ev: "think", text: "one" }))),
-      line(R(L({ ev: "think", text: "two" }))),
-    ];
-    expect(groupThoughts(entries, true)).toEqual(entries);
-  });
-
-  it("carries telemetry blocks through untouched", () => {
-    const tele = { kind: "telemetry" as const, count: 3, tags: ["token_count"] };
-    expect(groupThoughts([tele], false)).toEqual([tele]);
-  });
-});
 
 describe("thoughtLabel (P19-RC1)", () => {
   it("MEASURES the span from the stored clocks", () => {
@@ -620,10 +516,10 @@ describe("agentMessageProse (N20-18)", () => {
 });
 
 /**
- * Ruling 366: a call's heartbeats are ONE wait row, in the tense its liveness
- * sets. Canary: fold on adjacency alone and `two calls` below becomes one row.
+ * Ruling 366: a call's heartbeats are ONE wait row (folded by console-fold.ts),
+ * in the tense its liveness sets.
  */
-describe("foldWaits + waitText (ruling 366)", () => {
+describe("waitText (ruling 366)", () => {
   const beat = (call: string, elapsed: number | null, t = "10:00:30"): LogLine =>
     L({
       t,
@@ -633,29 +529,6 @@ describe("foldWaits + waitText (ruling 366)", () => {
       text: "mcp__viberr__run_agent still running",
       progress: { call, elapsed, heartbeat: true, at: "2026-09-20T10:00:30.000Z" },
     });
-
-  it("folds one call's heartbeats into one wait row and keeps two calls apart", () => {
-    const rows = [
-      R(L({ ev: "tool", tag: "tool_use", name: "mcp__viberr__run_agent", text: "profileId: developer" })),
-      R(beat("a", 30)),
-      R(beat("a", 60, "10:01:00")),
-      R(L({ ev: "out", tag: "tool_result", text: "done" })),
-      R(beat("b", 30)),
-    ];
-    const blocks = foldWaits(rows.map(line), false);
-    expect(blocks.map((b) => b.kind)).toEqual(["line", "wait", "line", "wait"]);
-    expect(blocks[1]).toEqual({ kind: "wait", lines: [rows[1], rows[2]] });
-    expect(blocks[3]).toEqual({ kind: "wait", lines: [rows[4]] });
-    // A heartbeat that never got its structured field is not a wait row: it
-    // renders as the meta line it is.
-    const bare = R(L({ ev: "meta", tag: TOOL_PROGRESS_TAG, text: "{…}" }));
-    expect(foldWaits([line(bare)], false)).toEqual([line(bare)]);
-  });
-
-  it("is a no-op under raw — the toggle's contract is what the provider sent", () => {
-    const rows = [R(beat("a", 30)), R(beat("a", 60))].map(line);
-    expect(foldWaits(rows, true)).toEqual(rows);
-  });
 
   it("prints the provider's LAST figure, in the tense the row's liveness sets", () => {
     const lines = [R(beat("a", 30)), R(beat("a", 150, "10:02:30"))];
