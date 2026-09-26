@@ -7,8 +7,11 @@ import {
   COMPACT_AT_COMPLETION_TOKENS,
   COMPLETION_COMPACT_INSTRUCTIONS,
   CONTEXT_ENV_KEYS,
+  EXTENDED_CACHE_RETENTION_MS,
   FIRST_CALL_LARGE_WRITE_TOKENS,
+  OPERATOR_BURST_WINDOW_MS,
   RESUME_FRESH_CONTEXT_TOKENS,
+  RESUME_IDLE_EDGES_MS,
   autoCompactWindow,
   cacheTtlMs,
   codexCompactionConfig,
@@ -179,6 +182,26 @@ describe("ruling 369: start temperature and the large-write line", () => {
 
   it("pins the large-write threshold the Insights card counts against", () => {
     expect(FIRST_CALL_LARGE_WRITE_TOKENS).toBe(100_000);
+  });
+});
+
+describe("ruling 505: what Insights measures the policy by", () => {
+  it("sorts resumes at every TTL the policy assumes, then at the extended retention", () => {
+    expect(EXTENDED_CACHE_RETENTION_MS).toBe(24 * 60 * 60 * 1000);
+    expect([...RESUME_IDLE_EDGES_MS]).toEqual([
+      5 * 60_000,
+      10 * 60_000,
+      60 * 60_000,
+      24 * 60 * 60_000,
+    ]);
+    // CANARY: spell the edges by hand and a TTL the table gains leaves no edge.
+    for (const byKind of Object.values(CACHE_TTL_MS)) {
+      for (const ttl of Object.values(byKind)) expect(RESUME_IDLE_EDGES_MS).toContain(ttl);
+    }
+  });
+
+  it("counts an operator start as part of a burst for a minute after the one before it", () => {
+    expect(OPERATOR_BURST_WINDOW_MS).toBe(60_000);
   });
 });
 

@@ -2,15 +2,17 @@ import type {
   Breakdown,
   CacheRow,
   CacheSummary,
+  OperatorBurstSummary,
   OversightSummary,
   InsightsSummary,
+  ResumeSummary,
 } from "~/server/insights/insights-query.server";
 import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
 import { observedAfter } from "~/shared/freshness";
-import { countLabel } from "~/shared/text/plural";
+import { countLabel, pluralNoun } from "~/shared/text/plural";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -628,12 +630,15 @@ function StatCard({
 }
 
 /**
- * Ruling 369: the prompt-cache record, by run kind and by credential kind —
- * the warm-start rate over the runs that have a first call, the write/read
- * ratio, the first calls that wrote more than the large-write line, and how
- * many runs' writes were billed under each cache lifetime. Every figure is on
- * a `data-` attribute so the DOM reads without the words; a rate with no
- * first call behind it prints "n/a", never 0%.
+ * Ruling 369: the prompt-cache record, by run kind, by backend and run kind
+ * (ruling 505) and by credential kind: the warm-start rate over the runs that
+ * have a first call, the write/read ratio, the first calls that wrote more than
+ * the large-write line, and how many runs' writes were billed under each cache
+ * lifetime. Ruling 505 adds PLAN.md's baseline columns (the mean first write,
+ * reads per run, the peak prompt's median · p90 · max), and under the table the
+ * resumes by idle time and the operator bursts. Every figure is on a `data-`
+ * attribute so the DOM reads without the words; a rate with no first call
+ * behind it prints "n/a", never 0%.
  */
 function CachePanel({ cache }: { cache: CacheSummary }) {
   const warmWhy = (r: CacheRow) =>
@@ -641,7 +646,7 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
   const rows = (group: string, list: CacheRow[]) => (
     <>
       <tr className="group">
-        <td colSpan={7}>{group}</td>
+        <td colSpan={11}>{group}</td>
       </tr>
       {list.map((r) => (
         <tr key={`${group}:${r.label}`} data-cache-row={`${group}:${r.label}`}>
@@ -657,6 +662,28 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
                 rate was title-only. */}
             <span className="vh">{", " + warmWhy(r)}</span>
           </td>
+          <FirstWriteCell r={r} />
+          <td
+            data-read-per-run={r.readPerRun === null ? "" : r.readPerRun}
+            className={r.readPerRun === null ? "na" : undefined}
+            title={
+              r.readPerRun === null
+                ? "No run in this group reached the provider."
+                : `Over the ${fmtCount(r.firstCalls)} runs that reached the provider`
+            }
+          >
+            {r.readPerRun === null ? "n/a" : fmtTokens(Math.round(r.readPerRun))}
+          </td>
+          <td
+            data-peak-median={r.peakPrompt?.median ?? ""}
+            data-peak-p90={r.peakPrompt?.p90 ?? ""}
+            data-peak-max={r.peakPrompt?.max ?? ""}
+            className={r.peakPrompt === null ? "na" : undefined}
+          >
+            {r.peakPrompt === null
+              ? "n/a"
+              : [r.peakPrompt.median, r.peakPrompt.p90, r.peakPrompt.max].map(fmtTokens).join(" · ")}
+          </td>
           {/* Ruling 395: a group with no run on a backend that reports the
               figure has no figure, and the rest of this page already says
               "not reported" rather than printing a zero it cannot vouch for. */}
@@ -665,7 +692,7 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
             className={r.writeTokens === null ? "na" : undefined}
             title={
               r.writeTokens === null
-                ? "No run in this group is on a backend that reports a cache-write figure."
+                ? NO_WRITE_FIGURE
                 : `${fmtCount(r.writeReportingRuns)} of ${fmtCount(r.runs)} runs report one`
             }
           >
@@ -693,13 +720,15 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
       </div>
       <p className="fine">
         What the provider's prompt cache did for the runs on this instance: a warm start read more
-        than it wrote on its first model call; the ratio is tokens written over tokens read; a
-        large first write is one above {fmtTokens(cache.largeWriteTokens)}, the whole-history
-        replay a stale resume causes. The lifetime column is how many runs' writes were billed
-        under each cache TTL. Claude reports both the write figure and the lifetime; Codex
-        reports neither, so a group of Codex runs reads "not reported" rather than zero.
+        than it wrote on its first model call; the mean first write and the reads per run are over
+        the runs that reached the provider; the peak prompt is each run's largest, as median · p90
+        · max; the ratio is tokens written over tokens read; a large first write is one above{" "}
+        {fmtTokens(cache.largeWriteTokens)}, the whole-history replay a stale resume causes. The
+        lifetime column is how many runs' writes were billed under each cache TTL. Claude reports
+        both the write figure and the lifetime; Codex reports neither, so a group of Codex runs
+        reads "not reported" rather than zero.
       </p>
-      {/* Interface review 2026-09-24 (layo-21): eight nowrap columns are wider
+      {/* Interface review 2026-09-24 (layo-21): the nowrap columns are wider
           than a phone, so the table scrolls in its own box (the markdown
           tables' wrap), focusable so the keyboard can scroll it too. */}
       <div
@@ -714,6 +743,9 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
               <th>group</th>
               <th>runs</th>
               <th>warm starts</th>
+              <th>mean first write</th>
+              <th>read / run</th>
+              <th>peak prompt (median · p90 · max)</th>
               <th>written</th>
               <th>read</th>
               <th>write / read</th>
@@ -723,11 +755,184 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
           </thead>
           <tbody>
             {rows("by run kind", cache.byKind)}
+            {rows("by backend and run kind", cache.byBackendKind)}
             {rows("by credential kind", cache.byCredentialKind)}
           </tbody>
         </table>
       </div>
+      <ResumeTable resumes={cache.resumes} />
+      <BurstNote bursts={cache.operatorBursts} />
     </section>
+  );
+}
+
+const NO_WRITE_FIGURE = "No run in this group is on a backend that reports a cache-write figure.";
+
+/**
+ * Ruling 505: PLAN.md's "avg first-call write". A group with no run on a
+ * backend that reports writes says so, as the write column does (ruling 395);
+ * one whose reporting runs never reached the provider has no mean to take.
+ */
+function FirstWriteCell({ r }: { r: CacheRow }) {
+  const value =
+    r.writeReportingRuns === 0
+      ? "not reported"
+      : r.avgFirstCallWrite === null
+        ? "n/a"
+        : fmtTokens(Math.round(r.avgFirstCallWrite));
+  return (
+    <td
+      data-first-write-mean={r.avgFirstCallWrite === null ? "" : r.avgFirstCallWrite}
+      className={r.avgFirstCallWrite === null ? "na" : undefined}
+      title={
+        r.writeReportingRuns === 0
+          ? NO_WRITE_FIGURE
+          : r.avgFirstCallWrite === null
+            ? "No run in this group on a backend that reports writes reached the provider."
+            : "Over the runs that reached the provider on a backend that reports writes"
+      }
+    >
+      {value}
+    </td>
+  );
+}
+
+/** An idle edge or a TTL: whole hours as hours, the rest as minutes. Spelled
+ *  out, because the table heads are upper-cased and "5M" reads as millions. */
+function fmtSpan(ms: number): string {
+  const hours = ms / 3_600_000;
+  if (Number.isInteger(hours)) return `${hours} ${pluralNoun(hours, "hour")}`;
+  return `${Math.round(ms / 60_000)} min`;
+}
+
+/** "5 to 10 min", "10 min to 1 hour", "1 to 24 hours": the lower edge drops its
+ *  unit when both edges share one, so a narrow head wraps less. */
+function fmtSpanRange(lower: number, upper: number): string {
+  const inHours = (ms: number) => Number.isInteger(ms / 3_600_000);
+  if (inHours(lower) !== inHours(upper)) return `${fmtSpan(lower)} to ${fmtSpan(upper)}`;
+  const bare = inHours(lower) ? lower / 3_600_000 : Math.round(lower / 60_000);
+  return `${bare} to ${fmtSpan(upper)}`;
+}
+
+/**
+ * Ruling 505: resumes by how long their session sat idle, one row per backend
+ * and the credential kind the earlier run billed (the pair the TTL table is
+ * keyed on). A warm cell past the row's assumed TTL says the cache outlived it,
+ * which is what PLAN.md's Codex retention probe asks; a cold one inside it says
+ * the cache lapsed sooner. Each bucket lies wholly inside or wholly past every
+ * TTL, because the edges are those TTLs.
+ */
+function ResumeTable({ resumes }: { resumes: ResumeSummary }) {
+  const edges = resumes.edgesMs;
+  const buckets = [...edges, Number.POSITIVE_INFINITY].map((upper, i) => {
+    const lower = i === 0 ? 0 : edges[i - 1]!;
+    const label =
+      i === 0
+        ? `up to ${fmtSpan(upper)}`
+        : i === edges.length
+          ? `over ${fmtSpan(lower)}`
+          : fmtSpanRange(lower, upper);
+    return { lower, label };
+  });
+  return (
+    <>
+      <p className="fine">
+        Resumes by idle time: how often a resumed session's first call read the cache back,
+        by how long the session sat idle after its last run. Each cell counts the warm resumes out
+        of all the resumes idle that long. A row assumes the cache lasts its TTL; a warm resume past it
+        means the cache outlived that, and a cold one inside it means the cache lapsed sooner.
+        Set aside counts the sessions idle past the TTL and larger than{" "}
+        {fmtTokens(resumes.freshContextTokens)} tokens, which started fresh instead of replaying.
+      </p>
+      {resumes.rows.length === 0 ? (
+        <p className="fine dim">No resumed session yet.</p>
+      ) : (
+        <div className="md-table-wrap" tabIndex={0} role="region" aria-label="Resumes by idle time">
+          <table className="cache-table">
+            <thead>
+              <tr>
+                <th>backend · credential</th>
+                <th>assumed TTL</th>
+                {buckets.map((b) => (
+                  <th key={b.label}>{b.label}</th>
+                ))}
+                <th>set aside</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resumes.rows.map((r) => (
+                <tr key={r.label} data-resume-row={r.label}>
+                  <td>{r.label}</td>
+                  <td data-assumed-ttl={r.assumedTtlMs}>{fmtSpan(r.assumedTtlMs)}</td>
+                  {r.cells.map((c, i) => {
+                    const bucket = buckets[i]!;
+                    const past = bucket.lower >= r.assumedTtlMs;
+                    const why =
+                      `${fmtCount(c.warmStarts)} of ${fmtCount(c.firstCalls)} resumes idle ` +
+                      `${bucket.label} read more than they wrote` +
+                      (past ? `, past the ${fmtSpan(r.assumedTtlMs)} this row assumes` : "");
+                    return (
+                      <td
+                        key={bucket.label}
+                        data-bucket={i}
+                        data-first-calls={c.firstCalls}
+                        data-warm={c.warmStarts}
+                        data-past-ttl={past ? "true" : "false"}
+                        className={c.firstCalls === 0 ? "na" : undefined}
+                        title={c.firstCalls === 0 ? undefined : why}
+                      >
+                        {/* The fraction is the visible text; no `.vh` beside it:
+                            the far columns sit past a phone's edge, and an
+                            absolutely placed span there widened the page. */}
+                        {c.firstCalls === 0
+                          ? "n/a"
+                          : `${fmtCount(c.warmStarts)} of ${fmtCount(c.firstCalls)}`}
+                      </td>
+                    );
+                  })}
+                  <td data-set-aside={r.setAside}>{fmtCount(r.setAside)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Ruling 505: the operator bursts PLAN.md said to count before building a gate
+ * that holds simultaneous starts back. The cold ones in a burst, and what their
+ * first calls wrote, are the most such a gate could save.
+ */
+function BurstNote({ bursts: b }: { bursts: OperatorBurstSummary }) {
+  const text =
+    b.starts === 0
+      ? "Operator bursts: no Claude operator start has reached the provider yet, so there are none to count."
+      : `Operator bursts: ${fmtCount(b.starts)} Claude operator ${pluralNoun(b.starts, "start")} ` +
+        `reached the provider, and ${fmtCount(b.inBursts)} came within ${fmtSpan(b.windowMs)} of ` +
+        `the previous start for the same project, account and model.` +
+        (b.inBursts === 0
+          ? ""
+          : b.coldInBursts === 0
+            ? " None of those started cold."
+            : ` ${fmtCount(b.coldInBursts)} of those started cold and wrote ` +
+              `${fmtTokens(b.coldBurstWrite)} tokens, the most a gate holding such starts ` +
+              `back could save.`) +
+        ` ${fmtCount(b.coldStarts)} of all the operator starts were cold.`;
+  return (
+    <p
+      className="fine"
+      data-operator-bursts
+      data-starts={b.starts}
+      data-in-bursts={b.inBursts}
+      data-cold-in-bursts={b.coldInBursts}
+      data-cold-burst-write={b.coldBurstWrite}
+      data-cold-starts={b.coldStarts}
+    >
+      {text}
+    </p>
   );
 }
 

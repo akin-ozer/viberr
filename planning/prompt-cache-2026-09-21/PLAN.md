@@ -8,6 +8,8 @@ Two corrections to the research note, found while pinning versions: viberr's sto
 
 > **Implemented 2026-09-21 as rulings 369–374** (one change, not the seven PRs below; the owner asked for the whole of it end to end). Deviations from this plan, each with its reason: the resume policy (PR 3) reads the LAST call's prompt (`last_prompt_tokens`, else the provider transcript) rather than the peak — a run that compacted at 250k and finished at 20k replays 20k, and refusing it would discard the summary compaction just built; the run row also stores `last_prompt_tokens` and `credential_kind` (the TTL follows the kind the run billed, not the person's current row); a set-aside session is stamped `run·session_stale` (a meta line) rather than `session_missing`, so `latestSessionRun` does not skip a live session and no classifier reads a decision as a fault; Codex per-call figures come off the rollout at finalize because the SDK streams turn totals only; the controller's authority tiers stay beside its ceiling sentence (ruling 309) in the dynamic tail rather than moving to the static block; PR 7's owner decision is recorded as ruling 374 (automatic TTL, nothing forced). The re-measured baseline and its corrections are in `RESEARCH.md` (§1 note).
 
+> **Completed 2026-09-26 as ruling 505**: the measurement this plan asked for before deciding more, which the 2026-09-21 change left off the page. Insights now reproduces the table below (PR 1's acceptance: the mean first-call write, reads per run and the peak prompt's median · p90 · max, with Codex on rows of its own, by backend and run kind), sorts resumes by idle time against every assumed TTL (PR 6's retention probe) and counts operator bursts (PR 5's count before the gate). Not built, each with its reason: the gate itself (`RESEARCH.md`'s re-measure found 1 cold start in 141 operator starts within five minutes of the previous one, and the burst count now shows whether that changes); PR 2's rework-rate check (the mid-run window it guarded was removed by ruling 376); and Codex 0.156.0's post-turn compaction threshold (ruling 376 compacts at the end of a run and keeps no mid-run window).
+
 | kind | first-call cold | avg first-call write | cache reads / run | peak prompt (median · p90 · max) |
 |---|---|---|---|---|
 | operator (247) | 2% | 4.4k | 609k | 48k · 59k · 97k |
@@ -58,7 +60,7 @@ Goal: every later decision is checkable on the live board.
 - Console strip (`RunView`): one chip, "warm start" or "cold start · 298k written", derived from the first-call figures; the tokens cell gains "written / read" on hover. Insights page: warm-start rate by kind, write/read ratio by kind, count of first calls writing over 100k, TTL bucket distribution by credential kind.
 - Audit: a `task.agent.compaction` event when a `compact_boundary` arrives (with pre/post token counts from the message), so compactions become visible on the timeline.
 - Tests: wire-format fixtures with the breakdown and with `cache_miss_reason`; projection tests; jsdom tests read `data-*` attributes, not text.
-- Acceptance: the insights page reproduces the baseline table above from the stored rows.
+- Acceptance: the insights page reproduces the baseline table above from the stored rows. *(Met by ruling 505: the table's last three columns and the Codex rows were missing until then.)*
 
 ### PR 2 — Specialists: shared prefix, pinned prompt, bounded context (ruling 370)
 
@@ -99,13 +101,13 @@ What compaction keeps and drops, for the ruling text: Claude keeps the system pr
 - `buildOperatorSystemPrompt` returns `{ static, dynamic, inputs }` through `prompt-prefix.server.ts`. Static, in order: shipped definition, project persona override, skills, KBs, ruling-namespace note, resource ground truth, priority note, closing rules. Dynamic: workspace section, MCP gating notes, unhealthy and missing notices. The trigger doctrine and the task snapshot stay in the user turn.
 - Claude receives the `string[]` with `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`; Codex receives the joined string as `developer_instructions`. The operator is never resumed, so `snapshot` does not apply.
 - Byte-stability audit of the static block with the §1 tests.
-- Not in this PR, measure first: a per-project gate that serializes the first call of simultaneous fresh operator sessions (a cache entry exists only once the first response has begun, so a burst of stage moves on one project pays the write several times). Count bursts with PR 1 data before building it.
+- Not in this PR, measure first: a per-project gate that serializes the first call of simultaneous fresh operator sessions (a cache entry exists only once the first response has begun, so a burst of stage moves on one project pays the write several times). Count bursts with PR 1 data before building it. *(Counted on Insights since ruling 505; the gate stays unbuilt, see the note under §0.)*
 - Acceptance: operator warm-start rate stays at or above 98% while two tasks in one project alternate operator turns two minutes apart; each first call reads roughly the full prefix.
 
 ### PR 6 — Codex measurement and retention (ruling 373)
 
 - Store `cache_write_input_tokens` and the first turn's cached ratio per Codex run (PR 1 columns).
-- Retention probe: for Codex runs resumed after gaps over 10 minutes, record whether the first turn was cached. The 0.153.4 binary contains the string `prompt_cache_retention` once, so the CLI may already request 24-hour retention on the ChatGPT backend; two weeks of rows settle it and, if retention proves out, PR 3's Codex idle threshold moves from 10 minutes to hours.
+- Retention probe: for Codex runs resumed after gaps over 10 minutes, record whether the first turn was cached. The 0.153.4 binary contains the string `prompt_cache_retention` once, so the CLI may already request 24-hour retention on the ChatGPT backend; two weeks of rows settle it and, if retention proves out, PR 3's Codex idle threshold moves from 10 minutes to hours. *(Measured on Insights since ruling 505: resumes by idle time, a row per backend and credential kind, the buckets past each row's assumed TTL marked.)*
 - Explain the 16 low-cache runs: context above 160k, or gaps over 10 minutes, or neither. Each is a different fix (window, retention, or a bug report).
 - Nothing to set for `prompt_cache_key` (per thread by the CLI) and nothing available in `config.toml` for retention.
 

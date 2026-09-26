@@ -1059,7 +1059,8 @@ tooltip) and "N compactions" — each figure on a `data-` attribute (`data-start
 call yet" (or "first call not recorded" when cache figures landed without a first call),
 never cold. A compaction also reads as a `system·compact_boundary` line ("context
 compacted (auto) · 972k → 10k tokens"); it leaves no note on the task timeline (ruling
-490). Insights carries the same record as a table (ui/surfaces.md).
+490). Insights carries the same record as a table, with resumes by idle time and the
+operator bursts under it (ruling 505; ui/surfaces.md).
 
 ## 4. Specialist runs
 

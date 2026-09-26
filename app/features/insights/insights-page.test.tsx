@@ -48,6 +48,10 @@ const FULL: InsightsSummary = {
         writeReadRatio: 0.02,
         largeFirstWrites: 1,
         ttl: { fiveMinute: 0, oneHour: 18, mixed: 0 },
+        // Ruling 505: PLAN.md's baseline columns.
+        avgFirstCallWrite: 14_000,
+        readPerRun: 95_000_000 / 18,
+        peakPrompt: { median: 108_000, p90: 226_000, max: 482_000 },
       },
       {
         label: "operator",
@@ -61,6 +65,9 @@ const FULL: InsightsSummary = {
         writeReadRatio: null,
         largeFirstWrites: 0,
         ttl: { fiveMinute: 0, oneHour: 0, mixed: 0 },
+        avgFirstCallWrite: null,
+        readPerRun: null,
+        peakPrompt: null,
       },
     ],
     byCredentialKind: [
@@ -76,9 +83,75 @@ const FULL: InsightsSummary = {
         writeReadRatio: 0.02,
         largeFirstWrites: 1,
         ttl: { fiveMinute: 0, oneHour: 18, mixed: 0 },
+        avgFirstCallWrite: 14_000,
+        readPerRun: 95_000_000 / 18,
+        peakPrompt: { median: 108_000, p90: 226_000, max: 482_000 },
+      },
+    ],
+    // Ruling 505: Codex on its own rows, as PLAN.md's baseline table had it.
+    byBackendKind: [
+      {
+        label: "codex · primary",
+        runs: 14,
+        firstCalls: 14,
+        warmStarts: 2,
+        warmRate: 2 / 14,
+        writeTokens: null,
+        writeReportingRuns: 0,
+        readTokens: 60_000_000,
+        writeReadRatio: null,
+        largeFirstWrites: 0,
+        ttl: { fiveMinute: 0, oneHour: 0, mixed: 0 },
+        avgFirstCallWrite: null,
+        readPerRun: 60_000_000 / 14,
+        peakPrompt: { median: 90_000, p90: 175_000, max: 210_000 },
       },
     ],
     largeWriteTokens: 100_000,
+    // Ruling 505: resumes by idle time, the edges being every TTL assumed.
+    resumes: {
+      edgesMs: [5 * 60_000, 10 * 60_000, 60 * 60_000, 24 * 60 * 60_000],
+      freshContextTokens: 150_000,
+      rows: [
+        {
+          label: "claude · login",
+          backend: "claude",
+          credentialKind: "login",
+          assumedTtlMs: 60 * 60_000,
+          cells: [
+            { firstCalls: 3, warmStarts: 3, warmRate: 1 },
+            { firstCalls: 0, warmStarts: 0, warmRate: null },
+            { firstCalls: 5, warmStarts: 4, warmRate: 0.8 },
+            { firstCalls: 2, warmStarts: 0, warmRate: 0 },
+            { firstCalls: 0, warmStarts: 0, warmRate: null },
+          ],
+          setAside: 1,
+        },
+        {
+          label: "codex · login",
+          backend: "codex",
+          credentialKind: "login",
+          assumedTtlMs: 10 * 60_000,
+          cells: [
+            { firstCalls: 2, warmStarts: 2, warmRate: 1 },
+            { firstCalls: 1, warmStarts: 1, warmRate: 1 },
+            { firstCalls: 3, warmStarts: 1, warmRate: 1 / 3 },
+            { firstCalls: 0, warmStarts: 0, warmRate: null },
+            { firstCalls: 0, warmStarts: 0, warmRate: null },
+          ],
+          setAside: 0,
+        },
+      ],
+    },
+    // Ruling 505: the operator bursts, counted before any gate is built.
+    operatorBursts: {
+      starts: 141,
+      inBursts: 12,
+      coldInBursts: 1,
+      coldBurstWrite: 26_700,
+      coldStarts: 3,
+      windowMs: 60_000,
+    },
   },
   outcomes: {
     finished: 30,
@@ -877,8 +950,9 @@ describe("the prompt-cache panel (ruling 369)", () => {
   });
 
   it("scrolls the table in its own keyboard-reachable box, not the page (layo-21)", () => {
-    // Eight nowrap columns are ~690px: without the wrap, /insights scrolled
-    // sideways at phone width and at 200% zoom.
+    // The nowrap columns (eight then, ~690px; eleven since ruling 505) are
+    // wider than a phone: without the wrap, /insights scrolled sideways at
+    // phone width and at 200% zoom.
     const { getByRole } = renderPage(FULL);
     const region = getByRole("region", { name: "Prompt cache by group" });
     expect(region.classList.contains("md-table-wrap")).toBe(true);
@@ -911,9 +985,13 @@ describe("the prompt-cache panel: an unreported write (ruling 395)", () => {
           writeReadRatio: null,
           largeFirstWrites: 0,
           ttl: { fiveMinute: 0, oneHour: 0, mixed: 0 },
+          avgFirstCallWrite: null,
+          readPerRun: 45_000_000 / 21,
+          peakPrompt: null,
         },
       ],
       byCredentialKind: [],
+      byBackendKind: [],
     },
   };
 
@@ -930,5 +1008,156 @@ describe("the prompt-cache panel: an unreported write (ruling 395)", () => {
     expect(primary.querySelector("[data-read]")?.textContent).toBe("45.0M");
     // And the caption says which backends answer the question at all.
     expect(panel.textContent).toContain("Codex reports neither");
+  });
+});
+
+/**
+ * Ruling 505: what PLAN.md (`planning/prompt-cache-2026-09-21/`) asked the page
+ * for. PR 1's acceptance was that the page reproduce the plan's baseline table
+ * (the mean first write, reads per run, the peak prompt's spread, Codex on its
+ * own rows); PR 6 asked whether a Codex resume idle past ten minutes ever reads
+ * its prefix back; PR 5 asked for the operator bursts to be counted before a
+ * gate is built.
+ */
+describe("the prompt-cache panel: PLAN.md's baseline columns (ruling 505)", () => {
+  it("draws the mean first write, reads per run and the peak prompt's spread", () => {
+    const { container } = renderPage(FULL);
+    const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
+    const primary = panel.querySelector('[data-cache-row="by run kind:primary"]')!;
+    expect(primary.querySelector("[data-first-write-mean]")?.textContent).toBe("14.0K");
+    expect(primary.querySelector("[data-read-per-run]")?.textContent).toBe("5.3M");
+    expect(primary.querySelector("[data-peak-median]")?.textContent).toBe("108.0K · 226.0K · 482.0K");
+    expect(primary.querySelector("[data-peak-p90]")?.getAttribute("data-peak-p90")).toBe("226000");
+    // No first call behind a group: nothing to average, and it says so.
+    const operator = panel.querySelector('[data-cache-row="by run kind:operator"]')!;
+    expect(operator.querySelector("[data-first-write-mean]")?.textContent).toBe("n/a");
+    expect(operator.querySelector("[data-read-per-run]")?.textContent).toBe("n/a");
+    expect(operator.querySelector("[data-peak-median]")?.textContent).toBe("n/a");
+    expect(operator.querySelector("[data-peak-median]")?.getAttribute("data-peak-median")).toBe("");
+  });
+
+  it("gives Codex its own rows, whose first write is not reported rather than zero", () => {
+    const { container } = renderPage(FULL);
+    const codex = container.querySelector('[data-cache-row="by backend and run kind:codex · primary"]')!;
+    // CANARY: print `fmtTokens(r.avgFirstCallWrite ?? 0)` and this reads "0".
+    expect(codex.querySelector("[data-first-write-mean]")?.textContent).toBe("not reported");
+    expect(codex.querySelector("[data-first-write-mean]")?.getAttribute("data-first-write-mean")).toBe("");
+    expect(codex.querySelector("[data-read-per-run]")?.textContent).toBe("4.3M");
+    expect(codex.querySelector("[data-peak-median]")?.textContent).toBe("90.0K · 175.0K · 210.0K");
+  });
+
+  it("spans every column with each group's label row", () => {
+    const { container } = renderPage(FULL);
+    const table = container.querySelector('[aria-label="Prompt cache by group"] table')!;
+    const columns = table.querySelectorAll("thead th").length;
+    expect(columns).toBe(11);
+    const groups = [...table.querySelectorAll("tr.group td")];
+    expect(groups.map((td) => td.textContent)).toEqual([
+      "by run kind",
+      "by backend and run kind",
+      "by credential kind",
+    ]);
+    // CANARY: add a column and leave the label rows at the old span, and the
+    // group rows stop short of the table's edge.
+    for (const td of groups) expect(td.getAttribute("colspan")).toBe(String(columns));
+  });
+});
+
+describe("the prompt-cache panel: resumes by idle time (ruling 505)", () => {
+  it("sorts each row's resumes into idle buckets, marking the ones past its assumed TTL", () => {
+    const { getByRole } = renderPage(FULL);
+    const region = getByRole("region", { name: "Resumes by idle time" });
+    expect(region.classList.contains("md-table-wrap")).toBe(true);
+    expect(region.getAttribute("tabindex")).toBe("0");
+    // Spelled out: the heads are upper-cased, and "5M" would read as millions.
+    expect([...region.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual([
+      "backend · credential",
+      "assumed TTL",
+      "up to 5 min",
+      "5 to 10 min",
+      "10 min to 1 hour",
+      "1 to 24 hours",
+      "over 24 hours",
+      "set aside",
+    ]);
+    const codex = region.querySelector('[data-resume-row="codex · login"]')!;
+    expect(codex.querySelector("[data-assumed-ttl]")?.textContent).toBe("10 min");
+    const cell = (row: Element, i: number) => row.querySelector(`[data-bucket="${i}"]`)!;
+    // Five to ten minutes is inside Codex's ten; ten minutes to an hour is past it.
+    expect(cell(codex, 1).getAttribute("data-past-ttl")).toBe("false");
+    expect(visibleText(cell(codex, 2))).toBe("1 of 3");
+    expect(cell(codex, 2).getAttribute("data-past-ttl")).toBe("true");
+    expect(cell(codex, 2).getAttribute("title")).toBe(
+      "1 of 3 resumes idle 10 min to 1 hour read more than they wrote, past the 10 min this row assumes",
+    );
+    // No visually hidden copy in these cells: the far columns sit past a
+    // phone's edge, and an absolutely placed `.vh` there widened the page by
+    // 44px at 390px (measured in Chromium).
+    expect(region.querySelector("tbody .vh")).toBeNull();
+    // A bucket with no resume has no fraction to show.
+    expect(visibleText(cell(codex, 3))).toBe("n/a");
+    expect(cell(codex, 3).classList.contains("na")).toBe(true);
+    // Claude on a sign-in assumes the hour, so only the last two buckets are past it.
+    const claude = region.querySelector('[data-resume-row="claude · login"]')!;
+    expect([0, 1, 2, 3, 4].map((i) => cell(claude, i).getAttribute("data-past-ttl"))).toEqual([
+      "false",
+      "false",
+      "false",
+      "true",
+      "true",
+    ]);
+    expect(claude.querySelector("[data-set-aside]")?.textContent).toBe("1");
+  });
+
+  it("names the size past which a stale session starts fresh, and says when nothing resumed", () => {
+    const { container, queryByRole, getByText } = renderPage({
+      ...FULL,
+      cache: { ...FULL.cache, resumes: { ...FULL.cache.resumes, rows: [] } },
+    });
+    const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
+    expect(panel.textContent).toContain("larger than 150.0K tokens");
+    expect(queryByRole("region", { name: "Resumes by idle time" })).toBeNull();
+    expect(getByText("No resumed session yet.")).toBeTruthy();
+  });
+});
+
+describe("the prompt-cache panel: operator bursts (ruling 505)", () => {
+  it("counts the starts close behind another and what the cold ones wrote", () => {
+    const { container } = renderPage(FULL);
+    const note = container.querySelector("[data-operator-bursts]")!;
+    expect(note.getAttribute("data-in-bursts")).toBe("12");
+    expect(note.getAttribute("data-cold-burst-write")).toBe("26700");
+    expect(note.textContent).toBe(
+      "Operator bursts: 141 Claude operator starts reached the provider, and 12 came within 1 min " +
+        "of the previous start for the same project, account and model. 1 of those started cold and " +
+        "wrote 26.7K tokens, the most a gate holding such starts back could save. 3 of all the " +
+        "operator starts were cold.",
+    );
+  });
+
+  it("says so when there is nothing to count, or no burst started cold", () => {
+    const none = renderPage({
+      ...FULL,
+      cache: {
+        ...FULL.cache,
+        operatorBursts: { starts: 0, inBursts: 0, coldInBursts: 0, coldBurstWrite: 0, coldStarts: 0, windowMs: 60_000 },
+      },
+    });
+    expect(none.container.querySelector("[data-operator-bursts]")?.textContent).toBe(
+      "Operator bursts: no Claude operator start has reached the provider yet, so there are none to count.",
+    );
+    cleanup();
+    const warm = renderPage({
+      ...FULL,
+      cache: {
+        ...FULL.cache,
+        operatorBursts: { starts: 1, inBursts: 1, coldInBursts: 0, coldBurstWrite: 0, coldStarts: 0, windowMs: 60_000 },
+      },
+    });
+    expect(warm.container.querySelector("[data-operator-bursts]")?.textContent).toBe(
+      "Operator bursts: 1 Claude operator start reached the provider, and 1 came within 1 min of the " +
+        "previous start for the same project, account and model. None of those started cold. 0 of all " +
+        "the operator starts were cold.",
+    );
   });
 });

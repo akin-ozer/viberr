@@ -219,6 +219,42 @@ export function startTemperature(cacheWrite: number, cacheRead: number): "warm" 
  *  exists to remove. */
 export const FIRST_CALL_LARGE_WRITE_TOKENS = 100_000;
 
+// ------------------------------------------- what Insights measures them by
+
+/**
+ * Ruling 505: OpenAI's documented extended prompt-cache retention (24 hours,
+ * research S16). The Codex rows of `CACHE_TTL_MS` stay at ten minutes "until
+ * measured"; this is the retention the measurement looks for. If Codex resumes
+ * idle past ten minutes read their prefix back, the Codex TTL moves toward it.
+ */
+export const EXTENDED_CACHE_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Ruling 505: the idle edges Insights sorts resumes by, ascending: every TTL
+ * `CACHE_TTL_MS` assumes (five minutes, ten, an hour) and then the extended
+ * retention. Derived rather than spelled, so a TTL the table gains or loses
+ * moves the edges with it. Each bucket then says whether the sessions resumed
+ * that long after their last run read their prefix back, which is the fact
+ * ruling 372's verdict assumes and PLAN.md's Codex retention probe asked for.
+ */
+export const RESUME_IDLE_EDGES_MS: readonly number[] = [
+  ...new Set(Object.values(CACHE_TTL_MS).flatMap((byKind): number[] => Object.values(byKind))),
+  EXTENDED_CACHE_RETENTION_MS,
+].sort((a, b) => a - b);
+
+/**
+ * Ruling 505: how close together two operator starts must be for the second to
+ * count as part of a burst. A cache entry exists only once the first response
+ * has begun, so an operator run that starts while another of the same prefix
+ * (same project, seat and model) is still waiting for its first response writes
+ * the prefix again. The operator's first response begins seconds after its
+ * start (spawn, server handshakes, one request); a minute bounds that
+ * generously, so the cold starts it counts are the most a gate serializing
+ * those first calls could save. PLAN.md (PR 5) said to count them before
+ * building that gate.
+ */
+export const OPERATOR_BURST_WINDOW_MS = 60 * 1000;
+
 // ------------------------------------------------------ what compaction keeps
 
 /**
