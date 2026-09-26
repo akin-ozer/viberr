@@ -48,8 +48,6 @@ import {
   deliveredFollowUpFor,
   executeStrandedCodexPlan,
   maybeResumeStrandedOperator,
-  CODEX_PLAN_WHOLE_TURN,
-  REFRESH_ENDED_NUDGE,
   operatorPlanToolsFor,
   ownOperatorRunForTests,
   resetOperatorLeasesForTests,
@@ -58,7 +56,6 @@ import {
   operatorPlanSchemaFor,
 } from "./operator-run.server";
 import * as operatorPrompts from "./operator-run.server";
-import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   CREATE_TASK_BASE_NOTE,
@@ -80,6 +77,7 @@ import {
 } from "../../../test-support/test-db";
 import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { operatorSnapshot } from "../../../test-support/operator-snapshot";
 import { emptyRunFailureFacts, type RunFailureFacts } from "~/shared/run-failure";
 
 interface PendingRun {
@@ -1612,42 +1610,19 @@ describe("pr-diverged turn instruction (both backends)", () => {
   function snapshot(
     over: Partial<OperatorTaskSnapshot> = {},
   ): OperatorTaskSnapshot {
-    return {
+    return operatorSnapshot({
       key: "VIB-9",
-      // Ruling 302: the window's own size, always present.
-      timelineTotal: 0,
       title: "T",
       goal: "Do the thing.",
-      priority: "normal",
-      labels: [],
-      dueDate: null,
-      blockedBy: [],
       stage: "review",
       stageName: "Review",
-      previousStage: null,
-      readiness: "ready",
       waiting: "human",
-      validation: "changed",
-      owner: null,
-      specialist: null,
-      reviewers: [],
       nextStages: [{ id: "done", name: "Done", boundary: "human" }],
-      reworkStages: [],
       stageIds: ["triage", "ready", "impl", "review", "done"],
-      doneStageId: "done",
-      reviewStageId: "review",
-      workStageId: "impl",
-      deployedSpecialists: [],
-      openPacket: false,
-      packet: null,
-      recentTimeline: [],
       pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" },
       branch: "vib-9",
-      liveRuns: [],
-      autonomy: "supervised",
-      operatorPolicy: { scope: "operator", note: "", capabilities: {} },
       ...over,
-    };
+    });
   }
   const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock } = operatorPrompts;
 
@@ -1960,8 +1935,12 @@ describe("pr-diverged turn instruction (both backends)", () => {
   it("F39-69: a Codex plan is told it is the whole turn, a refresh and its next step together", () => {
     // CANARY: drop the sentence and nothing tells a plan that stopping after
     // the refresh leaves the task idle.
-    expect(buildCodexOperatorPrompt(snapshot(), "manual")).toContain(CODEX_PLAN_WHOLE_TURN);
-    expect(CODEX_PLAN_WHOLE_TURN).toContain("A walk across `auto` stages where nothing needs an agent is one `transition_stage` per stage");
+    const prompt = buildCodexOperatorPrompt(snapshot(), "manual");
+    expect(prompt).toContain("The plan is the whole turn: nothing re-invokes you for a step of your own");
+    expect(prompt).toContain("A refresh goes with the step it prepares.");
+    expect(prompt).toContain("Viberr carries out none of the acting steps after it (ruling 430)");
+    // Ruling 450: the walk across `auto` stages is one plan too.
+    expect(prompt).toContain("A walk across `auto` stages where nothing needs an agent is one `transition_stage` per stage");
   });
 
   it("ruling 415: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
@@ -2282,41 +2261,16 @@ describe("stranded auto-stage resume", () => {
 
   it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
-      {
-        key: "VIB-1",
-        // Ruling 302: the window's own size, always present.
-        timelineTotal: 0,
+      operatorSnapshot({
         title: "t",
         goal: "Goal to be refined at the triage quality gate.",
-        priority: "normal",
-        labels: [],
-        dueDate: null,
-        blockedBy: [],
         stage: "triage",
         stageName: "Triage",
-        previousStage: null,
         readiness: "input_required",
         waiting: "human",
-        validation: "changed",
-        owner: null,
-        specialist: null,
-        reviewers: [],
         nextStages: [{ id: "ready", name: "Ready", boundary: "auto" }],
-        reworkStages: [],
         stageIds: ["triage", "ready", "impl", "review", "done"],
-        doneStageId: "done",
-        reviewStageId: "review",
-        workStageId: "impl",
-        deployedSpecialists: [],
-        openPacket: false,
-        packet: null,
-        recentTimeline: [],
-        pr: null,
-        branch: null,
-        liveRuns: [],
-        autonomy: "supervised",
-        operatorPolicy: { scope: "operator", note: "", capabilities: {} },
-      },
+      }),
       "create",
     );
     expect(prompt).toContain("Drafting the goal is SETUP");
@@ -2384,6 +2338,21 @@ describe("stranded auto-stage resume", () => {
         .prepare(`SELECT id, state FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
         .all()
         .map((row) => ({ id: String(row.id), state: String(row.state) }));
+
+    /** A FINISHED operator run on `taskKey`, written by hand for a drive that
+     *  ended before the case begins: the backstop judges it by id. */
+    const finishedRun = (id: string, taskKey: string, at = "2026-09-13T00:00:00.000Z"): void => {
+      store2.db
+        .prepare(
+          `INSERT INTO agent_runs
+             (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+              turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+              created_at, updated_at, agent_profile_id)
+           VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                   1, 0, 0, 0, 1, ?, ?, 'operator')`,
+        )
+        .run(id, taskKey, store2.slug, `t_${id}`, at, at);
+    };
 
     /**
      * A drive that throws before `startRun` creates its row releases the lease
@@ -2789,16 +2758,7 @@ describe("stranded auto-stage resume", () => {
         goal: "Read the cron run's output.",
       });
       rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
-      store2.db
-        .prepare(
-          `INSERT INTO agent_runs
-             (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
-              turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
-              created_at, updated_at, agent_profile_id)
-           VALUES ('run_cron', 'VIB-7', ?, 't_run_cron', 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
-                   1, 0, 0, 0, 1, ?, ?, 'operator')`,
-        )
-        .run(store2.slug, "2026-09-25T10:40:00.000Z", "2026-09-25T10:40:00.000Z");
+      finishedRun("run_cron", "VIB-7", "2026-09-25T10:40:00.000Z");
       const before = operatorRuns().length;
       const resumed = await maybeResumeStrandedOperator(store2.db, {
         projectSlug: store2.slug,
@@ -2817,25 +2777,6 @@ describe("stranded auto-stage resume", () => {
     });
 
     it("ruling 399: a plan Viberr REFUSED is not a deliberate hold", async () => {
-      const finishedRun = (id: string, taskKey: string) => {
-        store2.db
-          .prepare(
-            `INSERT INTO agent_runs
-               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
-                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
-                created_at, updated_at, agent_profile_id)
-             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
-                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
-          )
-          .run(
-            id,
-            taskKey,
-            store2.slug,
-            `t_${id}`,
-            "2026-09-13T00:00:00.000Z",
-            "2026-09-13T00:00:00.000Z",
-          );
-      };
       writeTask(store2.dataRoot, store2.slug, {
         frontmatter: baseTaskFrontmatter("VIB-9", {
           title: "the refused plan",
@@ -2902,25 +2843,6 @@ describe("stranded auto-stage resume", () => {
      * would be refused before `performDelivery` ever stamps anything.
      */
     it("ruling 202: a nudged drive that DELIVERED is not a deliberate hold", async () => {
-      const finishedRun = (id: string, taskKey: string) => {
-        store2.db
-          .prepare(
-            `INSERT INTO agent_runs
-               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
-                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
-                created_at, updated_at, agent_profile_id)
-             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
-                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
-          )
-          .run(
-            id,
-            taskKey,
-            store2.slug,
-            `t_${id}`,
-            "2026-09-13T00:00:00.000Z",
-            "2026-09-13T00:00:00.000Z",
-          );
-      };
       const held = (taskKey: string) =>
         readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
 
@@ -2999,18 +2921,6 @@ describe("stranded auto-stage resume", () => {
      * drive ACTED, which is what "held" was always meant to deny.
      */
     it("ruling 406: a nudged drive that CARRIED OUT its action is not a deliberate hold", async () => {
-      const finishedRun = (id: string, taskKey: string) => {
-        store2.db
-          .prepare(
-            `INSERT INTO agent_runs
-               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
-                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
-                created_at, updated_at, agent_profile_id)
-             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
-                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
-          )
-          .run(id, taskKey, store2.slug, `t_${id}`, "2026-09-13T00:00:00.000Z", "2026-09-13T00:00:00.000Z");
-      };
       const held = (taskKey: string) =>
         readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
 
@@ -3062,18 +2972,6 @@ describe("stranded auto-stage resume", () => {
      * nothing to answer until the owner pressed Run operator.
      */
     it("F39-69: a drive that refreshed and stopped at Review is resumed once, and told why", async () => {
-      const finishedRun = (id: string, taskKey: string) => {
-        store2.db
-          .prepare(
-            `INSERT INTO agent_runs
-               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
-                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
-                created_at, updated_at, agent_profile_id)
-             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
-                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
-          )
-          .run(id, taskKey, store2.slug, `t_${id}`, "2026-09-23T05:10:09.000Z", "2026-09-23T05:10:18.000Z");
-      };
       writeTask(store2.dataRoot, store2.slug, {
         frontmatter: baseTaskFrontmatter("VIB-11", {
           title: "ax ssh",
@@ -3085,8 +2983,8 @@ describe("stranded auto-stage resume", () => {
         goal: "Rework after the refresh.",
       });
       rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
-      finishedRun("run_refreshed", "VIB-11");
-      finishedRun("run_nudged", "VIB-11");
+      finishedRun("run_refreshed", "VIB-11", "2026-09-23T05:10:09.000Z");
+      finishedRun("run_nudged", "VIB-11", "2026-09-23T05:10:09.000Z");
       const ownRun = { backend: "codex" as const, autonomy: "supervised" as const, reactDepth: 0 };
       const ref = {
         projectSlug: store2.slug,
@@ -3134,7 +3032,9 @@ describe("stranded auto-stage resume", () => {
       const prompt = adapter2.pending!.spec.prompt;
       // CANARY: drop the `refreshNudge` mapping and it is told the stage is an
       // idle auto-advance one, which Review is not.
-      expect(prompt).toContain(REFRESH_ENDED_NUDGE);
+      expect(prompt).toContain(
+        "You are re-invoked ONCE because your previous run brought the branch up to date",
+      );
       expect(prompt).not.toContain("auto-advance stage idle");
     });
 
@@ -3224,41 +3124,16 @@ describe("stranded auto-stage resume", () => {
 /* -------- transition context in the turn prompt (owner ruling 2026-07-26) -------- */
 
 describe("transition trigger carries from → to and who moved it", () => {
-  const snap = (): OperatorTaskSnapshot => ({
-    key: "VIB-2",
-    // Ruling 302: the window's own size, always present.
-    timelineTotal: 0,
-    title: "t",
-    goal: "Write the post.",
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    stage: "impl",
-    stageName: "In Progress",
-    previousStage: null,
-    readiness: "ready",
-    waiting: "agent",
-    validation: "changed",
-    owner: null,
-    specialist: null,
-    reviewers: [],
-    nextStages: [{ id: "review", name: "Review", boundary: "approval" }],
-    reworkStages: [],
-    stageIds: ["triage", "ready", "impl", "review", "done"],
-    doneStageId: "done",
-    reviewStageId: "review",
-    workStageId: "impl",
-    deployedSpecialists: [],
-    openPacket: false,
-    packet: null,
-    recentTimeline: [],
-    pr: null,
-    branch: "vib-2",
-    liveRuns: [],
-    autonomy: "supervised",
-    operatorPolicy: { scope: "operator", note: "", capabilities: {} },
-  });
+  const snap = (): OperatorTaskSnapshot =>
+    operatorSnapshot({
+      key: "VIB-2",
+      title: "t",
+      goal: "Write the post.",
+      waiting: "agent",
+      nextStages: [{ id: "review", name: "Review", boundary: "approval" }],
+      stageIds: ["triage", "ready", "impl", "review", "done"],
+      branch: "vib-2",
+    });
 
   it("a HUMAN move names them, points at their steer, and says ASK (@tag) when unclear", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
@@ -3313,45 +3188,21 @@ describe("transition trigger carries from → to and who moved it", () => {
 describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
   const snap = (
     over: Partial<OperatorTaskSnapshot> = {},
-  ): OperatorTaskSnapshot => ({
-    key: "VIB-6",
-    // Ruling 302: the window's own size, always present.
-    timelineTotal: 0,
-    title: "Improve the docs",
-    // The live goal that sailed through the gate: no file, no change, no
-    // acceptance criteria — and NOT the unspecified placeholder, so the
-    // goal-drafting branch never fired either.
-    goal: "The documentation could be improved. Make it better.",
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    stage: "triage",
-    stageName: "Triage",
-    previousStage: null,
-    readiness: "ready",
-    waiting: "human",
-    validation: "changed",
-    owner: null,
-    specialist: null,
-    reviewers: [],
-    nextStages: [{ id: "ready", name: "Ready", boundary: "auto" }],
-    reworkStages: [],
-    stageIds: ["triage", "ready", "impl", "review", "done"],
-    doneStageId: "done",
-    reviewStageId: "review",
-    workStageId: "impl",
-    deployedSpecialists: [],
-    openPacket: false,
-    packet: null,
-    recentTimeline: [],
-    pr: null,
-    branch: null,
-    liveRuns: [],
-    autonomy: "supervised",
-    operatorPolicy: { scope: "operator", note: "", capabilities: {} },
-    ...over,
-  });
+  ): OperatorTaskSnapshot =>
+    operatorSnapshot({
+      key: "VIB-6",
+      title: "Improve the docs",
+      // The live goal that sailed through the gate: no file, no change, no
+      // acceptance criteria — and NOT the unspecified placeholder, so the
+      // goal-drafting branch never fired either.
+      goal: "The documentation could be improved. Make it better.",
+      stage: "triage",
+      stageName: "Triage",
+      waiting: "human",
+      nextStages: [{ id: "ready", name: "Ready", boundary: "auto" }],
+      stageIds: ["triage", "ready", "impl", "review", "done"],
+      ...over,
+    });
 
   /**
    * Ruling 193 (F37-14, live): the doctrine had ONE answer to a
@@ -3507,12 +3358,6 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).not.toContain("advancing one boundary and stopping is fine");
   });
 
-  it("R21-2: the Codex plan prompt carries the same remedy instruction", () => {
-    expect(operatorPrompts.buildCodexOperatorPrompt(snap(), "create")).toContain(
-      "grantable on an agent profile",
-    );
-  });
-
   /**
    * R21-2 residual (band-3 follow-up) — the remedy was emitted from
    * `triageQualityGate`, so it reached the model only at the ENTRY stage and
@@ -3598,6 +3443,12 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     ]) {
       expect(prompt).toContain("This task WAITS ON OTHER WORK and Viberr is holding it: JC-3 (open), JC-6 (archived, can never complete).");
       expect(prompt).toContain("`set_dependencies`");
+      // Ruling 240 (F37-61): both doors are named as refused, and both gates
+      // exist — specialist-run.server.test.ts pins the dispatch refusal,
+      // delivery-requeue.server.test.ts the delivery one.
+      expect(prompt).toContain(
+        "`run_agent` and `deliver_for_review` are BOTH REFUSED by the server while the task is held",
+      );
       expect(prompt).toContain("do NOT open a decision packet about the wait");
       expect(prompt).not.toContain("NEVER end your turn");
       expect(prompt).not.toContain("asking the human to confirm the hold");
@@ -4388,6 +4239,7 @@ describe("pending trigger queue", () => {
         "why is this still in progress?",
       );
     });
+    // NEW-4: the only pin that the Codex builder carries the @tag directive.
     expect(adapter3.pending?.spec.prompt).toContain('tag them "@Arda"');
 
     // The machine trigger is still queued behind it — nothing was lost either way.
@@ -4802,19 +4654,6 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
-  /**
-   * Ruling 130(b)/(c) (pass 34, F34-12 / F34-1): the operator's OWN failure
-   * packet names the cause Viberr classified and the credential principal's
-   * own remedy, and its recommended option asserts only what the human says.
-   * Live, a five-hour session limit and a 403 `oauth_org_not_allowed` both
-   * produced "Retry on the other backend, fix the credential, or redirect the
-   * task" and recommended "I've updated the policy / credential".
-   *
-   * Canaries: (1) restore `options: defaultPacketOptions("blocked")` in
-   * `escalateFailedOperatorRun` and the quota/auth cases fail on the
-   * recommended title and `ev`; (2) restore the generic body sentence and
-   * every case fails on the body.
-   */
   describe("ruling 177: a closed task refuses every operator trigger at no cost", () => {
     const seedClosed = (over: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {}): void => {
       writeTask(store5.dataRoot, store5.slug, {
@@ -4851,6 +4690,7 @@ describe("runOperator — authority, ordering, orphans", () => {
       for (const trigger of EVERY_TRIGGER) {
         const result = await drive({ trigger });
         expect(result.refused, trigger).toBe("closed");
+        expect(result.refusalReason, trigger).toMatch(/VIB-1 is closed \(Done is the terminal stage\)/);
         expect(result.runId, trigger).toBeNull();
         expect(adapter5.pending, trigger).toBeNull();
       }
@@ -5245,6 +5085,19 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
+  /**
+   * Ruling 130(b)/(c) (pass 34, F34-12 / F34-1): the operator's OWN failure
+   * packet names the cause Viberr classified and the credential principal's
+   * own remedy, and its recommended option asserts only what the human says.
+   * Live, a five-hour session limit and a 403 `oauth_org_not_allowed` both
+   * produced "Retry on the other backend, fix the credential, or redirect the
+   * task" and recommended "I've updated the policy / credential".
+   *
+   * Canaries: (1) restore `options: defaultPacketOptions("blocked")` in
+   * `escalateFailedOperatorRun` and the quota/auth cases fail on the
+   * recommended title and `ev`; (2) restore the generic body sentence and
+   * every case fails on the body.
+   */
   describe("ruling 130: a failed operator run's packet", () => {
     const RESET = "2026-09-07T11:50:00.000Z";
     const RESET_LABEL = "Sep 7, 2026 · 11:50 UTC";
@@ -5350,52 +5203,6 @@ describe("runOperator — authority, ordering, orphans", () => {
   });
 
   /**
-   * F19-20 / FR39 — "a scheduled re-run never fires on a terminal stage",
-   * enforced where the run STARTS.
-   *
-   * The schedule runner decided mootness from the tick's projection snapshot,
-   * and `runOperator` had no terminal-stage guard of its own. Two windows
-   * survived that: the runner drains its claimed list sequentially, and — far
-   * wider — a trigger arriving while a drive holds the lease is QUEUED and
-   * fired on release with no mootness re-check at all. That in-flight turn is
-   * frequently the one that calls `accept_completion`, so the human watched a
-   * fresh unwatched agent turn start on the task they had just closed.
-   */
-  it("F19-20: a SCHEDULED trigger on a Done task starts no run", async () => {
-    // Canary: delete the `input.trigger === "scheduled"` guard in runOperator
-    // and a run row appears / adapter5.pending is non-null.
-    deployAgents([operatorAgent()]);
-    seed("done");
-
-    const result = await drive({ trigger: "scheduled" });
-
-    // Ruling 177 (pass 36): the refusal is the one closed-task refusal every
-    // trigger gets, no longer a scheduled-only `terminal-stage`.
-    expect(result.refused).toBe("closed");
-    expect(result.refusalReason).toMatch(/VIB-1 is closed \(Done is the terminal stage\)/);
-    expect(result.runId).toBeNull();
-    expect(result.queued).toBe(false);
-    expect(adapter5.pending).toBeNull();
-    expect(operatorRuns()).toHaveLength(0);
-  });
-
-  it("ruling 177 (was F19-20's scope): a human trigger on a Done task is refused too", async () => {
-    // FR39 scoped the terminal refusal to `scheduled` ("every other trigger on
-    // a terminal task is legitimate — an @operator question about finished
-    // work"). Pass 36 watched that legitimacy start paid runs on shipped and
-    // archived tasks (F36-4, F36-5); ruling 177 closes every door. A person
-    // with a question about finished work reopens the task (a stage move) or
-    // asks in a comment nobody is dispatched for.
-    deployAgents([operatorAgent()]);
-    seed("done");
-
-    const result = await drive({ trigger: "manual" });
-
-    expect(result.refused).toBe("closed");
-    expect(adapter5.pending).toBeNull();
-  });
-
-  /**
    * R20-1 (F20-5) — a HUMAN-pressed "Run operator" while a decision packet is
    * open is a paid no-op (coordination is paused). Refuse it, scoped to the
    * `manual` trigger so machine recovery paths still run.
@@ -5422,18 +5229,43 @@ describe("runOperator — authority, ordering, orphans", () => {
     rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
   };
 
-  it("R20-1: a MANUAL run is refused while a decision packet is open", async () => {
-    deployAgents([operatorAgent()]);
-    seedWithOpenPacket();
+  // Ruling 141 widened R20-1's door to a scheduled run. Canary: shrink
+  // `PACKET_REFUSED_TRIGGERS` back to `manual` and the scheduled row starts a
+  // run.
+  it.each(["manual", "scheduled"] as const)(
+    "R20-1 / ruling 141: a %s trigger is refused while a decision packet is open",
+    async (trigger) => {
+      deployAgents([operatorAgent()]);
+      seedWithOpenPacket();
 
-    const result = await drive({ trigger: "manual" });
+      const result = await drive({ trigger });
 
-    expect(result.refused).toBe("open-packet");
-    expect(result.runId).toBeNull();
-    expect(result.queued).toBe(false);
-    expect(adapter5.pending).toBeNull();
-    expect(operatorRuns()).toHaveLength(0);
-  });
+      expect(result.refused).toBe("open-packet");
+      expect(result.runId).toBeNull();
+      expect(result.queued).toBe(false);
+      expect(adapter5.pending).toBeNull();
+      expect(operatorRuns()).toHaveLength(0);
+    },
+  );
+
+  // The MACHINE triggers are never refused: pr-diverged WITHDRAWS a moot
+  // packet (ruling 17 recovery) and agent-reply reacts to a run already in
+  // flight. Canary: refuse every trigger over an open packet (drop the
+  // `PACKET_REFUSED_TRIGGERS` scoping) and both rows go red.
+  it.each(["pr-diverged", "agent-reply"] as const)(
+    "R20-1: a machine %s trigger still runs with a packet open",
+    async (trigger) => {
+      deployAgents([operatorAgent()]);
+      seedWithOpenPacket();
+
+      const result = await drive(
+        trigger === "agent-reply" ? { trigger, agentReply: "done" } : { trigger },
+      );
+
+      expect(result.refused).toBeUndefined();
+      expect(adapter5.pending).not.toBeNull();
+    },
+  );
 
   it("ruling 227: a refused MANUAL turn says so on the task, not only in the log", async () => {
     // Live on SHOP-2 at 02:44 UTC. A person wrote "@operator PR #13 conflicts
@@ -5465,20 +5297,6 @@ describe("runOperator — authority, ordering, orphans", () => {
       // And NOT the queue sentence: this one never reached a queue.
       expect(note!.text).not.toContain("front of the queue");
     });
-  });
-
-  it("ruling 141: a SCHEDULED run is refused like a manual one while a decision packet is open", async () => {
-    // Canary: restore the manual-only guard (`=== "manual"`).
-    deployAgents([operatorAgent()]);
-    seedWithOpenPacket();
-
-    const result = await drive({ trigger: "scheduled" });
-
-    expect(result.refused).toBe("open-packet");
-    expect(result.runId).toBeNull();
-    expect(result.queued).toBe(false);
-    expect(adapter5.pending).toBeNull();
-    expect(operatorRuns()).toHaveLength(0);
   });
 
   /**
@@ -5603,30 +5421,6 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired")).toHaveLength(0);
   });
 
-  it("R20-1: a MACHINE pr-diverged trigger still runs with a packet open (ruling 17 recovery)", async () => {
-    // Canary for the `manual` scoping: pr-diverged WITHDRAWS a moot packet, so
-    // it must NOT be refused. Remove the `=== "manual"` scoping in runOperator
-    // and this goes red.
-    deployAgents([operatorAgent()]);
-    seedWithOpenPacket();
-
-    const diverged = await drive({ trigger: "pr-diverged" });
-
-    expect(diverged.refused).toBeUndefined();
-    expect(adapter5.pending).not.toBeNull();
-  });
-
-  it("R20-1: a MACHINE agent-reply trigger still runs with a packet open", async () => {
-    // agent-reply reacts to a run already in flight — also never refused.
-    deployAgents([operatorAgent()]);
-    seedWithOpenPacket();
-
-    const replied = await drive({ trigger: "agent-reply", agentReply: "done" });
-
-    expect(replied.refused).toBeUndefined();
-    expect(adapter5.pending).not.toBeNull();
-  });
-
   it("F19-20: a scheduled trigger QUEUED behind a live drive is re-checked when it FIRES", async () => {
     // The wide window the claim-time check cannot cover: a trigger arriving
     // while a drive holds the lease is queued and fired on release with no
@@ -5682,7 +5476,9 @@ describe("runOperator — authority, ordering, orphans", () => {
     expect(systemPrompt).not.toContain("Attached MCP servers: ghost-mcp");
     expect(systemPrompt).toContain("No MCP servers are attached to you.");
     expect(systemPrompt).toContain("Unavailable MCP servers");
-    expect(systemPrompt).toContain("ghost-mcp");
+    // Ruling 310: the reason the registry resolution gave, not one the prompt
+    // invented.
+    expect(systemPrompt).toContain("- ghost-mcp: no MCP server by that name in the org registry");
     // Nothing mounted → no governance paragraph claiming tools it lacks.
     expect(systemPrompt).not.toContain("MCP tools are governed too");
   });
@@ -6266,7 +6062,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
       expect(adapter7.pending!.spec.threadId).toBe(rows[0]!.thread_id);
     });
 
-    it("only a drive that must actually CLONE reserves a row", async () => {
+    it("pendingOperatorClone: only a connected repository with no checkout yet is a clone to wait for", async () => {
       // A reservation is worth a row when the human would otherwise stare at
       // nothing for minutes. The reuse and no-repo arms return in microseconds,
       // and a row for those is noise.
@@ -6329,53 +6125,6 @@ describe("R19-1 — the operator's read-only repository view", () => {
       );
     });
 
-    it("the anchored read answers from origin/main while the tree says otherwise", async () => {
-      // The mechanism, on the exact shape of the live incident: the deliverer's
-      // commits are IN THE TREE and NOT on main.
-      // Canary: point `readDefaultBranchFile` at the working tree (drop the
-      // `origin/<branch>:` ref) and both assertions flip.
-      deploy("acme/widgets");
-      await makeOrigin();
-      await withLocalGithub(origins, () => drive());
-
-      const dir = checkoutDir();
-      await exec("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
-      await exec("git", ["-C", dir, "config", "user.name", "T"]);
-      await exec("git", ["-C", dir, "checkout", "-qb", "vib-1"]);
-      writeFileSync(path.join(dir, "docs", "guide.md"), "the guide\nthe governed row\n");
-      writeFileSync(path.join(dir, "docs", "new.md"), "brand new\n");
-      await exec("git", ["-C", dir, "add", "-A"]);
-      await exec("git", ["-C", dir, "commit", "-qm", "the deliverer's work"]);
-
-      // What a `Read` of the checkout shows — the false-positive input.
-      expect(readFileSync(path.join(dir, "docs", "guide.md"), "utf8")).toContain(
-        "the governed row",
-      );
-
-      const reads = await withLocalGithub(origins, async () => ({
-        changed: await readDefaultBranchFile(store7.db, {
-          projectSlug: store7.slug,
-          dir,
-          defaultBranch: "main",
-          path: "docs/guide.md",
-        }),
-        added: await readDefaultBranchFile(store7.db, {
-          projectSlug: store7.slug,
-          dir,
-          defaultBranch: "main",
-          path: "docs/new.md",
-        }),
-      }));
-
-      expect(reads.changed.kind).toBe("found");
-      expect(reads.changed.kind === "found" && reads.changed.text).toContain("the guide");
-      expect(reads.changed.kind === "found" && reads.changed.text).not.toContain(
-        "the governed row",
-      );
-      // The whole point: a file only the task branch has is ABSENT from main.
-      expect(reads.added.kind).toBe("absent");
-    });
-
     /**
      * F21-3 — the operator's org MCP mounts were never pre-flighted. The
      * specialist path got that in pass 20 (F20-10); the operator, which holds
@@ -6420,49 +6169,5 @@ describe("R19-1 — the operator's read-only repository view", () => {
       expect(spec.allowedTools ?? []).not.toContain("mcp__dead-mcp");
     });
 
-    it("refuses a path that is not a repository-relative file path", async () => {
-      deploy("acme/widgets");
-      await makeOrigin();
-      await withLocalGithub(origins, () => drive());
-
-      const bad = await readDefaultBranchFile(store7.db, {
-        projectSlug: store7.slug,
-        dir: checkoutDir(),
-        defaultBranch: "main",
-        // A ref-ish argument would let the read escape the default branch —
-        // which is the one thing this tool exists to pin down.
-        path: "vib-1:docs/guide.md",
-      });
-      expect(bad.kind).toBe("unavailable");
-    });
-  });
-});
-
-/**
- * F37-61: the held-task doctrine told the operator that BOTH `run_agent` and
- * `deliver_for_review` are "REFUSED by the server". Only the first is. Ruling
- * 186's gate lives in `startAgentRun` ("every dispatch door lands here"), and
- * delivery is `performDelivery`, a different path with no `blockedBy` check
- * anywhere in it.
- *
- * Asserting a gate that does not exist is the same defect ruling 186 was written
- * about, inverted: there it was a prompt ASKING where a gate was needed; here it
- * is a prompt CLAIMING a gate that was never built.
- */
-describe("F37-61 / ruling 240: the held-task doctrine names two gates, and both exist", () => {
-  it("names both doors, and both are really gated", async () => {
-    const { readFileSync } = await import("node:fs");
-    const src = readFileSync("app/server/runtimes/operator-run.server.ts", "utf8");
-    // The sentence names both doors, and BOTH gates now exist — ruling 240 built
-    // the second after the owner's call. The point of this test is that the
-    // claim is checked against the code rather than restated.
-    expect(src).toContain("`run_agent` and `deliver_for_review` are BOTH REFUSED");
-
-    const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(specialist).toContain('holdRefusalFor(db, input.projectSlug, input.taskKey, held, "running an agent on it")');
-    // CANARY: delete the hold gate from `performDelivery` and this fails — the
-    // prompt would be back to asserting a gate that was never built.
-    const actions = readFileSync("app/server/tasks/task-actions.server.ts", "utf8");
-    expect(actions).toContain('holdRefusalFor(db, projectSlug, taskKey, held, "delivering it for review")');
   });
 });

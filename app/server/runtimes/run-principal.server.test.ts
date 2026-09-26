@@ -286,4 +286,28 @@ describe("principalRefusalMessage", () => {
     expect(principalRefusalMessage(unowned, "claude").startsWith("Claude runs on VIB-9")).toBe(true);
     expect(principalRefusalMessage(unowned, "codex").startsWith("Codex runs on VIB-9")).toBe(true);
   });
+
+  it("names no environment variable — ruling 127 left none to set", () => {
+    // CANARY: bring back the deployment-wide answer (a key or CODEX_HOME to
+    // set) in either sentence and this fails.
+    const refusals = [
+      { kind: "unowned", taskKey: "VIB-9" },
+      { kind: "owner-missing", ownerUserId: "u_gone" },
+    ] as const;
+    for (const refusal of refusals) {
+      for (const backend of ["claude", "codex"] as const) {
+        const message = principalRefusalMessage(refusal, backend);
+        for (const gone of [
+          "ANTHROPIC_API_KEY",
+          "CODEX_API_KEY",
+          "OPENAI_API_KEY",
+          "CODEX_HOME",
+          "VIBERR_CODEX_USE_CLI_AUTH",
+          "VIBERR_CLAUDE_USE_CLI_AUTH",
+        ]) {
+          expect(message, `${refusal.kind} · ${backend}`).not.toContain(gone);
+        }
+      }
+    }
+  });
 });

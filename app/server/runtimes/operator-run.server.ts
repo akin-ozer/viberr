@@ -4603,7 +4603,7 @@ type StrandedNudge = boolean | "idle-stage" | "plan-refused" | "refresh-ended";
  * operator runs walking Design to Review with nothing to do at Build or
  * Verify. The moves chain in one plan, each checked from the stage it runs at.
  */
-export const CODEX_PLAN_WHOLE_TURN =
+const CODEX_PLAN_WHOLE_TURN =
   "The plan is the whole turn: nothing re-invokes you for a step of your own, so plan every step " +
   "this turn needs. A refresh goes with the step it prepares. A walk across `auto` stages where " +
   "nothing needs an agent is one `transition_stage` per stage, in order, in this plan (each is " +
@@ -4616,7 +4616,7 @@ export const CODEX_PLAN_WHOLE_TURN =
  * auto-advance stage" (a Review stage is not one), and not an accusation of
  * holding: the previous drive acted.
  */
-export const REFRESH_ENDED_NUDGE =
+const REFRESH_ENDED_NUDGE =
   "You are re-invoked ONCE because your previous run brought the branch up to date " +
   "(`update_branch_from_base`) and stopped there: nothing was dispatched, delivered or asked. " +
   "A refresh only prepares the branch for the step that follows it. Take that step now, in this " +
@@ -5417,7 +5417,7 @@ function pendingSchedulesInstruction(snapshot: OperatorTaskSnapshot): string {
  * agent's question twice in half an hour (AX-28 02:12, AX-31 02:39), each a
  * "plan was not carried out in full" note.
  */
-export function packetAuthorInstruction(snapshot: OperatorTaskSnapshot): string {
+function packetAuthorInstruction(snapshot: OperatorTaskSnapshot): string {
   const packet = snapshot.packet;
   if (!packet || packet.yours) return "";
   return (
@@ -5441,7 +5441,7 @@ export function packetAuthorInstruction(snapshot: OperatorTaskSnapshot): string 
  * positive. The snapshot now carries the refusal itself; this says what it
  * means for the plan.
  */
-export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): string {
+function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): string {
   if (!snapshot.notRefreshableReason) return "";
   return (
     "This task stands at the acceptance stage, where `update_branch_from_base` refuses (`notRefreshableReason`). " +
@@ -5464,7 +5464,7 @@ export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): stri
  * names the head each count was counted on (`baseComparedHead`) and carries
  * the sentence; this puts it in front of the plan, whatever the trigger.
  */
-export function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
+function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
   const sentence = snapshot.baseBehindBySentence ?? "";
   if (!sentence) return "";
   return (
@@ -5483,7 +5483,7 @@ export function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
  * newest decision was then "wait for the window", which says nothing about
  * review, so this cannot tell the operator to follow the newest one only.
  */
-export function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): string {
+function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): string {
   const decisions = snapshot.humanDecisions;
   if (!decisions || decisions.length === 0) return "";
   return (
@@ -5502,7 +5502,7 @@ export function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): strin
  * version explained it only in the Claude toolkit's `read_task` description,
  * and every operator on the board it was written for runs on Codex.
  */
-export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
+function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
   const collisions = snapshot.collisions;
   // Ruling 431: the leases that bind now, said wherever leases might be quoted.
   const leases =

@@ -262,18 +262,6 @@ export type RunCompletionCallback = (finished: AgentRunRow) => void;
 /** U39-30: told that a run's answer is complete and in its lines. */
 export type RunAnsweredCallback = (runId: string) => void;
 
-/**
- * U39-30: register a one-shot callback for the moment a run's answer is
- * complete but its settle is still waiting on a completion compaction. The
- * completion callback still fires afterwards, as always; this only lets a
- * caller show the answer the person is waiting for without making them sit
- * through the housekeeping. It never fires for a run that is not compacted
- * at completion, or that did not finish.
- */
-export function registerRunAnswered(runId: string, cb: RunAnsweredCallback): void {
-  getState().answered.set(runId, cb);
-}
-
 const SERVICE_KEY = Symbol.for("viberr.runService");
 
 function getState(): ServiceState {
@@ -448,8 +436,10 @@ export interface StartRunInput {
    *  (see `RunSpec.compactAnchor`). */
   compactAnchor?: string;
   /** U39-30: told the run's answer is written, before the completion
-   *  compaction that holds its settle back (`registerRunAnswered`). Registered
-   *  before the run launches, so a run cannot finish ahead of it. */
+   *  compaction that holds its settle back. The completion callback still
+   *  fires afterwards; this never fires for a run that is not compacted at
+   *  completion, or that did not finish. Registered before the run launches,
+   *  so a run cannot finish ahead of it. */
   onAnswered?: RunAnsweredCallback;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: RunMcpServers;
@@ -817,7 +807,7 @@ export function webSearchWithheldFromDenylist(
  * derived from a server's key alone, and nothing here may depend on how a
  * declaration is shaped.
  */
-export function withMcpAutoApproval(
+function withMcpAutoApproval(
   allowedTools: readonly string[] | undefined,
   mcpServerNames: readonly string[],
 ): string[] | undefined {
@@ -1391,7 +1381,7 @@ export type RunUnavailability =
    *  the un-openable-key refusal `runCredentialFor` raises). */
   | { kind: "detail"; detail: string };
 
-export function backendUnavailableMessage(
+function backendUnavailableMessage(
   backend: RealBackend,
   cause: RunUnavailability,
 ): string {

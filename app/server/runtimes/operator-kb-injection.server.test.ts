@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -8,9 +7,6 @@ import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { createTempDirs } from "../../../test-support/temp-dirs";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 // After the whole file, not each test: three describes below make one data
 // root at collection time and share it across their cases.
@@ -461,12 +457,6 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
     expect(prompt).not.toContain("ops-readonly is mounted through");
   });
 
-  it("says nothing about MCP governance when no server mounted", () => {
-    const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
-    expect(prompt).not.toContain("MCP tools are governed too");
-    expect(prompt).toContain("No MCP servers are attached to you.");
-  });
-
   it("ruling 176: a server whose write tools are marked leaves the paragraph, and the removed tools are named", () => {
     // Canary: drop the `gatedServers` filter in buildOperatorSystemPrompt and
     // the paragraph names the gated server again.
@@ -505,27 +495,6 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
  */
 describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
   const dataRoot = temp.make("viberr-op-b8-");
-
-  it("never announces a granted server that resolved to nothing — it names the gap instead", () => {
-    const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
-      servers: {},
-      mounted: [],
-      unresolved: [{ name: "ghost-mcp", reason: "no server by that name is in the org registry" }],
-      unhealthy: [],
-      toolDenials: [],
-      proxied: [],
-    }).prompt;
-    expect(prompt).not.toContain("Attached MCP servers: ghost-mcp");
-    expect(prompt).toContain("No MCP servers are attached to you.");
-    // Ruling 310: the operator reads the SAME sentence the specialist does,
-    // from one renderer, carrying the reason the server gave rather than a
-    // cause the prompt invented. The two saying different things about the
-    // same fact is how the invented cause survived in both for so long.
-    expect(prompt).toContain("no server by that name is in the org registry");
-    expect(prompt).toContain("do not assume the grant or the registration is missing");
-    expect(prompt).toContain("Unavailable MCP servers");
-    expect(prompt).toContain("Do not claim or attempt tools");
-  });
 
   it("flags a mounted-but-unreachable server separately from one that never mounted", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {

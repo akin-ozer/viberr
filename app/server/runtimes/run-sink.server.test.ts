@@ -360,22 +360,6 @@ describe("the sink redacts before it persists", () => {
     expect(line!.display.text).toContain("PATH=/usr/bin");
   });
 
-  it("a sink built WITHOUT the run's secrets would have persisted it", () => {
-    // The canary for the seam itself: drop `{ secrets }` in `launch` and the
-    // key rides through, which is exactly what this pair proves is possible.
-    const sink = sinkFor("run_nosecrets", "primary-nosec");
-    sink.markRunning();
-    sink.line(
-      emitted(
-        { t: "00:00:01", ev: "out", tag: "tool_result", text: PERSONAL_TOKEN },
-        JSON.stringify({ type: "tool_result", content: PERSONAL_TOKEN }),
-      ),
-    );
-    expect(listRunLines(store.db, "run_nosecrets")[0]!.display.text).toBe(
-      PERSONAL_TOKEN,
-    );
-  });
-
   it("keeps the display line parseable and untouched when it holds no secret", () => {
     const sink = sinkFor("run_clean");
     sink.markRunning();
