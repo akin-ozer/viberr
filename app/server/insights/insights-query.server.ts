@@ -7,7 +7,16 @@ import {
 } from "~/server/runtimes/backend-quota.server";
 import { DEFAULT_COMPACTION } from "~/server/tasks/timeline-compaction.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
-import { FIRST_CALL_LARGE_WRITE_TOKENS } from "~/server/runtimes/context-policy.server";
+import {
+  FIRST_CALL_LARGE_WRITE_TOKENS,
+  OPERATOR_BURST_WINDOW_MS,
+  RESUME_FRESH_CONTEXT_TOKENS,
+  RESUME_IDLE_EDGES_MS,
+  cacheTtlMs,
+} from "~/server/runtimes/context-policy.server";
+import type { RunBackend } from "~/features/runtime/runtime-types";
+import type { CredentialKind } from "~/server/runtimes/backend-credentials.server";
+import type { ContinuityLossReason } from "~/server/runtimes/run-service.server";
 
 /**
  * Insights: read-only aggregate analytics over `agent_runs` — the cost, token,
@@ -234,13 +243,102 @@ export interface CacheRow {
   largeFirstWrites: number;
   /** How many runs' writes were billed under each cache lifetime. */
   ttl: { fiveMinute: number; oneHour: number; mixed: number };
+  /**
+   * Ruling 505: the mean first-call write, over the runs with a first call on
+   * a backend that reports writes, so PLAN.md's baseline column ("avg
+   * first-call write") reads off the stored rows. Null when no such run is in
+   * the group: ruling 395's rule, one column over.
+   */
+  avgFirstCallWrite: number | null;
+  /** Ruling 505: cache reads per run, over the runs that reached the provider
+   *  (the ones with a first call) and those runs' reads alone. Null with none. */
+  readPerRun: number | null;
+  /** Ruling 505: the spread of each run's largest prompt, over the runs that
+   *  carried a per-call figure (`peak_prompt_tokens > 0`). Null with none. */
+  peakPrompt: PromptSpread | null;
+}
+
+/** Ruling 505: PLAN.md's "peak prompt (median · p90 · max)", in tokens. */
+export interface PromptSpread {
+  median: number;
+  /** Nearest rank: the smallest peak at least 90% of the runs stay within. */
+  p90: number;
+  max: number;
+}
+
+/** Ruling 505: the resumed first calls whose idle time fell in one bucket. */
+export interface ResumeCell {
+  firstCalls: number;
+  warmStarts: number;
+  /** warmStarts / firstCalls, null with no first call (never 0%). */
+  warmRate: number | null;
+}
+
+/**
+ * Ruling 505: one backend and credential kind, the pair `CACHE_TTL_MS` is
+ * keyed on, with its resumes sorted by how long the session sat idle.
+ */
+export interface ResumeRow {
+  /** `claude · login`. */
+  label: string;
+  backend: string;
+  /** The kind the PRIOR run billed (the one whose writes the resume reads),
+   *  `unknown` for a row written before the kind was stored. */
+  credentialKind: string;
+  /** The TTL ruling 372's verdict assumes for this pair (`cacheTtlMs`). */
+  assumedTtlMs: number;
+  /** One cell per bucket of `ResumeSummary.edgesMs`, plus the open last one. */
+  cells: ResumeCell[];
+  /** Resumes ruling 372 declined: a fresh session started instead of a
+   *  replay (`stale_large_session`), counted from their start audit rows. */
+  setAside: number;
+}
+
+export interface ResumeSummary {
+  /** The buckets' upper edges, ascending (`RESUME_IDLE_EDGES_MS`). */
+  edgesMs: readonly number[];
+  rows: ResumeRow[];
+  /** The size past which a stale session is set aside (ruling 372's line),
+   *  so the card can name it. */
+  freshContextTokens: number;
+}
+
+/**
+ * Ruling 505: operator starts that came close behind another of the same
+ * prefix. PLAN.md (PR 5) held back a gate serializing them until they were
+ * counted: the cold ones here, and what their first calls wrote, are the most
+ * such a gate could save. Claude only — Codex's cache does not cross threads
+ * (ruling 375(c)), so no gate could make its second start warm.
+ */
+export interface OperatorBurstSummary {
+  /** Claude operator runs that reached the provider (have a first call). */
+  starts: number;
+  /** Of them, the ones started within `windowMs` after the previous such
+   *  start of the same project, principal and model. */
+  inBursts: number;
+  /** Of the burst starts, the cold ones. */
+  coldInBursts: number;
+  /** What those cold first calls wrote into the cache. */
+  coldBurstWrite: number;
+  /** Cold operator starts in all, so the burst share reads against them. */
+  coldStarts: number;
+  windowMs: number;
 }
 
 export interface CacheSummary {
   byKind: CacheRow[];
   byCredentialKind: CacheRow[];
+  /** Ruling 505: by backend and run kind (`claude · primary`), so Codex has
+   *  its own rows as PLAN.md's baseline table did, and a Claude specialist's
+   *  cold starts (ruling 371's shared prefix) are not averaged with Codex's
+   *  (per thread, ruling 375(c)). */
+  byBackendKind: CacheRow[];
   /** The line `largeFirstWrites` counts against, so the card can name it. */
   largeWriteTokens: number;
+  /** Ruling 505: resumes by idle time (PLAN.md's Codex retention probe). */
+  resumes: ResumeSummary;
+  /** Ruling 505: operator bursts (PLAN.md's count before the gate). */
+  operatorBursts: OperatorBurstSummary;
 }
 
 export interface InsightsSummary {
@@ -335,6 +433,38 @@ const cacheGroupSchema = z.object({
   ttl_5m: z.number().nullable(),
   ttl_1h: z.number().nullable(),
   ttl_mixed: z.number().nullable(),
+  // Ruling 505: PLAN.md's baseline columns.
+  first_write_sum: z.number().nullable(),
+  first_write_runs: z.number().nullable(),
+  first_call_reads: z.number().nullable(),
+});
+
+/** Ruling 505: one run's peak prompt, keyed by the group it falls in. */
+const peakRowSchema = z.object({ label: z.string().nullable(), peak: z.number() });
+
+/** Ruling 505: a run that replayed a session, beside the run before it. The
+ *  two enums are the `agent_runs` CHECK constraints, which the TTL table is
+ *  keyed on. */
+const resumeRowSchema = z.object({
+  backend: z.enum(["claude", "codex"]),
+  prev_credential_kind: z.enum(["login", "api_key", "access_token"]).nullable(),
+  started_at: z.string(),
+  prev_finished_at: z.string().nullable(),
+  first_call_warm: z.number().nullable(),
+});
+
+const setAsideSchema = z.object({
+  backend: z.enum(["claude", "codex"]),
+  credential_kind: z.enum(["login", "api_key", "access_token"]).nullable(),
+  runs: z.number(),
+});
+
+/** Ruling 505: a Claude operator start beside the one before it. */
+const operatorStartSchema = z.object({
+  started_at: z.string(),
+  prev_started_at: z.string().nullable(),
+  first_call_warm: z.number(),
+  first_call_cache_write: z.number().nullable(),
 });
 
 const outcomeSchema = z.object({ state: z.string(), runs: z.number() });
@@ -470,6 +600,12 @@ function avg(values: number[]): number | null {
   return values.length
     ? values.reduce((a, b) => a + b, 0) / values.length
     : null;
+}
+
+/** Nearest rank: the smallest value at least `p` of the sorted values reach. */
+function nearestRank(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  return sorted[Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length))) - 1]!;
 }
 
 function oversightSummary(
@@ -699,6 +835,287 @@ function namedKeys(rows: readonly { project_slug: string; task_key: string }[]):
   return rows.slice(0, INSIGHTS_NAMED_EXCEPTIONS).map((t) => `${t.project_slug}/${t.task_key}`);
 }
 
+/**
+ * Ruling 505: the fresh start `resumeRun` records instead of a replay, in the
+ * run's start audit (`continuityReset`). Typed against the service's own
+ * reason list, so a rename there fails here.
+ */
+const STALE_SESSION_SET_ASIDE = "stale_large_session" satisfies ContinuityLossReason;
+
+/**
+ * Ruling 369: the prompt-cache record, grouped by run kind, by the credential
+ * kind the runs billed and (ruling 505) by backend and run kind. Every figure
+ * is a plain SUM over the columns the sink folded; the rates are taken over the
+ * runs that HAVE a first call, so a refused run is neither warm nor cold.
+ *
+ * Ruling 505 adds what PLAN.md (`planning/prompt-cache-2026-09-21/`) asked the
+ * page for and it lacked: the baseline table's own columns (the mean first-call
+ * write, reads per run, the peak prompt's spread), resumes by idle time (the
+ * Codex retention probe, and the check on every TTL ruling 372 assumes) and the
+ * operator bursts the plan said to count before building a gate. All of it is
+ * read off rows the sink already writes, so an instance's history since ruling
+ * 369 answers at once.
+ */
+function cacheSummary(db: DatabaseSync, filter: InsightsFilter): CacheSummary {
+  const { clause, params } = scope(filter);
+  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+  const reportingPlaceholders = CACHE_WRITE_REPORTING_BACKENDS.map(() => "?").join(", ");
+
+  // Ruling 505: each run's peak prompt, keyed by the same group expression, for
+  // the spread; a run whose peak never landed carries no per-call figure.
+  const peaksBy = (column: string): Map<string, number[]> => {
+    const peaks = new Map<string, number[]>();
+    const rows = z.array(peakRowSchema).parse(
+      db
+        .prepare(
+          `SELECT ${column} AS label, peak_prompt_tokens AS peak
+           FROM agent_runs ${and("peak_prompt_tokens > 0")}`,
+        )
+        .all(...params),
+    );
+    for (const row of rows) {
+      const label = row.label ?? "unknown";
+      peaks.set(label, [...(peaks.get(label) ?? []), row.peak]);
+    }
+    return peaks;
+  };
+  const spreadOf = (values: readonly number[] | undefined): PromptSpread | null => {
+    if (!values?.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    return {
+      median: nearestRank(sorted, 0.5)!,
+      p90: nearestRank(sorted, 0.9)!,
+      max: sorted[sorted.length - 1]!,
+    };
+  };
+
+  const cacheGroup = (column: string): CacheRow[] => {
+    const peaks = peaksBy(column);
+    return z
+      .array(cacheGroupSchema)
+      .parse(
+        db
+          .prepare(
+            `SELECT ${column} AS label, count(*) AS runs,
+                    SUM(CASE WHEN first_call_warm IS NOT NULL THEN 1 ELSE 0 END) AS first_calls,
+                    SUM(CASE WHEN first_call_warm = 1 THEN 1 ELSE 0 END) AS warm_starts,
+                    SUM(cache_write_tokens) AS write_tokens,
+                    SUM(CASE WHEN backend IN (${reportingPlaceholders}) THEN 1 ELSE 0 END)
+                      AS write_reporting_runs,
+                    SUM(cached_input_tokens) AS read_tokens,
+                    SUM(CASE WHEN first_call_cache_write > ? THEN 1 ELSE 0 END) AS large_first_writes,
+                    SUM(CASE WHEN cache_ttl_bucket = '5m' THEN 1 ELSE 0 END) AS ttl_5m,
+                    SUM(CASE WHEN cache_ttl_bucket = '1h' THEN 1 ELSE 0 END) AS ttl_1h,
+                    SUM(CASE WHEN cache_ttl_bucket = 'mixed' THEN 1 ELSE 0 END) AS ttl_mixed,
+                    SUM(CASE WHEN first_call_warm IS NOT NULL
+                              AND backend IN (${reportingPlaceholders})
+                             THEN first_call_cache_write END) AS first_write_sum,
+                    SUM(CASE WHEN first_call_warm IS NOT NULL
+                              AND backend IN (${reportingPlaceholders})
+                             THEN 1 ELSE 0 END) AS first_write_runs,
+                    SUM(CASE WHEN first_call_warm IS NOT NULL
+                             THEN cached_input_tokens END) AS first_call_reads
+             FROM agent_runs ${clause}
+             GROUP BY ${column} ORDER BY runs DESC, label ASC`,
+          )
+          .all(
+            ...CACHE_WRITE_REPORTING_BACKENDS,
+            FIRST_CALL_LARGE_WRITE_TOKENS,
+            ...CACHE_WRITE_REPORTING_BACKENDS,
+            ...CACHE_WRITE_REPORTING_BACKENDS,
+            ...params,
+          ),
+      )
+      .map((r) => {
+        const label = r.label ?? "unknown";
+        const firstCalls = r.first_calls ?? 0;
+        const warmStarts = r.warm_starts ?? 0;
+        const writeReportingRuns = r.write_reporting_runs ?? 0;
+        // Ruling 395: no reporting run behind the sum means there is no figure,
+        // not a figure of zero.
+        const writeTokens = writeReportingRuns > 0 ? (r.write_tokens ?? 0) : null;
+        const readTokens = r.read_tokens ?? 0;
+        const firstWriteRuns = r.first_write_runs ?? 0;
+        return {
+          label,
+          runs: r.runs,
+          firstCalls,
+          warmStarts,
+          warmRate: firstCalls > 0 ? warmStarts / firstCalls : null,
+          writeTokens,
+          readTokens,
+          writeReportingRuns,
+          writeReadRatio:
+            writeTokens !== null && readTokens > 0 ? writeTokens / readTokens : null,
+          largeFirstWrites: r.large_first_writes ?? 0,
+          ttl: { fiveMinute: r.ttl_5m ?? 0, oneHour: r.ttl_1h ?? 0, mixed: r.ttl_mixed ?? 0 },
+          // Ruling 505: the same rule as the write column — a mean of first
+          // writes only over runs whose backend reports a write at all.
+          avgFirstCallWrite: firstWriteRuns > 0 ? (r.first_write_sum ?? 0) / firstWriteRuns : null,
+          readPerRun: firstCalls > 0 ? (r.first_call_reads ?? 0) / firstCalls : null,
+          peakPrompt: spreadOf(peaks.get(label)),
+        };
+      });
+  };
+
+  return {
+    byKind: cacheGroup("kind"),
+    // A row written before the kind was stored, or a refused run, has none.
+    byCredentialKind: cacheGroup("COALESCE(credential_kind, 'unknown')"),
+    byBackendKind: cacheGroup("backend || ' · ' || kind"),
+    largeWriteTokens: FIRST_CALL_LARGE_WRITE_TOKENS,
+    resumes: resumeSummary(db, filter),
+    operatorBursts: operatorBurstSummary(db, filter),
+  };
+}
+
+/**
+ * Ruling 505: resumes sorted by how long their session sat idle, per backend
+ * and credential kind — the probe PLAN.md (PR 6) asked for before Codex's
+ * ten-minute TTL moves, and the check on every TTL ruling 372's verdict
+ * assumes (a warm cell past the assumed TTL says the TTL is too short, a cold
+ * one inside it that the cache lapsed sooner).
+ *
+ * A resume is a run whose provider session an earlier run of the same backend
+ * already used (`resumeRun` hands the stored id over and the sink keeps it; a
+ * fresh session is a new id, and an operator's is never reused). Its idle time
+ * runs from that earlier run's finish, which follows any completion compaction
+ * (ruling 376, the last call that touched the cache), to its own start. The
+ * row is keyed by the kind the EARLIER run billed: its writes are what the
+ * resume reads, and ruling 372 takes the TTL from it. Only resumes whose first
+ * call landed are counted; the set-aside column counts the fresh starts
+ * ruling 372 made instead of a replay, from their start audit.
+ */
+function resumeSummary(db: DatabaseSync, filter: InsightsFilter): ResumeSummary {
+  const { clause, params } = scope(filter);
+  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+  const edgesMs = RESUME_IDLE_EDGES_MS;
+  const rows = new Map<string, ResumeRow>();
+  const rowFor = (backend: RunBackend, kind: CredentialKind | null): ResumeRow => {
+    const credentialKind = kind ?? "unknown";
+    const label = `${backend} · ${credentialKind}`;
+    const known = rows.get(label);
+    if (known) return known;
+    const row: ResumeRow = {
+      label,
+      backend,
+      credentialKind,
+      assumedTtlMs: cacheTtlMs(backend, kind),
+      cells: Array.from({ length: edgesMs.length + 1 }, () => ({
+        firstCalls: 0,
+        warmStarts: 0,
+        warmRate: null,
+      })),
+      setAside: 0,
+    };
+    rows.set(label, row);
+    return row;
+  };
+
+  const resumed = z.array(resumeRowSchema).parse(
+    db
+      .prepare(
+        `SELECT backend, prev_credential_kind, started_at, prev_finished_at, first_call_warm
+         FROM (SELECT backend, started_at, first_call_warm,
+                      LAG(id) OVER session AS prev_id,
+                      LAG(finished_at) OVER session AS prev_finished_at,
+                      LAG(credential_kind) OVER session AS prev_credential_kind
+               FROM agent_runs
+               ${and("session_id IS NOT NULL AND started_at IS NOT NULL")}
+               WINDOW session AS (PARTITION BY backend, session_id ORDER BY started_at, id))
+         WHERE prev_id IS NOT NULL AND first_call_warm IS NOT NULL`,
+      )
+      .all(...params),
+  );
+  for (const r of resumed) {
+    const idleMs = Date.parse(r.started_at) - Date.parse(r.prev_finished_at ?? "");
+    // An earlier run that never finished, or a clock that ran backwards, gives
+    // no idle time to sort by.
+    if (!Number.isFinite(idleMs) || idleMs < 0) continue;
+    const bucket = edgesMs.findIndex((edge) => idleMs <= edge);
+    const cell = rowFor(r.backend, r.prev_credential_kind).cells[
+      bucket === -1 ? edgesMs.length : bucket
+    ]!;
+    cell.firstCalls += 1;
+    if (r.first_call_warm === 1) cell.warmStarts += 1;
+    cell.warmRate = cell.warmStarts / cell.firstCalls;
+  }
+
+  const setAside = z.array(setAsideSchema).parse(
+    db
+      .prepare(
+        `SELECT r.backend AS backend, r.credential_kind AS credential_kind, count(*) AS runs
+         FROM audit_events a JOIN agent_runs r ON r.id = a.subject_id
+         WHERE a.action = 'runtime.run.started' AND a.subject_kind = 'run'
+           AND json_extract(a.details_json, '$.continuityReset') = ?
+           ${filter.projectSlug ? "AND r.project_slug = ?" : ""}
+         GROUP BY r.backend, r.credential_kind`,
+      )
+      .all(STALE_SESSION_SET_ASIDE, ...params),
+  );
+  for (const r of setAside) rowFor(r.backend, r.credential_kind).setAside += r.runs;
+
+  return {
+    edgesMs,
+    freshContextTokens: RESUME_FRESH_CONTEXT_TOKENS,
+    rows: [...rows.values()].sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)),
+  };
+}
+
+/**
+ * Ruling 505: the operator bursts PLAN.md (PR 5) said to count before building
+ * a gate that serializes them. A cache entry exists only once the first
+ * response has begun, so an operator run that starts while another run of the
+ * same prefix — same project, the same principal's account, the same model —
+ * is still waiting for its first response writes the prefix again.
+ *
+ * Counted over the Claude operator runs that reached the provider: a start
+ * within `OPERATOR_BURST_WINDOW_MS` after the previous such start is in a
+ * burst, and the cold ones among those, with what their first calls wrote, are
+ * the most a gate could save. Codex is left out on purpose: its cache does not
+ * cross threads (ruling 375(c)), so no order of starts makes a second one warm.
+ * The re-measure behind ruling 369 found 1 cold start in the 141 operator
+ * starts that came within five minutes of the one before, which is why the
+ * gate waits on this count.
+ */
+function operatorBurstSummary(db: DatabaseSync, filter: InsightsFilter): OperatorBurstSummary {
+  const { clause, params } = scope(filter);
+  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+  const starts = z.array(operatorStartSchema).parse(
+    db
+      .prepare(
+        `SELECT started_at, first_call_warm, first_call_cache_write,
+                LAG(started_at) OVER prefix AS prev_started_at
+         FROM agent_runs
+         ${and(
+           "kind = 'operator' AND backend = 'claude' AND started_at IS NOT NULL AND first_call_warm IS NOT NULL",
+         )}
+         WINDOW prefix AS (PARTITION BY project_slug, credential_user_id, model
+                           ORDER BY started_at, id)`,
+      )
+      .all(...params),
+  );
+  const summary: OperatorBurstSummary = {
+    starts: starts.length,
+    inBursts: 0,
+    coldInBursts: 0,
+    coldBurstWrite: 0,
+    coldStarts: 0,
+    windowMs: OPERATOR_BURST_WINDOW_MS,
+  };
+  for (const s of starts) {
+    const cold = s.first_call_warm === 0;
+    if (cold) summary.coldStarts += 1;
+    const gapMs = Date.parse(s.started_at) - Date.parse(s.prev_started_at ?? "");
+    if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > OPERATOR_BURST_WINDOW_MS) continue;
+    summary.inBursts += 1;
+    if (!cold) continue;
+    summary.coldInBursts += 1;
+    summary.coldBurstWrite += s.first_call_cache_write ?? 0;
+  }
+  return summary;
+}
+
 export function getInsightsSummary(
   db: DatabaseSync,
   nowIso: string,
@@ -835,62 +1252,7 @@ export function getInsightsSummary(
     tokenless,
   };
 
-  // Ruling 369: the prompt-cache record, grouped by run kind and by the
-  // credential kind the runs billed. Every figure is a plain SUM over the
-  // columns the sink folded; the rates are taken over the runs that HAVE a
-  // first call, so a refused run is neither warm nor cold.
-  const reportingPlaceholders = CACHE_WRITE_REPORTING_BACKENDS.map(() => "?").join(", ");
-  const cacheGroup = (column: string): CacheRow[] =>
-    z
-      .array(cacheGroupSchema)
-      .parse(
-        db
-          .prepare(
-            `SELECT ${column} AS label, count(*) AS runs,
-                    SUM(CASE WHEN first_call_warm IS NOT NULL THEN 1 ELSE 0 END) AS first_calls,
-                    SUM(CASE WHEN first_call_warm = 1 THEN 1 ELSE 0 END) AS warm_starts,
-                    SUM(cache_write_tokens) AS write_tokens,
-                    SUM(CASE WHEN backend IN (${reportingPlaceholders}) THEN 1 ELSE 0 END)
-                      AS write_reporting_runs,
-                    SUM(cached_input_tokens) AS read_tokens,
-                    SUM(CASE WHEN first_call_cache_write > ? THEN 1 ELSE 0 END) AS large_first_writes,
-                    SUM(CASE WHEN cache_ttl_bucket = '5m' THEN 1 ELSE 0 END) AS ttl_5m,
-                    SUM(CASE WHEN cache_ttl_bucket = '1h' THEN 1 ELSE 0 END) AS ttl_1h,
-                    SUM(CASE WHEN cache_ttl_bucket = 'mixed' THEN 1 ELSE 0 END) AS ttl_mixed
-             FROM agent_runs ${clause}
-             GROUP BY ${column} ORDER BY runs DESC, label ASC`,
-          )
-          .all(...CACHE_WRITE_REPORTING_BACKENDS, FIRST_CALL_LARGE_WRITE_TOKENS, ...params),
-      )
-      .map((r) => {
-        const firstCalls = r.first_calls ?? 0;
-        const warmStarts = r.warm_starts ?? 0;
-        const writeReportingRuns = r.write_reporting_runs ?? 0;
-        // Ruling 395: no reporting run behind the sum means there is no figure,
-        // not a figure of zero.
-        const writeTokens = writeReportingRuns > 0 ? (r.write_tokens ?? 0) : null;
-        const readTokens = r.read_tokens ?? 0;
-        return {
-          label: r.label ?? "unknown",
-          runs: r.runs,
-          firstCalls,
-          warmStarts,
-          warmRate: firstCalls > 0 ? warmStarts / firstCalls : null,
-          writeTokens,
-          readTokens,
-          writeReportingRuns,
-          writeReadRatio:
-            writeTokens !== null && readTokens > 0 ? writeTokens / readTokens : null,
-          largeFirstWrites: r.large_first_writes ?? 0,
-          ttl: { fiveMinute: r.ttl_5m ?? 0, oneHour: r.ttl_1h ?? 0, mixed: r.ttl_mixed ?? 0 },
-        };
-      });
-  const cache: CacheSummary = {
-    byKind: cacheGroup("kind"),
-    // A row written before the kind was stored, or a refused run, has none.
-    byCredentialKind: cacheGroup("COALESCE(credential_kind, 'unknown')"),
-    largeWriteTokens: FIRST_CALL_LARGE_WRITE_TOKENS,
-  };
+  const cache = cacheSummary(db, filter);
 
   const outcomeRows = z.array(outcomeSchema).parse(
     db

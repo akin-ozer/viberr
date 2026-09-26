@@ -1,4 +1,5 @@
 import { ENV_KEYS } from "~/server/config/env.server";
+import { CLAUDE_AUTO_COMPACT_WINDOW_ENV } from "./context-policy.server";
 
 /**
  * Spawn env hygiene: the base every child the server starts is built on.
@@ -44,6 +45,48 @@ const PRIVATE_RUNTIME_ENV_RE =
  * set it to.
  */
 const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|CODEX_SQLITE_HOME)$/;
+
+/**
+ * Ruling 506: the CLI's prompt-cache switches, stripped because ruling 374(a)
+ * made the cache lifetime the CLI's automatic choice and Viberr sets none of
+ * them.
+ *
+ * Not setting them was not enough. None of these names is credential-shaped
+ * or declared by the env schema, so one on the host (a developer's shell, a
+ * deployment's old `.env`) rode into every Claude child, where
+ * `DISABLE_PROMPT_CACHING` would turn caching off for every run the instance
+ * makes, `ENABLE_PROMPT_CACHING_1H` would pay the hour's 2x write on every
+ * API-key run that 374(a) priced out, and any of them would make ruling 370's
+ * `CACHE_TTL_MS`, which the resume verdict and the Insights resume table
+ * assume, quietly wrong. The names are the CLI's own (the 2.1.280 bundle),
+ * with its per-model and Bedrock variants.
+ */
+const PROMPT_CACHE_ENV_RE =
+  /^(?:DISABLE_PROMPT_CACHING(?:_[A-Z0-9]+)?|ENABLE_PROMPT_CACHING_1H(?:_[A-Z0-9]+)?|FORCE_PROMPT_CACHING_5M|CLAUDE_CODE_(?:SUBAGENT_)?PROMPT_CACHE_TTL)$/;
+
+/**
+ * Ruling 506: the CLI's compaction switches, stripped for the same reason
+ * under ruling 376(d): the CLI compacts at its model's own limit, and Viberr
+ * compacts a large session at the end of its run with `/compact`.
+ *
+ * On the host, the window (`CLAUDE_AUTO_COMPACT_WINDOW_ENV`) and
+ * `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` would move where every run compacts (a
+ * mid-run compaction rewrites the prefix the rest of the run reads from
+ * cache), `DISABLE_AUTO_COMPACT` would stop it, and `DISABLE_COMPACT` would
+ * refuse the completion compaction itself. A server started from inside a
+ * Claude Code session inherits the first two: the container this ruling was
+ * written in did, and ruling 376's hermeticity tests failed there.
+ *
+ * Neither list stops Viberr choosing a value on purpose: a run's own overlay
+ * (`spec.env`) is spread over this base, as a window from `CONTEXT_ENV_KEYS`
+ * would be.
+ */
+const COMPACTION_ENV: ReadonlySet<string> = new Set([
+  CLAUDE_AUTO_COMPACT_WINDOW_ENV,
+  "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+  "DISABLE_AUTO_COMPACT",
+  "DISABLE_COMPACT",
+]);
 
 /**
  * Ruling 142 (pass 34, U34-7): the app's OWN configuration, stripped for a
@@ -98,6 +141,11 @@ const APP_CONFIG_ENV: ReadonlySet<string> = new Set(ENV_KEYS);
  * to person A can never see person B's credential, and a stale ambient
  * `OPENAI_API_KEY` on the host can never quietly pay for a ChatGPT-workspace
  * run.
+ *
+ * Ruling 506: and NO prompt-cache or compaction switch
+ * ({@link PROMPT_CACHE_ENV_RE}, {@link COMPACTION_ENV}), so the cache
+ * lifetime and the compaction point a run gets are the CLI's own choice, as
+ * rulings 374(a) and 376(d) decided.
  */
 export function filteredSpawnEnv(): Record<string, string> {
   return Object.fromEntries(
@@ -107,6 +155,8 @@ export function filteredSpawnEnv(): Record<string, string> {
         !CREDENTIAL_ENV_RE.test(entry[0]) &&
         !PRIVATE_RUNTIME_ENV_RE.test(entry[0]) &&
         !RUNTIME_HOME_ENV_RE.test(entry[0]) &&
+        !PROMPT_CACHE_ENV_RE.test(entry[0]) &&
+        !COMPACTION_ENV.has(entry[0]) &&
         !APP_CONFIG_ENV.has(entry[0]),
     ),
   );

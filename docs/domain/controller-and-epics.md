@@ -426,7 +426,7 @@ a notification row: replies stay out of the bell (§8).
    running conversation at its next compaction (the tool definitions themselves arrive
    fresh with every request). Every list in it is sorted by name (ruling 370). The static
    block is: the doctrine; the attached skills injected verbatim; the attached knowledge
-   bases as INDEXES (ruling 283: every document with its size and sections, read on demand
+   bases as INDEXES (ruling 283: every document with its size class and sections, read on demand
    with `read_knowledge_doc`), which on a project-scoped conversation include the
    project's rulings knowledge base (ruling 239, with the rulings note when it resolved);
    a runtime block (the model is named in each turn's message; the mounted org MCP

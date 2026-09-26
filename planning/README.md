@@ -55,4 +55,7 @@ is recorded in [`prompt-cache-2026-09-21/RESEARCH.md`](prompt-cache-2026-09-21/R
 its implementation plan in [`prompt-cache-2026-09-21/PLAN.md`](prompt-cache-2026-09-21/PLAN.md)
 and the goal that drives the implementation in
 [`prompt-cache-2026-09-21/GOAL.md`](prompt-cache-2026-09-21/GOAL.md); it shipped as
-rulings 369–376.
+rulings 369–376, the measurement the plan asked for before deciding more (its
+baseline table on Insights, resumes by idle time, operator bursts) as ruling 505, and
+the cross-session pass that keeps a knowledge-base edit or the host's environment from
+moving a cached prefix as ruling 506.

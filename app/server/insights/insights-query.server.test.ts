@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Guardrail } from "~/schemas/project-file.schema";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { compactTimelineEvents } from "~/server/tasks/timeline-compaction.server";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { startTemperature } from "~/server/runtimes/context-policy.server";
 import { INSIGHTS_NAMED_EXCEPTIONS, getInsightsSummary } from "./insights-query.server";
 
 const ctx = createTestDbContext();
@@ -33,19 +35,30 @@ function insertRun(
     agentProfileId?: string;
     /** Ruling 395: what the provider said it wrote into the cache. */
     cacheWrite?: number;
+    /** Ruling 505: the provider session the run used (a resume reuses one). */
+    sessionId?: string | null;
+    /** Ruling 505: the first call's write and read; warm by `startTemperature`. */
+    firstCall?: { write: number; read: number } | null;
+    /** Ruling 505: the run's largest prompt (0: no per-call figure landed). */
+    peak?: number;
+    credentialKind?: "login" | "api_key" | "access_token" | null;
+    credentialUserId?: string | null;
   },
-) {
+): string {
   seq += 1;
+  const id = `run_${seq}`;
   db.prepare(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
         started_at, finished_at, turns, input_tokens, cached_input_tokens,
         output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
-        interrupted_reason, cache_write_tokens)
+        interrupted_reason, cache_write_tokens, session_id, first_call_cache_write,
+        first_call_cache_read, first_call_warm, peak_prompt_tokens, credential_kind,
+        credential_user_id)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?, ?)`,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    `run_${seq}`,
+    id,
     r.taskKey ?? `VIB-${seq}`,
     r.project ?? "viberr-core",
     `t_${seq}`,
@@ -64,7 +77,15 @@ function insertRun(
     r.agentProfileId ?? "developer",
     r.interruptedReason ?? null,
     r.cacheWrite ?? 0,
+    r.sessionId ?? null,
+    r.firstCall ? r.firstCall.write : null,
+    r.firstCall ? r.firstCall.read : null,
+    r.firstCall ? (startTemperature(r.firstCall.write, r.firstCall.read) === "warm" ? 1 : 0) : null,
+    r.peak ?? 0,
+    r.credentialKind ?? null,
+    r.credentialUserId ?? null,
   );
+  return id;
 }
 
 const NOW = "2026-08-23T12:00:00.000Z";
@@ -1142,5 +1163,245 @@ describe("ruling 395: a backend that reports no cache write reports no cache wri
     const primary = s.cache.byKind.find((r) => r.label === "primary")!;
     expect(primary.writeTokens).toBe(0);
     expect(primary.writeReadRatio).toBe(0);
+  });
+});
+
+/**
+ * Ruling 505 — what PLAN.md (`planning/prompt-cache-2026-09-21/`) asked this
+ * page for and it lacked. PR 1's acceptance was "the insights page reproduces
+ * the baseline table above from the stored rows", and the table had columns the
+ * page never drew: the mean first-call write, reads per run and the peak
+ * prompt's spread, with Codex on its own row. PR 6 asked whether a Codex resume
+ * idle past ten minutes ever reads its prefix back before the Codex TTL moves,
+ * and PR 5 asked for the operator bursts to be counted before a gate is built.
+ * Every clock below is pinned; nothing reads the wall clock.
+ */
+describe("ruling 505: the prompt-cache table reproduces PLAN.md's baseline", () => {
+  it("carries the mean first-call write, reads per run and the peak prompt's spread", () => {
+    const db = ctx.makeDb();
+    // A cold start, a warm one, and one refused before the provider answered.
+    insertRun(db, { kind: "primary", firstCall: { write: 14_000, read: 0 }, cachedTok: 5_000_000, peak: 10_000 });
+    insertRun(db, { kind: "primary", firstCall: { write: 2_000, read: 40_000 }, cachedTok: 3_000_000, peak: 20_000 });
+    insertRun(db, { kind: "primary", state: "error" });
+    // A row from before ruling 369: reads, no first call. CANARY: take the
+    // reads over every run and read/run is (5M + 3M + 9M) / 2.
+    insertRun(db, { kind: "primary", cachedTok: 9_000_000 });
+    for (const peak of [30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000]) {
+      insertRun(db, { kind: "reviewer", peak });
+    }
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.avgFirstCallWrite).toBe(8_000);
+    expect(primary.readPerRun).toBe(4_000_000);
+    expect(primary.peakPrompt).toEqual({ median: 10_000, p90: 20_000, max: 20_000 });
+    // Nearest rank over ten peaks: the fifth and the ninth. A run whose peak
+    // never landed (0) is not a run that peaked at nothing.
+    const reviewer = s.cache.byKind.find((r) => r.label === "reviewer")!;
+    expect(reviewer.peakPrompt).toEqual({ median: 60_000, p90: 100_000, max: 100_000 });
+    expect(reviewer.avgFirstCallWrite).toBeNull();
+    expect(reviewer.readPerRun).toBeNull();
+  });
+
+  it("splits the rows by backend as PLAN.md's table did; Codex's first write is not reported, not zero", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { backend: "claude", kind: "primary", firstCall: { write: 14_000, read: 0 }, peak: 108_000 });
+    insertRun(db, { backend: "codex", kind: "primary", model: "gpt-5.6-terra", firstCall: { write: 0, read: 0 }, cachedTok: 0, peak: 26_000 });
+    insertRun(db, { backend: "codex", kind: "primary", model: "gpt-5.6-terra", firstCall: { write: 0, read: 30_000 }, cachedTok: 4_200_000, peak: 175_000 });
+    const cache = getInsightsSummary(db, NOW).cache;
+    // By run kind alone, a Claude specialist's cold start (its prefix is shared
+    // across tasks) and a Codex one (per thread) read as one rate.
+    expect(cache.byKind.find((r) => r.label === "primary")).toMatchObject({ firstCalls: 3, warmStarts: 1 });
+    expect(cache.byBackendKind.map((r) => r.label)).toEqual(["codex · primary", "claude · primary"]);
+    const [codex, claude] = cache.byBackendKind;
+    expect(codex).toMatchObject({ runs: 2, firstCalls: 2, warmStarts: 1, writeTokens: null, readPerRun: 2_100_000 });
+    // CANARY: average the first writes over every backend and Codex reads 0,
+    // the zero ruling 395 retired one column over.
+    expect(codex!.avgFirstCallWrite).toBeNull();
+    expect(codex!.peakPrompt).toEqual({ median: 26_000, p90: 175_000, max: 175_000 });
+    expect(claude).toMatchObject({ runs: 1, warmStarts: 0, avgFirstCallWrite: 14_000, readPerRun: 0 });
+  });
+});
+
+describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", () => {
+  const T0 = Date.parse("2026-09-21T10:00:00.000Z");
+  const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+
+  /** One session's runs, back to back: each starts `idle` minutes after the
+   *  one before it finished and runs for one minute. */
+  function session(
+    db: DatabaseSync,
+    input: {
+      backend: "claude" | "codex";
+      sessionId: string;
+      runs: { idle: number; warm: boolean | null; kind?: "login" | "api_key" | null }[];
+    },
+  ): void {
+    let clock = 0;
+    for (const run of input.runs) {
+      const start = clock + run.idle;
+      insertRun(db, {
+        backend: input.backend,
+        kind: "reviewer",
+        sessionId: input.sessionId,
+        startedAt: at(start),
+        finishedAt: at(start + 1),
+        firstCall: run.warm === null ? null : run.warm ? { write: 900, read: 60_000 } : { write: 60_000, read: 0 },
+        credentialKind: run.kind === undefined ? "login" : run.kind,
+      });
+      clock = start + 1;
+    }
+  }
+
+  it("sorts each resume into the bucket of its idle time, per backend and credential kind", () => {
+    const db = ctx.makeDb();
+    // Claude on a sign-in: resumed after 3, 45 and 70 minutes.
+    session(db, {
+      backend: "claude",
+      sessionId: "s-claude",
+      runs: [
+        { idle: 0, warm: false },
+        { idle: 3, warm: true },
+        { idle: 45, warm: true },
+        { idle: 70, warm: false },
+      ],
+    });
+    // Codex: resumed after 11 minutes (cold), then 2 (warm), then 5 exactly.
+    session(db, {
+      backend: "codex",
+      sessionId: "s-codex",
+      runs: [
+        { idle: 0, warm: false },
+        { idle: 11, warm: false },
+        { idle: 2, warm: true },
+        { idle: 5, warm: true },
+      ],
+    });
+    // A fresh session per run, as every operator turn is: no resume at all.
+    session(db, { backend: "claude", sessionId: "s-op-1", runs: [{ idle: 0, warm: false }] });
+    session(db, { backend: "claude", sessionId: "s-op-2", runs: [{ idle: 1, warm: false }] });
+    const { resumes } = getInsightsSummary(db, NOW).cache;
+    expect(resumes.edgesMs).toEqual([5 * 60_000, 10 * 60_000, 60 * 60_000, 24 * 60 * 60_000]);
+    // The size past which a stale session is set aside, so the card can name it.
+    expect(resumes.freshContextTokens).toBe(150_000);
+    expect(resumes.rows.map((r) => r.label)).toEqual(["claude · login", "codex · login"]);
+    const [claude, codex] = resumes.rows;
+    // The TTL each row's verdict assumes, from the one table.
+    expect(claude!.assumedTtlMs).toBe(60 * 60_000);
+    expect(codex!.assumedTtlMs).toBe(10 * 60_000);
+    const counts = (r: typeof claude) => r!.cells.map((c) => `${c.warmStarts}/${c.firstCalls}`);
+    expect(counts(claude)).toEqual(["1/1", "0/0", "1/1", "0/1", "0/0"]);
+    // Five minutes exactly is inside the five-minute bucket, as the verdict
+    // reads it (fresh only when idle is PAST the TTL).
+    expect(counts(codex)).toEqual(["2/2", "0/0", "0/1", "0/0", "0/0"]);
+    expect(claude!.cells[1]!.warmRate).toBeNull();
+    expect(codex!.cells[0]!.warmRate).toBe(1);
+  });
+
+  it("keys a resume by the kind the EARLIER run billed, and leaves out what it cannot time", () => {
+    const db = ctx.makeDb();
+    session(db, {
+      backend: "claude",
+      sessionId: "s-key",
+      runs: [
+        // The earlier run billed an API key: the resume reads its writes, and
+        // ruling 372 takes the TTL from it. CANARY: key by the resume's own
+        // kind and this lands on "claude · login".
+        { idle: 0, warm: false, kind: "api_key" },
+        { idle: 4, warm: true, kind: "login" },
+        // A resume whose first call never landed says nothing about the cache.
+        { idle: 4, warm: null, kind: "login" },
+      ],
+    });
+    // An earlier run that never finished gives no idle time.
+    insertRun(db, { backend: "claude", sessionId: "s-open", startedAt: at(0), finishedAt: null, credentialKind: "login" });
+    insertRun(db, {
+      backend: "claude",
+      sessionId: "s-open",
+      startedAt: at(30),
+      finishedAt: at(31),
+      firstCall: { write: 10, read: 50_000 },
+      credentialKind: "login",
+    });
+    const rows = getInsightsSummary(db, NOW).cache.resumes.rows;
+    expect(rows.map((r) => r.label)).toEqual(["claude · api_key"]);
+    expect(rows[0]!.assumedTtlMs).toBe(5 * 60_000);
+    expect(rows[0]!.cells.map((c) => c.firstCalls)).toEqual([1, 0, 0, 0, 0]);
+  });
+
+  it("counts the fresh starts ruling 372 made instead of a replay, from their start audit", () => {
+    const db = ctx.makeDb();
+    const fresh = insertRun(db, { backend: "codex", credentialKind: "login", sessionId: "s-new" });
+    const lost = insertRun(db, { backend: "codex", credentialKind: "login", sessionId: "s-new-2" });
+    const started = (runId: string, continuityReset: string) =>
+      recordAudit(db, {
+        action: "runtime.run.started",
+        actor: { userId: null, label: "operator" },
+        subjectKind: "run",
+        subjectId: runId,
+        projectSlug: "viberr-core",
+        details: { backend: "codex", resumed: false, continuityReset },
+      });
+    started(fresh, "stale_large_session");
+    // A vanished transcript is a fault, not the policy's decision.
+    started(lost, "transcript_gone");
+    const rows = getInsightsSummary(db, NOW).cache.resumes.rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ label: "codex · login", setAside: 1 });
+    expect(rows[0]!.cells.every((c) => c.firstCalls === 0)).toBe(true);
+    // Scoped to another project, the set-aside is not there.
+    expect(getInsightsSummary(db, NOW, { projectSlug: "elsewhere" }).cache.resumes.rows).toEqual([]);
+  });
+});
+
+describe("ruling 505: operator bursts (PLAN.md's count before the gate)", () => {
+  const T0 = Date.parse("2026-09-21T10:00:00.000Z");
+  const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
+  const operator = (
+    db: DatabaseSync,
+    input: { second: number; warm: boolean | null; project?: string; seat?: string; model?: string; backend?: string },
+  ) =>
+    insertRun(db, {
+      kind: "operator",
+      backend: input.backend ?? "claude",
+      project: input.project ?? "viberr-core",
+      model: input.model ?? "claude-opus-5",
+      credentialUserId: input.seat ?? "usr_arda",
+      startedAt: at(input.second),
+      firstCall:
+        input.warm === null ? null : input.warm ? { write: 2_300, read: 24_400 } : { write: 26_700, read: 0 },
+    });
+
+  it("counts a start within a minute of the previous one on the same prefix, and what its cold first call wrote", () => {
+    const db = ctx.makeDb();
+    operator(db, { second: 0, warm: false }); // the priming turn: cold, alone
+    operator(db, { second: 5, warm: false }); // burst, cold: the gate's case
+    operator(db, { second: 40, warm: true }); // burst, warm: the entry was there
+    operator(db, { second: 200, warm: true }); // minutes later: no burst
+    // A refused start never reached the provider: it opens no cache entry and
+    // is no burst. CANARY: keep it in the window and second 300 pairs with it
+    // (ten seconds) instead of with second 200 (a minute and forty).
+    operator(db, { second: 290, warm: null });
+    operator(db, { second: 300, warm: true });
+    const b = getInsightsSummary(db, NOW).cache.operatorBursts;
+    expect(b).toEqual({
+      starts: 5,
+      inBursts: 2,
+      coldInBursts: 1,
+      coldBurstWrite: 26_700,
+      coldStarts: 2,
+      windowMs: 60_000,
+    });
+  });
+
+  it("does not pair starts that could never share a prefix: another project, seat, model or Codex", () => {
+    const db = ctx.makeDb();
+    operator(db, { second: 0, warm: false });
+    operator(db, { second: 5, warm: false, project: "shop" });
+    operator(db, { second: 10, warm: false, seat: "usr_bea" });
+    operator(db, { second: 15, warm: false, model: "claude-sonnet-5" });
+    operator(db, { second: 20, warm: false, backend: "codex" });
+    const b = getInsightsSummary(db, NOW).cache.operatorBursts;
+    // CANARY: partition by project alone and three of these read as a burst.
+    expect(b).toMatchObject({ starts: 4, inBursts: 0, coldInBursts: 0, coldStarts: 4 });
   });
 });

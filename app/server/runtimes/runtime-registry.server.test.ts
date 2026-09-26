@@ -245,6 +245,46 @@ describe("runtime-registry", () => {
     );
   });
 
+  it("ruling 506: filteredSpawnEnv strips the CLI's prompt-cache and compaction switches, and no other cache setting", () => {
+    // Rulings 374(a) and 376(d): the cache lifetime and the compaction point
+    // are the CLI's own choice, and Viberr sets none of these. None is
+    // credential-shaped or declared, so one on the HOST rode into every Claude
+    // child, where a developer's `DISABLE_PROMPT_CACHING=1` would turn caching
+    // off for every run the instance makes. The names are the 2.1.280
+    // bundle's, per-model and Bedrock variants included.
+    const switches = [
+      "DISABLE_PROMPT_CACHING",
+      "DISABLE_PROMPT_CACHING_FABLE",
+      "DISABLE_PROMPT_CACHING_HAIKU",
+      "DISABLE_PROMPT_CACHING_MYTHOS",
+      "DISABLE_PROMPT_CACHING_OPUS",
+      "DISABLE_PROMPT_CACHING_SONNET",
+      "ENABLE_PROMPT_CACHING_1H",
+      "ENABLE_PROMPT_CACHING_1H_BEDROCK",
+      "FORCE_PROMPT_CACHING_5M",
+      "CLAUDE_CODE_PROMPT_CACHE_TTL",
+      "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+      // A server started inside a Claude Code session carries the first two.
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+      "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+      "DISABLE_AUTO_COMPACT",
+      "DISABLE_COMPACT",
+    ];
+    for (const key of switches) setEnv(key, key.endsWith("_TTL") ? "1h" : "1");
+    // The CLI's other caches are not the prompt cache, and pass like any
+    // undeclared name.
+    setEnv("CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS", "60000");
+    setEnv("MCP_DISCOVERY_CACHE_TTL_S", "30");
+    setEnv("PATH", process.env.PATH || "/usr/bin:/bin");
+
+    const env = filteredSpawnEnv();
+
+    expect(switches.filter((key) => key in env)).toEqual([]);
+    expect(env.CLAUDE_CODE_WEBFETCH_CACHE_TTL_MS).toBe("60000");
+    expect(env.MCP_DISCOVERY_CACHE_TTL_S).toBe("30");
+    expect(env.PATH).toBeTruthy();
+  });
+
   it("ruling 142: createAdapters builds BOTH adapters on a base that carries none of the app's own configuration", async () => {
     // The same invariant where it bites: what each SDK is actually handed.
     // `VIBERR_BROWSER_EXECUTABLE` is the one declared knob a child's tool

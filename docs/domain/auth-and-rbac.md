@@ -437,11 +437,21 @@ the standalone-page header. Read-only; nothing here writes.
   the top 8 (half the slots reserved for the busiest groups) with `hidden`,
   `hiddenRuns` and `hiddenCost` naming what the window left out. A task row is labelled
   `project/task`.
-- **Prompt cache** table (ruling 369), by run kind and by credential kind: runs, the
-  warm-start rate over runs with a first call ("n/a" with none), tokens written and
+- **Prompt cache** table (ruling 369), by run kind, by backend and run kind (ruling 505,
+  `claude · primary`, so Codex has rows of its own) and by credential kind: runs, the
+  warm-start rate over runs with a first call ("n/a" with none), the planning baseline's
+  columns (ruling 505: the mean first-call write, cache reads per run over the runs that
+  reached the provider, and the peak prompt's median · p90 · max), tokens written and
   read, the write/read ratio, first calls writing over 100k, and each cache lifetime's
-  count. A write figure is null for groups with no run on a backend that reports one
-  (`CACHE_WRITE_REPORTING_BACKENDS`, Claude only; ruling 395).
+  count. A write figure, and the mean first write, is null for groups with no run on a
+  backend that reports one (`CACHE_WRITE_REPORTING_BACKENDS`, Claude only; ruling 395).
+  Under it (ruling 505): **resumes by idle time**, a row per backend and the credential
+  kind the earlier run billed, naming the TTL `cacheTtlMs` assumes for it, with the warm
+  resumes of all the resumes in each idle bucket (`RESUME_IDLE_EDGES_MS`: every assumed
+  TTL, then 24 hours; a bucket past the row's TTL is marked) and the sessions set aside
+  as stale and large (ruling 372); and the **operator bursts**, the Claude operator
+  starts within a minute of the previous one on the same project, principal and model,
+  with the cold ones and what their first calls wrote.
 - Average duration and a 30-day daily chart.
 - **Oversight**: owner clarity (active tasks with a definite next actor), branch and PR
   traceability, packet resolution times from audit rows, time to review, and long

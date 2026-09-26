@@ -145,14 +145,14 @@ const RULINGS_NOTE =
 const HOUSE_STYLE =
   "\n\n---\n# house-style (knowledge base)\n\n" +
   "Folder `<dataRoot>/kb/house-style`. 1 document:\n\n" +
-  "- `conventions.md` · 31 chars\n" +
+  "- `conventions.md` · under 1k chars\n" +
   "  # House style\n" +
   "  ## Naming";
 
 const TEAM_FACTS =
   "\n\n---\n# team-facts (knowledge base)\n\n" +
   "Folder `<dataRoot>/kb/team-facts`. 1 document:\n\n" +
-  "- `facts.md` · 19 chars\n" +
+  "- `facts.md` · under 1k chars\n" +
   "  # Team facts";
 
 const TEAM_RULES =
@@ -162,7 +162,7 @@ const TEAM_RULES =
   "project makes, you included. Read it — the obligation is not conditional " +
   "on your finding it interesting.\n\n" +
   "Folder `<dataRoot>/kb/team-rules`. 1 document:\n\n" +
-  "- `rulings.md` · 36 chars\n" +
+  "- `rulings.md` · under 1k chars\n" +
   "  # Rulings\n" +
   "  ## 1. Never rebase";
 

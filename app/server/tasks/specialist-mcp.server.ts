@@ -14,6 +14,7 @@ import {
   type McpSpawn,
 } from "~/server/org/resources.server";
 import { toError } from "~/shared/errors";
+import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
 
 /**
  * Resolve a specialist profile's declared MCP names to portable runtime
@@ -228,9 +229,13 @@ export function gatewayMcpSection(
 ): string {
   if (proxied.length === 0) return "";
   const names = [...proxied].sort().join(", ");
-  const signedIn = grants
-    .filter((grant) => proxied.includes(grant.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Ruling 506: the grant lines in the names' own code-point order. The
+  // specialist and the controller carry this section in their static prefix,
+  // and `localeCompare` follows the process locale.
+  const signedIn = sortedBy(
+    grants.filter((grant) => proxied.includes(grant.name)),
+    (grant) => grant.name,
+  );
   return (
     "\n\n---\n# MCP servers reached through Viberr's gateway\n\n" +
     `${names} ${proxied.length === 1 ? "is" : "are"} mounted through Viberr's MCP ` +

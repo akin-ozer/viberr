@@ -16,6 +16,7 @@ import {
   STORE_TEXT_EXTENSIONS,
   attachedResourcesBlock,
   isInjectableKbDoc,
+  kbSizeClass,
   readKbDocForRun,
   readKbIndexDetailed,
   readKbIndexes,
@@ -41,7 +42,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
       "utf8",
     );
     const body = readKbIndexDetailed("notes", dataRoot).body;
-    expect(body).toContain("`overview.md`");
+    expect(body).toContain("`overview.md` · under 1k chars");
     expect(body).toContain("# Top");
     expect(body).toContain("## Deploying");
     // The TEXT is not in the index — that is the whole change.
@@ -187,6 +188,76 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     for (const name of ["contract.pdf", "diagram.png", ".hidden.md"]) {
       expect(isInjectableKbDoc(name)).toBe(false);
     }
+  });
+});
+
+/**
+ * Ruling 506: the index sits in the static prefix of every run its knowledge
+ * base is attached to (ruling 370), and ruling 498 writes agents' corrections
+ * straight into the documents, so an edit is routine. The exact byte count the
+ * index printed moved on every edit, and each one cost every run on the
+ * project its cached prefix. A size class moves only when a document crosses
+ * a step.
+ */
+describe("the index survives an edit inside a document (ruling 506)", () => {
+  it("prints each size as a 1-2-5 class, exact at every step", () => {
+    const cases: [number, string][] = [
+      [0, "under 1k chars"],
+      [999, "under 1k chars"],
+      [1_000, "1k to 2k chars"],
+      [1_999, "1k to 2k chars"],
+      [2_000, "2k to 5k chars"],
+      [5_000, "5k to 10k chars"],
+      [10_000, "10k to 20k chars"],
+      [20_632, "20k to 50k chars"],
+      [49_999, "20k to 50k chars"],
+      [50_000, "50k to 100k chars"],
+      [100_000, "100k to 200k chars"],
+      [200_000, "200k to 500k chars"],
+      [500_000, "500k to 1M chars"],
+      [999_999, "500k to 1M chars"],
+      [1_000_000, "1M chars or more"],
+      [40_000_000, "1M chars or more"],
+    ];
+    expect(cases.map(([size]) => [size, kbSizeClass(size)])).toEqual(cases);
+  });
+
+  it("a correction to a document's body leaves the index byte-identical", () => {
+    const { dataRoot, kbDir } = freshKb("rulings");
+    const doc = path.join(kbDir, "conventions.md");
+    // The live size ruling 283 was written about, and a one-line correction
+    // of the kind `correct_knowledge_doc` appends.
+    const text = `# Conventions\n\n${"x".repeat(20_600)}\n\n## Boundaries\n\ntail`;
+    writeFileSync(doc, text, "utf8");
+    const before = readKbIndexDetailed("rulings", dataRoot).body;
+    expect(before).toContain("`conventions.md` · 20k to 50k chars");
+    writeFileSync(doc, `${text}\n\nCorrected 2026-09-26: never rebase a shared branch.`, "utf8");
+    expect(readKbIndexDetailed("rulings", dataRoot).body).toBe(before);
+    // What the index SAYS still moves it: a new section, and a document that
+    // crosses a step.
+    writeFileSync(doc, `${text}\n\n## Rebasing\n\nnever`, "utf8");
+    expect(readKbIndexDetailed("rulings", dataRoot).body).toContain("## Rebasing");
+    writeFileSync(doc, `# Conventions\n\n${"x".repeat(60_000)}`, "utf8");
+    expect(readKbIndexDetailed("rulings", dataRoot).body).toContain(
+      "`conventions.md` · 50k to 100k chars",
+    );
+  });
+
+  it("lists documents in code-point order, whatever the process locale", () => {
+    // `localeCompare` put `api.md` before `README.md` under an English locale
+    // and may not under another; two servers that order one index differently
+    // do not share a prefix. Code-point order is the one every other list in a
+    // cached prefix already uses (ruling 370's `sortedNames`).
+    const { dataRoot, kbDir } = freshKb();
+    for (const name of ["beta.md", "README.md", "api.md", "Zeta.md"]) {
+      writeFileSync(path.join(kbDir, name), `# ${name}`, "utf8");
+    }
+    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const order = ["README.md", "Zeta.md", "api.md", "beta.md"].map((name) =>
+      body.indexOf(`\`${name}\``),
+    );
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 });
 

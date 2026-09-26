@@ -1059,7 +1059,8 @@ tooltip) and "N compactions" — each figure on a `data-` attribute (`data-start
 call yet" (or "first call not recorded" when cache figures landed without a first call),
 never cold. A compaction also reads as a `system·compact_boundary` line ("context
 compacted (auto) · 972k → 10k tokens"); it leaves no note on the task timeline (ruling
-490). Insights carries the same record as a table (ui/surfaces.md).
+490). Insights carries the same record as a table, with resumes by idle time and the
+operator bursts under it (ruling 505; ui/surfaces.md).
 
 ## 4. Specialist runs
 
@@ -1535,12 +1536,15 @@ runtime's answer for a missing grant.
   produce a byte-identical static block, which is what the Claude preset's
   `excludeDynamicSections` caches once (ruling 371).
 - **Knowledge bases arrive as an INDEX** (ruling 283, `kb-injection.server.ts`): each KB's
-  text files under `kb/<dir>` (depth ≤ 32, no symlinks, no dotfiles) are listed with
-  their size and heading outline (outline budget `KB_INDEX_OUTLINE_BUDGET` 4 000 chars per
-  KB, at most `KB_INDEX_MAX_DOCS` 200 documents named, the rest counted) and the folder's
-  path on disk; the text is not in the prompt. `KB_INDEX_NOTE` tells the run to read what
-  it needs: `read_knowledge_doc {kb, path}` (the specialist, operator and controller
-  toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
+  text files under `kb/<dir>` (depth ≤ 32, no symlinks, no dotfiles) are listed in
+  code-point order with their size class and heading outline (outline budget
+  `KB_INDEX_OUTLINE_BUDGET` 4 000 chars per KB, at most `KB_INDEX_MAX_DOCS` 200 documents
+  named, the rest counted) and the folder's path on disk; the text is not in the prompt.
+  The size is a 1-2-5 class ("2k to 5k chars", `kbSizeClass`, ruling 506), not the byte
+  count, so a correction to a document's body leaves every static block that carries the
+  index, and so every cached prefix on the project, as it was. `KB_INDEX_NOTE` tells the
+  run to read what it needs: `read_knowledge_doc {kb, path}` (the specialist, operator and
+  controller toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
   one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
   workspace contract allows those reads, ruling 422; `kb/` stays readable, and never
