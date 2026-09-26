@@ -388,25 +388,31 @@ export function GithubTrace({
   const mergePr = task.pr?.state === "accepted" && onCompleteMerge ? task.pr : null;
   return (
     <div className="panel flush pr-card">
-      <div className="pr-id">
+      {/* Ruling 511: the inverted bar stays the card's head (the owner, on
+          the first draft without it: "the old white/black headers were
+          looking good"), holding the mark, the repository and the state. The
+          other pills it carried are the status rows below. */}
+      <div className="gh-bar">
         {/* Ruling 478(f) (F40-35): the panel's name, for heading navigation.
             The mark and the repository already say it to the eye; without
             this the panel was the one region of the page a screen reader's
             heading list could not reach once the task had a branch. */}
         <h2 className="vh">GitHub</h2>
-        <div className="pr-head">
-          <Icon name="github" />
-          {task.repo && <span className="pr-repo">{task.repo}</span>}
-          {prState ? (
-            <Pill kind={prState.kind} quiet={prState.quiet} sm>
-              {prState.label}
-            </Pill>
-          ) : (
-            <Pill kind="neutral" sm>
-              no PR
-            </Pill>
-          )}
-        </div>
+        <Icon name="github" />
+        {task.repo && <span className="repo">{task.repo}</span>}
+        {/* Filled whatever its tier, as the bar always drew it: the quiet
+            outline's ink is made for --surface and fades on the bar. */}
+        {prState ? (
+          <Pill kind={prState.kind} sm>
+            {prState.label}
+          </Pill>
+        ) : (
+          <Pill kind="neutral" sm>
+            no PR
+          </Pill>
+        )}
+      </div>
+      <div className="pr-id">
         {task.pr && (
           <p className="pr-title">
             {prHref ? (

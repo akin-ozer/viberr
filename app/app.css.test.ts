@@ -4445,11 +4445,28 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
     return decls;
   };
 
-  it("ruling 511: the PR card has no inverted bar, and its status marks keep the pills' tones", () => {
-    // CANARY: bring back `.gh-bar` (the card's black header, whose neutral
-    // pill needed its own fill to clear AA on it), or drop the done mark's
-    // fill and a passing gate run reads grey (ruling 491: a pass is green).
-    expect(CODE).not.toMatch(/\.gh-bar\b/);
+  it("the GitHub bar's neutral pill keeps a fill of its own and clears AA on the bar, in both themes", () => {
+    // CANARY: delete `.gh-bar .pill.neutral`. The sweep stays green, because it
+    // then measures only the base pill (--muted on --tint-press) against the
+    // page; on the inverted bar that pair drew at 2.48:1 light, 1.62:1 dark.
+    const onBar = SWEEP.pairs.filter((p) => p.selector === ".gh-bar .pill.neutral");
+    expect(onBar.map((p) => p.theme).sort()).toEqual(["dark", "light"]);
+    const barPaint = cascade(plain, ".gh-bar").get("background")!;
+    for (const p of onBar) {
+      expect(p.ratio, `${p.theme} ink on the pill`).toBeGreaterThanOrEqual(4.5);
+      // "Lost its fill" was a --fg tint on a --fg ground: the pill's own fill
+      // has to stand a visible step off the bar it sits on.
+      const tokens = THEMES.find(([theme]) => theme === p.theme)![1];
+      const bar = asHex(resolveColor(barPaint, tokens)!.rgb);
+      expect(contrastRatio(p.bg, bar), `${p.theme} fill against the bar`).toBeGreaterThan(1.25);
+    }
+  });
+
+  it("ruling 511: the PR card's status marks keep the pills' tones, under the bar", () => {
+    // CANARY: drop the done mark's fill, and a passing gate run reads grey
+    // (ruling 491: a pass is green); or give the section after the bar its
+    // hairline back, a grey rule drawn against the black.
+    expect(cascade(plain, ".pr-card > .gh-bar + *").get("border-top")).toBe("0");
     expect(cascade(plain, '.pr-sig[data-kind="done"] > .ico').get("color")).toBe("var(--success-dark)");
     expect(cascade(plain, '.pr-sig[data-kind="done"] > .ico circle').get("fill")).toBe("var(--success-soft)");
     expect(cascade(plain, '.pr-sig[data-kind="blocked"] > .ico').get("color")).toBe("var(--coral-dark)");

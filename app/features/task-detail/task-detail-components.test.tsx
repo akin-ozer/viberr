@@ -1937,15 +1937,17 @@ describe("GithubTrace — the merge-box card (ruling 511)", () => {
       </MemoryRouter>,
     );
 
-  it("heads the card with the repository and the state, and the title opens the pull request", () => {
-    // CANARY: bring back the inverted `.gh-bar` head with "PR #318 · in review".
+  it("heads the card with the inverted bar, and the title opens the pull request", () => {
+    // CANARY: drop the `.gh-bar` head (the owner kept it: "the old white/black
+    // headers were looking good"), or put the number back in its pill.
     const { container, getByRole } = card({
       pr: { number: 318, state: "review", title: "Attach execution workspace" },
     });
-    expect(container.querySelector(".gh-bar")).toBeNull();
-    const head = container.querySelector(".pr-head")!;
-    expect(head.querySelector(".pr-repo")!.textContent).toBe("akin-ozer/viberr");
-    expect(head.querySelector(".pill")!.textContent).toBe("in review");
+    const bar = container.querySelector(".pr-card > .gh-bar")!;
+    expect(bar.querySelector("h2")!.textContent).toBe("GitHub");
+    expect(bar.querySelector(".repo")!.textContent).toBe("akin-ozer/viberr");
+    // The bar keeps the state alone; the number stands with the title.
+    expect([...bar.querySelectorAll(".pill")].map((p) => p.textContent)).toEqual(["in review"]);
     const title = getByRole("link", { name: "Attach execution workspace #318 on GitHub" });
     expect(title.getAttribute("href")).toBe("https://github.com/akin-ozer/viberr/pull/318");
     expect(title.getAttribute("target")).toBe("_blank");
@@ -2056,7 +2058,7 @@ describe("GithubTrace — the merge-box card (ruling 511)", () => {
       },
     );
     const sections = [...container.querySelector(".pr-card")!.children].map((s) => s.className);
-    expect(sections).toEqual(["pr-id", "pr-acts", "pr-facts"]);
+    expect(sections).toEqual(["gh-bar", "pr-id", "pr-acts", "pr-facts"]);
     const acts = [...container.querySelectorAll(".pr-acts button")].map((b) => b.textContent);
     expect(acts).toEqual(["Complete merge", "Force accept (override review gate)"]);
   });
@@ -2470,7 +2472,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
 
   it("renders a CLOSED (rejected) PR distinctly from one in review", () => {
     const closed = render(<GithubTrace githubHost={GH_HOST} task={withPr("closed")} acceptance={traceAcceptance()} />);
-    const closedPill = closed.container.querySelector(".pr-head .pill")!;
+    const closedPill = closed.container.querySelector(".gh-bar .pill")!;
     // Before the fix this branch didn't exist: a rejected PR rendered as the
     // blue `info` "PR #14", identical to a PR still under review.
     expect(closedPill.textContent).toContain("closed");
@@ -2478,7 +2480,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     cleanup();
 
     const review = render(<GithubTrace githubHost={GH_HOST} task={withPr("review")} acceptance={traceAcceptance()} />);
-    const reviewPill = review.container.querySelector(".pr-head .pill")!;
+    const reviewPill = review.container.querySelector(".gh-bar .pill")!;
     expect(reviewPill.textContent).toBe("in review");
     expect(reviewPill.className).toContain("info");
     // Ruling 511: the number stands with the title, not in the pill.
@@ -2487,13 +2489,15 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
 
   it("keeps merged and merge-pending distinct", () => {
     const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} acceptance={traceAcceptance()} />);
-    expect(merged.container.querySelector(".pr-head .pill")!.textContent).toBe(
-      "merged",
-    );
+    const mergedPill = merged.container.querySelector(".gh-bar .pill")!;
+    expect(mergedPill.textContent).toBe("merged");
+    // Ruling 511: filled on the bar, as it always was there. The quiet
+    // outline's muted ink is made for --surface and fades on the inverted bar.
+    expect(mergedPill.className).not.toContain("quiet");
     cleanup();
     const accepted = render(<GithubTrace githubHost={GH_HOST} task={withPr("accepted")} acceptance={traceAcceptance()} />);
     expect(
-      accepted.container.querySelector(".pr-head .pill")!.textContent,
+      accepted.container.querySelector(".gh-bar .pill")!.textContent,
     ).toContain("merge pending");
   });
 });
