@@ -460,7 +460,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   PDF documents, executables, databases) are decided by name and get an honest "no
   in-app preview" note; every other file is fetched and read in a read-only CODE reader
   (ruling 363: Shiki tokens by the name's grammar, line numbers, plain when no grammar
-  is mapped), unless a NUL byte in its first 8,000 characters sends it to the no-preview
+  is mapped; ruling 508: every scope family the theme emits has a colour, so a diff's
+  lines are green and red, and a log colours a number whole and a level by severity),
+  unless a NUL byte in its first 8,000 characters sends it to the no-preview
   card ("This file is not text"). A body whose fetch proved the file unservable (404
   after the completion-time prune, 413 over the 50 MB cap, an auth redirect) reports the
   failure and drops Download rather than saving an error body under the real filename.

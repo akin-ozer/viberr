@@ -95,10 +95,12 @@
   --red-light: #fbd4d4;
   /* Ruling 363: the code reader's syntax palette — GitHub's light syntax
      colours, the family the danger and warning pairs already borrow (ruling
-     148(d)). Eight scope families, the ones Shiki's css-variables theme
-     resolves every grammar to; each clears 4.5:1 on --bg and --surface,
-     locked in app.css.test.ts beside the secondary-text checks. Punctuation
-     stays --fg, so it has no token. */
+     148(d)). One token per scope family Shiki's css-variables theme resolves
+     a grammar to, which app.css.test.ts reads off the theme; each clears
+     4.5:1 on --bg and --surface, locked there beside the secondary-text
+     checks. Punctuation stays --fg, so it has no token. Inserted, deleted and
+     changed (a diff's lines, a log's levels) are the text colours GitHub's
+     own theme gives them (ruling 508). */
   --syn-keyword: #cf222e;
   --syn-string: #0a3069;
   --syn-string-expression: #116329;
@@ -107,6 +109,9 @@
   --syn-parameter: #953800;
   --syn-function: #8250df;
   --syn-link: #0969da;
+  --syn-inserted: #116329;
+  --syn-deleted: #82071e;
+  --syn-changed: #953800;
   /* Ruling 364: the twenty stage colour presets (shared/workflow/stage-colors.ts).
      A stage stores a NAME; these are the only place the name becomes paint.
      Light values sit at the 600 weight where the hue is pale (amber, yellow,
@@ -3911,6 +3916,9 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   --syn-parameter: #ffa657;
   --syn-function: #d2a8ff;
   --syn-link: #58a6ff;
+  --syn-inserted: #7ee787;
+  --syn-deleted: #ffa198;
+  --syn-changed: #ffa657;
   /* Ruling 364: the stage presets at the 400 weight — they read on the dark
      surface at 6:1 and better (see the light block). */
   --stage-slate: #94a3b8;
@@ -7933,6 +7941,9 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .code-view .tk-parameter { color: var(--syn-parameter); }
 .code-view .tk-function { color: var(--syn-function); }
 .code-view .tk-link { color: var(--syn-link); }
+.code-view .tk-inserted { color: var(--syn-inserted); }
+.code-view .tk-deleted { color: var(--syn-deleted); }
+.code-view .tk-changed { color: var(--syn-changed); }
 .code-view .tk-i { font-style: italic; }
 .code-view .tk-b { font-weight: 600; }
 .code-view .tk-u { text-decoration: underline; text-underline-offset: 2px; }

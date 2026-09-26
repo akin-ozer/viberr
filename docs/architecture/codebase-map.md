@@ -147,7 +147,8 @@ for the operator), `icon` (one stroke icon set), `pill` (the one
 readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` ``,
 `@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `code-view` +
 `code-language` + `code-highlight` (the ruling-363 reader: numbered lines, Shiki tokens by
-filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center; success 5 s, paused on hover or focus; errors stay until dismissed, ruling 455),
+filename grammar, loaded on first use) + `log-grammar` (upstream's log grammar with whole
+numbers and levels by severity, in the grammar's own chunk, ruling 508), `mention-spans`, `toast` (bottom-center; success 5 s, paused on hover or focus; errors stay until dismissed, ruling 455),
 `confirm-dialog`, `use-dialog` (native `<dialog>` contract: Escape, backdrop click, focus
 restore; `commit` runs a primary action and then the same exit, ruling 459), `copy-glyph`
 (`GlyphSwap`: a glyph that trades with its control's state cross-fades in place; `CopyGlyph` is

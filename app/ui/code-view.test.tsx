@@ -75,6 +75,13 @@ describe("CodeView (ruling 363)", () => {
     expect(line).toContainEqual({ text: "// why", className: "tk-comment" });
   });
 
+  it("a diff's added and removed lines take the inserted and deleted families (ruling 508)", async () => {
+    const lines = await highlightCode("@@ -1 +1 @@\n-const b = 2;\n+const b = 3;", "diff");
+    expect(lines).not.toBeNull();
+    expect(lines![1]).toEqual([{ text: "-const b = 2;", className: "tk-deleted" }]);
+    expect(lines![2]).toEqual([{ text: "+const b = 3;", className: "tk-inserted" }]);
+  });
+
   it("toToken: the foreground is a bare text node; scope families and font styles become classes", () => {
     expect(
       toToken({ content: "x", offset: 0, color: "var(--shiki-foreground)" }),
