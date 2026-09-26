@@ -194,7 +194,7 @@ const NO_PLUGIN_REASON =
   "the run's skill plugin directory could not be written (Viberr injects it as prompt text instead)";
 
 /** Where a run's plugin lives: a sibling of the checkout, named by the run. */
-export function skillPluginDir(workspaceDir: string, runId: string): string {
+function skillPluginDir(workspaceDir: string, runId: string): string {
   return path.join(path.dirname(workspaceDir), SKILL_PLUGINS_DIR, runId);
 }
 

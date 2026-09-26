@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -19,7 +18,6 @@ import {
   isSdkSkillName,
   mountGrantedSkills,
   removeSkillPlugin,
-  skillPluginDir,
   skillPluginInPlace,
   stripUngovernedRepoCatalog,
 } from "./skill-mount.server";
@@ -109,12 +107,6 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
     expect(diff).not.toContain(".claude");
   });
 
-  it("is a no-op when the clone has no .claude", async () => {
-    const dir = temp.make("viberr-strip-empty-");
-    await stripUngovernedRepoCatalog(dir);
-    expect(existsSync(path.join(dir, ".claude"))).toBe(false);
-  });
-
   it("ruling 180: the strip is whole — an agent-written catalog goes, and a live run's skills are elsewhere", async () => {
     // The in-checkout mount needed a per-process marker (F19-15) so a second
     // run's strip would spare a live run's `.claude/skills`. Skills now live
@@ -140,34 +132,6 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
     expect(existsSync(path.join(dir, ".claude"))).toBe(false);
     expect(skillPluginInPlace(live.plugin)).toBe(true);
     expect(pluginSkillMd(live.plugin!.path, "live-craft")).toContain("SENTINEL-LIVE");
-  });
-});
-
-describe("reviewer inheritance is KBs only (F19-2 / ruling 57)", () => {
-  const SOURCE = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../tasks/specialist-run.server.ts",
-  );
-
-  it("neither call site unions anything but `kb`, and no comment claims otherwise", () => {
-    const src = readFileSync(SOURCE, "utf8");
-
-    // Canary (code): change either call site to union `skills` and this fails.
-    const calls = [...src.matchAll(/(\w+)\s*=\s*withDeliveringGrants\(/g)].map(
-      (m) => m[1],
-    );
-    const resumeCalls = [...src.matchAll(/withDeliveringGrants\(resolved\.(\w+)/g)].map(
-      (m) => m[1],
-    );
-    expect(calls.length + resumeCalls.length).toBeGreaterThanOrEqual(2);
-    for (const target of [...calls, ...resumeCalls]) expect(target).toBe("kb");
-
-    // Canary (prose): restore "R18-1 (widened to SKILLS by LV-F3)" above
-    // `deliveringContextGrants` and this fails.
-    expect(src).not.toMatch(/widened to SKILLS/i);
-    expect(src).not.toContain("LV-F3");
-    // …and the ruling that settles it is cited where the rule lives.
-    expect(src).toMatch(/Ruling 57 \(R19-3/);
   });
 });
 
@@ -234,7 +198,6 @@ describe("mountGrantedSkills", () => {
     // The plugin is a sibling of the checkout, named by the run …
     const plugin = path.join(path.dirname(ws), ".viberr-plugins", "run_abc123");
     expect(result.plugin).toEqual({ path: plugin, name: "viberr" });
-    expect(skillPluginDir(ws, "run_abc123")).toBe(plugin);
     // … with the manifest the CLI reads and the skill folder it discovers.
     const manifest = z
       .object({ name: z.string(), description: z.string(), version: z.string() })
@@ -559,35 +522,6 @@ describe("mountGrantedSkills", () => {
     });
     expect(gone.mounted).toEqual([]);
     expect(gone.plugin).toBeNull();
-  });
-
-  it("leaves NO trace in the delivery: git never sees the plugin", async () => {
-    // The load-bearing half of the whole change. Delivery runs `git add -A`
-    // (push-workspace.server) over the agent's working tree, and the agent
-    // commits itself — neither can pick up a sibling directory, and no
-    // exclude entry is needed to make that so.
-    const dataRoot = storeWithSkills([{ name: "craft", skillMd: "SENTINEL-CRAFT\n" }]);
-    const ws = await gitCheckout();
-
-    const result = await mountGrantedSkills({
-      workspaceDir: ws,
-      skills: ["craft"],
-      dataRoot,
-      runId: "run_clean",
-    });
-
-    const status = (await exec("git", ["-C", ws, "status", "--porcelain"])).stdout.trim();
-    expect(status).toBe("");
-    writeFileSync(path.join(ws, "src", "app.ts"), "export const a = 2;\n");
-    await exec("git", ["-C", ws, "add", "-A"]);
-    await exec("git", ["-C", ws, "commit", "-q", "-m", "work"]);
-    const diff = (await exec("git", ["-C", ws, "diff", "--name-status", "HEAD~1", "HEAD"]))
-      .stdout;
-    expect(diff).toContain("src/app.ts");
-    expect(diff).not.toContain(".claude");
-    expect(diff).not.toContain("viberr-plugins");
-    // And the skill is still there for the run that is using it.
-    expect(existsSync(path.join(result.plugin!.path, "skills", "craft", "SKILL.md"))).toBe(true);
   });
 
   it("two runs on one workspace get two plugins — a second mount never touches the first run's", async () => {

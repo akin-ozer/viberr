@@ -306,7 +306,7 @@ function resolveClaudeBase(model: string): string | undefined {
  * it, worst case the run 400s and the human sees a generic `run·error·unknown`.
  * Unknown → dropped, so the SDK applies its own default.
  */
-export function resolveClaudeEffort(effort?: string): string | undefined {
+function resolveClaudeEffort(effort?: string): string | undefined {
   switch (effort) {
     case "low":
     case "medium":

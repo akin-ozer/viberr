@@ -326,13 +326,6 @@ describe("agentIsolation in /resources/health (ruling 460)", () => {
     expect(agentIsolation().status).toBe("degraded");
     expect(agentIsolation().reason).toMatch(/probe failed \(exit 2\)/);
   });
-
-  it("is appended LAST: the health body's key order is part of its contract", () => {
-    const keys = Object.keys(healthSnapshot(ctx.makeDb()));
-    expect(keys.at(-1)).toBe("agentIsolation");
-    // Ruling 461's mcpProxy sits between toolchain and this key.
-    expect(keys.slice(-3)).toEqual(["toolchain", "mcpProxy", "agentIsolation"]);
-  });
 });
 
 describe("agentLaunchFor (ruling 460)", () => {

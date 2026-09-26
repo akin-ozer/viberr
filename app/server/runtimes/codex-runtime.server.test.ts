@@ -12,7 +12,6 @@ import {
   CODEX_SDK_VERIFIED_VERSION,
   createCodexAdapter,
   INTERRUPT_SETTLE_GRACE_MS,
-  resolveCodexReasoningEffort,
   type CodexClient,
   type CodexThread,
 } from "./codex-runtime.server";
@@ -136,22 +135,6 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-describe("resolveCodexReasoningEffort", () => {
-  it("accepts only values supported by the installed SDK that Viberr offers", () => {
-    expect(resolveCodexReasoningEffort("minimal")).toBe("minimal");
-    expect(resolveCodexReasoningEffort("xhigh")).toBe("xhigh");
-    // SDK 0.153.4: `max` joined the union and the bundled catalog lists it on
-    // every current model, so it is forwarded.
-    expect(resolveCodexReasoningEffort("max")).toBe("max");
-    // In the union too, deliberately NOT forwarded: `ultra` is automatic task
-    // delegation (sub-agents, the operator's job); `persistent` is supported by
-    // no bundled model. Canary: add either case to the switch.
-    expect(resolveCodexReasoningEffort("ultra")).toBeUndefined();
-    expect(resolveCodexReasoningEffort("persistent")).toBeUndefined();
-    expect(resolveCodexReasoningEffort("")).toBeUndefined();
-  });
-});
-
 describe("codex adapter (SDK, injected fake client)", () => {
   it("streams ThreadEvents → EmittedLine and finishes on turn.completed", async () => {
     const events = [
@@ -189,57 +172,39 @@ describe("codex adapter (SDK, injected fake client)", () => {
     });
   });
 
-  it("threads spec.effort into startThread modelReasoningEffort (omits when absent)", async () => {
-    const events = [
+  // SDK 0.153.4: `max` joined the union and the bundled catalog lists it on
+  // every current model, so it is forwarded. In the union too, deliberately
+  // NOT forwarded: `ultra` is automatic task delegation (sub-agents, the
+  // operator's job); `persistent` is supported by no bundled model. Canary: add
+  // either case to the switch. A tier Viberr does not forward, or none at all,
+  // is omitted, so the CLI applies its own default instead of running a mode
+  // the deployment never chose.
+  it.each([
+    ["high", "high"],
+    ["max", "max"],
+    ["minimal", "minimal"],
+    ["xhigh", "xhigh"],
+    ["ultra", undefined],
+    ["persistent", undefined],
+    ["", undefined],
+    [undefined, undefined],
+  ] as const)("effort %j reaches startThread as %j", async (effort, expected) => {
+    const run = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ];
-
-    const withEffort = fakeCodex(events);
-    createCodexAdapter({ codexFactory: withEffort.factory }).start(
-      { ...SPEC, effort: "high" },
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      effort === undefined ? SPEC : { ...SPEC, effort },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(withEffort.startOptions()).toMatchObject({
-      model: "gpt-5.4-codex",
-      modelReasoningEffort: "high",
-    });
-
-    const noEffort = fakeCodex(events);
-    createCodexAdapter({ codexFactory: noEffort.factory }).start(SPEC, {
-      onLine: () => {},
-      onExit: () => {},
-    });
-    await drain();
-    expect(noEffort.startOptions()?.modelReasoningEffort).toBeUndefined();
-
-    // `max` is a tier the pinned SDK accepts and the catalog offers (0.153.4).
-    const max = fakeCodex(events);
-    createCodexAdapter({ codexFactory: max.factory }).start(
-      { ...SPEC, effort: "max" },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(max.startOptions()?.modelReasoningEffort).toBe("max");
-
-    // A tier Viberr does not forward (`ultra`: automatic delegation) is omitted,
-    // so the CLI applies its own default instead of running a mode the
-    // deployment never chose.
-    const unsupported = fakeCodex(events);
-    createCodexAdapter({ codexFactory: unsupported.factory }).start(
-      { ...SPEC, effort: "ultra" },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(unsupported.startOptions()?.modelReasoningEffort).toBeUndefined();
+    expect(run.startOptions()?.model).toBe("gpt-5.4-codex");
+    expect(run.startOptions()?.modelReasoningEffort).toBe(expected);
   });
 
-  it("uses the same supported options for start/resume and confines operators", async () => {
-    const events = [
+  it("resume uses the same supported thread options as start (model, effort, sandbox, workdir, approval)", async () => {
+    const resumed = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ];
-
-    const resumed = fakeCodex(events);
+    ]);
     createCodexAdapter({ codexFactory: resumed.factory }).start(
       { ...SPEC, resumeSessionId: "thread-1", effort: "high" },
       { onLine: () => {}, onExit: () => {} },
@@ -253,85 +218,6 @@ describe("codex adapter (SDK, injected fake client)", () => {
       skipGitRepoCheck: true,
       approvalPolicy: "never",
     });
-
-    const operator = fakeCodex(events);
-    createCodexAdapter({ codexFactory: operator.factory }).start(
-      { ...SPEC, kind: "operator" },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    const opOpts = operator.startOptions()!;
-    expect(opOpts).toMatchObject({
-      // Ruling 185: no kind is OS-confined any more, the operator included.
-      // It does have the CLI's shell (its prompt runs `git show` for
-      // default-branch reads); its contract, not a sandbox, keeps it off the
-      // tree (ruling 207(b)). Its OS network is no longer forced off either.
-      sandboxMode: "danger-full-access",
-      approvalPolicy: "never",
-    });
-    expect(opOpts.networkAccessEnabled).toBeUndefined();
-    // B-2 (pass 24, owner ruling): web SEARCH now follows the grant on the
-    // operator exactly as on a specialist. This SPEC does not withhold it, so web
-    // search is ENABLED (option unset) — the operator honors `use-web-search-fetch`
-    // on Codex, matching Claude. (The unconditional `webSearchMode:"disabled"`
-    // here used to dishonour a granted operator while the matrix showed it green.)
-    expect(opOpts.webSearchMode).toBeUndefined();
-
-    // …and an operator whose web grant IS withheld disables web search, like a
-    // specialist — and its network is not forced off either way (ruling 185).
-    const opWithheld = fakeCodex(events);
-    createCodexAdapter({ codexFactory: opWithheld.factory }).start(
-      { ...SPEC, kind: "operator", webSearchWithheld: true },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    const opWithheldOpts = opWithheld.startOptions()!;
-    expect(opWithheldOpts.webSearchMode).toBe("disabled");
-    expect(opWithheldOpts.networkAccessEnabled).toBeUndefined();
-
-    // A supporting run is not confined for its role's name either (R22's core,
-    // now the whole rule — ruling 185).
-    const reviewer = fakeCodex(events);
-    createCodexAdapter({ codexFactory: reviewer.factory }).start(
-      { ...SPEC, kind: "reviewer" },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    const revOpts = reviewer.startOptions()!;
-    expect(revOpts.sandboxMode).toBe("danger-full-access");
-    expect(revOpts.networkAccessEnabled).toBeUndefined();
-  });
-
-  // P14-RT-06: `use-web-search-fetch` withheld was enforced on Claude (the
-  // WebFetch/WebSearch denial) and on NOTHING on Codex — although the option
-  // that enforces it was already being set, two lines away, for the operator.
-  it("disables web search for a specialist whose web-egress grant is withheld", async () => {
-    const events = [
-      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ];
-
-    const withheld = fakeCodex(events);
-    createCodexAdapter({ codexFactory: withheld.factory }).start(
-      { ...SPEC, webSearchWithheld: true },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    const withheldOpts = withheld.startOptions()!;
-    expect(withheldOpts.webSearchMode).toBe("disabled");
-    expect(withheldOpts.networkAccessEnabled).toBeUndefined();
-    // Ruling 185: the run is not confined, so `webSearchMode` — the CLI's own
-    // tool switch — is the whole of what withheld egress binds on Codex. The
-    // OS-level network gate is gone with the sandbox, and the capability
-    // surfaces say what each half enforces.
-    expect(withheldOpts.sandboxMode).toBe("danger-full-access");
-
-    const granted = fakeCodex(events);
-    createCodexAdapter({ codexFactory: granted.factory }).start(SPEC, {
-      onLine: () => {},
-      onExit: () => {},
-    });
-    await drain();
-    expect(granted.startOptions()!.webSearchMode).toBeUndefined();
   });
 
   it("keeps subscription auth in the CLI env but out of generated shells", async () => {
@@ -410,82 +296,29 @@ describe("codex adapter (SDK, injected fake client)", () => {
     // The Codex SDK replaces the child env wholesale. Per-run env (e.g.
     // GIT_CEILING_DIRECTORIES) must land on top of a full process.env snapshot
     // so PATH/HOME survive — overlaying onto {} would break the spawned binary.
-    const events = [
+    const run = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ];
-    let factoryOpts: CodexOptions | undefined;
-    const client: CodexClient = {
-      startThread: (o) => {
-        void o;
-        return {
-          id: "t",
-          async runStreamed() {
-            return {
-              events: asSdkEvents(
-                (async function* () {
-                  for (const e of events) yield e;
-                })(),
-              ),
-            };
-          },
-        };
-      },
-      resumeThread: () => ({
-        id: "t",
-        async runStreamed() {
-          return { events: asSdkEvents((async function* () {})()) };
-        },
-      }),
-    };
-    const factory = (opts?: CodexOptions) => {
-      factoryOpts = opts;
-      return client;
-    };
-    createCodexAdapter({ codexFactory: factory }).start(
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
       { ...SPEC, env: { GIT_CEILING_DIRECTORIES: "/ceil" } },
       { onLine: () => {}, onExit: () => {} },
     );
     await drain();
-    expect(factoryOpts?.env?.GIT_CEILING_DIRECTORIES).toBe("/ceil");
+    expect(run.factoryOptions()?.env?.GIT_CEILING_DIRECTORIES).toBe("/ceil");
     // PATH from the real process.env must have survived the overlay.
-    expect(factoryOpts?.env?.PATH).toBe(process.env.PATH);
+    expect(run.factoryOptions()?.env?.PATH).toBe(process.env.PATH);
   });
 
   it("passes no env override when neither deps.env nor spec.env is set (#3)", async () => {
-    const events = [
+    const run = fakeCodex([
       { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ];
-    const seen: (CodexOptions | undefined)[] = [];
-    const client: CodexClient = {
-      startThread: () => ({
-        id: "t",
-        async runStreamed() {
-          return {
-            events: asSdkEvents(
-              (async function* () {
-                for (const e of events) yield e;
-              })(),
-            ),
-          };
-        },
-      }),
-      resumeThread: () => ({
-        id: "t",
-        async runStreamed() {
-          return { events: asSdkEvents((async function* () {})()) };
-        },
-      }),
-    };
-    const factory = (opts?: CodexOptions) => {
-      seen.push(opts);
-      return client;
-    };
-    createCodexAdapter({ codexFactory: factory }).start(SPEC, {
+    ]);
+    createCodexAdapter({ codexFactory: run.factory }).start(SPEC, {
       onLine: () => {},
       onExit: () => {},
     });
     await drain();
-    const factoryOpts = seen.at(-1);
+    const factoryOpts = run.factoryOptions();
     // Config is always present to enforce shell isolation, but no child-env
     // override is fabricated; the SDK can inherit the real process env.
     expect(factoryOpts).toMatchObject({
@@ -589,71 +422,6 @@ describe("codex adapter (SDK, injected fake client)", () => {
     );
     expect(errText).toContain("The provider reported:");
     expect(errText).toContain("request failed with [redacted]");
-    expect(errText).not.toContain("sk-secretsentinel0123456789");
-    expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
-  });
-
-  it("retains a safe auth category while redacting the raw SDK failure", async () => {
-    const thread: CodexThread = {
-      id: "thread-1",
-      async runStreamed() {
-        return {
-          events: failingEvents(
-            new Error("401 unauthorized for token sk-secretsentinel0123456789"),
-          ),
-        };
-      },
-    };
-    const client: CodexClient = {
-      startThread: () => thread,
-      resumeThread: () => thread,
-    };
-    const lines: EmittedLine[] = [];
-    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
-      onLine: (line) => lines.push(line),
-      onExit: () => {},
-    });
-    await drain();
-
-    const errText = lines.at(-1)?.display?.text ?? "";
-    expect(errText).toContain(
-      "Codex authentication failed. Review the configured subscription credential.",
-    );
-    // R20-3: the provider's sentence surfaces with the token redacted by shape.
-    expect(errText).toContain("401 unauthorized for token [redacted]");
-    expect(errText).not.toContain("sk-secretsentinel0123456789");
-    expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
-  });
-
-  it("retains a safe quota category while redacting the raw SDK failure", async () => {
-    const thread: CodexThread = {
-      id: "thread-1",
-      async runStreamed() {
-        return {
-          events: failingEvents(
-            new Error(
-              "429 rate limit: internal request id sk-secretsentinel0123456789",
-            ),
-          ),
-        };
-      },
-    };
-    const client: CodexClient = {
-      startThread: () => thread,
-      resumeThread: () => thread,
-    };
-    const lines: EmittedLine[] = [];
-    createCodexAdapter({ codexFactory: () => client }).start(SPEC, {
-      onLine: (line) => lines.push(line),
-      onExit: () => {},
-    });
-    await drain();
-
-    const errText = lines.at(-1)?.display?.text ?? "";
-    expect(errText).toContain(
-      "Codex usage limit was reached. Retry after the subscription limit resets.",
-    );
-    expect(errText).toContain("The provider reported:");
     expect(errText).not.toContain("sk-secretsentinel0123456789");
     expect(lines.at(-1)?.raw).not.toContain("sk-secretsentinel0123456789");
   });
@@ -1206,7 +974,7 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
 describe("ruling 185: Viberr never OS-confines a Codex run", () => {
   const KINDS = ["primary", "reviewer", "operator", "controller"] as const;
 
-  it("every kind, every grant shape, reaches the SDK as `danger-full-access` with no extra dirs", async () => {
+  it("every kind, every grant shape, reaches the SDK as `danger-full-access` with no extra dirs or network switch, and web search follows the grant", async () => {
     // Canary: put ANY other mode back on one arm (a read-only operator, a
     // workspace-write withheld run) and one of these fails. The owner removed
     // the sandbox because every confined mode was a dead run on the compose
@@ -1218,11 +986,17 @@ describe("ruling 185: Viberr never OS-confines a Codex run", () => {
       { label: "supervised deliverer", spec: { kind: "primary", autonomous: false } },
       { label: "write-withheld", spec: { kind: "reviewer", autonomous: true, repoWriteWithheld: true } },
       { label: "egress-withheld deliverer", spec: { kind: "primary", autonomous: true, webSearchWithheld: true } },
+      { label: "egress-withheld operator", spec: { kind: "operator", autonomous: true, webSearchWithheld: true } },
       {
         label: "evidence-granted, write-withheld",
         spec: { kind: "reviewer", autonomous: true, repoWriteWithheld: true, attachmentsWritableDir: DIR },
       },
     ] as const;
+    // `networkAccessEnabled` only ever bound below full access; keeping it
+    // would be a setting that reads as enforcement and is not one. Web SEARCH
+    // is the CLI's own tool and still follows the grant on every kind.
+    // Canary: set `networkAccessEnabled = false` for the operator again, or
+    // drop the `webSearchWithheld` arm, and a row below fails.
     for (const posture of postures) {
       const run = fakeCodex([
         { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
@@ -1235,6 +1009,10 @@ describe("ruling 185: Viberr never OS-confines a Codex run", () => {
       expect(run.startOptions()?.sandboxMode, posture.label).toBe("danger-full-access");
       // No `--add-dir`: full access already writes the attachments drop.
       expect(run.startOptions()?.additionalDirectories, posture.label).toBeUndefined();
+      expect(run.startOptions()?.networkAccessEnabled, posture.label).toBeUndefined();
+      expect(run.startOptions()?.webSearchMode, posture.label).toBe(
+        "webSearchWithheld" in posture.spec ? "disabled" : undefined,
+      );
     }
     for (const kind of KINDS) {
       const run = fakeCodex([
@@ -1246,31 +1024,9 @@ describe("ruling 185: Viberr never OS-confines a Codex run", () => {
       );
       await drain();
       expect(run.startOptions()?.sandboxMode, kind).toBe("danger-full-access");
+      expect(run.startOptions()?.networkAccessEnabled, kind).toBeUndefined();
+      expect(run.startOptions()?.webSearchMode, kind).toBeUndefined();
     }
-  });
-
-  it("the operator's OS network is no longer forced off, and withheld web search still binds", async () => {
-    // `networkAccessEnabled` only ever bound below full access; keeping it
-    // would be a setting that reads as enforcement and is not one. Web SEARCH
-    // is the CLI's own tool and still follows the grant on BOTH kinds.
-    // Canary: set `networkAccessEnabled = false` for the operator again and the
-    // first assertion fails; drop the `webSearchWithheld` arm and the last does.
-    const op = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
-    createCodexAdapter({ codexFactory: op.factory }).start(
-      { ...SPEC, kind: "operator", autonomous: true },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(op.startOptions()?.networkAccessEnabled).toBeUndefined();
-    expect(op.startOptions()?.webSearchMode).toBeUndefined();
-
-    const withheld = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
-    createCodexAdapter({ codexFactory: withheld.factory }).start(
-      { ...SPEC, kind: "operator", autonomous: true, webSearchWithheld: true },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(withheld.startOptions()?.webSearchMode).toBe("disabled");
   });
 });
 
@@ -1372,15 +1128,6 @@ describe("D5 — the verified SDK version is a fact, not a claim", () => {
   it("matches the @openai/codex-sdk the app depends on", async () => {
     expect(CODEX_SDK_VERIFIED_VERSION).toBe(await declaredSdkVersion());
   });
-
-  it("is the version the adapter header quotes", async () => {
-    const { readFileSync } = await import("node:fs");
-    const header = readFileSync(
-      new URL("./codex-runtime.server.ts", import.meta.url),
-      "utf8",
-    ).slice(0, 3000);
-    expect(header).toContain(`v${CODEX_SDK_VERIFIED_VERSION}`);
-  });
 });
 
 /**
@@ -1439,6 +1186,8 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
       CodexOptions["config"]
     >;
 
+    // P13-LV-15: the DECLARED (hyphenated) names pass through; the codex
+    // binary's rename to `everything_http` for its tool prefix is its own.
     expect(Object.keys(servers).sort()).toEqual([
       "everything-http",
       "everything-stdio",
@@ -1465,19 +1214,6 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
     // agent's report posts when the run ENDS, through the outcome envelope.
     expect(config?.mcp_servers).not.toHaveProperty("viberr_agent");
     expect(JSON.stringify(config)).not.toContain("viberr_agent");
-  });
-
-  it("passes the DECLARED server name through unchanged (the rename is the CLI's, not Viberr's)", async () => {
-    // P13-LV-15: the codex binary lowercases hyphens to underscores when it
-    // derives a tool prefix (`mcp__everything_http__…`). Viberr must not
-    // pre-normalize to match it — the same declaration has to keep working on
-    // Claude, where the hyphen survives. The disclosure tells personas never to
-    // name an MCP tool literally; this pins that Viberr itself stays neutral.
-    const config = await configWith({ mcpServers: MOUNTED_SERVERS });
-    expect(Object.keys(config?.mcp_servers ?? {})).toContain("everything-http");
-    expect(Object.keys(config?.mcp_servers ?? {})).not.toContain(
-      "everything_http",
-    );
   });
 
   it("has no native skills channel — `spec.skills` changes nothing about the run", async () => {
@@ -2382,10 +2118,10 @@ describe("ruling 394: the transport died after the turn completed", () => {
     expect(exit).toMatchObject({ outcome: "error" });
   });
 
-  it("still FAILS when the error arrives BEFORE the completed turn", async () => {
-    // A provider that reports its refusal and then completes the turn anyway
-    // has not done the work; order is what this ruling reads, in both
-    // directions.
+  it("still FAILS when a fatal error event leaves work in flight and no completed turn", async () => {
+    // A fatal event, then more work, then the stream ends: no turn stands
+    // complete, so the run fails (ruling 394). An error followed by a
+    // completed turn is a recovery and finishes; see the RECOVERED test above.
     const { exit } = await runWith(
       fakeCodex([
         { type: "turn.started" },

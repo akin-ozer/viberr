@@ -205,7 +205,7 @@ function unwrap(words: readonly string[]): { words: string[] } | { script: strin
 const MAX_SCRIPT_DEPTH = 4;
 
 /** Every simple command a command line runs, unwrapped, as its words. */
-export function simpleCommands(command: string, depth = 0): string[][] {
+function simpleCommands(command: string, depth = 0): string[][] {
   const split: string[][] = [];
   splitCommands(command, split);
   const out: string[][] = [];
