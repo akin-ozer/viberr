@@ -18,6 +18,12 @@ import { plainText } from "~/features/notifications/notification-meta";
 import type { AttentionSnapshot } from "~/features/notifications/desktop-alerts";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
+import {
+  proposalAnchor,
+  TASK_DECISION_ANCHOR,
+  TASK_RECOMMENDATIONS_ANCHOR,
+  timelineEventAnchor,
+} from "~/shared/page-anchors";
 
 /**
  * Per-user notification rows (orchestrator ruling 9): SQLite-owned,
@@ -37,6 +43,10 @@ export interface CreateNotificationInput {
   from?: ActorRender | null;
   projectSlug?: string | null;
   taskKey?: string | null;
+  /** Ruling 497: where the row opens, when the notifier knows the exact thing
+   *  it is about (the link builders below). Omitted, it opens the task, or the
+   *  project's board (`notificationHref`). */
+  href?: string | null;
   occurredAt?: string;
   readAt?: string | null;
   /** Skip the recipient's routing-pref filter. For FIXTURE inserts (the demo
@@ -75,8 +85,8 @@ export function createNotification(
   db.prepare(
     `INSERT OR REPLACE INTO notifications
        (id, user_id, kind, ptype, title, text, actor_json, project_slug,
-        task_key, occurred_at, read_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        task_key, href, occurred_at, read_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.userId,
@@ -87,6 +97,7 @@ export function createNotification(
     input.from ? JSON.stringify(input.from) : null,
     input.projectSlug ?? null,
     input.taskKey ?? null,
+    input.href ?? null,
     input.occurredAt ?? now,
     input.readAt ?? null,
     now,
@@ -99,6 +110,52 @@ export function createNotification(
   return id;
 }
 
+function projectPath(projectSlug: string): string {
+  return `/projects/${projectSlug}`;
+}
+
+function taskPath(projectSlug: string, taskKey: string): string {
+  return `${projectPath(projectSlug)}/tasks/${taskKey}`;
+}
+
+/**
+ * Ruling 497: the links a notifier records (`CreateNotificationInput.href`), one
+ * per thing a row can be about. Each opens inside the row's own project, which
+ * `notificationHref` checks.
+ */
+
+/** An event on the task's timeline: the page scrolls to it and marks it. */
+export function taskEventLink(projectSlug: string, taskKey: string, occurredAt: string): string {
+  return `${taskPath(projectSlug, taskKey)}#${timelineEventAnchor(occurredAt)}`;
+}
+
+/** The task's open decision packet (an operator's, or an agent's question). */
+export function taskDecisionLink(projectSlug: string, taskKey: string): string {
+  return `${taskPath(projectSlug, taskKey)}#${TASK_DECISION_ANCHOR}`;
+}
+
+/** The task's pending recommendations, each a decision to apply. */
+export function taskRecommendationsLink(projectSlug: string, taskKey: string): string {
+  return `${taskPath(projectSlug, taskKey)}#${TASK_RECOMMENDATIONS_ANCHOR}`;
+}
+
+/** A knowledge-base proposal's entry on the project Controller page, where it
+ *  is promoted or dismissed (ruling 483). */
+export function proposalLink(projectSlug: string, proposalId: string): string {
+  return `${projectPath(projectSlug)}/controller#${proposalAnchor(proposalId)}`;
+}
+
+/** The project's GitHub page: its connection, credential and pull requests. */
+export function projectGithubLink(projectSlug: string): string {
+  return `${projectPath(projectSlug)}/github`;
+}
+
+/** A goal chain on the project Controller page (ruling 419(h)); `anchor` is the
+ *  goal's id, or one of its links (`goalLinkAnchor`). */
+export function goalLink(projectSlug: string, anchor: string): string {
+  return `${projectPath(projectSlug)}/controller#${anchor}`;
+}
+
 /**
  * B-FD6: where a notification row actually goes when clicked. The inbox routed
  * only rows carrying BOTH a project and a task, so an org- or project-level row
@@ -106,17 +163,29 @@ export function createNotification(
  * a clickable one and did nothing — a dead click with no explanation. Resolving
  * the destination here, once, lets every surface either navigate or render the
  * row as plainly non-clickable instead of each one re-deriving the rule.
+ *
+ * Ruling 497: a row that recorded where it opens opens there. That link must
+ * stay inside the project the row names, so the orphan rule (F18-1) and a
+ * member's removal (`deleteMemberProjectNotifications`) cover it too; one that
+ * does not is ignored for the task or board the row names.
  */
 function notificationHref(
-  record: Pick<NotificationRecord, "projectSlug" | "taskKey">,
+  record: Pick<NotificationRecord, "projectSlug" | "taskKey"> & { href: string | null },
 ): string | null {
-  if (record.projectSlug && record.taskKey) {
-    return `/projects/${record.projectSlug}/tasks/${record.taskKey}`;
-  }
-  // A project-scoped row still has a surface it concerns: that project's board.
-  if (record.projectSlug) return `/projects/${record.projectSlug}`;
   // Org-wide rows (no project ref) concern no single page — never clickable.
-  return null;
+  if (!record.projectSlug) return null;
+  const project = projectPath(record.projectSlug);
+  if (record.href && opensInside(record.href, project)) return record.href;
+  if (record.taskKey) return taskPath(record.projectSlug, record.taskKey);
+  // A project-scoped row still has a surface it concerns: that project's board.
+  return project;
+}
+
+/** `href` is the project's own page or somewhere under it. */
+function opensInside(href: string, project: string): boolean {
+  if (!href.startsWith(project)) return false;
+  const rest = href.slice(project.length);
+  return rest === "" || rest.startsWith("/") || rest.startsWith("#") || rest.startsWith("?");
 }
 
 export interface NotificationListItem extends NotificationRecord {
@@ -238,7 +307,7 @@ export function listNotifications(
         record.projectSlug != null &&
         record.taskKey != null &&
         mine.has(`${record.projectSlug}::${record.taskKey}`),
-      href: targetMissing ? null : notificationHref(record),
+      href: targetMissing ? null : notificationHref({ ...record, href: row.href }),
       targetMissing,
     };
     return scoped.from ? { ...scoped, from: overlay(scoped.from) } : scoped;
@@ -359,7 +428,7 @@ export function attentionSnapshot(db: DatabaseSync, userId: string): AttentionSn
   // JOIN leaves null for an org-wide row.
   const rows = db
     .prepare(
-      `SELECT n.id, n.kind, n.title, n.text, n.project_slug, n.task_key,
+      `SELECT n.id, n.kind, n.title, n.text, n.project_slug, n.task_key, n.href,
               p.name AS project_name
        FROM notifications n
        LEFT JOIN projects p ON p.slug = n.project_slug
@@ -368,7 +437,10 @@ export function attentionSnapshot(db: DatabaseSync, userId: string): AttentionSn
        LIMIT ?`,
     )
     .all(userId, ...DECISION_NOTIFICATION_KINDS, ATTENTION_ITEM_CAP) as Array<
-    Pick<NotificationRow, "id" | "kind" | "title" | "text" | "project_slug" | "task_key"> & {
+    Pick<
+      NotificationRow,
+      "id" | "kind" | "title" | "text" | "project_slug" | "task_key" | "href"
+    > & {
       project_name: string | null;
     }
   >;
@@ -382,7 +454,11 @@ export function attentionSnapshot(db: DatabaseSync, userId: string): AttentionSn
         id: row.id,
         title: row.title ?? "A decision waits on you",
         body: body.length > ATTENTION_BODY_MAX ? `${body.slice(0, ATTENTION_BODY_MAX - 1)}…` : body,
-        href: notificationHref({ projectSlug: row.project_slug, taskKey: row.task_key }),
+        href: notificationHref({
+          projectSlug: row.project_slug,
+          taskKey: row.task_key,
+          href: row.href,
+        }),
       };
     }),
   };

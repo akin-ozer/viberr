@@ -291,6 +291,13 @@ CREATE TABLE notifications (
   actor_json TEXT,
   project_slug TEXT,
   task_key TEXT,
+  -- Ruling 497: where the row opens, written by the notifier that knows the exact
+  -- thing it is about (a timeline event, the task's decision, a knowledge-base
+  -- proposal, the project's GitHub page, a goal chain). An app path inside the
+  -- row's own project, with an optional #fragment. NULL opens the task, or the
+  -- project's board (`notificationHref`). A root that predates it gains it at
+  -- open (`ensureBaselineColumns`).
+  href TEXT,
   occurred_at TEXT NOT NULL,
   read_at TEXT,
   created_at TEXT NOT NULL

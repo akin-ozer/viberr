@@ -334,7 +334,7 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
       dataRoot: store.dataRoot,
     });
     const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
-    // Filed before ruling 497, and still standing in its document.
+    // Filed before ruling 498, and still standing in its document.
     const body = withLegacyProposals("# Facts\n\n- A fact.\n", [
       { taskKey: "VIB-1", filedBy: "Operator", line: "A fact.", correction: "A truer fact.", evidence: "measured" },
     ]);
@@ -360,11 +360,11 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
 });
 
 /**
- * Ruling 497: the project surface lists what agents on its tasks wrote into a
+ * Ruling 498: the project surface lists what agents on its tasks wrote into a
  * knowledge base, newest first, each with whether a person undid it: the
  * record the owner reads instead of approving each correction first.
  */
-describe("getControllerSurface — the project's knowledge-base corrections (ruling 497)", () => {
+describe("getControllerSurface — the project's knowledge-base corrections (ruling 498)", () => {
   it("lists them newest first on the project surface only, clipped for the page, with the document link for an org admin", async () => {
     const [{ saveKnowledgeBase, resolveStoreTarget }, { writeStoreDoc }, { mergeKbCorrection }] = await Promise.all([
       import("~/server/org/resources.server"),

@@ -52,9 +52,10 @@ export async function recordPrAdoption(
   ref: TaskFileRef,
   input: PrAdoptionRecordInput,
   actor: AuditActor,
-): Promise<void> {
+): Promise<string> {
+  const at = new Date().toISOString();
   await appendTimelineEvent(ref, {
-    occurredAt: new Date().toISOString(),
+    occurredAt: at,
     type: "github",
     actor: SOURCE_ACTOR[input.source],
     title: null,
@@ -80,4 +81,6 @@ export async function recordPrAdoption(
       source: input.source,
     },
   });
+  // Ruling 497: when the `github` event was written, so a notice opens on it.
+  return at;
 }

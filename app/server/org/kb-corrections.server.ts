@@ -13,7 +13,7 @@ import { kbStoreTargetForDir } from "./resources.server";
 import { utf8Bytes, writeStoreDoc } from "./store-files.server";
 
 /**
- * Ruling 497: a correction an agent PROVED, written straight into the
+ * Ruling 498: a correction an agent PROVED, written straight into the
  * knowledge-base document it corrects, and undone by a person who disagrees.
  *
  * Rulings 378 and 483 filed every correction as a proposal under "Proposed

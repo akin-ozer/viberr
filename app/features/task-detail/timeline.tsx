@@ -1,12 +1,20 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useFetcher, useSearchParams } from "react-router";
+import { Link, useFetcher, useLocation, useNavigate, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
+import {
+  hashTarget,
+  KB_CORRECTIONS_ANCHOR,
+  KB_PROPOSALS_ANCHOR,
+  timelineEventAnchor,
+  timelineEventTime,
+} from "~/shared/page-anchors";
+import { useHashTarget } from "~/ui/use-hash-target";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { gatesPill } from "~/features/github/github-pills";
 import type { GateNoteState } from "~/shared/project-gates";
 import { Icon, type IconName } from "~/ui/icon";
-import { LocalDayDotTime } from "~/ui/local-time";
+import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { AttachmentThumb } from "./attachment-image";
 import { GateResults } from "./gate-results";
@@ -49,6 +57,16 @@ const TL_FILTERS = [
 ] as const;
 
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
+
+/** Whether the filter tab `f` shows `ev`. */
+function shownBy(f: TimelineFilterId, ev: Pick<TimelineEventRender, "type">): boolean {
+  return f === "all" ? true : f === "comment" ? ev.type === "comment" : ev.type !== "comment";
+}
+
+/** Ruling 497: a notification about an event links to it (`#event-<time>`). */
+function isEventAnchor(id: string): boolean {
+  return timelineEventTime(id) !== null;
+}
 
 /** Comments taller than this (px) clamp by default with a "Show more" toggle. */
 const COLLAPSE_MAX = 340;
@@ -221,6 +239,8 @@ const NO_NAMES: string[] = [];
  */
 export const TimelineItem = memo(function TimelineItem({
   ev,
+  anchor,
+  targeted = false,
   mentionNames = NO_NAMES,
   attachmentNames,
   attachmentsBase,
@@ -228,9 +248,14 @@ export const TimelineItem = memo(function TimelineItem({
   knowledgeHref,
 }: {
   ev: TimelineEventRender;
+  /** Ruling 497: the id a link to this event names (`timelineEventAnchor`).
+   *  Only the first of the events that share a time carries it. */
+  anchor?: string;
+  /** Ruling 497: the link that opened the page named this event. */
+  targeted?: boolean;
   /** U39-31: the other tasks the event names, key to path. */
   taskLinks?: TaskLinks;
-  /** Rulings 483 and 497: the project's Controller page, whose Knowledge base
+  /** Rulings 483 and 498: the project's Controller page, whose Knowledge base
    *  panel a `proposal` or an agent's `kb_correction` links to; absent in bare
    *  renders. */
   knowledgeHref?: string;
@@ -251,7 +276,12 @@ export const TimelineItem = memo(function TimelineItem({
   // real links so modified clicks and no-provider renders keep the raw tab.
   const lightbox = useAttachmentLightbox();
   return (
-    <div className="tl-item">
+    <div
+      className="tl-item"
+      id={anchor}
+      tabIndex={targeted ? -1 : undefined}
+      data-targeted={targeted || undefined}
+    >
       <div className="tl-rail">
         <div className={"tl-node " + meta.node}>
           <Icon name={meta.icon} />
@@ -363,7 +393,7 @@ export const TimelineItem = memo(function TimelineItem({
             </div>
             {/* Ruling 483 (F40-59): a proposal is a decision a person owes, and
                 the project's Controller page is where it is promoted or
-                dismissed and where its document opens. Ruling 497: a
+                dismissed and where its document opens. Ruling 498: a
                 correction an agent wrote is reviewed and undone there; a
                 person's undo (the one `kb_correction` a person writes) owes
                 nothing. A plain string prop, never `useParams`: a router hook
@@ -373,7 +403,7 @@ export const TimelineItem = memo(function TimelineItem({
               (ev.type === "proposal" || (ev.type === "kb_correction" && ev.actor.kind !== "human")) && (
                 <Link
                   className="linkish tl-proposal-link"
-                  to={`${knowledgeHref}#${ev.type === "proposal" ? "kb-proposals" : "kb-corrections"}`}
+                  to={`${knowledgeHref}#${ev.type === "proposal" ? KB_PROPOSALS_ANCHOR : KB_CORRECTIONS_ANCHOR}`}
                 >
                   {ev.type === "proposal" ? "Open proposals" : "Review or undo"}
                 </Link>
@@ -496,7 +526,7 @@ export function Timeline({
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
-  /** Rulings 483 and 497: the project's Controller page, which a `proposal` or
+  /** Rulings 483 and 498: the project's Controller page, which a `proposal` or
    *  `kb_correction` event links. */
   knowledgeHref?: string;
   /** U39-31: the other tasks the slice names, key to path (loader). */
@@ -599,13 +629,51 @@ export function Timeline({
       ? fetcher.data.error
       : null;
 
-  const items = useMemo(
-    () =>
-      rows.filter((e) =>
-        f === "all" ? true : f === "comment" ? e.type === "comment" : e.type !== "comment",
-      ),
-    [rows, f],
-  );
+  const items = useMemo(() => rows.filter((e) => shownBy(f, e)), [rows, f]);
+  // Ruling 497: the first of the events that share a time is the one its
+  // link names (they were written together, so they sit together).
+  const anchors = useMemo(() => {
+    const byEvent = new Map<number, string>();
+    const taken = new Set<string>();
+    for (const e of items) {
+      if (taken.has(e.occurredAt)) continue;
+      taken.add(e.occurredAt);
+      byEvent.set(e.id, timelineEventAnchor(e.occurredAt));
+    }
+    return byEvent;
+  }, [items]);
+
+  // Ruling 497: a notification about an event opens it here. A filter tab that
+  // hides it opens to All, older events load until it is among them, and it
+  // comes into view, marked (`useHashTarget`). Each step happens once for the
+  // navigation that named the event, so the person can switch tabs after.
+  const location = useLocation();
+  const navigate = useNavigate();
+  // After hydration only, as `useHashTarget` reads it: the server never sees it.
+  const targetTime = useHydrated() ? timelineEventTime(hashTarget(location.hash)) : null;
+  const target = targetTime ? (rows.find((e) => e.occurredAt === targetTime) ?? null) : null;
+  const targeted = useHashTarget(isEventAnchor, target !== null && shownBy(f, target));
+  const steppedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!targetTime || steppedFor.current === location.key) return;
+    if (target) {
+      if (shownBy(f, target)) return;
+      steppedFor.current = location.key;
+      setF("all");
+      return;
+    }
+    // Newest first: when the oldest event loaded is older than the target,
+    // the target would be among them, so this timeline no longer holds it.
+    const oldest = rows.at(-1);
+    if (!hasMore || (oldest && oldest.occurredAt < targetTime)) return;
+    steppedFor.current = location.key;
+    const search = new URLSearchParams(location.search);
+    search.set("events", String(nextLimit));
+    void navigate(
+      { pathname: location.pathname, search: `?${search}`, hash: location.hash },
+      { replace: true, preventScrollReset: true },
+    );
+  }, [targetTime, target, f, rows, hasMore, nextLimit, location, navigate]);
 
   const send = () => {
     const text = draftRef.current.trim();
@@ -747,6 +815,8 @@ export function Timeline({
             <TimelineItem
               key={ev.id}
               ev={ev}
+              anchor={anchors.get(ev.id)}
+              targeted={targeted !== null && anchors.get(ev.id) === targeted}
               mentionNames={mentionNames}
               {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}

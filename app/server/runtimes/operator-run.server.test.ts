@@ -1427,7 +1427,7 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
     // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
     // 378 added `propose_ruling` (ruling 483 renamed it `propose_kb_correction`,
-    // ruling 497 `correct_knowledge_doc`), also in-Viberr and also destroying
+    // ruling 498 `correct_knowledge_doc`), also in-Viberr and also destroying
     // nothing a person cannot undo, so it is 10.
     // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
     // with delivery and the count stays 10. Ruling 487's two schedule verbs
@@ -1892,11 +1892,11 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(onVerdict).toContain("At the SECOND consecutive objection from the same reviewer");
     const later = buildCodexOperatorPrompt(snapshot({}), "manual");
     expect(later).toContain("`correct_knowledge_doc` the convention into the rulings document it belongs to");
-    // Ruling 497: it is written, not proposed.
+    // Ruling 498: it is written, not proposed.
     expect(later).toContain("It is written at once, every later run reads it, and a person undoes it if they disagree.");
   });
 
-  it("rulings 483 and 497: the turn an agent's report lands on relays a knowledge-base passage it proved wrong", () => {
+  it("rulings 483 and 498: the turn an agent's report lands on relays a knowledge-base passage it proved wrong", () => {
     // CANARY: drop the relay sentence and a Codex agent's correction, which it
     // has no tool to file, stays in its report as it did on WEB-3.
     const reply = "## Knowledge-base correction\n\nakin-dossier 06-platform-facts.md T-003 says 4.138.0; measured 4.139.0.";
@@ -4032,7 +4032,7 @@ describe("pending trigger queue", () => {
     });
   });
 
-  it("rulings 483 and 497: a Codex plan's correct_knowledge_doc writes `<kb>/<doc>` of an engaged agent's knowledge base, in place of the passage in `reason`", async () => {
+  it("rulings 483 and 498: a Codex plan's correct_knowledge_doc writes `<kb>/<doc>` of an engaged agent's knowledge base, in place of the passage in `reason`", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
     const admin = { userId: store3.users.arda.id, label: "arda" };

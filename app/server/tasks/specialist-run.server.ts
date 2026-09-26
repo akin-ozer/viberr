@@ -409,12 +409,12 @@ async function mcpServersFor(
   return mounts;
 }
 
-/** Rulings 483 and 497: the collaboration note a Claude run with a knowledge
+/** Rulings 483 and 498: the collaboration note a Claude run with a knowledge
  *  base gets. */
 export const KB_CORRECTION_NOTE_CLAUDE =
   "- `correct_knowledge_doc` — when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say. It is written at once, for every later run to read, and a person undoes it if they disagree.";
 
-/** Rulings 483 and 497: the same channel on Codex, which mounts no Viberr
+/** Rulings 483 and 498: the same channel on Codex, which mounts no Viberr
  *  tools. */
 export const KB_CORRECTION_NOTE_CODEX =
   "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read.";

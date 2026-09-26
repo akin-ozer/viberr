@@ -1238,7 +1238,7 @@ describe("instance scope: org-role gate on every management tool", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    // Filed before ruling 497, and still standing in its document.
+    // Filed before ruling 498, and still standing in its document.
     const seeded = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
         taskKey: "VIB-142",
@@ -1286,11 +1286,11 @@ describe("instance scope: org-role gate on every management tool", () => {
   });
 
   /**
-   * Ruling 497: an agent's knowledge-base correction is written as it is made.
+   * Ruling 498: an agent's knowledge-base correction is written as it is made.
    * The controller reads a project's in `get_project` and undoes one when a
    * person asks, which notes the undo on the task that made it.
    */
-  it("ruling 497: get_project lists kbCorrections and undo_kb_correction puts the passage back, org admins only", async () => {
+  it("ruling 498: get_project lists kbCorrections and undo_kb_correction puts the passage back, org admins only", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
     const { mergeKbCorrection } = await import("~/server/org/kb-corrections.server");

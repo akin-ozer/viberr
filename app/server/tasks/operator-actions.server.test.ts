@@ -2918,6 +2918,11 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
       listNotifications(store.db, userId).filter((n) => n.kind === "packet");
     expect(packets(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
     expect(packets(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    // Ruling 497: the row opens the packet, where it is decided. CANARY: drop
+    // `about` from the notice and the row opens the task's top.
+    expect(packets(store.users.murat.id)[0]!.href).toBe(
+      `/projects/${store.slug}/tasks/VIB-1#decision`,
+    );
     // The audit trail records it.
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
       "task.operator.packet_opened",
@@ -3562,6 +3567,11 @@ describe("applyRecommendation / dismissRecommendation", () => {
     // …a contributor and a viewer do not (not task supervisors).
     expect(approvals(store.users.selin.id)).toHaveLength(0);
     expect(approvals(store.users.elif.id)).toHaveLength(0);
+    // Ruling 497: the row opens the card, where it is applied. CANARY: drop
+    // `about` from the notice and the row opens the task's top.
+    expect(approvals(store.users.murat.id)[0]!.href).toBe(
+      `/projects/${store.slug}/tasks/VIB-1#recommendations`,
+    );
   });
 
   it("a re-running operator does not re-notify the same pending recommendation", async () => {
@@ -3988,11 +3998,11 @@ describe("operatorLeaseFiles (ruling 417)", () => {
   });
 });
 
-describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 497)", () => {
+describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
   /**
    * F39-1/F39-7 (pass 39): the operator could write a correction into the
    * project's settled rulings as a proposal (ruling 378); ruling 483 (F40-53)
-   * widened it to every knowledge base a run on the task was given. Ruling 497
+   * widened it to every knowledge base a run on the task was given. Ruling 498
    * (owner, 2026-09-26: "No human can approve all of these while inspecting
    * them thoroughly") writes it into the document, and a person undoes it.
    */

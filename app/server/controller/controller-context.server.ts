@@ -515,7 +515,7 @@ function proposalLine(p: KbProposal, rulingsKb: string | null): string {
  * the turn context, so the next conversation knows they wait and raises them.
  * Live on WEB-1 two proposals were never promoted: nothing brought them back
  * after they scrolled off the timeline, and the controller only runs when a
- * person talks to it. Since ruling 497 an agent's correction is written as it
+ * person talks to it. Since ruling 498 an agent's correction is written as it
  * is made, so these are only the ones filed before, which documents still hold.
  */
 export function projectProposalsContextLine(
@@ -533,7 +533,7 @@ export function projectProposalsContextLine(
   return (
     `\n## Open knowledge-base proposals on this project (${open.length})\n` +
     `Agents filed these from this project's tasks under "Proposed corrections (not binding)" in the ` +
-    `document each corrects, before corrections were written straight into the document (ruling 497). ` +
+    `document each corrects, before corrections were written straight into the document (ruling 498). ` +
     `Every run that reads the document reads them beside the line, and none binds until a person ` +
     `promotes it. If the person has not heard about them in this conversation, tell them they are ` +
     `waiting. Promote or dismiss one with resolve_kb_proposal only when the person asks (their ` +

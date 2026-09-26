@@ -25,12 +25,19 @@ import {
   bellCounts,
   countUnreadNotifications,
   createNotification,
+  type CreateNotificationInput,
+  goalLink,
   isTaskViewNavigation,
   listNotifications,
   markAllNotificationsRead,
   markNotificationsRead,
   markTaskNotificationsSeen,
   markTaskPacketApprovalRead,
+  projectGithubLink,
+  proposalLink,
+  taskDecisionLink,
+  taskEventLink,
+  taskRecommendationsLink,
 } from "./notifications.server";
 
 const ctx = createTestDbContext();
@@ -226,7 +233,7 @@ describe("notifications", () => {
     ).run();
     const at = (m: number) => `2026-09-25T03:${String(m).padStart(2, "0")}:00.000Z`;
     const base = { userId: "u_1", projectSlug: "akinozer-com" };
-    createNotification(db, { ...base, id: "q", kind: "question", taskKey: "WEB-3", occurredAt: at(8), title: "Platform Engineer asks: Connect Workers Builds", text: "Only **the owner** can press `Connect`." });
+    createNotification(db, { ...base, id: "q", kind: "question", taskKey: "WEB-3", occurredAt: at(8), title: "Platform Engineer asks: Connect Workers Builds", text: "Only **the owner** can press `Connect`.", href: "/projects/akinozer-com/tasks/WEB-3#decision" });
     createNotification(db, { ...base, id: "p", kind: "packet", ptype: "input", taskKey: "WEB-2", occurredAt: at(5), title: "Decision needed: merge PR #3?", text: "Both reviewers approved." });
     createNotification(db, { ...base, id: "a", kind: "approval", taskKey: "WEB-4", occurredAt: at(4), title: "Operator recommends: Move to Review", text: "Delivered." });
     // Not counted: read, not a decision, another person's, a deleted project.
@@ -242,7 +249,8 @@ describe("notifications", () => {
       id: "q",
       title: "Platform Engineer asks: Connect Workers Builds",
       body: "WEB-3 · akinozer.com\nOnly the owner can press Connect.",
-      href: "/projects/akinozer-com/tasks/WEB-3",
+      // Ruling 497: a desktop notification opens where the bell's row does.
+      href: "/projects/akinozer-com/tasks/WEB-3#decision",
     });
     expect(attentionSnapshot(db, "u_nobody")).toEqual({ waiting: 0, items: [] });
   });
@@ -596,6 +604,62 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
       ["n_proj", `/projects/${store.slug}`],
       ["n_org", null],
     ]);
+  });
+
+  /**
+   * Ruling 497: a row opens the exact thing its notifier said it is about, and
+   * only inside the project the row names, so the orphan rule (F18-1) and a
+   * member's removal still decide whether it opens at all.
+   *
+   * Canaries: resolve the stored link without `opensInside` and the foreign and
+   * lookalike rows open other projects; drop the stored link and every row
+   * opens its task's top, which is the dead click this ruling fixes.
+   */
+  it("ruling 497: a row opens the link its notifier recorded, inside its own project only", () => {
+    const store = setupProjectedStore(ctx);
+    const uid = store.users.murat.id;
+    const slug = store.slug;
+    const row = (
+      id: string,
+      minute: number,
+      href: string | null,
+      extra: Partial<CreateNotificationInput> = {},
+    ) =>
+      createNotification(store.db, {
+        id,
+        userId: uid,
+        kind: "quality",
+        text: "t",
+        projectSlug: slug,
+        taskKey: "VIB-1",
+        href,
+        occurredAt: `2026-07-01T03:${String(minute).padStart(2, "0")}:00.000Z`,
+        ...extra,
+      });
+    row("event", 9, taskEventLink(slug, "VIB-1", "2026-07-01T02:59:00.123Z"));
+    row("decision", 8, taskDecisionLink(slug, "VIB-1"));
+    row("recs", 7, taskRecommendationsLink(slug, "VIB-1"));
+    row("proposal", 6, proposalLink(slug, "kp-0123456789"));
+    row("github", 5, projectGithubLink(slug), { taskKey: null });
+    row("goal", 4, goalLink(slug, "goal-2-link-3"), { taskKey: null });
+    row("foreign", 3, "/projects/other/tasks/OTH-1#decision");
+    row("lookalike", 2, `/projects/${slug}x/tasks/VIB-1`);
+    row("offsite", 1, "https://example.com/projects/x");
+    row("orphan", 0, "/projects/gone/tasks/GON-1#decision", { projectSlug: "gone", taskKey: "GON-1" });
+    expect(Object.fromEntries(listNotifications(store.db, uid).map((n) => [n.id, n.href]))).toEqual({
+      event: `/projects/${slug}/tasks/VIB-1#event-2026-07-01T02:59:00.123Z`,
+      decision: `/projects/${slug}/tasks/VIB-1#decision`,
+      recs: `/projects/${slug}/tasks/VIB-1#recommendations`,
+      proposal: `/projects/${slug}/controller#proposal-kp-0123456789`,
+      github: `/projects/${slug}/github`,
+      goal: `/projects/${slug}/controller#goal-2-link-3`,
+      // Not inside the row's project: the task it names, as before.
+      foreign: `/projects/${slug}/tasks/VIB-1`,
+      lookalike: `/projects/${slug}/tasks/VIB-1`,
+      offsite: `/projects/${slug}/tasks/VIB-1`,
+      // F18-1 still wins: a project that is gone opens nothing.
+      orphan: null,
+    });
   });
 
   it("B-FD5: an approval row on an acceptance-ready task with NO packet is waiting on the acceptor", () => {

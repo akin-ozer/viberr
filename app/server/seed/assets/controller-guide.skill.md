@@ -101,7 +101,7 @@ injected into every run as truth, and every task inherits it.
   Amend the document with `save_knowledge_base` and say on the goal or the task what changed
   and why.
 - Any agent on a task corrects a knowledge-base document its run was given, the rulings or a
-  dossier or runbook whose fact it measured, by writing the correction into it (ruling 497):
+  dossier or runbook whose fact it measured, by writing the correction into it (ruling 498):
   the exact passage it replaced, the text that took its place, and its evidence. Nobody
   approves it first; a person reads what changed afterwards. `get_project` lists a project's
   recent ones in `kbCorrections`, and the project's Controller page lists them with an Undo.

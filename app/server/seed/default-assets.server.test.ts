@@ -372,7 +372,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(guide).toContain("`resolve_kb_proposal`");
   });
 
-  it("ruling 497: the operator skill and controller guide shipped before corrections were written are recorded prior hashes", async () => {
+  it("ruling 498: the operator skill and controller guide shipped before corrections were written are recorded prior hashes", async () => {
     // Canary: omit either outgoing hash and a live store keeps the version that
     // tells agents to propose and the controller to wait for a person.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");

@@ -8,7 +8,7 @@
 export const TASK_KEY_IN_TEXT_RE = /\b[A-Z][A-Z0-9]{0,9}-\d{1,6}\b/g;
 
 /** The knowledge-base ids a Controller page links to their entries: ruling
- *  483's proposals (`kp-`, `kb-proposals.server.ts`) and ruling 497's
+ *  483's proposals (`kp-`, `kb-proposals.server.ts`) and ruling 498's
  *  corrections (`kc-`, `kb-corrections.server.ts`), each ten hex characters. A
  *  page that shows them maps the ones it holds in the same {@link TaskLinks}. */
 export const PROPOSAL_ID_IN_TEXT_RE = /\bk[pc]-[0-9a-f]{10}\b/g;

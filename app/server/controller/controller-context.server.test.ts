@@ -615,7 +615,7 @@ describe("gatherControllerContext", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    // Filed before ruling 497, and still standing in its document.
+    // Filed before ruling 498, and still standing in its document.
     const body = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
         taskKey: "VIB-142",

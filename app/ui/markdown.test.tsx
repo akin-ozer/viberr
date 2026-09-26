@@ -358,7 +358,7 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     const refs = [...container.querySelectorAll("a.kp-ref")];
     expect(refs.map((a) => a.getAttribute("href"))).toEqual([
       "#proposal-kp-9f258c9ef4",
-      // Ruling 497: a correction's id links the same way.
+      // Ruling 498: a correction's id links the same way.
       "#correction-kc-0123456789",
     ]);
     expect(refs.every((a) => !a.hasAttribute("target"))).toBe(true);

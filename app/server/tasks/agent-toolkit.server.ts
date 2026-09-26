@@ -115,7 +115,7 @@ const prose = normalizeEscapedNewlines;
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
 
-/** Rulings 483 and 497: the specialist's half of `correct_knowledge_doc`. */
+/** Rulings 483 and 498: the specialist's half of `correct_knowledge_doc`. */
 export const KB_CORRECTION_SPECIALIST_DESCRIPTION =
   "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run.";
 
@@ -344,6 +344,8 @@ export async function openAgentQuestionPacket(
     kind: "question",
     title: `${role} asks: ${packet.title}`,
     text: packet.body || "An engaged agent needs a human decision.",
+    // Ruling 497: the row opens the question's card, where it is answered.
+    about: "decision",
     // Ruling 361: the agent that asked, by name; the Operator only when it did.
     from:
       input.actorRef.kind === "agent"
@@ -761,7 +763,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   // it into the repo", an hour after the Site Engineer found the same stale
   // dossier fact, and the next directives still sent agents to the old lines.
   // Gated like `read_knowledge_doc`, on the grant itself: an agent corrects
-  // exactly the knowledge bases it was given. Ruling 497 writes the correction
+  // exactly the knowledge bases it was given. Ruling 498 writes the correction
   // as it is made, and a person undoes what they disagree with. Mounted after
   // `read_board`, so a knowledge base alone never widens U11's collaboration
   // gate.

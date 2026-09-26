@@ -1084,6 +1084,8 @@ async function addRecommendation(
         from: OPERATOR_NOTIFY_FROM,
         title: `Operator recommends: ${rec.label}`,
         text: reasoning,
+        // Ruling 497: the row opens the card, where it is applied.
+        about: "recommendations",
       },
       ctx,
     );
@@ -1942,6 +1944,8 @@ export async function operatorOpenPacket(
           ? `Blocked, decision needed: ${title}`
           : `Decision needed: ${title}`,
       text: packet.body || title,
+      // Ruling 497: the row opens the packet, where it is decided.
+      about: "decision",
     },
     ctx,
   );
@@ -2121,13 +2125,13 @@ function kbsGivenToTaskRuns(
 
 /**
  * F39-1/F39-7 (pass 39, ruling 378), generalized by ruling 483 (F40-53) and
- * made a write by ruling 497: the operator CORRECTS a knowledge base, in the
+ * made a write by ruling 498: the operator CORRECTS a knowledge base, in the
  * document itself.
  *
  * Ruling 378 gave it a proposal against the project's rulings only; ruling 483
  * widened it to every knowledge base a run on the task holds (live in pass 40
  * the stale facts were in the akin-dossier and the deploy runbook, and the
- * operator answered "I'm not changing them myself"). Ruling 497 (owner,
+ * operator answered "I'm not changing them myself"). Ruling 498 (owner,
  * 2026-09-26: "No human can approve all of these while inspecting them
  * thoroughly") writes the correction as it is made: `replaces` is the exact
  * passage, `text` what takes its place, and a person undoes it from the
@@ -2347,6 +2351,7 @@ export async function operatorLeaseFiles(
         title: "Files leased by another task",
         text,
         occurredAt: at,
+        about: { event: at },
         from: OPERATOR_NOTIFY_FROM,
       },
       ctx,
@@ -3854,6 +3859,7 @@ export async function operatorFlagContextConflict(
       title: CONTEXT_CONFLICT_TITLE,
       text: event.text,
       occurredAt: event.occurredAt,
+      about: { event: event.occurredAt },
       // Ruling 361: the operator flagged the conflict (the event's own actor).
       from: OPERATOR_NOTIFY_FROM,
     },

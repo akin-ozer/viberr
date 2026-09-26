@@ -6,7 +6,7 @@
  * (review finding 6). CommonMark closes on a run of the same length or longer,
  * so one more than the longest run inside can never be matched.
  *
- * Its home since ruling 497: the controller's context read fences what people
+ * Its home since ruling 498: the controller's context read fences what people
  * and agents wrote, and a refused knowledge-base correction fences the
  * document's own lines back to the agent that must copy them exactly.
  */

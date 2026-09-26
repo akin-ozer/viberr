@@ -20,7 +20,7 @@ import {
 } from "./kb-corrections.server";
 
 /**
- * Ruling 497: an agent's knowledge-base correction is written into the
+ * Ruling 498: an agent's knowledge-base correction is written into the
  * document as it is made, the record keeps what it replaced, and a person's
  * undo puts that back. The owner: "No human can approve all of these while
  * inspecting them thoroughly."

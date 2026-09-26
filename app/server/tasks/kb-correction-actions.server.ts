@@ -16,7 +16,7 @@ import { toError } from "~/shared/errors";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 497: the task-side half of a knowledge-base correction, one
+ * Ruling 498: the task-side half of a knowledge-base correction, one
  * implementation for every agent that makes one — the operator (Claude tool
  * and Codex plan) and any specialist (its Claude tool) — and for the person who
  * undoes one. The store-side half, which writes the document and keeps the

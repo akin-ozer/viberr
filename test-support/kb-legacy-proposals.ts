@@ -1,7 +1,7 @@
 /**
  * Knowledge-base documents as rulings 378 and 483 left them: settled text, then
  * a "## Proposed corrections (not binding)" section of agents' proposals
- * (docs/architecture/file-formats.md §7). Ruling 497 ended the filing; stores
+ * (docs/architecture/file-formats.md §7). Ruling 498 ended the filing; stores
  * still hold such sections until someone closes them, so the reader, the
  * Controller page and the controller's tools are tested against documents
  * built here, byte for byte the way the filing wrote them.

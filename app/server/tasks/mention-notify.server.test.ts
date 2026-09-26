@@ -78,6 +78,39 @@ describe("notifyMentionedUsers", () => {
     }
   });
 
+  /**
+   * Ruling 497: a mention is about its comment, so the row opens on it (the
+   * comment writers all pass its time). Canary: drop the `href` line in
+   * `fanOutMentions` and the row opens the task's top.
+   */
+  it("links the row to the comment it quotes when the writer passes the comment's time", () => {
+    const store = setupTestStore(ctx);
+    notifyMentionedUsers(store.db, {
+      text: "@arda the review is clean.",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+      occurredAt: "2026-09-26T07:00:00.123Z",
+    });
+    notifyMentionedUsers(store.db, {
+      text: "@selin a writer with no time.",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      from: OPERATOR_FROM,
+    });
+    expect(
+      store.db.prepare(`SELECT user_id, href FROM notifications ORDER BY user_id`).all(),
+    ).toEqual(
+      [
+        {
+          user_id: store.users.arda.id,
+          href: `/projects/${store.slug}/tasks/VIB-1#event-2026-09-26T07:00:00.123Z`,
+        },
+        { user_id: store.users.selin.id, href: null },
+      ].sort((a, b) => a.user_id.localeCompare(b.user_id)),
+    );
+  });
+
   it("a multi-word display-name mention (@Arda Test) matches via its first token", () => {
     const store = setupTestStore(ctx);
     const matched = notifyMentionedUsers(store.db, {

@@ -1011,12 +1011,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   // WEB-1 two sat unpromoted while the next packet asked the owner to type the
   // "not binding" build command into Cloudflare. Org-admin gated like every
   // other knowledge-base write, because a proposal lives in an org knowledge
-  // base. Since ruling 497 nothing files a proposal; this closes the ones
+  // base. Since ruling 498 nothing files a proposal; this closes the ones
   // documents still hold.
   add(
     tool(
       "resolve_kb_proposal",
-      "Promote or dismiss one open knowledge-base proposal (ruling 483): an entry an agent filed, before corrections were written straight into the document (ruling 497), under \"Proposed corrections (not binding)\" in a knowledge-base document, listed in your turn context and in get_project's `openProposals` by id. Org admins only, and only when the person asked you to: their Promote, Dismiss and Promote all buttons on a project's Controller page send you exactly that request. `promote` writes `text` into the document's SETTLED text, in place of `replaces` (the exact passage it corrects, which must stand once in the settled text; read the document first with read_knowledge_base_doc) or appended to the settled text when `replaces` is omitted, and removes the entry in the same write. `dismiss` removes the entry and changes nothing else. `reason` is recorded on the audit row.",
+      "Promote or dismiss one open knowledge-base proposal (ruling 483): an entry an agent filed, before corrections were written straight into the document (ruling 498), under \"Proposed corrections (not binding)\" in a knowledge-base document, listed in your turn context and in get_project's `openProposals` by id. Org admins only, and only when the person asked you to: their Promote, Dismiss and Promote all buttons on a project's Controller page send you exactly that request. `promote` writes `text` into the document's SETTLED text, in place of `replaces` (the exact passage it corrects, which must stand once in the settled text; read the document first with read_knowledge_base_doc) or appended to the settled text when `replaces` is omitted, and removes the entry in the same write. `dismiss` removes the entry and changes nothing else. `reason` is recorded on the audit row.",
       {
         id: z.string().describe("The proposal's id, e.g. 'kp-3f9a1c2b7d'."),
         action: z.enum(["promote", "dismiss"]),
@@ -1064,14 +1064,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "resolve_kb_proposal",
   );
 
-  // Ruling 497: an agent's knowledge-base correction is written as it is made,
+  // Ruling 498: an agent's knowledge-base correction is written as it is made,
   // and a person undoes the ones they disagree with. Their Undo on a project's
   // Controller page does it directly; this is the same undo for a person who
   // asks in a conversation. Org-admin gated like every knowledge-base write.
   add(
     tool(
       "undo_kb_correction",
-      "Undo one knowledge-base correction an agent wrote (ruling 497), by its id (`kc-` and ten hex characters; get_project lists a project's in `kbCorrections`). Org admins only, and only when the person asked you to. It puts back the passage the correction replaced (or removes the text it added) and notes the undo on the task that made it; an agent that later tries to write the same text into that document is refused and told who undid it and why, so pass the person's `reason`. It refuses, writing nothing, when the document was edited since: then read it with read_knowledge_base_doc and change it with save_knowledge_base.",
+      "Undo one knowledge-base correction an agent wrote (ruling 498), by its id (`kc-` and ten hex characters; get_project lists a project's in `kbCorrections`). Org admins only, and only when the person asked you to. It puts back the passage the correction replaced (or removes the text it added) and notes the undo on the task that made it; an agent that later tries to write the same text into that document is refused and told who undid it and why, so pass the person's `reason`. It refuses, writing nothing, when the document was edited since: then read it with read_knowledge_base_doc and change it with save_knowledge_base.",
       {
         id: z.string().describe("The correction's id, e.g. 'kc-3f9a1c2b7d'."),
         projectSlug: z
@@ -1892,7 +1892,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             ...p,
             rulings: p.kb === (fm.rulingsKb ?? null),
           })),
-          // Ruling 497: what agents on this project's tasks wrote into a
+          // Ruling 498: what agents on this project's tasks wrote into a
           // knowledge base, newest first, each with its id for
           // undo_kb_correction and whether a person already undid it.
           kbCorrections: listKbCorrections(db, { projectSlug: slug })

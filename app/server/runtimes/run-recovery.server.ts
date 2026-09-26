@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
-import { createNotification } from "~/server/projections/notifications.server";
+import { createNotification, taskEventLink } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses, compactionRunId } from "./run-processes.server";
 import {
@@ -134,7 +134,13 @@ export interface FinalizeOrphanedRunsDeps {
  * task with no owner has nobody to tell, and a failure here must never take
  * boot recovery down with it.
  */
-function notifyCappedTask(db: DatabaseSync, projectSlug: string, taskKey: string): void {
+function notifyCappedTask(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  /** Ruling 497: the restart note's time, so the row opens on it. */
+  noteAt: string,
+): void {
   try {
     // SAFETY: `owner_user_id` is a declared column of `task_projections`
     // (0001_baseline); the SELECT names it and nothing else, and `.get`
@@ -156,6 +162,7 @@ function notifyCappedTask(db: DatabaseSync, projectSlug: string, taskKey: string
         "crash-loop guard. Run the operator from the task page when you are ready.",
       projectSlug,
       taskKey,
+      href: taskEventLink(projectSlug, taskKey, noteAt),
     });
   } catch (error) {
     logger.warn("capped-recovery notification failed", {
@@ -369,8 +376,9 @@ export function finalizeOrphanedRuns(
         .filter(Boolean)
         .join("; ");
       try {
+        const noteAt = new Date().toISOString();
         await appendTimelineEvent(ref, {
-          occurredAt: new Date().toISOString(),
+          occurredAt: noteAt,
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: "Interrupted by a restart",
@@ -402,7 +410,7 @@ export function finalizeOrphanedRuns(
             t.taskKey,
           );
           rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
-          notifyCappedTask(db, t.projectSlug, t.taskKey);
+          notifyCappedTask(db, t.projectSlug, t.taskKey, noteAt);
         }
       } catch (error) {
         logger.warn("restart note failed", {

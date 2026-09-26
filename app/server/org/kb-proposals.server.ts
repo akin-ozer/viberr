@@ -18,7 +18,7 @@ import { writeStoreDoc } from "./store-files.server";
  * binding)" (ruling 378's "## Proposed (not binding)" before that), for a
  * person to promote into the settled text or dismiss.
  *
- * Ruling 497 ended the filing. The owner, 2026-09-26: "proposal spam is
+ * Ruling 498 ended the filing. The owner, 2026-09-26: "proposal spam is
  * exhausting, it should be easier to get them merged to the kb. No human can
  * approve all of these while inspecting them thoroughly." An agent's correction
  * is now written into the settled text as it is made, and a person undoes the
@@ -228,7 +228,7 @@ export function looseText(value: string): string {
 
 /**
  * Where a document's proposals section stands, heading to section end, or null
- * when it has none. Ruling 497 corrects the settled text around it: a passage
+ * when it has none. Ruling 498 corrects the settled text around it: a passage
  * an entry merely quotes is not in the document.
  */
 export function legacyProposalsSpan(raw: string): { start: number; end: number } | null {
@@ -461,7 +461,7 @@ export async function resolveKbProposal(
 
 /** The path a person opens a knowledge-base document at: Instance settings,
  *  with that knowledge base's browser open on the document (org admins). A
- *  proposal's "Open document" and a correction's (ruling 497) both go there. */
+ *  proposal's "Open document" and a correction's (ruling 498) both go there. */
 export function kbDocHref(place: { kb: string; doc: string }): string {
   const params = new URLSearchParams({ tab: "resources", kb: place.kb, doc: place.doc });
   return `/org/settings?${params.toString()}`;

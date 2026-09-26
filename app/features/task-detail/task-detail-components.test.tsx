@@ -431,11 +431,11 @@ describe("TimelineItem", () => {
    * Ruling 483 (F40-59): a proposal asks a person to decide, and the event
    * used to carry no way to where that happens. Inside a project it links to
    * the project's Controller page, where the proposal is listed with its
-   * document and its Promote and Dismiss. Ruling 497: a correction an agent
+   * document and its Promote and Dismiss. Ruling 498: a correction an agent
    * wrote links there too, where it is reviewed and undone; a person's undo
    * owes nothing and links nowhere.
    */
-  it("rulings 483 and 497: a proposal and an agent's correction link to the Controller page's panel, and no other event does", () => {
+  it("rulings 483 and 498: a proposal and an agent's correction link to the Controller page's panel, and no other event does", () => {
     const href = "/projects/akinozer-com/controller";
     const proposal = ev({
       type: "proposal",
@@ -498,7 +498,7 @@ describe("TimelineItem", () => {
       // kind, never a "Review verdict". CANARY: drop `proposal` from EVENT_META
       // and the fallback names the raw type on an unstyled node.
       ["proposal", "proposal", "Proposal"],
-      // Ruling 497: a correction an agent wrote, in the proposal's tint, named
+      // Ruling 498: a correction an agent wrote, in the proposal's tint, named
       // for what it touched.
       ["kb_correction", "proposal", "Knowledge base"],
       ["transition", "transition", "Transition request"],

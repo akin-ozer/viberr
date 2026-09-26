@@ -3853,6 +3853,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(notifs.length).toBeGreaterThan(0);
     expect(notifs.every((n) => n.kind === "quality")).toBe(true);
     expect(notifs.every((n) => /run failed/.test(n.text))).toBe(true);
+    // Ruling 497: each row opens the failure's own event, which says why.
+    // CANARY: drop `about` from `failureNotice` and the rows open the top.
+    const failure = taskFile().parsed.timeline.find((e) => e.type === "blocked")!;
+    expect(
+      new Set(
+        store.db
+          .prepare(`SELECT href FROM notifications WHERE task_key = 'VIB-1'`)
+          .all()
+          .map((row) => row.href),
+      ),
+    ).toEqual(new Set([`/projects/${store.slug}/tasks/VIB-1#event-${failure.occurredAt}`]));
     expect(taskFile().parsed.frontmatter.waiting).toBe("human");
   });
 });

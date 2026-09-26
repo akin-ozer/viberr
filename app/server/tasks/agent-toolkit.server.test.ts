@@ -859,7 +859,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      * is the KB grant, not U11's collaboration grants — an agent granted a
      * knowledge base and nothing else still has to be able to read it.
      */
-    it("rulings 283, 483 and 497: a KB grant alone mounts read_knowledge_doc and correct_knowledge_doc, and nothing else", () => {
+    it("rulings 283, 483 and 498: a KB grant alone mounts read_knowledge_doc and correct_knowledge_doc, and nothing else", () => {
       const store = setupTestStore(ctx);
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
@@ -892,10 +892,10 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      * Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
      * bases wrong corrects the document. Live on WEB-3 the Platform Engineer
      * wrote "the knowledge-base runbook is read-only to me", an hour after the
-     * Site Engineer found the same stale dossier fact. Ruling 497 writes the
+     * Site Engineer found the same stale dossier fact. Ruling 498 writes the
      * correction into the settled text as it is made.
      */
-    it("rulings 483 and 497: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
+    it("rulings 483 and 498: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
       const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
       const { writeStoreDoc } = await import("~/server/org/store-files.server");
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");

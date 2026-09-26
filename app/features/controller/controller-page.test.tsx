@@ -1977,7 +1977,7 @@ describe("ruling 476: the controller page and its goals rail", () => {
  * where the owner looks, with a count, and Promote and Dismiss ask the
  * controller to carry the decision out. Live on WEB-1 two operator proposals
  * existed only as timeline events that looked like failed reviews, and nothing
- * brought them back. Since ruling 497 nothing files one, and the ones that
+ * brought them back. Since ruling 498 nothing files one, and the ones that
  * documents still hold are listed under the corrections, with Promote all.
  */
 describe("the project's open knowledge-base proposals (ruling 483)", () => {
@@ -2062,15 +2062,45 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     expect(within(memberPanel).getByText("An org admin promotes or dismisses proposals.")).toBeTruthy();
     expect(within(memberPanel).queryByRole("link", { name: "Open document" })).toBeNull();
   });
+
+  /**
+   * Ruling 497: a proposal's notification opens its entry here. The router
+   * arrives by `pushState`, which never updates `:target`, so the page marks
+   * the entry itself. One promoted or dismissed since has left the panel, and
+   * the notification still lands on the panel.
+   *
+   * Canaries: drop `data-targeted` from the entry and nothing marks it; drop
+   * the fallback in `revealKnowledge` and the second link moves nothing.
+   */
+  it("ruling 497: a proposal's notification marks and focuses its entry; a closed one lands on the proposals list", async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    renderPage(view({ proposals: [proposal] }), "#proposal-kp-0123456789");
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    const entry = panel.querySelector("#proposal-kp-0123456789")!;
+    await waitFor(() => expect(entry.hasAttribute("data-targeted")).toBe(true));
+    // The mark is drawn by the render, the focus by the effect after it.
+    await waitFor(() => expect(document.activeElement).toBe(entry));
+    cleanup();
+
+    focus.mockClear();
+    renderPage(view({ proposals: [proposal] }), "#proposal-kp-ffffffffff");
+    const after = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(after.querySelector("[data-targeted]")).toBeNull();
+    // Ruling 498: the proposals sit inside the Knowledge base panel, so a
+    // closed one's link lands on their list.
+    const list = after.querySelector("#kb-proposals")!;
+    await waitFor(() => expect(focus.mock.contexts).toContain(list));
+    focus.mockRestore();
+  });
 });
 
 /**
- * Ruling 497: the owner stopped approving each knowledge-base correction ("No
+ * Ruling 498: the owner stopped approving each knowledge-base correction ("No
  * human can approve all of these while inspecting them thoroughly"). The panel
  * lists what agents wrote, each passage before and after with its evidence,
  * and an org admin's Undo puts one back, directly, after a confirm.
  */
-describe("the project's knowledge-base corrections (ruling 497)", () => {
+describe("the project's knowledge-base corrections (ruling 498)", () => {
   const correction = {
     id: "kc-0123456789",
     kb: "akinozer-deploy-runbook",
@@ -2144,6 +2174,24 @@ describe("the project's knowledge-base corrections (ruling 497)", () => {
     expect(within(memberPanel).queryByRole("button", { name: "Undo" })).toBeNull();
     expect(within(memberPanel).getByText("An org admin can undo a correction.")).toBeTruthy();
     expect(within(memberPanel).queryByRole("link", { name: "Open document" })).toBeNull();
+  });
+
+  it("a correction's link marks and focuses its entry; one no longer listed lands on the panel", async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    renderPage(view({ corrections: { shown: [correction], total: 1 } }), "#correction-kc-0123456789");
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    const entry = panel.querySelector("#correction-kc-0123456789")!;
+    // CANARY: drop `data-targeted` from the entry and nothing marks it.
+    await waitFor(() => expect(entry.hasAttribute("data-targeted")).toBe(true));
+    await waitFor(() => expect(document.activeElement).toBe(entry));
+    cleanup();
+
+    focus.mockClear();
+    renderPage(view({ corrections: { shown: [correction], total: 25 } }), "#correction-kc-ffffffffff");
+    const after = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(after.querySelector("[data-targeted]")).toBeNull();
+    await waitFor(() => expect(focus.mock.contexts).toContain(after));
+    focus.mockRestore();
   });
 
   it("says what fills it when nothing has been corrected, and how many it leaves out", async () => {

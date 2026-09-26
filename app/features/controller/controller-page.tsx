@@ -8,7 +8,6 @@ import {
   createContext,
   Fragment,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -38,6 +37,8 @@ import { Markdown } from "~/ui/markdown";
 import { RichText } from "~/ui/rich-text";
 import { Pill, type PillKind } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
+import { revealTarget, useHashTarget } from "~/ui/use-hash-target";
+import { correctionAnchor, proposalAnchor } from "~/shared/page-anchors";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -246,7 +247,7 @@ export function ControllerPage({
             buries the list above it nor stretches the page beside it. */}
         <aside className="ctl-side">
           <ConversationList view={view} />
-          {/* Ruling 497: what the board's agents changed in its knowledge,
+          {/* Ruling 498: what the board's agents changed in its knowledge,
               where the owner looks, before the chains; with ruling 483's
               proposals that documents still hold. */}
           {view.corrections && view.proposals !== null && projectSlug && (
@@ -604,15 +605,15 @@ function Transcript({
   useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
   // A reply that names an open knowledge-base proposal links it to its entry
   // in the panel beside the transcript (owner, 2026-09-25), and one that names
-  // a correction to its entry there too (ruling 497).
+  // a correction to its entry there too (ruling 498).
   const messageLinks = useMemo(
     () =>
       view.proposals?.length || view.corrections?.shown.length
         ? {
             ...view.taskLinks,
-            ...Object.fromEntries((view.proposals ?? []).map((p) => [p.id, `#proposal-${p.id}`])),
+            ...Object.fromEntries((view.proposals ?? []).map((p) => [p.id, `#${proposalAnchor(p.id)}`])),
             ...Object.fromEntries(
-              (view.corrections?.shown ?? []).map((c) => [c.id, `#correction-${c.id}`]),
+              (view.corrections?.shown ?? []).map((c) => [c.id, `#${correctionAnchor(c.id)}`]),
             ),
           }
         : view.taskLinks,
@@ -1032,46 +1033,32 @@ const HISTORY_PREVIEW = 6;
 /**
  * Ruling 419(h): open the chain a link pointed at (`#goal-4`) and bring it into
  * view. Only the nearest scroller moves (the rail on a desktop, the page column
- * on a phone): `scrollIntoView` would move the document as well, which the
- * shell never lets a person scroll back.
+ * on a phone, `revealTarget`).
  *
  * Ruling 476(b): a link's own row is a target too (`#goal-4-link-6`, from the
  * task page's chain chip and from a wait entry naming a goal link). Its chain
  * opens, the row comes to the top of the scroller and takes focus, and the
  * returned id marks it (`data-targeted`). A keyboard or screen-reader user
  * following "goal-1 link 5" used to land on goal-1's summary, 5 rows short.
+ *
+ * Ruling 497: a goal notification opens its chain here, and a second click on
+ * it, from this page, brings the chain back into view (`useHashTarget`).
  */
 function useTargetedGoal(): string {
-  const location = useLocation();
-  const id = hashTarget(location.hash);
-  useEffect(() => {
-    if (!id) return;
-    const target = document.getElementById(id);
-    const card = target?.closest("details.ctl-goal");
-    if (!target || !(card instanceof HTMLDetailsElement)) return;
-    card.open = true;
-    let box = card.parentElement;
-    while (
-      box &&
-      !(box.scrollHeight > box.clientHeight && /(auto|scroll)/.test(getComputedStyle(box).overflowY))
-    ) {
-      box = box.parentElement;
-    }
-    if (box) box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
-    const focusable = target === card ? card.querySelector("summary") : target;
-    focusable?.focus({ preventScroll: true });
-  }, [id]);
-  return id;
+  return useHashTarget(anyId, true, revealGoal) ?? "";
 }
 
-/** The element id a URL's hash names; a hash that is not valid percent-encoding
- *  names nothing (the id is read while rendering now, so it must not throw). */
-function hashTarget(hash: string): string {
-  try {
-    return decodeURIComponent(hash.slice(1));
-  } catch {
-    return "";
-  }
+function anyId(): boolean {
+  return true;
+}
+
+function revealGoal(id: string): boolean {
+  const target = document.getElementById(id);
+  const card = target?.closest("details.ctl-goal");
+  if (!target || !(card instanceof HTMLDetailsElement)) return false;
+  card.open = true;
+  revealTarget(target, target === card ? card.querySelector("summary") : target);
+  return true;
 }
 
 /**

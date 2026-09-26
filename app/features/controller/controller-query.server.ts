@@ -88,9 +88,9 @@ export interface ControllerSurfaceView {
    */
   plannedElsewhere?: PlannedElsewhere[];
   /** Ruling 483 (F40-59): the open knowledge-base proposals agents filed from
-   *  this project's tasks before ruling 497. Project surface only. */
+   *  this project's tasks before ruling 498. Project surface only. */
   proposals: KbProposalView[] | null;
-  /** Ruling 497: the knowledge-base corrections agents on this project's
+  /** Ruling 498: the knowledge-base corrections agents on this project's
    *  tasks wrote, newest first. Project surface only. */
   corrections: KbCorrectionsView | null;
   viewerOwnsActive: boolean;
@@ -119,7 +119,7 @@ export interface KbProposalView {
   docHref: string | null;
 }
 
-/** Ruling 497: one knowledge-base correction an agent wrote, as the project
+/** Ruling 498: one knowledge-base correction an agent wrote, as the project
  *  controller page lists it. The passages are clipped for the page; the
  *  document and the record hold them whole. */
 export interface KbCorrectionView {
@@ -272,7 +272,7 @@ function projectProposals(
   }));
 }
 
-/** Ruling 497: corrections the page lists before the rest are left to the
+/** Ruling 498: corrections the page lists before the rest are left to the
  *  audit log and to `get_project`. */
 const CORRECTIONS_SHOWN = 20;
 
@@ -282,7 +282,7 @@ function clipped(value: string, max: number): string {
 }
 
 /**
- * Ruling 497: what the board's agents changed in the knowledge every run
+ * Ruling 498: what the board's agents changed in the knowledge every run
  * reads, where the owner looks, with Undo. The owner stopped approving each
  * correction ("No human can approve all of these while inspecting them
  * thoroughly"); this list is what they read afterwards instead.

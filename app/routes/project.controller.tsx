@@ -184,7 +184,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       return { ok: true as const, toast: result.message };
     }
     if (intent === "kb-correction-undo") {
-      // Ruling 497: the Knowledge base panel's Undo, confirmed on the page.
+      // Ruling 498: the Knowledge base panel's Undo, confirmed on the page.
       // Direct, not through the controller: an undo is the recorded edit in
       // reverse, with nothing to compose. Org admins, because it edits an org
       // knowledge base.

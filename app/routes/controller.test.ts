@@ -156,12 +156,12 @@ describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s
 });
 
 /**
- * Ruling 497: the Knowledge base panel's Undo posts `kb-correction-undo`, and
+ * Ruling 498: the Knowledge base panel's Undo posts `kb-correction-undo`, and
  * the route undoes the correction itself, no controller turn, for an org admin
  * only: the undo edits an org knowledge base. Canary: drop the org-admin check
  * and a member rewrites what every run reads.
  */
-describe("POST intent=kb-correction-undo on the project surface (ruling 497)", () => {
+describe("POST intent=kb-correction-undo on the project surface (ruling 498)", () => {
   it("an org admin undoes a correction; a member is refused and nothing changes", async () => {
     const { readFileSync } = await import("node:fs");
     const path = await import("node:path");

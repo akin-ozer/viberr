@@ -206,7 +206,7 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
-    // Ruling 497 (owner, 2026-09-26): before "Keeping a project's rulings
+    // Ruling 498 (owner, 2026-09-26): before "Keeping a project's rulings
     // current" said agents' corrections are written straight into the document
     // and named `undo_kb_correction` and `kbCorrections`, with proposals only
     // as the ones documents still hold, and before the gates line stopped
@@ -372,7 +372,7 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
-    // Ruling 497 (owner, 2026-09-26): before `propose_kb_correction` became
+    // Ruling 498 (owner, 2026-09-26): before `propose_kb_correction` became
     // `correct_knowledge_doc`, which writes the correction into the document
     // (the exact passage it replaces, the text in its place) instead of filing
     // a proposal a person had to promote.

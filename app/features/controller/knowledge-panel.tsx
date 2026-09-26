@@ -4,6 +4,13 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
+import { revealTarget, useHashTarget } from "~/ui/use-hash-target";
+import {
+  correctionAnchor,
+  KB_CORRECTIONS_ANCHOR,
+  KB_PROPOSALS_ANCHOR,
+  proposalAnchor,
+} from "~/shared/page-anchors";
 import type {
   KbCorrectionsView,
   KbCorrectionView,
@@ -13,7 +20,7 @@ import { CONNECT_TO_SEND } from "./not-connected";
 import { useOpResultToast, type ActionResult } from "./op-result";
 
 /**
- * Ruling 497: what the board's agents changed in the knowledge every run
+ * Ruling 498: what the board's agents changed in the knowledge every run
  * reads, where the owner looks, with Undo.
  *
  * Rulings 378 and 483 queued every correction here as a proposal, and each
@@ -26,11 +33,37 @@ import { useOpResultToast, type ActionResult } from "./op-result";
  * (direct and audited, never a controller turn: an undo is the recorded edit in
  * reverse, with nothing to compose).
  *
- * The proposals agents filed before ruling 497 still stand in their documents
+ * The proposals agents filed before ruling 498 still stand in their documents
  * until someone closes them, so they are listed under the corrections with
  * ruling 483's Promote and Dismiss, which ask the controller in this
  * conversation, and a Promote all that asks once for the lot.
  */
+
+/** Ruling 497's reveal, for the places this panel holds: the panel, a
+ *  correction's entry, the proposals list and a proposal's entry (a proposal's
+ *  notification opens `#proposal-kp-…`; a correction's timeline entry and a
+ *  reply naming its id open `#correction-kc-…`). */
+function isKnowledgeTarget(id: string): boolean {
+  return (
+    id === KB_CORRECTIONS_ANCHOR ||
+    id === KB_PROPOSALS_ANCHOR ||
+    id.startsWith(correctionAnchor("")) ||
+    id.startsWith(proposalAnchor(""))
+  );
+}
+
+/** An entry the panel no longer lists (a proposal closed since, a correction
+ *  older than the newest shown) leaves its list, or the panel, in view: that
+ *  is still where the link was pointing. */
+function revealKnowledge(id: string): boolean {
+  const target =
+    document.getElementById(id) ??
+    (id.startsWith(proposalAnchor("")) ? document.getElementById(KB_PROPOSALS_ANCHOR) : null) ??
+    document.getElementById(KB_CORRECTIONS_ANCHOR);
+  if (!target) return false;
+  revealTarget(target);
+  return true;
+}
 
 /** The request each proposal button sends, in the words the controller acts on. */
 export function proposalRequest(
@@ -42,7 +75,7 @@ export function proposalRequest(
     : `Dismiss knowledge-base proposal ${p.id} in ${p.kb}/${p.doc} with resolve_kb_proposal, leaving the settled text as it is. I decided against it on the Controller page.`;
 }
 
-/** Ruling 497: the one request that clears the proposals filed before it. */
+/** Ruling 498: the one request that clears the proposals filed before it. */
 export function promoteAllRequest(count: number): string {
   return (
     `Promote all ${count} open knowledge-base proposals on this board (get_project lists them in openProposals). ` +
@@ -62,7 +95,7 @@ export function KnowledgePanel({
   onAsk,
 }: {
   corrections: KbCorrectionsView;
-  /** The proposals filed before ruling 497 that still stand. */
+  /** The proposals filed before ruling 498 that still stand. */
   proposals: KbProposalView[];
   projectSlug: string;
   /** Org admins: an undo, a promote and a dismiss edit an org knowledge base. */
@@ -82,8 +115,13 @@ export function KnowledgePanel({
   const taskHref = (key: string) =>
     `/projects/${encodeURIComponent(projectSlug)}/tasks/${encodeURIComponent(key)}`;
   const { shown, total } = corrections;
+  const targeted = useHashTarget(isKnowledgeTarget, true, revealKnowledge);
   return (
-    <section className="panel ctl-proposals" id="kb-corrections" aria-labelledby="kb-corrections-h">
+    <section
+      className="panel ctl-proposals"
+      id={KB_CORRECTIONS_ANCHOR}
+      aria-labelledby="kb-corrections-h"
+    >
       <div className="panel-head">
         <Icon name="edit" />
         <h2 id="kb-corrections-h">Knowledge base</h2>
@@ -98,7 +136,14 @@ export function KnowledgePanel({
       ) : (
         <ul className="ctl-proposal-list">
           {shown.map((c) => (
-            <li key={c.id} id={`correction-${c.id}`} className="ctl-proposal" data-correction={c.id}>
+            <li
+              key={c.id}
+              id={correctionAnchor(c.id)}
+              tabIndex={-1}
+              className="ctl-proposal"
+              data-correction={c.id}
+              data-targeted={correctionAnchor(c.id) === targeted || undefined}
+            >
               <div className="ctl-proposal-head">
                 <Pill kind="info" sm>
                   {c.rulings ? "Ruling" : "Knowledge base"}
@@ -184,6 +229,7 @@ export function KnowledgePanel({
           sending={sending}
           onAsk={onAsk}
           taskHref={taskHref}
+          targeted={targeted}
         />
       )}
       {confirmUndo && (
@@ -231,6 +277,7 @@ function LegacyProposals({
   sending,
   onAsk,
   taskHref,
+  targeted,
 }: {
   proposals: KbProposalView[];
   canResolve: boolean;
@@ -238,6 +285,8 @@ function LegacyProposals({
   sending: boolean;
   onAsk: (text: string) => void;
   taskHref: (key: string) => string;
+  /** The id the URL's hash names, when the panel claims it. */
+  targeted: string | null;
 }) {
   const [asked, setAsked] = useState<{ id: string; action: "promote" | "dismiss" | "all" } | null>(
     null,
@@ -250,7 +299,7 @@ function LegacyProposals({
   const inFlight = (action: "promote" | "dismiss" | "all", id: string) =>
     sending && asked?.id === id && asked.action === action;
   return (
-    <div id="kb-proposals" className="ctl-proposals" data-proposal-count={proposals.length}>
+    <div id={KB_PROPOSALS_ANCHOR} className="ctl-proposals" data-proposal-count={proposals.length}>
       <div className="ctl-proposal-head">
         <h3 className="fine">Open proposals ({proposals.length})</h3>
         {canResolve && proposals.length > 1 && (
@@ -276,7 +325,14 @@ function LegacyProposals({
       </p>
       <ul className="ctl-proposal-list">
         {proposals.map((p) => (
-          <li key={p.id} id={`proposal-${p.id}`} className="ctl-proposal" data-proposal={p.id}>
+          <li
+            key={p.id}
+            id={proposalAnchor(p.id)}
+            tabIndex={-1}
+            className="ctl-proposal"
+            data-proposal={p.id}
+            data-targeted={proposalAnchor(p.id) === targeted || undefined}
+          >
             <div className="ctl-proposal-head">
               <Pill kind="info" sm>
                 {p.rulings ? "Ruling" : "Knowledge base"}

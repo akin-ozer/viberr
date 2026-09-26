@@ -2216,7 +2216,7 @@ const OPERATOR_PLAN_TOOLS = [
   // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
   // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`, generalized by
-  // ruling 483 into `propose_kb_correction` and made a write by ruling 497 as
+  // ruling 483 into `propose_kb_correction` and made a write by ruling 498 as
   // `correct_knowledge_doc`. Every agent on the pass-39 instance ran on Codex,
   // so a tool that exists only on the Claude toolkit would have been
   // unreachable by the operator that actually found the false ruling. `text`
@@ -2271,7 +2271,7 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // packet's own grant.
   set_dependencies: ["generate-packets"],
   // F39-1/F39-7: same gate as `flag_context_conflict`, the typed event it
-  // posts. Ruling 497 made the correction a write; a person undoes one from
+  // posts. Ruling 498 made the correction a write; a person undoes one from
   // the Controller page rather than gating each (owner, 2026-09-26).
   correct_knowledge_doc: ["append-typed-events"],
   // Ruling 417: a lease orders DELIVERIES, so it rides delivery authority —
@@ -3318,7 +3318,7 @@ async function executeCodexPlan(
           }
           break;
         case "correct_knowledge_doc":
-          // F39-1/F39-7 (pass 39), rulings 483 and 497: `kbSource` is
+          // F39-1/F39-7 (pass 39), rulings 483 and 498: `kbSource` is
           // `<kb>/<doc>` (or a bare rulings document), `text` what the document
           // should say, `reason` the exact passage it replaces, `repoSource`
           // the evidence that proves it. Reuses the plan's existing string
