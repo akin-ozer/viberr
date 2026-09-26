@@ -632,6 +632,28 @@ describe("viberr_controller.get_github_state", () => {
   });
 
   /**
+   * Ruling 496 (F40-72): `checksUnread.at` is when GitHub first refused the
+   * read, not the last pass that met it, and this tool is the one reader that
+   * sees it (no pill prints it, ruling 491), so its description says which.
+   */
+  it("ruling 496: the description says `checksUnread.at` is when the refusal was first seen", async () => {
+    // CANARY: drop the clause from the description.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const user = findUserById(app.db, ids.owner)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: SLUG,
+    });
+    const tool = toolkit.tools.find((t) => t.name === "get_github_state")!;
+    expect(tool.description).toContain(
+      "`at` is when that refusal was first seen, not the last check",
+    );
+  });
+
+  /**
    * The D2 emergency override reaches this read as well — and it is AUDITED,
    * which is the condition the owner attached to it: an org admin reading a
    * board they are not a member of leaves a row naming what they read.

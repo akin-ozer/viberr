@@ -464,10 +464,12 @@ export function prChecksRead(pr: PrRef | null): boolean {
   return pr?.checks !== undefined && pr.checks !== null;
 }
 
-/** Ruling 360: the refused read, as the surfaces print it. */
+/** Ruling 360: the refused read, as the GitHub view's data and the
+ *  controller's `get_github_state` carry it (no pill prints it, ruling 491). */
 export interface PrChecksUnread {
   status: number | null;
   message: string;
+  /** Ruling 496: when this refusal was first seen, not the last pass that met it. */
   at: string;
 }
 

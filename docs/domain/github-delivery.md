@@ -693,6 +693,16 @@ the tool answers, and since ruling 494 every Viberr push that moves a task branc
 the same before its caller returns (§3 step 5). The reconciler never mints a PR link and never downgrades `merged` or
 `accepted`.
 
+A pass writes only what changed (DG-3). When the `pr` and `github` caches it builds equal
+the file's, it leaves `task.md` untouched, rebuilds no projection (so no open page
+revalidates) and, on a poller tick (`skipUnchangedProvenance`), writes no
+`github.reconcile` row unless the sync verdict or the compared head changed (below). The
+comparison is of the caches as the file parses them, so nothing in them may move on a pass
+over an unchanged GitHub. The pass stamps its own clock in two places, each when something
+happens, and carries the time after: `pr.closure.at` when the close is recorded, and
+`pr.checksUnread.at` when a refusal is first seen. It also sets the `pr` keys in the order
+the parse returns them, since a key out of that order compared as a change (ruling 496).
+
 Facts it records beside the state:
 
 - **Commits** (`github.commits`, ruling 187): each entry carries `pushed` — whether the
@@ -706,8 +716,10 @@ Facts it records beside the state:
   they were read at, capped at `PR_PATHS_MAX` (300) with `truncated`. The review queue
   and the operator snapshot compare them across open PRs (`prPathOverlaps`).
 - **Checks** (ruling 360): a check-runs read GitHub refuses is kept as
-  `pr.checksUnread {status, message}` until a read succeeds, and the PR card, the accept
-  dialog and the GitHub page say the checks could not be read, with GitHub's reason. A
+  `pr.checksUnread {status, message, at}` until a read succeeds. `at` is when the refusal
+  was first seen: a later pass that meets the same status and message on the same PR keeps
+  the record, and a different refusal, or a refusal on another PR, is stamped anew (ruling
+  496). No pill shows it (ruling 491); the controller's `get_github_state` carries it. A
   403 there flags the advisory `checks:read` scope (§7). `checksRead` in
   `get_github_state` separates "never read" from "read, zero checks" (ruling 276).
 - **Sync verdict**: the branch pill reads `merged`, `behind_main`, `synced`, `unknown`
