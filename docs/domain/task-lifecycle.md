@@ -749,13 +749,14 @@ them.
    the person reads the gate's sentence with its way out instead of "GitHub refuses to
    merge ...". No surface offers an acceptance the gate will refuse: the task page's
    recommendation card prints the refusal as an alert and its Apply refuses the click,
-   the accept dialog prints it above a disabled confirm, the GitHub card wears the
-   "conflicts" pill, and the reconciler withdraws a pending `accept_completion` card the
-   moment `mergeable` flips to conflicting, with a "Conflict:" note on the timeline, and
-   an open decision packet offering the acceptance too, telling the watchers why and
-   waking the operator (`pr-conflicting`, ruling 475(b)). After every merge Viberr
-   re-reads the project's other open PRs (`recheckOpenReviewPrs`), so a sibling the merge
-   put in conflict flips before anyone presses its Accept. The accept dialog also says
+   the accept dialog prints it above a disabled confirm, the GitHub card shows its
+   "Conflicts" status row (ruling 511), and the reconciler withdraws a pending
+   `accept_completion` card the moment `mergeable` flips to conflicting, with a
+   "Conflict:" note on the timeline, and an open decision packet offering the acceptance
+   too, telling the watchers why and waking the operator (`pr-conflicting`, ruling
+   475(b)). After every merge Viberr re-reads the project's other open PRs
+   (`recheckOpenReviewPrs`), so a sibling the merge put in conflict flips before anyone
+   presses its Accept. The accept dialog also says
    what CI reports when the checks are not green (failing or pending); checks are not a
    gate (ruling 304). Its "Collides" row names every other open PR that changes a path
    this one changes ("Merging this will likely put WEB-2's PR #3 in conflict on

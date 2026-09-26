@@ -4462,6 +4462,33 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
     }
   });
 
+  it("ruling 511: the PR card's status marks keep the pills' tones, under the bar", () => {
+    // CANARY: drop the done mark's fill, and a passing gate run reads grey
+    // (ruling 491: a pass is green); or give the section after the bar its
+    // hairline back, a grey rule drawn against the black.
+    expect(cascade(plain, ".pr-card > .gh-bar + *").get("border-top")).toBe("0");
+    expect(cascade(plain, '.pr-sig[data-kind="done"] > .ico').get("color")).toBe("var(--success-dark)");
+    expect(cascade(plain, '.pr-sig[data-kind="done"] > .ico circle').get("fill")).toBe("var(--success-soft)");
+    expect(cascade(plain, '.pr-sig[data-kind="blocked"] > .ico').get("color")).toBe("var(--coral-dark)");
+    expect(cascade(plain, '.pr-sig[data-kind="blocked"] > .ico circle').get("fill")).toBe("var(--red-light)");
+    // An approval is a quiet pill, the outline tier: its mark is the ink alone.
+    expect(cascade(plain, '.pr-sig[data-kind="ready"] > .ico').get("color")).toBe("var(--teal-dark)");
+    expect(plain.some((r) => parts(r).includes('.pr-sig[data-kind="ready"] > .ico circle'))).toBe(false);
+    // The freshness facts are small print, not the bold display face a side
+    // panel gives a fact, and they close the card on a well.
+    const facts = cascade(plain, ".pr-facts .kv-row .v");
+    expect(facts.get("font-weight")).toBe("400");
+    expect(facts.get("color")).toBe("var(--muted)");
+    expect(cascade(plain, ".pr-card > .pr-facts").get("background")).toBe("var(--tint-well)");
+    // The branch chip and the fold toggle are links and buttons in small type:
+    // each stands a 24px target (WCAG 2.2, 2.5.8).
+    expect(cascade(plain, ".pr-branch").get("min-height")).toBe("24px");
+    expect(cascade(plain, ".pr-fold").get("min-height")).toBe("24px");
+    // The fold's chevron points down while the gates are folded, up when open.
+    expect(cascade(plain, ".pr-fold .ico").get("transform")).toBe("rotate(90deg)");
+    expect(cascade(plain, '.pr-fold[aria-expanded="true"] .ico').get("transform")).toBe("rotate(-90deg)");
+  });
+
   it("a run control's start holds the width of its widest label", () => {
     // CANARY: drop the min-width, and the when-picker slides 21px (operator)
     // or 32px (dispatch) under the pointer that just switched it to Schedule,

@@ -1801,10 +1801,10 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
         />
       </MemoryRouter>,
     );
-    const row = Array.from(container.querySelectorAll(".kv-row")).find((r) =>
-      r.textContent?.includes("Collision"),
-    )!;
-    expect(row).toBeDefined();
+    // Ruling 511: the collision is the first of the card's status rows.
+    const row = container.querySelector('[data-signal="collision"]')!;
+    expect(row).not.toBeNull();
+    expect(row.querySelector(".pr-sig-title")!.textContent).toBe("Branch collision");
     expect(row.textContent).toContain("#232");
     expect(row.textContent).toContain("not this task");
   });
@@ -1819,11 +1819,7 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
         />
       </MemoryRouter>,
     );
-    expect(
-      Array.from(container.querySelectorAll(".kv-row")).some((r) =>
-        r.textContent?.includes("Collision"),
-      ),
-    ).toBe(false);
+    expect(container.querySelector('[data-signal="collision"]')).toBeNull();
   });
 });
 
@@ -1863,7 +1859,11 @@ describe("GithubTrace — project gates (ruling 482)", () => {
       </MemoryRouter>,
     );
     expect(getByText("Gates on a95c337: 3/4 exit 0 (run by Viberr)")).toBeTruthy();
-    expect(container.querySelector(".gh-bar")?.textContent).toContain("gates failed");
+    // Ruling 511: the gates are the card's first status row, titled in the
+    // pill vocabulary's words, and a failure keeps its table open.
+    const gatesRow = container.querySelector('[data-signal="gates"]')!;
+    expect(gatesRow.querySelector(".pr-sig-title")!.textContent).toBe("gates failed");
+    expect(gatesRow.getAttribute("data-kind")).toBe("blocked");
     const results = getByRole("table", { name: "Gate results" });
     expect(results.textContent).toContain("build");
     expect(results.textContent).toContain("exit 1");
@@ -1898,12 +1898,178 @@ describe("GithubTrace — project gates (ruling 482)", () => {
   });
 });
 
+/**
+ * Ruling 511 (owner, 2026-09-26, on the PR card: "this is dated design …
+ * this has no taste"): the card reads like GitHub's merge box. No inverted
+ * bar: the repository and the pull request's state, its title as the link to
+ * it, the branch as the link to its tree, and the diff; then one status row
+ * per signal in the pill vocabulary's words and tones; a passing gate run
+ * folds its table; a commit leads with its subject; the actions stand
+ * together; the freshness facts close the card in small print.
+ */
+describe("GithubTrace — the merge-box card (ruling 511)", () => {
+  const PASSED: NonNullable<AcceptanceAffordance["gates"]> = {
+    sha: "a91f7c2".padEnd(40, "0"),
+    state: "passed",
+    passed: 2,
+    total: 2,
+    line: "Gates on a91f7c2: 2/2 exit 0 (run by Viberr)",
+    results: [],
+    rows: [
+      { name: "install", command: "npm ci", outcome: "exit 0", wall: "2 s", ok: true, log: "gate-a91f7c2-01-install-20260926T095900Z.log" },
+      { name: "test", command: "npm test", outcome: "exit 0", wall: "924 ms", ok: true, log: "gate-a91f7c2-02-test-20260926T095900Z.log" },
+    ],
+    error: null,
+    finishedAt: "2026-09-26T09:59:17.000Z",
+  };
+  const card = (
+    task: Partial<TaskDetail>,
+    props: Partial<ComponentProps<typeof GithubTrace>> = {},
+  ) =>
+    render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ repo: "akin-ozer/viberr", branch: "vib-142-attach-workspace", ...task })}
+          acceptance={traceAcceptance()}
+          {...props}
+        />
+      </MemoryRouter>,
+    );
+
+  it("heads the card with the inverted bar, and the title opens the pull request", () => {
+    // CANARY: drop the `.gh-bar` head (the owner kept it: "the old white/black
+    // headers were looking good"), or put the number back in its pill.
+    const { container, getByRole } = card({
+      pr: { number: 318, state: "review", title: "Attach execution workspace" },
+    });
+    const bar = container.querySelector(".pr-card > .gh-bar")!;
+    expect(bar.querySelector("h2")!.textContent).toBe("GitHub");
+    expect(bar.querySelector(".repo")!.textContent).toBe("akin-ozer/viberr");
+    // The bar keeps the state alone; the number stands with the title.
+    expect([...bar.querySelectorAll(".pill")].map((p) => p.textContent)).toEqual(["in review"]);
+    const title = getByRole("link", { name: "Attach execution workspace #318 on GitHub" });
+    expect(title.getAttribute("href")).toBe("https://github.com/akin-ozer/viberr/pull/318");
+    expect(title.getAttribute("target")).toBe("_blank");
+    const branch = getByRole("link", { name: "vib-142-attach-workspace" });
+    expect(branch.getAttribute("href")).toBe(
+      "https://github.com/akin-ozer/viberr/tree/vib-142-attach-workspace",
+    );
+    // The two links are the card's way to GitHub; the full-width button is gone.
+    expect(container.textContent).not.toContain("Open on GitHub");
+  });
+
+  it("names a pull request whose title is empty by its number", () => {
+    const { container } = card({ pr: { number: 7, state: "review", title: "  " } });
+    expect(container.querySelector(".pr-title")!.textContent).toContain("Pull request #7");
+  });
+
+  it("lists each signal as a row, in the pill vocabulary's words and tones", () => {
+    // CANARY: drop the `checks` row, or map a failing check to another tone.
+    const head = "5d0c3aa".padEnd(40, "0");
+    const { container } = card(
+      {
+        unownedPr: 232,
+        pr: {
+          number: 327,
+          state: "review",
+          title: "x",
+          headSha: head,
+          mergeable: "conflicting",
+          mergeableAt: head,
+        },
+        prChecks: { state: "failing", total: 4, passing: 3, failing: 1, pending: 0 },
+        prReview: "approved",
+      },
+      { acceptance: { ...traceAcceptance(), gates: PASSED } },
+    );
+    const rows = [...container.querySelectorAll(".pr-sigs > .pr-sig")].map((row) => [
+      row.getAttribute("data-signal"),
+      row.getAttribute("data-kind"),
+      row.querySelector(".pr-sig-title")!.textContent,
+    ]);
+    expect(rows).toEqual([
+      ["collision", "risk", "Branch collision"],
+      ["gates", "done", "gates passed"],
+      ["checks", "blocked", "1/4 checks failing"],
+      ["review", "ready", "approved"],
+      ["conflicts", "risk", "conflicts"],
+    ]);
+  });
+
+  it("folds a passing run's gate table behind Show all, and opens it on the click", () => {
+    // CANARY: drop `hidden` from the table's wrapper in `GatesRow`.
+    const { container, getByRole, queryByRole } = card(
+      { pr: { number: 318, state: "review", title: "x" } },
+      {
+        acceptance: { ...traceAcceptance(), gates: PASSED },
+        attachmentsBase: "/projects/viberr-core/tasks/VIB-151/attachments",
+      },
+    );
+    // Folded, the server's line still says the whole result.
+    expect(container.querySelector('[data-signal="gates"] [role="status"]')!.textContent).toBe(
+      PASSED.line,
+    );
+    expect(queryByRole("table", { name: "Gate results" })).toBeNull();
+    const toggle = getByRole("button", { name: "Show all gates" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const folded = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(folded.hidden).toBe(true);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(getByRole("button", { name: "Hide gates" })).toBe(toggle);
+    expect(folded.hidden).toBe(false);
+    expect(getByRole("table", { name: "Gate results" }).textContent).toContain("install");
+    expect(getByRole("link", { name: "test log" })).toBeTruthy();
+  });
+
+  it("keeps a failing run's table open, with nothing to fold", () => {
+    const failed: NonNullable<AcceptanceAffordance["gates"]> = {
+      ...PASSED,
+      state: "failed",
+      passed: 1,
+      line: "Gates on a91f7c2: 1/2 exit 0 (run by Viberr)",
+      rows: [PASSED.rows[0]!, { ...PASSED.rows[1]!, ok: false, outcome: "exit 1" }],
+    };
+    const { getByRole, queryByRole } = card({}, { acceptance: { ...traceAcceptance(), gates: failed } });
+    expect(queryByRole("button", { name: /gates$/ })).toBeNull();
+    expect(getByRole("table", { name: "Gate results" }).querySelector("tr.bad")!.textContent).toContain(
+      "exit 1",
+    );
+  });
+
+  it("leads a commit with its subject and closes it with the SHA", () => {
+    const { container } = card({
+      commits: [{ sha: "a91f7c2", msg: "[VIB-142] add repo attach policy gate" }],
+    });
+    const commit = container.querySelector(".pr-commits .commit")!;
+    expect([...commit.children].map((part) => part.className)).toEqual(["msg", "sha"]);
+  });
+
+  it("stands the actions together and closes the card with the freshness facts", () => {
+    // CANARY: move `.pr-facts` back above the branch, where the old card
+    // printed "Checked" and "Last change" first.
+    const { container } = card(
+      { pr: { number: 147, state: "accepted", title: "x" }, commits: [], otherCommits: [] },
+      {
+        acceptance: traceAcceptance({ blockedReason: "Waiting on a verdict." }),
+        onCompleteMerge: () => {},
+        onForceAccept: () => {},
+      },
+    );
+    const sections = [...container.querySelector(".pr-card")!.children].map((s) => s.className);
+    expect(sections).toEqual(["gh-bar", "pr-id", "pr-acts", "pr-facts"]);
+    const acts = [...container.querySelectorAll(".pr-acts button")].map((b) => b.textContent);
+    expect(acts).toEqual(["Complete merge", "Force accept (override review gate)"]);
+  });
+});
+
 describe("GithubTrace — admin force-accept (DG-2)", () => {
   it("renders the Force-accept button when blocked AND onForceAccept is provided", () => {
     // C1: the block REASON no longer renders here — it has one owner, the
     // Current-state panel. This panel carries only the GitHub-side fact: the
     // admin override button itself, whose label already names what it does.
-    // Canary: bring back the `.force-accept .hint` sentence and this reads its
+    // Canary: bring back a `.hint` sentence in the force-accept row and this reads its
     // absence (the duplicate returns).
     const onForceAccept = vi.fn();
     const { container, queryByText } = render(
@@ -2183,7 +2349,7 @@ describe("F19-22: the GitHub panel names the last CHANGE, not the last check", (
         />
       </MemoryRouter>,
     );
-    const rows = [...container.querySelectorAll(".gh-body .kv-row")];
+    const rows = [...container.querySelectorAll(".pr-facts .kv-row")];
     const byKey = (k: string) => {
       const row = rows.find((r) => r.querySelector(".k")?.textContent === k);
       if (!row) throw new Error(`no "${k}" row in the GitHub panel`);
@@ -2315,15 +2481,19 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
 
     const review = render(<GithubTrace githubHost={GH_HOST} task={withPr("review")} acceptance={traceAcceptance()} />);
     const reviewPill = review.container.querySelector(".gh-bar .pill")!;
-    expect(reviewPill.textContent).toContain("PR #14");
+    expect(reviewPill.textContent).toBe("in review");
     expect(reviewPill.className).toContain("info");
+    // Ruling 511: the number stands with the title, not in the pill.
+    expect(review.container.querySelector(".pr-title")!.textContent).toContain("#14");
   });
 
   it("keeps merged and merge-pending distinct", () => {
     const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} acceptance={traceAcceptance()} />);
-    expect(merged.container.querySelector(".gh-bar .pill")!.textContent).toBe(
-      "merged",
-    );
+    const mergedPill = merged.container.querySelector(".gh-bar .pill")!;
+    expect(mergedPill.textContent).toBe("merged");
+    // Ruling 511: filled on the bar, as it always was there. The quiet
+    // outline's muted ink is made for --surface and fades on the inverted bar.
+    expect(mergedPill.className).not.toContain("quiet");
     cleanup();
     const accepted = render(<GithubTrace githubHost={GH_HOST} task={withPr("accepted")} acceptance={traceAcceptance()} />);
     expect(
@@ -2340,10 +2510,8 @@ describe("LV-09: pluralization + null-ish packet observations", () => {
       changed: { files: 1, add: 3, del: 1 },
     };
     const { container } = render(<GithubTrace githubHost={GH_HOST} task={task} acceptance={traceAcceptance()} />);
-    const diff = [...container.querySelectorAll(".kv-row")].find((r) =>
-      r.textContent?.startsWith("Diff"),
-    )!;
-    expect(diff.textContent).toContain("1 file ·");
+    const diff = container.querySelector(".pr-diff")!;
+    expect(diff.textContent).toMatch(/^1 file \+3/);
     expect(diff.textContent).not.toContain("1 files");
   });
 
@@ -4344,7 +4512,7 @@ describe("ruling 478: the task page's timeline, packet and GitHub panel", () => 
   });
 
   it("(f) F40-35: the GitHub panel has a heading once the task has a branch and a PR", () => {
-    // CANARY: drop the visually hidden h2 from the gh-bar branch.
+    // CANARY: drop the visually hidden h2 from the card's head.
     const { getByRole } = render(
       <MemoryRouter>
         <GithubTrace

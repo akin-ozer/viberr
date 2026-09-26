@@ -543,9 +543,9 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
   snapshot (`notAcceptableReason` is the whole stack's verdict, `pr.mergeable` the
   recorded fact), by the operator's move into the acceptance-boundary stage, and by the
   accept-time merge refusal; no surface offers an acceptance the gate will refuse (the
-  recommendation card, the accept dialog, the sidebar and the GitHub card's "conflicts"
-  pill all read it), and the reconciler withdraws a pending `accept_completion` card
-  when `mergeable` flips to conflicting. Ruling 475(b): the same flip withdraws an open
+  recommendation card, the accept dialog, the sidebar and the GitHub card's "Conflicts"
+  status row all read it), and the reconciler withdraws a pending `accept_completion`
+  card when `mergeable` flips to conflicting. Ruling 475(b): the same flip withdraws an open
   decision packet that offers `accept_completion` ("**Packet withdrawn:**", audit
   `task.packet.withdrawn_superseded {reason: pr_conflicting}`), tells the watchers why,
   and wakes the operator with `pr-conflicting`. After every merge Viberr performs
@@ -660,8 +660,9 @@ the tail kept, the middle cut). The record binds to the revision id and sha like
 verdict; results land as each gate finishes; the finished run writes one note from
 "Project gates" that claims its logs, and audit `task.gates.run`. The timeline draws that
 note as its ending, its revision and the gate table, a row per gate with its log (ruling
-493, `gateNoteView`), the table the PR card and the accept dialog show. A log never counts as
-a file a concurrent run produced (`isGateLogName` in `attachmentNamesSince`). The PR card,
+493, `gateNoteView`), the table the PR card (folded behind "Show all" on a pass, ruling
+511) and the accept dialog show. A log never counts as a file a concurrent run produced
+(`isGateLogName` in `attachmentNamesSince`). The PR card,
 the accept dialog, the operator's snapshot (`gates`) and every agent's canonical anchor
 print the same line, "Gates on `<sha7>`: N/M exit 0 (run by Viberr)". **A plain
 acceptance waits until every declared gate exited 0 on the revision under review**:
