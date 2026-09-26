@@ -1026,23 +1026,37 @@ describe("resumeWorkdir", () => {
     // CANARY: drop the hand-over and a resumed agent's workspace is the
     // server's alone (0775 in the server's group, no setgid): its person
     // writes nothing there, and cannot remove the supporting folder the
-    // server made in it when the task's workspace is reclaimed.
+    // server made in it when the task's workspace is reclaimed. Make
+    // `support/<profileId>` before the hand-over and, in the image, it keeps
+    // the server's group and no setgid, for the same reason.
     resetAgentIsolationForTests({ status: "on", uidFloor: AGENT_UID_FLOOR, reason: null });
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const workspace = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace");
+    const support = path.join(workspace, "support");
+    // Whether `support/` was there each time the hand-over was refused.
+    const supportAtRefusal: boolean[] = [];
+    const warn = vi.spyOn(logger, "warn").mockImplementation((msg, fields) => {
+      if (msg === "a directory could not be shared with the agent group" && fields?.dir === workspace) {
+        supportAtRefusal.push(existsSync(support));
+      }
+    });
     try {
-      const workspace = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace");
+      expect(existsSync(support)).toBe(false);
       const dir = resumeWorkdir(store.slug, "VIB-1", null, store.dataRoot, { profileId: "reviewer" });
 
-      expect(dir).toBe(path.join(workspace, "support", "reviewer"));
+      expect(dir).toBe(path.join(support, "reviewer"));
       expect(existsSync(dir)).toBe(true);
-      // In the image it lands (2770 in the agents' group); the suite is not
-      // in that group, so here the hand-over is refused and names its folder.
       const st = statSync(workspace);
-      const handedOver = st.gid === AGENT_GID && (st.mode & 0o7777) === 0o2770;
-      const refusedFor = warn.mock.calls.some(
-        ([msg, fields]) => msg === "a directory could not be shared with the agent group" && fields?.dir === workspace,
-      );
-      expect(handedOver || refusedFor).toBe(true);
+      if (st.gid === AGENT_GID && (st.mode & 0o7777) === 0o2770) {
+        // In the image the hand-over lands (2770 in the agents' group), and
+        // what is made after it inherits that group and the setgid bit.
+        const made = statSync(support);
+        expect(made.gid).toBe(AGENT_GID);
+        expect(made.mode & 0o2000).toBe(0o2000);
+      } else {
+        // The suite is not in the agents' group: the hand-over is refused and
+        // logged the moment it runs, when nothing may be in the workspace yet.
+        expect(supportAtRefusal).toEqual([false]);
+      }
     } finally {
       warn.mockRestore();
       resetAgentIsolationForTests();
