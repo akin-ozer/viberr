@@ -1084,6 +1084,8 @@ async function addRecommendation(
         from: OPERATOR_NOTIFY_FROM,
         title: `Operator recommends: ${rec.label}`,
         text: reasoning,
+        // Ruling 497: the row opens the card, where it is applied.
+        about: "recommendations",
       },
       ctx,
     );
@@ -1942,6 +1944,8 @@ export async function operatorOpenPacket(
           ? `Blocked, decision needed: ${title}`
           : `Decision needed: ${title}`,
       text: packet.body || title,
+      // Ruling 497: the row opens the packet, where it is decided.
+      about: "decision",
     },
     ctx,
   );
@@ -2347,6 +2351,7 @@ export async function operatorLeaseFiles(
         title: "Files leased by another task",
         text,
         occurredAt: at,
+        about: { event: at },
         from: OPERATOR_NOTIFY_FROM,
       },
       ctx,
@@ -3854,6 +3859,7 @@ export async function operatorFlagContextConflict(
       title: CONTEXT_CONFLICT_TITLE,
       text: event.text,
       occurredAt: event.occurredAt,
+      about: { event: event.occurredAt },
       // Ruling 361: the operator flagged the conflict (the event's own actor).
       from: OPERATOR_NOTIFY_FROM,
     },

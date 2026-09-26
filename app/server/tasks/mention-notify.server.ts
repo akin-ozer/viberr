@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   type CreateNotificationInput,
   createNotification,
+  taskEventLink,
 } from "~/server/projections/notifications.server";
 import { resolveTaskFilePath, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
@@ -500,7 +501,11 @@ export function fanOutMentions(
       taskKey: input.taskKey,
     };
     // No caller timestamp ⇒ leave the key off and let the writer stamp `now`.
-    if (input.occurredAt) notification.occurredAt = input.occurredAt;
+    // Ruling 497: the timestamp is the comment's, so the row opens on it.
+    if (input.occurredAt) {
+      notification.occurredAt = input.occurredAt;
+      notification.href = taskEventLink(input.projectSlug, input.taskKey, input.occurredAt);
+    }
     createNotification(db, notification);
   }
   return { mentioned, ambiguous, nonMembers };

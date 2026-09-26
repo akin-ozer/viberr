@@ -4,6 +4,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
+import { TASK_RECOMMENDATIONS_ANCHOR } from "~/shared/page-anchors";
 
 /**
  * Operator recommendations panel — a SUPERVISED operator recommends governed
@@ -79,6 +80,7 @@ export interface RecommendationInFlight {
 
 export function OperatorRecommendations({
   recommendations,
+  targeted = false,
   canApply,
   busy,
   inFlight = null,
@@ -88,6 +90,9 @@ export function OperatorRecommendations({
   terminalStageId = null,
 }: {
   recommendations: RecommendationView[];
+  /** Ruling 497: a recommendation's notification opened the cards
+   *  (`#recommendations`). */
+  targeted?: boolean;
   /** admin|maintainer — gates the Apply button (server re-checks). */
   canApply: boolean;
   busy: boolean;
@@ -118,7 +123,12 @@ export function OperatorRecommendations({
   const refusalShake = useRefusalShake(refused ? `${refused.id}:${refused.n}` : null);
   if (recommendations.length === 0) return null;
   return (
-    <div className="panel op-recs">
+    <div
+      className="panel op-recs"
+      id={TASK_RECOMMENDATIONS_ANCHOR}
+      tabIndex={-1}
+      data-targeted={targeted || undefined}
+    >
       <div className="panel-head">
         <span className="agent-glyph op">
           <Icon name="shield" />

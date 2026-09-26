@@ -3,6 +3,8 @@ import { Link } from "react-router";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
+import { revealTarget, useHashTarget } from "~/ui/use-hash-target";
+import { KB_PROPOSALS_ANCHOR, proposalAnchor } from "~/shared/page-anchors";
 import type { KbProposalView } from "./controller-query.server";
 import { CONNECT_TO_SEND } from "./not-connected";
 
@@ -21,6 +23,21 @@ import { CONNECT_TO_SEND } from "./not-connected";
  * buttons SEND that request to the controller in this conversation, and the
  * controller walks `resolve_kb_proposal`. Nothing here writes the document.
  */
+
+/** Ruling 497: a proposal's notification opens its entry here
+ *  (`#proposal-kp-…`); the panel itself is `#kb-proposals`. */
+function isProposalTarget(id: string): boolean {
+  return id === KB_PROPOSALS_ANCHOR || id.startsWith(proposalAnchor(""));
+}
+
+/** An entry that is no longer open (promoted or dismissed since) leaves the
+ *  panel, which is still where the notification was pointing. */
+function revealProposal(id: string): boolean {
+  const target = document.getElementById(id) ?? document.getElementById(KB_PROPOSALS_ANCHOR);
+  if (!target) return false;
+  revealTarget(target);
+  return true;
+}
 
 /** The request each button sends, in the words the controller acts on. */
 export function proposalRequest(
@@ -58,8 +75,9 @@ export function ProposalsPanel({
   };
   const inFlight = (action: "promote" | "dismiss", p: KbProposalView) =>
     sending && asked?.id === p.id && asked.action === action;
+  const targeted = useHashTarget(isProposalTarget, true, revealProposal);
   return (
-    <section className="panel ctl-proposals" id="kb-proposals" aria-labelledby="kb-proposals-h">
+    <section className="panel ctl-proposals" id={KB_PROPOSALS_ANCHOR} aria-labelledby="kb-proposals-h">
       <div className="panel-head">
         <Icon name="edit" />
         <h2 id="kb-proposals-h">Proposals</h2>
@@ -72,7 +90,14 @@ export function ProposalsPanel({
       ) : (
         <ul className="ctl-proposal-list">
           {proposals.map((p) => (
-            <li key={p.id} id={`proposal-${p.id}`} className="ctl-proposal" data-proposal={p.id}>
+            <li
+              key={p.id}
+              id={proposalAnchor(p.id)}
+              tabIndex={-1}
+              className="ctl-proposal"
+              data-proposal={p.id}
+              data-targeted={proposalAnchor(p.id) === targeted || undefined}
+            >
               <div className="ctl-proposal-head">
                 <Pill kind="info" sm>
                   {p.rulings ? "Ruling" : "Knowledge base"}

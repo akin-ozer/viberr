@@ -1236,9 +1236,18 @@ async function reconcileTaskUnlocked(
         parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
       }
     });
+    // Ruling 497: when each note below was written, so the notice about it
+    // opens on it (null: that note was not written on this pass).
+    let collisionAt: string | null = null;
+    let acceptedClosedAt: string | null = null;
+    let conflictAt: string | null = null;
+    let divergenceAt: string | null = null;
+    let reopenedAt: string | null = null;
+    let driftAt: string | null = null;
     if (unownedPrIsNew && collisionNote) {
+      collisionAt = new Date().toISOString();
       await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
+        occurredAt: collisionAt,
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
@@ -1264,6 +1273,7 @@ async function reconcileTaskUnlocked(
             kind: "policy",
             title: `Branch name collision on ${fm.key}: PR #${unownedPr!.number} is not this task's`,
             text: collisionNote,
+            about: { event: collisionAt },
             from: POLICY_ENGINE_NOTIFY_FROM,
           },
           { dataRoot: ctx.dataRoot },
@@ -1271,8 +1281,9 @@ async function reconcileTaskUnlocked(
       }
     }
     if (acceptedClosedText) {
+      acceptedClosedAt = new Date().toISOString();
       await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
+        occurredAt: acceptedClosedAt,
         // Neutral divergence note, not a violation (P13-LV-03).
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
@@ -1284,8 +1295,9 @@ async function reconcileTaskUnlocked(
     }
     if (conflictText && !divergenceText) {
       const withdrawn = supersededRecs.filter((r) => r.kind === "accept_completion");
+      conflictAt = new Date().toISOString();
       await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
+        occurredAt: conflictAt,
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
@@ -1305,8 +1317,9 @@ async function reconcileTaskUnlocked(
               .map((r) => `“${r.label}”`)
               .join(", ")} recommendation${supersededRecs.length === 1 ? " was" : "s were"} withdrawn.`
           : "";
+      divergenceAt = new Date().toISOString();
       await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
+        occurredAt: divergenceAt,
         // A GitHub-side divergence is a neutral note the human must act on, not
         // a governance violation by an agent (P13-LV-03).
         type: "note",
@@ -1318,8 +1331,9 @@ async function reconcileTaskUnlocked(
       });
     }
     if (reopenedText) {
+      reopenedAt = new Date().toISOString();
       await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
+        occurredAt: reopenedAt,
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: null,
@@ -1330,8 +1344,9 @@ async function reconcileTaskUnlocked(
     }
     if (driftVoidText) {
       const withdrawnNames = supersededRecs.map((r) => `“${r.label}”`);
+      driftAt = new Date().toISOString();
       await appendTimelineEvent(ref, {
-        occurredAt: new Date().toISOString(),
+        occurredAt: driftAt,
         type: "note",
         actor: POLICY_ENGINE_ACTOR,
         title: "Revision moved after review",
@@ -1369,6 +1384,7 @@ async function reconcileTaskUnlocked(
             text:
               `${conflictText} The decision "${withdrawnPacket.title}" was withdrawn, because ` +
               `the acceptance it offered would be refused. The task's operator is asked to resolve the conflict.`,
+            about: conflictAt ? { event: conflictAt } : null,
             from: POLICY_ENGINE_NOTIFY_FROM,
           },
           { dataRoot: ctx.dataRoot },
@@ -1410,6 +1426,7 @@ async function reconcileTaskUnlocked(
             kind: "policy",
             title: `PR #${newPr!.number} moved after review: ${fm.key} needs a fresh verdict`,
             text: driftVoidText,
+            about: driftAt ? { event: driftAt } : null,
             from: POLICY_ENGINE_NOTIFY_FROM,
           },
           { dataRoot: ctx.dataRoot },
@@ -1417,7 +1434,7 @@ async function reconcileTaskUnlocked(
       }
     }
     if (adoptionInput) {
-      await recordPrAdoption(db, ref, adoptionInput, actor);
+      const adoptedAt = await recordPrAdoption(db, ref, adoptionInput, actor);
       if (!prJustReopened) {
         const { notifyTaskWatchers } = await import(
           "~/server/tasks/task-actions.server"
@@ -1433,6 +1450,7 @@ async function reconcileTaskUnlocked(
                 ? `PR #${adoptionInput.prNumber} adopted for ${fm.key}: replaces PR #${adoptionInput.previousPrNumber}`
                 : `PR #${adoptionInput.prNumber} adopted for ${fm.key}`,
             text: prAdoptionText(fm.key, adoptionInput),
+            about: { event: adoptedAt },
             from: POLICY_ENGINE_NOTIFY_FROM,
           },
           { dataRoot: ctx.dataRoot },
@@ -1449,6 +1467,8 @@ async function reconcileTaskUnlocked(
     // the promised merge can no longer happen. It gets the same inbox alert as
     // the other two branches.
     const noticeText = divergenceText ?? acceptedClosedText ?? reopenedText;
+    // The note that says the same thing, in the same order of precedence.
+    const noticeAt = divergenceText ? divergenceAt : acceptedClosedText ? acceptedClosedAt : reopenedAt;
     if (noticeText && !ctx.suppressDivergenceNotice) {
       const { notifyTaskWatchers } = await import(
         "~/server/tasks/task-actions.server"
@@ -1467,6 +1487,7 @@ async function reconcileTaskUnlocked(
                 ? `Accepted PR #${newPr!.number} closed on GitHub: ${fm.key}'s merge can't complete`
                 : `PR #${newPr!.number} live again on GitHub: ${fm.key} resumes`,
           text: noticeText,
+          about: noticeAt ? { event: noticeAt } : null,
           from: POLICY_ENGINE_NOTIFY_FROM,
         },
         { dataRoot: ctx.dataRoot },

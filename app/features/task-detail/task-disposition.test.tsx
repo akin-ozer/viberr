@@ -142,6 +142,8 @@ function renderPage(props: {
   baseBehindBy?: number | null;
   /** Ruling 484: the Changes panel's read. */
   changesUrl?: string | null;
+  /** Ruling 497: where the page opens (a notification's `#decision`). */
+  entry?: string;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -190,7 +192,7 @@ function renderPage(props: {
       },
     },
   ]);
-  const utils = render(<Stub initialEntries={["/"]} />);
+  const utils = render(<Stub initialEntries={[props.entry ?? "/"]} />);
   return { ...utils, submitted };
 }
 
@@ -2698,6 +2700,81 @@ describe("D6: consequential actions confirm before they act", () => {
  * order and its CONTENT — a swap that moved empty divs would pass on order
  * alone. Canary: swap the JSX regions back and the order assert is red.
  */
+/**
+ * Ruling 497: a decision's notification opens the decision itself: the open
+ * packet at `#decision`, the pending recommendation cards at
+ * `#recommendations`. The page marks the region and focuses it; the G7
+ * focus on `.detail` does not take it back.
+ *
+ * Canaries: drop `data-targeted` from either region and nothing marks it; let
+ * the G7 effect focus `.detail` unconditionally and the event, which the
+ * timeline (a child, whose effects run first) focused, loses its focus.
+ */
+describe("ruling 497: a decision's notification opens the decision", () => {
+  it("marks and focuses the open packet at #decision, and the cards at #recommendations", async () => {
+    const { container } = renderPage({
+      entry: "/#decision",
+      task: {
+        packet: {
+          type: "input",
+          kind: "Decision required",
+          from: "Operator",
+          title: "Which spec wins?",
+          body: "The goal and the merged spec disagree.",
+          observations: [],
+          options: [
+            { kind: "edit_goal", t: "Align the goal", d: "", rec: true },
+            { kind: "redirect", t: "Redirect", d: "", rec: false },
+          ],
+        },
+      },
+    });
+    const packet = container.querySelector(".detail-packet")!;
+    await waitFor(() => expect(packet.hasAttribute("data-targeted")).toBe(true));
+    expect(packet.id).toBe("decision");
+    // The mark is drawn by the render, the focus by the effect after it.
+    await waitFor(() => expect(document.activeElement).toBe(packet));
+    cleanup();
+
+    const { container: page } = renderPage({
+      entry: "/#recommendations",
+      recommendations: [
+        { id: "rec-1", kind: "run_agent", label: "Run the Developer", detail: "Ready for work." },
+      ],
+    });
+    const cards = page.querySelector(".op-recs")!;
+    await waitFor(() => expect(cards.hasAttribute("data-targeted")).toBe(true));
+    expect(cards.id).toBe("recommendations");
+    await waitFor(() => expect(document.activeElement).toBe(cards));
+    expect(page.querySelector(".detail-packet")).toBeNull();
+  });
+
+  it("keeps the focus on a timeline event a notification opened", async () => {
+    const at = "2026-09-26T07:00:00.123Z";
+    const { container } = renderPage({
+      entry: `/#event-${at}`,
+      task: {
+        timeline: [
+          {
+            id: 7,
+            type: "quality",
+            occurredAt: at,
+            actor: { kind: "agent", backend: "claude", name: "Fact Checker", role: "Fact Checker" },
+            title: "Approval noted, waiting on Fact Checker",
+            text: "Site Reviewer approved.",
+            toAgent: false,
+            evidence: null,
+            attachments: null,
+          },
+        ],
+      },
+    });
+    const event = container.querySelector(".tl-item")!;
+    await waitFor(() => expect(event.hasAttribute("data-targeted")).toBe(true));
+    await waitFor(() => expect(document.activeElement).toBe(event));
+  });
+});
+
 describe("U7 / U35-2: the task detail's reading order matches its stacking rule", () => {
   it("puts the title and the open packet first, current state next, the timeline last in the DOM", () => {
     const { container } = renderPage({

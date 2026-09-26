@@ -122,6 +122,23 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "oauth_json",
         "oauth_requested_scope",
       ]);
+
+      // Ruling 497: notifications from before a row recorded where it opens.
+      // `createNotification` names `href` on every insert, and its callers
+      // fail open, so a root without it would drop every notification.
+      // CANARY: drop the `notifications` entry and this reads no `href`.
+      db.exec(`CREATE TABLE notifications (id TEXT PRIMARY KEY, task_key TEXT)`);
+      db.exec(`INSERT INTO notifications (id, task_key) VALUES ('ntf_old', 'VIB-1')`);
+      ensureBaselineColumns(db);
+      ensureBaselineColumns(db);
+      // SAFETY: PRAGMA table_info rows always carry a TEXT `name`.
+      const notificationColumns = (db.prepare(`PRAGMA table_info(notifications)`).all() as {
+        name: string;
+      }[]).map((c) => c.name);
+      expect(notificationColumns).toEqual(["id", "task_key", "href"]);
+      expect(db.prepare(`SELECT id, href FROM notifications`).all()).toEqual([
+        { id: "ntf_old", href: null },
+      ]);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

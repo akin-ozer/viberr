@@ -72,6 +72,9 @@ export type NotificationRow = {
   actor_json: string | null;
   project_slug: string | null;
   task_key: string | null;
+  /** Ruling 497: where the row opens, as its notifier recorded it (resolved by
+   *  `notificationHref`, which ignores one outside the row's project). */
+  href: string | null;
   occurred_at: string;
   read_at: string | null;
   created_at: string;

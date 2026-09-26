@@ -1583,6 +1583,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+  /* Ruling 497: the containing block of what it scrolls. A visually hidden
+     heading (`.vh`, absolute) had none inside, so it sat at its place in the
+     page's full height and made the DOCUMENT 150px taller than the window:
+     every `scrollIntoView` here (the composer's Ask operator, a hash link)
+     moved the shell up past its top bar, with nothing to scroll it back. */
+  position: relative;
 }
 /* `.detail` is programmatically focused (tabIndex=-1) so keyboard scrolling
    works; it isn't an interactive control, so suppress the focus ring. */
@@ -1647,6 +1653,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    it in column 1, the packet on row 2 or, without one, main on row 2 — no
    `:has()`, no phantom row gap. */
 .detail-packet { grid-column: 1; grid-row: 2; min-width: 0; }
+/* Ruling 497: the decision a notification opened (the packet, or the
+   recommendation cards), ringed the way focus is while the URL names it. */
+.detail-packet[data-targeted], .op-recs[data-targeted] {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-box);
+}
 .detail-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; grid-column: 1; grid-row: auto; }
 .detail-side { display: flex; flex-direction: column; gap: 1rem; grid-column: 2; grid-row: 1 / span 3; }
 
@@ -2167,6 +2180,20 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-item:last-child .tl-line { display: none; }
 
 .tl-body { padding: 0 0 1rem .375rem; min-width: 0; }
+/* Ruling 497: the event a notification opened, marked while the URL names it.
+   A wash behind the entry, stopping short of the gap below it; the entry's own
+   stacking context keeps it under the text. A border, not a shadow, so forced
+   colors keep the mark. */
+.tl-item[data-targeted] { isolation: isolate; outline: none; }
+.tl-item[data-targeted]::before {
+  content: "";
+  position: absolute;
+  inset: -.375rem -.5rem .625rem;
+  z-index: -1;
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-box);
+  background: var(--blue-soft);
+}
 .tl-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .tl-actor { font-size: .75rem; font-weight: 800; font-family: var(--font-display); }
 .tl-time { font-size: .75rem; color: var(--placeholder); font-family: var(--font-mono); }
@@ -7117,8 +7144,10 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .ctl-proposals-count, .ctl-proposal-acts .linkish { margin-left: auto; }
 .ctl-proposal-list { list-style: none; margin: 0; padding: 0; }
 .ctl-proposal { border: 1px solid var(--hairline); border-radius: var(--radius-box); padding: .5rem .75rem; min-width: 0; scroll-margin-block: .75rem; }
-/* A reply's proposal id lands here: the entry it names says so. */
-.ctl-proposal:target { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
+/* A reply's proposal id lands here: the entry it names says so. So does a
+   proposal's notification (ruling 497), which arrives by the router, and a
+   `pushState` never updates `:target`. */
+.ctl-proposal:target, .ctl-proposal[data-targeted] { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: none; }
 .ctl-proposal p { margin: 0; overflow-wrap: anywhere; }
 .ctl-proposal-head, .ctl-proposal-acts { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
 .ctl-proposal-doc { font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }

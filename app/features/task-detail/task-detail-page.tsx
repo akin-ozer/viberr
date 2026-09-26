@@ -3,6 +3,12 @@ import { useFetcher } from "react-router";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TaskLinks } from "~/shared/task-key-links";
+import {
+  KB_PROPOSALS_ANCHOR,
+  TASK_DECISION_ANCHOR,
+  TASK_RECOMMENDATIONS_ANCHOR,
+} from "~/shared/page-anchors";
+import { useHashTarget } from "~/ui/use-hash-target";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -113,6 +119,12 @@ function recReachesAcceptance(
 /** A run group's identity in the projection (`useStableRows`' key). */
 function runThreadKey(run: RunView): string {
   return run.id;
+}
+
+/** Ruling 497: the page's own places a notification opens (the timeline's
+ *  events are the timeline's). */
+function isTaskRegionAnchor(id: string): boolean {
+  return id === TASK_DECISION_ANCHOR || id === TASK_RECOMMENDATIONS_ANCHOR;
 }
 
 export function TaskDetailPage({
@@ -271,8 +283,16 @@ export function TaskDetailPage({
   // focused on mount so the workspace is keyboard-scrollable immediately.
   const detailRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    detailRef.current?.focus({ preventScroll: true });
+    const detail = detailRef.current;
+    // Ruling 497: a link that opened a place on this page (a timeline event)
+    // has focused it already, and inside `.detail` the keys scroll just the same.
+    if (detail?.contains(document.activeElement)) return;
+    detail?.focus({ preventScroll: true });
   }, []);
+  // Ruling 497: a decision's notification opens the packet or the
+  // recommendation cards, and a second click on it, from this page, brings
+  // them back into view.
+  const regionTarget = useHashTarget(isTaskRegionAnchor);
 
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
@@ -817,7 +837,12 @@ export function TaskDetailPage({
       </div>
 
       {task.packet && (
-        <div className="detail-packet">
+        <div
+          className="detail-packet"
+          id={TASK_DECISION_ANCHOR}
+          tabIndex={-1}
+          data-targeted={regionTarget === TASK_DECISION_ANCHOR || undefined}
+        >
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
@@ -962,6 +987,7 @@ export function TaskDetailPage({
         />
 
         <OperatorRecommendations
+          targeted={regionTarget === TASK_RECOMMENDATIONS_ANCHOR}
           inFlight={recInFlight}
           recommendations={recommendations}
           canApply={canDecideOwned}
@@ -1066,7 +1092,7 @@ export function TaskDetailPage({
           // condition that renders that strip, so the two cannot disagree.
           runLive={runtime.length > 0}
           // Ruling 483: a proposal event links to the project's open proposals.
-          proposalsHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller#kb-proposals`}
+          proposalsHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller#${KB_PROPOSALS_ANCHOR}`}
           {...(attachmentsBase
             ? {
                 attachmentNames: attachments.map((a) => a.name),

@@ -769,7 +769,10 @@ drift from it: a person who deletes an entry in the document editor has closed i
   browser on the document). Promote and Dismiss do not write anything: each SENDS the
   request to the controller in the open conversation (the page's `send` intent), in the
   words `proposalRequest` builds, and the controller carries it out with the tool. Anyone
-  else reads "An org admin promotes or dismisses proposals."
+  else reads "An org admin promotes or dismisses proposals." A proposal's notification
+  opens its entry here (`#proposal-<id>`, ruling 497): the entry is marked and focused,
+  and one promoted or dismissed since leaves the panel itself in view. A goal
+  notification opens its chain, or its link's row, the same way.
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 

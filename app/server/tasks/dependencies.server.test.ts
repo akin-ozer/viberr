@@ -475,6 +475,16 @@ describe("the release engine", () => {
     for (const n of notifs) {
       expect(JSON.parse(n.actor_json ?? "null")).toEqual({ kind: "system", name: "Dependency release" });
     }
+    // Ruling 497: the row opens the release note, which says what it waited on.
+    // CANARY: drop `about` from the release notice and the row opens the top.
+    expect(
+      new Set(
+        store.db
+          .prepare(`SELECT href FROM notifications WHERE task_key = 'VIB-10' AND kind = 'dependency'`)
+          .all()
+          .map((row) => row.href),
+      ),
+    ).toEqual(new Set([`/projects/${store.slug}/tasks/VIB-10#event-${note.occurredAt}`]));
     const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released");
     expect(release).toBeDefined();
     expect(release![1].dependencyRelease).toEqual({ entries: ["VIB-2", "VIB-5", "VIB-1"], clearedBy: null });

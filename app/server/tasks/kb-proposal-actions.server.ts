@@ -212,6 +212,9 @@ export async function proposeKbCorrection(
       title,
       text: event.text,
       occurredAt: event.occurredAt,
+      // Ruling 497: its page is the entry on the Controller page, where it is
+      // promoted or dismissed, not the task it came from.
+      about: { proposal: filed.proposal.id },
       from: input.from,
     },
     ctx,

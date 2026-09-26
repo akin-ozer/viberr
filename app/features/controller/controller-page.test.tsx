@@ -2050,4 +2050,31 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     expect(within(panel).getByText("0 open")).toBeTruthy();
     expect(within(panel).getByText("Nothing to review.")).toBeTruthy();
   });
+
+  /**
+   * Ruling 497: a proposal's notification opens its entry here. The router
+   * arrives by `pushState`, which never updates `:target`, so the page marks
+   * the entry itself. One promoted or dismissed since has left the panel, and
+   * the notification still lands on the panel.
+   *
+   * Canaries: drop `data-targeted` from the entry and nothing marks it; drop
+   * the fallback in `revealProposal` and the second link moves nothing.
+   */
+  it("ruling 497: a proposal's notification marks and focuses its entry; a closed one lands on the panel", async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    renderPage(view({ proposals: [proposal] }), "#proposal-kp-0123456789");
+    const panel = await screen.findByRole("region", { name: "Proposals" });
+    const entry = panel.querySelector("#proposal-kp-0123456789")!;
+    await waitFor(() => expect(entry.hasAttribute("data-targeted")).toBe(true));
+    // The mark is drawn by the render, the focus by the effect after it.
+    await waitFor(() => expect(document.activeElement).toBe(entry));
+    cleanup();
+
+    focus.mockClear();
+    renderPage(view({ proposals: [proposal] }), "#proposal-kp-ffffffffff");
+    const after = await screen.findByRole("region", { name: "Proposals" });
+    expect(after.querySelector("[data-targeted]")).toBeNull();
+    await waitFor(() => expect(focus.mock.contexts).toContain(after));
+    focus.mockRestore();
+  });
 });

@@ -108,11 +108,12 @@ async function appendPolicyEvent(
     advisory?: boolean;
   },
   ctx: ScopeFlagContext,
-): Promise<boolean> {
+): Promise<string | null> {
   const ref = taskRef({ ...input, ...ctx });
-  if (!readTaskFile(ref)) return false; // soft ref — task file may be gone
+  if (!readTaskFile(ref)) return null; // soft ref — task file may be gone
+  const at = new Date().toISOString();
   await appendTimelineEvent(ref, {
-    occurredAt: new Date().toISOString(),
+    occurredAt: at,
     // F39-5: the `policy` type renders as "Policy violation" under a red
     // shield (`event-meta.ts`), which is the right chip for a scope the
     // project requires and the wrong one for a scope nothing requires. The
@@ -128,7 +129,7 @@ async function appendPolicyEvent(
   rebuildPath(db, resolveTaskFilePath(ref), {
     dataRoot: ctx.dataRoot,
   });
-  return true;
+  return at;
 }
 
 export interface FlagScopeViolationInput {
@@ -164,7 +165,9 @@ export async function flagScopeViolation(
   if (!created) return { violation, created };
 
   if (input.taskKey) {
-    await appendPolicyEvent(
+    // When the event was written, which is where the row opens (ruling 497);
+    // null when the task file is gone and only the notification goes out.
+    const at = await appendPolicyEvent(
       db,
       {
         projectSlug: input.projectSlug,
@@ -184,6 +187,7 @@ export async function flagScopeViolation(
         taskKey: input.taskKey,
         kind: "policy",
         text: input.detail,
+        about: at ? { event: at } : null,
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       { dataRoot: ctx.dataRoot },
