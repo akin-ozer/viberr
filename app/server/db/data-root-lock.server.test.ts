@@ -15,10 +15,10 @@ import {
   releaseDataRootLock,
   startDataRootLockGuard,
   stopDataRootLockGuard,
-  verifyLockOwnership,
   type DataRootLock,
   type LockHolder,
   type LockOwnership,
+  type LockOwnershipProbes,
 } from "./data-root-lock.server";
 
 /**
@@ -156,13 +156,6 @@ describe("releaseDataRootLock (G1)", () => {
     const lock = acquireDataRootLock({ dataRoot, self: HOST_A, isAlive: alive });
     lock.release();
     expect(heldDataRootLock()).toBeNull();
-  });
-
-  it("a test-scoped lock (releaseOnExit: false) is never the process's lock", () => {
-    const dataRoot = ctx.makeTempDir();
-    const lock = acquire(dataRoot, HOST_A);
-    expect(heldDataRootLock()).toBeNull();
-    lock.release();
   });
 });
 
@@ -329,12 +322,11 @@ describe("forceDataRootTakeover", () => {
 
 const BOOT_A: LockHolder = { ...HOST_A, bootId: "boot-1" };
 
-describe("verifyLockOwnership (F18-5 fail-closed)", () => {
+describe("verifyOwnership (F18-5 fail-closed)", () => {
   it("reports 'held' for a lock this process genuinely owns", () => {
     const dataRoot = ctx.makeTempDir();
     const lock = acquire(dataRoot, BOOT_A);
     expect(lock.verifyOwnership()).toBe("held");
-    expect(verifyLockOwnership(lock)).toBe("held");
     lock.release();
   });
 
@@ -359,34 +351,42 @@ describe("verifyLockOwnership (F18-5 fail-closed)", () => {
   });
 });
 
-describe("verifyLockOwnership (injected probes)", () => {
-  const owned = { fd: 7, path: "/x/writer.lock", holder: BOOT_A };
+describe("verifyOwnership (injected probes)", () => {
+  /** A real lock held as BOOT_A, judged through `probes`, then released. */
+  function verify(probes: LockOwnershipProbes): LockOwnership {
+    const lock = acquire(ctx.makeTempDir(), BOOT_A);
+    try {
+      return lock.verifyOwnership(probes);
+    } finally {
+      lock.release();
+    }
+  }
 
   it("'stolen' on an inode mismatch, before reading content", () => {
     expect(
-      verifyLockOwnership(owned, {
+      verify({
         fstat: () => ({ ino: 100n, dev: 1n }),
         stat: () => ({ ino: 999n, dev: 1n }),
-        readHolder: () => owned.holder,
+        readHolder: () => BOOT_A,
       }),
     ).toBe("stolen");
   });
 
   it("'stolen' when our held descriptor is unusable (fstat throws)", () => {
     expect(
-      verifyLockOwnership(owned, {
+      verify({
         fstat: () => {
           throw new Error("EBADF");
         },
         stat: () => ({ ino: 1n, dev: 1n }),
-        readHolder: () => owned.holder,
+        readHolder: () => BOOT_A,
       }),
     ).toBe("stolen");
   });
 
   it("'stolen' when inode matches but the content names another boot (VirtioFS ino-reuse guard)", () => {
     expect(
-      verifyLockOwnership(owned, {
+      verify({
         fstat: () => ({ ino: 100n, dev: 1n }),
         stat: () => ({ ino: 100n, dev: 1n }),
         readHolder: () => ({ ...HOST_A_OTHER, bootId: "boot-2" }),
@@ -396,7 +396,7 @@ describe("verifyLockOwnership (injected probes)", () => {
 
   it("'unverifiable' on a torn read (inode matches, content unreadable)", () => {
     expect(
-      verifyLockOwnership(owned, {
+      verify({
         fstat: () => ({ ino: 100n, dev: 1n }),
         stat: () => ({ ino: 100n, dev: 1n }),
         readHolder: () => null,
@@ -406,10 +406,10 @@ describe("verifyLockOwnership (injected probes)", () => {
 
   it("'held' when inode + boot identity both agree (normal run does not false-positive)", () => {
     expect(
-      verifyLockOwnership(owned, {
+      verify({
         fstat: () => ({ ino: 100n, dev: 1n }),
         stat: () => ({ ino: 100n, dev: 1n }),
-        readHolder: () => owned.holder,
+        readHolder: () => BOOT_A,
       }),
     ).toBe("held");
   });

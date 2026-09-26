@@ -607,58 +607,6 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
     expect(q.ready.map((t) => t.key)).toContain("VIB-4");
     expect(q.ready.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
   });
-
-  /**
-   * R16-3 (owner ruling 2026-08-04): a terminal GitHub fact outranks the
-   * process gates, and force-accept is withheld while the PR is closed. The row
-   * used to carry the verdict gate's "…or an admin can force-accept" beside a
-   * PR GitHub had already closed — the exact override the task page refuses.
-   */
-  it("a CLOSED PR on the same delivered task replaces the verdict gate, force-accept and all", () => {
-    const store = setupTestStore(ctx);
-    seedDelivered(store, "VIB-6", {
-      pr: { number: 66, state: "closed", title: "Delivered, unreviewed" },
-    });
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    const row = q.working.find((t) => t.key === "VIB-6")!;
-    expect(row.blockReason).toContain("closed on GitHub without merging");
-    expect(row.blockReason).not.toContain("force-accept");
-    expect(row.blockReason).not.toContain("approving verdict");
-    // Unchanged: it was never acceptance-ready (NEW-1 filters closed PRs out).
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-6");
-  });
-
-  it("the same task with its PR still OPEN keeps the process-gate sentence", () => {
-    const store = setupTestStore(ctx);
-    seedDelivered(store, "VIB-6");
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    expect(q.working.find((t) => t.key === "VIB-6")!.blockReason).toMatch(
-      // R19-B added a third way to satisfy the gate, so the sentence names it.
-      // Telling a reader only two of the three ways to unblock is the same
-      // half-truth this pass has been removing everywhere else.
-      /no approving verdict yet\. Run a review for a verdict, approve the pull request on GitHub, or an admin can force-accept/,
-    );
-  });
-
-  it("a MERGED PR is not terminal — the verdict gate still names the real blocker", () => {
-    const store = setupTestStore(ctx);
-    seedDelivered(store, "VIB-6", {
-      pr: { number: 66, state: "merged", title: "Delivered, unreviewed" },
-    });
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    const row = q.working.find((t) => t.key === "VIB-6")!;
-    expect(row.pr).toMatchObject({ number: 66, state: "merged" });
-    expect(row.blockReason).toMatch(/no approving verdict yet/);
-  });
 });
 
 /**

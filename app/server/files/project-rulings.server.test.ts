@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
+import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { projectRulingsKb, withProjectRulings } from "./project-rulings.server";
 
@@ -11,8 +12,9 @@ import { projectRulingsKb, withProjectRulings } from "./project-rulings.server";
  * The unit under test is deliberately tiny, because the interesting property is
  * not what it computes but WHERE it is called — three runtimes, one of which
  * (the controller) only when a project is in scope. The call sites are pinned
- * in the source assertions at the bottom, the same shape ruling 179's dispatch
- * test uses: a helper with no production caller is the state this pass found
+ * at the bottom: the specialist's in source assertions, the same shape ruling
+ * 179's dispatch test uses, and the operator's and the controller's by what
+ * they return. A helper with no production caller is the state this pass found
  * that ruling's own helper in.
  */
 let ctx: TestDbContext;
@@ -77,11 +79,12 @@ describe("withProjectRulings", () => {
 });
 
 describe("the runtimes that build a run's knowledge call it", () => {
-  it("specialists and the operator, pinned at the call site", async () => {
+  it("specialists, pinned at the call site", async () => {
     // The helper is worth nothing unless it is on the path. Source assertions
-    // for these two because both sites sit deep inside a function that starts
-    // a real run; the controller's is covered behaviourally below, which is
-    // stronger and is what caught this test being too weak the first time.
+    // here because both sites sit deep inside a function that starts a real
+    // run; the operator's and the controller's are covered behaviourally
+    // below, which is stronger and is what caught this test being too weak the
+    // first time.
     const { readFileSync } = await import("node:fs");
     const specialist = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
     expect(specialist).toContain("kb = withProjectRulings(kb, input.projectSlug, ctx)");
@@ -91,10 +94,18 @@ describe("the runtimes that build a run's knowledge call it", () => {
     // project's rulings between turns. An adversarial sweep found it the same
     // day. CANARY: unwrap either call and the count drops.
     expect(specialist.split("withProjectRulings(").length - 1).toBe(2);
-    // The operator reads it through its resolved authority, so every consumer
-    // of `authority.kb` gets it and not just the prompt builder.
-    expect(readFileSync("app/server/tasks/operator-actions.server.ts", "utf8")).toContain(
-      "kb: withProjectRulings(view.resources.kb ?? [], projectSlug, ctx)",
+  });
+
+  it("the operator reads it through its resolved authority", async () => {
+    // So every consumer of `authority.kb` gets it, not just the prompt builder.
+    // An undeployed operator resolves no knowledge at all, so deploy one.
+    deployDeliveryOperator(store, "supervised");
+    setRulings("team-rulings");
+    const { resolveOperatorAuthority } = await import("~/server/tasks/operator-actions.server");
+    // CANARY: read `view.resources.kb` without `withProjectRulings` and the
+    // operator's list loses the project's rulings.
+    expect(resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug).kb).toContain(
+      "team-rulings",
     );
   });
 

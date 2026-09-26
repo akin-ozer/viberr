@@ -126,7 +126,7 @@ export function listScopeViolations(
   return rows.map(mapRow);
 }
 
-export function getScopeViolation(
+function getScopeViolation(
   db: DatabaseSync,
   id: string,
 ): ScopeViolationRecord | null {

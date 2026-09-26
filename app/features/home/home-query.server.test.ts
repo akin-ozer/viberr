@@ -119,3 +119,33 @@ describe("listHomeProjectsForUser — membership scoping (D10/Q6)", () => {
     expect(viewerCard!.waiting).toBe(0);
   });
 });
+
+/**
+ * UI-02 — "updated just now" on projects that did not change.
+ *
+ * `updatedAt` used to fall back to `projects.parsed_at`, which is `nowIso()` at
+ * (re)projection time, so "Rebuild projections" made every TASK-LESS project
+ * card read "updated just now" although nothing had changed.
+ */
+describe("UI-02: a task-less project has no recency signal", () => {
+  it("returns null updatedAt instead of the projection timestamp", () => {
+    const store = setupProjectedStore(ctx);
+    const card = listHomeProjectsForUser(store.db, { id: store.users.arda.id, role: "admin" })
+      .find((p) => p.slug === store.slug)!;
+    expect(card.total).toBe(0);
+    expect(card.updatedAt).toBeNull();
+  });
+
+  it("still reports the newest task updated_at when tasks exist", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-903", {
+        updatedAt: "2026-07-20T10:00:00.000Z",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const card = listHomeProjectsForUser(store.db, { id: store.users.arda.id, role: "admin" })
+      .find((p) => p.slug === store.slug)!;
+    expect(card.updatedAt).toBe("2026-07-20T10:00:00.000Z");
+  });
+});

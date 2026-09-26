@@ -38,7 +38,7 @@ import {
   projectionFaultCount,
   resetProjectionFaultsForTests,
 } from "./store-health.server";
-import { getTaskDetail } from "./task-query.server";
+import { getTaskDetail, getTaskSummary } from "./task-query.server";
 
 /** A second project alongside the store's default, for scope tests. */
 function writeSecondProject(store: ReturnType<typeof setupTestStore>, slug: string) {
@@ -470,33 +470,19 @@ describe("rebuilder", () => {
     expect(guest?.actor).toMatchObject({ name: "Deniz Test" });
   });
 
-  it("membership change in project.md cascades guest flags onto tasks", async () => {
+  // LV-04: an unresolvable user id must never render as the raw `u_…` string.
+  it("labels an owner whose account no longer exists", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1"),
-      timeline: [
-        { occurredAt: "2026-07-04T07:00:00.000Z", type: "comment",
-          actor: { kind: "human", userId: store.users.elif.id, nameHint: null },
-          title: null, text: "Was a member when written.", toAgent: false, evidence: null },
-      ],
+      frontmatter: baseTaskFrontmatter("VIB-904", {
+        ownerUserId: "u_RT7-QeTWOwP4",
+      }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    let detail = getTaskDetail(store.db, store.slug, "VIB-1");
-    expect("guest" in detail!.timeline[0]!.actor).toBe(false);
-
-    // Remove elif from the project file → her events re-render as guest.
-    const { readProjectFile } = await import("~/server/files/project-writer.server");
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    project.parsed.frontmatter.members = project.parsed.frontmatter.members.filter(
-      (m) => m.userId !== store.users.elif.id,
-    );
-    const { writeFileAtomic } = await import("~/server/files/atomic-file.server");
-    const { serializeProjectFile } = await import("~/server/files/project-file.server");
-    writeFileAtomic(project.absPath, serializeProjectFile(project.parsed));
-
-    rebuildPath(store.db, project.absPath, { dataRoot: store.dataRoot });
-    detail = getTaskDetail(store.db, store.slug, "VIB-1");
-    expect(detail!.timeline[0]!.actor).toMatchObject({ guest: true });
+    const owner = getTaskSummary(store.db, store.slug, "VIB-904")!.owner!;
+    expect(owner.kind).toBe("human");
+    expect(owner.name).not.toBe("u_RT7-QeTWOwP4");
+    expect(owner.name).toContain("Removed account");
   });
 
   it("adding a missing stage to project.md clears the task's unknown-stage warning", async () => {
@@ -1412,6 +1398,53 @@ describe("task dependencies projection (ruling 131)", () => {
     } finally {
       ctx.cleanup();
     }
+  });
+});
+
+/**
+ * LV-20 — a terminal-stage task is CLOSED, so nothing can be waiting on a human.
+ *
+ * Live-proven: a conversational operator turn on a Done+merged task left
+ * `waiting: human` in the task file forever (the run start flips it to `agent`,
+ * `clearWaitingToHuman` flips it back to `human` when the run ends — see
+ * app/server/tasks/task-actions.server.ts). The task detail then reported
+ * "Waiting on: Human decision", the board counted it in "N waiting on a human
+ * decision", and the review queue (which filters on the review boundary)
+ * reported 0 — two surfaces disagreeing about one task.
+ */
+describe("LV-20: waiting is normalized at the terminal stage", () => {
+  it("projects a done task's stored `waiting: human` as `none`", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-900", {
+        stage: "done",
+        waiting: "human",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const summary = getTaskSummary(store.db, store.slug, "VIB-900")!;
+    expect(summary.stage).toBe("done");
+    expect(summary.waiting).toBe("none");
+
+    // The board counter reads the same projection, so it agrees.
+    const board = getBoard(store.db, store.slug)!;
+    const all = board.columns.flatMap((c) => c.tasks);
+    expect(all.filter((t) => t.waiting === "human")).toHaveLength(0);
+  });
+
+  it("leaves a NON-terminal task's waiting state untouched", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-901", {
+        stage: "review",
+        waiting: "human",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(getTaskSummary(store.db, store.slug, "VIB-901")!.waiting).toBe(
+      "human",
+    );
   });
 });
 

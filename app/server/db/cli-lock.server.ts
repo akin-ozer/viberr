@@ -57,8 +57,6 @@ export interface CliLockOptions {
    */
   alternative?: string;
   io?: CliRefusalIo;
-  /** Test seam for the env-driven takeover; production reads the env. */
-  force?: boolean;
 }
 
 /**
@@ -67,7 +65,7 @@ export interface CliLockOptions {
  * both remedies — with the command that was refused on the front, because the
  * lock's message says "Refusing to boot" and nobody was booting.
  */
-export function cliLockRefusalMessage(
+function cliLockRefusalMessage(
   command: string,
   error: DataRootLockedError,
   alternative?: string,
@@ -86,10 +84,10 @@ export function cliLockRefusalMessage(
  * however it finishes.
  */
 function acquireCliWriterLock(
-  options: Pick<CliLockOptions, "dataRoot" | "force"> = {},
+  options: Pick<CliLockOptions, "dataRoot"> = {},
 ): DataRootLock {
   const request: AcquireDataRootLockOptions = {
-    force: options.force ?? forceDataRootTakeover(),
+    force: forceDataRootTakeover(),
     releaseOnExit: true,
   };
   // Naming a root at all is the caller's choice; left off, the lock resolves the
@@ -111,14 +109,9 @@ export async function runWithDataRootWriterLock<T>(
   options: CliLockOptions = {},
 ): Promise<T> {
   const io = options.io ?? PROCESS_REFUSAL_IO;
-  // Both are forwarded only when the caller set them: an absent `force` must
-  // reach the env-driven default, not overwrite it with `undefined`.
-  const request: Pick<CliLockOptions, "dataRoot" | "force"> = {};
-  if (options.dataRoot) request.dataRoot = options.dataRoot;
-  if (options.force !== undefined) request.force = options.force;
   let lock: DataRootLock;
   try {
-    lock = acquireCliWriterLock(request);
+    lock = acquireCliWriterLock(options);
   } catch (error) {
     if (!(error instanceof DataRootLockedError)) throw error;
     io.write(cliLockRefusalMessage(command, error, options.alternative));

@@ -370,14 +370,13 @@ describe("a failed rebuild is retried (ruling 218)", () => {
   }, 30_000);
 
   /**
-   * The rung-exhaustion guard, pinned separately so the reason the ladder above
-   * is 500 long does not live only in a comment. `scheduleRetry` gives up after
-   * the last rung; a test ladder that runs out mid-wait stops retrying and the
-   * canary fails for a reason that has nothing to do with ruling 218.
+   * The ruled ladder, pinned (ruling 218(a)). `scheduleRetry` gives up after
+   * the last rung, which is why the test ladder above is 500 long: a test
+   * ladder that runs out mid-wait stops retrying and the canary fails for a
+   * reason that has nothing to do with ruling 218.
    */
-  it("ruling 218's ladder gives up after its last rung, which is why the test ladder is long", () => {
+  it("ruling 218's ladder is 2s, 5s, 15s, 45s, 120s", () => {
     expect(RETRY_BACKOFF_MS).toEqual([2_000, 5_000, 15_000, 45_000, 120_000]);
-    expect(RETRY_BACKOFF_MS).toHaveLength(5);
   });
 });
 

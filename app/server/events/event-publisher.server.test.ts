@@ -3,7 +3,6 @@ import { sseEventSchema } from "~/schemas/sse-event.schema";
 import { emitProjectionEvent } from "./projection-events.server";
 import {
   startEventPublisher,
-  stopEventPublisherForTests,
   translateProjectionEvent,
 } from "./event-publisher.server";
 import {
@@ -22,7 +21,6 @@ function validated(events: ReturnType<typeof translateProjectionEvent>) {
 }
 
 afterEach(() => {
-  stopEventPublisherForTests();
   resetSseBrokerForTests();
 });
 
@@ -39,6 +37,8 @@ describe("translateProjectionEvent shapes (docs/architecture/decisions.md payloa
         { taskFacts: { stage: "review", readiness: "input_required" } },
       ),
     );
+    // ONE event per task change: the derived `task.readiness-changed` had no
+    // consumer and is gone (E9); a readiness flip rides task.updated.
     expect(out).toHaveLength(1);
     expect(out[0]!.event).toEqual({
       type: "task.updated",
@@ -54,25 +54,6 @@ describe("translateProjectionEvent shapes (docs/architecture/decisions.md payloa
     expect(out[0]!.route).toEqual({
       projectSlug: "viberr-core",
       taskKey: "VIB-142",
-    });
-  });
-
-  it("task.updated is the ONLY event for a task change — readiness-changed is gone (E9)", () => {
-    // The derived `task.readiness-changed` event had no consumer: it doubled
-    // wire traffic and required unbounded per-task bookkeeping. Deleted —
-    // a readiness flip is exactly ONE task.updated carrying the new value.
-    const out = validated(
-      translateProjectionEvent(
-        { type: "task.updated", projectSlug: "p", taskKey: "K-1", occurredAt: AT },
-        { taskFacts: { stage: "impl", readiness: "ready" } },
-      ),
-    );
-    expect(out.map((e) => e.event.type)).toEqual(["task.updated"]);
-    expect(out[0]!.event.data).toEqual({
-      projectSlug: "p",
-      taskKey: "K-1",
-      stage: "impl",
-      readiness: "ready",
     });
   });
 

@@ -432,7 +432,7 @@ const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {
  *
  * Pure + injectable so a test can simulate every branch (mirrors `classifyLock`).
  */
-export function verifyLockOwnership(
+function verifyLockOwnership(
   lock: Pick<DataRootLock, "fd" | "path" | "holder">,
   probes: LockOwnershipProbes = DEFAULT_OWNERSHIP_PROBES,
 ): LockOwnership {

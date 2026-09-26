@@ -1,14 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { lockPath } from "../../../test-support/data-root-lock";
 import {
-  cliLockRefusalMessage,
   runWithDataRootWriterLock,
   type CliRefusalIo,
 } from "./cli-lock.server";
 import {
-  DataRootLockedError,
   acquireDataRootLock,
   type LockHolder,
 } from "./data-root-lock.server";
@@ -21,7 +20,18 @@ import {
  */
 
 const ctx = createTestDbContext();
-afterEach(ctx.cleanup);
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvCacheForTests();
+  ctx.cleanup();
+});
+
+/** Sets `VIBERR_FORCE_DATA_ROOT_LOCK` the way an operator does: in the env
+ *  that the CLI reads, not as an argument. */
+function forceLockEnv(value: string): void {
+  vi.stubEnv("VIBERR_FORCE_DATA_ROOT_LOCK", value);
+  resetEnvCacheForTests();
+}
 
 const SERVER: LockHolder = {
   pid: 4242,
@@ -83,6 +93,8 @@ describe("runWithDataRootWriterLock", () => {
     });
     const io = collectingIo();
     let bodyRan = false;
+    // Off, so a takeover left in the shell cannot let this one through.
+    forceLockEnv("");
 
     await expect(
       runWithDataRootWriterLock(
@@ -93,7 +105,6 @@ describe("runWithDataRootWriterLock", () => {
         {
           dataRoot,
           io,
-          force: false,
           alternative: "Stop the app first (`docker compose stop app`).",
         },
       ),
@@ -102,8 +113,9 @@ describe("runWithDataRootWriterLock", () => {
     expect(bodyRan).toBe(false);
     expect(io.exitCode).toBe(1);
     const message = io.output.join("");
-    // Names the command, the holder, and both remedies.
-    expect(message).toContain("`npm run seed` refused to run");
+    // Leads with the command (the lock's own message says "boot"), then names
+    // the holder and both remedies.
+    expect(message.startsWith("`npm run seed` refused to run")).toBe(true);
     expect(message).toContain("SECOND writer");
     expect(message).toContain("pid 4242");
     expect(message).toContain("viberr-app-1");
@@ -123,13 +135,14 @@ describe("runWithDataRootWriterLock", () => {
       releaseOnExit: false,
     });
     let bodyRan = false;
+    forceLockEnv("1");
 
     await runWithDataRootWriterLock(
       "`npm run rescan`",
       () => {
         bodyRan = true;
       },
-      { dataRoot, force: true },
+      { dataRoot },
     );
 
     expect(bodyRan).toBe(true);
@@ -148,19 +161,5 @@ describe("runWithDataRootWriterLock", () => {
       ),
     ).rejects.toThrow("seed blew up");
     expect(existsSync(lockPath(dataRoot))).toBe(false);
-  });
-});
-
-describe("cliLockRefusalMessage", () => {
-  it("leads with the refused command, because the lock's own message says 'boot'", () => {
-    const error = new DataRootLockedError({
-      message: "Refusing to boot: another Viberr process is already writing /data.",
-      verdict: "held",
-      holder: SERVER,
-      lockPath: "/data/state/writer.lock",
-    });
-    const message = cliLockRefusalMessage("`npm run rescan`", error);
-    expect(message.startsWith("`npm run rescan` refused to run")).toBe(true);
-    expect(message).toContain("Refusing to boot: another Viberr process");
   });
 });

@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   REBUILD_MIN_INTERVAL_MS,
   RESCAN_MIN_INTERVAL_MS,
-  resetSingleFlight,
   runSingleFlight,
   throttledMessage,
 } from "./single-flight.server";
@@ -13,16 +12,12 @@ import {
  * min-interval, so holding the button ran one full store sweep per click.
  */
 
-afterEach(() => {
-  resetSingleFlight();
-});
-
 describe("runSingleFlight", () => {
   it("runs the first call and refuses the next one inside the interval", () => {
     let runs = 0;
     let clock = 1_000;
     const call = () =>
-      runSingleFlight("k", () => ++runs, {
+      runSingleFlight("k-first", () => ++runs, {
         minIntervalMs: 10_000,
         now: () => clock,
       });
@@ -39,7 +34,7 @@ describe("runSingleFlight", () => {
     let runs = 0;
     let clock = 0;
     const call = () =>
-      runSingleFlight("k", () => ++runs, {
+      runSingleFlight("k-elapsed", () => ++runs, {
         minIntervalMs: 10_000,
         now: () => clock,
       });
@@ -64,7 +59,7 @@ describe("runSingleFlight", () => {
     let clock = 0;
     const boom = () =>
       runSingleFlight(
-        "k",
+        "k-throws",
         () => {
           throw new Error("sweep failed");
         },
@@ -73,20 +68,9 @@ describe("runSingleFlight", () => {
 
     expect(boom).toThrowError("sweep failed");
     expect(
-      runSingleFlight("k", () => "ok", { minIntervalMs: 10_000, now: () => clock })
+      runSingleFlight("k-throws", () => "ok", { minIntervalMs: 10_000, now: () => clock })
         .status,
     ).toBe("throttled");
-  });
-
-  it("resets per key and globally", () => {
-    const opts = { minIntervalMs: 10_000, now: () => 0 };
-    runSingleFlight("a", () => 1, opts);
-    runSingleFlight("b", () => 1, opts);
-    resetSingleFlight("a");
-    expect(runSingleFlight("a", () => 1, opts).status).toBe("ran");
-    expect(runSingleFlight("b", () => 1, opts).status).toBe("throttled");
-    resetSingleFlight();
-    expect(runSingleFlight("b", () => 1, opts).status).toBe("ran");
   });
 });
 
