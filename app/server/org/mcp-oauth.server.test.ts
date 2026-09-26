@@ -731,6 +731,26 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     expect(unknown).toContain("- cloudflare-api: signed in with OAuth; the server did not say which scopes it granted.");
     expect(unknown).not.toContain("viberr_connection_grant");
   });
+
+  it("ruling 506: the grant lines read in the names' code-point order, like the names above them", () => {
+    // The section is in the specialist's and the controller's cached prefix.
+    // `localeCompare` put `Sentry` last under an English locale, after the
+    // names line had put it first, and may order it differently elsewhere.
+    const section = gatewayMcpSection(
+      ["linear", "Sentry", "cloudflare-api"],
+      [
+        { name: "linear", scope: null },
+        { name: "cloudflare-api", scope: null },
+        { name: "Sentry", scope: null },
+      ],
+    );
+    expect(section).toContain("Sentry, cloudflare-api, linear are mounted");
+    const granted = section
+      .split("\n")
+      .filter((line) => line.startsWith("- "))
+      .map((line) => line.slice(2, line.indexOf(":")));
+    expect(granted).toEqual(["Sentry", "cloudflare-api", "linear"]);
+  });
 });
 
 describe("no token material leaves the server (ruling 469)", () => {

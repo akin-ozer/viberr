@@ -245,7 +245,7 @@ entry) and invokes the operator with the `stranded` trigger.
 The system prompt is built once per drive by `buildOperatorSystemPrompt` as a static block
 and a per-task tail (ruling 370): the shipped definition and the project's operator
 guidance, the attached skills (verbatim) and knowledge-base INDEXES (ruling 283, every
-document with its size and sections, read on demand; the project's rulings KB with its
+document with its size class and sections, read on demand; the project's rulings KB with its
 note, ruling 286), sorted by name, the two-kinds-of-ruling note (ruling 312), the runtime
 ground truth (backend, model, effort, the attached MCP servers in name order), the measured
 shell inventory (ruling 191), the live capability policy (rows sorted by id), the triage

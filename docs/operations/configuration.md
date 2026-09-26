@@ -235,7 +235,16 @@ sign-in driver and the vendor sign-out all start from `filteredSpawnEnv`
   `AUTH`);
 - `DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`;
 - the vendor homes `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `CODEX_SQLITE_HOME`
-  (`RUNTIME_HOME_ENV_RE`, rulings 127 and 181).
+  (`RUNTIME_HOME_ENV_RE`, rulings 127 and 181);
+- the Claude CLI's prompt-cache switches `DISABLE_PROMPT_CACHING` (and its per-model
+  variants), `ENABLE_PROMPT_CACHING_1H` (and `_BEDROCK`), `FORCE_PROMPT_CACHING_5M`,
+  `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`
+  (`PROMPT_CACHE_ENV_RE`, ruling 506), so one on the host cannot turn caching off or
+  force a lifetime for every run;
+- the Claude CLI's compaction switches `CLAUDE_CODE_AUTO_COMPACT_WINDOW`,
+  `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` and `DISABLE_COMPACT`
+  (`COMPACTION_ENV`, ruling 506), which a server started from inside a Claude Code
+  session inherits, so one cannot move, stop or refuse any run's compaction.
 
 **A name the schema does not declare passes through**: `PATH`, `HOME`, locale, proxy
 settings and the image's `UV_CACHE_DIR` / `UV_PYTHON_INSTALL_DIR` (§5) reach the child,
@@ -270,9 +279,11 @@ so the CLI compacts at its model's own limit, and a session above
 `COMPACT_AT_COMPLETION_TOKENS` (100k) is compacted at the end of its run instead. The key
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` would be set by the run service from that table if an
 entry were ever non-null again, and Codex would take its window through `config.toml`
-(§2.5 of `agents-and-runtime.md`). It is not a deployment knob. No cache-TTL variable is
+(§2.5 of `agents-and-runtime.md`). It is not a deployment knob, and one in the server's own
+environment is stripped before it reaches a child (ruling 506). No cache-TTL variable is
 set on any run (ruling 374: `CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M`
-stay unset; the CLI's automatic choice stands).
+stay unset; the CLI's automatic choice stands), and one in the server's own environment
+is stripped before it reaches a child (ruling 506).
 
 The server's own git (clone, mirror fetch, delivery push) never puts a token in argv, a
 URL or a config file: `createGitHubAskpassEnv` / `createGitHubClonePlan`

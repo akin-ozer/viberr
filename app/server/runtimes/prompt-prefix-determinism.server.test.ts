@@ -44,6 +44,16 @@ function dataRootWithKbs(): string {
   return dataRoot;
 }
 
+/** Ruling 506: what `correct_knowledge_doc` does to a document, appended to
+ *  the house-style document `dataRootWithKbs` wrote. */
+function correctHouseStyle(dataRoot: string, addition: string): void {
+  writeFileSync(
+    path.join(dataRoot, "kb", "house-style", "overview.md"),
+    `# Style\n\nKB-STYLE-MARKER${addition}`,
+    "utf8",
+  );
+}
+
 const TASK_A = "/data/projects/acme/tasks/ACME-1/attachments";
 const TASK_B = "/data/projects/acme/tasks/ACME-2/attachments";
 
@@ -104,6 +114,22 @@ describe("ruling 370: the specialist prefix", () => {
     expect(text).toContain("attached them to this run for you: alpha-skill, zeta-skill");
     expect(text.indexOf("architecture (knowledge base)")).toBeLessThan(text.indexOf("house-style (knowledge base)"));
     expect(text).toContain("write_a, write_b (on alpha)");
+  });
+
+  it("ruling 506: a correction inside a knowledge-base document leaves the static block as it was", () => {
+    // Ruling 498 writes agents' corrections straight into the document, so an
+    // edit is routine, and the index is in this block. The exact byte count it
+    // printed moved on every edit: each one cost every run of the profile its
+    // cached prefix, and every resumed session its whole history.
+    const dataRoot = dataRootWithKbs();
+    const statics = () => buildSpecialistPromptPrefix(base(dataRoot, TASK_A)).static.join("");
+    const before = statics();
+    expect(before).toContain("`overview.md` · under 1k chars");
+    correctHouseStyle(dataRoot, "\n\nCorrected: tabs, not spaces.");
+    expect(statics()).toBe(before);
+    // A new section is news, and moves it.
+    correctHouseStyle(dataRoot, "\n\n## Tabs\n\nTabs, not spaces.");
+    expect(statics()).toContain("## Tabs");
   });
 });
 
@@ -188,5 +214,18 @@ describe("ruling 370: the operator prefix", () => {
     // The disclosure lists the same sorted names.
     expect(a.inputs.knowledge).toEqual(["architecture", "house-style"]);
     expect(a.inputs.mcp.mounted).toEqual(["alpha", "zulu"]);
+  });
+
+  it("ruling 506: a correction inside a knowledge-base document leaves the static block as it was", () => {
+    const dataRoot = dataRootWithKbs();
+    const statics = () =>
+      buildOperatorSystemPrompt(authority(), dataRoot, mcp, checkout("ACME-1"), true, ["get_task"])
+        .prefix.static.join("");
+    const before = statics();
+    expect(before).toContain("house-style (knowledge base)");
+    correctHouseStyle(dataRoot, "\n\nCorrected: tabs, not spaces.");
+    expect(statics()).toBe(before);
+    correctHouseStyle(dataRoot, "\n\n## Tabs\n\nTabs, not spaces.");
+    expect(statics()).toContain("## Tabs");
   });
 });

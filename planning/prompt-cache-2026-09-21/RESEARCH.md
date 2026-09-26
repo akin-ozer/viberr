@@ -82,7 +82,7 @@ Research note, 2026-09-21 (`planning/prompt-cache-2026-09-21/RESEARCH.md`; the i
 - Whether the post-compaction turn rebuilds only the summary (docs, S2) or about 97.5k of re-attached stable content every time (measured in an open issue cited by verifier v2).
 - Whether resumed sessions inside the 1h TTL miss because the harness drops thinking blocks (S8, open, no vendor reply).
 - Whether system-prompt recording is enabled for the owner's accounts ("rolling out", S22).
-- Whether the Codex CLI sends `prompt_cache_retention` on the ChatGPT backend (S17 versus its cross-reference).
+- Whether the Codex CLI sends `prompt_cache_retention` on the ChatGPT backend (S17 versus its cross-reference). *(Settled for 0.156.0 by ruling 506: the name occurs once in the binary, in bundled docs prose, so no request field carries it; the backend's own default is what applies.)*
 - The single-org-unit behaviour after the dynamic boundary (S9, one reporter, no maintainer confirmation).
 
 ## 6. Suggested order of work

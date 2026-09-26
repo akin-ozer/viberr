@@ -11,6 +11,7 @@ import { logger } from "~/server/logging/logger.server";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { countLabel } from "~/shared/text/plural";
 import { kbDirPath } from "./file-store-root.server";
+import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -101,6 +102,40 @@ const KB_INDEX_OUTLINE_BUDGET = 4_000;
  *  the prompt problem this ruling exists to remove. */
 const KB_INDEX_MAX_DOCS = 200;
 
+/**
+ * Ruling 506: the size an index prints is a class on a 1-2-5 scale, not the
+ * byte count.
+ *
+ * The index sits in the static prefix of every run its knowledge base is
+ * attached to (ruling 370), so a byte of it that moves costs the next fresh
+ * start of each of those its prompt cache, and a session resumed after it,
+ * where the CLI does not record the system prompt, replays its whole history
+ * cold. The exact count moved on EVERY edit: a one-word fix through
+ * `correct_knowledge_doc` (ruling 498) turned "20,632 chars" into "20,641
+ * chars" and re-priced every prompt on the project. A class moves only
+ * when a document crosses a step, which a correction to its body almost never
+ * does, and it still tells a run what the number did: whether a document is a
+ * note or a book. No run was ever told more than that: the read cap is not in
+ * any tool description, and a read past it says so itself.
+ */
+const KB_SIZE_CLASSES: readonly { below: number; label: string }[] = [
+  { below: 1_000, label: "under 1k chars" },
+  { below: 2_000, label: "1k to 2k chars" },
+  { below: 5_000, label: "2k to 5k chars" },
+  { below: 10_000, label: "5k to 10k chars" },
+  { below: 20_000, label: "10k to 20k chars" },
+  { below: 50_000, label: "20k to 50k chars" },
+  { below: 100_000, label: "50k to 100k chars" },
+  { below: 200_000, label: "100k to 200k chars" },
+  { below: 500_000, label: "200k to 500k chars" },
+  { below: 1_000_000, label: "500k to 1M chars" },
+];
+
+/** A document's size as its index line prints it (ruling 506). */
+export function kbSizeClass(size: number): string {
+  return KB_SIZE_CLASSES.find((c) => size < c.below)?.label ?? "1M chars or more";
+}
+
 /** Cap on ONE `read_knowledge_doc` call. Generous — the point of the pull is
  *  that a document arrives whole — but not unbounded. */
 export const KB_DOC_READ_CHARS = 48_000;
@@ -143,9 +178,12 @@ export interface KbDoc {
 }
 
 /** Recursively collect injectable docs under `dir`, sorted by relative path so
- *  injection order is deterministic (and stable across runs). Exported for the
- *  proposal reader (ruling 483), which walks the documents a run is indexed
- *  with the same symlink and containment rules. */
+ *  injection order is deterministic (and stable across runs). Code-point order
+ *  (ruling 506), like every other list in a cached prefix: `localeCompare`
+ *  follows the process locale, and an index two servers order differently is
+ *  not a shared prefix. Exported for the proposal reader (ruling 483), which
+ *  walks the documents a run is indexed with the same symlink and containment
+ *  rules. */
 export function collectKbDocs(dir: string): KbDoc[] {
   const out: KbDoc[] = [];
   // F10-18: never follow a symlink out of the KB root, and never loop on a
@@ -200,7 +238,7 @@ export function collectKbDocs(dir: string): KbDoc[] {
     }
   };
   walk(dir, [], 0);
-  return out.sort((a, b) => a.rel.localeCompare(b.rel));
+  return sortedBy(out, (doc) => doc.rel);
 }
 
 /** A declared knowledge base that reached the run with less (or none) of its
@@ -275,7 +313,7 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
     const listed = docs.slice(0, KB_INDEX_MAX_DOCS);
     let outlineBudget = KB_INDEX_OUTLINE_BUDGET;
     const entries = listed.map((doc) => {
-      const head = `- \`${doc.rel}\` · ${doc.size.toLocaleString("en-US")} chars`;
+      const head = `- \`${doc.rel}\` · ${kbSizeClass(doc.size)}`;
       // Ruling 283: the outline budget clips OUTLINES, never the list. A doc
       // whose sections do not fit is still named at full size, because the name
       // is the only thing the run needs in order to ask for the document — and
