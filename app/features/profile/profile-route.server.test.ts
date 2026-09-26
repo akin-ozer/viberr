@@ -13,7 +13,7 @@ import {
   type FakeVendorBinaries,
 } from "../../../test-support/fake-vendor-binary";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
+import { mergeNotifPrefs } from "./notification-prefs";
 
 type ProfileAction = typeof import("~/routes/profile").action;
 
@@ -151,7 +151,7 @@ describe("/profile loader", () => {
     expect(profile.accessRole).toBe("admin");
 
     // Pref defaults (nothing stored yet).
-    expect(profile.prefs.notifs).toEqual(DEFAULT_NOTIF_PREFS);
+    expect(profile.prefs.notifs).toEqual(mergeNotifPrefs(null));
     expect(profile.prefs.tlDefault).toBe("all");
     // Ruling 148(c): there is no motion preference any more.
     expect("motion" in profile.prefs).toBe(false);
