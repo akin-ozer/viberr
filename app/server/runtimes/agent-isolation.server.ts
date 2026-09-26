@@ -555,14 +555,19 @@ export function shareTreeBuiltForAgents(dir: string, deps: { gid?: number } = {}
 /**
  * Pass 40 review (R-seams-1): the project mirrors stay the server's alone. A
  * workspace cloned from a mirror shares its object files (hardlinks), and the
- * boot hand-over of a pre-460 workspace used to add group write to them,
- * which reached the mirror's inode too. Every server-owned file under
- * `projects/<slug>/.repo-mirror/` loses group and other write (the server,
- * their owner, never needs them). Returns how many entries changed.
+ * boot hand-over of a pre-460 workspace used to put them in the agent group
+ * with group write, which reached the mirror's inode too. Every server-owned
+ * file under `projects/<slug>/.repo-mirror/` loses group and other write (the
+ * server, their owner, never needs them) and is back in the server's own
+ * group, which no agent uid is in: ruling 495's removal step
+ * (`chmod -R -P g+rwX`, `agent-trees.server.ts`) can reach a checkout's
+ * object linked from here, and opens it to the group it is in. Agents read
+ * the mirror through its other-read bits. Returns how many entries changed.
  */
 function revokeMirrorWrites(root: string): number {
   let changed = 0;
   const serverUid = process.getuid?.() ?? -1;
+  const serverGid = process.getgid?.() ?? -1;
   const visit = (entry: string, depth: number) => {
     let st: Stats;
     try {
@@ -572,9 +577,8 @@ function revokeMirrorWrites(root: string): number {
     }
     if (st.isSymbolicLink() || st.uid !== serverUid) return;
     if (st.isFile()) {
-      if ((st.mode & 0o022) !== 0 && shareEntry(entry, st.gid, (seen) => seen.mode & 0o755)) {
-        changed += 1;
-      }
+      const widened = (st.mode & 0o022) !== 0 || st.gid !== serverGid;
+      if (widened && shareEntry(entry, serverGid, (seen) => seen.mode & 0o755)) changed += 1;
       return;
     }
     if (!st.isDirectory() || depth > 64) return;
@@ -621,7 +625,8 @@ export interface LayoutReport {
   sharedEntries: number;
   /** Person runtime roots handed to their uid. */
   homes: number;
-  /** Mirror files that had group or other write (pass 40 review, R-seams-1). */
+  /** Mirror files that had group or other write, or were in another group
+   *  than the server's (pass 40 review, R-seams-1; ruling 495). */
   mirrorWritesRevoked: number;
   /** What could not be set, by path. */
   failures: string[];

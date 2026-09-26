@@ -638,11 +638,14 @@ export const prRefSchema = z
     // learns nothing produces no file churn. `.catch(null)` keeps a hand-edited
     // garbage value from nulling the WHOLE ref (same reasoning as `state`).
     checks: prChecksSchema.nullish().catch(null),
-    // Ruling 360 (pass 38, F38-14): the last REFUSED check-runs read for this
-    // PR, kept only while `checks` has never been read. An absent `checks`
+    // Ruling 360 (pass 38, F38-14): the check-runs read GitHub REFUSED for
+    // this PR, kept only while `checks` has never been read. An absent `checks`
     // beside this key means "GitHub would not let this credential read them" —
     // which is neither "never looked" nor "no CI", and every human surface
     // rendered all three as silence. Dropped by the first read that succeeds.
+    // Ruling 496: `at` is when this refusal was FIRST seen, not the last pass
+    // that met it. A pass meeting the same status and message keeps the record,
+    // so an unchanged refusal writes nothing; a different one replaces it.
     checksUnread: z
       .object({
         status: z.number().int().nullable(),

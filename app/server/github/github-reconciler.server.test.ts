@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -21,6 +21,7 @@ import { checksPill } from "~/features/github/github-pills";
 import { mapPrChecks } from "~/shared/mapping/task.server";
 import { updateUserFields } from "~/server/auth/user-store.server";
 import { readPrHumanApproval } from "./pr-human-approval.server";
+import { readReviewRelay } from "./pr-review-relay.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import {
@@ -4481,5 +4482,291 @@ describe("ruling 494: the reconcile row names the head it compared", () => {
     await pass(store, actor, behindAt(OLD), true);
     expect(rows(store)).toHaveLength(3);
     expect(rows(store).at(-1)).toEqual({ behindBy: 6, headSha: OLD, baseSha: MAIN });
+  });
+});
+
+/**
+ * Ruling 496 (pass 40, F40-72): a pass over an unchanged GitHub writes nothing.
+ * Live on WEB-12 (deploy 10) the credential had no `checks:read`, every pass
+ * stamped `checksUnread.at` anew, and each five-minute poll rewrote task.md,
+ * reprojected it and wrote a `github.reconcile` row that differed from the last
+ * only in that time: 19 rows in 80 minutes. The audit of the compared snapshot
+ * found one more key that churned the same way: the pass set `revisionDrift`
+ * before `headSha`, which the parse orders first, so a PR carrying a recorded
+ * drift never compared equal to its own file.
+ */
+describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
+  const REFUSED = "Resource not accessible by personal access token";
+  const CHECK_RUNS = `GET ${REPO_PATH}/commits/headsha318/check-runs`;
+  const REV = "rev0delivered";
+  const T1 = "2026-09-25T23:12:00.000Z";
+  const T2 = "2026-09-25T23:17:00.000Z";
+  const T3 = "2026-09-25T23:22:00.000Z";
+  const T4 = "2026-09-25T23:27:00.000Z";
+  afterEach(() => vi.useRealTimers());
+
+  const fileOf = (store: TestStore) =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!;
+  const prOf = (store: TestStore) => fileOf(store).parsed.frontmatter.pr;
+  const reconcileRows = (store: TestStore): number =>
+    store.db.prepare(`SELECT id FROM provenance WHERE action = 'github.reconcile'`).all().length;
+
+  /** The happy routes with the check-runs read answered `status` and `message`. */
+  function refused(status = 403, message = REFUSED): FakeRoutes {
+    const routes = happyRoutes();
+    routes[CHECK_RUNS] = { status, body: { message } };
+    return routes;
+  }
+
+  /** One pass as the poller runs it (DG-3's `skipUnchangedProvenance`), at
+   *  `at`. Only Date is faked: the pass awaits real promises. */
+  async function pollAt(
+    store: TestStore,
+    actor: ReturnType<typeof setup>["actor"],
+    at: string,
+    routes: FakeRoutes,
+  ) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(at));
+    try {
+      return await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+        skipUnchangedProvenance: true,
+        wakeOperator: async () => {},
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  /** VIB-301 delivered at {@link REV}, its PR recorded as `pr`. */
+  function seed(pr: PrRef) {
+    const s = setup();
+    writeTask(s.store.dataRoot, s.store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: s.store.users.arda.id,
+        pr,
+        workRevision: {
+          id: "rev_1",
+          headSha: REV,
+          treeSha: null,
+          branch: "vib-301-workspace",
+          createdAt: "2026-09-25T20:00:00.000Z",
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+      }),
+    });
+    rebuildAll(s.store.db, { dataRoot: s.store.dataRoot, force: true });
+    return s;
+  }
+
+  it("(a) the same refusal on the same PR keeps its first `at`: the second pass writes nothing and adds no row", async () => {
+    // Canary: stamp `at` on every refused pass again, and the second pass
+    // rewrites the file, adds a row and moves `at` to T2.
+    const { store, actor } = setup();
+    expect(await pollAt(store, actor, T1, refused())).toMatchObject({
+      status: "reconciled",
+      changed: true,
+    });
+    expect(prOf(store)?.checksUnread).toEqual({ status: 403, message: REFUSED, at: T1 });
+    const before = fileOf(store).content;
+    const rows = reconcileRows(store);
+
+    expect(await pollAt(store, actor, T2, refused())).toMatchObject({
+      status: "reconciled",
+      changed: false,
+    });
+    expect(fileOf(store).content).toBe(before);
+    expect(reconcileRows(store)).toBe(rows);
+    expect(prOf(store)?.checksUnread?.at).toBe(T1);
+  });
+
+  it("(a) a refusal that changes, or a read that succeeds, writes as before", async () => {
+    // Canaries: compare the status alone, or the message alone, and the
+    // refusal that changed keeps T1.
+    const { store, actor } = setup();
+    await pollAt(store, actor, T1, refused());
+    const reworded = "Resource not accessible by integration";
+
+    expect(await pollAt(store, actor, T2, refused(403, reworded))).toMatchObject({ changed: true });
+    expect(prOf(store)?.checksUnread).toEqual({ status: 403, message: reworded, at: T2 });
+
+    expect(await pollAt(store, actor, T3, refused(404, reworded))).toMatchObject({ changed: true });
+    expect(prOf(store)?.checksUnread).toEqual({ status: 404, message: reworded, at: T3 });
+
+    // Ruling 360: the first read that succeeds drops the refusal.
+    expect(await pollAt(store, actor, T4, happyRoutes())).toMatchObject({ changed: true });
+    expect(prOf(store)?.checksUnread).toBeUndefined();
+    expect(prOf(store)?.checks).toMatchObject({ total: 2, passing: 2 });
+    expect(reconcileRows(store)).toBe(4);
+  });
+
+  it("(a) another PR's refusal is its own, even with the same status and message", async () => {
+    // Canary: compare against the file's PR whatever its number, and the
+    // adopted PR #318 inherits the refusal PR #5 first met at T1.
+    const { store, actor } = seed({
+      number: 5,
+      state: "review",
+      title: "old",
+      checksUnread: { status: 403, message: REFUSED, at: T1 },
+    });
+    const adopted = {
+      number: 318,
+      title: "Attach execution workspace",
+      state: "open",
+      draft: false,
+      merged: false,
+      merged_at: null,
+      head: { sha: REV },
+      additions: 4,
+      deletions: 1,
+      changed_files: 2,
+    };
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls`] = { body: [adopted] };
+    routes[`GET ${REPO_PATH}/pulls/318`] = { body: adopted };
+    routes[`GET ${REPO_PATH}/commits/${REV}/check-runs`] = {
+      status: 403,
+      body: { message: REFUSED },
+    };
+
+    expect(await pollAt(store, actor, T2, routes)).toMatchObject({ changed: true });
+    expect(prOf(store)).toMatchObject({
+      number: 318,
+      checksUnread: { status: 403, message: REFUSED, at: T2 },
+    });
+  });
+
+  it("(b) an open PR carrying every fact a pass measures compares equal to its own file", async () => {
+    // The audit's second find. Canary: set `revisionDrift` before `headSha`
+    // again (the parse orders `headSha` first), and the second pass rewrites a
+    // file nothing changed.
+    const bodyWritten = { sha256: "a".repeat(64), revision: REV };
+    const { store, actor } = seed({
+      number: 318,
+      state: "review",
+      title: "Attach execution workspace",
+      bodyWritten,
+      reviewRelay: { relayed: ["review:41"] },
+    });
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "open",
+        merged: false,
+        merged_at: null,
+        head: { sha: "headsha318" },
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+        mergeable: true,
+        mergeable_state: "clean",
+      },
+    };
+    routes[CHECK_RUNS] = {
+      body: {
+        total_count: 3,
+        check_runs: [{ conclusion: "success" }, { conclusion: "success" }, { conclusion: "stale" }],
+      },
+    };
+    routes[`GET ${REPO_PATH}/pulls/318/reviews`] = {
+      body: [
+        {
+          id: 41,
+          user: { login: "muratdev" },
+          state: "APPROVED",
+          commit_id: REV,
+          submitted_at: "2026-09-25T21:00:00Z",
+          body: "",
+        },
+      ],
+    };
+    routes[`GET ${REPO_PATH}/pulls/318/files`] = {
+      body: [{ filename: "app/a.ts" }, { filename: "app/b.ts" }],
+    };
+    routes[`GET ${REPO_PATH}/compare/${REV}...headsha318`] = {
+      body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] },
+    };
+
+    expect(await pollAt(store, actor, T1, routes)).toMatchObject({ changed: true });
+    const pr = prOf(store);
+    expect(pr).toMatchObject({
+      number: 318,
+      state: "review",
+      checks: { total: 3, passing: 2, failing: 0, pending: 0, unknown: 1 },
+      review: "approved",
+      mergeable: "clean",
+      mergeableAt: "headsha318",
+      paths: { headSha: "headsha318", changed: ["app/a.ts", "app/b.ts"], truncated: false },
+      headSha: "headsha318",
+      revisionDrift: { headSha: "headsha318", authored: 1, baseRefresh: null },
+      bodyWritten,
+    });
+    expect(readPrHumanApproval(pr)).toMatchObject({ status: "counted", commitSha: REV });
+    expect([...readReviewRelay(pr)]).toEqual(["review:41"]);
+    const before = fileOf(store).content;
+    const rows = reconcileRows(store);
+
+    expect(await pollAt(store, actor, T2, routes)).toMatchObject({ changed: false });
+    expect(fileOf(store).content).toBe(before);
+    expect(reconcileRows(store)).toBe(rows);
+  });
+
+  it("(b) a PR closed with a refused read keeps its closure and its refusal on the next pass", async () => {
+    // Canaries: the refusal stamped on every pass; the closure stamped on
+    // every pass instead of on the transition (ruling 160).
+    const unpushedRevision = {
+      revisionSha: REV,
+      prHeadSha: "headsha318",
+      relation: "behind" as const,
+    };
+    const { store, actor } = seed({
+      number: 318,
+      state: "review",
+      title: "Attach execution workspace",
+      unpushedRevision,
+    });
+    const routes = refused();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: {
+        number: 318,
+        title: "Attach execution workspace",
+        state: "closed",
+        merged: false,
+        merged_at: null,
+        head: { sha: "headsha318" },
+        additions: 412,
+        deletions: 87,
+        changed_files: 9,
+      },
+    };
+    // The branch still points at the PR head, so the closed PR stays linked (F26).
+    routes[`GET ${REPO_PATH}/branches/vib-301-workspace`] = {
+      body: { commit: { sha: "headsha318" } },
+    };
+    routes[`GET ${REPO_PATH}/issues/318`] = { body: { closed_by: { login: "akin-ozer" } } };
+
+    expect(await pollAt(store, actor, T1, routes)).toMatchObject({ changed: true });
+    expect(prOf(store)).toMatchObject({
+      state: "closed",
+      checksUnread: { status: 403, message: REFUSED, at: T1 },
+      headSha: "headsha318",
+      unpushedRevision,
+      closure: { at: T1, by: "akin-ozer", answered: null },
+    });
+    const before = fileOf(store).content;
+    const rows = reconcileRows(store);
+
+    expect(await pollAt(store, actor, T2, routes)).toMatchObject({ changed: false });
+    expect(fileOf(store).content).toBe(before);
+    expect(reconcileRows(store)).toBe(rows);
   });
 });

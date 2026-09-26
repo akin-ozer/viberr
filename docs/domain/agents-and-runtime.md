@@ -1486,8 +1486,15 @@ runtime's answer for a missing grant.
   …]` and `settingSources: []`; the plugin is one per RUN (the directory is named by the
   run id when the row was reserved before the mount, else by a fresh id; the run carries
   the path) and run-service removes it when the run settles, the dispatch when a run fails
-  before it starts. A plugin that is gone by the start enables no skill and the persona is
-  corrected (`droppedSkillsNotice`). Residual: a run that never settles in-process (a
+  before it starts, as the task's person (ruling 485). Whatever modes the store's skill
+  folder carries, every entry of the plugin is made anew with the mode that removal needs
+  and never changed once it exists (`copySkillFolder`, `writeNewPluginFile`, ruling
+  495(a)): its folders by `mkdir` under the server's umask in the workspace's setgid
+  chain (2775), its files group-readable on their own new descriptor (0644, 0755 when
+  executable). `cpSync` kept the source's modes, and a store folder's 0755 had left every
+  settled run's plugin behind, its files beyond the person's removal (F40-71); a chmod
+  walk after the copy would follow a folder an agent swapped for a link. A plugin that is gone by the
+  start enables no skill and the persona is corrected (`droppedSkillsNotice`). Residual: a run that never settles in-process (a
   crash) leaves its directory, inert, until the workspace is reclaimed. Canaried inside
   the image 2026-09-11 (SDK 0.3.261 / CLI 2.1.261): the init lists `viberr:<slug>` and the
   model invokes it.
@@ -1687,8 +1694,8 @@ runtime's answer for a missing grant.
 - **Shared between the server and the agents' users (ruling 460).** The directories a run
   writes — a task's `workspace/`, `attachments/` and `.operator-scratch/`, and
   `runtimes/controller-scratch`, `uv-cache`, `uv-python` — are `node:viberr-agents` 2770
-  (`shareDirWithAgents`, called where each is created; boot hands an older tree over once,
-  recursively). setgid keeps whatever either side creates inside in the agent group; the
+  (`shareDirWithAgents`, called where each is created, a resumed reply's `workspace/`
+  included since ruling 495(a); boot hands an older tree over once, recursively). setgid keeps whatever either side creates inside in the agent group; the
   agent's umask is 0007 (the launcher sets it) and the server's is 0002 (set at boot when the
   launcher exists), so a file the server's clone checks out is one an agent can edit and a
   file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
@@ -1737,10 +1744,19 @@ runtime's answer for a missing grant.
   workspace's git uses) or, for a run home, the run's own launch. What that leaves is
   another uid's (a task whose owner changed): the server reads the owners it can see in
   what is left and removes as each of them, opening their entries to the group
-  (`g+rwX`) so a deeper layer shows on the next round, three rounds at most. A tree still
+  (`g+rwX`) so a deeper layer shows on the next round, three rounds at most. What the
+  server itself wrote there no agent pass can remove (ruling 495, F40-71: a skill plugin
+  copied at the store's 0755, the `workspace/` root in a task directory only the server
+  writes), so when the passes leave entries the server opens its own to their group
+  (`chmod -R -P g+rwX`, `-P` so it follows no link, not even the tree's own) and the
+  person's pass and the rounds run again; when they leave an empty directory the server
+  owns, the server removes it with `rmdir`. The server never runs `rm` there, and neither
+  step runs while a directory above the tree is a link an agent could have put there (one
+  an agent uid owns, or any link in a folder an agent can write, a link the server's own
+  clone checked out included). A tree still
   there is a fault naming the path and the errno ("EACCES on …/dev-1wnDsF"). With no
-  launcher the same commands run as the server; with isolation on and no owner to name
-  the removal refuses and nothing is removed. A checkout with no `.git/HEAD` found when a
+  launcher the same two commands run as the server and nothing else; with isolation on
+  and no owner to name the removal refuses and nothing is removed. A checkout with no `.git/HEAD` found when a
   run (or the operator) prepares its checkout is removed as its person and cloned again,
   so a tree an older build half-removed heals on the next run. Every local step of
   preparing a checkout (the removal, the directory, the clone of the delivering checkout,
@@ -1753,14 +1769,17 @@ runtime's answer for a missing grant.
   workspace) with `origin` rewritten to the credential-free
   `https://github.com/<repo>.git`; a shallow direct clone (into a stage too) is the
   fallback. The mirror is the server's alone: boot takes group and other write off every
-  mirror file, and a hand-over never widens a file with a second link.
+  mirror file and puts it back in the server's own group (ruling 495: a removal's
+  `chmod -R -P g+rwX` can reach a checkout's object linked from the mirror, and opens it
+  only to the group it is in), and a hand-over never widens a file with a second link.
 - Credentials never touch argv or `.git/config`: the PAT is delivered through
   `GIT_ASKPASS` (`x-access-token`), `GIT_TERMINAL_PROMPT=0`, credential helper reset.
   Clone timeout 15 min (`VIBERR_GIT_CLONE_TIMEOUT_MS`); progress is streamed to the run
   strip ("Receiving objects" 0..90 %, "Resolving deltas" 90..100 %).
 - Retention: workspaces of tasks in the terminal stage are removed at boot (after run
   recovery, only when no run is live) and on every maintenance pass, each as its task's
-  owner (ruling 485; a task with no owner keeps its workspace while isolation is on); transcripts and
+  owner (ruling 485; a task with no owner keeps its workspace while isolation is on), the
+  emptied `workspace/` root, the server's own, by the server's `rmdir` (ruling 495); transcripts and
   session homes older than 30 days are pruned (`VIBERR_TRANSCRIPT_RETENTION_DAYS`,
   `VIBERR_SESSION_HOME_RETENTION_DAYS`, `0` = forever).
 
