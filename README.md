@@ -232,12 +232,9 @@ password), `--build` after pulling a new version, or use `npm run deploy`, which
 build and verifies it. Optional baseline content goes in before the first `up`, while
 nothing holds the store's writer lock: `docker compose run --rm app npm run seed`.
 
-On a host that holds real data, copy `.env.example` to `.env` and set
-`VIBERR_STORE_EXTERNAL=true` before the first `up`, then start with `npm run deploy` (or
-run `docker volume create viberr-data` first): `docker compose down -v` deletes a volume
-Compose made, and one made outside Compose with this set is one Compose never creates or
-deletes (ruling 473). `VIBERR_CPUS` caps
-the container's CPUs (roughly cores minus 3 on a machine someone also works on). Your own
+`docker compose down` keeps the store; `docker compose down -v` deletes it. In `.env`,
+`VIBERR_CPUS` caps the container's CPUs (roughly cores minus 3 on a machine someone also
+works on). Your own
 `VIBERR_SESSION_SECRET` / `VIBERR_SECRET_ENCRYPTION_KEY` override the generated ones; once
 anything has been sealed, take over the generated values unchanged
 ([deployment guide](docs/operations/deployment.md#secrets--configuration)).

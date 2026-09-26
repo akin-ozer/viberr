@@ -122,44 +122,6 @@ if (process.argv.includes("--no-up")) {
   process.exit(0);
 }
 
-/** Only the store volume's entry of `docker compose config`, parsed in memory:
- *  the rest of that output carries `.env`'s secrets and is never printed. */
-const composeVolumesSchema = z.object({
-  volumes: z.record(z.string(), z.object({ external: z.boolean().optional() })),
-});
-
-// Ruling 504: with VIBERR_STORE_EXTERNAL=true the store volume is `external`,
-// so Compose will not create it and `up` fails on a host without it. Make it
-// here, outside Compose, when it is missing. A volume Compose never labelled is
-// the one no `down -v` can delete; one Compose made is still found by its
-// labels when `docker compose -p <name> down -v` runs without the file
-// (measured on Compose 5.5.1). Compose's own reading of the file decides, so
-// the shell and `.env` resolve exactly as they will for `up`.
-const STORE_VOLUME = "viberr-data";
-let composeConfig: unknown;
-try {
-  composeConfig = JSON.parse(
-    execFileSync("docker", ["compose", "config", "--format", "json"], {
-      cwd: ROOT,
-      env: buildEnv,
-      encoding: "utf8",
-    }),
-  );
-} catch {
-  // A parse error quotes the text it failed on, and this text holds `.env`.
-  console.error("x `docker compose config --format json` did not print a readable config.");
-  process.exit(1);
-}
-const resolved = composeVolumesSchema.parse(composeConfig);
-if (resolved.volumes[STORE_VOLUME]?.external) {
-  try {
-    execFileSync("docker", ["volume", "inspect", STORE_VOLUME], { stdio: "ignore" });
-  } catch {
-    execFileSync("docker", ["volume", "create", STORE_VOLUME], { stdio: "ignore" });
-    console.log(`created the store volume ${STORE_VOLUME} outside Compose (VIBERR_STORE_EXTERNAL=true)`);
-  }
-}
-
 // Every `up -d` kills the runs in flight — that is a property of the deploy, not
 // of this script, and it is why the runbook says to check the board first.
 compose("up", "-d");

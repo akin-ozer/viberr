@@ -6,19 +6,15 @@ import { z } from "zod";
 import { parse } from "yaml";
 
 /**
- * Ruling 504 (narrowing 473): a starter's bare `docker compose up` is the
- * whole install, and a host that holds real data can still keep Compose's
- * hands off the store.
+ * Ruling 504 (superseding 473): a starter's bare `docker compose up` is the
+ * whole install.
  *
  * Ruling 473 declared the store volume `external`, so `docker compose down -v`
  * could never delete it. The price was that a fresh `up` failed with
  * `external volume "viberr-data" not found` until someone created the volume
  * by hand, and the README's quickstart never said to. The owner ruled for the
- * starter: Compose owns the volume by default, and VIBERR_STORE_EXTERNAL=true
- * in `.env` re-arms ruling 473 where it matters, on a volume made outside
- * Compose (measured 2026-09-26 on Compose 5.5.1: that one survives every form
- * of `down -v`, while one Compose made is still deleted by a
- * `docker compose -p <name> down -v` run without the file).
+ * starter: Compose owns the volume. `down` keeps it and `down -v` deletes it,
+ * because `-v` is an explicit request to.
  */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -31,7 +27,7 @@ const composeSchema = z.object({
       cpus: z.string(),
     }),
   }),
-  volumes: z.record(z.string(), z.object({ name: z.string(), external: z.unknown() })),
+  volumes: z.record(z.string(), z.record(z.string(), z.unknown())),
 });
 
 /** The first shell block that runs Compose: the install a newcomer follows. */
@@ -46,27 +42,10 @@ function firstComposeBlock(markdown: string): string {
 describe("ruling 504: a starter's `docker compose up` is the whole install", () => {
   const app = composeSchema.parse(parse(read("compose.yml")));
 
-  it("mounts viberr-data, owned by Compose unless VIBERR_STORE_EXTERNAL re-arms ruling 473", () => {
+  it("mounts viberr-data, a volume Compose owns", () => {
     expect(app.services.app.volumes).toContain("viberr-data:/data");
-    // CANARY: a literal `external: true` fails every fresh `up`; dropping the
-    // variable leaves a host with real data no way to keep `down -v` off it.
-    expect(app.volumes["viberr-data"]).toEqual({
-      name: "viberr-data",
-      external: "${VIBERR_STORE_EXTERNAL:-false}",
-    });
-  });
-
-  it("the deploy makes a guarded store outside Compose before `up`, and only a guarded one", () => {
-    const deploy = read("scripts/deploy.ts");
-    const guard = deploy.indexOf("resolved.volumes[STORE_VOLUME]?.external");
-    const create = deploy.indexOf('["volume", "create", STORE_VOLUME]');
-    const up = deploy.indexOf('compose("up", "-d")');
-    // CANARY: create it unguarded and every default host gets a volume Compose
-    // did not make and warns about on each `up`; create it after `up` and a
-    // guarded fresh host fails with `external volume "viberr-data" not found`.
-    expect(guard).toBeGreaterThan(-1);
-    expect(create).toBeGreaterThan(guard);
-    expect(up).toBeGreaterThan(create);
+    // CANARY: `external: true` fails every fresh `up`.
+    expect(app.volumes["viberr-data"]).toEqual({ name: "viberr-data" });
   });
 
   it("needs no .env, and sets no CPU ceiling a small host cannot meet", () => {

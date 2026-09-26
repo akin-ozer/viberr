@@ -128,18 +128,9 @@ volumes:
   # Ruling 460: the store. Named `viberr-data` exactly (not project-prefixed),
   # so the one-time move, the backup and the runbook can name it.
   #
-  # Ruling 504 (narrowing 473): Compose owns it by default, so a starter's
-  # first `up` creates it, and `docker compose down -v` deletes it as it does
-  # any Compose volume: the canonical files, the database, everyone's sealed
-  # credentials and sign-ins. A host that holds real data sets
-  # VIBERR_STORE_EXTERNAL=true in `.env`, which makes it EXTERNAL (ruling 473),
-  # and has the volume made outside Compose: `npm run deploy` does it, or
-  # `docker volume create viberr-data` before the first `up`. Compose then
-  # never creates or deletes it, no `down -v` can touch it, and an `up` without
-  # it fails instead of starting on an empty store. Switched on over a volume
-  # Compose already made, the guard holds for `docker compose down -v` run with
-  # this file, but `docker compose -p <name> down -v` without the file still
-  # finds Compose's labels on it and deletes it (measured on Compose 5.5.1).
+  # Ruling 504: Compose owns it, so a starter's first `up` creates it.
+  # `docker compose down` keeps it; `docker compose down -v` deletes it, with
+  # the canonical files, the database and everyone's sealed credentials and
+  # sign-ins in it, as that flag asks.
   viberr-data:
     name: viberr-data
-    external: ${VIBERR_STORE_EXTERNAL:-false}

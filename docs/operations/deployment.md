@@ -321,19 +321,10 @@ generated into the store, and Compose creates the store, the named volume `viber
 `/data` (owned `node:viberr-agents`, 0750), so there is no host directory to create or
 chown.
 
-A volume Compose owns is one `docker compose down -v` deletes: the canonical files, the
-database, every sealed credential and every person's sign-in. On a host that holds real
-data, set `VIBERR_STORE_EXTERNAL=true` in `.env` before the first `up` (ruling 473) and
-let the volume be made outside Compose: `npm run deploy` creates it when it is missing, or
-run `docker volume create viberr-data` yourself. The volume is then `external`, so Compose
-never creates or deletes it, no `down -v` can touch it, and an `up` without it fails with
-"external volume not found" instead of starting on an empty store. Switching the guard on
-over a volume Compose already made is weaker (measured on Compose 5.5.1): it prints no
-warning and holds for `docker compose down -v` run with this compose file, but
-`docker compose -p <name> down -v` run without the file finds Compose's labels on the
-volume and deletes it. That host also wants
-`VIBERR_CPUS` (above), and `BETTER_AUTH_URL` and `VIBERR_TRUST_PROXY` behind a TLS proxy
-(below). A volume lives inside Docker, not in the
+`docker compose down` keeps the volume; `docker compose down -v` deletes it, and with it
+the canonical files, the database, every sealed credential and every person's sign-in.
+A host that people also work on wants `VIBERR_CPUS` (above), and one behind a TLS proxy
+`BETTER_AUTH_URL` and `VIBERR_TRUST_PROXY` (below). A volume lives inside Docker, not in the
 repository: read a live instance through the app, `docker compose exec app …` (the
 maintenance CLIs, `ls`, `cat`) or a backup (`npm run backup`, below), never by opening
 files on the host.
@@ -346,7 +337,6 @@ Move it once, with the app stopped:
 ```bash
 docker compose stop app
 npm run store:to-volume          # ./docker-data → the volume viberr-data
-echo VIBERR_STORE_EXTERNAL=true >> .env   # real data, in a volume Compose did not make
 docker compose up -d
 curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
 ```
