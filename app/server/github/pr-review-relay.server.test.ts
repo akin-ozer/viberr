@@ -157,6 +157,7 @@ interface GhCommentRow {
   line?: number | null;
   original_line?: number | null;
   original_start_line?: number;
+  start_side?: string;
   side: string;
   original_commit_id: string;
 }
@@ -246,6 +247,18 @@ const SELIN_COMMENTS: GhCommentRow[] = [
     path: "notes/range.md",
     body: "Too long.",
     original_start_line: 2,
+    start_side: "RIGHT",
+    original_line: 5,
+    side: "RIGHT",
+    original_commit_id: HEAD,
+  },
+  {
+    // Ruling 509: a range from a removed line to an added one.
+    id: 104,
+    path: "notes/swap.md",
+    body: "Keep the old wording.",
+    original_start_line: 3,
+    start_side: "LEFT",
     original_line: 5,
     side: "RIGHT",
     original_commit_id: HEAD,
@@ -292,6 +305,7 @@ describe("ruling 484: the review relay", () => {
         "- `notes/three.md:12`: Reject this note. \\@operator need not see it.",
         "- `notes/old.md:4` (removed line): Keep this line.",
         "- `notes/range.md:2-5`: Too long.",
+        "- `notes/swap.md` (removed line 3 to line 5): Keep the old wording.",
       ].join("\n"),
     );
     // Audited as the member, with the instrument named.
@@ -307,6 +321,7 @@ describe("ruling 484: the review relay", () => {
       "comment:101",
       "comment:102",
       "comment:103",
+      "comment:104",
       "review:11",
     ]);
   });

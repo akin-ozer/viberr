@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffRows } from "./diff-rows";
+import { diffRows, noteLine, noteRange } from "./diff-rows";
 
 /**
  * Ruling 484: the Changes panel quotes a note's `file:line`, so each drawn row
@@ -50,5 +50,77 @@ describe("ruling 484: diffRows numbers every line the way a note quotes it", () 
       { kind: "hunk", text: "@@ garbage @@" },
       { kind: "add", oldLine: null, newLine: null, text: "x" },
     ]);
+  });
+});
+
+/**
+ * Ruling 509: a note may cover several lines. The panel asks `noteRange` which
+ * rows a drag or a shift-click from one line towards another covers, so the
+ * range never leaves its hunk and never shares a line with another note.
+ */
+describe("ruling 509: noteRange keeps a note's lines inside one hunk and off other notes", () => {
+  const rows = diffRows(
+    [
+      "@@ -10,4 +10,5 @@",
+      " keep", // 1: new 10
+      "-gone", // 2: old 11
+      "+new one", // 3: new 11
+      "+new two", // 4: new 12
+      " tail", // 5: new 13
+      "@@ -40,2 +41,2 @@", // 6
+      "-old", // 7: old 40
+      "+fresh", // 8: new 41
+      "\\ No newline at end of file", // 9
+      "",
+    ].join("\n"),
+  );
+  const free = () => false;
+  /** The first and last row of a range, or null. */
+  const span = (range: ReturnType<typeof noteRange>) => range && [range.start.row, range.end.row];
+
+  it("quotes a removed line in the old file and every other line in the new one", () => {
+    expect(rows.map(noteLine)).toEqual([
+      null,
+      { side: "new", line: 10 },
+      { side: "old", line: 11 },
+      { side: "new", line: 11 },
+      { side: "new", line: 12 },
+      { side: "new", line: 13 },
+      null,
+      { side: "old", line: 40 },
+      { side: "new", line: 41 },
+      null,
+    ]);
+  });
+
+  it("runs from the first row to the second, whichever way the pointer went, and names both ends' lines", () => {
+    expect(noteRange(rows, 2, 4, free)).toEqual({
+      start: { row: 2, side: "old", line: 11 },
+      end: { row: 4, side: "new", line: 12 },
+    });
+    expect(span(noteRange(rows, 4, 1, free))).toEqual([1, 4]);
+    expect(span(noteRange(rows, 3, 3, free))).toEqual([3, 3]);
+  });
+
+  it("stops at the hunk's edge in either direction", () => {
+    expect(span(noteRange(rows, 2, 8, free))).toEqual([2, 5]);
+    expect(span(noteRange(rows, 8, 0, free))).toEqual([7, 8]);
+  });
+
+  it("passes over the no-newline marker but never ends on it", () => {
+    expect(span(noteRange(rows, 7, 9, free))).toEqual([7, 8]);
+  });
+
+  it("stops before a line another note covers, and starts nowhere a note already is", () => {
+    const taken = (row: number) => row === 4;
+    expect(span(noteRange(rows, 1, 5, taken))).toEqual([1, 3]);
+    expect(span(noteRange(rows, 5, 1, taken))).toEqual([5, 5]);
+    expect(noteRange(rows, 4, 1, taken)).toBeNull();
+  });
+
+  it("starts nowhere a note cannot sit", () => {
+    expect(noteRange(rows, 0, 3, free)).toBeNull();
+    expect(noteRange(rows, 9, 7, free)).toBeNull();
+    expect(noteRange(diffRows("@@ garbage @@\n+x\n+y"), 1, 2, free)).toBeNull();
   });
 });

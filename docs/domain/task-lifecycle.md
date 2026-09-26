@@ -435,14 +435,17 @@ order of an epic's work is each task's own list.
   directive, and a second failure writes no second note (rulings 203, 205).
 - **Review notes are comments to the deliverer** (ruling 484,
   `review-notes.server.ts`). Two doors write the same comment through `commentToAgent`:
-  the task page's Changes panel (`review-notes`: a person's line notes on the delivered
-  revision's patches) and the reconciler's review relay (a project member's GitHub
+  the task page's Changes panel (`review-notes`: a person's notes on the delivered
+  revision's patches, each on one line or on a range of one hunk's lines, ruling 509)
+  and the reconciler's review relay (a project member's GitHub
   review of the delivered head, posted as that member, audit label `· via GitHub`,
   [github-delivery.md §6](github-delivery.md#6-reconciliation-and-freshness)). It opens
   `@<deliverer handle> Review notes on \`<sha7>\` (PR #N):` (the relay adds "from
   GitHub (a review by <login>)") and lists one note per item as `` `path:line` ``
-  (`path:start-end` for a range, "(removed line)" for a line of the old file, a bare
-  `` `path` `` for a whole file, "Requested changes" for a review's own body). Every
+  (`path:start-end` for a range, "(removed line)" or "(removed lines)" for the old
+  file's, both ends for a range from a removed line to an added one, `` `path` (removed
+  line 4 to line 7) ``, a bare `` `path` `` for a whole file, "Requested changes" for a
+  review's own body). Every
   other `@` in a note is escaped, so the deliverer is the one addressee and a note
   cannot reroute it to the operator or notify a GitHub login. The deliverer resumes on it
   exactly as on a typed mention, under the same role gate: a contributor's notes post and

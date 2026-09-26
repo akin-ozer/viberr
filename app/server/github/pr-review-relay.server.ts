@@ -91,6 +91,7 @@ const reviewCommentSchema = z.object({
   original_line: z.number().int().nullable().optional().catch(null),
   start_line: z.number().int().nullable().optional().catch(null),
   original_start_line: z.number().int().nullable().optional().catch(null),
+  start_side: z.string().nullable().optional().catch(null),
   side: z.string().nullable().optional().catch(null),
   original_commit_id: z.string().nullable().optional().catch(null),
 });
@@ -135,7 +136,8 @@ async function readReviewComments(
   return out;
 }
 
-/** A GitHub line comment as a note: its line on the commit it was written on. */
+/** A GitHub line comment as a note: its line on the commit it was written on.
+ *  A multi-line comment's first line keeps its own side (ruling 509). */
 function commentNote(c: ReviewComment): ReviewNote {
   const line = c.original_line ?? c.line ?? null;
   const start = c.original_start_line ?? c.start_line ?? null;
@@ -143,6 +145,7 @@ function commentNote(c: ReviewComment): ReviewNote {
     path: c.path,
     line,
     startLine: start,
+    startSide: c.start_side === "LEFT" ? "old" : c.start_side === "RIGHT" ? "new" : null,
     side: c.side === "LEFT" ? "old" : "new",
     body: c.body,
   };
@@ -226,7 +229,14 @@ export async function relayPrReviews(
     };
     batch.ids.push(reviewKey(review.id));
     if (review.state === "CHANGES_REQUESTED" && review.body.trim()) {
-      batch.notes.push({ path: null, line: null, startLine: null, side: "new", body: review.body });
+      batch.notes.push({
+        path: null,
+        line: null,
+        startLine: null,
+        startSide: null,
+        side: "new",
+        body: review.body,
+      });
     }
     for (const c of comments) {
       const key = commentKey(c.id);

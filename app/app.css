@@ -8329,7 +8329,10 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    scrolling sideways. Added and removed rows are tinted from the success and
    danger tokens over the surface, so both themes carry them. The note editor
    is the goal editor's textarea and action row (`.goal-textarea`,
-   `.goal-edit-actions`). */
+   `.goal-edit-actions`). Ruling 509: a note covers a range of lines, so the
+   rows a drag or a shift-click takes are washed in the focus blue over their
+   own tint, a saved note's rows keep a bar at their left edge, and a range
+   is named above its note (`.chg-where`). */
 .chg-lede { margin: 0 0 .75rem; max-width: 70ch; font-size: .88rem; color: var(--muted); }
 /* The toggle's chevron points the way the disclosure carets do: down while
    the reader is folded, up while it is open. */
@@ -8370,7 +8373,10 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
   font-variant-numeric: tabular-nums; user-select: none;
 }
 button.chg-num { cursor: pointer; }
-button.chg-num:hover, button.chg-num[aria-expanded="true"] { color: var(--blue-pressed); background: var(--focus-wash); }
+button.chg-num:hover { color: var(--blue-pressed); background: var(--focus-wash); }
+.chg-row[data-sel] { background-image: linear-gradient(var(--focus-wash), var(--focus-wash)); }
+.chg-row[data-sel] > .chg-num { color: var(--blue-pressed); }
+.chg-row[data-noted] { box-shadow: inset 2px 0 var(--blue-pressed); }
 .chg-mark { color: var(--faint); user-select: none; }
 .chg-code, .chg-hunk code, .chg-nl code { min-width: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chg-code { padding-right: .5rem; }
@@ -8383,6 +8389,7 @@ button.chg-num:hover, button.chg-num[aria-expanded="true"] { color: var(--blue-p
 }
 .chg-note > .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; color: var(--blue-pressed); }
 .chg-note-text { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chg-where { display: block; margin: 0; font-size: .75rem; color: var(--muted); }
 .chg-foot {
   display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem;
   padding-top: .75rem; border-top: 1px solid var(--hairline);

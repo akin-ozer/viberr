@@ -88,6 +88,7 @@ const line = (path: string, n: number, body: string, side: "new" | "old" = "new"
   path,
   line: n,
   startLine: null,
+  startSide: null,
   side,
   body,
 });
@@ -101,8 +102,8 @@ describe("ruling 484: reviewNotesDirective", () => {
       notes: [
         line("notes/one.md", 12, "Approved."),
         line("notes/two.md", 4, "Keep this line.", "old"),
-        { path: "notes/three.md", line: 9, startLine: 2, side: "new", body: "Cut this paragraph.\nIt repeats note one." },
-        { path: "notes/four.md", line: null, startLine: null, side: "new", body: "Wrong file name." },
+        { path: "notes/three.md", line: 9, startLine: 2, startSide: null, side: "new", body: "Cut this paragraph.\nIt repeats note one." },
+        { path: "notes/four.md", line: null, startLine: null, startSide: null, side: "new", body: "Wrong file name." },
       ],
     });
     expect(text).toBe(
@@ -126,7 +127,7 @@ describe("ruling 484: reviewNotesDirective", () => {
       prNumber: 3,
       fromGithub: { login: "akin-ozer" },
       notes: [
-        { path: null, line: null, startLine: null, side: "new", body: "@operator, hold the merge. cc @octocat" },
+        { path: null, line: null, startLine: null, startSide: null, side: "new", body: "@operator, hold the merge. cc @octocat" },
         line("notes/five.md", 1, "@agent drop this"),
       ],
     });
@@ -148,6 +149,36 @@ describe("ruling 484: reviewNotesDirective", () => {
     expect(text).toContain(`${"x".repeat(4_000)}… (cut here; the full comment is on the pull request)`);
     expect(text).not.toContain("x".repeat(4_001));
   });
+
+  it("ruling 509: quotes a range on one side as path:start-end, and one across sides by both ends", () => {
+    const range = (startLine: number, startSide: "new" | "old", end: number, side: "new" | "old"): ReviewNote => ({
+      path: "notes/one.md",
+      line: end,
+      startLine,
+      startSide,
+      side,
+      body: "x",
+    });
+    const text = reviewNotesDirective({
+      handle: "content-writer",
+      revisionSha: HEAD,
+      prNumber: 3,
+      notes: [
+        range(3, "new", 9, "new"),
+        range(4, "old", 6, "old"),
+        range(4, "old", 7, "new"),
+        range(8, "new", 9, "old"),
+        range(5, "new", 5, "new"),
+      ],
+    });
+    expect(text.split("\n").slice(2)).toEqual([
+      "- `notes/one.md:3-9`: x",
+      "- `notes/one.md:4-6` (removed lines): x",
+      "- `notes/one.md` (removed line 4 to line 7): x",
+      "- `notes/one.md` (line 8 to removed line 9): x",
+      "- `notes/one.md:5`: x",
+    ]);
+  });
 });
 
 describe("ruling 484: the panel's notes, parsed and bound", () => {
@@ -155,7 +186,20 @@ describe("ruling 484: the panel's notes, parsed and bound", () => {
 
   it("parses the intent's notes and refuses anything else with one sentence", () => {
     expect(parsePanelReviewNotes(notesJson)).toEqual([
-      { path: "notes/one.md", line: 12, side: "new", body: "Tighten.", startLine: null },
+      { path: "notes/one.md", line: 12, side: "new", body: "Tighten.", startLine: null, startSide: null },
+    ]);
+    // Ruling 509: a note on several lines names its first line and that
+    // line's side.
+    expect(
+      parsePanelReviewNotes(
+        JSON.stringify([
+          { path: "a", line: 9, side: "new", startLine: 3, startSide: "new", body: "x" },
+          { path: "a", line: 2, side: "new", startLine: 7, startSide: "old", body: "y" },
+        ]),
+      ),
+    ).toEqual([
+      { path: "a", line: 9, side: "new", startLine: 3, startSide: "new", body: "x" },
+      { path: "a", line: 2, side: "new", startLine: 7, startSide: "old", body: "y" },
     ]);
     for (const bad of [
       null,
@@ -164,6 +208,10 @@ describe("ruling 484: the panel's notes, parsed and bound", () => {
       JSON.stringify([{ path: "a", line: 0, side: "new", body: "x" }]),
       JSON.stringify([{ path: "a", line: 1, side: "new", body: "   " }]),
       JSON.stringify(Array.from({ length: 51 }, () => ({ path: "a", line: 1, side: "new", body: "x" }))),
+      // A range on one side never reads upward, and a start side needs a start.
+      JSON.stringify([{ path: "a", line: 3, side: "new", startLine: 9, body: "x" }]),
+      JSON.stringify([{ path: "a", line: 3, side: "new", startSide: "old", body: "x" }]),
+      JSON.stringify([{ path: "a", line: 3, side: "new", startLine: 0, startSide: "old", body: "x" }]),
     ]) {
       const refused = (() => {
         try {

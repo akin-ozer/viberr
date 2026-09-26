@@ -22,6 +22,18 @@ export type DiffRow =
       text: string;
     };
 
+/** A line as a note quotes it: which file it is numbered in, and its number. */
+export interface NoteLine {
+  /** `old` = a removed line, numbered in the file as it was. */
+  side: "new" | "old";
+  line: number;
+}
+
+/** A row a note can sit on: its index in the rows, and the line it quotes. */
+export interface NoteRow extends NoteLine {
+  row: number;
+}
+
 const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 export function diffRows(patch: string): DiffRow[] {
@@ -65,4 +77,43 @@ export function diffRows(patch: string): DiffRow[] {
     }
   }
   return rows;
+}
+
+/** The line a row quotes: the new file's number for an added or context line,
+ *  the old file's for a removed one. Null for a row a note cannot sit on (a
+ *  hunk header, the no-newline marker, a line under a header that did not
+ *  parse). */
+export function noteLine(row: DiffRow): NoteLine | null {
+  if (row.kind === "hunk" || row.kind === "meta") return null;
+  if (row.kind === "del") return row.oldLine === null ? null : { side: "old", line: row.oldLine };
+  return row.newLine === null ? null : { side: "new", line: row.newLine };
+}
+
+/**
+ * Ruling 509: the rows one note covers when a person drags or shift-clicks from
+ * row `from` towards row `to`, first row first. The run stops at its hunk's
+ * edge, because the lines between two hunks are not in the patch, and before
+ * any row `taken` says another note covers, because a line carries one note.
+ * Both ends are rows a note can sit on; a no-newline marker inside the run is
+ * passed over. Null when `from` itself cannot carry the note.
+ */
+export function noteRange(
+  rows: readonly DiffRow[],
+  from: number,
+  to: number,
+  taken: (row: number) => boolean,
+): { start: NoteRow; end: NoteRow } | null {
+  const origin = rows[from];
+  const quoted = origin ? noteLine(origin) : null;
+  if (quoted === null || taken(from)) return null;
+  const anchor: NoteRow = { row: from, ...quoted };
+  const step = to < from ? -1 : 1;
+  let reach = anchor;
+  for (let i = from + step; step > 0 ? i <= to : i >= to; i += step) {
+    const row = rows[i];
+    if (!row || row.kind === "hunk" || taken(i)) break;
+    const line = noteLine(row);
+    if (line !== null) reach = { row: i, ...line };
+  }
+  return step > 0 ? { start: anchor, end: reach } : { start: reach, end: anchor };
 }

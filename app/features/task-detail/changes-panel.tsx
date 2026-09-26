@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { useFetcher } from "react-router";
 import type { PrDiffFile } from "~/server/github/pr-diff.server";
 import type { TaskChangesView } from "~/server/github/task-changes.server";
-import { diffRows, type DiffRow } from "~/shared/diff-rows";
+import {
+  diffRows,
+  noteLine,
+  noteRange,
+  type DiffRow,
+  type NoteLine,
+  type NoteRow,
+} from "~/shared/diff-rows";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
@@ -22,6 +29,13 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * hunk is a window onto a file, not a file, so the attachment reader's Shiki
  * pass (ruling 363, whole-file grammars) would colour it wrongly as often as
  * not.
+ *
+ * Ruling 509: a note may cover several lines of one hunk, as a GitHub review
+ * comment can. A person drags the mouse across the numbers, or opens a note and
+ * shift-clicks another number (Shift+Enter from the keyboard), and the note
+ * reaches the agent as `path:start-end`. A line still carries one note, so a
+ * range stops before a line that has one, and pressing any line of a note
+ * opens it.
  */
 
 export interface ChangesBodyProps {
@@ -34,13 +48,30 @@ export interface ChangesBodyProps {
   githubHost: string;
 }
 
-/** One pending note, bound to the revision it was written on. */
+/** One pending note, bound to the revision it was written on. It covers the
+ *  rows `start` to `end` of one hunk (one row for a note on one line), and no
+ *  other note covers any of them. */
 interface PanelNote {
+  /** The last line's identity, `lineKey`. */
   key: string;
   path: string;
-  line: number;
-  side: "new" | "old";
+  start: NoteRow;
+  end: NoteRow;
   body: string;
+}
+
+/** The open note editor: the rows it covers in one file, the row a
+ *  shift-click extends from, the note it rewrites (null for a new one) and
+ *  the text it opens with. `id` is new for each note opened, so an editor
+ *  never keeps another note's text. */
+interface Draft {
+  id: number;
+  path: string;
+  anchor: number;
+  start: NoteRow;
+  end: NoteRow;
+  edits: string | null;
+  text: string;
 }
 
 type SendResult = { ok: true; toast?: string } | { ok: false; error?: string };
@@ -62,6 +93,32 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** How the panel names the lines a note covers: "line 5", "line 5, removed",
+ *  "lines 3 to 9", or both ends when the range runs from a removed line to an
+ *  added one ("removed line 4 to line 7"). */
+function spanLabel(start: NoteLine, end: NoteLine): string {
+  const removed = end.side === "old" ? ", removed" : "";
+  if (start.side !== end.side) {
+    const one = (at: NoteLine) => `${at.side === "old" ? "removed line" : "line"} ${at.line}`;
+    return `${one(start)} to ${one(end)}`;
+  }
+  return start.line === end.line
+    ? `line ${end.line}${removed}`
+    : `lines ${start.line} to ${end.line}${removed}`;
+}
+
+/** A label that opens a line of its own. */
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A note as the `review-notes` intent reads it: a note on several lines also
+ *  names its first line and that line's side (ruling 509). */
+function postedNote({ path, start, end, body }: PanelNote) {
+  const note = { path, line: end.line, side: end.side, body };
+  return start.row === end.row ? note : { ...note, startLine: start.line, startSide: start.side };
+}
+
 export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) {
   const read = useFetcher<TaskChangesView>();
   const loadRead = read.load;
@@ -72,12 +129,28 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
   const reading = read.state !== "idle";
 
   const [notes, setNotes] = useState<PanelNote[]>([]);
-  const [editing, setEditing] = useState<string | null>(null);
-  // The number button that opened the editor, so closing it hands focus back.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  // What the open editor holds, kept out of state so a keystroke redraws the
+  // editor alone, not every file; a range change carries it to the editor's
+  // new row.
+  const typed = useRef("");
+  const opened = useRef(0);
+  // The number button pressed last, so closing the editor hands focus back.
   const opener = useRef<HTMLButtonElement | null>(null);
   const closeEditor = () => {
-    setEditing(null);
+    setDraft(null);
     opener.current?.focus();
+  };
+  const openDraft = (next: Omit<Draft, "id">, button: HTMLButtonElement) => {
+    opener.current = button;
+    typed.current = next.text;
+    opened.current += 1;
+    setDraft({ ...next, id: opened.current });
+  };
+  const moveDraft = (start: NoteRow, end: NoteRow, anchor: number, button: HTMLButtonElement) => {
+    if (!draft) return;
+    opener.current = button;
+    setDraft({ ...draft, anchor, start, end, text: typed.current });
   };
 
   const send = useFetcher<SendResult>();
@@ -119,11 +192,16 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
 
   const recipient = view.recipient;
   const stale = view.headSha !== revisionSha;
-  const byLine = new Map(notes.map((n) => [n.key, n]));
   const prFiles = `${githubHost}/${view.repo}/pull/${view.prNumber}/files`;
 
-  const saveNote = (note: PanelNote) => {
-    setNotes((all) => [...all.filter((n) => n.key !== note.key), note]);
+  const saveNote = (body: string) => {
+    if (!draft) return;
+    const { path, start, end, edits } = draft;
+    const key = lineKey(path, end.side, end.line);
+    setNotes((all) => [
+      ...all.filter((n) => n.key !== edits && n.key !== key),
+      { key, path, start, end, body },
+    ]);
     closeEditor();
   };
   const removeNote = (key: string) => setNotes((all) => all.filter((n) => n.key !== key));
@@ -133,10 +211,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
     fd.set("_csrf", csrf);
     fd.set("intent", "review-notes");
     fd.set("headSha", view.headSha);
-    fd.set(
-      "notes",
-      JSON.stringify(notes.map(({ path, line, side, body }) => ({ path, line, side, body }))),
-    );
+    fd.set("notes", JSON.stringify(notes.map(postedNote)));
     void send.submit(fd, { method: "post" });
   };
 
@@ -168,7 +243,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
             disabled={reading}
             onClick={() => {
               setNotes([]);
-              setEditing(null);
+              setDraft(null);
               void loadRead(url);
             }}
           >
@@ -192,11 +267,12 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
             url={url}
             defaultOpen={i < 5}
             canNote={recipient !== null && !stale}
-            notes={byLine}
-            editing={editing}
-            onEdit={(key, button) => {
-              opener.current = button;
-              setEditing(key);
+            notes={notes.filter((n) => n.path === file.path)}
+            draft={draft?.path === file.path ? draft : null}
+            onOpen={openDraft}
+            onMove={moveDraft}
+            onText={(text) => {
+              typed.current = text;
             }}
             onCancel={closeEditor}
             onSave={saveNote}
@@ -208,7 +284,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
         <div className="chg-foot">
           <p className="chg-count" role="status">
             {notes.length === 0
-              ? "No notes yet. Select a line number to add one."
+              ? "No notes yet. Select a line number to add one, or drag across several."
               : `${plural(notes.length, "note", "notes")} for @${recipient.name}, sent as one comment.`}
           </p>
           <div className="chg-foot-acts">
@@ -218,7 +294,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
               disabled={notes.length === 0 || sending}
               onClick={() => {
                 setNotes([]);
-                setEditing(null);
+                setDraft(null);
               }}
             >
               Discard notes
@@ -246,33 +322,29 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
   );
 }
 
-interface FileDiffProps {
+/** What a file's lines need from the panel: this file's notes, the open
+ *  editor when it is in this file, and the doors that change them. */
+interface NoteProps {
+  canNote: boolean;
+  notes: readonly PanelNote[];
+  draft: Draft | null;
+  onOpen: (draft: Omit<Draft, "id">, button: HTMLButtonElement) => void;
+  onMove: (start: NoteRow, end: NoteRow, anchor: number, button: HTMLButtonElement) => void;
+  onText: (text: string) => void;
+  onCancel: () => void;
+  onSave: (body: string) => void;
+  onRemove: (key: string) => void;
+}
+
+interface FileDiffProps extends NoteProps {
   file: PrDiffFile;
   url: string;
   defaultOpen: boolean;
-  canNote: boolean;
-  notes: ReadonlyMap<string, PanelNote>;
-  editing: string | null;
-  onEdit: (key: string, button: HTMLButtonElement) => void;
-  onCancel: () => void;
-  onSave: (note: PanelNote) => void;
-  onRemove: (key: string) => void;
 }
 
 /** One changed file: its counts in the summary, its hunks inside. A patch the
  *  panel's read left out for size loads on its own. */
-function FileDiff({
-  file,
-  url,
-  defaultOpen,
-  canNote,
-  notes,
-  editing,
-  onEdit,
-  onCancel,
-  onSave,
-  onRemove,
-}: FileDiffProps) {
+function FileDiff({ file, url, defaultOpen, ...lines }: FileDiffProps) {
   const one = useFetcher<TaskChangesView>();
   const loaded =
     one.data?.ok === true ? (one.data.files.find((f) => f.path === file.path) ?? null) : null;
@@ -280,7 +352,7 @@ function FileDiff({
   const oneFailed = one.data !== undefined && !one.data.ok ? one.data.reason : null;
   const rows = useMemo(() => (patch === null ? [] : diffRows(patch)), [patch]);
   const status = STATUS_LABEL.get(file.status) ?? file.status;
-  const fileNotes = [...notes.values()].filter((n) => n.path === file.path).length;
+  const fileNotes = lines.notes.length;
 
   return (
     <details className="chg-file" open={defaultOpen}>
@@ -301,17 +373,7 @@ function FileDiff({
         ) : null}
       </summary>
       {patch !== null ? (
-        <DiffLines
-          path={file.path}
-          rows={rows}
-          canNote={canNote}
-          notes={notes}
-          editing={editing}
-          onEdit={onEdit}
-          onCancel={onCancel}
-          onSave={onSave}
-          onRemove={onRemove}
-        />
+        <DiffLines path={file.path} rows={rows} {...lines} />
       ) : (loaded?.patchOmitted ?? file.patchOmitted) === "budget" ? (
         <div className="chg-omitted">
           <p>This file&rsquo;s changes are larger than one read carries.</p>
@@ -342,16 +404,20 @@ function FileDiff({
   );
 }
 
-interface DiffLinesProps {
+interface DiffLinesProps extends NoteProps {
   path: string;
   rows: DiffRow[];
-  canNote: boolean;
-  notes: ReadonlyMap<string, PanelNote>;
-  editing: string | null;
-  onEdit: (key: string, button: HTMLButtonElement) => void;
-  onCancel: () => void;
-  onSave: (note: PanelNote) => void;
-  onRemove: (key: string) => void;
+}
+
+/** A mouse drag across the numbers, before it is released: the row it started
+ *  on, the rows it covers so far, whether it re-ranges the open note (it
+ *  started on one of that note's rows) and the button it started on. */
+interface Drag {
+  anchor: number;
+  start: NoteRow;
+  end: NoteRow;
+  moves: boolean;
+  from: HTMLButtonElement;
 }
 
 function DiffLines({
@@ -359,42 +425,151 @@ function DiffLines({
   rows,
   canNote,
   notes,
-  editing,
-  onEdit,
+  draft,
+  onOpen,
+  onMove,
+  onText,
   onCancel,
   onSave,
   onRemove,
 }: DiffLinesProps) {
+  // The note on each row: a line carries one note.
+  const cover = new Map<number, PanelNote>();
+  for (const note of notes) {
+    for (let row = note.start.row; row <= note.end.row; row += 1) cover.set(row, note);
+  }
+  const inDraft = (row: number) =>
+    draft !== null && row >= draft.start.row && row <= draft.end.row;
+  /** The rows a note being drawn may not take: every other note's. The note
+   *  the editor rewrites (`edits`) gives its own rows up. */
+  const takenBy = (edits: string | null) => (row: number) => {
+    const note = cover.get(row);
+    return note !== undefined && note.key !== edits;
+  };
+
+  const [drag, setDrag] = useState<Drag | null>(null);
+  // The drag as the last pointer event left it, for the release, which can
+  // arrive before React has drawn the last move.
+  const live = useRef<Drag | null>(null);
+  const moveDrag = (next: Drag | null) => {
+    live.current = next;
+    setDrag(next);
+  };
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const release = (e: globalThis.PointerEvent) => {
+      const done = live.current;
+      moveDrag(null);
+      if (!done) return;
+      // Released on the button it started on, one line long: that is the
+      // button's own click, which follows.
+      const onOrigin = e.target instanceof Node && done.from.contains(e.target);
+      if (onOrigin && done.start.row === done.end.row) return;
+      const { anchor, start, end, from } = done;
+      if (done.moves) onMove(start, end, anchor, from);
+      else onOpen({ path, anchor, start, end, edits: null, text: "" }, from);
+    };
+    const drop = () => moveDrag(null);
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") moveDrag(null);
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", drop);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", drop);
+      window.removeEventListener("keydown", escape);
+    };
+    // The doors are the panel's; the drag reads its own state from `live`.
+  }, [dragging]);
+
+  /** A primary mouse press on a number starts a drag. A finger or a stylus on
+   *  the numbers pans the page instead, and a modified press is a click. */
+  const startDrag = (row: number, e: PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    const moves = inDraft(row);
+    const range = noteRange(rows, row, row, takenBy(moves ? (draft?.edits ?? null) : null));
+    // Another note's line: its click opens that note.
+    if (!range) return;
+    moveDrag({ anchor: row, ...range, moves, from: e.currentTarget });
+  };
+  const trackDrag = (e: PointerEvent<HTMLOListElement>) => {
+    const over = e.target instanceof Element ? e.target.closest("[data-row]") : null;
+    if (!drag || !over) return;
+    const range = noteRange(
+      rows,
+      drag.anchor,
+      Number(over.getAttribute("data-row")),
+      takenBy(drag.moves ? (draft?.edits ?? null) : null),
+    );
+    if (range && (range.start.row !== drag.start.row || range.end.row !== drag.end.row)) {
+      moveDrag({ ...drag, ...range });
+    }
+  };
+  const press = (row: number, e: MouseEvent<HTMLButtonElement>) => {
+    const button = e.currentTarget;
+    if (e.shiftKey && draft) {
+      // Shift extends the open note from where it began, as a text selection
+      // does from its anchor.
+      const range = noteRange(rows, draft.anchor, row, takenBy(draft.edits));
+      if (range) onMove(range.start, range.end, draft.anchor, button);
+      return;
+    }
+    // A line of the open note: it is already open.
+    if (inDraft(row)) return;
+    const note = cover.get(row);
+    if (note) {
+      const { start, end, key, body } = note;
+      onOpen({ path, anchor: start.row, start, end, edits: key, text: body }, button);
+      return;
+    }
+    const range = noteRange(rows, row, row, takenBy(null));
+    if (range) onOpen({ path, anchor: row, ...range, edits: null, text: "" }, button);
+  };
+
+  const selected = drag ?? draft;
   return (
-    <ol className="chg-lines">
+    <ol className="chg-lines" onPointerOver={dragging ? trackDrag : undefined}>
       {rows.map((row, i) => {
         if (row.kind === "hunk" || row.kind === "meta") {
           return (
-            <li key={i} className={row.kind === "hunk" ? "chg-hunk" : "chg-nl"}>
+            <li key={i} data-row={i} className={row.kind === "hunk" ? "chg-hunk" : "chg-nl"}>
               <code>{row.text}</code>
             </li>
           );
         }
-        const side = row.kind === "del" ? "old" : "new";
-        const line = row.kind === "del" ? row.oldLine : row.newLine;
-        const key = line === null ? null : lineKey(path, side, line);
-        const note = key === null ? undefined : notes.get(key);
-        const where = `${path} line ${line ?? ""}${side === "old" ? ", removed" : ""}`;
+        const quoted = noteLine(row);
+        const note = cover.get(i);
+        // The note the editor rewrites is drawn as the editor, not as itself.
+        const shown = note && note.key !== draft?.edits ? note : undefined;
         return (
-          <li key={i}>
-            <div className="chg-row" data-kind={row.kind}>
-              {canNote && key !== null && line !== null ? (
+          <li key={i} data-row={i}>
+            <div
+              className="chg-row"
+              data-kind={row.kind}
+              data-sel={(selected && i >= selected.start.row && i <= selected.end.row) || undefined}
+              data-noted={shown ? true : undefined}
+            >
+              {canNote && quoted ? (
                 <button
                   type="button"
                   className="chg-num"
-                  aria-label={note ? `Edit the note on ${where}` : `Add a note on ${where}`}
-                  aria-expanded={editing === key}
-                  onClick={(e) => onEdit(key, e.currentTarget)}
+                  aria-label={
+                    note
+                      ? `Edit the note on ${path} ${spanLabel(note.start, note.end)}`
+                      : `Add a note on ${path} ${spanLabel(quoted, quoted)}`
+                  }
+                  aria-expanded={inDraft(i)}
+                  onPointerDown={(e) => startDrag(i, e)}
+                  onClick={(e) => press(i, e)}
                 >
-                  {line}
+                  {quoted.line}
                 </button>
               ) : (
-                <span className="chg-num">{line ?? ""}</span>
+                <span className="chg-num">{quoted?.line ?? ""}</span>
               )}
               <span className="chg-mark" aria-hidden="true">
                 {row.kind === "add" ? "+" : row.kind === "del" ? "−" : " "}
@@ -404,26 +579,42 @@ function DiffLines({
               ) : null}
               <code className="chg-code">{row.text}</code>
             </div>
-            {note && editing !== key ? (
+            {shown && shown.end.row === i ? (
               <div className="chg-note">
                 <Icon name="message" />
-                <p className="chg-note-text">{note.body}</p>
+                <p className="chg-note-text">
+                  {shown.start.row !== shown.end.row ? (
+                    <span className="chg-where">
+                      {capitalized(spanLabel(shown.start, shown.end))}
+                    </span>
+                  ) : null}
+                  {shown.body}
+                </p>
                 <button
                   type="button"
                   className="btn sm ghost"
-                  aria-label={`Remove the note on ${where}`}
-                  onClick={() => onRemove(note.key)}
+                  aria-label={`Remove the note on ${path} ${spanLabel(shown.start, shown.end)}`}
+                  onClick={() => onRemove(shown.key)}
                 >
                   Remove
                 </button>
               </div>
             ) : null}
-            {key !== null && line !== null && editing === key ? (
+            {draft && draft.end.row === i ? (
               <NoteEditor
-                label={`Note on ${where}`}
-                initial={note?.body ?? ""}
+                key={draft.id}
+                label={`Note on ${path} ${spanLabel(draft.start, draft.end)}`}
+                range={
+                  draft.start.row !== draft.end.row
+                    ? capitalized(spanLabel(draft.start, draft.end))
+                    : null
+                }
+                initial={draft.text}
+                rewrites={draft.edits !== null}
+                focusKey={`${draft.start.row}:${draft.end.row}`}
+                onText={onText}
                 onCancel={onCancel}
-                onSave={(body) => onSave({ key, path, line, side, body })}
+                onSave={onSave}
               />
             ) : null}
           </li>
@@ -435,12 +626,23 @@ function DiffLines({
 
 function NoteEditor({
   label,
+  range,
   initial,
+  rewrites,
+  focusKey,
+  onText,
   onCancel,
   onSave,
 }: {
   label: string;
+  /** The lines a note on several covers, shown above the box; null for one. */
+  range: string | null;
   initial: string;
+  /** True when the note already exists and this editor rewrites it. */
+  rewrites: boolean;
+  /** Changes when the note's lines do, so the box takes focus again. */
+  focusKey: string;
+  onText: (text: string) => void;
   onCancel: () => void;
   onSave: (body: string) => void;
 }) {
@@ -448,10 +650,11 @@ function NoteEditor({
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     ref.current?.focus();
-  }, []);
+  }, [focusKey]);
   const body = text.trim();
   return (
     <div className="chg-edit">
+      {range ? <p className="chg-where">{range}</p> : null}
       <textarea
         ref={ref}
         className="goal-textarea"
@@ -459,8 +662,13 @@ function NoteEditor({
         rows={3}
         maxLength={4000}
         value={text}
-        placeholder="What should change on this line?"
-        onChange={(e) => setText(e.target.value)}
+        placeholder={
+          range ? "What should change on these lines?" : "What should change on this line?"
+        }
+        onChange={(e) => {
+          setText(e.target.value);
+          onText(e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
@@ -481,7 +689,7 @@ function NoteEditor({
           disabled={!body}
           onClick={() => onSave(body)}
         >
-          {initial ? "Save note" : "Add note"}
+          {rewrites ? "Save note" : "Add note"}
         </button>
       </div>
     </div>
