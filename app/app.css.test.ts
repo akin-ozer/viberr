@@ -4445,21 +4445,31 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
     return decls;
   };
 
-  it("the GitHub bar's neutral pill keeps a fill of its own and clears AA on the bar, in both themes", () => {
-    // CANARY: delete `.gh-bar .pill.neutral`. The sweep stays green, because it
-    // then measures only the base pill (--muted on --tint-press) against the
-    // page; on the inverted bar that pair drew at 2.48:1 light, 1.62:1 dark.
-    const onBar = SWEEP.pairs.filter((p) => p.selector === ".gh-bar .pill.neutral");
-    expect(onBar.map((p) => p.theme).sort()).toEqual(["dark", "light"]);
-    const barPaint = cascade(plain, ".gh-bar").get("background")!;
-    for (const p of onBar) {
-      expect(p.ratio, `${p.theme} ink on the pill`).toBeGreaterThanOrEqual(4.5);
-      // "Lost its fill" was a --fg tint on a --fg ground: the pill's own fill
-      // has to stand a visible step off the bar it sits on.
-      const tokens = THEMES.find(([theme]) => theme === p.theme)![1];
-      const bar = asHex(resolveColor(barPaint, tokens)!.rgb);
-      expect(contrastRatio(p.bg, bar), `${p.theme} fill against the bar`).toBeGreaterThan(1.25);
-    }
+  it("ruling 511: the PR card has no inverted bar, and its status marks keep the pills' tones", () => {
+    // CANARY: bring back `.gh-bar` (the card's black header, whose neutral
+    // pill needed its own fill to clear AA on it), or drop the done mark's
+    // fill and a passing gate run reads grey (ruling 491: a pass is green).
+    expect(CODE).not.toMatch(/\.gh-bar\b/);
+    expect(cascade(plain, '.pr-sig[data-kind="done"] > .ico').get("color")).toBe("var(--success-dark)");
+    expect(cascade(plain, '.pr-sig[data-kind="done"] > .ico circle').get("fill")).toBe("var(--success-soft)");
+    expect(cascade(plain, '.pr-sig[data-kind="blocked"] > .ico').get("color")).toBe("var(--coral-dark)");
+    expect(cascade(plain, '.pr-sig[data-kind="blocked"] > .ico circle').get("fill")).toBe("var(--red-light)");
+    // An approval is a quiet pill, the outline tier: its mark is the ink alone.
+    expect(cascade(plain, '.pr-sig[data-kind="ready"] > .ico').get("color")).toBe("var(--teal-dark)");
+    expect(plain.some((r) => parts(r).includes('.pr-sig[data-kind="ready"] > .ico circle'))).toBe(false);
+    // The freshness facts are small print, not the bold display face a side
+    // panel gives a fact, and they close the card on a well.
+    const facts = cascade(plain, ".pr-facts .kv-row .v");
+    expect(facts.get("font-weight")).toBe("400");
+    expect(facts.get("color")).toBe("var(--muted)");
+    expect(cascade(plain, ".pr-card > .pr-facts").get("background")).toBe("var(--tint-well)");
+    // The branch chip and the fold toggle are links and buttons in small type:
+    // each stands a 24px target (WCAG 2.2, 2.5.8).
+    expect(cascade(plain, ".pr-branch").get("min-height")).toBe("24px");
+    expect(cascade(plain, ".pr-fold").get("min-height")).toBe("24px");
+    // The fold's chevron points down while the gates are folded, up when open.
+    expect(cascade(plain, ".pr-fold .ico").get("transform")).toBe("rotate(90deg)");
+    expect(cascade(plain, '.pr-fold[aria-expanded="true"] .ico').get("transform")).toBe("rotate(-90deg)");
   });
 
   it("a run control's start holds the width of its widest label", () => {

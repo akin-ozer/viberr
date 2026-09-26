@@ -1,16 +1,25 @@
+import { useId, useState, type ReactNode } from "react";
 import { holdEntriesSentence } from "~/shared/dependencies";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { Avatar } from "~/ui/avatar";
 import { GlyphSwap } from "~/ui/copy-glyph";
-import { Icon } from "~/ui/icon";
-import { Pill } from "~/ui/pill";
+import { Icon, type IconName } from "~/ui/icon";
+import { Pill, type PillKind } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { checksPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import {
+  checksPill,
+  gatesPill,
+  liveMergeable,
+  mergeablePill,
+  prStatePill,
+  reviewPill,
+  type PillView,
+} from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 import { GateResults } from "./gate-results";
@@ -24,6 +33,67 @@ import type { OwnerAction, TaskMemberView } from "./execution-profile";
  * — the viewer's role grants restated row by row — is gone (owner, 2026-09-08,
  * ruling 167): what a person may do here is said where they would do it.
  */
+
+/** Ruling 511: a signal's mark, from its pill tone, in the circle family
+ *  (ruling 365): a check for a pass, a cross for a failure, the dotted ring
+ *  for a wait (ruling 499), a plain ring for the rest; a risk is the alert. */
+function signalGlyph(kind: PillKind): IconName {
+  switch (kind) {
+    case "done":
+    case "ready":
+      return "checkcircle";
+    case "blocked":
+      return "xcircle";
+    case "risk":
+      return "alert";
+    case "input":
+      return "todo";
+    default:
+      return "ring";
+  }
+}
+
+/**
+ * Ruling 511: one row of the PR card's status list, drawn the way GitHub's
+ * merge box draws a check: the mark in the pill vocabulary's tone
+ * (`github-pills.ts`, so the words and the tones are the ones every other
+ * surface prints), the state as the row's title, and what it rests on under
+ * it. A plain function rather than a component: the rows are static markup,
+ * and a component each would add a render per row to every revalidation
+ * (ruling 457).
+ */
+function prSignal({
+  signal,
+  view,
+  glyph,
+  detail,
+  aside,
+  children,
+}: {
+  /** What the row reports, for the sheet and the tests. */
+  signal: string;
+  view: PillView;
+  /** The mark, when the tone's own would say less than this one. */
+  glyph?: IconName;
+  detail?: ReactNode;
+  /** A control at the end of the title line. */
+  aside?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <li className="pr-sig" data-signal={signal} data-kind={view.kind}>
+      <Icon name={glyph ?? signalGlyph(view.kind)} />
+      <div className="pr-sig-main">
+        <div className="pr-sig-head">
+          <p className="pr-sig-title">{view.label}</p>
+          {aside}
+        </div>
+        {detail && <p className="pr-sig-desc">{detail}</p>}
+        {children}
+      </div>
+    </li>
+  );
+}
 
 /** The layout hands these panels `myRole` as a raw string. Decode it to the
  *  domain role once, so every matrix read asks about a role the matrix knows —
@@ -206,37 +276,35 @@ export function GithubTrace({
   // into `forceAcceptReason`) is the only withdrawal — a closed PR is decided
   // (R16-3), not wedged.
   const skipsStages = !acceptance.atBoundary;
+  // C1: the refusal sentence has ONE owner — the Current-state panel, where
+  // the Accept button lives. It used to render here too ("Acceptance is
+  // blocked: …"), byte-identical to the Current-state deny-note ~350px away; a
+  // prior pass fixed the two DISAGREEING and left them duplicates. This panel
+  // keeps only the GitHub-side fact: the admin override itself, whose button
+  // already names what it does.
   const forceAcceptRow =
     forceAcceptReason && onForceAccept ? (
-      <div className="force-accept">
-        {/* C1: the refusal sentence has ONE owner — the Current-state panel,
-            where the Accept button lives. It used to render here too ("Acceptance
-            is blocked: …"), byte-identical to the Current-state deny-note ~350px
-            away; a prior pass fixed the two DISAGREEING and left them duplicates.
-            This panel keeps only the GitHub-side fact: the admin override itself,
-            whose button already names what it does. */}
-        <button
-          type="button"
-          // Ruling 149: force-accept is destructive, and the confirmation it
-          // opens already commits in red.
-          className="btn ghost sm full danger"
-          disabled={merging}
-          aria-busy={forcing || undefined}
-          onClick={onForceAccept}
-          title={
-            skipsStages
-              ? `Admin override: accept ${task.key} into Done from here, skipping the remaining stages AND the review gate, and merge. Audited.`
-              : "Admin override: accept this task into Done past the review gate. Audited."
-          }
-        >
-          <GlyphSwap rest="shield" alt="loader" on={forcing} spinAlt />
-          {forcing
-            ? "Force-accepting…"
-            : skipsStages
-              ? "Force accept (skips the remaining stages and the review gate)"
-              : "Force accept (override review gate)"}
-        </button>
-      </div>
+      <button
+        type="button"
+        // Ruling 149: force-accept is destructive, and the confirmation it
+        // opens already commits in red.
+        className="btn ghost sm full danger"
+        disabled={merging}
+        aria-busy={forcing || undefined}
+        onClick={onForceAccept}
+        title={
+          skipsStages
+            ? `Admin override: accept ${task.key} into Done from here, skipping the remaining stages AND the review gate, and merge. Audited.`
+            : "Admin override: accept this task into Done past the review gate. Audited."
+        }
+      >
+        <GlyphSwap rest="shield" alt="loader" on={forcing} spinAlt />
+        {forcing
+          ? "Force-accepting…"
+          : skipsStages
+            ? "Force accept (skips the remaining stages and the review gate)"
+            : "Force accept (override review gate)"}
+      </button>
     ) : null;
   if (!task.branch && !task.pr) {
     return (
@@ -248,12 +316,14 @@ export function GithubTrace({
         <div className="empty sm">
           No branch yet. A task-key branch is created when execution starts.
         </div>
-        {forceAcceptRow}
+        {forceAcceptRow && <div className="pr-acts">{forceAcceptRow}</div>}
       </div>
     );
   }
-  // Real external link (spec §4.9: the prototype toast goes away): the PR when
-  // one exists, else the branch tree.
+  // Real external links (spec §4.9: the prototype toast goes away). Ruling
+  // 511: the pull request's title opens it, and the branch opens its tree;
+  // they are the card's "Open on GitHub", which stood as a third full-width
+  // button under the other two.
   //
   // P14-UI-11 residual: this used to carry its own `?? "https://github.com"`
   // fallback, so the app held the host literal in TWO places while the fix note
@@ -261,89 +331,272 @@ export function GithubTrace({
   // GHE base URL. The loader always sends `githubWebHost()`, so the prop is
   // required and the second literal is gone.
   const host = githubHost;
-  const ghHref = task.repo
-    ? task.pr
-      ? `${host}/${task.repo}/pull/${task.pr.number}`
-      : task.branch
-        ? `${host}/${task.repo}/tree/${task.branch}`
-        : `${host}/${task.repo}`
-    : null;
+  const prHref = task.repo && task.pr ? `${host}/${task.repo}/pull/${task.pr.number}` : null;
+  const treeHref = task.repo && task.branch ? `${host}/${task.repo}/tree/${task.branch}` : null;
+  // UI-36: reuse the shared PR-state mapping. This branched only on
+  // `merged`/`accepted`, so a PR CLOSED WITHOUT MERGING (a rejected one — a
+  // first-class state since NEW-1) rendered as a blue "PR #14", visually
+  // identical to a PR still in review. The GitHub page and the review queue
+  // have always rendered it correctly.
+  const prState = task.pr ? prStatePill(task.pr.state) : null;
+  const prName = task.pr && (
+    <>
+      {task.pr.title.trim() || "Pull request"}{" "}
+      <span className="pr-num">#{task.pr.number}</span>{" "}
+    </>
+  );
+  const branchChip = task.branch && (
+    <>
+      <Icon name="branch" />
+      {task.branch}
+    </>
+  );
+  // P13-D-28: the two GitHub facts the app fetched (or could have) and never
+  // showed. Check-runs were summarized on every reconcile pass and read by
+  // nothing; review state was never read at all, so a teammate approving or
+  // requesting changes on GitHub was invisible here and a merge blocked by
+  // required reviews surfaced only as a late 405.
+  const checks = task.prChecks ? checksPill(task.prChecks) : null;
+  const review = task.prReview ? reviewPill(task.prReview) : null;
+  // Ruling 162 (pass 35, F35-12 (c)): the conflict the acceptance gate refuses
+  // on, on the task page too. It was rendered on the GitHub page alone, so this
+  // card read "PR #16 · in review" while the accept click answered 409. The
+  // reconciler drops the fact for a settled PR, so a merged or closed one never
+  // carries it. Ruling 405(b): through `liveMergeable`, not off the raw field.
+  // The GitHub page and the review queue both read the verdict's head pin, and
+  // a task page reporting "conflicts" over the commit that resolved it would
+  // disagree with them and with the acceptance gate.
+  const conflict = task.pr ? mergeablePill(liveMergeable(task.pr)) : null;
+  const signals = Boolean(
+    task.unownedPr !== null || acceptance.gates || checks || review || conflict || pushOffer,
+  );
+  // R15-2 safety net (b): with delivery now an operator decision, a human with
+  // authority can always ship the branch by hand — offered when no live PR
+  // stands (none yet, or the last one closed/merged) and, since ruling 134(c),
+  // whenever the open PR does not carry the delivered revision: the same door
+  // pushes the revision to that PR. A DIVERGED remote gets the fact and a
+  // disabled control naming the refusal the server would give, never a button
+  // that then fails.
+  const offersDelivery = Boolean(onDeliver && (prTerminal || pushOffer));
+  // F19-24: this is a Done writer — it finishes the acceptance by performing
+  // the irreversible merge, and it is the mandatory human half of EVERY
+  // full-autonomy operator acceptance (R16-6). It used to merge on a bare click
+  // while the sibling force-accept one line down was already wrapped in the
+  // confirm. `onCompleteMerge` opens the same ceremony now; the label names the
+  // outcome, the dialog names the PR, the target branch and any commits pushed
+  // since the review.
+  const mergePr = task.pr?.state === "accepted" && onCompleteMerge ? task.pr : null;
   return (
-    <div className="panel flush">
-      {/* Ruling 478(f) (F40-35): the panel's name, for heading navigation. The
-          bar's icon and repo already say it to the eye; without this the
-          panel was the one region of the page a screen reader's heading list
-          could not reach once the task had a branch. */}
-      <h2 className="vh">GitHub</h2>
-      <div className="gh-bar">
-        <Icon name="github" />
-        <span className="repo">{task.repo}</span>
-        {task.pr ? (
-          // UI-36: reuse the shared PR-state mapping. This branched only on
-          // `merged`/`accepted`, so a PR CLOSED WITHOUT MERGING (a rejected
-          // one — a first-class state since NEW-1) rendered as a blue "PR #14",
-          // visually identical to a PR still in review. The GitHub page and the
-          // review queue have always rendered it correctly.
-          <Pill kind={prStatePill(task.pr.state).kind} sm>
-            {task.pr.state === "merged"
-              ? "merged"
-              : `PR #${task.pr.number} · ${prStatePill(task.pr.state).label}`}
-          </Pill>
-        ) : (
-          <Pill kind="neutral" sm>
-            no PR
-          </Pill>
+    <div className="panel flush pr-card">
+      <div className="pr-id">
+        {/* Ruling 478(f) (F40-35): the panel's name, for heading navigation.
+            The mark and the repository already say it to the eye; without
+            this the panel was the one region of the page a screen reader's
+            heading list could not reach once the task had a branch. */}
+        <h2 className="vh">GitHub</h2>
+        <div className="pr-head">
+          <Icon name="github" />
+          {task.repo && <span className="pr-repo">{task.repo}</span>}
+          {prState ? (
+            <Pill kind={prState.kind} quiet={prState.quiet} sm>
+              {prState.label}
+            </Pill>
+          ) : (
+            <Pill kind="neutral" sm>
+              no PR
+            </Pill>
+          )}
+        </div>
+        {task.pr && (
+          <p className="pr-title">
+            {prHref ? (
+              <a href={prHref} target="_blank" rel="noreferrer">
+                {prName}
+                <span className="vh">on GitHub</span>
+                <Icon name="ext" />
+              </a>
+            ) : (
+              prName
+            )}
+          </p>
         )}
-        {/* P13-D-28: the two GitHub facts the app fetched (or could have) and
-            never showed. Check-runs were summarized on every reconcile pass and
-            read by nothing; review state was never read at all, so a teammate
-            approving or requesting changes on GitHub was invisible here and a
-            merge blocked by required reviews surfaced only as a late 405. */}
-        {task.prChecks && (
-          <Pill kind={checksPill(task.prChecks).kind} sm>
-            {checksPill(task.prChecks).label}
-          </Pill>
-        )}
-        {task.prReview && (
-          <Pill kind={reviewPill(task.prReview).kind} sm>
-            {reviewPill(task.prReview).label}
-          </Pill>
-        )}
-        {/* Ruling 482: what Viberr's own run of the project's gates says about
-            the revision under review, beside what GitHub's checks say. */}
-        {acceptance.gates && (
-          <Pill kind={gatesPill(acceptance.gates.state).kind} sm>
-            {gatesPill(acceptance.gates.state).label}
-          </Pill>
-        )}
-        {/* Ruling 162 (pass 35, F35-12 (c)): the conflict the acceptance gate
-            refuses on, on the task page too. It was rendered on the GitHub
-            page alone, so this card read "PR #16 · in review" while the accept
-            click answered 409. The reconciler drops the fact for a settled PR,
-            so a merged or closed one never wears it. */}
-        {/* Ruling 405(b): through `mapPrMergeable`, not off the raw field. The
-            GitHub page and the review queue both read the verdict's head pin,
-            and a task page painting "conflicts" over the commit that resolved
-            it would disagree with them and with the acceptance gate. */}
-        {task.pr && mergeablePill(liveMergeable(task.pr)) && (
-          <Pill kind={mergeablePill(liveMergeable(task.pr))!.kind} sm>
-            {mergeablePill(liveMergeable(task.pr))!.label}
-          </Pill>
+        {(task.branch || task.changed) && (
+          <p className="pr-src">
+            {branchChip &&
+              (treeHref ? (
+                <a className="pr-branch" href={treeHref} target="_blank" rel="noreferrer">
+                  {branchChip}
+                </a>
+              ) : (
+                <span className="pr-branch">{branchChip}</span>
+              ))}
+            {task.changed && (
+              <span className="pr-diff">
+                {/* LV-09: "Diff 1 files" */}
+                {task.changed.files} {task.changed.files === 1 ? "file" : "files"}{" "}
+                <span className="diff-add">+{task.changed.add}</span>{" "}
+                <span className="diff-del">−{task.changed.del}</span>
+              </span>
+            )}
+          </p>
         )}
       </div>
-      <div className="gh-body">
-        {/* F19-22 (second half): the honest freshness cue is TWO facts, and the
-            panel could previously only hold one. "Checked" comes off the
-            per-tick `github.reconcile.task` audit row — the last pass that
-            completed, whether or not it found anything — so a human can tell a
-            quiet branch from a dead poller. "Last change" below stays the
-            provenance row DG-3 skips on unchanged ticks. Two rows, not one
-            merged sentence: they go stale independently, and the whole defect
-            was one number being read as the other. */}
+      {signals && (
+        <ul className="pr-sigs">
+          {/* F31-1: while an unrelated PR squats on this task's branch name
+              (R15-15), the branch on GitHub is a STRANGER — say so instead of
+              leaving the panel to read as this task's footprint. The
+              reconciler no longer records the stranger's stats, so `changed`
+              and `commits` are this task's own honest cache (usually empty
+              pre-work). */}
+          {task.unownedPr !== null &&
+            prSignal({
+              signal: "collision",
+              view: { kind: "risk", label: "Branch collision" },
+              detail: (
+                <>
+                  PR <span className="mono">#{task.unownedPr}</span> holds this branch name but
+                  is not this task&rsquo;s review PR
+                </>
+              ),
+            })}
+          {/* Ruling 482: what Viberr's own run of the project's gates says
+              about the revision under review, beside what GitHub's checks
+              say. */}
+          {acceptance.gates && (
+            <GatesRow
+              gates={acceptance.gates}
+              attachmentsBase={attachmentsBase}
+              {...(onRunGates ? { onRunGates } : {})}
+              running={runningGates}
+            />
+          )}
+          {checks &&
+            prSignal({ signal: "checks", view: checks, detail: "GitHub's check runs on this pull request" })}
+          {review && prSignal({ signal: "review", view: review, detail: "GitHub's review decision" })}
+          {conflict &&
+            prSignal({ signal: "conflicts", view: conflict, detail: "GitHub can't merge it into the base branch" })}
+          {/* Ruling 135: the delivered revision is not on the open PR. Named
+              among the PR's signals so the push control below reads from a
+              fact. */}
+          {pushOffer &&
+            prSignal({
+              signal: "unpushed",
+              view: { kind: "input", label: "Unpushed revision" },
+              glyph: "upload",
+              detail: (
+                <>
+                  <span className="mono">{pushOffer.rev}</span> is not on PR{" "}
+                  <span className="mono">#{pushOffer.prNumber}</span>
+                  {pushOffer.head ? (
+                    <>
+                      {" "}(its head is <span className="mono">{pushOffer.head}</span>)
+                    </>
+                  ) : null}
+                </>
+              ),
+            })}
+        </ul>
+      )}
+      {task.commits.length > 0 && (
+        <div className="pr-commits">
+          {/* P16-F3: `.flabel` IS these six declarations — the inline copy
+              was a second source for the same section-label treatment. */}
+          <div className="flabel">Commits</div>
+          <ul className="commit-rows">
+            {task.commits.map((c) => (
+              <li className="commit" key={c.sha}>
+                <span className="msg">{c.msg}</span>
+                <span className="sha">{c.sha}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* Ruling 179 (pass 36, F36-7): the `[KEY]` filter above hid the very
+          commits that move a reviewed head — a stranger's push sat on the
+          branch and this card showed only the task's own. Named apart, not
+          mixed in. */}
+      {task.otherCommits.length > 0 && (
+        <div className="pr-commits" data-other-commits>
+          <div className="flabel">Also on the branch · not this task's</div>
+          <ul className="commit-rows">
+            {task.otherCommits.map((c) => (
+              <li className="commit" key={c.sha}>
+                <span className="msg">{c.msg}</span>
+                <span className="sha">{c.sha}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {(offersDelivery || mergePr || forceAcceptRow) && (
+        <div className="pr-acts">
+          {offersDelivery && closedRefusal && (
+            <p className="deny-note" id="deliver-closed-refusal">
+              <Icon name="alert" />
+              {closedRefusal}
+            </p>
+          )}
+          {offersDelivery && (
+            <button
+              type="button"
+              className="btn primary sm full"
+              disabled={delivering || pushOffer?.relation === "diverged" || !!closedRefusal}
+              aria-busy={delivering || undefined}
+              aria-describedby={closedRefusal ? "deliver-closed-refusal" : undefined}
+              onClick={onDeliver}
+              title={
+                closedRefusal
+                  ? closedRefusal
+                  : pushOffer?.relation === "diverged"
+                    ? DIVERGED_PUSH_REFUSAL
+                    : pushOffer
+                      ? "Push the delivered revision to the open review PR (audited)"
+                      : "Push the delivering agent's branch and open the review PR (audited)"
+              }
+            >
+              <GlyphSwap rest="branch" alt="loader" on={delivering} spinAlt />
+              {pushOffer
+                ? delivering
+                  ? "Pushing…"
+                  : PUSH_LABEL(pushOffer.rev, pushOffer.prNumber)
+                : delivering
+                  ? "Delivering…"
+                  : "Deliver branch & open PR"}
+            </button>
+          )}
+          {mergePr && (
+            <button
+              type="button"
+              className="btn primary sm full"
+              disabled={merging}
+              aria-busy={completingMerge || undefined}
+              onClick={onCompleteMerge}
+              title={`Review and run the real GitHub merge for PR #${mergePr.number} (needs a valid project credential)`}
+            >
+              <GlyphSwap rest="check" alt="loader" on={completingMerge} spinAlt />
+              {completingMerge ? "Merging…" : "Complete merge"}
+            </button>
+          )}
+          {forceAcceptRow}
+        </div>
+      )}
+      {/* F19-22 (second half): the honest freshness cue is TWO facts, and the
+          panel could previously only hold one. "Checked" comes off the
+          per-tick `github.reconcile.task` audit row — the last pass that
+          completed, whether or not it found anything — so a human can tell a
+          quiet branch from a dead poller. "Last change" below stays the
+          provenance row DG-3 skips on unchanged ticks. Two rows, not one
+          merged sentence: they go stale independently, and the whole defect
+          was one number being read as the other. Ruling 511: they close the
+          card in small print, because they say how fresh the card is, not
+          what the pull request needs. */}
+      <div className="pr-facts">
         <div className="kv-row">
           <span className="k">Checked</span>
           <span
-            className="v sub"
+            className="v"
             title="When a reconcile pass for this task last completed. A background poller re-checks branched tasks roughly every 5 minutes, and a pass that finds nothing new is still a check: it just records no change."
           >
             {checkedAt ? (
@@ -360,8 +613,8 @@ export function GithubTrace({
         <div className="kv-row">
           <span className="k">Last change</span>
           <span
-            className="v sub"
-            title="Branch, diff, commits and PR state below are served from the cached projection. This is when that cache last CHANGED: a background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so an older time here means a quiet branch. The Checked row above says when GitHub was last read."
+            className="v"
+            title="Branch, diff, commits and PR state above are served from the cached projection. This is when that cache last CHANGED: a background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so an older time here means a quiet branch. The Checked row above says when GitHub was last read."
           >
             {reconciledAt ? (
               <time dateTime={reconciledAt}>
@@ -382,163 +635,6 @@ export function GithubTrace({
             )}
           </span>
         </div>
-        <div className="kv-row">
-          <span className="k">Branch</span>
-          <span className="v">
-            <Icon name="branch" />
-            <span className="mono">{task.branch}</span>
-          </span>
-        </div>
-        {/* F31-1: while an unrelated PR squats on this task's branch name
-            (R15-15), the branch on GitHub is a STRANGER — say so instead of
-            leaving the panel to read as this task's footprint. The reconciler
-            no longer records the stranger's stats, so `changed`/`commits`
-            below are this task's own honest cache (usually empty pre-work). */}
-        {task.unownedPr !== null && (
-          <div className="kv-row">
-            <span className="k">Collision</span>
-            <span className="v">
-              PR <span className="mono">#{task.unownedPr}</span> holds this
-              branch name but is not this task&rsquo;s review PR
-            </span>
-          </div>
-        )}
-        {task.changed && (
-          <div className="kv-row">
-            <span className="k">Diff</span>
-            <span className="v mono">
-              {/* LV-09: "Diff 1 files" */}
-              {task.changed.files} {task.changed.files === 1 ? "file" : "files"} ·{" "}
-              <span className="diff-add">+{task.changed.add}</span>{" "}
-              <span className="diff-del">−{task.changed.del}</span>
-            </span>
-          </div>
-        )}
-        {task.commits.length > 0 && (
-          <div className="commit-list">
-            {/* P16-F3: `.flabel` IS these six declarations — the inline copy
-                was a second source for the same section-label treatment. */}
-            <div className="flabel">Commits</div>
-            {task.commits.map((c) => (
-              <div className="commit" key={c.sha}>
-                <span className="sha">{c.sha}</span>
-                <span className="msg">{c.msg}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Ruling 179 (pass 36, F36-7): the `[KEY]` filter above hid the very
-            commits that move a reviewed head — a stranger's push sat on the
-            branch and this card showed only the task's own. Named apart, not
-            mixed in. */}
-        {task.otherCommits.length > 0 && (
-          <div className="commit-list" data-other-commits>
-            <div className="flabel">Also on the branch · not this task's</div>
-            {task.otherCommits.map((c) => (
-              <div className="commit" key={c.sha}>
-                <span className="sha">{c.sha}</span>
-                <span className="msg">{c.msg}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {acceptance.gates && (
-          <GatesRow
-            gates={acceptance.gates}
-            attachmentsBase={attachmentsBase}
-            {...(onRunGates ? { onRunGates } : {})}
-            running={runningGates}
-          />
-        )}
-        {/* Ruling 135: the delivered revision is not on the open PR. Named
-            beside the branch so the push control below reads from a fact. */}
-        {pushOffer && (
-          <div className="kv-row">
-            <span className="k">Unpushed</span>
-            <span className="v">
-              <span className="mono">{pushOffer.rev}</span> is not on PR{" "}
-              <span className="mono">#{pushOffer.prNumber}</span>
-              {pushOffer.head ? (
-                <>
-                  {" "}(its head is <span className="mono">{pushOffer.head}</span>)
-                </>
-              ) : null}
-            </span>
-          </div>
-        )}
-        {/* R15-2 safety net (b): with delivery now an operator decision, a
-            human with authority can always ship the branch by hand — shown when
-            no live PR stands (none yet, or the last one closed/merged) and,
-            since ruling 134(c), whenever the open PR does not carry the
-            delivered revision: the same door pushes the revision to that PR.
-            A DIVERGED remote gets the fact and a disabled control naming the
-            refusal the server would give, never a button that then fails. */}
-        {onDeliver && (prTerminal || pushOffer) && closedRefusal && (
-          <p className="deny-note spaced" id="deliver-closed-refusal">
-            <Icon name="alert" />
-            {closedRefusal}
-          </p>
-        )}
-        {onDeliver && (prTerminal || pushOffer) && (
-          <button
-            type="button"
-            className="btn primary sm panel-act"
-            disabled={delivering || pushOffer?.relation === "diverged" || !!closedRefusal}
-            aria-busy={delivering || undefined}
-            aria-describedby={closedRefusal ? "deliver-closed-refusal" : undefined}
-            onClick={onDeliver}
-            title={
-              closedRefusal
-                ? closedRefusal
-                : pushOffer?.relation === "diverged"
-                  ? DIVERGED_PUSH_REFUSAL
-                  : pushOffer
-                    ? "Push the delivered revision to the open review PR (audited)"
-                    : "Push the delivering agent's branch and open the review PR (audited)"
-            }
-          >
-            <GlyphSwap rest="branch" alt="loader" on={delivering} spinAlt />
-            {pushOffer
-              ? delivering
-                ? "Pushing…"
-                : PUSH_LABEL(pushOffer.rev, pushOffer.prNumber)
-              : delivering
-                ? "Delivering…"
-                : "Deliver branch & open PR"}
-          </button>
-        )}
-        {/* F19-24: this is a Done writer — it finishes the acceptance by
-            performing the irreversible merge, and it is the mandatory human half
-            of EVERY full-autonomy operator acceptance (R16-6). It used to merge
-            on a bare click while the sibling force-accept one line down was
-            already wrapped in the confirm. `onCompleteMerge` opens the same
-            ceremony now; the label names the outcome, the dialog names the PR,
-            the target branch and any commits pushed since the review. */}
-        {task.pr?.state === "accepted" && onCompleteMerge && (
-          <button
-            type="button"
-            className="btn primary sm panel-act"
-            disabled={merging}
-            aria-busy={completingMerge || undefined}
-            onClick={onCompleteMerge}
-            title={`Review and run the real GitHub merge for PR #${task.pr.number} (needs a valid project credential)`}
-          >
-            <GlyphSwap rest="check" alt="loader" on={completingMerge} spinAlt />
-            {completingMerge ? "Merging…" : "Complete merge"}
-          </button>
-        )}
-        {forceAcceptRow}
-        {ghHref && (
-          <a
-            className="btn ghost sm panel-act"
-            href={ghHref}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <Icon name="ext" />
-            Open on GitHub
-          </a>
-        )}
       </div>
     </div>
   );
@@ -549,6 +645,9 @@ export function GithubTrace({
  * 0 (run by Viberr)" — with each gate's outcome, time and log, and the control
  * that runs them again. The line is the server's (`projectGatesView`), so the
  * card, the accept dialog, the refusal and every agent's anchor say the same.
+ * Ruling 511: it is the first of the card's status rows, and a pass folds its
+ * table behind "Show all"; anything short of a pass keeps the table open,
+ * because then it is the table that says what to do.
  */
 function GatesRow({
   gates,
@@ -562,39 +661,56 @@ function GatesRow({
   running: boolean;
 }) {
   const lightbox = useAttachmentLightbox();
+  const tableId = useId();
+  const [open, setOpen] = useState(false);
   const inFlight = gates.state === "queued" || gates.state === "running";
-  return (
-    <div className="gate-block" data-gates={gates.state}>
-      <div className="kv-row">
-        <span className="k">Gates</span>
-        <span className="v" role="status">
-          {gates.line}
-        </span>
-      </div>
-      {gates.rows.length > 0 && (
-        <GateResults rows={gates.rows} attachmentsBase={attachmentsBase} openLog={lightbox} compact />
-      )}
-      {gates.error && (
-        <p className="deny-note spaced">
-          <Icon name="alert" />
-          {gates.error}
-        </p>
-      )}
-      {onRunGates && (
-        <button
-          type="button"
-          className="btn ghost sm panel-act"
-          disabled={running || inFlight}
-          aria-busy={running || undefined}
-          onClick={onRunGates}
-          title="Run the project's gates on this revision again (audited)"
-        >
-          <GlyphSwap rest="refresh" alt="loader" on={running} spinAlt />
-          {running ? "Queuing gates…" : gates.state === "not_run" ? "Run gates" : "Run gates again"}
-        </button>
-      )}
-    </div>
-  );
+  const folds = gates.state === "passed" && gates.rows.length > 0;
+  return prSignal({
+    signal: "gates",
+    view: gatesPill(gates.state),
+    detail: <span role="status">{gates.line}</span>,
+    aside: folds ? (
+      <button
+        type="button"
+        className="pr-fold"
+        aria-expanded={open}
+        aria-controls={tableId}
+        onClick={() => setOpen((was) => !was)}
+      >
+        {open ? "Hide" : "Show all"}{" "}
+        <span className="vh">gates</span>
+        <Icon name="chevron" />
+      </button>
+    ) : null,
+    children: (
+      <>
+        {gates.rows.length > 0 && (
+          <div id={tableId} hidden={folds && !open}>
+            <GateResults rows={gates.rows} attachmentsBase={attachmentsBase} openLog={lightbox} compact />
+          </div>
+        )}
+        {gates.error && (
+          <p className="deny-note">
+            <Icon name="alert" />
+            {gates.error}
+          </p>
+        )}
+        {onRunGates && (
+          <button
+            type="button"
+            className="btn ghost sm pr-run"
+            disabled={running || inFlight}
+            aria-busy={running || undefined}
+            onClick={onRunGates}
+            title="Run the project's gates on this revision again (audited)"
+          >
+            <GlyphSwap rest="refresh" alt="loader" on={running} spinAlt />
+            {running ? "Queuing gates…" : gates.state === "not_run" ? "Run gates" : "Run gates again"}
+          </button>
+        )}
+      </>
+    ),
+  });
 }
 
 /** Sidebar "Current state" panel — stage (with governed transition menu),

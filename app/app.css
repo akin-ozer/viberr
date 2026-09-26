@@ -2375,46 +2375,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .state-acts + .state-acts { border-top: 0; padding-top: .5rem; }
 .state-acts .deny-note { margin-top: .375rem; }
 
-.gh-bar {
-  display: flex; align-items: center; gap: .5rem;
-  /* C9 (pass-20): the repo slug is the card's identity; the state / checks /
-     review pills are a sibling group that must WRAP under it, never clip. Before
-     this the row was a single no-wrap line inside `.panel.flush`'s
-     `overflow: hidden`, so three pills plus a repo slug overran the 340px side
-     column at 1440px and the checks pill was sliced mid-word ("1/2 checks
-     faili"). Wrapping drops the pill group onto its own row instead. */
-  flex-wrap: wrap;
-  padding: .75rem .75rem;
-  background: var(--fg); color: var(--surface);
-}
-.gh-bar .ico { width: 18px; height: 18px; flex: none; }
-.gh-bar .repo { font-family: var(--font-mono); font-size: .75rem; min-width: 0; overflow-wrap: anywhere; }
-/* Only the FIRST pill pushes the group to the right of the header line; the rest
-   pack beside it (the flex `gap` spaces them) so the pills wrap together as one
-   right-anchored row rather than each claiming its own auto margin. `flex: none`
-   keeps every pill at its full width so its label never shrinks and clips. */
-.gh-bar .pill { margin-left: auto; flex: none; }
-.gh-bar .pill ~ .pill { margin-left: 0; }
-/* Interface review 2026-09-24 (colo-9): the neutral pill's --tint-press fill
-   and --muted ink are made for --surface; on the inverted bar they measured
-   2.48:1 light and 1.62:1 dark. On the bar it is the bar's own ink, on a fill
-   of 15% of that ink in the bar's --fg: 10.7:1 in both themes. The mix is
-   written opaque (the same pixels as a 15% wash over the bar) so the contrast
-   sweep measures it against the bar and not the base `.pill` teal. */
-.gh-bar .pill.neutral { background: color-mix(in srgb, var(--fg), var(--surface) 15%); color: var(--surface); }
-.gh-body { padding: 1rem 1rem 1rem; }
-/* Interface review 2026-09-24 (typo-2, colo-11): the subject wraps under
-   itself rather than ellipsizing (nothing else in the app shows the rest of
-   it), and the SHA is plain ink: it is a span, not a link. */
-.commit {
-  display: flex; align-items: baseline; gap: .5rem;
-  padding: .5rem 0; font-size: .75rem;
-  border-bottom: 1px solid var(--hairline);
-}
-.commit:last-child { border-bottom: 0; }
-.commit .sha { font-family: var(--font-mono); font-size: .75rem; }
-.commit .msg { color: var(--muted); overflow-wrap: anywhere; }
-
 
 /* toast */
 .toast-wrap { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: .5rem; align-items: center; }
@@ -3958,8 +3918,8 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   --shadow-ring: 0 0 0 1px oklch(1 0 0 / 0.08);
   --image-outline: oklch(1 0 0 / 0.1);
 }
-/* inverted-chrome + hardcoded-color fixups. The gh-bar/toast/tl-node.github
-   trio now writes color: var(--surface) at the source rule, which resolves
+/* inverted-chrome + hardcoded-color fixups. The toast/tl-node.github pair
+   now writes color: var(--surface) at the source rule, which resolves
    correctly in both themes, so their per-selector fixups are gone. The dark
    primary-CTA hover override is gone too: it hand-minted #4a5fe0 under the
    token-pair's back (dark --cta-fg #131419 on #4a5fe0 = 3.51:1, below AA),
@@ -5902,14 +5862,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    `.ag-stat .n`, `.count.violations` vs `.nav-item .count`). */
 
 /* --- task detail: GitHub, acceptance and state side panels --- */
-.panel-act { width: 100%; margin-top: .75rem; }
 .more-act { width: 100%; margin-top: .5rem; }
-.force-accept { margin-top: .75rem; }
-.force-accept .hint { margin: 0 0 .375rem; }
 .diff-add { color: var(--teal-dark); }
 .diff-del { color: var(--coral-dark); }
-.commit-list { margin-top: .75rem; }
-.commit-list .flabel { margin-bottom: .25rem; }
 .archive-hint { margin: .375rem 0 0; }
 .by-human { color: var(--blue-pressed); }
 .by-agent { color: var(--agent-dark); }
@@ -8277,12 +8232,10 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .conn-reach-note { margin: .375rem 0 0; }
 
 /* ---------- appended: ruling 482, project gates ---------- */
-/* The PR card's gate record: the one-line verdict as a `.kv-row` like the
-   rows above it (the line wraps: it names a sha and a count), then the gate
-   table (ruling 493, below). A gate row on Settings is a lease row whose
-   command field takes the room, set in the code face because it is a
-   command. */
-.gate-block .kv-row .v { flex-wrap: wrap; justify-content: flex-end; text-align: right; font-weight: 600; }
+/* The PR card's gate record is its first status row (ruling 511's section);
+   the gate table is ruling 493's, below. A gate row on Settings is a lease
+   row whose command field takes the room, set in the code face because it
+   is a command. */
 /* Ruling 493: one table wherever the gates are shown, on the note a run
    writes to the timeline, the PR card and the accept dialog. The mark, the
    time and the log take what they need and the name takes the rest. A pass is
@@ -8671,3 +8624,92 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
    on an `h3` (block, no margin), the rows are the connections list's own
    `.conn-row`, whose wrap spaces each row's buttons. */
 .acct-list { margin-top: 1rem; }
+
+/* ---------- appended: ruling 511, the PR card ---------- */
+/* The task page's GitHub card, drawn after GitHub's own merge box. Who and
+   what come first, on the surface: the repository and the pull request's
+   state, its title (the link to it), the branch (the link to its tree) and
+   the diff. Then one row per signal (a branch collision, Viberr's gates,
+   GitHub's checks, review and conflict, an unpushed revision): a mark in its
+   pill's tone, the state in words, and what the state rests on. Then the
+   commits, the actions, and the two freshness facts in small print on a
+   well. Full-width hairlines part the sections; rows inside a section are
+   parted by space, and the signals by an inset hairline. The inverted bar,
+   its wrapping pill group and its pill fixes are gone with it. */
+.pr-card > * { padding: .75rem 1rem; }
+.pr-card > * + * { border-top: 1px solid var(--hairline); }
+.pr-id { display: flex; flex-direction: column; gap: .5rem; padding-top: 1rem; }
+.pr-head { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.pr-head > .ico { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.pr-repo { min-width: 0; font-family: var(--font-mono); font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }
+.pr-head > .pill { margin-left: auto; flex: none; }
+.pr-title { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.4; color: var(--fg); overflow-wrap: anywhere; text-wrap: pretty; }
+.pr-title a { color: inherit; text-decoration: none; }
+.pr-title a:hover { text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+.pr-num { font-weight: 400; color: var(--muted); }
+.pr-title .ico { width: 12px; height: 12px; vertical-align: -1px; color: var(--muted); }
+.pr-src { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem .75rem; margin: 0; font-size: .75rem; color: var(--muted); }
+/* The branch as GitHub labels one: a well-tinted chip in the code face. It
+   is a link, so it stands a 24px target (WCAG 2.2, 2.5.8). */
+.pr-branch {
+  display: inline-flex; align-items: center; gap: .25rem;
+  min-width: 0; max-width: 100%; min-height: 24px; padding: 0 .5rem 0 .375rem;
+  border-radius: var(--radius-small); background: var(--tint-well);
+  font-family: var(--font-mono); font-size: .75rem; color: var(--fg);
+  text-decoration: none; overflow-wrap: anywhere;
+}
+a.pr-branch:hover { background: var(--tint-hover); }
+.pr-branch .ico { width: 12px; height: 12px; flex: none; color: var(--muted); }
+.pr-diff { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pr-card > .pr-sigs { margin: 0; padding: 0 1rem; list-style: none; }
+.pr-sig { display: flex; align-items: flex-start; gap: .75rem; padding: .75rem 0; }
+.pr-sig + .pr-sig { border-top: 1px solid var(--hairline); }
+.pr-sig > .ico { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.pr-sig-main { display: flex; flex-direction: column; gap: .125rem; flex: 1; min-width: 0; }
+.pr-sig-head { display: flex; align-items: center; gap: .5rem; min-height: 18px; }
+.pr-sig-title { flex: 1; min-width: 0; margin: 0; font-size: .88rem; font-weight: 600; line-height: 1.3; color: var(--fg); }
+/* The words are the pill vocabulary's, lower case everywhere a pill prints
+   them; as a row's title they start with a capital. */
+.pr-sig-title::first-letter { text-transform: uppercase; }
+.pr-sig-desc { margin: 0; font-size: .75rem; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+.pr-sig-desc .mono { color: var(--fg); }
+/* The mark takes its pill's ink, and a filled pill's fill: a pass of the
+   gates or the checks is a green fill as its pill is (ruling 491), while an
+   approval, a quiet pill, keeps the ink alone. A wait is the hollow dotted
+   ring. */
+.pr-sig[data-kind="done"] > .ico { color: var(--success-dark); }
+.pr-sig[data-kind="done"] > .ico circle { fill: var(--success-soft); }
+.pr-sig[data-kind="ready"] > .ico { color: var(--teal-dark); }
+.pr-sig[data-kind="blocked"] > .ico, .pr-sig[data-kind="risk"] > .ico { color: var(--coral-dark); }
+.pr-sig[data-kind="blocked"] > .ico circle { fill: var(--red-light); }
+.pr-sig[data-kind="risk"] > .ico path:first-child { fill: var(--rose-light); }
+.pr-sig[data-kind="input"] > .ico { color: var(--amber-dark); }
+/* A pass folds its gate table; the toggle is the title line's end, and its
+   chevron points down while the table is folded, up while it is open. */
+.pr-fold {
+  display: inline-flex; align-items: center; gap: .25rem; flex: none;
+  min-height: 24px; margin-block: -3px; padding: 0 .375rem;
+  border: 0; border-radius: var(--radius-small);
+  font-size: .75rem; font-weight: 600; color: var(--muted);
+}
+.pr-fold:hover { background: var(--tint-hover); color: var(--fg); }
+.pr-fold .ico { width: 12px; height: 12px; transform: rotate(90deg); }
+.pr-fold[aria-expanded="true"] .ico { transform: rotate(-90deg); }
+.pr-sig-main > .deny-note { margin-top: .5rem; }
+.pr-run { align-self: flex-start; margin-top: .5rem; }
+/* Interface review 2026-09-24 (typo-2, colo-11): the subject wraps under
+   itself rather than ellipsizing (nothing else in the app shows the rest of
+   it), and the SHA is plain ink: it is a span, not a link. Ruling 511: the
+   subject leads in the text ink and the SHA closes the row in the code face,
+   in the row's muted ink. */
+.pr-commits .flabel { margin-bottom: .375rem; }
+.commit-rows { display: flex; flex-direction: column; gap: .375rem; margin: 0; padding: 0; list-style: none; }
+.commit { display: flex; align-items: baseline; gap: .75rem; font-size: .75rem; line-height: 1.45; color: var(--muted); }
+.commit .msg { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.commit .sha { flex: none; font-family: var(--font-mono); font-size: .75rem; }
+.pr-acts { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem; }
+.pr-card > .pr-acts { margin-top: 0; }
+.pr-card > .pr-facts { padding-block: .5rem; background: var(--tint-well); }
+.pr-facts .kv-row { flex-wrap: nowrap; align-items: baseline; padding: .125rem 0; border-bottom: 0; font-size: .75rem; }
+.pr-facts .kv-row .k { white-space: nowrap; }
+.pr-facts .kv-row .v { font-family: inherit; font-weight: 400; color: var(--muted); text-align: right; }

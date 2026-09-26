@@ -435,8 +435,8 @@ describe("P14-LV-06: the acceptance affordance", () => {
     // C1 found the fix had made them DUPLICATES — byte-identical sentences ~350px
     // apart. One owner now: the Current-state deny-note holds the sentence, and
     // the GitHub panel's admin override renders only its button, no reason line.
-    // Canary: bring back the `.force-accept .hint` "Acceptance is blocked: …"
-    // paragraph and the duplicate returns here.
+    // Canary: bring back the force-accept row's `.hint` "Acceptance is
+    // blocked: …" paragraph and the duplicate returns here.
     const stageRefusal =
       "VIB-151 is at In Progress, not Review — a completion can only be accepted from the boundary the workflow puts before Done.";
     const { container } = renderPage({
@@ -450,8 +450,10 @@ describe("P14-LV-06: the acceptance affordance", () => {
         blockedReason: stageRefusal,
       },
     });
-    // The force-accept row is now just the override button — no reason paragraph.
-    const forceAccept = container.querySelector(".force-accept")!;
+    // The force-accept row is now just the override button — no reason
+    // paragraph. Ruling 511: it stands with the card's other actions.
+    const forceAccept = container.querySelector(".pr-acts")!;
+    expect(forceAccept.textContent).toContain("Force accept");
     expect(forceAccept.querySelector(".hint")).toBeNull();
     expect(forceAccept.textContent).not.toContain(stageRefusal);
     // The sentence lives once, in the Current-state deny-note.
