@@ -16,11 +16,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
+  ACCOUNT_HOME_SHARED_DIRS,
   assertPathSafeUserId,
+  backendAccountHome,
   claudeLoginCredentialPath,
+  codexCompactionHomeId,
   codexLoginCredentialPath,
   codexRunHomeDir,
   CODEX_HOME_SHARED_DIRS,
+  ensureBackendAccountHome,
   ensureUserBackendHome,
   finishCodexRunHome,
   listUserRuntimeRoots,
@@ -149,6 +153,96 @@ describe("listUserRuntimeRoots", () => {
   });
 });
 
+/**
+ * Ruling 507: every account connected since the ruling keeps its vendor
+ * sign-in in a home of its own inside the backend home, so switching accounts
+ * moves no file; what must stay one per person is shared by link.
+ */
+describe("per-account homes (ruling 507)", () => {
+  it("puts an account's home under the backend home, and a legacy account's IN it", () => {
+    const root = ctx.makeTempDir();
+    const backendHome = userBackendHome("u_arda", "claude", root);
+    expect(backendAccountHome("u_arda", "claude", { id: "ubc_work", legacyHome: false }, root)).toBe(
+      path.join(backendHome, "accounts", "ubc_work"),
+    );
+    expect(backendAccountHome("u_arda", "claude", { id: "ubc_old", legacyHome: true }, root)).toBe(
+      backendHome,
+    );
+    // Two accounts of one person never share a sign-in file.
+    expect(backendAccountHome("u_arda", "codex", { id: "ubc_a", legacyHome: false }, root)).not.toBe(
+      backendAccountHome("u_arda", "codex", { id: "ubc_b", legacyHome: false }, root),
+    );
+  });
+
+  it("refuses an account id that is not a path segment", () => {
+    const root = ctx.makeTempDir();
+    const refused = (id: string): boolean => {
+      try {
+        backendAccountHome("u_arda", "claude", { id, legacyHome: false }, root);
+        return false;
+      } catch (error) {
+        return isAppError(error);
+      }
+    };
+    for (const id of ["../escape", "", "a/b", "x".repeat(65)]) {
+      expect(refused(id), id).toBe(true);
+    }
+  });
+
+  it("links a Claude account's transcripts to the backend home's, and names what the launch must own", () => {
+    const root = ctx.makeTempDir();
+    const backendHome = userBackendHome("u_arda", "claude", root);
+    const ensured = ensureBackendAccountHome("u_arda", "claude", { id: "ubc_work", legacyHome: false }, root);
+    expect([...ACCOUNT_HOME_SHARED_DIRS.claude]).toEqual(["projects"]);
+    const link = path.join(ensured.home, "projects");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(realpathSync(link)).toBe(realpathSync(path.join(backendHome, "projects")));
+    expect(statSync(ensured.home).mode & 0o777).toBe(0o700);
+    expect(ensured.ownDirs).toEqual([ensured.home, path.join(backendHome, "projects")]);
+    // A transcript the CLI writes through the link is the backend home's —
+    // where resume, the exporter and the retention sweep look.
+    mkdirSync(path.join(link, "-tmp-work"), { recursive: true });
+    writeFileSync(path.join(link, "-tmp-work", "sess.jsonl"), "{}\n");
+    expect(existsSync(path.join(backendHome, "projects", "-tmp-work", "sess.jsonl"))).toBe(true);
+    // Idempotent: the link is made once and left alone after.
+    expect(ensureBackendAccountHome("u_arda", "claude", { id: "ubc_work", legacyHome: false }, root)).toEqual(
+      ensured,
+    );
+  });
+
+  it("gives a Codex account a bare home: its runs fork from the backend home and only take its sign-in", () => {
+    const root = ctx.makeTempDir();
+    const ensured = ensureBackendAccountHome("u_arda", "codex", { id: "ubc_chatgpt", legacyHome: false }, root);
+    expect(ensured.ownDirs).toEqual([ensured.home]);
+    expect(existsSync(path.join(ensured.home, "sessions"))).toBe(false);
+  });
+
+  it("changes nothing for a legacy account: its home is the backend home", () => {
+    const root = ctx.makeTempDir();
+    const ensured = ensureBackendAccountHome("u_arda", "claude", { id: "ubc_old", legacyHome: true }, root);
+    expect(ensured).toEqual({ home: userBackendHome("u_arda", "claude", root), ownDirs: [] });
+    expect(existsSync(path.join(ensured.home, "accounts"))).toBe(false);
+  });
+
+  it("leaves a real directory where a link belongs alone, and says so", () => {
+    const root = ctx.makeTempDir();
+    const home = backendAccountHome("u_arda", "claude", { id: "ubc_odd", legacyHome: false }, root);
+    mkdirSync(path.join(home, "projects", "-kept"), { recursive: true });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      ensureBackendAccountHome("u_arda", "claude", { id: "ubc_odd", legacyHome: false }, root);
+      expect(lstatSync(path.join(home, "projects")).isSymbolicLink()).toBe(false);
+      expect(existsSync(path.join(home, "projects", "-kept"))).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        "an account home holds its own copy of a directory it should share",
+        expect.objectContaining({ accountId: "ubc_odd", name: "projects" }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe("per-run Codex homes (ruling 181)", () => {
   function sharedCodexHome(): string {
     return ensureUserBackendHome("u_arda", "codex", ctx.makeTempDir());
@@ -263,6 +357,71 @@ describe("per-run Codex homes (ruling 181)", () => {
     expect(() => codexRunHomeDir(shared, "../escape")).toThrow();
     expect(() => prepareCodexRunHome(shared, "")).toThrow();
     expect(codexRunHomeDir(shared, "run_ok-1")).toBe(path.join(shared, "runs", "run_ok-1"));
+    // Ruling 507: the compaction's own fork has a path-safe id beside the run's.
+    expect(codexRunHomeDir(shared, codexCompactionHomeId("run_ok-1"))).toBe(
+      path.join(shared, "runs", "run_ok-1-compaction"),
+    );
+  });
+
+  it("takes the sign-in from the billed account's home and hands it back there (ruling 507)", () => {
+    const root = ctx.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", root);
+    writeFileSync(path.join(shared, "auth.json"), '{"tokens":"legacy-account"}');
+    writeFileSync(path.join(shared, "config.toml"), 'model = "x"\n');
+    const { home: accountHome } = ensureBackendAccountHome(
+      "u_arda",
+      "codex",
+      { id: "ubc_billed", legacyHome: false },
+      root,
+    );
+    writeFileSync(path.join(accountHome, "auth.json"), '{"tokens":"billed"}');
+
+    const run = prepareCodexRunHome(shared, "run_acct", undefined, accountHome);
+    expect(run.authHome).toBe(accountHome);
+    // The account's sign-in; the shared config.
+    expect(readFileSync(path.join(run.dir, "auth.json"), "utf8")).toBe('{"tokens":"billed"}');
+    expect(readFileSync(path.join(run.dir, "config.toml"), "utf8")).toBe('model = "x"\n');
+    writeFileSync(path.join(run.dir, "auth.json"), '{"tokens":"billed-refreshed"}');
+    finishCodexRunHome(run);
+    expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"tokens":"billed-refreshed"}');
+    expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"legacy-account"}');
+  });
+
+  it("never hands back a copy the CLI did not refresh over one another run refreshed (ruling 507)", () => {
+    // Two runs of one account: A refreshes (the provider rotates the refresh
+    // token) and settles first; B's copy is still the seed when it settles.
+    // Comparing B's copy with the account's file would call it "changed" and
+    // put the rotated-away token back. Canary: drop the seed digest.
+    const shared = sharedCodexHome();
+    const auth = path.join(shared, "auth.json");
+    writeFileSync(auth, '{"tokens":"seed"}');
+    const a = prepareCodexRunHome(shared, "run_first");
+    const b = prepareCodexRunHome(shared, "run_second");
+    writeFileSync(path.join(a.dir, "auth.json"), '{"tokens":"rotated"}');
+    finishCodexRunHome(a);
+    expect(readFileSync(auth, "utf8")).toBe('{"tokens":"rotated"}');
+    finishCodexRunHome(b);
+    expect(readFileSync(auth, "utf8")).toBe('{"tokens":"rotated"}');
+    expect(existsSync(b.dir)).toBe(false);
+  });
+
+  it("hands nothing back to an account removed while the run was live (ruling 507)", () => {
+    const root = ctx.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", root);
+    const { home: accountHome } = ensureBackendAccountHome(
+      "u_arda",
+      "codex",
+      { id: "ubc_gone", legacyHome: false },
+      root,
+    );
+    writeFileSync(path.join(accountHome, "auth.json"), '{"tokens":"before"}');
+    const run = prepareCodexRunHome(shared, "run_gone", undefined, accountHome);
+    // Disconnecting the account removes its whole home mid-run.
+    rmSync(accountHome, { recursive: true, force: true });
+    writeFileSync(path.join(run.dir, "auth.json"), '{"tokens":"refreshed"}');
+    finishCodexRunHome(run);
+    expect(existsSync(accountHome)).toBe(false);
+    expect(existsSync(run.dir)).toBe(false);
   });
 });
 

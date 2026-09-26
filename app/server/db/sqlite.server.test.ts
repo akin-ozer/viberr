@@ -11,11 +11,14 @@ import {
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { DATA_ROOT_LOCK_FILENAME, isProcessAlive } from "./data-root-lock.server";
+import { runMigrations } from "./migration-runner.server";
 import {
   closeDb,
   copyStorePair,
+  ensureBackendAccountsTable,
   ensureBaselineColumns,
   getDb,
   getProjectionDbPath,
@@ -77,10 +80,12 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "last_prompt_tokens",
         "compactions",
         "credential_kind",
+        // Ruling 507: `upsertRun` names the billed account on every insert.
+        "credential_account_id",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(20);
+      expect(columns()).toHaveLength(21);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
 
       // F37-71: a task projection from before the recommendation-kinds column.
@@ -706,6 +711,101 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
       expect(
         db.prepare(`SELECT COUNT(*) AS n FROM user_backend_credentials`).get(),
       ).toEqual({ n: 1 });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rebuilds the one-account shape into the several-accounts shape, carrying every row (ruling 507)", () => {
+    // A root created before ruling 507 has `UNIQUE (user_id, backend)`, which
+    // refuses a person's second Claude account at its INSERT, and ALTER TABLE
+    // cannot drop a constraint. Canary: remove the rebuild and the second
+    // INSERT below throws "UNIQUE constraint failed".
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ubc507-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY)`);
+      db.prepare(`INSERT INTO users (id) VALUES (?)`).run("u1");
+      db.exec(`CREATE TABLE user_backend_credentials (
+         id TEXT PRIMARY KEY,
+         user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+         backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
+         kind TEXT NOT NULL CHECK (kind IN ('login', 'api_key', 'access_token')),
+         method TEXT,
+         secret_box TEXT,
+         secret_suffix TEXT,
+         detail_json TEXT NOT NULL DEFAULT '{}',
+         verified_at TEXT,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL,
+         UNIQUE (user_id, backend)
+       )`);
+      const insertOld = db.prepare(
+        `INSERT INTO user_backend_credentials
+           (id, user_id, backend, kind, method, secret_box, secret_suffix, detail_json,
+            verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertOld.run("ubc_login", "u1", "claude", "login", "claudeai", null, null,
+        `{"email":"person@example.com"}`, "2026-09-01T00:00:00.000Z",
+        "2026-09-01T00:00:00.000Z", "2026-09-02T00:00:00.000Z");
+      insertOld.run("ubc_key", "u1", "codex", "api_key", null, "box", "abcd", "{}",
+        "2026-09-03T00:00:00.000Z", "2026-09-03T00:00:00.000Z", "2026-09-04T00:00:00.000Z");
+
+      ensureBaselineColumns(db);
+
+      // Every row carried with its data, each its person's active account on
+      // its backend, and each marked as living in the backend home itself.
+      expect(
+        db
+          .prepare(
+            `SELECT id, kind, method, secret_box, secret_suffix, detail_json, selected_at,
+                    legacy_home, label
+               FROM user_backend_credentials ORDER BY id`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          id: "ubc_key", kind: "api_key", method: null, secret_box: "box", secret_suffix: "abcd",
+          detail_json: "{}", selected_at: "2026-09-04T00:00:00.000Z", legacy_home: 1, label: null,
+        },
+        {
+          id: "ubc_login", kind: "login", method: "claudeai", secret_box: null, secret_suffix: null,
+          detail_json: `{"email":"person@example.com"}`, selected_at: "2026-09-02T00:00:00.000Z",
+          legacy_home: 1, label: null,
+        },
+      ]);
+      // The point of the rebuild: a second Claude account for the same person.
+      db.prepare(
+        `INSERT INTO user_backend_credentials
+           (id, user_id, backend, kind, detail_json, selected_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run("ubc_second", "u1", "claude", "login", "{}", "t2", "t2", "t2");
+      // The rebuilt DDL is the baseline's, index included, so the next boot
+      // finds nothing to do.
+      const baseline = openDatabase(":memory:");
+      runMigrations(baseline);
+      // sqlite quotes a renamed table's name in the DDL it stores; the
+      // statement is otherwise the baseline's own text.
+      const ddl = (d: typeof db) =>
+        z
+          .array(z.object({ type: z.string(), name: z.string(), sql: z.string() }))
+          .parse(
+            d
+              .prepare(
+                `SELECT type, name, sql FROM sqlite_master
+                  WHERE tbl_name = 'user_backend_credentials' AND sql IS NOT NULL ORDER BY name`,
+              )
+              .all(),
+          )
+          .map((row) => ({ ...row, sql: row.sql.replace(/^CREATE TABLE "([^"]+)"/, "CREATE TABLE $1") }));
+      expect(ddl(db)).toEqual(ddl(baseline));
+      baseline.close();
+      expect(ensureBackendAccountsTable(db)).toBe("current");
+      expect(
+        db.prepare(`SELECT COUNT(*) AS n FROM user_backend_credentials`).get(),
+      ).toEqual({ n: 3 });
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

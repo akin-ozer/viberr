@@ -227,11 +227,12 @@ describe("POST /resources/controller", () => {
    * `CONTROLLER_NOT_CONNECTED_NOTE` at the door again.
    */
   it("names the wiped sign-in file at the door, not the generic isn't-connected sentence", async () => {
-    const { recordBackendLogin, disconnectBackend } = await import(
+    const { recordBackendLogin, disconnectBackendAccount, loginTargetFor } = await import(
       "~/server/runtimes/backend-credentials.server"
     );
     const actor = { userId: arda, label: "arda@viberr.dev" };
-    recordBackendLogin(app.db, actor, "claude", "claudeai", {});
+    const target = loginTargetFor(app.db, arda, "claude");
+    recordBackendLogin(app.db, actor, "claude", "claudeai", {}, target);
     try {
       const refused = returnedRefusal.parse(
         await post(arda, {
@@ -245,7 +246,7 @@ describe("POST /resources/controller", () => {
       expect(refused.data.error).toContain("sign-in file is missing from this server");
       expect(refused.data.error).not.toContain("Claude isn't connected for you yet");
     } finally {
-      await disconnectBackend(app.db, actor, "claude");
+      await disconnectBackendAccount(app.db, actor, target.id);
     }
   });
 

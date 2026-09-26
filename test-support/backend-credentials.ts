@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
-  disconnectBackend,
+  disconnectBackendAccount,
+  listBackendAccounts,
   setBackendApiKey,
 } from "~/server/runtimes/backend-credentials.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
@@ -74,18 +75,17 @@ export async function connectFakeBackends(
 
 /**
  * Disconnect one backend for one person — the "not connected" half every
- * refusal test needs. Tolerates a person who never connected it, so a test can
- * state the posture it wants without first asking what the posture is.
+ * refusal test needs: every account they hold on it (ruling 507), through the
+ * same per-account disconnect the Profile card calls. Tolerates a person who
+ * never connected it, so a test can state the posture it wants without first
+ * asking what the posture is.
  */
 export async function disconnectFakeBackend(
   db: DatabaseSync,
   userId: string,
   backend: RealBackend,
 ): Promise<void> {
-  try {
-    await disconnectBackend(db, { userId, label: `${userId}@test` }, backend);
-  } catch {
-    // Already disconnected: `disconnectBackend` refuses rather than lying, and
-    // for a harness "make sure this is off" that refusal is the success case.
+  for (const account of listBackendAccounts(db, userId, backend)) {
+    await disconnectBackendAccount(db, { userId, label: `${userId}@test` }, account.id);
   }
 }

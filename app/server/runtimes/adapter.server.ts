@@ -171,6 +171,13 @@ export interface RunSpec {
    *  `startRun` whenever this server launches agents; absent (the host dev
    *  server, the test harness) the CLI spawns as the server's own user. */
   agent?: AgentLaunch;
+  /** Ruling 507: the vendor home of the ACCOUNT this run bills (the person's
+   *  active one when it started). Claude reads it as `CLAUDE_CONFIG_DIR` from
+   *  `env`; the Codex adapter's private home (ruling 181) takes the account's
+   *  `auth.json` from here and writes the refreshed one back here, and nowhere
+   *  else. Absent on a refused run and in adapter tests that build a spec by
+   *  hand, where the shared `CODEX_HOME` stands in, as before the ruling. */
+  accountHome?: string;
 }
 
 /** One emitted line: the raw envelope + its projected display line + facts. */

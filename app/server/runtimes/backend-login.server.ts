@@ -13,13 +13,18 @@ import { ANSI_CSI_RE, redactGitOutput } from "~/server/secrets/git-output-redact
 import { newId } from "~/shared/ids/new-id.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
+  loginTargetFor,
   recordBackendLogin,
   vendorCommand,
   type BackendBinaries,
   type BackendCredentialActor,
   type LoginMethod,
+  type LoginTarget,
 } from "./backend-credentials.server";
+import { agentGitLaunchFor } from "./agent-isolation.server";
+import { removeAgentTree } from "./agent-trees.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The hosted sign-in driver (ruling 127).
@@ -34,9 +39,10 @@ import type { RealBackend } from "./runtime-registry.server";
  * OAuth of its own: it starts the vendor's process in that ONE person's runtime
  * home, relays what the vendor prints (a URL, a device code, a prompt for the
  * code Anthropic shows), and afterwards asks the SAME binary whether it is
- * signed in. The credential itself is written by the vendor client into
- * `<dataRoot>/runtimes/users/<id>/{claude-home,codex-home}` and is never read,
- * copied or parsed here.
+ * signed in. The credential itself is written by the vendor client into the
+ * account's own home under `<dataRoot>/runtimes/users/<id>/{claude-home,codex-home}`
+ * (`accounts/<accountId>`, ruling 507) and is never read, copied or parsed
+ * here.
  *
  * What this module deliberately never does:
  *
@@ -60,6 +66,15 @@ import type { RealBackend } from "./runtime-registry.server";
  * sign-in per person per backend, a new one replacing (and killing) the old.
  * Ended sessions stay readable for ten minutes so the Profile poller can show
  * the outcome, then are dropped.
+ *
+ * Ruling 507: a sign-in is for ONE account. Adding an account signs in inside
+ * a new, empty account home minted before the vendor process starts, and the
+ * person's other accounts on the backend are never touched: their sign-ins
+ * sit in homes of their own. A sign-in that does not end connected takes its
+ * half-made home with it (removed as the person, ruling 485, once the vendor
+ * process has exited), so an abandoned attempt leaves no credential behind that
+ * no account row accounts for. Signing an existing `login` account in again
+ * runs in that account's own home and updates its row.
  */
 
 // --------------------------------------------------------------- the shapes
@@ -80,6 +95,10 @@ export interface LoginSessionView {
   id: string;
   backend: RealBackend;
   method: LoginMethod;
+  /** Ruling 507: the account this sign-in records, and whether it is one the
+   *  person already has (signed in again) rather than a new one. */
+  accountId: string;
+  existingAccount: boolean;
   state: LoginState;
   url: string | null;
   /** Codex: the one-time code the person types on the vendor's page. */
@@ -423,6 +442,10 @@ interface LoginSession {
   userId: string;
   backend: RealBackend;
   method: LoginMethod;
+  /** Ruling 507: the account the sign-in records, and its home. */
+  target: LoginTarget;
+  accountHome: string;
+  dataRoot: string | undefined;
   state: LoginState;
   url: string | null;
   userCode: string | null;
@@ -448,6 +471,8 @@ interface LoginSession {
   killTimer: NodeJS.Timeout | null;
   /** Epoch ms at which this session reached a terminal state; null while live. */
   endedAt: number | null;
+  /** Set once a failed NEW account's home has been sent for removal. */
+  discarded: boolean;
 }
 
 const SESSIONS_KEY = Symbol.for("viberr.backendLoginSessions");
@@ -476,6 +501,8 @@ function viewOf(session: LoginSession): LoginSessionView {
     id: session.id,
     backend: session.backend,
     method: session.method,
+    accountId: session.target.id,
+    existingAccount: session.target.existing,
     state: session.state,
     url: session.url,
     userCode: session.userCode,
@@ -658,6 +685,39 @@ function finish(session: LoginSession, state: LoginState, error: string | null):
   });
 }
 
+/**
+ * Ruling 507: a sign-in for a NEW account that did not end connected takes its
+ * half-made home with it — a vendor that got as far as writing its sign-in
+ * before the flow failed must not leave a credential on this server that no
+ * account row accounts for. Called only once the vendor process has exited
+ * (its `close`, or a spawn that never produced one), so nothing is writing in
+ * the home while it goes; removed as the person (ruling 485), never the
+ * server. An existing account's home is never touched here, and neither is a
+ * home whose sign-in succeeded. Fire-and-forget: the person is told about the
+ * sign-in, not about housekeeping, and a failure is logged.
+ */
+function discardPendingAccount(session: LoginSession): void {
+  if (session.discarded || session.target.existing || session.state === "succeeded") return;
+  if (session.state !== "failed" && session.state !== "cancelled") return;
+  session.discarded = true;
+  let person: ReturnType<typeof agentGitLaunchFor>;
+  try {
+    person = agentGitLaunchFor(session.db, session.userId, session.dataRoot);
+  } catch (error) {
+    logger.warn("an abandoned sign-in's account home could not be removed", {
+      backend: session.backend,
+      err: toError(error),
+    });
+    return;
+  }
+  removeAgentTree(session.accountHome, person).catch((error) => {
+    logger.warn("an abandoned sign-in's account home could not be removed", {
+      backend: session.backend,
+      err: toError(error),
+    });
+  });
+}
+
 function auditFailure(session: LoginSession, reason: string): void {
   recordAudit(session.db, {
     action: "profile.backend.login_failed",
@@ -691,6 +751,7 @@ async function confirmAndRecord(session: LoginSession): Promise<void> {
       session.backend,
       session.method,
       detail,
+      session.target,
     );
     finish(session, "succeeded", null);
   } catch (error) {
@@ -700,6 +761,8 @@ async function confirmAndRecord(session: LoginSession): Promise<void> {
         : `${label} finished sign-in but could not confirm it. Start again.`;
     finish(session, "failed", reason);
     auditFailure(session, reason);
+    // The vendor process exited before the confirmation ran.
+    discardPendingAccount(session);
   }
 }
 
@@ -780,10 +843,14 @@ export interface StartBackendLoginDeps {
   /** Overrides the vendor default so a test can drive the timeout path without
    *  waiting a quarter of an hour. */
   timeoutMs?: number;
+  /** Ruling 507: sign THIS existing `login` account in again (its own home,
+   *  its own row). Omitted, the sign-in adds a new account. */
+  accountId?: string;
 }
 
 /**
- * Start (or restart) a hosted sign-in for one person and one backend.
+ * Start (or restart) a hosted sign-in for one person and one backend — into a
+ * new account, or (`deps.accountId`) into one of their existing sign-ins.
  *
  * Synchronous by design: the caller is a form action, and what it returns is
  * the FIRST view of a session the person then watches through the poll route.
@@ -806,6 +873,10 @@ export function startBackendLogin(
   // optional package but not OpenAI's can still connect Claude, and the failure
   // sentence names the vendor the person actually pressed.
   const binary = deps.binaries?.[backend] ?? resolveBackendBinary(backend);
+  // Ruling 507: which account this sign-in becomes, decided before anything
+  // is killed or spawned, so a refusal (the account ceiling, an account that
+  // is not a sign-in) leaves a running sign-in exactly as it was.
+  const target = loginTargetFor(db, actor.userId, backend, deps.accountId);
   const nowDate = deps.now ? deps.now() : new Date();
   pruneEndedSessions(nowDate.getTime());
 
@@ -823,7 +894,7 @@ export function startBackendLogin(
   // launcher when this server launches agents, so the sign-in it writes into
   // their home is theirs. `binary` becomes the launcher then; the status
   // confirmation below reuses the same pair.
-  const command = vendorCommand(db, actor.userId, backend, binary, deps.dataRoot);
+  const command = vendorCommand(db, actor.userId, backend, binary, target, deps.dataRoot);
   const env = command.env;
 
   const timeoutMs = deps.timeoutMs ?? LOGIN_TIMEOUT_MS[backend];
@@ -837,6 +908,9 @@ export function startBackendLogin(
     userId: actor.userId,
     backend,
     method,
+    target,
+    accountHome: command.accountHome,
+    dataRoot: deps.dataRoot,
     state: "starting",
     url: null,
     userCode: null,
@@ -855,6 +929,7 @@ export function startBackendLogin(
     timeoutTimer: null,
     killTimer: null,
     endedAt: null,
+    discarded: false,
   };
   // argv only, never a shell; every stream piped so nothing reaches the
   // server's own stdio and the person's code can be written to stdin. A spawn
@@ -883,10 +958,17 @@ export function startBackendLogin(
     const reason = `${BACKEND_LABEL[backend]} sign-in could not start on this server.`;
     finish(session, "failed", reason);
     auditFailure(session, reason);
+    // A process that never started has nothing writing in the home.
+    if (child.pid === undefined) discardPendingAccount(session);
   });
   child.on("close", (code) => {
     clearTimers(session);
-    if (isTerminalLoginState(session.state)) return;
+    // Cancelled, replaced or timed out: the process is gone now, and so is
+    // the reason to keep the new account's half-made home (ruling 507).
+    if (isTerminalLoginState(session.state)) {
+      discardPendingAccount(session);
+      return;
+    }
     if (code === 0) {
       session.state = "finishing";
       void confirmAndRecord(session);
@@ -900,6 +982,7 @@ export function startBackendLogin(
         : redactedReason(session, "Claude sign-in did not complete. Start again.");
     finish(session, "failed", reason);
     auditFailure(session, reason);
+    discardPendingAccount(session);
   });
 
   const timer = setTimeout(() => {
@@ -916,7 +999,7 @@ export function startBackendLogin(
     actor,
     subjectKind: "backend_login",
     subjectId: session.id,
-    details: { backend, method },
+    details: { backend, method, accountId: target.id, existingAccount: target.existing },
   });
   logger.info("backend sign-in started", {
     backend,

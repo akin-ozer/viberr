@@ -124,8 +124,9 @@ function removeTaskAgentTrees(db: DatabaseSync, dataRoot: string, projRoot: stri
  * runtime .jsonl transcript truth, and every derived table. Scoped to the
  * per-backend RUN-LOG dirs (`runtimes/<backend>/<id>.jsonl`) and NEVER the
  * per-person runtime homes that also live under `runtimes/` — ruling 127 put
- * every vendor sign-in there (`users/<id>/codex-home/auth.json`,
- * `users/<id>/claude-home/.credentials.json`), so deleting them would sign
+ * every vendor sign-in there (`users/<id>/codex-home/accounts/<account>/auth.json`,
+ * `users/<id>/claude-home/accounts/<account>/.credentials.json` since ruling
+ * 507, or directly in the two homes before it), so deleting them would sign
  * every person on the instance out of their own accounts (P11-04, when the
  * homes were still deployment-wide). Users/auth tables are preserved.
  */

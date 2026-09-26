@@ -115,6 +115,10 @@ export type AgentRunRow = {
    *  the cache TTL the resume policy assumes (ruling 372). NULL on a refused
    *  run and on rows written before the column existed. */
   credential_kind: CredentialKind | null;
+  /** Ruling 507: which of the principal's accounts on this backend the run
+   *  billed (`user_backend_credentials.id`). NULL on a refused run and on rows
+   *  written before the column existed. */
+  credential_account_id: string | null;
 };
 
 /** Ruling 369: which prompt-cache TTL the provider billed a run's writes under. */
@@ -161,6 +165,9 @@ export interface InsertRunInput {
    *  `AgentRunRow.credential_kind`). Omitted (a refused run, a fixture) stores
    *  NULL. */
   credentialKind?: CredentialKind | null;
+  /** Ruling 507: the account the run bills (see
+   *  `AgentRunRow.credential_account_id`). Omitted stores NULL. */
+  credentialAccountId?: string | null;
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
@@ -173,7 +180,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, interrupted_reason, credential_user_id, verdict_withheld,
-        credential_kind,
+        credential_kind, credential_account_id,
         created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
@@ -181,7 +188,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
         @interruptedBy, @interruptedReason, @credentialUserId, @verdictWithheld,
-        @credentialKind,
+        @credentialKind, @credentialAccountId,
         @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
@@ -199,6 +206,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         credential_user_id=excluded.credential_user_id,
         verdict_withheld=excluded.verdict_withheld,
         credential_kind=excluded.credential_kind,
+        credential_account_id=excluded.credential_account_id,
         updated_at=excluded.updated_at`,
   ).run({
     id: input.id,
@@ -228,6 +236,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     credentialUserId: input.credentialUserId ?? null,
     verdictWithheld: input.verdictWithheld ? 1 : 0,
     credentialKind: input.credentialKind ?? null,
+    credentialAccountId: input.credentialAccountId ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -287,6 +296,8 @@ export interface RunPatch {
   compactions?: number;
   /** Ruling 369: patchable so the start path can stamp it on a reserved row. */
   credentialKind?: CredentialKind | null;
+  /** Ruling 507: patchable for the same reason, beside the kind. */
+  credentialAccountId?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -329,6 +340,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     lastPromptTokens: ["last_prompt_tokens", patch.lastPromptTokens],
     compactions: ["compactions", patch.compactions],
     credentialKind: ["credential_kind", patch.credentialKind],
+    credentialAccountId: ["credential_account_id", patch.credentialAccountId],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

@@ -5,6 +5,11 @@ import { findUserById } from "~/server/auth/user-store.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import {
   BACKEND_PASTE_KINDS,
+  MAX_ACCOUNT_LABEL_LEN,
+  MAX_ACCOUNTS_PER_BACKEND,
+  backendAccountHealth,
+  backendAccountName,
+  listBackendAccounts,
   userBackendHealth,
   type LoginMethod,
   type PastedKind,
@@ -121,14 +126,40 @@ export interface ProfileBackendUsage {
   windowReset: boolean;
 }
 
+/**
+ * Ruling 507: one of the viewer's accounts on a backend, as the card lists it.
+ * `health` is that account's own answer (`backendAccountHealth`), so an
+ * inactive sign-in whose file went missing reads as such before anyone
+ * switches to it.
+ */
+export interface ProfileBackendAccount {
+  id: string;
+  /** How the account is named: the person's own label, else the vendor's
+   *  facts (`backendAccountName`). */
+  name: string;
+  /** The person's own name for it, for the rename field; null when unnamed. */
+  label: string | null;
+  /** The account the viewer's runs on this backend bill now. */
+  active: boolean;
+  health: UserBackendHealth;
+}
+
 export interface ProfileBackend {
   backend: RealBackend;
+  /** The ACTIVE account's health — the answer every other surface reads. */
   health: UserBackendHealth;
   login: LoginSessionView | null;
   methods: {
     signIn: LoginMethod[];
     paste: PastedKind[];
   };
+  /** Ruling 507: every account the viewer holds on this backend, the active
+   *  one first. Optional so fixtures that predate it stay valid (absent reads
+   *  as the one account `health` describes); the loader always sets it. */
+  accounts?: ProfileBackendAccount[];
+  /** Ruling 507: the store's own limits, so the card offers what the store
+   *  accepts. Optional for the same reason. */
+  limits?: { maxAccounts: number; maxLabelLength: number };
   /** The viewer's own last observed refusal on this backend, or null. Optional
    *  so fixtures that predate it stay valid; the loader always sets it. */
   lastRefusal?: ProfileBackendRefusal | null;
@@ -153,9 +184,9 @@ export interface ProfileBackend {
 function ownReading(
   row: BackendQuotaRow | undefined,
   userId: string,
-  /** When the credential now in the slot was connected, or null when nothing is
-   *  connected. A reading OLDER than that describes the account this one
-   *  replaced. */
+  /** When the account now in use became the active one (ruling 507: connected,
+   *  or switched to), or null when nothing is connected. A reading OLDER than
+   *  that describes the account that was in use before it. */
   connectedAt: string | null,
 ): ProfileBackendUsage | null {
   const reading = row?.reading;
@@ -237,12 +268,26 @@ function getProfileBackends(
   const limits = new Map(latestBackendRateLimits(db).map((row) => [row.backend, row]));
   return PROFILE_BACKENDS.map((backend) => {
     const health = userBackendHealth(db, userId, backend);
+    const accounts = listBackendAccounts(db, userId, backend);
+    // Ruling 507: a reading is about the account that was ACTIVE when it was
+    // observed, so the gate is when the account now in use became active —
+    // connected, or switched back to — not when it was first connected.
+    const active = accounts[0];
+    const activeSince = active ? active.selectedAt || active.createdAt : null;
     return {
     backend,
     health,
     login: getBackendLogin(userId, backend),
     lastRefusal: ownRefusal(limits.get(backend), userId),
-    usage: ownReading(limits.get(backend), userId, health.connectedAt),
+    usage: ownReading(limits.get(backend), userId, activeSince),
+    accounts: accounts.map((row, index) => ({
+      id: row.id,
+      name: backendAccountName(row),
+      label: row.label,
+      active: index === 0,
+      health: backendAccountHealth(row),
+    })),
+    limits: { maxAccounts: MAX_ACCOUNTS_PER_BACKEND, maxLabelLength: MAX_ACCOUNT_LABEL_LEN },
     methods: {
       // The sign-in list is the DRIVER's own table, not a copy of it: a card
       // that offered a flow `startBackendLogin` refuses would post a button

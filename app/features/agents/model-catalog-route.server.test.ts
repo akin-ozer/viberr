@@ -126,8 +126,11 @@ describe("resources/model-catalog", () => {
       "../../../test-support/backend-credentials"
     );
     const { insertUser } = await import("~/server/auth/user-store.server");
-    const { userBackendHome } = await import(
+    const { backendAccountHome, userBackendHome } = await import(
       "~/server/runtimes/user-homes.server"
+    );
+    const { getBackendCredential } = await import(
+      "~/server/runtimes/backend-credentials.server"
     );
     const { getModelCatalog, resetModelCatalogCache } = await import(
       "~/server/runtimes/model-catalog.server"
@@ -140,16 +143,21 @@ describe("resources/model-catalog", () => {
     });
     await connectFakeBackend(app.db, ardaId, "claude");
     try {
-      // The cache entry Arda's own credential would produce. `homeDir` is the
-      // identity the catalog keys on, and it is the one the route resolves for
-      // him (`runCredentialFor` reads the same per-user home).
+      // The cache entry Arda's own credential would produce. The account's
+      // home is the identity the catalog keys on (ruling 507), and it is the
+      // one the route resolves for him (`runCredentialFor` reads the same one).
       const home = userBackendHome(ardaId, "claude");
+      const account = getBackendCredential(app.db, ardaId, "claude")!;
+      const accountHome = backendAccountHome(ardaId, "claude", account);
       const warmed = await getModelCatalog("claude", {
         credential: {
-          env: { CLAUDE_CONFIG_DIR: home },
+          env: { CLAUDE_CONFIG_DIR: accountHome },
           secrets: [],
           kind: "api_key",
           homeDir: home,
+          accountId: account.id,
+          accountHome,
+          ownDirs: [],
         },
         claudeQueryFn: () =>
           Object.assign((async function* () {})(), {

@@ -16,8 +16,12 @@ import {
 import { getPref, setPref } from "~/server/prefs/user-prefs.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
-  disconnectBackend,
+  backendAccountName,
+  disconnectBackendAccount,
+  getBackendAccount,
+  renameBackendAccount,
   setBackendApiKey,
+  switchBackendAccount,
   type LoginMethod,
 } from "~/server/runtimes/backend-credentials.server";
 import {
@@ -213,7 +217,8 @@ export function disconnectGithubIdentity(
  */
 
 /**
- * Start the vendor's own hosted sign-in for this person.
+ * Start the vendor's own hosted sign-in for this person: into a new account
+ * (ruling 507), or with `accountId` into one of their existing sign-ins.
  *
  * No `binaries` override: the driver resolves the ONE binary this flow needs,
  * so a server that has Anthropic's optional package but not OpenAI's can still
@@ -225,8 +230,9 @@ export function startBackendSignIn(
   actor: ProfileActor,
   backend: RealBackend,
   method: LoginMethod,
+  accountId?: string,
 ): LoginSessionView {
-  return startBackendLogin(db, actor, backend, method);
+  return startBackendLogin(db, actor, backend, method, accountId ? { accountId } : {});
 }
 
 /** Hand Anthropic's one-time code to the waiting child (Claude only). The value
@@ -258,13 +264,9 @@ export function cancelBackendSignIn(
 }
 
 /**
- * Store a pasted key or workspace access token, replacing whatever held the
- * slot. This backend's `binary` rides along because replacing a previous vendor
- * SIGN-IN runs that vendor's own logout first (spec §3.2 replace semantics);
- * without it the store would delete the local credential file and leave the
- * vendor-side session alive. `backendBinaryIfPresent` rather than a hard
- * resolve: a host missing the optional package must still let a person manage
- * their own account, and it never withholds the OTHER vendor's logout.
+ * Store a pasted key or workspace access token as a new account, which becomes
+ * the one this person's runs bill. Nothing is replaced (ruling 507): whatever
+ * was connected stays connected, one switch away.
  */
 export async function connectBackendKey(
   db: DatabaseSync,
@@ -273,9 +275,7 @@ export async function connectBackendKey(
   kind: "api_key" | "access_token",
   secret: string,
 ): Promise<ProfileToast> {
-  const row = await setBackendApiKey(db, actor, backend, kind, secret, {
-    binary: backendBinaryIfPresent(backend),
-  });
+  const row = await setBackendApiKey(db, actor, backend, kind, secret);
   const label = BACKEND_LABEL[backend];
   const suffix = row.secretSuffix ?? "";
   return {
@@ -286,14 +286,56 @@ export async function connectBackendKey(
   };
 }
 
-/** Disconnect this person's account for one backend. */
-export async function disconnectBackendAccount(
+/** Ruling 507: make one of this person's accounts the one their runs bill.
+ *  No sign-in runs; the toast names the account now in use. */
+export function switchAgentAccount(
   db: DatabaseSync,
   actor: ProfileActor,
-  backend: RealBackend,
+  accountId: string,
+): ProfileToast {
+  const row = switchBackendAccount(db, actor, accountId);
+  return { toast: `${BACKEND_LABEL[row.backend]} runs now use ${backendAccountName(row)}` };
+}
+
+/** Ruling 507: name one of this person's accounts, or clear its name. */
+export function renameAgentAccount(
+  db: DatabaseSync,
+  actor: ProfileActor,
+  accountId: string,
+  name: string,
+): ProfileToast {
+  const row = renameBackendAccount(db, actor, accountId, name);
+  return {
+    toast: row.label
+      ? `${BACKEND_LABEL[row.backend]} account renamed ${row.label}`
+      : `${BACKEND_LABEL[row.backend]} account name cleared`,
+  };
+}
+
+/**
+ * Disconnect ONE of this person's accounts (ruling 507). This backend's
+ * `binary` rides along because a vendor SIGN-IN is logged out with that
+ * vendor's own logout first; without it the store would delete the local
+ * credential and leave the vendor-side session alive. `backendBinaryIfPresent`
+ * rather than a hard resolve: a host missing the optional package must still
+ * let a person manage their own account. The toast says which account runs
+ * bill now, because removing the active one hands them to the one used before.
+ */
+export async function disconnectAgentAccount(
+  db: DatabaseSync,
+  actor: ProfileActor,
+  accountId: string,
 ): Promise<ProfileToast> {
-  await disconnectBackend(db, actor, backend, {
-    binary: backendBinaryIfPresent(backend),
+  const account = getBackendAccount(db, actor.userId, accountId);
+  if (!account) throw AppError.validation("That account isn't connected any more.");
+  const label = BACKEND_LABEL[account.backend];
+  const { removed, wasActive, active } = await disconnectBackendAccount(db, actor, accountId, {
+    binary: backendBinaryIfPresent(account.backend),
   });
-  return { toast: `${BACKEND_LABEL[backend]} disconnected` };
+  if (!active) return { toast: `${label} disconnected` };
+  return {
+    toast: wasActive
+      ? `${backendAccountName(removed)} disconnected · ${label} runs now use ${backendAccountName(active)}`
+      : `${backendAccountName(removed)} disconnected`,
+  };
 }

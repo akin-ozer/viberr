@@ -16,12 +16,19 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { retireBackendRecordsFor } from "./backend-quota.server";
 import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
 import {
-  claudeLoginCredentialPath,
-  codexLoginCredentialPath,
+  backendAccountHome,
+  ensureBackendAccountHome,
   ensureUserBackendHome,
-  userBackendHome,
+  vendorLoginCredentialPath,
+  type BackendAccountRef,
 } from "./user-homes.server";
-import { agentLaunchFor, launchEnv, resolveExecutable } from "./agent-isolation.server";
+import {
+  agentGitLaunchFor,
+  agentLaunchFor,
+  launchEnv,
+  resolveExecutable,
+} from "./agent-isolation.server";
+import { removeAgentTree } from "./agent-trees.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -42,6 +49,16 @@ import { toError } from "~/shared/errors";
  *    or a ChatGPT workspace access token. That value IS ours to hold, so it is
  *    sealed (AES-256-GCM, `secret-box`) and the store is registered in
  *    `SEALED_STORES` so a key rotation reaches it.
+ *
+ * Ruling 507: a row is one ACCOUNT, and a person may keep several per backend
+ * — a work and a personal subscription, a key for when both windows are spent.
+ * Connecting adds an account instead of replacing the one there was, and
+ * exactly one per (person, backend) is ACTIVE: the one runs bill, which is the
+ * one selected most recently ({@link ACTIVE_FIRST}). Switching is a write to
+ * `selected_at` and nothing else — no vendor process runs, no file moves —
+ * because every account signed in since the ruling keeps its sign-in in a home
+ * of its own (`backendAccountHome`), where the vendor wrote it. Removing the
+ * active account hands runs back to the one used before it.
  *
  * Nothing outside this module ever sees a box: `BackendCredentialRow` has no
  * field for one and the metadata SELECT does not even name the column. The one
@@ -84,7 +101,8 @@ export interface BackendCredentialActor {
   label: string;
 }
 
-/** A stored credential as every reader sees it — never the box. */
+/** A stored credential — one account (ruling 507) — as every reader sees it,
+ *  never the box. */
 export interface BackendCredentialRow {
   id: string;
   userId: string;
@@ -96,6 +114,13 @@ export interface BackendCredentialRow {
   /** Non-secret facts the vendor reported at connect time. */
   detail: Record<string, string>;
   verifiedAt: string | null;
+  /** Ruling 507: the person's own name for the account, or null. */
+  label: string | null;
+  /** Ruling 507: when this account last became the active one. */
+  selectedAt: string;
+  /** Ruling 507: connected before the ruling, so its sign-in lives in the
+   *  backend home itself rather than in a home of its own. */
+  legacyHome: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -105,13 +130,32 @@ const VENDOR_LABEL = { claude: "Anthropic", codex: "OpenAI" } as const;
 
 const CONNECT_HERE = "Profile → Agent accounts";
 
+/**
+ * Ruling 507: how many accounts one person may keep per backend. Each sign-in
+ * is a home on the runtime volume and a vendor session; nobody switches among
+ * more than a handful, and a ceiling turns a runaway loop of sign-ins into a
+ * sentence instead of a directory per attempt.
+ */
+export const MAX_ACCOUNTS_PER_BACKEND = 10;
+
+/** The longest name a person may give an account (ruling 507). */
+export const MAX_ACCOUNT_LABEL_LEN = 60;
+
 // ------------------------------------------------------------------ reads
 
 /** The metadata columns every read selects. `secret_box` is deliberately absent:
  *  a column that is never selected cannot be leaked by a caller that spreads a
  *  row into loader data. */
 const CREDENTIAL_COLUMNS = `id, user_id, backend, kind, method, secret_suffix,
-       detail_json, verified_at, created_at, updated_at`;
+       detail_json, verified_at, label, selected_at, legacy_home, created_at, updated_at`;
+
+/**
+ * Ruling 507: the order that puts a person's ACTIVE account first — the most
+ * recently selected, then the newer row, then the id, so the answer is total
+ * even for two rows written in one millisecond. The one definition of "active":
+ * every reader that wants the account runs bill takes the first row of it.
+ */
+const ACTIVE_FIRST = "selected_at DESC, created_at DESC, id DESC";
 
 /** 0001_baseline declares `backend`, `kind`, `detail_json`, `created_at` and
  *  `updated_at` NOT NULL with CHECK constraints pinning the two vocabularies;
@@ -126,6 +170,9 @@ const credentialRowSchema = z.object({
   secret_suffix: z.string().nullable(),
   detail_json: z.string(),
   verified_at: z.string().nullable(),
+  label: z.string().nullable().catch(null),
+  selected_at: z.string().catch(""),
+  legacy_home: z.number().catch(0),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -153,41 +200,109 @@ function mapRow(row: CredentialRow): BackendCredentialRow {
     secretSuffix: row.secret_suffix,
     detail: parseDetail(row.detail_json),
     verifiedAt: row.verified_at,
+    label: row.label,
+    selectedAt: row.selected_at,
+    legacyHome: row.legacy_home === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
+function parseRows(rows: unknown[]): BackendCredentialRow[] {
+  return rows.flatMap((row) => {
+    const parsed = credentialRowSchema.safeParse(row);
+    return parsed.success ? [mapRow(parsed.data)] : [];
+  });
+}
+
+/** The ACTIVE account of (person, backend) — the one every run on that backend
+ *  bills (ruling 507) — or null when the person has connected none. */
 export function getBackendCredential(
   db: DatabaseSync,
   userId: string,
   backend: RealBackend,
 ): BackendCredentialRow | null {
+  return listBackendAccounts(db, userId, backend)[0] ?? null;
+}
+
+/** Every account the person holds on one backend, the active one first, then
+ *  the rest in the order they were last used (ruling 507). */
+export function listBackendAccounts(
+  db: DatabaseSync,
+  userId: string,
+  backend: RealBackend,
+): BackendCredentialRow[] {
+  return parseRows(
+    db
+      .prepare(
+        `SELECT ${CREDENTIAL_COLUMNS} FROM user_backend_credentials
+          WHERE user_id = ? AND backend = ? ORDER BY ${ACTIVE_FIRST}`,
+      )
+      .all(userId, backend),
+  );
+}
+
+/** One of THIS person's accounts by id, or null — never another person's: an
+ *  id from a form is only ever looked up together with the session's user. */
+export function getBackendAccount(
+  db: DatabaseSync,
+  userId: string,
+  accountId: string,
+): BackendCredentialRow | null {
   const row = credentialRowSchema.safeParse(
     db
       .prepare(
         `SELECT ${CREDENTIAL_COLUMNS} FROM user_backend_credentials
-          WHERE user_id = ? AND backend = ?`,
+          WHERE user_id = ? AND id = ?`,
       )
-      .get(userId, backend),
+      .get(userId, accountId),
   );
   return row.success ? mapRow(row.data) : null;
 }
 
+/** Every account the person holds, both backends, each backend's active one
+ *  first. */
 export function listBackendCredentials(
   db: DatabaseSync,
   userId: string,
 ): BackendCredentialRow[] {
-  return db
-    .prepare(
-      `SELECT ${CREDENTIAL_COLUMNS} FROM user_backend_credentials
-        WHERE user_id = ? ORDER BY backend ASC`,
-    )
-    .all(userId)
-    .flatMap((row) => {
-      const parsed = credentialRowSchema.safeParse(row);
-      return parsed.success ? [mapRow(parsed.data)] : [];
-    });
+  return parseRows(
+    db
+      .prepare(
+        `SELECT ${CREDENTIAL_COLUMNS} FROM user_backend_credentials
+          WHERE user_id = ? ORDER BY backend ASC, ${ACTIVE_FIRST}`,
+      )
+      .all(userId),
+  );
+}
+
+/** Where one account's vendor sign-in lives (ruling 507). */
+function accountRef(row: Pick<BackendCredentialRow, "id" | "legacyHome">): BackendAccountRef {
+  return { id: row.id, legacyHome: row.legacyHome };
+}
+
+/**
+ * How an account is named to the person who holds it (ruling 507): their own
+ * label; else what the vendor reported about a sign-in (the email Claude's
+ * `auth status` prints); else what kind of credential it is. The one home of
+ * the name, so the Profile list, the toasts and the audit-facing sentences
+ * agree.
+ */
+export function backendAccountName(
+  row: Pick<BackendCredentialRow, "label" | "kind" | "method" | "detail" | "secretSuffix">,
+): string {
+  if (row.label) return row.label;
+  if (row.kind === "login") {
+    const email = row.detail.email;
+    if (email) return email;
+    return row.method === "console"
+      ? "Console sign-in"
+      : row.method === "device"
+        ? "ChatGPT sign-in"
+        : "Claude sign-in";
+  }
+  const noun = row.kind === "access_token" ? "Workspace access token" : "API key";
+  return row.secretSuffix ? `${noun} ending in ${row.secretSuffix}` : noun;
 }
 
 /** `secret_box` is a single nullable TEXT column; a row without one is a login
@@ -259,18 +374,17 @@ const HOME_ENV_KEY = {
 } as const;
 
 /**
- * The env a vendor binary runs on for one person outside a run: the sign-in
+ * The env a vendor binary runs on for one ACCOUNT outside a run: the sign-in
  * driver (`startBackendLogin`) and `runVendorLogout`. `filteredSpawnEnv()`
  * (every credential-shaped variable stripped) plus the ONE home variable of
- * this backend, pointed at that person's home, so the child cannot reach any
- * credential but the one it is signing in or revoking.
+ * this backend, pointed at that account's home (ruling 507), so the child
+ * cannot reach any credential but the one it is signing in or revoking — not
+ * even the person's other accounts on the same backend.
  */
 export function vendorSpawnEnv(
-  userId: string,
   backend: RealBackend,
-  dataRoot?: string,
+  accountHome: string,
 ): Record<string, string> {
-  const home = ensureUserBackendHome(userId, backend, dataRoot);
   const env = filteredSpawnEnv();
   // Neither vendor's home variable may be inherited: the child must act on the
   // home this call names and on nothing else, so an ambient CLAUDE_CONFIG_DIR
@@ -278,7 +392,7 @@ export function vendorSpawnEnv(
   // ambient CODEX_HOME a `claude auth login`.
   delete env.CLAUDE_CONFIG_DIR;
   delete env.CODEX_HOME;
-  env[HOME_ENV_KEY[backend]] = home;
+  env[HOME_ENV_KEY[backend]] = accountHome;
   return env;
 }
 
@@ -288,33 +402,42 @@ export interface VendorCommand {
   env: Record<string, string>;
   /** Ruling 460: `file` is the agent launcher, whose hard kill is SIGUSR2. */
   launched: boolean;
+  /** Ruling 507: the account home the binary acts on. */
+  accountHome: string;
 }
 
 /**
  * Ruling 460: a vendor binary run for one person outside a run — the hosted
  * sign-in, its confirmation, the sign-out — runs as that person's own OS user
  * through the launcher, exactly like their runs, so every file it writes into
- * their home is theirs (and, once the launcher has handed the home back after
- * it exits, readable by the server's group). Off (no launcher), it is the
- * binary on `vendorSpawnEnv`, as before. Throws the launch's `run_unavailable`
- * AppError when the person's home cannot be prepared.
+ * their home is theirs (and, once the launcher has handed the backend home
+ * back after it exits, readable by the server's group). Off (no launcher), it
+ * is the binary on `vendorSpawnEnv`, as before. Throws the launch's
+ * `run_unavailable` AppError when the person's home cannot be prepared.
+ *
+ * Ruling 507: it acts on ONE account's home, created here (with its links)
+ * when it does not exist yet — a sign-in into a new account starts in an empty
+ * home of its own.
  */
 export function vendorCommand(
   db: DatabaseSync,
   userId: string,
   backend: RealBackend,
   binary: string,
+  account: BackendAccountRef,
   dataRoot?: string,
 ): VendorCommand {
-  const env = vendorSpawnEnv(userId, backend, dataRoot);
-  const home = env[HOME_ENV_KEY[backend]] ?? userBackendHome(userId, backend, dataRoot);
-  const agent = agentLaunchFor(db, userId, home, dataRoot);
-  if (!agent) return { file: binary, env, launched: false };
+  const backendHome = ensureUserBackendHome(userId, backend, dataRoot);
+  const ensured = ensureBackendAccountHome(userId, backend, account, dataRoot);
+  const env = vendorSpawnEnv(backend, ensured.home);
+  const agent = agentLaunchFor(db, userId, backendHome, dataRoot, ensured.ownDirs);
+  if (!agent) return { file: binary, env, launched: false, accountHome: ensured.home };
   if (agent.home) env.HOME = agent.home;
   return {
     file: agent.launcher,
     env: launchEnv(agent, resolveExecutable(binary, env.PATH), env),
     launched: true,
+    accountHome: ensured.home,
   };
 }
 
@@ -324,112 +447,130 @@ const LOGOUT_ARGS = {
 } as const;
 
 /**
- * Ask the vendor's own binary to revoke the sign-in it holds.
+ * Ask the vendor's own binary to revoke the sign-in one account holds.
  *
  * argv only, never a shell; the child gets `vendorSpawnEnv` (every
- * credential-shaped variable stripped, plus the one home variable), so a logout
- * cannot reach any credential but the one it is revoking. Never throws: a
- * failed or missing logout must not stop the disconnect — the credential FILE
- * is removed either way, which is what makes the account unusable from this
- * server.
+ * credential-shaped variable stripped, plus the one home variable, pointed at
+ * THIS account's home), so a logout cannot reach any credential but the one it
+ * is revoking. Never throws: a failed or missing logout must not stop the
+ * disconnect — the credential FILE is removed either way, which is what makes
+ * the account unusable from this server.
  */
 async function runVendorLogout(
   db: DatabaseSync,
-  userId: string,
-  backend: RealBackend,
+  row: BackendCredentialRow,
   binary: string,
   dataRoot?: string,
 ): Promise<void> {
   try {
     // Ruling 460: as the person's own OS user, like the sign-in that wrote it.
-    const command = vendorCommand(db, userId, backend, binary, dataRoot);
-    await execFileAsync(command.file, [...LOGOUT_ARGS[backend]], {
+    const command = vendorCommand(db, row.userId, row.backend, binary, accountRef(row), dataRoot);
+    await execFileAsync(command.file, [...LOGOUT_ARGS[row.backend]], {
       env: command.env,
       timeout: LOGOUT_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
     });
   } catch (error) {
     logger.warn("vendor logout did not exit cleanly", {
-      backend,
+      backend: row.backend,
       exitCode: execFileRejection.parse(error).code,
     });
   }
 }
 
-/** Delete the vendor's credential file from the person's home. Transcripts stay
- *  (they are the run record, not a credential). Never throws on a missing
- *  file — a disconnect after a volume wipe is still a disconnect. */
-function removeLoginCredentialFile(
-  userId: string,
-  backend: RealBackend,
+/**
+ * Delete what one account left on disk. An account with a home of its own
+ * (ruling 507) loses the whole home — its sign-in and whatever its runs wrote
+ * there beside the shared transcripts, which the home only LINKS to (a removal
+ * unlinks a link; it never descends into it) — removed as the person, because
+ * their agents wrote it (ruling 485). An account connected before the ruling
+ * lives in the backend home itself, which also holds the person's transcripts
+ * and their other accounts, so it loses its credential file and nothing else.
+ * Never throws: a disconnect after a volume wipe is still a disconnect.
+ */
+async function removeAccountFiles(
+  db: DatabaseSync,
+  row: BackendCredentialRow,
   dataRoot?: string,
-): void {
-  const home = userBackendHome(userId, backend, dataRoot);
-  const file =
-    backend === "claude"
-      ? claudeLoginCredentialPath(home)
-      : codexLoginCredentialPath(home);
+): Promise<void> {
+  const home = backendAccountHome(row.userId, row.backend, accountRef(row), dataRoot);
   try {
-    rmSync(file, { force: true });
+    if (row.legacyHome) {
+      if (row.kind === "login") rmSync(vendorLoginCredentialPath(row.backend, home), { force: true });
+      return;
+    }
+    await removeAgentTree(home, agentGitLaunchFor(db, row.userId, dataRoot));
   } catch (error) {
-    logger.warn("could not remove a vendor credential file", {
-      backend,
+    logger.warn("could not remove a disconnected account's files", {
+      backend: row.backend,
+      accountId: row.id,
       err: toError(error),
     });
   }
 }
 
-/** What retiring ONE (user, backend) credential needs from its caller: the
- *  binary of THAT vendor, when this deployment has it. Per backend rather than
- *  the pair, so a host missing one vendor's optional package still runs the
- *  other vendor's logout (`backendBinaryIfPresent`). */
+/** What retiring ONE account needs from its caller: the binary of THAT vendor,
+ *  when this deployment has it. Per backend rather than the pair, so a host
+ *  missing one vendor's optional package still runs the other vendor's logout
+ *  (`backendBinaryIfPresent`). */
 interface VendorDeps {
   binary?: string;
   dataRoot?: string;
 }
 
 /**
- * Retire whatever is connected for (user, backend) so a new method can take the
- * slot. A `login` row is logged out at the vendor and its credential file
- * deleted FIRST: leaving a live sign-in file behind would leave a credential on
- * this server that no row accounts for, and the next `runCredentialFor` would
- * happily bill it.
- *
- * Ruling 165: the refusal Viberr observed on the slot goes with it, row or no
- * row. A spent window or a rejected credential is evidence about the account
- * that was billed, and whatever takes the slot next is not that account; left
- * standing, the Profile card kept "usage window spent · reopens 21:30" over a
- * freshly connected account whose runs were going through, and the dispatch
- * hold parked the new account until the old one's instant. Retired before the
- * row is touched, and without a row to touch too, so a record that outlived an
- * earlier disconnect is retired by the connect that follows it.
+ * Retire one account: a `login` account is logged out at the vendor and its
+ * files deleted FIRST, the row after — leaving a live sign-in file behind
+ * would leave a credential on this server that no row accounts for, which the
+ * next `runCredentialFor` could bill if the row came back, and which the
+ * person could never reach again to revoke.
  */
-async function clearExistingCredential(
+async function retireAccount(
   db: DatabaseSync,
-  userId: string,
-  backend: RealBackend,
-  existing: BackendCredentialRow | null,
+  row: BackendCredentialRow,
   deps: VendorDeps,
 ): Promise<void> {
-  retireBackendRecordsFor(db, backend, userId);
-  if (!existing) return;
-  if (existing.kind === "login") {
+  if (row.kind === "login") {
     if (deps.binary) {
-      await runVendorLogout(db, userId, backend, deps.binary, deps.dataRoot);
+      await runVendorLogout(db, row, deps.binary, deps.dataRoot);
     } else {
       // The route hands `backendBinaryIfPresent(backend)` in. Without it the
       // sign-in can still be made unusable here (the file goes), but the
       // vendor-side session is left for the person to revoke — say so rather
       // than implying a revoke happened.
       logger.warn("disconnecting a vendor login without a binary to log out", {
-        backend,
+        backend: row.backend,
       });
     }
-    removeLoginCredentialFile(userId, backend, deps.dataRoot);
   }
-  db.prepare(`DELETE FROM user_backend_credentials WHERE id = ?`).run(
-    existing.id,
-  );
+  await removeAccountFiles(db, row, deps.dataRoot);
+  db.prepare(`DELETE FROM user_backend_credentials WHERE id = ?`).run(row.id);
+}
+
+/**
+ * Ruling 165, carried into ruling 507: the account that bills the next run on
+ * this backend is about to change — a connect, a switch, the active account's
+ * removal — so the refusals and the reading Viberr observed on the one that
+ * billed until now go. A spent window or a rejected credential is evidence
+ * about the account that was billed, and the next one is not that account;
+ * left standing, the Profile card kept "usage window spent · reopens 21:30"
+ * over a freshly connected account whose runs were going through, and the
+ * dispatch hold parked the new account until the old one's instant. Switching
+ * BACK to a spent account retires it too: one refused run re-records the
+ * window, which is cheaper than a notice that lies about the other account.
+ */
+function activeAccountChanged(db: DatabaseSync, userId: string, backend: RealBackend): void {
+  retireBackendRecordsFor(db, backend, userId);
+}
+
+/** Refuse a new account once the person holds the ceiling on this backend. */
+function assertRoomForAnotherAccount(db: DatabaseSync, userId: string, backend: RealBackend): void {
+  if (listBackendAccounts(db, userId, backend).length >= MAX_ACCOUNTS_PER_BACKEND) {
+    throw AppError.validation(
+      `You already have ${MAX_ACCOUNTS_PER_BACKEND} ${BACKEND_LABEL[backend]} accounts connected. ` +
+        "Disconnect one before adding another.",
+    );
+  }
 }
 
 // ------------------------------------------------------------ paste a key
@@ -465,15 +606,13 @@ export const BACKEND_PASTE_KINDS = {
 export interface SetBackendApiKeyDeps {
   /** Injected in tests; production uses the global `fetch`. */
   fetchImpl?: typeof fetch;
-  /** This backend's binary, needed only to log a previous `login` row out (see
-   *  `clearExistingCredential`). */
-  binary?: string;
-  dataRoot?: string;
 }
 
 /**
  * The paste path: verify a pasted key against the provider, then seal it as
- * this person's credential for that backend, replacing whatever was connected.
+ * a NEW account of this person's on that backend, which becomes the active
+ * one. Whatever was connected before stays connected (ruling 507): the person
+ * switches back to it on the same card, with no sign-in.
  *
  * A ChatGPT workspace ACCESS TOKEN has no free probe (every endpoint that
  * accepts one costs money), so it is stored `verified_at = null` with an
@@ -495,23 +634,26 @@ export async function setBackendApiKey(
     );
   }
   const value = validatePastedSecret(backend, kind, secret);
+  // Before the provider is asked anything: a refusal that is ours to make
+  // costs nobody a network round trip.
+  assertRoomForAnotherAccount(db, actor.userId, backend);
   const verifiedAt =
     kind === "access_token"
       ? null
       : await verifyKeyWithProvider(backend, value, deps.fetchImpl ?? fetch);
   const detail: Record<string, string> =
     kind === "access_token" ? { verification: "unverified" } : {};
-
-  const existing = getBackendCredential(db, actor.userId, backend);
-  await clearExistingCredential(db, actor.userId, backend, existing, deps);
+  // Again after the probe: another connect may have landed while the provider
+  // answered, and from here to the insert nothing awaits, so the ceiling holds.
+  assertRoomForAnotherAccount(db, actor.userId, backend);
 
   const id = newId("ubc");
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO user_backend_credentials
        (id, user_id, backend, kind, method, secret_box, secret_suffix,
-        detail_json, verified_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+        detail_json, verified_at, selected_at, legacy_home, created_at, updated_at)
+     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?)`,
   ).run(
     id,
     actor.userId,
@@ -523,7 +665,9 @@ export async function setBackendApiKey(
     verifiedAt,
     now,
     now,
+    now,
   );
+  activeAccountChanged(db, actor.userId, backend);
   recordAudit(db, {
     action: "profile.backend.connected",
     actor,
@@ -536,7 +680,7 @@ export async function setBackendApiKey(
     kind,
     userId: actor.userId,
   });
-  const row = getBackendCredential(db, actor.userId, backend);
+  const row = getBackendAccount(db, actor.userId, id);
   if (!row) throw AppError.internal(`backend credential ${id} vanished after insert`);
   return row;
 }
@@ -619,14 +763,57 @@ function trimDetail(detail: Record<string, string>): Record<string, string> {
 }
 
 /**
+ * Where a hosted sign-in writes (ruling 507): the account it will become, and
+ * whether that account already exists. A sign-in for a NEW account runs in an
+ * empty home of its own, minted before the vendor process starts; signing an
+ * existing `login` account in again (its file went missing, or its vendor
+ * session was revoked) runs in that account's own home and updates its row.
+ */
+export interface LoginTarget extends BackendAccountRef {
+  existing: boolean;
+}
+
+/**
+ * The account a sign-in will record, decided BEFORE the vendor process starts,
+ * because the process needs its home. With `accountId`, the person's existing
+ * `login` account on this backend is signed in again; without it, a new account
+ * is minted — refused once the person holds the ceiling, so the refusal comes
+ * before any process runs.
+ */
+export function loginTargetFor(
+  db: DatabaseSync,
+  userId: string,
+  backend: RealBackend,
+  accountId?: string,
+): LoginTarget {
+  if (accountId === undefined) {
+    assertRoomForAnotherAccount(db, userId, backend);
+    return { id: newId("ubc"), legacyHome: false, existing: false };
+  }
+  const row = getBackendAccount(db, userId, accountId);
+  if (!row || row.backend !== backend) {
+    throw AppError.validation(`That ${BACKEND_LABEL[backend]} account isn't connected any more.`);
+  }
+  if (row.kind !== "login") {
+    throw AppError.validation(
+      `That ${BACKEND_LABEL[backend]} account is a pasted ${row.kind === "access_token" ? "access token" : "API key"}, ` +
+        "not a sign-in. Add a new account to sign in.",
+    );
+  }
+  return { id: row.id, legacyHome: row.legacyHome, existing: true };
+}
+
+/**
  * Called by the sign-in driver the moment the vendor binary reports success:
- * records the `login` row (no secret — the binary owns the credential in the
- * person's home), retires any pasted key that held the slot, and retires the
- * refusal Viberr observed on whatever held it (ruling 165).
+ * records the `login` account (no secret — the binary owns the credential in
+ * the account's home) as the person's ACTIVE account on this backend, and
+ * retires the refusal Viberr observed on the one that was active (ruling 165).
+ * Every other account the person holds stays connected (ruling 507).
  *
- * Synchronous, and deliberately does NOT run a vendor logout for a previous
- * `login` row: the binary has just written a fresh credential into that very
- * home, and logging out now would revoke the sign-in this call is recording.
+ * A new account is inserted with the id its home was minted under; an account
+ * signed in again keeps its id and home and has its vendor facts refreshed.
+ * Synchronous, and never runs a vendor logout: the binary has just written a
+ * fresh credential, and nothing else is being replaced.
  */
 export function recordBackendLogin(
   db: DatabaseSync,
@@ -634,49 +821,134 @@ export function recordBackendLogin(
   backend: RealBackend,
   method: LoginMethod,
   detail: Record<string, string>,
+  target: LoginTarget,
 ): BackendCredentialRow {
-  const existing = getBackendCredential(db, actor.userId, backend);
-  if (existing) {
-    db.prepare(`DELETE FROM user_backend_credentials WHERE id = ?`).run(
-      existing.id,
+  const now = new Date().toISOString();
+  const facts = JSON.stringify(trimDetail(detail));
+  const stored = target.existing && getBackendAccount(db, actor.userId, target.id) !== null;
+  if (stored) {
+    db.prepare(
+      `UPDATE user_backend_credentials
+          SET method = ?, detail_json = ?, verified_at = ?, selected_at = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(method, facts, now, now, now, target.id, actor.userId);
+  } else {
+    db.prepare(
+      `INSERT INTO user_backend_credentials
+         (id, user_id, backend, kind, method, secret_box, secret_suffix,
+          detail_json, verified_at, selected_at, legacy_home, created_at, updated_at)
+       VALUES (?, ?, ?, 'login', ?, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      target.id,
+      actor.userId,
+      backend,
+      method,
+      facts,
+      now,
+      now,
+      target.legacyHome ? 1 : 0,
+      now,
+      now,
     );
   }
-  const id = newId("ubc");
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO user_backend_credentials
-       (id, user_id, backend, kind, method, secret_box, secret_suffix,
-        detail_json, verified_at, created_at, updated_at)
-     VALUES (?, ?, ?, 'login', ?, NULL, NULL, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    actor.userId,
-    backend,
-    method,
-    JSON.stringify(trimDetail(detail)),
-    now,
-    now,
-    now,
-  );
   recordAudit(db, {
     action: "profile.backend.connected",
     actor,
     subjectKind: "backend_credential",
-    subjectId: id,
-    details: { backend, kind: "login", method },
+    subjectId: target.id,
+    details: { backend, kind: "login", method, signedInAgain: stored },
   });
   logger.info("personal backend sign-in recorded", {
     backend,
     method,
     userId: actor.userId,
   });
-  // Ruling 165: this writer bypasses `clearExistingCredential` on purpose (no
-  // vendor logout over a credential the binary has just written), so it
-  // retires the refusal observed on the previous account itself.
-  retireBackendRecordsFor(db, backend, actor.userId);
-  const row = getBackendCredential(db, actor.userId, backend);
-  if (!row) throw AppError.internal(`backend credential ${id} vanished after insert`);
+  activeAccountChanged(db, actor.userId, backend);
+  const row = getBackendAccount(db, actor.userId, target.id);
+  if (!row) throw AppError.internal(`backend credential ${target.id} vanished after insert`);
   return row;
+}
+
+/**
+ * Ruling 507: make one of the person's accounts the one their runs bill.
+ *
+ * No vendor process runs and no file moves — the account's sign-in has sat in
+ * its own home since it was connected — so switching takes effect for the next
+ * run that starts, and a run already going keeps the account it started on.
+ * Refused, with a sentence, for an account that is not the person's, one that
+ * is already active, and one whose sign-in this server no longer holds (a run
+ * on it could only fail; the card offers its sign-in instead).
+ */
+export function switchBackendAccount(
+  db: DatabaseSync,
+  actor: BackendCredentialActor,
+  accountId: string,
+  env: UserBackendHealthEnv = {},
+): BackendCredentialRow {
+  const row = getBackendAccount(db, actor.userId, accountId);
+  if (!row) throw AppError.validation("That account isn't connected any more.");
+  const label = BACKEND_LABEL[row.backend];
+  const active = getBackendCredential(db, actor.userId, row.backend);
+  if (active?.id === row.id) {
+    throw AppError.validation(`${backendAccountName(row)} is already the ${label} account in use.`);
+  }
+  const health = backendAccountHealth(row, env);
+  if (!health.available) {
+    throw AppError.validation(
+      `${backendAccountName(row)} can't be used yet: ${health.detail ?? "its credential is not usable."}`,
+    );
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE user_backend_credentials SET selected_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+  ).run(now, now, row.id, actor.userId);
+  activeAccountChanged(db, actor.userId, row.backend);
+  recordAudit(db, {
+    action: "profile.backend.switched",
+    actor,
+    subjectKind: "backend_credential",
+    subjectId: row.id,
+    details: { backend: row.backend, kind: row.kind, from: active?.id ?? null },
+  });
+  logger.info("personal backend account switched", {
+    backend: row.backend,
+    userId: actor.userId,
+  });
+  const switched = getBackendAccount(db, actor.userId, row.id);
+  if (!switched) throw AppError.internal(`backend credential ${row.id} vanished after a switch`);
+  return switched;
+}
+
+/**
+ * Ruling 507: give an account the person's own name, or clear it (an empty
+ * name) so it is named by its vendor facts again. A name is display only: it
+ * decides nothing about which account runs bill.
+ */
+export function renameBackendAccount(
+  db: DatabaseSync,
+  actor: BackendCredentialActor,
+  accountId: string,
+  name: string,
+): BackendCredentialRow {
+  const row = getBackendAccount(db, actor.userId, accountId);
+  if (!row) throw AppError.validation("That account isn't connected any more.");
+  const label = name.trim().replace(/\s+/g, " ");
+  if (label.length > MAX_ACCOUNT_LABEL_LEN) {
+    throw AppError.validation(`An account name can be at most ${MAX_ACCOUNT_LABEL_LEN} characters.`);
+  }
+  db.prepare(
+    `UPDATE user_backend_credentials SET label = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+  ).run(label || null, new Date().toISOString(), row.id, actor.userId);
+  recordAudit(db, {
+    action: "profile.backend.renamed",
+    actor,
+    subjectKind: "backend_credential",
+    subjectId: row.id,
+    details: { backend: row.backend, named: label !== "" },
+  });
+  const renamed = getBackendAccount(db, actor.userId, row.id);
+  if (!renamed) throw AppError.internal(`backend credential ${row.id} vanished after a rename`);
+  return renamed;
 }
 
 export interface DisconnectBackendDeps {
@@ -686,37 +958,50 @@ export interface DisconnectBackendDeps {
   dataRoot?: string;
 }
 
+/** What a disconnect reports back: the account that went, and the account
+ *  runs bill now (null when it was the person's last on the backend). */
+export interface DisconnectedAccount {
+  removed: BackendCredentialRow;
+  wasActive: boolean;
+  active: BackendCredentialRow | null;
+}
+
 /**
- * Disconnect a backend for the acting person: log the vendor sign-in out (login
- * rows), remove its credential file, drop the row. Transcripts stay — they are
- * the record of what the agents did, not a credential.
+ * Disconnect ONE of the acting person's accounts (ruling 507): log its vendor
+ * sign-in out (login accounts), remove its files, drop the row. Transcripts
+ * stay — they are the record of what the agents did, not a credential, and
+ * they live in the backend home the account only linked to. Removing the
+ * active account hands runs back to the account used before it, and retires
+ * the refusals observed on the removed one (ruling 165); removing any other
+ * changes nothing about which account runs bill.
  *
- * Refuses when nothing is connected instead of succeeding silently, so the UI
- * can toast the truth ("Claude isn't connected.") rather than "disconnected".
+ * Refuses when the account is not the person's (or is already gone) instead
+ * of succeeding silently, so the UI can toast the truth.
  */
-export async function disconnectBackend(
+export async function disconnectBackendAccount(
   db: DatabaseSync,
   actor: BackendCredentialActor,
-  backend: RealBackend,
+  accountId: string,
   deps: DisconnectBackendDeps = {},
-): Promise<void> {
-  const existing = getBackendCredential(db, actor.userId, backend);
-  if (!existing) {
-    throw AppError.validation(`${BACKEND_LABEL[backend]} isn't connected.`);
-  }
-  await clearExistingCredential(db, actor.userId, backend, existing, deps);
+): Promise<DisconnectedAccount> {
+  const row = getBackendAccount(db, actor.userId, accountId);
+  if (!row) throw AppError.validation("That account isn't connected any more.");
+  const wasActive = getBackendCredential(db, actor.userId, row.backend)?.id === row.id;
+  await retireAccount(db, row, deps);
+  if (wasActive) activeAccountChanged(db, actor.userId, row.backend);
   recordAudit(db, {
     action: "profile.backend.disconnected",
     actor,
     subjectKind: "backend_credential",
-    subjectId: existing.id,
-    details: { backend, kind: existing.kind },
+    subjectId: row.id,
+    details: { backend: row.backend, kind: row.kind, wasActive },
   });
   logger.info("personal backend credential disconnected", {
-    backend,
-    kind: existing.kind,
+    backend: row.backend,
+    kind: row.kind,
     userId: actor.userId,
   });
+  return { removed: row, wasActive, active: getBackendCredential(db, actor.userId, row.backend) };
 }
 
 export interface RetireUserBackendsDeps {
@@ -734,14 +1019,15 @@ export interface RetireUserBackendsDeps {
  * foreign key cannot reach the filesystem — and a `login` row's credential is a
  * live Claude.ai / ChatGPT sign-in file the vendor client wrote into
  * `<dataRoot>/runtimes/users/<id>/`. Left behind, it is exactly the state
- * `clearExistingCredential` exists to prevent: a working credential on this
- * server that no row accounts for, that the person can never again reach
- * `disconnectBackend` to revoke, and that every backup taken with the runtime
- * volume copies forward. So the vendor logout runs and the file goes BEFORE
- * the row does.
+ * `retireAccount` exists to prevent: a working credential on this server that
+ * no row accounts for, that the person can never again reach
+ * `disconnectBackendAccount` to revoke, and that every backup taken with the
+ * runtime volume copies forward. So the vendor logout runs and the file goes
+ * BEFORE the row does.
  *
  * Transcripts stay. They are the run record, not a credential (the same line
- * `disconnectBackend` draws), and the retention sweep is what ages them out.
+ * `disconnectBackendAccount` draws), and the retention sweep is what ages them
+ * out.
  *
  * Best effort by construction: `runVendorLogout` never throws, the file
  * removal never throws on a missing file, and a deployment installed without
@@ -754,12 +1040,11 @@ export async function retireUserBackends(
   userId: string,
   deps: RetireUserBackendsDeps = {},
 ): Promise<RealBackend[]> {
-  const connected = (["claude", "codex"] as const).flatMap((backend) => {
-    const row = getBackendCredential(db, userId, backend);
-    return row ? [{ backend, row }] : [];
-  });
+  // Every account on both backends (ruling 507), not only the active ones: an
+  // inactive account's sign-in is as live a credential as the active one's.
+  const connected = listBackendCredentials(db, userId);
   if (connected.length === 0) return [];
-  for (const entry of connected) {
+  for (const row of connected) {
     // Resolved HERE, not by the caller: account removal is org administration
     // and has no business knowing about vendor packages, and there is no UI on
     // that path to report a missing optional dependency to. Per backend and
@@ -768,25 +1053,21 @@ export async function retireUserBackends(
     // vendor's package still logs the OTHER one out.
     const vendorDeps: VendorDeps = {};
     const binary =
-      deps.binaries?.[entry.backend] ??
-      (entry.row.kind === "login"
-        ? await vendorBinaryIfPresent(entry.backend)
-        : undefined);
+      deps.binaries?.[row.backend] ??
+      (row.kind === "login" ? await vendorBinaryIfPresent(row.backend) : undefined);
     if (binary) vendorDeps.binary = binary;
     if (deps.dataRoot !== undefined) vendorDeps.dataRoot = deps.dataRoot;
-    await clearExistingCredential(
-      db,
-      userId,
-      entry.backend,
-      entry.row,
-      vendorDeps,
-    );
+    await retireAccount(db, row, vendorDeps);
   }
+  const backends = [...new Set(connected.map((row) => row.backend))];
+  // Ruling 165: the records naming this person go with their accounts.
+  for (const backend of backends) activeAccountChanged(db, userId, backend);
   logger.info("personal backend credentials retired with the account", {
     userId,
-    backends: connected.map((entry) => entry.backend).join(","),
+    backends: backends.join(","),
+    accounts: connected.length,
   });
-  return connected.map((entry) => entry.backend);
+  return backends;
 }
 
 /** `backendBinaryIfPresent` (backend-login.server.ts) is the ONE home of the
@@ -810,7 +1091,9 @@ async function vendorBinaryIfPresent(
 // -------------------------------------------------------------- health
 
 /** Per-person backend health — the ONE answer the task page, the packets, the
- *  Agents page, the controller and the run service all read. */
+ *  Agents page, the controller and the run service all read. Since ruling 507
+ *  it is the health of the person's ACTIVE account on the backend, the one a
+ *  run would bill; {@link backendAccountHealth} answers for any one account. */
 export interface UserBackendHealth {
   backend: RealBackend;
   userId: string;
@@ -827,6 +1110,10 @@ export interface UserBackendHealth {
   connectedAt: string | null;
   /** Actionable sentence for the person themselves; null when available. */
   detail: string | null;
+  /** Ruling 507: the account this answers for, and how it is named to the
+   *  person; null when nothing is connected. */
+  accountId: string | null;
+  accountName: string | null;
 }
 
 export interface UserBackendHealthEnv {
@@ -834,36 +1121,27 @@ export interface UserBackendHealthEnv {
   dataRoot?: string;
 }
 
-export function userBackendHealth(
-  db: DatabaseSync,
-  userId: string,
-  backend: RealBackend,
+/**
+ * Whether ONE account can bill a run right now (ruling 507's per-account half
+ * of {@link userBackendHealth}). Re-probed on every call, never cached, from
+ * the account's own home: a wiped runtime volume must read as "sign in again"
+ * the moment it happens, and a fresh sign-in must count without a restart.
+ */
+export function backendAccountHealth(
+  row: BackendCredentialRow,
   env: UserBackendHealthEnv = {},
 ): UserBackendHealth {
-  const row = getBackendCredential(db, userId, backend);
-  const label = BACKEND_LABEL[backend];
-  if (!row) {
-    return {
-      backend,
-      userId,
-      available: false,
-      kind: null,
-      method: null,
-      verification: "none",
-      secretSuffix: null,
-      verifiedAt: null,
-      connectedAt: null,
-      detail: `${label} isn't connected. Connect it on your ${CONNECT_HERE}.`,
-    };
-  }
+  const label = BACKEND_LABEL[row.backend];
   const base = {
-    backend,
-    userId,
+    backend: row.backend,
+    userId: row.userId,
     kind: row.kind,
     method: row.method,
     secretSuffix: row.secretSuffix,
     verifiedAt: row.verifiedAt,
     connectedAt: row.createdAt,
+    accountId: row.id,
+    accountName: backendAccountName(row),
   };
   if (row.kind !== "login") {
     // A sealed key is usable by definition — nothing on disk has to survive for
@@ -872,15 +1150,8 @@ export function userBackendHealth(
     // rather than making every loader pay a decryption to find out.)
     return { ...base, available: true, verification: "credential", detail: null };
   }
-  // Re-probed EVERY call, never cached: a wiped runtime volume must read as
-  // "sign in again" the moment it happens, and a fresh sign-in must count
-  // without a restart.
-  const home = userBackendHome(userId, backend, env.dataRoot);
-  const file =
-    backend === "claude"
-      ? claudeLoginCredentialPath(home)
-      : codexLoginCredentialPath(home);
-  if (pathExists(file)) {
+  const home = backendAccountHome(row.userId, row.backend, accountRef(row), env.dataRoot);
+  if (pathExists(vendorLoginCredentialPath(row.backend, home))) {
     return { ...base, available: true, verification: "file", detail: null };
   }
   if ((env.platform ?? process.platform) === "darwin" && pathExists(home)) {
@@ -898,6 +1169,44 @@ export function userBackendHealth(
       `Your ${label} sign-in file is missing from this server (the runtime volume was wiped). ` +
       `Sign in again on your ${CONNECT_HERE}.`,
   };
+}
+
+export function userBackendHealth(
+  db: DatabaseSync,
+  userId: string,
+  backend: RealBackend,
+  env: UserBackendHealthEnv = {},
+): UserBackendHealth {
+  const [row, ...others] = listBackendAccounts(db, userId, backend);
+  const label = BACKEND_LABEL[backend];
+  if (!row) {
+    return {
+      backend,
+      userId,
+      available: false,
+      kind: null,
+      method: null,
+      verification: "none",
+      secretSuffix: null,
+      verifiedAt: null,
+      connectedAt: null,
+      detail: `${label} isn't connected. Connect it on your ${CONNECT_HERE}.`,
+      accountId: null,
+      accountName: null,
+    };
+  }
+  const health = backendAccountHealth(row, env);
+  if (health.available) return health;
+  // Ruling 507: there is no fallback — a run bills the active account or none
+  // (ruling 127) — but the person may hold one that works, and the sentence
+  // every refusal quotes should say so rather than send them to a sign-in.
+  const usable = others.some((other) => backendAccountHealth(other, env).available);
+  return usable
+    ? {
+        ...health,
+        detail: `${health.detail ?? ""} Another of your ${label} accounts is connected there: switching to it needs no sign-in.`.trim(),
+      }
+    : health;
 }
 
 function pathExists(file: string): boolean {
@@ -921,7 +1230,9 @@ export function isBackendAvailableFor(
 const connectedRowSchema = z.object({ user_id: z.string() });
 
 /** Every person whose connection to this backend actually holds — the
- *  instance-level number that replaced "is the backend configured". */
+ *  instance-level number that replaced "is the backend configured". A person
+ *  counts once however many accounts they keep, and by their ACTIVE one
+ *  (ruling 507): that is the account a run of theirs would bill. */
 export function connectedUserIds(
   db: DatabaseSync,
   backend: RealBackend,
@@ -929,7 +1240,7 @@ export function connectedUserIds(
 ): string[] {
   const rows = db
     .prepare(
-      `SELECT user_id FROM user_backend_credentials
+      `SELECT DISTINCT user_id FROM user_backend_credentials
         WHERE backend = ? ORDER BY user_id ASC`,
     )
     .all(backend)
@@ -960,7 +1271,18 @@ export interface RunCredential {
   /** Plaintext values the run sink redacts from every persisted line. */
   secrets: string[];
   kind: CredentialKind;
+  /** The person's backend home: what the launcher prepares and hands back
+   *  after every launched process (ruling 460). Shared by all their accounts. */
   homeDir: string;
+  /** Ruling 507: the account this run bills — the person's active one when the
+   *  credential was resolved — and its own vendor home. A Claude run gets the
+   *  account home as `CLAUDE_CONFIG_DIR`; a Codex run's private home takes the
+   *  account's `auth.json` from it (the adapter's fork, ruling 181). */
+  accountId: string;
+  accountHome: string;
+  /** Ruling 460 + 507: the directories the launch must hand to the person's
+   *  uid besides the backend home (the account home and what it links to). */
+  ownDirs: string[];
 }
 
 export function runCredentialFor(
@@ -970,7 +1292,12 @@ export function runCredentialFor(
   dataRoot?: string,
 ): RunCredential {
   const health = userBackendHealth(db, userId, backend, { dataRoot });
-  const row = health.available ? getBackendCredential(db, userId, backend) : null;
+  // The account `health` answered for, re-read by its id: the one that was
+  // active when the health was judged, even if a switch lands in between.
+  const row =
+    health.available && health.accountId
+      ? getBackendAccount(db, userId, health.accountId)
+      : null;
   if (!row) {
     throw new AppError({
       code: ERROR_CODES.RUN_UNAVAILABLE,
@@ -982,7 +1309,12 @@ export function runCredentialFor(
     });
   }
   const homeDir = ensureUserBackendHome(userId, backend, dataRoot);
-  const env = { [HOME_ENV_KEY[backend]]: homeDir };
+  const account = ensureBackendAccountHome(userId, backend, accountRef(row), dataRoot);
+  // Claude reads its sign-in from its config dir, so the run is pointed at the
+  // account's own home (whose `projects/` links to the shared transcripts).
+  // Codex keeps the SHARED home here: its adapter forks a private home from
+  // it for every run and copies the sign-in from `accountHome` (ruling 181).
+  const env = { [HOME_ENV_KEY[backend]]: backend === "claude" ? account.home : homeDir };
   const secrets: string[] = [];
   if (row.kind !== "login") {
     // A `login` row adds nothing here: the binary reads its own file from the
@@ -1004,7 +1336,15 @@ export function runCredentialFor(
   // (RUNTIME_HOME_ENV_RE) before this rides on top — so an ambient CODEX_HOME
   // pointing at some leftover shared `auth.json` cannot reach a Claude run and
   // let one `codex exec` bill an account this run never chose.
-  return { env, secrets, kind: row.kind, homeDir };
+  return {
+    env,
+    secrets,
+    kind: row.kind,
+    homeDir,
+    accountId: row.id,
+    accountHome: account.home,
+    ownDirs: account.ownDirs,
+  };
 }
 
 function openStoredSecret(

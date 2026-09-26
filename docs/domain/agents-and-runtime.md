@@ -45,16 +45,29 @@ its **credential principal**, persisted as `agent_runs.credential_user_id`: the 
 owner** for every task run (operator, specialist, resume, scheduled, boot recovery,
 retry), the **asker** for a controller turn. A task with no owner cannot run agents.
 
+**Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
+backend (`MAX_ACCOUNTS_PER_BACKEND`), one `user_backend_credentials` row each. Exactly one
+per (person, backend) is **active**, the one every run on that backend bills: the most
+recently selected (`selected_at`, ties to the newer row; `ACTIVE_FIRST`). Connecting, by a
+hosted sign-in or a pasted key, adds an account and makes it active; switching
+(`switchBackendAccount`, Profile → Agent accounts' **Use this account**) stamps
+`selected_at` and nothing else, so no vendor process runs and no file moves, and a run
+already going keeps the account it started on. Disconnecting is per account
+(`disconnectBackendAccount`): removing the active one hands runs to the account used
+before it. `agent_runs.credential_account_id` records which account a run billed.
+
 `userBackendHealth(db, userId, backend)` (`backend-credentials.server.ts`) is the ONE
-answer every surface reads. It re-probes on **every call**, never makes a paid request,
-and needs a `user_backend_credentials` row for that (person, backend):
+answer every surface reads: the health of the person's ACTIVE account on that backend
+(`backendAccountHealth` answers for any one account, and names it: `accountId`,
+`accountName`). It re-probes on **every call**, never makes a paid request, and needs a
+`user_backend_credentials` row for that (person, backend):
 
 | Row kind | Available when | `verification` |
 |---|---|---|
 | `api_key` / `access_token` | always (the sealed box is the credential) | `credential` |
-| `login` | the vendor's own file is in that person's home (`claude-home/.credentials.json`, `codex-home/auth.json`) | `file` |
-| `login` on darwin | the home exists but holds no file (the Claude binary uses the Keychain) | `presence` |
-| none, or a `login` whose file is gone | never — `detail` says which, addressed to the person | `none` |
+| `login` | the vendor's own file is in that ACCOUNT's home (`claude-home/accounts/<id>/.credentials.json`, `codex-home/accounts/<id>/auth.json`; for an account connected before ruling 507, the backend home itself) | `file` |
+| `login` on darwin | the account's home exists but holds no file (the Claude binary uses the Keychain) | `presence` |
+| none, or a `login` whose file is gone | never — `detail` says which, addressed to the person, and adds that another of their accounts on the backend works when one does ("switching to it needs no sign-in") | `none` |
 
 `/resources/health` reports the instance-level number that remains: `backends: { claude:
 { connectedUsers }, codex: { connectedUsers } }` (`countConnectedUsers`). Zero is a real
@@ -70,16 +83,33 @@ clone, no reservation, no process, and nothing spent on its behalf either: the p
 is resolved BEFORE the stdio MCP pre-flight (which starts each declared server to
 handshake it and corrects its registry row) and before the skills are mounted into the
 workspace, on the fresh, resume and operator paths alike. There is no fallback engine and
-no other account to fall back to.
+no fallback account: a run bills the active account or is refused, even when the person
+holds another that works (ruling 507; the refusal sentence says the switch is theirs to
+make).
 
 ### 2.2 Per-person runtime homes
 
-- `<dataRoot>/runtimes/users/<userId>/claude-home` is the child's `CLAUDE_CONFIG_DIR`
-  (sessions under `projects/`); `…/codex-home` is its `CODEX_HOME` (sessions under
-  `sessions/`). Created on demand by `ensureUserBackendHome` (`user-homes.server.ts`);
-  the user id is path-checked against `/^[A-Za-z0-9_-]{1,64}$/` first. There is no
-  deployment-wide `runtimes/claude-home` / `runtimes/codex-home` and no host `~/.codex`
-  mount.
+- `<dataRoot>/runtimes/users/<userId>/claude-home` holds the person's Claude transcripts
+  (`projects/`); `…/codex-home` is the `CODEX_HOME` a Codex run forks from (sessions under
+  `sessions/`, the thread database, `config.toml`). Created on demand by
+  `ensureUserBackendHome` (`user-homes.server.ts`); the user id is path-checked against
+  `/^[A-Za-z0-9_-]{1,64}$/` first. There is no deployment-wide `runtimes/claude-home` /
+  `runtimes/codex-home` and no host `~/.codex` mount.
+- **Every account has a vendor home of its own (ruling 507).** An account connected since
+  the ruling keeps its sign-in in `<backend home>/accounts/<accountId>`
+  (`backendAccountHome`, the account id path-checked like a user id), where the vendor's
+  binary wrote it: a hosted sign-in into a new account runs in an empty home minted with
+  the account's id, and one that does not end connected takes that home with it once its
+  process has exited. A Claude run's `CLAUDE_CONFIG_DIR` is the active account's home,
+  whose `projects/` is a relative link to the backend home's (`ACCOUNT_HOME_SHARED_DIRS`),
+  so every transcript lands where resume, the exporter and the retention sweep look,
+  whichever account wrote it; two accounts never share a credential file, and switching
+  moves none. A Codex account's home holds only its `auth.json`. An account connected
+  before the ruling (`legacy_home = 1`, carried by the boot rebuild) keeps its sign-in in
+  the backend home itself. `ensureBackendAccountHome` makes the home and its link before
+  any vendor process runs, and `agentLaunchFor` hands both, when the server created them,
+  to the person's uid (the launcher still hands back the whole backend home after every
+  process).
 - **Every agent process runs as its person's own OS user (ruling 460).** In the image,
   each person gets a stable agent uid (`agent_os_users`, allocated from 20001, never
   reused) and every agent shares the primary group `viberr-agents` (gid 20000); the
@@ -112,20 +142,28 @@ no other account to fall back to.
   launched run it is handed to the person's uid (`--prepare-home`) before the CLI starts,
   and at the settle handed over again before the server reads it, with the written-back
   `auth.json` handed back after (ruling 460): `auth.json` and `config.toml` are **copied**
-  in when present (a copy, so two runs never write one shared file through a link);
+  in when present (a copy, so two runs never write one shared file through a link) — the
+  sign-in from the home of the account the run bills (`RunSpec.accountHome`, ruling 507),
+  never from another account's, and the config from the shared home;
   `sessions/`, `skills/` and `memories/` are **symlinks** to the shared home's
   directories, created first, so a rollout the CLI writes lands where
   `probeSessionContinuity`, the exporter and the retention sweep look; `CODEX_SQLITE_HOME`
   is set to the shared home so the CLI's thread/state database stays the person's; `tmp/`
   is whatever the CLI creates inside the run home, private by construction. When the run
   settles — finished, failed, interrupted or crashed, the adapter's one `settle` — the
-  run's `auth.json` is copied back to the shared home only when its bytes changed, under a
-  per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s,
-  or one still held after a 3 s wait, is broken; last writer wins), only while the shared
-  file still exists (a disconnect mid-run is not undone), and the run directory is
+  run's `auth.json` is copied back to the billed account's home only when the CLI changed
+  it (its digest differs from the seed's, `.auth.json.seed`, so a copy that went stale
+  while another run of the account refreshed never overwrites the newer token) and its
+  bytes differ from the account's file, under that home's lockfile (`.auth.json.lock`,
+  `O_EXCL` with retry; a holder older than 30 s, or one still held after a 3 s wait, is
+  broken; last writer wins), only while the account's file still exists (a disconnect
+  mid-run is not undone), and the run directory is
   deleted — on a launched run as the person, through the launcher (ruling 485: their CLI
   wrote it); a run a restart orphaned is finished the same way by boot recovery before the
-  operator is re-invoked. **The settle also re-points the CLI's thread index** (ruling 199,
+  operator is re-invoked, its sign-in handed back to the account `credential_account_id`
+  names (to nobody when that account has been removed since), together with its completion
+  compaction's own fork when the restart cut that. The completion compaction (ruling 376)
+  runs in a fork of its own, `runs/<runId>-compaction`, seeded and settled the same way. **The settle also re-points the CLI's thread index** (ruling 199,
   F37-20): the CLI finds a rollout by `threads.rollout_path` in its own state database,
   and what it records there is the path it SAW through the link,
   `…/runs/<runId>/sessions/…`. Deleting the run directory would leave the file intact at
@@ -142,8 +180,10 @@ no other account to fall back to.
   SHARED home on `spec.env.CODEX_HOME`; the fork is the adapter's, so every path that
   builds a Codex spec (specialist, operator, controller, resume, scheduled, recovery) gets
   it.
-- `runCredentialFor(db, userId, backend)` builds what the run's child env carries: the
-  home always; `ANTHROPIC_API_KEY` (claude), `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`
+- `runCredentialFor(db, userId, backend)` builds what the run's child env carries for the
+  person's ACTIVE account: the home always (Claude: the account's own home as
+  `CLAUDE_CONFIG_DIR`; Codex: the shared `CODEX_HOME` the adapter forks, with the account's
+  home on `accountHome`); `ANTHROPIC_API_KEY` (claude), `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN`
   (codex) only for a pasted credential. In both codex secret cases `OPENAI_API_KEY` is
   explicitly absent. A `login` kind adds no secret: the vendor binary reads its own file.
 - Spawn env hygiene: every variable matching `CREDENTIAL_ENV_RE` (`API_KEY`, `TOKEN`,

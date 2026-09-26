@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { resetAgentIsolationForTests } from "./agent-isolation.server";
@@ -14,7 +22,9 @@ import {
   fakeVendorEnv,
   fakeVendorStdin,
   fakeVendorTerminated,
+  fakeVendorTerminations,
   resetFakeVendorEnv,
+  setFakeVendorEvidenceDir,
   setFakeVendorLoggedOut,
   setFakeVendorMode,
   writeFakeVendorBinaries,
@@ -22,7 +32,13 @@ import {
 } from "../../../test-support/fake-vendor-binary";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { isAppError, type AppError } from "~/server/errors/app-error.server";
-import { getBackendCredential } from "./backend-credentials.server";
+import {
+  MAX_ACCOUNTS_PER_BACKEND,
+  getBackendAccount,
+  getBackendCredential,
+  listBackendAccounts,
+  setBackendApiKey,
+} from "./backend-credentials.server";
 import {
   cancelBackendLogin,
   getBackendLogin,
@@ -35,7 +51,7 @@ import {
   type LoginState,
 } from "./backend-login.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
-import { userBackendHome } from "./user-homes.server";
+import { backendAccountHome, userBackendHome } from "./user-homes.server";
 
 /**
  * The hosted sign-in driver (ruling 127, spec §3.4), driven against REAL child
@@ -83,7 +99,7 @@ afterEach(() => {
 function start(
   backend: "claude" | "codex",
   method: "claudeai" | "console" | "device",
-  overrides: { timeoutMs?: number } = {},
+  overrides: { timeoutMs?: number; accountId?: string } = {},
 ): LoginSessionView {
   return startBackendLogin(db, ACTOR, backend, method, {
     binaries: fake.binaries,
@@ -92,8 +108,36 @@ function start(
   });
 }
 
-const home = (backend: "claude" | "codex"): string =>
-  userBackendHome(ACTOR.userId, backend, dataRoot);
+/** The home a sign-in runs in: the account it will record (ruling 507), a new
+ *  one of its own unless the sign-in is into an existing account. */
+function homeOf(view: LoginSessionView): string {
+  return backendAccountHome(
+    ACTOR.userId,
+    view.backend,
+    { id: view.accountId, legacyHome: false },
+    dataRoot,
+  );
+}
+
+/** The home of this person's current sign-in on one backend. */
+function home(backend: "claude" | "codex"): string {
+  const view = getBackendLogin(ACTOR.userId, backend);
+  if (!view) throw new Error(`no ${backend} sign-in to find the home of`);
+  return homeOf(view);
+}
+
+/** A pasted key the provider accepts, without a network. */
+async function pasteKey(backend: "claude" | "codex"): Promise<string> {
+  const row = await setBackendApiKey(
+    db,
+    ACTOR,
+    backend,
+    "api_key",
+    backend === "claude" ? "sk-ant-api03-viberr-login-test-key" : "sk-proj-viberr-login-test-key",
+    { fetchImpl: async () => new Response("{}", { status: 200 }) },
+  );
+  return row.id;
+}
 
 /** Poll the driver's own read path until the session satisfies `predicate`.
  *  Real processes settle on their own schedule, so waiting is the honest way to
@@ -131,6 +175,16 @@ function refusalFrom(run: () => string): AppError {
     throw error;
   }
   throw new Error("expected an AppError, but the call returned");
+}
+
+/** Wait for a path to be removed (ruling 507: an abandoned sign-in's home goes
+ *  once its process has exited, which happens on the process's schedule). */
+async function waitForGone(target: string, what: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (existsSync(target)) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /** Wait for a file one of the fake children writes. Same reason as
@@ -219,11 +273,15 @@ describe("the sign-in runs as the person's own OS user (ruling 460)", () => {
     expect(done.state).toBe("succeeded");
 
     const entries = readFileSync(log, "utf8").trim().split("\n");
-    const prefix = `uid=20001 exec=${fake.binaries.claude} home=${home("claude")}`;
+    // The launcher hands back the whole BACKEND home after each process, which
+    // holds every account's home (ruling 507); the vendor itself works in the
+    // new account's own home.
+    const prefix = `uid=20001 exec=${fake.binaries.claude} home=${userBackendHome(ACTOR.userId, "claude", dataRoot)}`;
     expect(entries).toEqual([
       `${prefix} args=auth login --claudeai`,
       `${prefix} args=auth status`,
     ]);
+    expect(fakeVendorEnv(home("claude"))?.CLAUDE_CONFIG_DIR).toBe(home("claude"));
     // The agent's own $HOME, not the server's.
     expect(fakeVendorEnv(home("claude"))?.HOME).toBe(
       path.join(dataRoot, "runtimes", "users", ACTOR.userId, "home"),
@@ -475,9 +533,12 @@ describe("session lifetime", () => {
 
   it("keeps ONE session per user and backend, replacing (and killing) the old", async () => {
     setFakeVendorMode("hang");
+    const evidence = ctx.makeTempDir();
+    setFakeVendorEvidenceDir(evidence);
     const first = start("claude", "claudeai");
     await waitForLogin("claude", (view) => view.url !== null, "the first URL");
-    expect(fakeVendorTerminated(home("claude"))).toBe(false);
+    const firstHome = homeOf(first);
+    expect(fakeVendorTerminated(firstHome)).toBe(false);
 
     const second = start("claude", "console");
     expect(second.id).not.toBe(first.id);
@@ -485,28 +546,32 @@ describe("session lifetime", () => {
     // The map holds the replacement, not both.
     expect(getBackendLogin(ACTOR.userId, "claude")?.id).toBe(second.id);
     // And the FIRST child is actually dead. The replacement is still hanging,
-    // so this marker can only have been written by the process that was
+    // so this record can only have been written by the process that was
     // replaced: without the kill it would keep running, holding this person's
     // runtime home and stdin until the container restarted.
-    await waitForFile(
-      `${home("claude")}/fake-terminated.txt`,
-      "the replaced child to die",
-    );
+    await waitForFile(path.join(evidence, "terminated.jsonl"), "the replaced child to die");
+    expect(fakeVendorTerminations(evidence)).toEqual([firstHome]);
+    // Ruling 507: the replacement signs in to a NEW home of its own, and the
+    // replaced attempt's half-made home goes once its process has exited.
+    expect(homeOf(second)).not.toBe(firstHome);
+    await waitForGone(firstHome, "the replaced attempt's home to be removed");
     // Submitting still goes to the replacement, which has not been prompted.
     expect(() =>
       submitBackendLoginCode(db, ACTOR, "claude", "x"),
     ).toThrow();
   });
 
-  it("kills the child a cancel ends", async () => {
+  it("kills the child a cancel ends, and takes the new account's half-made home with it", async () => {
     setFakeVendorMode("hang");
-    start("codex", "device");
+    const evidence = ctx.makeTempDir();
+    setFakeVendorEvidenceDir(evidence);
+    const started = start("codex", "device");
     await waitForLogin("codex", (view) => view.url !== null, "the URL");
     cancelBackendLogin(db, ACTOR, "codex");
-    await waitForFile(
-      `${home("codex")}/fake-terminated.txt`,
-      "the cancelled child to die",
-    );
+    await waitForFile(path.join(evidence, "terminated.jsonl"), "the cancelled child to die");
+    expect(fakeVendorTerminations(evidence)).toEqual([homeOf(started)]);
+    await waitForGone(homeOf(started), "the abandoned account home to be removed");
+    expect(listBackendAccounts(db, ACTOR.userId, "codex")).toEqual([]);
   });
 
   it("keeps the two backends' sessions apart", async () => {
@@ -520,5 +585,100 @@ describe("session lifetime", () => {
     // And apart from another person's, which is what makes the poll route safe
     // to serve keyed on the session user alone.
     expect(getBackendLogin("u_somebody_else", "claude")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 507: a sign-in is for ONE account. A new one runs in an empty home of
+ * its own and leaves every account the person already has exactly as it was;
+ * signing an existing sign-in in again runs in that account's home; and an
+ * attempt that does not end connected leaves no half-made account behind.
+ */
+describe("sign-ins and the person's several accounts (ruling 507)", () => {
+  it("signs a NEW account in beside the one connected, in a home of its own", async () => {
+    const keyId = await pasteKey("claude");
+    const started = start("claude", "claudeai");
+    expect(started.existingAccount).toBe(false);
+    expect(started.accountId).not.toBe(keyId);
+    await waitForLogin("claude", (view) => view.needsCode, "the code prompt");
+    submitBackendLoginCode(db, ACTOR, "claude", "abc-123");
+    const done = await waitForLogin("claude", isState("succeeded", "failed"), "the sign-in");
+    expect(done.state).toBe("succeeded");
+
+    const accountHome = homeOf(started);
+    expect(accountHome).toBe(
+      path.join(userBackendHome(ACTOR.userId, "claude", dataRoot), "accounts", started.accountId),
+    );
+    expect(existsSync(path.join(accountHome, ".credentials.json"))).toBe(true);
+    // Its transcripts land in the backend home's, whichever account writes them.
+    expect(lstatSync(path.join(accountHome, "projects")).isSymbolicLink()).toBe(true);
+    expect(realpathSync(path.join(accountHome, "projects"))).toBe(
+      realpathSync(path.join(userBackendHome(ACTOR.userId, "claude", dataRoot), "projects")),
+    );
+    // Both accounts are connected; the sign-in is the one in use.
+    expect(listBackendAccounts(db, ACTOR.userId, "claude").map((row) => row.id)).toEqual([
+      started.accountId,
+      keyId,
+    ]);
+    expect(getBackendCredential(db, ACTOR.userId, "claude")?.kind).toBe("login");
+    expect(getBackendAccount(db, ACTOR.userId, keyId)?.secretSuffix).toBe("-key");
+  });
+
+  it("signs an existing account in again in that account's own home, keeping its id", async () => {
+    const first = start("codex", "device");
+    await waitForLogin("codex", isState("succeeded", "failed"), "the first sign-in");
+    const firstHome = homeOf(first);
+    const otherKey = await pasteKey("codex");
+    // The volume lost the first account's sign-in.
+    rmSync(path.join(firstHome, "auth.json"));
+
+    const again = start("codex", "device", { accountId: first.accountId });
+    expect(again.existingAccount).toBe(true);
+    expect(again.accountId).toBe(first.accountId);
+    expect(homeOf(again)).toBe(firstHome);
+    const done = await waitForLogin("codex", isState("succeeded", "failed"), "the second sign-in");
+    expect(done.state).toBe("succeeded");
+
+    expect(existsSync(path.join(firstHome, "auth.json"))).toBe(true);
+    expect(listBackendAccounts(db, ACTOR.userId, "codex").map((row) => row.id)).toEqual([
+      first.accountId,
+      otherKey,
+    ]);
+  });
+
+  it("a failed sign-in into a NEW account takes its half-made home with it", async () => {
+    setFakeVendorMode("fail");
+    const started = start("claude", "claudeai");
+    await waitForLogin("claude", isState("failed"), "a failure");
+    await waitForGone(homeOf(started), "the failed attempt's home to be removed");
+    expect(listBackendAccounts(db, ACTOR.userId, "claude")).toEqual([]);
+  });
+
+  it("a failed sign-in into an EXISTING account leaves that account and its home alone", async () => {
+    const first = start("codex", "device");
+    await waitForLogin("codex", isState("succeeded", "failed"), "the first sign-in");
+    setFakeVendorMode("fail");
+    start("codex", "device", { accountId: first.accountId });
+    await waitForLogin("codex", isState("failed"), "a failure");
+    // Give a wrongly scheduled removal the time it would take.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(existsSync(path.join(homeOf(first), "auth.json"))).toBe(true);
+    expect(getBackendAccount(db, ACTOR.userId, first.accountId)).not.toBeNull();
+  });
+
+  it("refuses a sign-in past the account ceiling before any process starts", async () => {
+    for (let i = 0; i < MAX_ACCOUNTS_PER_BACKEND; i += 1) {
+      await setBackendApiKey(
+        db,
+        ACTOR,
+        "claude",
+        "api_key",
+        `sk-ant-api03-viberr-login-ceiling-${i}`,
+        { fetchImpl: async () => new Response("{}", { status: 200 }) },
+      );
+    }
+    expect(() => start("claude", "claudeai")).toThrow(/already have 10 Claude accounts/);
+    expect(getBackendLogin(ACTOR.userId, "claude")).toBeNull();
+    expect(listAuditEvents(db, { action: "profile.backend.login_started" })).toEqual([]);
   });
 });

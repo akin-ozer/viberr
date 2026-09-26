@@ -181,10 +181,12 @@ Two ways to connect, per backend:
   with `--claudeai` (a Pro/Max subscription) or `--console`. Codex: `codex login
   --device-auth`, the device-code flow OpenAI ships for headless machines. Viberr drives
   the binary, shows the URL (and, for Codex, the one-time code to type), and never sees
-  the token: the binary writes its own credential file into that person's runtime home,
-  `<dataRoot>/runtimes/users/<userId>/claude-home/.credentials.json` or
-  `.../codex-home/auth.json` (Viberr creates the directory mode `0700` and nothing else
-  about that file). This is what Anthropic's
+  the token: the binary writes its own credential file into the home of the account being
+  signed in (ruling 507), inside that person's runtime home,
+  `<dataRoot>/runtimes/users/<userId>/claude-home/accounts/<accountId>/.credentials.json` or
+  `.../codex-home/accounts/<accountId>/auth.json` (Viberr creates the directory mode `0700`
+  and nothing else about that file; an account connected before ruling 507 keeps its file
+  directly in `claude-home/` or `codex-home/`). This is what Anthropic's
   [Claude Code legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
   requires of a platform that hosts Claude Code: each end user authenticates with their
   own credentials, billed to them, through the vendor's own flow, and the app may not
@@ -203,12 +205,18 @@ A ChatGPT workspace can have device-code authorization switched off; the sign-in
 then reports the vendor's own refusal and points at the workspace admin, or at a pasted
 key. Treat a pasted token as a secret, prefer a finite expiration, and rotate it.
 
+A person may keep several accounts per backend (ruling 507), up to ten: each sign-in or
+pasted key adds one and makes it the one their runs bill, and **Use this account** on
+Profile → Agent accounts switches to another without a sign-in, because each keeps its
+sign-in in its own home. A run already going keeps the account it started on.
+
 Each Codex run works in a private copy of its principal's home,
-`runtimes/users/<userId>/codex-home/runs/<runId>/` (ruling 181): `auth.json` and
-`config.toml` copied in, `sessions/`, `skills/` and `memories/` linked back to the shared
-home, `CODEX_SQLITE_HOME` pointed at the shared home. When the run settles, a changed
-`auth.json` is copied back and the directory is deleted; boot recovery does the same for a
-run a restart orphaned.
+`runtimes/users/<userId>/codex-home/runs/<runId>/` (ruling 181): the billed account's
+`auth.json` and the shared `config.toml` copied in, `sessions/`, `skills/` and `memories/`
+linked back to the shared home, `CODEX_SQLITE_HOME` pointed at the shared home. When the
+run settles, an `auth.json` the CLI refreshed is copied back to that account's home and the
+directory is deleted; boot recovery does the same for a run a restart orphaned, and the
+end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`).
 
 **First run, as the first admin.** After `docker compose up -d`, sign in as the bootstrap
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
@@ -415,8 +423,9 @@ projects/       canonical project.md, task.md, epics/*.md (the source of truth �
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
 runtimes/       claude/ and codex/: raw NDJSON run logs per backend (0700);
-                users/<userId>/{claude-home,codex-home}/: one person's vendor sign-in file
-                plus their provider sessions (ruling 127), and codex-home/runs/<runId>/
+                users/<userId>/{claude-home,codex-home}/: one person's provider sessions
+                (ruling 127), each account's own home under accounts/<accountId>/ with
+                its vendor sign-in file (ruling 507), and codex-home/runs/<runId>/
                 while a Codex run is live (ruling 181); users/<userId>/home/: that person's
                 agents' $HOME (ruling 460) — all owned by the person's agent uid;
                 uv-cache/, uv-python/ and controller-scratch/ (shared with the agent group)

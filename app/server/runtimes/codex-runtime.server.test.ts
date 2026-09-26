@@ -17,10 +17,10 @@ import {
   type CodexThread,
 } from "./codex-runtime.server";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { codexVendor } from "./codex-app-server.server";
 import path from "node:path";
-import { ensureUserBackendHome } from "./user-homes.server";
+import { backendAccountHome, ensureUserBackendHome } from "./user-homes.server";
 import { insertRunLine, upsertRun } from "./run-store.server";
 import { runFailureReason } from "../tasks/agent-reply.server";
 import { resetEnvCacheForTests } from "../config/env.server";
@@ -1748,6 +1748,69 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
     expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"after"}');
   });
 
+  it("takes the sign-in from the billed ACCOUNT's home and hands the refresh back there, never to another account (ruling 507)", async () => {
+    // Two accounts of one person: an older one whose sign-in sits in the
+    // shared home, and the one this run bills, in a home of its own. Canary:
+    // seed the fork from `spec.env.CODEX_HOME` again and the run reads the
+    // wrong account's token.
+    const dataRoot = homes.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
+    writeFileSync(path.join(shared, "auth.json"), '{"tokens":"other-account"}');
+    const accountHome = backendAccountHome("u_arda", "codex", { id: "ubc_billed", legacyHome: false }, dataRoot);
+    mkdirSync(accountHome, { recursive: true });
+    writeFileSync(path.join(accountHome, "auth.json"), '{"tokens":"billed-before"}');
+    const run = gatedCodex();
+    let exit: RunExit | undefined;
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      {
+        ...SPEC,
+        runId: "run_account1",
+        env: { CODEX_HOME: shared, VIBERR_RUN_ID: "run_account1" },
+        accountHome,
+      },
+      { onLine: () => {}, onExit: (e) => { exit = e; } },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const runHome = path.join(shared, "runs", "run_account1");
+    expect(run.factoryOptions()?.env?.CODEX_HOME).toBe(runHome);
+    expect(run.factoryOptions()?.env?.CODEX_SQLITE_HOME).toBe(shared);
+    expect(readFileSync(path.join(runHome, "auth.json"), "utf8")).toBe('{"tokens":"billed-before"}');
+    writeFileSync(path.join(runHome, "auth.json"), '{"tokens":"billed-after"}');
+
+    run.release();
+    await drain();
+    expect(exit?.outcome).toBe("finished");
+    expect(existsSync(runHome)).toBe(false);
+    expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"tokens":"billed-after"}');
+    // The other account's sign-in is exactly as it was.
+    expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"other-account"}');
+  });
+
+  it("a pasted-key account's run inherits no sign-in at all, even with another account's in the shared home (ruling 507)", async () => {
+    const dataRoot = homes.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
+    writeFileSync(path.join(shared, "auth.json"), '{"tokens":"other-account"}');
+    const accountHome = backendAccountHome("u_arda", "codex", { id: "ubc_key", legacyHome: false }, dataRoot);
+    mkdirSync(accountHome, { recursive: true });
+    const run = gatedCodex();
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      {
+        ...SPEC,
+        runId: "run_account2",
+        env: { CODEX_HOME: shared, CODEX_API_KEY: "sk-proj-key", VIBERR_RUN_ID: "run_account2" },
+        accountHome,
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const runHome = path.join(shared, "runs", "run_account2");
+    expect(existsSync(runHome)).toBe(true);
+    expect(existsSync(path.join(runHome, "auth.json"))).toBe(false);
+    run.release();
+    await drain();
+  });
+
   /**
    * Ruling 460: the SDK spawns `codexPathOverride` with its own argv, so the
    * launcher stands in for the CLI and execs the SDK's vendored binary as the
@@ -2031,6 +2094,8 @@ describe("ruling 370/371: the joined prompt, the compaction keys and sorted serv
  * thread's model and the shared summarizer prompt.
  */
 describe("codex adapter compact() (ruling 376)", () => {
+  const compactHomes = createTestDbContext();
+  afterEach(() => compactHomes.cleanup());
   interface ServerLine {
     id?: number | undefined;
     method?: string;
@@ -2084,8 +2149,22 @@ describe("codex adapter compact() (ruling 376)", () => {
     };
   };
 
-  it("resumes the thread in the shared home with the model and the summarizer prompt, then starts the compaction", async () => {
+  it("resumes the thread in a private fork of the shared home with the model and the summarizer prompt, then starts the compaction", async () => {
+    // Ruling 507: the fork is seeded with the sign-in of the account the run
+    // billed, and settled like a run's — its refresh goes back to that account.
+    const dataRoot = compactHomes.makeTempDir();
+    const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
+    const accountHome = backendAccountHome("u_arda", "codex", { id: "ubc_billed", legacyHome: false }, dataRoot);
+    mkdirSync(accountHome, { recursive: true });
+    writeFileSync(path.join(accountHome, "auth.json"), '{"tokens":"before"}');
+    const forkHome = path.join(shared, "runs", `${SPEC.runId}-compaction`);
+    let seededWith: string | null = null;
     const server = scripted((method, id, write) => {
+      if (method === "initialize") {
+        seededWith = readFileSync(path.join(forkHome, "auth.json"), "utf8");
+        // The CLI refreshes the token inside the fork while it works.
+        writeFileSync(path.join(forkHome, "auth.json"), '{"tokens":"after"}');
+      }
       if (method === "initialize" || method === "thread/resume") write({ id, result: {} });
       if (method === "thread/compact/start") {
         write({ id, result: {} });
@@ -2096,18 +2175,33 @@ describe("codex adapter compact() (ruling 376)", () => {
     const phases: string[] = [];
     const lines: EmittedLine[] = [];
     const outcome = await adapter.compact!(
-      { ...SPEC, model: "gpt-5.6-terra", env: { CODEX_HOME: "/homes/arda/codex", VIBERR_RUN_ID: "run_1" } },
+      {
+        ...SPEC,
+        model: "gpt-5.6-terra",
+        env: { CODEX_HOME: shared, VIBERR_RUN_ID: "run_1" },
+        accountHome,
+      },
       "thread-1",
       { onLine: (l) => lines.push(l), onPhase: (phase) => phases.push(phase ?? "") },
     );
     expect(outcome).toEqual({ compacted: true, preTokens: null, postTokens: null });
     expect(phases[0]).toBe(RUN_PHASE.compacting);
-    // The run's credential overlay and home, under the epilogue's OWN marker
-    // (the run's settle sweep reaps `r1`; this process must outlive it).
+    // The run's credential overlay and its own fork of the home, under the
+    // epilogue's OWN marker (the run's settle sweep reaps `r1`; this process
+    // must outlive it). The state db stays the person's shared one.
     expect(server.spawned[0]).toMatchObject({
       args: ["app-server"],
-      env: { PATH: "/usr/bin", CODEX_HOME: "/homes/arda/codex", VIBERR_RUN_ID: `${SPEC.runId}:compaction` },
+      env: {
+        PATH: "/usr/bin",
+        CODEX_HOME: forkHome,
+        CODEX_SQLITE_HOME: shared,
+        VIBERR_RUN_ID: `${SPEC.runId}:compaction`,
+      },
     });
+    expect(seededWith).toBe('{"tokens":"before"}');
+    // Settled: the refresh went back to the billed account, the fork is gone.
+    expect(existsSync(forkHome)).toBe(false);
+    expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"tokens":"after"}');
     expect(server.requests.map((r) => r.method)).toEqual(["initialize", "initialized", "thread/resume", "thread/compact/start"]);
     expect(server.requests[2]?.params).toMatchObject({
       threadId: "thread-1",
@@ -2126,7 +2220,8 @@ describe("codex adapter compact() (ruling 376)", () => {
     });
     const adapter = createCodexAdapter({ env: {}, spawnAppServer: server.spawn });
     const lines: EmittedLine[] = [];
-    const outcome = await adapter.compact!({ ...SPEC, env: { CODEX_HOME: "/h" } }, "gone", { onLine: (l) => lines.push(l) });
+    const shared = ensureUserBackendHome("u_arda", "codex", compactHomes.makeTempDir());
+    const outcome = await adapter.compact!({ ...SPEC, env: { CODEX_HOME: shared } }, "gone", { onLine: (l) => lines.push(l) });
     expect(outcome).toEqual({ compacted: false, reason: "thread/resume refused: thread not found" });
     expect(lines).toHaveLength(1);
     expect(lines[0]!.display?.tag).toBe("run·compaction·failed");

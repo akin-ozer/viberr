@@ -8631,3 +8631,11 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .epic-add-in { margin-left: auto; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The two epic dialogs are form-sized, the narrow modal's measure. */
 .modal-card.epic-dialog, .modal-card.epic-add-dialog { width: min(560px, calc(100vw - 2rem)); }
+
+/* ---------- appended: ruling 507, a person's several accounts on one backend ---------- */
+/* The card's second group: the accounts not in use, then "Add another". More
+   space above a group than within it, like `.cred-card + .cred-card`. The rest
+   is existing idiom and costs every route nothing: the heading is a `.flabel`
+   on an `h3` (block, no margin), the rows are the connections list's own
+   `.conn-row`, whose wrap spaces each row's buttons. */
+.acct-list { margin-top: 1rem; }

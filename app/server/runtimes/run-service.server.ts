@@ -968,6 +968,10 @@ export async function startRun(
     // Ruling 369: the kind of credential the run bills, which decides the
     // cache TTL the resume policy assumes for its session (ruling 372).
     credentialKind: credential.ok ? credential.credential.kind : null,
+    // Ruling 507: WHICH of the principal's accounts it bills — the one active
+    // when the credential was resolved. Boot recovery hands an orphaned Codex
+    // run's refreshed sign-in back to this account and to no other.
+    credentialAccountId: credential.ok ? credential.credential.accountId : null,
     // Ruling 316: kept on the row so the completion path can tell an answer
     // from a silence long after the dispatch is gone.
     verdictWithheld: input.verdictWithheld === true,
@@ -1011,6 +1015,10 @@ export async function startRun(
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
   };
+  // Ruling 507: the home of the account this run bills. Claude already has it
+  // as `CLAUDE_CONFIG_DIR` on the credential env; the Codex adapter's private
+  // home copies the account's sign-in from here and hands it back here.
+  if (credential.ok) spec.accountHome = credential.credential.accountHome;
   // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
   // funnel every path goes through (specialist, operator, resume). It used to
   // run only on the D4 cross-backend retry, so a profile whose stored effort
@@ -1097,6 +1105,9 @@ export async function startRun(
         input.credentialUserId,
         credential.credential.homeDir,
         input.dataRoot,
+        // Ruling 507: the account's own home and what it links to, which the
+        // server may have created since the backend home was handed over.
+        credential.credential.ownDirs,
       );
       if (agent) {
         spec.agent = agent;

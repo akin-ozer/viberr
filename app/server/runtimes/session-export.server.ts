@@ -378,8 +378,20 @@ export function probeSessionContinuity(
     return codexRolloutOpensWithMeta(rollout) ? "present" : "damaged";
   }
   const projectsDir = claudeProjectsDir(userId, dataRoot);
-  if (!projectsDir || !existsSync(projectsDir)) return "unknown";
+  // Ruling 507: an EMPTY store proves no more than an absent one. Viberr now
+  // creates the shared `projects/` itself, before any CLI has run, so that
+  // each account home's link to it resolves; its existence is no longer the
+  // CLI's evidence of having written a transcript here.
+  if (!projectsDir || !existsSync(projectsDir) || isEmptyDir(projectsDir)) return "unknown";
   return locateClaude(userId, sessionId, dataRoot) ? "present" : "missing";
+}
+
+function isEmptyDir(dir: string): boolean {
+  try {
+    return readdirSync(dir).length === 0;
+  } catch {
+    return false;
+  }
 }
 
 /** The first line of a Codex rollout, as far as the probe needs it. */

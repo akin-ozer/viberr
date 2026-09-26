@@ -37,6 +37,8 @@ const HEALTH_NONE = {
   verifiedAt: null,
   connectedAt: null,
   detail: "Claude isn't connected. Connect it on your Profile → Agent accounts.",
+  accountId: null,
+  accountName: null,
 } as const;
 
 function backend(
@@ -65,6 +67,8 @@ function runningLogin(
     id: "bkl_1",
     backend: name,
     method: name === "claude" ? "claudeai" : "device",
+    accountId: "ubc_new",
+    existingAccount: false,
     state: "awaiting-browser",
     url: name === "claude" ? "https://claude.ai/oauth" : "https://auth.openai.com/codex/device",
     userCode: name === "codex" ? "WDJB-MJHT" : null,
@@ -365,6 +369,8 @@ describe("AgentAccountsPanel", () => {
           verifiedAt: "2026-09-01T10:00:00.000Z",
           connectedAt: "2026-09-01T10:00:00.000Z",
           detail: null,
+          accountId: "ubc_claude",
+          accountName: "person@example.com",
         },
       }),
       backend("codex", {
@@ -393,7 +399,9 @@ describe("AgentAccountsPanel", () => {
     // Ruling 149: dropping the stored credential is destructive, so the
     // control carries the danger label. Canary: drop `danger` from the
     // Disconnect className in `agent-accounts-panel.tsx`.
-    const disconnect = container.querySelectorAll(".cred-manage button")[0]!;
+    const disconnect = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".cred-card .cred-manage button"),
+    ).find((button) => button.textContent === "Disconnect")!;
     expect(disconnect.textContent).toContain("Disconnect");
     expect(Array.from(disconnect.classList)).toContain("danger");
     // Ruling 481(b) (F40-49): the press asks first. It used to post the
@@ -415,9 +423,11 @@ describe("AgentAccountsPanel", () => {
     fireEvent.click(
       getByText("Disconnect Claude", { selector: ".confirm-actions button.btn.danger" }),
     );
+    // Ruling 507: a disconnect names the account it removes.
     expect(lastSubmit).toEqual({
       intent: "backend-disconnect",
       backend: "claude",
+      account: "ubc_claude",
     });
   });
 
@@ -476,12 +486,12 @@ describe("AgentAccountsPanel", () => {
     // Ruling 165: the card names the second retirement, the one the remedy
     // asks for, so a person who connects another account is not told the old
     // account's verdict still stands.
-    expect(note.textContent).toContain("as does connecting a different Claude account here");
+    expect(note.textContent).toContain("as does switching to or connecting a different Claude account here");
     const window_ = container.querySelector('[data-refusal="quota"]')!;
     expect(window_.textContent).toContain("Spent as of");
     expect(window_.textContent).toContain("reopens");
     expect(window_.textContent).toContain("Any completed Codex run retires this notice");
-    expect(window_.textContent).toContain("as does connecting a different Codex account here");
+    expect(window_.textContent).toContain("as does switching to or connecting a different Codex account here");
   });
 
   it("ruling 130(d): no refusal, no pill and no note", () => {
@@ -608,7 +618,8 @@ describe("AgentAccountsPanel", () => {
 
   it("offers the sign-in it tells the person to use when the credential file is gone", () => {
     // The health sentence for this state ends "Sign in again on your Profile →
-    // Agent accounts", which is this card: it has to carry that sign-in.
+    // Agent accounts", which is this card: it has to carry that sign-in — into
+    // THAT account's own home (ruling 507), not a new one.
     const { getByText } = renderPanel([
       backend("claude", {
         health: {
@@ -622,6 +633,8 @@ describe("AgentAccountsPanel", () => {
           connectedAt: "2026-09-01T10:00:00.000Z",
           detail:
             "Your Claude sign-in file is missing from this server (the runtime volume was wiped). Sign in again on your Profile → Agent accounts.",
+          accountId: "ubc_wiped",
+          accountName: "Console sign-in",
         },
       }),
       backend("codex"),
@@ -632,6 +645,7 @@ describe("AgentAccountsPanel", () => {
       intent: "backend-login-start",
       backend: "claude",
       method: "console",
+      account: "ubc_wiped",
     });
   });
 
@@ -993,5 +1007,232 @@ describe("ruling 368: the account request in flight", () => {
     const submitCode = getByText("Submit code").closest("button")!;
     expect(submitCode.disabled).toBe(true);
     expect(submitCode.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 507: a person may keep several accounts per backend. The card leads
+ * with the one runs use, lists the others with a one-click switch (no
+ * sign-in), and adds, renames and disconnects per account.
+ */
+describe("ruling 507: several accounts on one backend", () => {
+  type Account = NonNullable<ProfileBackend["accounts"]>[number];
+
+  function account(
+    id: string,
+    name: string,
+    overrides: Partial<Account["health"]> & { active?: boolean; label?: string | null } = {},
+  ): Account {
+    const { active = false, label = null, ...health } = overrides;
+    return {
+      id,
+      name,
+      label,
+      active,
+      health: {
+        ...HEALTH_NONE,
+        backend: "claude",
+        userId: "u_arda",
+        available: true,
+        kind: "login",
+        method: "claudeai",
+        verification: "file",
+        verifiedAt: "2026-09-01T10:00:00.000Z",
+        connectedAt: "2026-09-01T10:00:00.000Z",
+        detail: null,
+        accountId: id,
+        accountName: name,
+        ...health,
+      },
+    };
+  }
+
+  const WORK = account("ubc_work", "Work", { active: true, label: "Work" });
+  const PERSONAL = account("ubc_personal", "personal@example.com", {
+    connectedAt: "2026-08-20T10:00:00.000Z",
+  });
+  const KEY = account("ubc_key", "API key ending in abcd", {
+    kind: "api_key",
+    method: null,
+    verification: "credential",
+    secretSuffix: "abcd",
+  });
+
+  function claudeWith(accounts: Account[], overrides: Partial<ProfileBackend> = {}): ProfileBackend {
+    const active = accounts.find((a) => a.active)!;
+    return backend("claude", {
+      health: active.health,
+      accounts,
+      limits: { maxAccounts: 10, maxLabelLength: 60 },
+      ...overrides,
+    });
+  }
+
+  function rowOf(container: HTMLElement, id: string): HTMLElement {
+    return container.querySelector<HTMLElement>(`[data-account="${id}"]`)!;
+  }
+
+  function buttonIn(scope: HTMLElement, text: string): HTMLButtonElement {
+    const found = Array.from(scope.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent === text,
+    );
+    if (!found) throw new Error(`no "${text}" button`);
+    return found;
+  }
+
+  it("leads with the account runs use and lists the others, each one switch away", () => {
+    const { container, getByText } = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
+    // Which account bills, said in the green line once there is a choice.
+    expect(container.querySelector(".cred-ok")!.textContent).toContain("Runs use Work");
+    expect(getByText("Other Claude accounts")).toBeTruthy();
+    const personal = rowOf(container, "ubc_personal");
+    expect(personal.textContent).toContain("personal@example.com");
+    expect(personal.textContent).toContain("Claude sign-in (claude.ai)");
+    const key = rowOf(container, "ubc_key");
+    expect(key.textContent).toContain("API key ending in abcd");
+    // The active account is not in the list of others.
+    expect(container.querySelector('[data-account="ubc_work"]')).toBeNull();
+
+    // A switch is one click and no sign-in: it names the account and nothing else.
+    fireEvent.click(buttonIn(personal, "Use this account"));
+    expect(lastSubmit).toEqual({
+      intent: "backend-account-switch",
+      backend: "claude",
+      account: "ubc_personal",
+    });
+  });
+
+  it("offers a sign-in, not a switch, for another account whose sign-in file is gone", () => {
+    const wiped = account("ubc_wiped", "wiped@example.com", {
+      available: false,
+      verification: "none",
+      detail: "Your Claude sign-in file is missing from this server (the runtime volume was wiped).",
+    });
+    const { container } = renderPanel([claudeWith([WORK, wiped]), backend("codex")]);
+    const row = rowOf(container, "ubc_wiped");
+    expect(row.textContent).toContain("sign-in file missing");
+    expect(Array.from(row.querySelectorAll("button")).map((b) => b.textContent)).not.toContain(
+      "Use this account",
+    );
+    fireEvent.click(buttonIn(row, "Sign in with Claude"));
+    expect(lastSubmit).toEqual({
+      intent: "backend-login-start",
+      backend: "claude",
+      method: "claudeai",
+      account: "ubc_wiped",
+    });
+  });
+
+  it("disconnecting another account says runs keep the one in use; the one in use says who takes over", () => {
+    const { container, getByRole } = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
+    fireEvent.click(buttonIn(rowOf(container, "ubc_key"), "Disconnect"));
+    const other = getByRole("alertdialog", { name: "Disconnect API key ending in abcd?" });
+    expect(other.textContent).toContain("Your runs keep using Work.");
+    fireEvent.click(buttonIn(other, "Disconnect API key ending in abcd"));
+    expect(lastSubmit).toEqual({ intent: "backend-disconnect", backend: "claude", account: "ubc_key" });
+    cleanup();
+
+    const again = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
+    const activeManage = again.container.querySelector<HTMLElement>(".cred-card .cred-manage")!;
+    fireEvent.click(buttonIn(activeManage, "Disconnect"));
+    const active = again.getByRole("alertdialog", { name: "Disconnect Work?" });
+    // The next account in the list is the one used before it: that is who
+    // the store hands runs to.
+    expect(active.textContent).toContain(
+      "Your runs switch to personal@example.com, the Claude account you used before it.",
+    );
+  });
+
+  it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {
+    const { container, getByLabelText, getByRole, queryByRole } = renderPanel([
+      claudeWith([WORK, PERSONAL]),
+      backend("codex"),
+    ]);
+    fireEvent.click(buttonIn(rowOf(container, "ubc_personal"), "Rename"));
+    const field = container.querySelector<HTMLInputElement>("#agentacc-ubc_personal-name")!;
+    // The label is the field's real label, not an aria-label.
+    expect(getByLabelText(/Account name/)).toBe(field);
+    expect(document.activeElement).toBe(field);
+    // An unnamed account starts empty; the hint says what empty means.
+    expect(field.value).toBe("");
+    expect(container.textContent).toContain("leave it empty to go back to personal@example.com");
+
+    fireEvent.change(field, { target: { value: "x".repeat(61) } });
+    fireEvent.click(buttonIn(rowOf(container, "ubc_personal"), "Save name"));
+    expect(lastSubmit).toBeNull();
+    const alert = getByRole("alert");
+    expect(alert.textContent).toContain("An account name can be at most 60 characters.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+
+    fireEvent.change(field, { target: { value: "Personal" } });
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(lastSubmit).toEqual({
+      intent: "backend-account-rename",
+      backend: "claude",
+      account: "ubc_personal",
+      name: "Personal",
+    });
+  });
+
+  it("adds another account through the same sign-in and paste methods, never into an existing one", () => {
+    const { container, getByText, queryByText } = renderPanel([claudeWith([WORK]), backend("codex")]);
+    // One account: no list of others, and no "Runs use" lead — there is no choice yet.
+    expect(queryByText("Other Claude accounts")).toBeNull();
+    expect(container.querySelector(".cred-ok")!.textContent).not.toContain("Runs use");
+
+    fireEvent.click(getByText("Add another Claude account"));
+    expect(getByText(/switching back needs no sign-in/)).toBeTruthy();
+    fireEvent.click(getByText("Sign in with Claude"));
+    expect(lastSubmit).toEqual({ intent: "backend-login-start", backend: "claude", method: "claudeai" });
+    fireEvent.click(buttonIn(container.querySelector<HTMLElement>(".cred-card")!, "Use an API key"));
+    expect(container.querySelector("#agentacc-claude-api_key")).toBeTruthy();
+  });
+
+  it("stops offering another account at the ceiling, and says why", () => {
+    const { getByText } = renderPanel([
+      claudeWith([WORK, PERSONAL], { limits: { maxAccounts: 2, maxLabelLength: 60 } }),
+      backend("codex"),
+    ]);
+    expect(getByText("Add another Claude account").closest("button")!.disabled).toBe(true);
+    expect(getByText(/2 is the most one person can keep/)).toBeTruthy();
+  });
+
+  it("says which account a running sign-in is for", () => {
+    const adding = renderPanel([
+      claudeWith([WORK], { login: runningLogin("claude") }),
+      backend("codex"),
+    ]);
+    expect(adding.getByText(/Adding another Claude account\. The one you have stays connected\./)).toBeTruthy();
+    cleanup();
+
+    const again = renderPanel([
+      claudeWith([WORK, PERSONAL], {
+        login: runningLogin("claude", { accountId: "ubc_personal", existingAccount: true }),
+      }),
+      backend("codex"),
+    ]);
+    expect(again.getByText("Signing in to personal@example.com again.")).toBeTruthy();
+  });
+
+  it("starts a failed sign-in again into the account it was for", () => {
+    const { getByText } = renderPanel([
+      claudeWith([WORK, PERSONAL], {
+        login: runningLogin("claude", {
+          state: "failed",
+          error: "error: browser authorization was refused.",
+          accountId: "ubc_personal",
+          existingAccount: true,
+        }),
+      }),
+      backend("codex"),
+    ]);
+    fireEvent.click(getByText("Start again"));
+    expect(lastSubmit).toEqual({
+      intent: "backend-login-start",
+      backend: "claude",
+      method: "claudeai",
+      account: "ubc_personal",
+    });
   });
 });

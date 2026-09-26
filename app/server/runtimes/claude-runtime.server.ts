@@ -886,8 +886,8 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
       // runs, so it must not say "the coordinating model" (misleads a human
       // triaging a failed delivery run toward the operator).
       message: facts.windowRejected
-        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${formatAbsoluteUTC(facts.resetsAt)}` : ""}. Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts.`
-        : "The Claude account is over its usage quota. Retry after the limit resets, or connect a different Claude account or an API key on Profile → Agent accounts.",
+        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${formatAbsoluteUTC(facts.resetsAt)}` : ""}. Wait for it, or switch to or connect a different Claude account (or an API key) on Profile → Agent accounts.`
+        : "The Claude account is over its usage quota. Retry after the limit resets, or switch to or connect a different Claude account (or an API key) on Profile → Agent accounts.",
       providerText,
       facts,
     };
@@ -908,10 +908,10 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     return {
       kind: "auth",
       message: orgRestricted
-        ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ?? 403} oauth_org_not_allowed): the organization this account belongs to does not allow it here. Connect a different Claude account or an API key on Profile → Agent accounts.`
+        ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ?? 403} oauth_org_not_allowed): the organization this account belongs to does not allow it here. Switch to or connect a different Claude account (or an API key) on Profile → Agent accounts.`
         : onHold
-          ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ? `${evidence.apiErrorStatus} ` : ""}account_on_hold): the account itself is on hold, so no run can bill it until the hold is lifted. Connect a different Claude account or an API key on Profile → Agent accounts.`
-          : `The Claude credential was rejected${evidence.apiErrorStatus ? ` (${evidence.apiErrorStatus}${evidence.apiError ? ` ${evidence.apiError}` : ""})` : ""}. Connect a different Claude account or an API key on Profile → Agent accounts.`,
+          ? `The Claude account was refused by the provider (${evidence.apiErrorStatus ? `${evidence.apiErrorStatus} ` : ""}account_on_hold): the account itself is on hold, so no run can bill it until the hold is lifted. Switch to or connect a different Claude account (or an API key) on Profile → Agent accounts.`
+          : `The Claude credential was rejected${evidence.apiErrorStatus ? ` (${evidence.apiErrorStatus}${evidence.apiError ? ` ${evidence.apiError}` : ""})` : ""}. Switch to or connect a different Claude account (or an API key) on Profile → Agent accounts.`,
       providerText,
       facts,
     };

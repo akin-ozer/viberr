@@ -196,6 +196,9 @@ const VIEWER_CREDENTIAL: RunCredential = {
   secrets: ["sk-ant-viewer-key-000000000000"],
   kind: "api_key",
   homeDir: "/data/runtimes/users/u_viewer/claude-home",
+  accountId: "ubc_viewer",
+  accountHome: "/data/runtimes/users/u_viewer/claude-home",
+  ownDirs: [],
 };
 
 describe("getModelCatalog", () => {

@@ -70,7 +70,7 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 - **Availability is a fact about a PERSON, so a test seeds it like data (ruling 127).**
   `test-support/backend-credentials.ts` gives `connectFakeBackend(db, userId, backend)`,
   `connectFakeBackends(db, userId)` and `disconnectFakeBackend(db, userId, backend)`,
-  which go through the REAL `setBackendApiKey` / `disconnectBackend` with an injected
+  which go through the REAL `setBackendApiKey` / `disconnectBackendAccount` with an injected
   `fetch` that answers 200 without a socket, so a test cannot end up with a row shape the
   product would not produce. `fakeBackendSecret(backend)` returns the plaintext those
   helpers seal, which is what a redaction test asserts on. Connect the backend for the
@@ -99,7 +99,7 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 | `git-origin.ts` | a local GitHub stand-in for the real git paths: `createLocalOrigin(origins, { repo, files?, empty? })` → a bare repo with `advance()` (one more commit on `main`); `withLocalGithub(root, work)` rewrites `https://github.com/` to it through a temp `GIT_CONFIG_GLOBAL`; `gitOut(cwd, args)` and its sync twin `gitOutSync(cwd, args)` (runs git in `cwd`, stderr piped) → trimmed stdout |
 | `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` (arda, elif, murat, selin, deniz, each signing in with `SEED_DEFAULT_PASSWORD` from `app/server/seed/seed-credentials.ts` unless `adminPassword` sets arda's; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed) → the counts plus `userIds`, each seeded user's id by handle, so a test signs in as one without looking it up by email; `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
 | `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` |
-| `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL`, `ANSI_ESCAPE` |
+| `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `setFakeVendorEvidenceDir()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)` and, outside every home, `fakeVendorLogouts/Terminations(dir)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL`, `ANSI_ESCAPE` |
 | `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297); `callToolText(tools, toolName, args)` calls one controller tool (`viberr_controller` or `viberr_ops`) by name on a toolkit the test built as its asker and returns the text reply |
 | `strict-schema.ts` | `assertStrictSchema(node)` — the OpenAI strict structured-output rule (every object `additionalProperties: false`, every key `required`) walked recursively over the Codex agent envelope and operator plan |
 | `toolchain.ts` | `HERMETIC_TOOLCHAIN`, `primeToolchain(reading \| null)`, `primeHermeticToolchain()` |
@@ -276,7 +276,12 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
   of being orphaned. The same pair serves the credential store's DISCONNECT tests: the
   vendors' `logout` branches drop `fake-logout.json` (argv plus the whole child env), so
   `backend-credentials.server.test.ts` proves the vendor's own logout ran, ran against the
-  home that call named, and saw no credential of the server's. The knobs are
+  home that call named, and saw no credential of the server's. Ruling 507 removes an
+  account's whole home when it is disconnected, and an abandoned sign-in's new home once
+  its process has exited, so the in-home evidence is gone by the time a test asserts:
+  `setFakeVendorEvidenceDir(dir)` makes every logout and every `SIGTERM` also record
+  itself in a directory outside all homes, read back with `fakeVendorLogouts(dir)` and
+  `fakeVendorTerminations(dir)`. The knobs are
   `VIBERR_FAKE_VENDOR_*` variables on the worker's own env, so call
   `resetFakeVendorEnv()` in `afterEach`. `no-module-mocking` is a lint rule (no
   `vi.mock`), and a mocked spawn would prove nothing about the parsing this module exists
