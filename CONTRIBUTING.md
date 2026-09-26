@@ -10,11 +10,9 @@ Requirements: Node >= 26, npm.
 ```sh
 git clone <this-repo> viberr && cd viberr
 
-# 1. Environment — copy the template and fill in the two required secrets
+# 1. Environment — copy the template; every variable is optional (the two
+#    secrets are generated into the data root on first run; see .env.example)
 cp .env.example .env
-#    VIBERR_SESSION_SECRET       — generate: openssl rand -base64 48
-#    VIBERR_SECRET_ENCRYPTION_KEY — generate: openssl rand -base64 32
-#    (every other variable is optional; see .env.example for docs)
 
 # 2. Install
 npm ci

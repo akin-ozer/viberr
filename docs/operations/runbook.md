@@ -721,7 +721,9 @@ every person's live vendor sign-in (`runtimes/users/<userId>/…`, ruling 127), 
 artefact taken with it is a secret. `npm run restore -- --from <artefact>` takes the
 lock, needs `--force` on an occupied root and moves displaced data to
 `<dataRoot>.replaced-<ts>/`; `--file <store path>` restores one canonical file without
-touching the database. Back up `VIBERR_SECRET_ENCRYPTION_KEY` separately: without it every
+touching the database. A key the instance generated for itself travels in the artefact
+(`instance-secrets.json`, ruling 504), which makes the artefact a secret. Back up a
+`VIBERR_SECRET_ENCRYPTION_KEY` set in the environment separately: without it every
 sealed PAT, MCP credential and **personal backend API key** (`user_backend_credentials`,
 ruling 127) in the artefact is unreadable, and restoring the database without the key
 leaves every person who pasted a key having to connect that backend again. Rotating is

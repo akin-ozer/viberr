@@ -52,12 +52,11 @@ Requirements: Node >= 26, npm.
 ```sh
 git clone <this-repo> viberr && cd viberr
 
-# 1. Environment — copy the documented template and fill in the two
-#    required secrets:
+# 1. Environment — copy the documented template. Every variable is optional:
+#    left unset, VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY are
+#    generated into the data root on first run (see .env.example and
+#    docs/operations/configuration.md)
 cp .env.example .env
-#    VIBERR_SESSION_SECRET       — generate: openssl rand -base64 48
-#    VIBERR_SECRET_ENCRYPTION_KEY — generate: openssl rand -base64 32
-#    (every other variable is optional; see .env.example and docs/operations/configuration.md)
 
 # 2. Install
 npm ci
@@ -221,10 +220,27 @@ https origin.
 ## Docker
 
 ```sh
-cp .env.example .env            # fill in the two required secrets
-docker compose run --rm app npm run seed   # optional baseline, BEFORE the app holds the lock
-docker compose up --build -d    # or: npm run deploy (stamps the build, then verifies it)
+docker compose up
 ```
+
+That is the whole install (ruling 504): no `.env` to write, no volume to create. Open
+http://localhost:3000 and sign in as `admin@viberr.dev` with the one-time password the log
+prints under `VIBERR BOOTSTRAP ADMIN`; you choose your own at first sign-in. The two
+secrets are generated into the store on first boot, and Compose creates the store volume
+`viberr-data`. Add `-d` to run in the background (`docker compose logs app` then shows the
+password), `--build` after pulling a new version, or use `npm run deploy`, which stamps the
+build and verifies it. Optional baseline content goes in before the first `up`, while
+nothing holds the store's writer lock: `docker compose run --rm app npm run seed`.
+
+On a host that holds real data, copy `.env.example` to `.env` and set
+`VIBERR_STORE_EXTERNAL=true` before the first `up`, then start with `npm run deploy` (or
+run `docker volume create viberr-data` first): `docker compose down -v` deletes a volume
+Compose made, and one made outside Compose with this set is one Compose never creates or
+deletes (ruling 473). `VIBERR_CPUS` caps
+the container's CPUs (roughly cores minus 3 on a machine someone also works on). Your own
+`VIBERR_SESSION_SECRET` / `VIBERR_SECRET_ENCRYPTION_KEY` override the generated ones; once
+anything has been sealed, take over the generated values unchanged
+([deployment guide](docs/operations/deployment.md#secrets--configuration)).
 
 The app listens on `PORT` (container default 3000; compose maps the same port on the
 host) and speaks **plain HTTP** — for anything beyond localhost, front it with a
@@ -236,15 +252,16 @@ connected agent accounts under `runtimes/users/`. Every agent process runs as it
 own OS user and cannot read the server's secrets, the database or anyone else's sign-in
 (ruling 460); `/resources/health` reports it as `agentIsolation`. Back it up with `npm run backup` (a raw copy of
 the live SQLite file misses rows still in the WAL; inside the container pass an absolute
-`--out` outside `/data` and copy the artefact out, as the deployment guide shows) and
-keep `VIBERR_SECRET_ENCRYPTION_KEY` with the backup; the default backup leaves
-`runtimes/` out because it holds live sign-ins. A restore leaves an existing `runtimes/`
+`--out` outside `/data` and copy the artefact out, as the deployment guide shows). A
+backup carries generated secrets, so treat it as a secret; a
+`VIBERR_SECRET_ENCRYPTION_KEY` you set yourself is not in it, so keep that with the
+backup. The default backup leaves `runtimes/` out because it holds live sign-ins. A restore leaves an existing `runtimes/`
 untouched, so people sign in again only when it is gone (a fresh volume), unless the
 backup was taken with `--include-runtimes`; treat such an artefact as a secret.
 `npm run seed` against a running
 container is **refused**: it would be a second writer on the data root. The compose file
 pins `hostname: viberr` (so a recreated container can reclaim its own writer lock), runs
-an init (`init: true`), caps the container at `cpus: "7"` (tune it to your host), and
+an init (`init: true`), caps the container's CPUs at `VIBERR_CPUS` when it is set, and
 wires a liveness healthcheck against `/resources/health` and `restart: unless-stopped`.
 See [docs/operations/deployment.md](docs/operations/deployment.md) for the full
 single-node story (TLS, backup/restore, projection rebuild, the writer lock) and

@@ -39,7 +39,8 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 - `test-support/setup-env.ts` runs before any app module loads and makes the suite
   hermetic:
   - seeds `VIBERR_SESSION_SECRET` and `VIBERR_SECRET_ENCRYPTION_KEY` (`??=`, so an
-    explicit export still wins);
+    explicit export still wins), so `getEnv()` never generates random ones into the
+    data root (ruling 504);
   - **blanks the ambient vendor keys a dev machine or CI host might carry**
     (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`,
     `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, `OPENAI_API_KEY`, plus

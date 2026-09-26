@@ -1,5 +1,6 @@
 import { loadEnvFile } from "node:process";
 import { z } from "zod";
+import { withInstanceSecrets } from "./instance-secrets.server";
 
 /** No `.env` at all is the normal case (container, CI, a shell-exported env) —
  *  any OTHER failure is a real configuration fault and must reach the operator. */
@@ -12,6 +13,8 @@ try {
 }
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+const DEFAULT_DATA_ROOT = "./data";
 
 const MINUTE_S = 60;
 const HOUR_S = 60 * MINUTE_S;
@@ -115,7 +118,8 @@ const envSchema = z.object({
   /** Port for the HTTP server (dev server and react-router-serve). */
   PORT: z.coerce.number().int().min(1).max(65535).default(5173),
 
-  /** Signs the session cookie. Random string, at least 32 characters. */
+  /** Signs the session cookie. Random string, at least 32 characters.
+   *  `getEnv()` fills it from the data root when unset (ruling 504). */
   VIBERR_SESSION_SECRET: z
     .string({
       error:
@@ -144,6 +148,7 @@ const envSchema = z.object({
   /**
    * AES-256-GCM key for encrypting stored secrets (e.g. GitHub PATs).
    * Must be base64 that decodes to exactly 32 bytes. Parsed into a Buffer.
+   * `getEnv()` fills it from the data root when unset (ruling 504).
    */
   VIBERR_SECRET_ENCRYPTION_KEY: z
     .string({
@@ -171,7 +176,7 @@ const envSchema = z.object({
     }),
 
   /** Runtime data root (canonical files, sqlite projections, logs). */
-  VIBERR_DATA_ROOT: z.string().min(1).default("./data"),
+  VIBERR_DATA_ROOT: z.string().min(1).default(DEFAULT_DATA_ROOT),
 
   // B-FD1: boot takes an exclusive single-writer lock on the data root, so a
   // second process pointed at the same volume refuses to start instead of
@@ -377,12 +382,14 @@ function envSlot(): EnvSlot {
 /**
  * Parses process.env exactly once per process and caches the result.
  * Call at boot so a bad configuration fails fast with a clear message.
+ * A secret the environment leaves unset comes from the data root, generated
+ * there by the first process to get here (ruling 504).
  */
 export function getEnv(): Env {
   const cache = envSlot();
   let env = cache[ENV_CACHE_KEY];
   if (!env) {
-    env = parseEnv(process.env);
+    env = parseEnv(withInstanceSecrets(process.env, DEFAULT_DATA_ROOT));
     cache[ENV_CACHE_KEY] = env;
   }
   return env;

@@ -11,15 +11,15 @@
 ## 1. Setup
 
 ```sh
-cp .env.example .env      # fill VIBERR_SESSION_SECRET (≥ 32 chars) and
-                          # VIBERR_SECRET_ENCRYPTION_KEY (base64 of exactly 32 bytes)
+cp .env.example .env      # every variable optional (ruling 504)
 npm ci                    # Node ≥ 26
 npm run seed              # baseline store; refused while an app holds the writer lock
 npm run dev               # http://localhost:5173 (PORT)
 ```
 
-Without the two secrets the server dies at boot with `Invalid environment
-configuration` listing every problem. Default sign-in after `npm run seed`:
+Left unset, `VIBERR_SESSION_SECRET` and `VIBERR_SECRET_ENCRYPTION_KEY` are generated once
+into `<data root>/state/instance-secrets.json` by the first process that reads the env, and
+every process after it reads them back (ruling 504). Default sign-in after `npm run seed`:
 `admin@viberr.dev` / `viberr-dev-2828` (or `VIBERR_SEED_ADMIN_EMAIL` /
 `VIBERR_SEED_ADMIN_PASSWORD`, read while the users table is empty). `.env.example` sets
 `VIBERR_DATA_ROOT=./docker-data`, the dev server's store. Until ruling 460 it was also the
@@ -126,6 +126,7 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 | `docs/architecture/file-formats.md` (append contract) | `task-file.server.test.ts` | never says "display sorts by timestamp"; keeps "it does not undo it" |
 | `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | states its supersession convention, and every ruling a later one changes carries an inline marker (ruling 341) |
 | `docs/operations/runbook.md`, `docs/operations/deployment.md`, `docs/development/scripts.md` | `runbook-db-read.test.ts` | copy first, never a second connection to a live projection; in-container backups use an absolute `--out` outside `/data` (ruling 158) |
+| `README.md`, `docs/operations/deployment.md` | `store-volume-wiring.test.ts` | the first shell block that runs Compose is the install: it runs `docker compose up`, with no `.env` copy and no `docker volume create` (ruling 504) |
 | `docs/architecture/codebase-map.md` | `app/features/shell/nav.test.ts` | contains `` `nav.ts` order: `` and the rail labels in order |
 | `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 458(c)) |
 | `vitest.config.ts` | `vitest-config.test.ts` | `testTimeout: 20_000` |

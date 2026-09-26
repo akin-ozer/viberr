@@ -23,7 +23,14 @@ handful of values are read straight off `process.env` and are listed in §3 so t
 surface is complete. Settings that live in the app rather than the environment are
 in §4.
 
-## 1. Required
+## 1. Secrets (generated when unset)
+
+Neither has to be set (ruling 504). When the environment leaves one unset, `getEnv()`
+takes it from `<data root>/state/instance-secrets.json`, which the first process to need
+it creates holding both (0600, in the server-only `state/`;
+`app/server/config/instance-secrets.server.ts`). A value set here wins, key by key. A
+backup carries the file; to take the generated values over, copy them into `.env`
+unchanged ([deployment.md](deployment.md#secrets--configuration)).
 
 | Variable | Rule | Purpose |
 |---|---|---|
@@ -296,7 +303,12 @@ From the `Dockerfile` runtime stage: `NODE_ENV=production`, `VIBERR_DATA_ROOT=/d
 `UV_CACHE_DIR=/data/runtimes/uv-cache`, `UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python`,
 `PORT=3000`, `VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`, and the three
 `VIBERR_BUILD_*` build args re-exported as `ENV` (empty unless stamped). Everything else
-comes from `.env` via compose `env_file`. Compose additionally forces `NODE_ENV=production`
+comes from `.env` via compose `env_file`, which is optional (ruling 504). Two `.env`
+variables are Compose's rather than the app's: `VIBERR_STORE_EXTERNAL=true` makes the store
+volume `external` (ruling 473: Compose never creates or deletes it, and `npm run deploy`
+creates it outside Compose when it is missing; unset, Compose owns it, a first `up`
+creates it and `down -v` deletes it), and `VIBERR_CPUS` sets the container's CPU ceiling
+(unset, none). Compose additionally forces `NODE_ENV=production`
 and `VIBERR_DATA_ROOT=/data` even when `.env` carries the dev values, passes the four
 controller unlock flags with `disabled` as the default, pins `hostname: viberr` (so a
 recreated container can reclaim its own writer lock), runs with `init: true` and mounts

@@ -16,7 +16,7 @@ projections plus app-owned rows. It is **pre-production**: schemas change withou
 ## Commands
 
 ```sh
-cp .env.example .env   # two required secrets, see docs/operations/configuration.md
+cp .env.example .env   # all optional; secrets are generated when unset (ruling 504)
 npm ci && npm run seed && npm run dev
 npm run lint && npm run typecheck && npm test && npm run build   # CI's verify job
 node scripts/measure-routes.mjs --check   # ...then the bundle ratchet (ruling 457)

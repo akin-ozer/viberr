@@ -4,6 +4,7 @@
  *
  *   docker compose stop app
  *   npm run store:to-volume            # or: npm run store:to-volume -- <dir>
+ *   # set VIBERR_STORE_EXTERNAL=true in .env (ruling 504: a store Compose did not make)
  *   docker compose up -d
  *
  *   npm run store:to-volume -- <dir> --volume <name>   # a rehearsal elsewhere
@@ -93,8 +94,10 @@ await runWithDataRootWriterLock(
       return;
     }
     console.log(
-      `store:to-volume: done. Start the app (docker compose up -d); /resources/health should report ` +
-        `agentIsolation.status "on". ${source} is left as it was: keep it until you have checked, then remove it.`,
+      `store:to-volume: done. The volume holds real data and Compose did not make it, so set ` +
+        `VIBERR_STORE_EXTERNAL=true in .env (ruling 504), then start the app (docker compose up -d); ` +
+        `/resources/health should report agentIsolation.status "on". ${source} is left as it was: ` +
+        `keep it until you have checked, then remove it.`,
     );
   },
   {

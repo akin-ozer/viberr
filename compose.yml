@@ -42,7 +42,13 @@ services:
     # profile. Chromium still needs --no-sandbox for the same namespace reason
     # and the image passes it (Dockerfile). Do not re-add this line without a
     # ruling: it lifts the profile for every process in the container.
-    env_file: .env
+    # Ruling 504: optional, so a starter's bare `docker compose up` needs no
+    # `.env` at all. Without one, the two secrets are generated into the store
+    # on first boot (app/server/config/instance-secrets.server.ts); a `.env`
+    # that sets them wins.
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Force the container-internal values even when .env carries the dev
       # equivalents (VIBERR_DATA_ROOT=./data, NODE_ENV=development).
@@ -96,11 +102,14 @@ services:
     # Capping runs alone cannot fix that, because the multiplier is inside the
     # run.
     #
-    # So the container gets a hard ceiling that the cap cannot overrun: some
-    # cores stay for the person whose laptop this is. Tune `cpus` to your host
-    # — roughly (cores - 3) — and remember it is a CEILING, not a reservation:
-    # a quiet instance uses nothing.
-    cpus: "7"
+    # So the container can get a hard ceiling that the cap cannot overrun: set
+    # VIBERR_CPUS in `.env` to roughly (cores - 3) on a machine someone also
+    # works on, and some cores stay theirs. It is a CEILING, not a reservation:
+    # a quiet instance uses nothing. Unset, there is none (ruling 504): the
+    # fixed "7" this used to be made Docker refuse to start the container at
+    # all on a host with fewer CPUs ("range of CPUs is from 0.01 to 4.00"),
+    # which is a starter's first `up` on a small VM.
+    cpus: "${VIBERR_CPUS:-0}"
     healthcheck:
       test:
         [
@@ -119,11 +128,18 @@ volumes:
   # Ruling 460: the store. Named `viberr-data` exactly (not project-prefixed),
   # so the one-time move, the backup and the runbook can name it.
   #
-  # Ruling 473: EXTERNAL, so Compose never owns it. A volume Compose creates is
-  # one `docker compose down -v` deletes, and this one is the whole store
-  # (canonical files, the database, everyone's sealed credentials and sign-ins).
-  # `npm run deploy` creates it when it is missing; by hand it is
-  # `docker volume create viberr-data` before the first `up`.
+  # Ruling 504 (narrowing 473): Compose owns it by default, so a starter's
+  # first `up` creates it, and `docker compose down -v` deletes it as it does
+  # any Compose volume: the canonical files, the database, everyone's sealed
+  # credentials and sign-ins. A host that holds real data sets
+  # VIBERR_STORE_EXTERNAL=true in `.env`, which makes it EXTERNAL (ruling 473),
+  # and has the volume made outside Compose: `npm run deploy` does it, or
+  # `docker volume create viberr-data` before the first `up`. Compose then
+  # never creates or deletes it, no `down -v` can touch it, and an `up` without
+  # it fails instead of starting on an empty store. Switched on over a volume
+  # Compose already made, the guard holds for `docker compose down -v` run with
+  # this file, but `docker compose -p <name> down -v` without the file still
+  # finds Compose's labels on it and deletes it (measured on Compose 5.5.1).
   viberr-data:
     name: viberr-data
-    external: true
+    external: ${VIBERR_STORE_EXTERNAL:-false}

@@ -1,4 +1,6 @@
 import {
+  chmodSync,
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -13,6 +15,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
+import {
+  INSTANCE_SECRETS_FILE,
+  instanceSecretsPath,
+} from "~/server/config/instance-secrets.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
@@ -124,6 +130,9 @@ export interface BackupManifest {
     files: number;
     bytes: number;
   };
+  /** True when the artefact carries the secrets the instance generated for
+   *  itself (`instance-secrets.json`, ruling 504). Absent on older artefacts. */
+  instanceSecrets?: boolean;
   /** Plain-English inventory — what a restore of this artefact brings back. */
   contains: string[];
   /** …and what it does not. */
@@ -257,6 +266,18 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   }
   const store = { dirs: copied, ...walkFiles(storeRoot) };
 
+  // ------------------------------------------------- the generated secrets
+  // Ruling 504: an instance whose environment sets no secrets generated its
+  // own into state/. They sealed every secret in the database above, so they
+  // travel with it, or a restore could never open those credentials again.
+  const secrets = instanceSecretsPath(dataRoot);
+  const instanceSecrets = existsSync(secrets);
+  if (instanceSecrets) {
+    const target = path.join(dir, INSTANCE_SECRETS_FILE);
+    copyFileSync(secrets, target);
+    chmodSync(target, 0o600);
+  }
+
   const manifest: BackupManifest = {
     format: BACKUP_FORMAT,
     createdAt: new Date().toISOString(),
@@ -264,8 +285,9 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
     dataRoot,
     projection,
     store,
-    contains: contains(projection !== null ? readFrom : null, copied),
-    excludes: excludes(options.includeRuntimes ?? false),
+    instanceSecrets,
+    contains: contains(projection !== null ? readFrom : null, copied, instanceSecrets),
+    excludes: excludes(options.includeRuntimes ?? false, instanceSecrets),
   };
   writeFileAtomic(
     path.join(dir, MANIFEST_NAME),
@@ -317,11 +339,20 @@ function projectionProvenance(source: ProjectionSource): string {
     : "read from the file itself; the root carried no writer lock";
 }
 
-function contains(projection: ProjectionSource | null, dirs: string[]): string[] {
+function contains(
+  projection: ProjectionSource | null,
+  dirs: string[],
+  instanceSecrets: boolean,
+): string[] {
   const list = [
     ...(projection !== null
       ? [
           `state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included; ${projectionProvenance(projection)})`,
+        ]
+      : []),
+    ...(instanceSecrets
+      ? [
+          "state/instance-secrets.json — the VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY this instance generated for itself (ruling 504). They open every sealed secret in the database, so treat this artefact as a secret. A value the environment sets overrides the file and is not in here.",
         ]
       : []),
     ...dirs.map((dir) => `${dir}/ — the canonical files, copied verbatim`),
@@ -329,7 +360,7 @@ function contains(projection: ProjectionSource | null, dirs: string[]): string[]
   return list;
 }
 
-function excludes(includeRuntimes: boolean): string[] {
+function excludes(includeRuntimes: boolean, instanceSecrets: boolean): string[] {
   return [
     ...(includeRuntimes
       ? []
@@ -337,7 +368,11 @@ function excludes(includeRuntimes: boolean): string[] {
           "runtimes/ — each person's agent CLI logins (users/<id>/codex-home/auth.json is a LIVE credential) and run transcripts. Everyone re-authenticates after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
         ]),
     "state/writer.lock — the running process's lock; restoring one would refuse the next boot.",
-    "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed secret in the database is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys). Back the key up separately.",
+    ...(instanceSecrets
+      ? []
+      : [
+          "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed secret in the database is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys). Back the key up separately.",
+        ]),
     "*.tmp — atomic writes in flight, never content.",
     "projects/*/tasks/*/workspace/ and projects/*/.repo-mirror/ — each task's git checkout and each project's bare mirror. Re-derivable from the remote (the next run re-clones and re-fetches), and a live run may be mid-write, so a copy would be torn as well as large.",
   ];
@@ -427,6 +462,7 @@ const backupManifestSchema = z
         bytes: z.number(),
       })
       .loose(),
+    instanceSecrets: z.boolean().optional(),
     contains: z.array(z.string()),
     excludes: z.array(z.string()),
   })
@@ -456,6 +492,8 @@ export interface RestoreResult {
   /** Directories replaced in the data root. */
   restoredDirs: string[];
   projectionRestored: boolean;
+  /** The artefact's generated secrets were put back (ruling 504). */
+  instanceSecretsRestored: boolean;
   /** Stale `-wal` / `-shm` removed beside the replaced projection. */
   removedSidecars: string[];
   /** Where the replaced data root was moved, when anything was displaced. */
@@ -554,6 +592,23 @@ export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
     }
   }
 
+  // Ruling 504: generated secrets come back with the database they sealed.
+  // The root's own go aside with its displaced database, so that copy still
+  // opens; on a root with no database they sealed nothing, and are replaced.
+  let instanceSecretsRestored = false;
+  if (manifest.instanceSecrets) {
+    const target = instanceSecretsPath(dataRoot);
+    if (displacedTo && existsSync(target)) {
+      const aside = path.join(displacedTo, "state", INSTANCE_SECRETS_FILE);
+      mkdirSync(path.dirname(aside), { recursive: true });
+      renameSync(target, aside);
+    }
+    mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    copyFileSync(path.join(options.artefact, INSTANCE_SECRETS_FILE), target);
+    chmodSync(target, 0o600);
+    instanceSecretsRestored = true;
+  }
+
   logger.info("data root restored from backup", {
     dataRoot,
     artefact: options.artefact,
@@ -564,6 +619,7 @@ export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
     manifest,
     restoredDirs,
     projectionRestored,
+    instanceSecretsRestored,
     removedSidecars,
     displacedTo,
   };
@@ -577,7 +633,10 @@ export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
  * exactly where it is: this process is holding it, and moving it aside would
  * drop the single-writer guard mid-restore (and trip the F18-5 ownership guard
  * of any process still watching it). `runtimes/` is never listed — a restore
- * must not wipe the agent CLI logins it deliberately does not carry.
+ * must not wipe the agent CLI logins it deliberately does not carry. Nor is
+ * `state/instance-secrets.json` (ruling 504): the restore CLI's own env read
+ * generates one on a fresh root, and it moves with the database it sealed
+ * rather than making a root "occupied".
  */
 /** `alsoDirs` carries the OPTIONAL dirs this particular restore is going to
  *  write. `runtimes/` is not in the default list on purpose: a restore from an
@@ -600,7 +659,7 @@ function occupiedPaths(
   const stateDir = path.join(dataRoot, "state");
   if (existsSync(stateDir)) {
     for (const entry of readdirSync(stateDir)) {
-      if (entry === DATA_ROOT_LOCK_FILENAME) continue;
+      if (entry === DATA_ROOT_LOCK_FILENAME || entry === INSTANCE_SECRETS_FILE) continue;
       names.push(path.join("state", entry));
     }
   }
@@ -629,7 +688,9 @@ function renderRestore(result: Omit<RestoreResult, "text">): string {
       ? "  runtimes/ WAS REPLACED from the artefact — everyone's agent CLI logins are now the ones this backup was taken with, and each person may need to reconnect on Profile → Agent accounts"
       : "  runtimes/ was left exactly as it was — this restore did not touch anyone's agent CLI logins",
     "",
-    "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed secret is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys).",
+    result.instanceSecretsRestored
+      ? "state/instance-secrets.json came back from the artefact: the secrets this instance generated for itself, which open the restored credentials (ruling 504). A value the environment sets still overrides them."
+      : "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed secret is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys).",
     "Start the app — boot reconciles the projection against the restored files.",
   );
   return lines.join("\n");

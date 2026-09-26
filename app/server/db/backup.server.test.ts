@@ -1,9 +1,21 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import {
+  createInstanceSecrets,
+  readInstanceSecrets,
+} from "../config/instance-secrets.server";
 import { acquireDataRootLock, DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
 import {
   DEFAULT_MIGRATIONS_DIR,
@@ -348,6 +360,47 @@ describe("restoreBackup", () => {
     expect(() => restoreBackup({ artefact: f.out, dataRoot: f.dataRoot })).toThrow(
       /not a viberr backup/,
     );
+  });
+});
+
+describe("the secrets an instance generated for itself (ruling 504)", () => {
+  it("travel in the artefact, and come back on a fresh root without --force", () => {
+    const f = fixture();
+    const generated = createInstanceSecrets(f.dataRoot);
+    const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
+    f.db.close();
+
+    expect(backup.manifest.instanceSecrets).toBe(true);
+    expect(statSync(path.join(backup.dir, "instance-secrets.json")).mode & 0o777).toBe(0o600);
+    expect(backup.manifest.contains.join(" ")).toContain("treat this artefact as a secret");
+    expect(backup.manifest.excludes.join(" ")).not.toContain("NOT in this artefact");
+
+    // A fresh volume, where the restore CLI's own env read already generated
+    // a different pair. CANARY: count that file as data and this restore
+    // demands --force on an empty root.
+    const fresh = ctx.makeTempDir();
+    createInstanceSecrets(fresh);
+    const result = restoreBackup({ artefact: backup.dir, dataRoot: fresh });
+
+    expect(result.instanceSecretsRestored).toBe(true);
+    expect(readInstanceSecrets(fresh)).toEqual(generated);
+    expect(result.text).toContain("came back from the artefact");
+  });
+
+  it("move the replaced root's own secrets aside with its database, so that copy still opens", () => {
+    const source = fixture();
+    const sourceSecrets = createInstanceSecrets(source.dataRoot);
+    const backup = createBackup({ dataRoot: source.dataRoot, destination: source.out });
+    source.db.close();
+    const target = fixture();
+    const targetSecrets = createInstanceSecrets(target.dataRoot);
+    target.db.close();
+
+    const result = restoreBackup({ artefact: backup.dir, dataRoot: target.dataRoot, force: true });
+
+    expect(readInstanceSecrets(target.dataRoot)).toEqual(sourceSecrets);
+    expect(existsSync(projectionPathIn(result.displacedTo!))).toBe(true);
+    expect(readInstanceSecrets(result.displacedTo!)).toEqual(targetSecrets);
   });
 });
 

@@ -4,12 +4,12 @@ import path from "node:path";
 import { primeHermeticToolchain } from "./toolchain";
 
 /**
- * Vitest setup: hermetic env for the test suite. The app's env parser
- * hard-requires two secrets at the first `getEnv()` call (fail-fast boot
- * validation), and some test paths reach it — e.g. `configureRunServiceForTests`
- * → `createAdapters` → `filteredSpawnEnv`. Locally a developer's `.env`
- * may happen to satisfy it via a local .env; on CI and fresh clones nothing does, and
- * the whole suite fails on env validation.
+ * Vitest setup: hermetic env for the test suite. The first `getEnv()` call
+ * needs two secrets, and some test paths reach it — e.g.
+ * `configureRunServiceForTests` → `createAdapters` → `filteredSpawnEnv`. Left
+ * unset, it would generate random ones into the data root (ruling 504): a file
+ * write and different values on every run. Locally a developer's `.env` may
+ * set them; on CI and fresh clones nothing does.
  *
  * Seed deterministic test values BEFORE any app module loads (setup files run
  * first, and .env loading never overrides values already present). `??=` keeps an

@@ -47,30 +47,45 @@ state on the local filesystem. There is no external database, cache, or queue to
 - The image also carries `db/`, `scripts/`, `app/` and `tsconfig.json`, so the maintenance
   CLIs (`npm run backup`, `keys`, `store:check`, …) run inside the container through `tsx`.
 
-What `compose.yml` adds around it: `env_file: .env`; `NODE_ENV=production` and
+What `compose.yml` adds around it: `env_file: .env`, optional (ruling 504); `NODE_ENV=production` and
 `VIBERR_DATA_ROOT=/data` forced over whatever `.env` says; the four controller unlock
 flags defaulting to `disabled`; the three `VIBERR_BUILD_*` build args (ruling 345);
 `hostname: viberr` (the writer lock's holder identity, see
 [Single-writer safety](#single-writer-safety-b-fd1--f18-5)); `ports:
 "${PORT:-3000}:${PORT:-3000}"`; a healthcheck that fetches `/resources/health` every 30 s
 (timeout 5 s, 3 retries, 20 s start period); `restart: unless-stopped`; and
-`cpus: "7"`. That CPU line is a ceiling, not a reservation: the run-concurrency cap
-counts runs, and one run can fork a test worker per host CPU (measured on a 10-core Mac
-with the cap at 0: six live runs, the container at 723% CPU and 5.4 GB). Tune it to your
-host, roughly cores minus 3.
+`cpus: "${VIBERR_CPUS:-0}"`. That CPU line is a ceiling, not a reservation: the
+run-concurrency cap counts runs, and one run can fork a test worker per host CPU (measured
+on a 10-core Mac with the cap at 0: six live runs, the container at 723% CPU and 5.4 GB).
+Set `VIBERR_CPUS` in `.env` to roughly cores minus 3 on a machine someone also works on.
+Unset, there is no ceiling (ruling 504): Docker refuses to start a container whose ceiling
+exceeds the host's CPU count, so the fixed `7` it used to be stopped a starter's first `up`
+on a small VM.
 
 ## Secrets & configuration
 
 All configuration comes from environment variables, validated at startup
 ([`app/server/config/env.server.ts`](../../app/server/config/env.server.ts)) — the
-process refuses to boot and prints every missing/invalid variable if configuration is
-incomplete. Two secrets are required; everything else is optional (see
-[`.env.example`](../../.env.example) and [configuration.md](configuration.md)).
+process refuses to boot and prints every invalid variable. Every variable is optional
+(see [`.env.example`](../../.env.example) and [configuration.md](configuration.md)),
+the two secrets included (ruling 504). When the environment leaves
+`VIBERR_SESSION_SECRET` or `VIBERR_SECRET_ENCRYPTION_KEY` unset, the first process that
+reads the env generates both, once, into `<data root>/state/instance-secrets.json`: 0600,
+inside the server-only `state/`, so no agent uid can open it. Every process after it (the
+server, the seed, the backup, the key tools) reads the same file. It is never regenerated;
+a file that cannot be read stops the process. The cost is that the key sits on the volume
+beside the secrets it seals, and a backup carries it (below). To manage them yourself, set
+them:
 
 ```bash
 VIBERR_SESSION_SECRET=$(openssl rand -base64 48)        # ≥ 32 chars
 VIBERR_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)  # decodes to exactly 32 bytes (AES-256-GCM)
 ```
+
+A value set in the environment wins over the file, key by key. Once anything has been
+sealed under a generated key, take it over unchanged: copy both values out of the file
+(`docker compose exec app cat /data/state/instance-secrets.json`) into `.env`. A new key
+is a rotation instead (below), or every sealed secret becomes unreadable.
 
 Inject them at runtime — do not bake them into the image (`.dockerignore` excludes
 `.env` and `.env.*` except `.env.example`). With Compose they come from `.env` via
@@ -295,20 +310,30 @@ discovering each absence as an exit-127. For any other command the controller's
 ## First run
 
 ```bash
-cp .env.example .env        # fill in the two required secrets
-docker volume create viberr-data   # the store; external, so Compose never owns it (ruling 473)
 docker compose up -d --build
-docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk, toolchain
+docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk, toolchain; the bootstrap admin's one-time password
 curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
 ```
 
-The store is the named volume `viberr-data` (ruling 460). It is declared `external`
-(ruling 473): Compose never creates it, so `docker compose down -v` can never delete it,
-and an `up` without it fails with "external volume not found" instead of starting on an
-empty store. Create it once, before the first `up` (`docker volume create viberr-data`;
-`npm run deploy` does this itself when it is missing). Docker initialises the empty volume
-from the image's `/data` on that first `up` (owned `node:viberr-agents`, 0750), so there is
-no host directory to create or chown. A volume lives inside Docker, not in the
+No `.env` is needed (ruling 504): Compose treats it as optional, the two secrets are
+generated into the store, and Compose creates the store, the named volume `viberr-data`
+(ruling 460), on this first `up`. Docker initialises the empty volume from the image's
+`/data` (owned `node:viberr-agents`, 0750), so there is no host directory to create or
+chown.
+
+A volume Compose owns is one `docker compose down -v` deletes: the canonical files, the
+database, every sealed credential and every person's sign-in. On a host that holds real
+data, set `VIBERR_STORE_EXTERNAL=true` in `.env` before the first `up` (ruling 473) and
+let the volume be made outside Compose: `npm run deploy` creates it when it is missing, or
+run `docker volume create viberr-data` yourself. The volume is then `external`, so Compose
+never creates or deletes it, no `down -v` can touch it, and an `up` without it fails with
+"external volume not found" instead of starting on an empty store. Switching the guard on
+over a volume Compose already made is weaker (measured on Compose 5.5.1): it prints no
+warning and holds for `docker compose down -v` run with this compose file, but
+`docker compose -p <name> down -v` run without the file finds Compose's labels on the
+volume and deletes it. That host also wants
+`VIBERR_CPUS` (above), and `BETTER_AUTH_URL` and `VIBERR_TRUST_PROXY` behind a TLS proxy
+(below). A volume lives inside Docker, not in the
 repository: read a live instance through the app, `docker compose exec app …` (the
 maintenance CLIs, `ls`, `cat`) or a backup (`npm run backup`, below), never by opening
 files on the host.
@@ -321,6 +346,7 @@ Move it once, with the app stopped:
 ```bash
 docker compose stop app
 npm run store:to-volume          # ./docker-data → the volume viberr-data
+echo VIBERR_STORE_EXTERNAL=true >> .env   # real data, in a volume Compose did not make
 docker compose up -d
 curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
 ```
@@ -466,14 +492,17 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   Read the artefact's own README for what it excludes. Three exclusions matter most:
   `runtimes/` (live agent logins, one set per person under `runtimes/users/` — opt in
   with `--include-runtimes`, and then treat the artefact as a secret),
-  **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the environment, and the git
+  **a `VIBERR_SECRET_ENCRYPTION_KEY` set in the environment**, and the git
   trees under `projects/` — each task's `tasks/<KEY>/workspace/` checkout and each
   project's `.repo-mirror/` bare mirror. Those two are re-derivable from the remote, a live
   run can be mid-write so the copy would be torn, and they dwarf what is actually truth (on
   the tree this was found on, 17M of git against 168K of project and task markdown); the
   next run re-clones and re-fetches. `state/writer.lock` and `*.tmp` files are never
   copied. Without the key every sealed PAT, MCP credential and personal backend API key in
-  the backed-up database is unreadable, so back the key up separately.
+  the backed-up database is unreadable, so back an environment key up separately. A key
+  the instance generated for itself is IN the artefact, as `state/instance-secrets.json`
+  (ruling 504): the manifest says so, and the artefact then opens every sealed secret, so
+  treat it as a secret.
 
   Copying the volume wholesale (`docker run --rm -v viberr-data:/data:ro -v
   "$PWD/backups":/to node:26-slim cp -a /data/. /to/`), `-wal`/`-shm` sidecars included,
@@ -483,7 +512,10 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
 - **Restore** = `npm run restore -- --from <artefact>`. Whole-root restore takes the writer
   lock, requires `--force` if the root is occupied, and *moves* displaced data aside to
   `<dataRoot>.replaced-<ts>/` rather than deleting it; `runtimes/` is displaced and
-  replaced only when the artefact carries it. To recover a single hand-broken canonical
+  replaced only when the artefact carries it. Generated secrets come back with the
+  database they sealed; the replaced root's own move aside with its database, and on a
+  fresh volume the pair the restore's own start generated never counts as data needing
+  `--force` (ruling 504). To recover a single hand-broken canonical
   file without touching the database: `npm run restore -- --from <artefact> --file
   projects/<slug>/tasks/<KEY>/task.md` — the broken bytes are kept beside it as
   `task.md.broken-<ts>`.
