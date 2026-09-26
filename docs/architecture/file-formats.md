@@ -6,6 +6,7 @@ files, agent profile templates and the smaller files beside them. SQLite holds p
 them; [data-model.md](data-model.md) has the tables and the full data-root layout.
 Source of truth: `app/schemas/project-file.schema.ts`, `app/schemas/task-file.schema.ts`,
 `app/schemas/epic-file.schema.ts`, `app/server/files/agent-profile-file.server.ts` (schemas);
+`app/shared/task-refs.ts` (the `blockedBy` and epic id spellings the schemas validate);
 `app/server/files/task-file.server.ts`, `frontmatter.server.ts`, `project-writer.server.ts`,
 `task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers).
 Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 503

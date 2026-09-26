@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EPIC_ID_RE, EPIC_STATUS_VALUES, epicNumber } from "~/shared/task-refs";
 import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
 
 /**
@@ -34,41 +35,18 @@ import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
  * only a hand edit can get there, and a silent correction would hide it.
  */
 
-export const EPIC_STATUS_VALUES = [
-  "planned",
-  "in_progress",
-  "paused",
-  "done",
-  "cancelled",
-] as const;
-export type EpicStatus = (typeof EPIC_STATUS_VALUES)[number];
-
-/** How each status reads to a person, in the order a menu offers them. */
-export const EPIC_STATUS_LABEL = {
-  planned: "Planned",
-  in_progress: "In progress",
-  paused: "Paused",
-  done: "Done",
-  cancelled: "Cancelled",
-} satisfies Record<EpicStatus, string>;
-
-/** Open epics are the ones work still lands in; the closed two are history. */
-export function isEpicOpen(status: EpicStatus): boolean {
-  return status !== "done" && status !== "cancelled";
-}
-
-/** `epic-<n>`: minted by the epic writer from a directory scan. */
-export const EPIC_ID_RE = /^epic-(\d+)$/;
-
-export function isEpicId(value: string): boolean {
-  return EPIC_ID_RE.test(value);
-}
-
-/** The number in an epic id, or null for a string that is not one. */
-export function epicNumber(id: string): number | null {
-  const m = EPIC_ID_RE.exec(id);
-  return m ? Number(m[1]) : null;
-}
+/** The epic's id and statuses live in `shared/task-refs.ts`, which the task
+ *  schema (on every page) and the board and task page read without loading
+ *  this file (ruling 457, FL-1). */
+export {
+  EPIC_ID_RE,
+  EPIC_STATUS_LABEL,
+  EPIC_STATUS_VALUES,
+  epicNumber,
+  isEpicId,
+  isEpicOpen,
+  type EpicStatus,
+} from "~/shared/task-refs";
 
 /**
  * An epic's colour is one of the twenty stage presets (ruling 364): the file

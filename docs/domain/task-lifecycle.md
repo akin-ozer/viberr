@@ -7,8 +7,8 @@
 > `app/server/tasks/required-reviewers.server.ts`, `app/server/tasks/task-closure.server.ts`,
 > `app/server/tasks/file-leases.server.ts`, `app/server/projections/review-queue.server.ts`,
 > `app/schemas/task-file.schema.ts`, `app/shared/workflow/*`, `app/shared/rbac.ts`,
-> `app/shared/dependencies.ts`, `app/shared/file-leases.ts`. File fields are in
-> [file-formats.md](../architecture/file-formats.md).
+> `app/shared/dependencies.ts`, `app/shared/task-refs.ts`, `app/shared/file-leases.ts`.
+> File fields are in [file-formats.md](../architecture/file-formats.md).
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. The shape of every governed mutation
