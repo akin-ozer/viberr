@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { authoredPacketOptions, buildOperatorSystemPrompt } from "./operator-run.server";
+import { HUMANIZER_PROMPT_SECTION } from "./humanizer.server";
 import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
@@ -273,7 +274,9 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
     // prompt (~6.7k, and it grows — ruling 191 added the shell inventory to it)
     // plus the single 24k skill budget. Two budgets would land past 54k, so the
     // bound separates the two cases with room for the base prompt to move.
-    expect(prompt.length).toBeLessThan(40_000);
+    // Ruling 502's writing guide rides every drive at a fixed size and spends
+    // no skill budget, so it is measured out of the bound rather than into it.
+    expect(prompt.length - HUMANIZER_PROMPT_SECTION.length).toBeLessThan(40_000);
   });
 });
 
@@ -322,7 +325,8 @@ describe("buildOperatorSystemPrompt — no KB starves another (ruling 283)", () 
     // …and the 30,000-char document is not in the prompt at all: that is the
     // point of an index, and it is why there is nothing left to ration.
     expect(prompt).not.toContain("B".repeat(200));
-    expect(prompt.length).toBeLessThan(48_000);
+    // Less ruling 502's fixed writing guide, as in the skill-budget bound above.
+    expect(prompt.length - HUMANIZER_PROMPT_SECTION.length).toBeLessThan(48_000);
   });
 });
 

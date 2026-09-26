@@ -1,5 +1,5 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
-import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
+import { joinedPrompt, sortedNames } from "~/server/runtimes/prompt-prefix.server";
 import type { RunMcpServerDeclaration } from "~/server/runtimes/adapter.server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -306,6 +306,44 @@ describe("controller mounts (ruling 107)", () => {
     expect(prompt).toContain("number from 1");
     // And it must say what to do about it, not merely that the hazard exists.
     expect(prompt).toContain("name the document and the section rather than a bare number");
+  });
+
+  /**
+   * Ruling 502. The owner asked for every controller turn to write under the
+   * Humanizer skill, hidden from the people who use Viberr. So it is no grant:
+   * the settings panel and a turn's `run_inputs` read the grants, and neither
+   * may learn of it. (The seeded store's half is in `humanizer.server.test.ts`.)
+   */
+  it("ruling 502: every turn closes its static block with the writing guide, and its disclosure never names it", async () => {
+    const { buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { HUMANIZER_PROMPT_SECTION } = await import("~/server/runtimes/humanizer.server");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+    });
+    const config = resolveControllerConfig(app.dataRoot);
+    const build = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config,
+      mountedMcps: [],
+      unresolvedMcps: [{ name: "kb-architecture", reason: "not registered" }],
+      toolkit: [],
+      deniedTools: [],
+      dataRoot: app.dataRoot,
+    });
+    // CANARY: drop the `parts.push` in buildControllerSystemPrompt and the
+    // static block ends on the shell inventory again.
+    expect(build.prefix.static.at(-1)).toBe(HUMANIZER_PROMPT_SECTION);
+    expect(build.prefix.dynamic.join("")).not.toContain("# How you write");
+    expect(build.prompt.split(HUMANIZER_PROMPT_SECTION)).toHaveLength(2);
+    // The turn's disclosure and the settings panel read the same grants.
+    expect(build.inputs.skills.granted).toEqual(sortedNames(config.skills));
+    expect(config.skills).not.toContain("humanizer");
+    // The tail still carries this turn's own notices.
+    expect(build.prefix.dynamic.join("")).toContain("kb-architecture (not registered)");
   });
 
   it("tells the model the diagnostics are attached, on every turn", async () => {

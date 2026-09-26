@@ -249,16 +249,26 @@ document with its size and sections, read on demand; the project's rulings KB wi
 note, ruling 286), sorted by name, the two-kinds-of-ruling note (ruling 312), the runtime
 ground truth (backend, model, effort, the attached MCP servers in name order), the measured
 shell inventory (ruling 191), the live capability policy (rows sorted by id), the triage
-signals and the non-negotiable rules close the static block; the workspace section (the
-checkout's repository, branch and directory, and what the run may write), the MCP
-governance and write-tool notes, the servers that failed their probe or did not mount and
-the grants whose content did not arrive follow it as the tail. On Claude the two blocks
+signals, the non-negotiable rules and the writing guide (ruling 502) close the static
+block; the workspace section (the checkout's repository, branch and directory, and what
+the run may write), the MCP governance and write-tool notes, the servers that failed their
+probe or did not mount and the grants whose content did not arrive follow it as the tail.
+On Claude the two blocks
 reach the SDK as a `string[]` with `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` between them, so the
 static block is one cache entry shared by every task of the project and the tail its own;
 on Codex the same text, in the same order, is joined into `developer_instructions`. The
 operator is a fresh session per turn on both backends, carries no context window (its
 turns peak under 100k) and asks the provider for no cache lifetime (ruling 374). The
 trigger doctrine and the task snapshot stay in the user turn.
+
+The writing guide (ruling 502) is the Humanizer skill (`blader/humanizer`, MIT), vendored
+unchanged in `app/server/runtimes/humanizer/` and pinned by hash. `HUMANIZER_PROMPT_SECTION`
+("# How you write") frames it and then carries its body: the operator writes all its prose
+by it, in its embedded mode (the final text only), below every other instruction in the
+prompt, and never names it. It rides every drive on both backends whatever the project's
+persona and skill grants say. It is no grant, so the Agents page and the run's
+`run_inputs` skills row never list it; `personaChars` counts it with the rest of the
+prompt.
 
 `operatorTurnDoctrine` builds the trigger-specific instruction and
 `operatorTurnInstruction` wraps it for every trigger: it PREPENDS, in order, the
@@ -746,7 +756,8 @@ ruling 382). There is no write-time length cap (ruling 104); long narration coll
 view-side behind "Show more". A comment is read by people and starts no run: an @mention
 of an agent in it reaches nobody, and the comment is stamped with a note saying which
 agents it did not reach (rulings 214, 252, 262); a handle that matches two people is
-disclosed as not delivered.
+disclosed as not delivered. How the words themselves read is the writing guide's (§4,
+ruling 502).
 
 ## 8. Where to look
 
@@ -761,3 +772,5 @@ disclosed as not delivered.
 - Packet resolution, acceptance, transitions, delivery, `autoInvokeOperator`:
   `app/server/tasks/task-actions.server.ts`.
 - The operator's shipped doctrine: `app/server/seed/assets/operator.definition.md`.
+- The writing guide: `app/server/runtimes/humanizer.server.ts` and the vendored
+  `app/server/runtimes/humanizer/SKILL.md` (ruling 502).

@@ -159,7 +159,7 @@ ctx.cleanup();
 
 ### Doc-pinning tests
 
-Every test under `app/shared/docs/`, and the two elsewhere that read a doc:
+Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a vendored file:
 
 - `app/shared/docs/prd-sync.test.ts` (ruling 27): `design/prd.md` must be byte-identical
   to `planning/planning-artifacts/prd.md`; a failure names the diverging lines.
@@ -199,6 +199,11 @@ Every test under `app/shared/docs/`, and the two elsewhere that read a doc:
   declares appears in `.env.example` (as `NAME=` or `#NAME=`; the declared keys because
   ruling 458(c)'s knobs have no raw read left), except three named test-only hooks and
   the runbook-only `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`.
+- `app/server/runtimes/humanizer.server.test.ts` (ruling 502): the vendored
+  `app/server/runtimes/humanizer/` holds only upstream's `SKILL.md`, matching
+  `HUMANIZER_SKILL_SHA256`, and its MIT `LICENSE`, and `THIRD_PARTY_NOTICES.md` names the
+  repository, the pinned commit and the licence text. Re-vendor from upstream and move
+  the pin with it; never edit the copy in place.
 
 ### Source-scan gates
 

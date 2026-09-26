@@ -91,6 +91,7 @@ import {
   sortedNames,
   type PromptPrefix,
 } from "~/server/runtimes/prompt-prefix.server";
+import { HUMANIZER_PROMPT_SECTION } from "~/server/runtimes/humanizer.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { normalizeTimeZone } from "~/shared/dates/time-zone";
 import { toError } from "~/shared/errors";
@@ -1337,6 +1338,10 @@ export function buildControllerSystemPrompt(
           "to run on.",
       ),
   );
+  // Ruling 502: the writing guide closes the static block on every turn. The
+  // settings panel never lists it and `configSkills` never holds it, because
+  // no admin grants it and no lock or save can remove it.
+  parts.push(HUMANIZER_PROMPT_SECTION);
 
   // ------------------------------------------------ the per-turn tail (dynamic)
   // Ruling 370: what names THIS conversation and THIS turn — the servers that
