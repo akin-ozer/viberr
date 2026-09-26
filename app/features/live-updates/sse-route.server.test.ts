@@ -43,10 +43,6 @@ afterAll(async () => {
   const { resetSseBrokerForTests } = await import(
     "~/server/events/sse-broker.server"
   );
-  const { stopEventPublisherForTests } = await import(
-    "~/server/events/event-publisher.server"
-  );
-  stopEventPublisherForTests();
   resetSseBrokerForTests();
   app.cleanup();
 });

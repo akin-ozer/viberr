@@ -199,8 +199,8 @@ interface PublisherHost {
 
 function publisherHost(): PublisherHost {
   // SAFETY: `PUBLISHER_KEY` is a registry symbol under a viberr-namespaced name
-  // that only `startEventPublisher` / `stopEventPublisherForTests` below read or
-  // write, so the slot holds either the state they put there or nothing at all.
+  // that only `startEventPublisher` below reads or writes, so the slot holds
+  // either the state it put there or nothing at all.
   return globalThis as PublisherHost;
 }
 
@@ -232,11 +232,4 @@ export function startEventPublisher(): void {
     }
   });
   cache[PUBLISHER_KEY] = { unsubscribe };
-}
-
-/** Test-only: detach from the emitter. */
-export function stopEventPublisherForTests(): void {
-  const cache = publisherHost();
-  cache[PUBLISHER_KEY]?.unsubscribe();
-  cache[PUBLISHER_KEY] = undefined;
 }
