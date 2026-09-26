@@ -558,6 +558,13 @@ enter (wrangler's 0700 `.wrangler/tmp/dev-*`), and the server's own `rm -rf` the
 `.git` and stops half-way. By hand, do the same: find the owner with `docker compose exec
 -T app stat -c '%u' <dir>` and remove it as that uid, `docker compose exec -T -u
 <uid>:20000 app rm -rf <dir>`; anything left belongs to another uid, removed the same way.
+What is left as uid 1000 is the server's own (a run's skill plugin copied before ruling
+495, the `workspace/` root itself). Viberr opens that to the agents' group and never
+removes it with `rm` (ruling 495): do the same, `docker compose exec -T app chmod -R -P
+g+rwX <dir>`, then remove as the owner again, and take an emptied `workspace/` root with
+`docker compose exec -T app rmdir <dir>`. A finished task's reclaim does all of this
+itself, so a workspace logged as "could not reclaim a finished task's workspace" before
+ruling 495 goes at the next boot or maintenance pass.
 A checkout left without `.git/HEAD` also heals by itself: the next run's checkout
 preparation removes it as its person and clones again. A run whose checkout could not be
 prepared says so as a workspace fault ("… could not be replaced: EACCES on <path>"), never

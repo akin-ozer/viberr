@@ -715,7 +715,9 @@ projection database and another person's home are refused, its own home and a sh
 workspace are writable, a workspace git launched with the server's overrides runs nothing
 an agent planted and a branch is fetched out of an agent-only checkout through the
 launcher's `git-upload-pack`, an agent-written checkout the server's own `rm -rf` cannot
-finish is removed by the server's replace as its persons (ruling 485), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
+finish is removed by the server's replace as its persons (ruling 485), what the server
+itself wrote in an agent's tree is removable by the person and an emptied workspace root
+goes with the server's `rmdir`, never through an agent's link (ruling 495), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
 included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
 by its marker, and every refusal holds), passes the base URL to Playwright as
 `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless

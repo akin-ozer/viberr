@@ -45,7 +45,9 @@ npm run deploy         # Docker deployment: stamp the build from git, build, up,
   cannot be prepared refuses the run — it never falls back to `node`. The store lives on the
   named volume (a macOS bind mount enforces no permissions), and a directory a run writes is
   created with `shareDirWithAgents`. A tree an agent can write is removed as its person
-  (`removeAgentTree`, ruling 485), never with the server's own `rmSync`.
+  (`removeAgentTree`, ruling 485), never with the server's own `rmSync`: what the server
+  wrote there it only opens to the group (`chmod -R -P g+rwX`), and an emptied root it
+  owns goes with its `rmdir` (ruling 495).
 - `npm run lint` has no suppression list: fix findings, never allowlist.
 - Docs pinned by tests are listed in `docs/development/contributing.md` §5: among them
   `design/prd.md` (a byte-for-byte mirror of the canon PRD), `docs/architecture/file-formats.md`
