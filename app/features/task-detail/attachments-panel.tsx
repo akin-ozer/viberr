@@ -4,6 +4,7 @@ import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server
 import { UPLOADABLE_EXTENSIONS } from "~/shared/attachment-kinds";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { prettySize } from "~/features/kb-browser/tree";
+import { Collapsible } from "~/ui/collapsible";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -99,69 +100,75 @@ export function AttachmentsPanel({
         </span>
       </div>
       {canAttach && <AttachFile />}
-      {moreNotShown && (
-        <p className="ntf-truncated sub">
-          Showing the most recent {attachments.length} of {total} files.
-          Older ones aren't listed here.
-        </p>
-      )}
-      {images.length > 0 && (
-        <div className="attach-grid">
-          {images.map((a) => (
-            // Keyed by name+size so a re-saved file (new size) remounts and
-            // clears a stale "preview unavailable" (broken-tile recovery). The
-            // route serves whitelisted image types inline, sandboxed; a
-            // rotated/oversized/unsupported file degrades to a placeholder.
-            <AttachmentThumb
-              key={`${a.name}:${a.size}`}
-              variant="panel"
-              href={href(a.name)}
-              name={a.name}
-              openLabel={`Open attachment ${a.name} (${prettySize(a.size)})`}
-              onOpen={lightbox({ name: a.name, url: href(a.name) })}
-            >
-              <span className="attach-meta">
-                <span className="attach-name" title={a.name}>{a.name}</span>
-                <span className="attach-size">{prettySize(a.size)}</span>
-              </span>
-              {producers[a.name] && (
-                // The producing message renders the same file as a chip, so the
-                // time here is what ties the two together on a long timeline.
-                <span className="attach-by">
-                  added by {producers[a.name].actor} ·{" "}
-                  <LocalDayDotTime iso={producers[a.name].occurredAt} />
+      {/* Ruling 510: a long list folds the way a long comment does, clamped
+          behind Show more / Show less, so fifteen files don't push the
+          timeline a screen down. The heading, its count and the attach control
+          stay above the fold. */}
+      <Collapsible className="attach-list" contentKey={attachments.length}>
+        {moreNotShown && (
+          <p className="ntf-truncated sub">
+            Showing the most recent {attachments.length} of {total} files.
+            Older ones aren't listed here.
+          </p>
+        )}
+        {images.length > 0 && (
+          <div className="attach-grid">
+            {images.map((a) => (
+              // Keyed by name+size so a re-saved file (new size) remounts and
+              // clears a stale "preview unavailable" (broken-tile recovery). The
+              // route serves whitelisted image types inline, sandboxed; a
+              // rotated/oversized/unsupported file degrades to a placeholder.
+              <AttachmentThumb
+                key={`${a.name}:${a.size}`}
+                variant="panel"
+                href={href(a.name)}
+                name={a.name}
+                openLabel={`Open attachment ${a.name} (${prettySize(a.size)})`}
+                onOpen={lightbox({ name: a.name, url: href(a.name) })}
+              >
+                <span className="attach-meta">
+                  <span className="attach-name" title={a.name}>{a.name}</span>
+                  <span className="attach-size">{prettySize(a.size)}</span>
                 </span>
-              )}
-            </AttachmentThumb>
-          ))}
-        </div>
-      )}
-      {files.map((a) => (
-        // Ruling 105 (+ addendum): a plain click opens the in-app card for
-        // EVERY kind — text files render read-only, anything else shows a
-        // no-preview note; both carry the Download button.
-        <a
-          key={a.name}
-          className="attach-file"
-          href={href(a.name)}
-          target="_blank"
-          rel="noreferrer"
-          onClick={lightbox({ name: a.name, url: href(a.name) })}
-        >
-          <Icon name="file" />
-          {/* Ruling 478(b) (F40-32): the name takes its own line on a phone
-              (app.css), and the whole name rides on a hover where a long one
-              is still cut. */}
-          <span className="attach-name" title={a.name}>{a.name}</span>
-          {producers[a.name] && (
-            <span className="attach-by">
-              by {producers[a.name].actor} ·{" "}
-              <LocalDayDotTime iso={producers[a.name].occurredAt} />
-            </span>
-          )}
-          <span className="attach-size">{prettySize(a.size)}</span>
-        </a>
-      ))}
+                {producers[a.name] && (
+                  // The producing message renders the same file as a chip, so the
+                  // time here is what ties the two together on a long timeline.
+                  <span className="attach-by">
+                    added by {producers[a.name].actor} ·{" "}
+                    <LocalDayDotTime iso={producers[a.name].occurredAt} />
+                  </span>
+                )}
+              </AttachmentThumb>
+            ))}
+          </div>
+        )}
+        {files.map((a) => (
+          // Ruling 105 (+ addendum): a plain click opens the in-app card for
+          // EVERY kind — text files render read-only, anything else shows a
+          // no-preview note; both carry the Download button.
+          <a
+            key={a.name}
+            className="attach-file"
+            href={href(a.name)}
+            target="_blank"
+            rel="noreferrer"
+            onClick={lightbox({ name: a.name, url: href(a.name) })}
+          >
+            <Icon name="file" />
+            {/* Ruling 478(b) (F40-32): the name takes its own line on a phone
+                (app.css), and the whole name rides on a hover where a long one
+                is still cut. */}
+            <span className="attach-name" title={a.name}>{a.name}</span>
+            {producers[a.name] && (
+              <span className="attach-by">
+                by {producers[a.name].actor} ·{" "}
+                <LocalDayDotTime iso={producers[a.name].occurredAt} />
+              </span>
+            )}
+            <span className="attach-size">{prettySize(a.size)}</span>
+          </a>
+        ))}
+      </Collapsible>
     </section>
   );
 }

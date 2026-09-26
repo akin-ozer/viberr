@@ -5,6 +5,7 @@ import { createCssVariablesTheme } from "shiki/core";
 import { describe, expect, it } from "vitest";
 import { escapeRegExp } from "~/shared/text/regexp";
 import { THEME_OPTIONS, toToken } from "~/ui/code-highlight";
+import { CLEAR_PART } from "~/ui/collapsible";
 import { balanced, cssRules, type CssRule } from "../test-support/css-rules";
 
 /**
@@ -6522,5 +6523,36 @@ describe("app.css ruling 501: the Details panel's properties", () => {
     expect(RULES.some((r) => r.selector.includes(dead) && r.decls.get("color") === "var(--danger)")).toBe(true);
     // The retired editor's rules are gone with it.
     expect(RULES.flatMap(parts).filter((s) => /meta-edit|meta-field|meta-label|meta-chips/.test(s))).toEqual([]);
+  });
+});
+
+describe("app.css ruling 510: a task's attachment list folds like a long comment", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decl = (selector: string, prop: string) => {
+    let value: string | undefined;
+    for (const r of plain) if (parts(r).includes(selector) && r.decls.has(prop)) value = r.decls.get(prop);
+    return value;
+  };
+
+  it("clips and fades any fold's box, and fades it where the keyboard check says plain sight ends", () => {
+    // CANARY: put `.md-body` back in the clamped selector and the attachment
+    // list clamps with no clip and no fade, its rows painted over the toggle.
+    expect(decl(".md-collapse > .clamped", "overflow")).toBe("hidden");
+    const fade = `linear-gradient(to bottom, #000 ${Math.round(CLEAR_PART * 100)}%, transparent)`;
+    expect(decl(".md-collapse > .clamped", "mask-image")).toBe(fade);
+    expect(decl(".md-collapse > .clamped", "-webkit-mask-image")).toBe(fade);
+  });
+
+  it("leaves the folded list room for a row's focus ring, and moves no row to make it", () => {
+    // CANARY: drop the list's padding and a clamped list cuts the sides off the
+    // ring of every row, which runs the panel's full width.
+    expect(decl(".attach-list", "padding")).toBe("4px");
+    expect(decl(".attach-list", "margin")).toBe("-4px");
+    // Spaced by the list's gap, so no row's margin collapses through the box
+    // one moment and stays inside it the next, when the fold clamps.
+    expect(decl(".attach-list", "display")).toBe("flex");
+    expect(decl(".attach-list", "gap")).toBe(".5rem");
+    expect(decl(".attach-file", "margin-top")).toBeUndefined();
   });
 });
