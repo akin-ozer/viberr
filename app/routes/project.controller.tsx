@@ -27,6 +27,8 @@ import {
   selectedConversationId,
 } from "~/features/controller/controller-query.server";
 import { readWorkspace } from "./project-workspace.server";
+import { isOrgAdmin } from "~/server/auth/project-authority.server";
+import { undoKbCorrectionOnTask } from "~/server/tasks/kb-correction-actions.server";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
@@ -180,6 +182,33 @@ export async function action({ request, params }: Route.ActionArgs) {
         { userId: auth.user.id, label: auth.user.email },
       );
       return { ok: true as const, toast: result.message };
+    }
+    if (intent === "kb-correction-undo") {
+      // Ruling 498: the Knowledge base panel's Undo, confirmed on the page.
+      // Direct, not through the controller: an undo is the recorded edit in
+      // reverse, with nothing to compose. Org admins, because it edits an org
+      // knowledge base.
+      if (!isOrgAdmin(db, auth.user.id)) {
+        return data(
+          {
+            ok: false as const,
+            error: "Only an org admin can undo a knowledge-base correction: it edits an org knowledge base.",
+          },
+          { status: 403 },
+        );
+      }
+      const reason = String(formData.get("reason") ?? "").trim();
+      const result = await undoKbCorrectionOnTask(
+        db,
+        {},
+        {
+          id: String(formData.get("id") ?? ""),
+          projectSlug: params.slug,
+          reason: reason || null,
+          person: { userId: auth.user.id, label: auth.user.email, name: auth.user.name },
+        },
+      );
+      return { ok: result.outcome === "done", toast: result.message };
     }
     if (intent === "interrupt") {
       // The Live-run strip's Interrupt, confirmed on the page. The engine

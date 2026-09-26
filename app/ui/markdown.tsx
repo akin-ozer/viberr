@@ -168,7 +168,7 @@ function linkTaskKeys(value: string, links: TaskLinks): HastNode[] | null {
     out.push({
       type: "element",
       tagName: "a",
-      properties: { className: [key.startsWith("kp-") ? "kp-ref" : "task-ref"], href },
+      properties: { className: [/^k[pc]-/.test(key) ? "kp-ref" : "task-ref"], href },
       children: [{ type: "text", value: key }],
     });
     last = match.index + key.length;
@@ -335,8 +335,9 @@ function componentsFor(
           </Link>
         );
       }
-      // A proposal id jumps to its entry on this page (the Controller page's
-      // Proposals panel), so it is a plain in-page anchor, never a new tab.
+      // A proposal or correction id jumps to its entry on this page (the
+      // Controller page's Knowledge base panel), so it is a plain in-page
+      // anchor, never a new tab.
       if (className === "kp-ref" && href) {
         return (
           <a href={href} className="kp-ref">

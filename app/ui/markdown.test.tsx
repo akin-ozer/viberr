@@ -346,19 +346,23 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     expect(container.querySelector("a:not(.task-ref)")!.getAttribute("href")).toBe("https://x.test");
   });
 
-  it("links a proposal id the page resolved to its in-page entry, in the same tab", () => {
+  it("links a proposal or correction id the page resolved to its in-page entry, in the same tab", () => {
     const { container } = render(
       <MemoryRouter>
         <Markdown
-          text={"Open: kp-9f258c9ef4 and kp-0000000000."}
-          taskLinks={{ "kp-9f258c9ef4": "#proposal-kp-9f258c9ef4" }}
+          text={"Open: kp-9f258c9ef4 and kp-0000000000; undone: kc-0123456789."}
+          taskLinks={{ "kp-9f258c9ef4": "#proposal-kp-9f258c9ef4", "kc-0123456789": "#correction-kc-0123456789" }}
         />
       </MemoryRouter>,
     );
-    const ref = container.querySelector("a.kp-ref")!;
-    expect(ref.getAttribute("href")).toBe("#proposal-kp-9f258c9ef4");
-    expect(ref.hasAttribute("target")).toBe(false);
-    expect(container.querySelectorAll("a")).toHaveLength(1);
+    const refs = [...container.querySelectorAll("a.kp-ref")];
+    expect(refs.map((a) => a.getAttribute("href"))).toEqual([
+      "#proposal-kp-9f258c9ef4",
+      // Ruling 498: a correction's id links the same way.
+      "#correction-kc-0123456789",
+    ]);
+    expect(refs.every((a) => !a.hasAttribute("target"))).toBe(true);
+    expect(container.querySelectorAll("a")).toHaveLength(2);
   });
 });
 

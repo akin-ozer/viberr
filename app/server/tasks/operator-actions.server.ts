@@ -189,7 +189,7 @@ import {
 } from "./required-reviewers.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { liveMergeable } from "~/features/github/github-pills";
-import { proposeKbCorrection, type KbCorrection } from "./kb-proposal-actions.server";
+import { correctKnowledgeDoc, type KbCorrectionRequest } from "./kb-correction-actions.server";
 import { relayToTask } from "./task-relay.server";
 import {
   listKnowledgeBaseNames,
@@ -2099,8 +2099,8 @@ function contextConflictEvent(
  * The knowledge bases a run on this task was given: the operator's own (its
  * grants and the project's rulings) and every engaged agent's. Ruling 483: the
  * operator relays a correction an agent proved, and on Codex the agent has no
- * tool to file one itself, so the operator may propose against any base a run
- * on this task was handed, not only its own.
+ * tool to make one itself, so the operator may correct any base a run on this
+ * task was handed, not only its own.
  */
 function kbsGivenToTaskRuns(
   ctx: TaskMutationContext,
@@ -2124,23 +2124,24 @@ function kbsGivenToTaskRuns(
 }
 
 /**
- * F39-1/F39-7 (pass 39, ruling 378), generalized by ruling 483 (F40-53): the
- * operator PROPOSES a correction to a knowledge base, in the document itself,
- * and nothing more.
+ * F39-1/F39-7 (pass 39, ruling 378), generalized by ruling 483 (F40-53) and
+ * made a write by ruling 498: the operator CORRECTS a knowledge base, in the
+ * document itself.
  *
- * Ruling 378 gave it this for the project's rulings only. Live in pass 40 the
- * stale facts were in the akin-dossier and the deploy runbook: two agents
- * re-derived the same corrections an hour apart, one wrote that the runbook
- * was read-only to it, the operator answered "I'm not changing them myself",
- * and the next directives still sent agents to the stale lines. `kb` names the
- * knowledge base (null keeps ruling 378's default, the project's rulings);
- * `line` anchors the proposal to what it corrects. Promotion stays a person's
- * or the controller's edit.
+ * Ruling 378 gave it a proposal against the project's rulings only; ruling 483
+ * widened it to every knowledge base a run on the task holds (live in pass 40
+ * the stale facts were in the akin-dossier and the deploy runbook, and the
+ * operator answered "I'm not changing them myself"). Ruling 498 (owner,
+ * 2026-09-26: "No human can approve all of these while inspecting them
+ * thoroughly") writes the correction as it is made: `replaces` is the exact
+ * passage, `text` what takes its place, and a person undoes it from the
+ * Controller page. `kb` null keeps ruling 378's default, the project's rulings.
+ * Same gate as the typed event it posts.
  */
-export async function operatorProposeKbCorrection(
+export async function operatorCorrectKnowledgeDoc(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string } & KbCorrection,
+  input: { projectSlug: string; taskKey: string } & KbCorrectionRequest,
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   if (gate(authority, "append-typed-events") === "deny") {
@@ -2149,12 +2150,11 @@ export async function operatorProposeKbCorrection(
       message: "The operator cannot post events in this project.",
     };
   }
-  return proposeKbCorrection(db, ctx, {
+  return correctKnowledgeDoc(db, ctx, {
     ...input,
     actorRef: { kind: "operator" },
     filedBy: "Operator",
     auditActor: OPERATOR_AUDIT_ACTOR,
-    from: OPERATOR_NOTIFY_FROM,
     allowedKbs: kbsGivenToTaskRuns(ctx, input.projectSlug, input.taskKey, authority.kb),
   });
 }

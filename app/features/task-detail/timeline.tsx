@@ -2,7 +2,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useFetcher, useLocation, useNavigate, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
-import { hashTarget, timelineEventAnchor, timelineEventTime } from "~/shared/page-anchors";
+import {
+  hashTarget,
+  KB_CORRECTIONS_ANCHOR,
+  KB_PROPOSALS_ANCHOR,
+  timelineEventAnchor,
+  timelineEventTime,
+} from "~/shared/page-anchors";
 import { useHashTarget } from "~/ui/use-hash-target";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { gatesPill } from "~/features/github/github-pills";
@@ -239,7 +245,7 @@ export const TimelineItem = memo(function TimelineItem({
   attachmentNames,
   attachmentsBase,
   taskLinks,
-  proposalsHref,
+  knowledgeHref,
 }: {
   ev: TimelineEventRender;
   /** Ruling 497: the id a link to this event names (`timelineEventAnchor`).
@@ -249,9 +255,10 @@ export const TimelineItem = memo(function TimelineItem({
   targeted?: boolean;
   /** U39-31: the other tasks the event names, key to path. */
   taskLinks?: TaskLinks;
-  /** Ruling 483: where a `proposal` event links (the project's open
-   *  proposals); absent in bare renders. */
-  proposalsHref?: string;
+  /** Rulings 483 and 498: the project's Controller page, whose Knowledge base
+   *  panel a `proposal` or an agent's `kb_correction` links to; absent in bare
+   *  renders. */
+  knowledgeHref?: string;
   /** Known mentionable names, for whole-name @mention chips in comment bodies
    *  AND in typed-event text. */
   mentionNames?: string[];
@@ -386,14 +393,21 @@ export const TimelineItem = memo(function TimelineItem({
             </div>
             {/* Ruling 483 (F40-59): a proposal is a decision a person owes, and
                 the project's Controller page is where it is promoted or
-                dismissed and where its document opens. A plain string prop,
-                never `useParams`: a router hook re-renders every memoised row
-                on each router change (ruling 457, CS-3). */}
-            {ev.type === "proposal" && proposalsHref && (
-              <Link className="linkish tl-proposal-link" to={proposalsHref}>
-                Open proposals
-              </Link>
-            )}
+                dismissed and where its document opens. Ruling 498: a
+                correction an agent wrote is reviewed and undone there; a
+                person's undo (the one `kb_correction` a person writes) owes
+                nothing. A plain string prop, never `useParams`: a router hook
+                re-renders every memoised row on each router change (ruling
+                457, CS-3). */}
+            {knowledgeHref &&
+              (ev.type === "proposal" || (ev.type === "kb_correction" && ev.actor.kind !== "human")) && (
+                <Link
+                  className="linkish tl-proposal-link"
+                  to={`${knowledgeHref}#${ev.type === "proposal" ? KB_PROPOSALS_ANCHOR : KB_CORRECTIONS_ANCHOR}`}
+                >
+                  {ev.type === "proposal" ? "Open proposals" : "Review or undo"}
+                </Link>
+              )}
             {ev.evidence && (
               <div className="tl-card evidence">
                 {/* The add/del columns are a DIFF shape. A verdict's rows are
@@ -508,12 +522,13 @@ export function Timeline({
   attachmentNames,
   attachmentsBase,
   taskLinks,
-  proposalsHref,
+  knowledgeHref,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
-  /** Ruling 483: the project's open proposals, which a `proposal` event links. */
-  proposalsHref?: string;
+  /** Rulings 483 and 498: the project's Controller page, which a `proposal` or
+   *  `kb_correction` event links. */
+  knowledgeHref?: string;
   /** U39-31: the other tasks the slice names, key to path (loader). */
   taskLinks?: TaskLinks;
   hasMore: boolean;
@@ -806,7 +821,7 @@ export function Timeline({
               {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}
               {...(links ? { taskLinks: links } : {})}
-              {...(proposalsHref ? { proposalsHref } : {})}
+              {...(knowledgeHref ? { knowledgeHref } : {})}
             />
           ))
         )}

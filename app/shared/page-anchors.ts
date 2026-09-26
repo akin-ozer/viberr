@@ -28,12 +28,22 @@ export const TASK_DECISION_ANCHOR = "decision";
 /** The task page's pending recommendations, each a decision to apply. */
 export const TASK_RECOMMENDATIONS_ANCHOR = "recommendations";
 
-/** The project Controller page's Proposals panel (ruling 483). */
+/** The project Controller page's open proposals (ruling 483), listed inside
+ *  its Knowledge base panel since ruling 498. */
 export const KB_PROPOSALS_ANCHOR = "kb-proposals";
 
 /** One open proposal's entry in that panel. */
 export function proposalAnchor(id: string): string {
   return `proposal-${id}`;
+}
+
+/** Ruling 498: the same page's Knowledge base panel, which lists the
+ *  corrections agents wrote (the proposals above sit inside it). */
+export const KB_CORRECTIONS_ANCHOR = "kb-corrections";
+
+/** One correction's entry in that panel. */
+export function correctionAnchor(id: string): string {
+  return `correction-${id}`;
 }
 
 /** The element id a URL's hash names; a hash that is not valid percent-encoding

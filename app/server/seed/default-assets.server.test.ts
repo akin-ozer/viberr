@@ -368,11 +368,37 @@ describe("shipped-asset refresh (B-OP1)", () => {
       ),
     ).toBe(true);
     const assets = path.join(import.meta.dirname, "assets");
+    const guide = readFileSync(path.join(assets, "controller-guide.skill.md"), "utf8");
+    expect(guide).toContain("`resolve_kb_proposal`");
+  });
+
+  it("ruling 498: the operator skill and controller guide shipped before corrections were written are recorded prior hashes", async () => {
+    // Canary: omit either outgoing hash and a live store keeps the version that
+    // tells agents to propose and the controller to wait for a person.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    const path = await import("node:path");
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "viberr-app-expertise", "SKILL.md"),
+        "195516db43c82959b5d0ec94806e15de0a1b90fd68f02525c95e43d7effdae2d",
+        {},
+      ),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "controller-guide", "SKILL.md"),
+        "a8e1cd90673ab1b2eccf08aeeff10f1e7f8ae181a4dc0c82518b08303dd5ba85",
+        {},
+      ),
+    ).toBe(true);
+    const assets = path.join(import.meta.dirname, "assets");
     const skill = readFileSync(path.join(assets, "viberr-app-expertise.skill.md"), "utf8");
     const guide = readFileSync(path.join(assets, "controller-guide.skill.md"), "utf8");
-    expect(skill).toContain("`propose_kb_correction`");
-    expect(skill).not.toContain("propose_ruling");
-    expect(guide).toContain("`resolve_kb_proposal`");
+    expect(skill).toContain("`correct_knowledge_doc`");
+    expect(skill).not.toContain("propose_kb_correction");
+    expect(skill).not.toContain("not binding");
+    expect(guide).toContain("`undo_kb_correction`");
+    expect(guide).toContain("`kbCorrections`");
   });
 
   it("refreshes an UNEDITED copy of an older shipped version", async () => {

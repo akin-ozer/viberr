@@ -13,23 +13,18 @@ import { kbStoreTargetForDir, subDirNames } from "./resources.server";
 import { writeStoreDoc } from "./store-files.server";
 
 /**
- * Ruling 483: a correction to a knowledge base, PROPOSED by an agent that
- * proved a line of it wrong, filed in the document beside what it corrects.
+ * Rulings 378 and 483: the knowledge-base corrections agents PROPOSED, filed in
+ * the document beside what they correct, under "## Proposed corrections (not
+ * binding)" (ruling 378's "## Proposed (not binding)" before that), for a
+ * person to promote into the settled text or dismiss.
  *
- * Ruling 378 gave the operator this for ONE knowledge base, the project's
- * rulings. Live in pass 40 the facts that went stale were somewhere else: the
- * akin-dossier's platform facts (a wrangler version, an output path) and the
- * deploy runbook's Step 1. The Site Engineer found one at 22:21, the Platform
- * Engineer re-derived both an hour later and wrote "the knowledge-base runbook
- * is read-only to me", the operator answered "I'm not changing them myself",
- * and the next directives still sent agents to the stale lines. So any agent on
- * a task may now propose against any knowledge base its run was given, and the
- * proposal lives in the document itself: every later reader meets it beside
- * the line, and the index every run is handed names the section.
- *
- * A proposal binds nobody. It edits no settled line and removes nothing; a
- * person, or the controller when a person asks it, promotes it into the
- * settled text or dismisses it (the pass-39 model, ruling 378).
+ * Ruling 498 ended the filing. The owner, 2026-09-26: "proposal spam is
+ * exhausting, it should be easier to get them merged to the kb. No human can
+ * approve all of these while inspecting them thoroughly." An agent's correction
+ * is now written into the settled text as it is made, and a person undoes the
+ * ones they disagree with (`kb-corrections.server.ts`). Nothing files an entry
+ * here any more; this module reads and closes the ones documents still hold,
+ * which runs keep reading beside the lines they name until someone closes them.
  *
  * The document is the record. There is no second list of proposals to drift
  * from it: an entry is open while it stands under the heading, and a person who
@@ -38,19 +33,10 @@ import { writeStoreDoc } from "./store-files.server";
  * edits that entry.
  */
 
-/** The heading every proposal is filed under, in the corrected document. */
-export const KB_PROPOSALS_HEADING = "## Proposed corrections (not binding)";
-
-/** This heading, or ruling 378's "## Proposed (not binding)", which rulings
- *  documents filed before ruling 483 carry: read as the same section, and
- *  renamed to {@link KB_PROPOSALS_HEADING} by the next filing. */
+/** The section's heading as ruling 483 filed it, or ruling 378's
+ *  "## Proposed (not binding)", which rulings documents filed before ruling
+ *  483 carry: both are the same section. */
 const PROPOSALS_HEADING_RE = /^## Proposed(?: corrections)? \(not binding\)\s*$/;
-
-/** The sentence under a new heading: what the section is and who closes it. */
-export const KB_PROPOSALS_INTRO =
-  "Raised by agents from evidence on a task. **Nothing here is binding.** A person, or the " +
-  "controller when a person asks it, promotes an entry into the settled text above or " +
-  "dismisses it.";
 
 /** One open proposal, as its document holds it. */
 export interface KbProposal {
@@ -208,58 +194,6 @@ export function parseKbProposals(kb: string, doc: string, raw: string): KbPropos
   return findSection(raw).entries.map((e) => parseEntry(kb, doc, e.text));
 }
 
-/** A value on the entry's own indented lines. Blank lines would end the list
- *  item, so they are dropped; every other line keeps its text. */
-function indented(value: string): string {
-  return value
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .filter((l) => l.trim() !== "")
-    .join("\n  ");
-}
-
-export interface KbProposalEntryInput {
-  taskKey: string;
-  /** `YYYY-MM-DD`. */
-  filedOn: string;
-  filedBy: string;
-  line: string | null;
-  correction: string;
-  evidence: string;
-}
-
-/** The markdown one proposal is filed as. */
-export function formatKbProposalEntry(input: KbProposalEntryInput): string {
-  // A comma or bracket inside the filer's name would re-split the stamp.
-  const filer = input.filedBy.replace(/[,[\]]/g, " ").replace(/\s+/g, " ").trim();
-  return (
-    `- **[${input.taskKey}, ${input.filedOn}${filer ? `, ${filer}` : ""}]** ${indented(input.correction)}` +
-    (input.line ? `\n  Line: ${indented(input.line)}` : "") +
-    `\n  Evidence: ${indented(input.evidence)}`
-  );
-}
-
-/**
- * The document with one entry filed at the end of its proposals section,
- * creating the section at the end of the document when it has none. Ruling
- * 378's heading is renamed in the same write. Built by slicing, never by
- * `String.replace` with a string: a proposal is shell and Makefile evidence,
- * where `$$` and `$&` are ordinary text.
- */
-export function withKbProposalFiled(raw: string, entry: string): string {
-  const section = findSection(raw);
-  if (section.headingStart === -1) {
-    return `${raw.trimEnd()}\n\n${KB_PROPOSALS_HEADING}\n\n${KB_PROPOSALS_INTRO}\n\n${entry}\n`;
-  }
-  const head = raw.slice(0, section.headingStart);
-  const body = raw.slice(section.headingEnd, section.sectionEnd).trimEnd();
-  const after = raw.slice(section.sectionEnd);
-  return (
-    `${head}${KB_PROPOSALS_HEADING}\n${body ? `${body}\n\n` : "\n"}${entry}\n` +
-    (after ? `\n${after.replace(/^\n+/, "")}` : "")
-  );
-}
-
 /** The document without one entry. The last entry takes the section with it,
  *  so a document with nothing proposed no longer advertises a section. */
 function withoutEntry(raw: string, kb: string, doc: string, id: string): string | null {
@@ -284,7 +218,7 @@ function withoutEntry(raw: string, kb: string, doc: string, id: string): string 
 
 /** Loose comparison for a quoted line: case, markdown emphasis, quotes and
  *  whitespace do not decide whether a model quoted the line it means. */
-function looseText(value: string): string {
+export function looseText(value: string): string {
   return value
     .toLowerCase()
     .replace(/[`*_"“”‘’']/g, "")
@@ -292,11 +226,16 @@ function looseText(value: string): string {
     .trim();
 }
 
-/** The settled text: the document without its proposals section. */
-function settledText(raw: string): string {
+/**
+ * Where a document's proposals section stands, heading to section end, or null
+ * when it has none. Ruling 498 corrects the settled text around it: a passage
+ * an entry merely quotes is not in the document.
+ */
+export function legacyProposalsSpan(raw: string): { start: number; end: number } | null {
   const section = findSection(raw);
-  if (section.headingStart === -1) return raw;
-  return raw.slice(0, section.headingStart) + raw.slice(section.sectionEnd);
+  return section.headingStart === -1
+    ? null
+    : { start: section.headingStart, end: section.sectionEnd };
 }
 
 // ------------------------------------------------------------------ reading
@@ -399,108 +338,6 @@ export function kbProposalCountsByProject(
 /** One open proposal by id, wherever it stands. */
 export function findKbProposal(id: string, dataRoot?: string): KbProposal | null {
   return listKbProposals(dataRoot).find((p) => p.id === id.trim()) ?? null;
-}
-
-// ------------------------------------------------------------------ filing
-
-export interface FileKbProposalInput extends Omit<KbProposalEntryInput, "filedOn"> {
-  /** The knowledge base's store directory. */
-  kb: string;
-  /** The document's path inside it. */
-  doc: string;
-  actor: AuditActor;
-  now?: Date;
-}
-
-export type FileKbProposalResult =
-  | { ok: true; proposal: KbProposal; created: boolean; bytes: number }
-  | { ok: false; message: string };
-
-function heldDocsSentence(kb: string, dataRoot?: string): string {
-  let held: string[] = [];
-  try {
-    held = collectKbDocs(kbDirPath(kb, dataRoot)).map((d) => d.rel);
-  } catch {
-    held = [];
-  }
-  if (held.length === 0) return "It holds no documents.";
-  const shown = held.slice(0, 40);
-  return (
-    `It holds: ${shown.join(", ")}` +
-    (held.length > shown.length ? `, and ${held.length - shown.length} more.` : ".")
-  );
-}
-
-/**
- * File one proposal into a document the knowledge base already holds.
- *
- * Refuses, writing nothing, when the document is not one the knowledge base
- * holds (a typo would otherwise CREATE a settled-looking document, ruling 378)
- * and when the quoted line is not in the settled text (a proposal is anchored
- * to the line it corrects, or it is not beside it). The same correction of the
- * same line, still open, is the same proposal: it is returned, not stacked.
- */
-export async function fileKbProposal(
-  db: DatabaseSync,
-  input: FileKbProposalInput,
-  ctx: { dataRoot?: string } = {},
-): Promise<FileKbProposalResult> {
-  const located = resolveKbDocPath(input.kb, input.doc, ctx.dataRoot);
-  if (!located) {
-    return {
-      ok: false,
-      message:
-        `"${input.doc}" is not a document in the knowledge base ${input.kb}. Nothing was written. ` +
-        heldDocsSentence(input.kb, ctx.dataRoot),
-    };
-  }
-  const target = kbStoreTargetForDir(db, input.kb, ctx);
-  if (!target) {
-    return {
-      ok: false,
-      message: `The knowledge base "${input.kb}" no longer resolves in the store. Nothing was written.`,
-    };
-  }
-  return withFileLock(`kb-doc:${located.abs}`, () => {
-    const raw = readFileSync(located.abs, "utf8");
-    const line = input.line?.trim() ? input.line.trim().replace(/^["“]|["”]$/g, "").trim() : null;
-    if (line && !looseText(settledText(raw)).includes(looseText(line))) {
-      return {
-        ok: false as const,
-        message:
-          `The line you quote is not in the settled text of ${input.kb}/${located.rel}. Nothing was written. ` +
-          "Quote it as the document has it (a distinctive phrase of it is enough), or leave `line` empty when the " +
-          "correction adds something the document does not say.",
-      };
-    }
-    const existing = parseKbProposals(input.kb, located.rel, raw).find(
-      (p) =>
-        looseText(p.correction) === looseText(input.correction) &&
-        looseText(p.line ?? "") === looseText(line ?? ""),
-    );
-    if (existing) return { ok: true as const, proposal: existing, created: false, bytes: 0 };
-    const entry = formatKbProposalEntry({
-      taskKey: input.taskKey,
-      filedOn: (input.now ?? new Date()).toISOString().slice(0, 10),
-      filedBy: input.filedBy,
-      line,
-      correction: input.correction,
-      evidence: input.evidence,
-    });
-    const body = withKbProposalFiled(raw, entry);
-    const segments = located.rel.split("/");
-    const name = segments.pop()!;
-    writeStoreDoc(db, target, segments, name, body, input.actor, { overwrite: true });
-    publishResourceUpdated("kb", target.id);
-    const proposal = parseEntry(input.kb, located.rel, entry);
-    return {
-      ok: true as const,
-      proposal,
-      created: true,
-      // Ruling 466: UTF-8 bytes, never a string length.
-      bytes: Buffer.byteLength(entry, "utf8"),
-    };
-  });
 }
 
 // ------------------------------------------------------------------ closing
@@ -622,9 +459,10 @@ export async function resolveKbProposal(
   });
 }
 
-/** The path a person opens a proposal's document at: Instance settings, with
- *  that knowledge base's browser open on the document (org admins). */
-export function kbProposalDocHref(proposal: Pick<KbProposal, "kb" | "doc">): string {
-  const params = new URLSearchParams({ tab: "resources", kb: proposal.kb, doc: proposal.doc });
+/** The path a person opens a knowledge-base document at: Instance settings,
+ *  with that knowledge base's browser open on the document (org admins). A
+ *  proposal's "Open document" and a correction's (ruling 498) both go there. */
+export function kbDocHref(place: { kb: string; doc: string }): string {
+  const params = new URLSearchParams({ tab: "resources", kb: place.kb, doc: place.doc });
   return `/org/settings?${params.toString()}`;
 }

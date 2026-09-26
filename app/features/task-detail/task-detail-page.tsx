@@ -3,11 +3,7 @@ import { useFetcher } from "react-router";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TaskLinks } from "~/shared/task-key-links";
-import {
-  KB_PROPOSALS_ANCHOR,
-  TASK_DECISION_ANCHOR,
-  TASK_RECOMMENDATIONS_ANCHOR,
-} from "~/shared/page-anchors";
+import { TASK_DECISION_ANCHOR, TASK_RECOMMENDATIONS_ANCHOR } from "~/shared/page-anchors";
 import { useHashTarget } from "~/ui/use-hash-target";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
@@ -1091,8 +1087,9 @@ export function TaskDetailPage({
           // loop" — directly under the Live-run strip saying otherwise. Same
           // condition that renders that strip, so the two cannot disagree.
           runLive={runtime.length > 0}
-          // Ruling 483: a proposal event links to the project's open proposals.
-          proposalsHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller#${KB_PROPOSALS_ANCHOR}`}
+          // Rulings 483 and 498: a proposal or a correction links to the
+          // project's Controller page, where its panel lists them.
+          knowledgeHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller`}
           {...(attachmentsBase
             ? {
                 attachmentNames: attachments.map((a) => a.name),

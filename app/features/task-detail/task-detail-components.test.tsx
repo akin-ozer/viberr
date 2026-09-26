@@ -431,10 +431,12 @@ describe("TimelineItem", () => {
    * Ruling 483 (F40-59): a proposal asks a person to decide, and the event
    * used to carry no way to where that happens. Inside a project it links to
    * the project's Controller page, where the proposal is listed with its
-   * document and its Promote and Dismiss.
+   * document and its Promote and Dismiss. Ruling 498: a correction an agent
+   * wrote links there too, where it is reviewed and undone; a person's undo
+   * owes nothing and links nowhere.
    */
-  it("ruling 483: a proposal event links to the project's open proposals, and no other event does", () => {
-    const href = "/projects/akinozer-com/controller#kb-proposals";
+  it("rulings 483 and 498: a proposal and an agent's correction link to the Controller page's panel, and no other event does", () => {
+    const href = "/projects/akinozer-com/controller";
     const proposal = ev({
       type: "proposal",
       actor: { kind: "agent", name: "Operator" },
@@ -443,21 +445,43 @@ describe("TimelineItem", () => {
     });
     const { getByRole, unmount } = render(
       <MemoryRouter>
-        <TimelineItem ev={proposal} proposalsHref={href} />
+        <TimelineItem ev={proposal} knowledgeHref={href} />
       </MemoryRouter>,
     );
     // CANARY: drop the link and the event names a decision with no way to it.
-    expect(getByRole("link", { name: "Open proposals" }).getAttribute("href")).toBe(href);
+    expect(getByRole("link", { name: "Open proposals" }).getAttribute("href")).toBe(`${href}#kb-proposals`);
     unmount();
-    const { queryByRole } = render(
+    const correction = ev({
+      type: "kb_correction",
+      actor: { kind: "agent", backend: "claude", name: "Platform Engineer", role: "Platform" },
+      title: "Knowledge base corrected",
+      text: "Corrected `runbook/runbook.md` as `kc-0123456789`:\n\n- **Was:** ~~Previews: on~~\n- **Now:** Previews: off",
+    });
+    const corrected = render(
       <MemoryRouter>
-        <TimelineItem ev={{ ...proposal, type: "quality" }} proposalsHref={href} />
+        <TimelineItem ev={correction} knowledgeHref={href} />
       </MemoryRouter>,
     );
-    expect(queryByRole("link", { name: "Open proposals" })).toBeNull();
+    expect(corrected.getByRole("link", { name: "Review or undo" }).getAttribute("href")).toBe(`${href}#kb-corrections`);
+    // The two sides render as a short list, the old one struck through.
+    expect(corrected.container.querySelector(".tl-text del")!.textContent).toBe("Previews: on");
+    corrected.unmount();
+    for (const other of [
+      { ...proposal, type: "quality" },
+      { ...correction, title: "Knowledge-base correction undone", actor: { kind: "human" as const, userId: "u_akin", name: "Akin", initials: "A", tone: "t1" } },
+    ]) {
+      const { queryByRole, unmount: done } = render(
+        <MemoryRouter>
+          <TimelineItem ev={other} knowledgeHref={href} />
+        </MemoryRouter>,
+      );
+      expect(queryByRole("link", { name: "Open proposals" })).toBeNull();
+      expect(queryByRole("link", { name: "Review or undo" })).toBeNull();
+      done();
+    }
   });
 
-  it("all 12 types map to their node class + pill label (contracts §1.3)", () => {
+  it("all 13 types map to their node class + pill label (contracts §1.3)", () => {
     const table: [string, string, string | null][] = [
       ["comment", "", null],
       ["completion", "completion", "Completion report"],
@@ -474,6 +498,9 @@ describe("TimelineItem", () => {
       // kind, never a "Review verdict". CANARY: drop `proposal` from EVENT_META
       // and the fallback names the raw type on an unstyled node.
       ["proposal", "proposal", "Proposal"],
+      // Ruling 498: a correction an agent wrote, in the proposal's tint, named
+      // for what it touched.
+      ["kb_correction", "proposal", "Knowledge base"],
       ["transition", "transition", "Transition request"],
       ["blocked", "blocked", "Blocked decision"],
       ["agent", "agent", "Operator"],
