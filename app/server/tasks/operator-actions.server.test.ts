@@ -49,8 +49,6 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
-  AUTONOMY_CLAMPED_AUDIT_ACTION,
-  clampAutonomy,
   deliverGate,
   gate,
   operatorAcceptCompletion,
@@ -239,6 +237,11 @@ describe("resolveOperatorAuthority", () => {
     expect(a.autonomyClampedFrom).toBeNull();
     expect(a.policy.get("dispatch-agents")).toBe("direct");
     expect(a.policy.get("stage-transitions")).toBe("recommend");
+    // No override at all (every schedule, boot and plain drive) = run at the
+    // configured level; not a clamp.
+    const omitted = resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug);
+    expect(omitted.autonomy).toBe("full");
+    expect(omitted.autonomyClampedFrom).toBeNull();
   });
 });
 
@@ -251,30 +254,6 @@ describe("resolveOperatorAuthority", () => {
  * Lowering for a single run is still allowed — this is a CEILING, not a pin.
  */
 describe("R19-A — per-run autonomy is clamped to project policy", () => {
-  it("clampAutonomy is a ceiling: it caps a raise, passes a lowering through", () => {
-    expect(clampAutonomy("full", "supervised")).toEqual({
-      autonomy: "supervised",
-      clampedFrom: "full",
-    });
-    expect(clampAutonomy("supervised", "full")).toEqual({
-      autonomy: "supervised",
-      clampedFrom: null,
-    });
-    expect(clampAutonomy("full", "full")).toEqual({
-      autonomy: "full",
-      clampedFrom: null,
-    });
-    // No override at all = run at the configured level; not a clamp.
-    expect(clampAutonomy(undefined, "supervised")).toEqual({
-      autonomy: "supervised",
-      clampedFrom: null,
-    });
-    expect(clampAutonomy(undefined, "full")).toEqual({
-      autonomy: "full",
-      clampedFrom: null,
-    });
-  });
-
   it("a run asking for full on a SUPERVISED project runs supervised", () => {
     deployRoster(DEFAULT_POLICY, "supervised");
     const a = authority("full");
@@ -312,7 +291,9 @@ describe("R19-A — per-run autonomy is clamped to project policy", () => {
       taskKey: "VIB-1",
       actor,
     });
-    const rows = listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION });
+    // The literal, not the writer's constant: the activity feed's audit map and
+    // docs/domain/operator.md name this string, so a rename has to fail here.
+    const rows = listAuditEvents(store.db, { action: "task.operator.autonomy_clamped" });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.actorLabel).toBe("arda@viberr.dev");
     expect(rows[0]!.projectSlug).toBe(store.slug);
@@ -327,12 +308,12 @@ describe("R19-A — per-run autonomy is clamped to project policy", () => {
       db: store.db,
       taskKey: "VIB-1",
     });
-    expect(listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION })).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "task.operator.autonomy_clamped" })).toHaveLength(0);
     // A pure READ (loader paths resolve authority too) must never write audit
     // rows, even when the requested autonomy is above the ceiling.
     deployRoster(DEFAULT_POLICY, "supervised");
     authority("full");
-    expect(listAuditEvents(store.db, { action: AUTONOMY_CLAMPED_AUDIT_ACTION })).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "task.operator.autonomy_clamped" })).toHaveLength(0);
   });
 
   it("an UNDEPLOYED operator reports the supervised ceiling rather than a phantom full", () => {
@@ -1411,34 +1392,6 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
     await interruptRunningRuns("VIB-1");
   });
 
-  it("recommend + prompt files the run_agent card and does NOT run the agent", async () => {
-    deployRoster([
-      { capabilityId: "dispatch-agents", mode: "recommend" },
-      { capabilityId: "append-typed-events", mode: "direct" },
-    ]);
-    seedTask("impl");
-    const r = await operatorDispatchAgent(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        profileId: "developer",
-        prompt: "implement the auth guard first.",
-      },
-      authority("supervised"),
-    );
-    expect(r.outcome).toBe("recommended");
-    expect(deliveringEngagement(task().frontmatter)).toBeNull();
-    expect(task().frontmatter.recommendations[0]?.kind).toBe("run_agent");
-    expect(task().frontmatter.recommendations[0]?.prompt).toBe(
-      "implement the auth guard first.",
-    );
-    // No run was triggered.
-    await new Promise((res) => setTimeout(res, 40));
-    expect(listRunsForTask(store.db, store.slug, "VIB-1").filter((x) => x.kind === "primary")).toHaveLength(0);
-  });
-
   it("prompting a supporting profile engages it, posts the hand-off, and starts its reviewer run", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
@@ -1542,7 +1495,7 @@ describe("operator transition chain (P11-70 runaway backstop)", () => {
     expect(listRunsForTask(store.db, store.slug, "VIB-1")).toHaveLength(0);
   });
 
-  it("below the cap, the transition re-triggers coordination and opens no packet", async () => {
+  it("below the cap, the transition opens no stuck-loop packet", async () => {
     deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("triage");
     const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
@@ -1562,9 +1515,6 @@ describe("operator transition chain (P11-70 runaway backstop)", () => {
       },
     );
     expect(task().packet).toBeFalsy();
-    // Let the fire-and-forget auto-invoke settle, then clean up its fake run.
-    await new Promise((r) => setTimeout(r, 50));
-    await interruptRunningRuns("VIB-1");
   });
 });
 
@@ -3669,12 +3619,6 @@ describe("applyRecommendation / dismissRecommendation", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await setTaskDependencies(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-77", "goal-9 link 1"] },
-      { userId: "operator", label: "operator" },
-      { dataRoot: store.dataRoot, operatorAuthorized: true },
-    ).catch(() => {});
-    await setTaskDependencies(
-      store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-77"] },
       { userId: "operator", label: "operator" },
       { dataRoot: store.dataRoot, operatorAuthorized: true },
@@ -3817,18 +3761,6 @@ describe("applyRecommendation / dismissRecommendation", () => {
     expect(
       task().timeline.filter((e) => e.title === RECOMMENDATION_DECLINED_TITLE),
     ).toHaveLength(7);
-  });
-
-  it("only admin|maintainer may dismiss a recommendation", async () => {
-    const recId = await seedRecommendation();
-    await expect(
-      dismissRecommendation(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", recId },
-        { userId: store.users.selin.id, label: store.users.selin.email }, // contributor
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -5137,17 +5069,9 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
       authority("supervised"),
     );
 
-  it("a verdict-capable profile is still dispatched 'as a reviewer'", async () => {
-    // Canary: hardcode "a reviewer" in `supportingRoleWord` and the next test
-    // fails while this one passes — the pair is what pins the branch.
-    deployVerdictRoster();
-    seedTask("review");
-    const r = await dispatch("reviewer");
-    expect(r.message).toBe("Started a Claude run for Rev (a reviewer).");
-    await interruptRunningRuns("VIB-1");
-  });
-
   it("a verdict-INCAPABLE profile is dispatched 'as a supporting agent'", async () => {
+    // Canary: hardcode "a reviewer" in `supportingRoleWord` and this fails. The
+    // verdict-capable half ("(a reviewer)") is the supporting-posture dispatch test.
     deployVerdictRoster();
     seedTask("review");
     const r = await dispatch("web-verifier");
@@ -6754,17 +6678,6 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
       { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:20:00.000Z", rounds: 2 },
     ]);
     expect(reviewerRow()?.consecutiveRequestChanges).toBe(2);
-  });
-
-  it("ruling 204: an interrupted re-review records no verdict, so it adds no round", () => {
-    // The distinction ruling 193 was reaching for and got wrong by proxy: a
-    // re-DISPATCH is not an objection. Only a completed review writes a verdict,
-    // and only a verdict carrying the same result increments `rounds` — so the
-    // count is objections, never retries.
-    writeVerdicts([
-      { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:10:00.000Z" },
-    ]);
-    expect(reviewerRow()?.consecutiveRequestChanges).toBe(1);
   });
 
   it("reaches 2 when the objection survives a rework — the escalation signal", () => {

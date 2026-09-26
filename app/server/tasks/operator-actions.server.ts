@@ -318,9 +318,10 @@ const AUTONOMY_RANK = {
 } satisfies Record<OperatorAutonomy, number>;
 
 /** The audit fact recorded when a run asked for more autonomy than the project
- *  configured and was reduced to the ceiling (R19-A). Exported so the audit
- *  panel's whitelist and the tests name the same string. */
-export const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
+ *  configured and was reduced to the ceiling (R19-A). The string is the
+ *  contract: the activity feed's audit map and docs/domain/operator.md name it
+ *  literally. */
+const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
 
 /**
  * R19-A (owner ruling, pass 19) — **a run may never exceed the project's
@@ -339,18 +340,15 @@ export const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
  * allowed and is not a clamp (a maintainer may always ask for more supervision
  * than the project demands). Omitting the override means "run at the configured
  * level", which is also not a clamp.
- *
- * Pure and exported so the clamp can be unit-asserted, and so the UI can offer
- * exactly the options that will actually run.
  */
-export interface ClampedAutonomy {
+interface ClampedAutonomy {
   /** The level the run actually gets — never above the ceiling. */
   autonomy: OperatorAutonomy;
   /** What the run asked for when the clamp BIT; null when nothing was reduced. */
   clampedFrom: OperatorAutonomy | null;
 }
 
-export function clampAutonomy(
+function clampAutonomy(
   requested: OperatorAutonomy | undefined,
   ceiling: OperatorAutonomy,
 ): ClampedAutonomy {
