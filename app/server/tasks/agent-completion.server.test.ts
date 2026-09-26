@@ -23,12 +23,13 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
-import { insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
+import { getRun, insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
@@ -311,6 +312,36 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       return row?.state === "finished";
     });
     return started.runId;
+  }
+
+  /**
+   * Save `names` into VIB-1's attachments store inside run `runId`'s window,
+   * and return the directory. Completion finds a run's files by mtime: those
+   * modified at or after its `started_at` (`attachmentNamesSince`).
+   *
+   * Each file is stamped with the run's own `finished_at` rather than keeping
+   * the mtime its write got. A fake run finishes within milliseconds of
+   * starting, and Linux stamps a new file from a coarse clock (the last timer
+   * tick) that trails the `new Date()` behind `started_at`: by up to 7 ms,
+   * median 5, measured on a CONFIG_HZ=250 kernel. A file written straight
+   * after the run could therefore read OLDER than the run, and the window held
+   * none of the files, or only the later ones when a tick fell between two
+   * writes. The prune test failed most runs, and the ERRORED and SIBLING tests
+   * passed without their files ever being candidates. A real run's files land
+   * seconds after it starts, so only the fixture needs this.
+   */
+  function saveInRunWindow(runId: string, names: readonly string[]): string {
+    const finishedAt = getRun(store.db, runId)?.finished_at;
+    if (!finishedAt) throw new Error(`run ${runId} has not finished`);
+    const savedAt = new Date(finishedAt);
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    for (const name of names) {
+      const file = path.join(dir, name);
+      writeFileSync(file, `content of ${name}`);
+      utimesSync(file, savedAt, savedAt);
+    }
+    return dir;
   }
 
   /**
@@ -735,18 +766,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         "Verdict: approve — the rendering matches the spec.",
     );
     // Saved during the run window (after started_at, before completion lands).
-    const dir = path.join(
-      store.dataRoot,
-      "projects",
-      store.slug,
-      "tasks",
-      "VIB-1",
-      "attachments",
-    );
-    mkdirSync(dir, { recursive: true });
-    for (const name of [cited, uncitedSnap, uncitedLog, screenshot]) {
-      writeFileSync(path.join(dir, name), `content of ${name}`);
-    }
+    const dir = saveInRunWindow(runId, [cited, uncitedSnap, uncitedLog, screenshot]);
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },
@@ -784,16 +804,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     writeReviewTask();
     const dump = "console-2026-08-31T16-00-00-000Z.log";
     const runId = await finishedRunWith("partial output before the crash");
-    const dir = path.join(
-      store.dataRoot,
-      "projects",
-      store.slug,
-      "tasks",
-      "VIB-1",
-      "attachments",
-    );
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, dump), "console output");
+    const dir = saveInRunWindow(runId, [dump]);
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },
@@ -830,16 +841,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
            'claude', 'sonnet', 'running', ?, ?, ?, 'developer')`,
       )
       .run(store.slug, now, now, now);
-    const dir = path.join(
-      store.dataRoot,
-      "projects",
-      store.slug,
-      "tasks",
-      "VIB-1",
-      "attachments",
-    );
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, siblingFile), "the sibling's console dump");
+    const dir = saveInRunWindow(runId, [siblingFile]);
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },

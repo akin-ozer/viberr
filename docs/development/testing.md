@@ -292,6 +292,11 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
 - Clocks a policy reads are injected, never the wall clock: the resume policy's tests pass
   `nowIso` (ruling 372), and `run-sink.server.test.ts` reads its fixture dates against a
   `FROZEN_NOW`, so a test cannot pass today and fail on a later date.
+- A file's mtime is not `new Date()`. Linux stamps a new file from a coarse clock (the
+  last timer tick), which trails the wall clock by a few milliseconds, so a file written
+  just after a run's `started_at` can read as older than the run. A test that needs files
+  inside a run's window (`attachmentNamesSince`) stamps them with `utimesSync`, as
+  `saveInRunWindow` in `agent-completion.server.test.ts` does.
 - Never mutate `node_modules` while `vitest run` is in flight (it once produced 688
   phantom failures).
 
