@@ -409,13 +409,15 @@ async function mcpServersFor(
   return mounts;
 }
 
-/** Ruling 483: the collaboration note a Claude run with a knowledge base gets. */
+/** Rulings 483 and 497: the collaboration note a Claude run with a knowledge
+ *  base gets. */
 export const KB_CORRECTION_NOTE_CLAUDE =
-  "- `propose_kb_correction` — when your work PROVES a line in one of your knowledge bases wrong (a version you measured, a path, a command, a step), propose the correction against that document with your evidence instead of only reporting the discrepancy. It lands under \"Proposed corrections (not binding)\" in the document, beside the line, for every later run to read, and a person promotes it.";
+  "- `correct_knowledge_doc` — when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say. It is written at once, for every later run to read, and a person undoes it if they disagree.";
 
-/** Ruling 483: the same channel on Codex, which mounts no Viberr tools. */
+/** Rulings 483 and 497: the same channel on Codex, which mounts no Viberr
+ *  tools. */
 export const KB_CORRECTION_NOTE_CODEX =
-  "- A line in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to file the correction on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the line, what is true instead and your evidence. The operator files it in the document, beside the line, for every later run to read.";
+  "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read.";
 
 /**
  * Ruling 488 (F40-67): the relay, named where a specialist reads its channels.

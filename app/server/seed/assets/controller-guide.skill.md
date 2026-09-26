@@ -70,8 +70,8 @@ run on the board reads what you set here.
   each exit code on the task; a plain acceptance waits until every one exited 0 on the revision
   under review. That record, not an agent's report, is what a person accepts on, so never
   restate the gate commands in a directive or ask an agent to report their exit codes. When a
-  proposal to change them reaches the rulings, promote it with `set_project_gates`, not as
-  prose.
+  correction an agent wrote into the rulings changes them, apply it with `set_project_gates`:
+  prose in the rulings runs nothing.
 - **Give the project a rulings knowledge base and name it with `set_project_rulings_kb`.** That
   one KB is injected into EVERY run the board makes, so it is where a fact belongs that agents
   would otherwise re-derive per task: the measured environment, the settled layout, a
@@ -100,18 +100,23 @@ injected into every run as truth, and every task inherits it.
   convention the repository actually follows, an environment fact), that is not noise to relay.
   Amend the document with `save_knowledge_base` and say on the goal or the task what changed
   and why.
-- Any agent on a task can file a proposal under "Proposed corrections (not binding)" in a
-  knowledge-base document its run was given: the rulings, or a dossier or runbook whose fact it
-  measured. Those entries are the board telling you its knowledge is stale, and they come to
-  you: your turn context lists a project's open ones and `get_project` carries them in
-  `openProposals`. If the person has not heard about them in this conversation, say they are
-  waiting.
-- Promoting or dismissing one is the person's decision, carried out by you with
-  `resolve_kb_proposal` when they ask (the Promote and Dismiss buttons on a project's Controller
-  page send you that request). To promote, read the document first, then send the settled text
-  to write and, in `replaces`, the exact passage it takes the place of; the entry leaves the
-  document in the same write. A proposal left sitting is read by every run alongside the line it
-  contradicts, and agents keep asking the owner to act on "not binding" settings.
+- Any agent on a task corrects a knowledge-base document its run was given, the rulings or a
+  dossier or runbook whose fact it measured, by writing the correction into it (ruling 497):
+  the exact passage it replaced, the text that took its place, and its evidence. Nobody
+  approves it first; a person reads what changed afterwards. `get_project` lists a project's
+  recent ones in `kbCorrections`, and the project's Controller page lists them with an Undo.
+- When a person disagrees with a correction, undo it with `undo_kb_correction` when they ask,
+  passing their reason: an agent that tries to write it again is refused and shown it. If the
+  document was edited since, the undo refuses; read the document and change it by hand with
+  `save_knowledge_base`.
+- Proposals agents filed before that, under "Proposed corrections (not binding)", still stand in
+  their documents until someone closes them: your turn context lists a project's open ones and
+  `get_project` carries them in `openProposals`. If the person has not heard about them in this
+  conversation, say they are waiting. Promote or dismiss one with `resolve_kb_proposal` when they
+  ask (the Promote, Dismiss and Promote all buttons on a project's Controller page send you that
+  request). To promote, read the document first, then send the settled text to write and, in
+  `replaces`, the exact passage it takes the place of; the entry leaves the document in the same
+  write.
 - Never quietly reverse a ruling a human set. Say what you are changing and on what evidence.
 
 ## A standing instruction from a person

@@ -3515,8 +3515,9 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* G8: continuity reset — amber warning tone (context lost + recovered). */
 .pev-ico.act-continuity { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 .pev-ico.act-transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
-/* Ruling 483: the proposal tint, as on its timeline node. */
-.pev-ico.act-proposal { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
+/* Ruling 483: the proposal tint, as on its timeline node; ruling 497's
+   knowledge-base corrections wear it too. */
+.pev-ico.act-proposal, .pev-ico.act-kb_correction { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.act-agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 
@@ -7123,7 +7124,10 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .ctl-proposal-head, .ctl-proposal-acts { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
 .ctl-proposal-doc { font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }
 .ctl-proposal-text { font-size: .88rem; line-height: 1.4; }
-.ctl-proposal-evidence { white-space: pre-wrap; }
+/* Ruling 497: a correction's two sides keep the document's line breaks, the
+   passage it replaced struck through and quiet. */
+.ctl-proposal-evidence, .ctl-correction-side { white-space: pre-wrap; }
+.ctl-correction-side del { color: var(--muted); }
 .ctl-proposals-note { margin: 0; }
 /* Ruling 419(d): a chain is a <details>. Spacing is margins, not a flex gap:
    a details element only became a flex container in recent engines. */
@@ -7199,13 +7203,14 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 /* Ruling 419(h): what a chain is for and what has happened to it, folded under
    the links: the same quiet disclosure the capability list uses. */
 .ctl-goal-more { margin-top: .5rem; font-size: .75rem; }
-.ctl-goal-more > summary {
+/* Ruling 497: a correction's evidence folds the same way. */
+.ctl-goal-more > summary, .ctl-correction-evidence > summary {
   cursor: pointer; color: var(--muted); list-style: none;
   display: inline-flex; align-items: center; gap: .375rem;
   border-radius: var(--radius-small);
 }
-.ctl-goal-more > summary::-webkit-details-marker { display: none; }
-.ctl-goal-more > summary:hover { color: var(--fg); }
+.ctl-goal-more > summary::-webkit-details-marker, .ctl-correction-evidence > summary::-webkit-details-marker { display: none; }
+.ctl-goal-more > summary:hover, .ctl-correction-evidence > summary:hover { color: var(--fg); }
 .ctl-goal-desc { margin: .375rem 0 0; font-size: .75rem; }
 /* Ruling 476(h): where a chain was planned, first under "About this chain",
    and in the rail the threads that planned this board's chains. */

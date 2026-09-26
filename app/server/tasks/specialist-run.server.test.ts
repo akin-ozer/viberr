@@ -2241,7 +2241,13 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * operator relays it. Live on WEB-3 a Codex agent wrote "the knowledge-base
    * runbook is read-only to me".
    */
-  it("ruling 483: a KB-granted run is told its correction channel, per backend", async () => {
+  it("rulings 483 and 497: a KB-granted run is told its correction channel, per backend", async () => {
+    // Ruling 497: the correction is written, so Claude names the tool that
+    // writes it and Codex hands the operator the exact passage to replace.
+    expect(KB_CORRECTION_NOTE_CLAUDE).toContain("`correct_knowledge_doc`");
+    expect(KB_CORRECTION_NOTE_CLAUDE).toContain("It is written at once");
+    expect(KB_CORRECTION_NOTE_CODEX).toContain("the passage exactly as the document has it");
+    expect(`${KB_CORRECTION_NOTE_CLAUDE} ${KB_CORRECTION_NOTE_CODEX}`).not.toContain("not binding");
     for (const backend of ["codex", "claude"] as const) {
       const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
       writeProject(store.dataRoot, {

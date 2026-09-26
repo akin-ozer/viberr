@@ -59,7 +59,7 @@ import {
   operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
-  operatorProposeKbCorrection,
+  operatorCorrectKnowledgeDoc,
   operatorLeaseFiles,
   operatorSetGoal,
   operatorResolvePacket,
@@ -73,8 +73,8 @@ import {
   type OperatorPacketOptionInput,
   GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
-import { KB_CORRECTION_TITLE, RULING_PROPOSAL_TITLE } from "./kb-proposal-actions.server";
-import { KB_PROPOSALS_HEADING } from "~/server/org/kb-proposals.server";
+import { KB_CORRECTED_TITLE, RULINGS_CORRECTED_TITLE } from "./kb-correction-actions.server";
+import { KB_CORRECTION_MERGED_ACTION } from "~/server/org/kb-corrections.server";
 
 /**
  * The operator's capability-GATED, operator-authorized actions: the RBAC the
@@ -3988,13 +3988,13 @@ describe("operatorLeaseFiles (ruling 417)", () => {
   });
 });
 
-describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
+describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 497)", () => {
   /**
-   * F39-1/F39-7 (pass 39): the operator can write a CORRECTION into the
-   * project's settled rulings, as a proposal, and nothing more. Ruling 483
-   * (F40-53) widened it to every knowledge base a run on the task was given:
-   * live in pass 40 the stale facts were in the akin-dossier and the deploy
-   * runbook, which propose_ruling could not reach.
+   * F39-1/F39-7 (pass 39): the operator could write a correction into the
+   * project's settled rulings as a proposal (ruling 378); ruling 483 (F40-53)
+   * widened it to every knowledge base a run on the task was given. Ruling 497
+   * (owner, 2026-09-26: "No human can approve all of these while inspecting
+   * them thoroughly") writes it into the document, and a person undoes it.
    */
   const arda = () => ({ kind: "user" as const, userId: store.users.arda.id, label: "arda" });
 
@@ -4052,8 +4052,8 @@ describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
-  const propose = (input: Partial<Parameters<typeof operatorProposeKbCorrection>[2]>) =>
-    operatorProposeKbCorrection(
+  const correct = (input: Partial<Parameters<typeof operatorCorrectKnowledgeDoc>[2]>) =>
+    operatorCorrectKnowledgeDoc(
       store.db,
       { dataRoot: store.dataRoot },
       {
@@ -4061,66 +4061,65 @@ describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
         taskKey: "VIB-1",
         kb: null,
         doc: "environment-and-gates.md",
-        line: null,
-        correction: "x",
+        replaces: null,
+        text: "x",
         evidence: "y",
         ...input,
       },
       authority("full"),
     );
 
-  it("files a non-binding ruling proposal beside the rule, as a `proposal` event with a neutral title, audited and notified", async () => {
+  it("writes a ruling correction in place of the exact passage, records one short `kb_correction` entry, audits it and notifies nobody", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const root = await seedRulingsKb(
-      "# Environment and gates\n\n- Every test must pass under `go test -race ./...`.\n",
+      "# Environment and gates\n\n- Every test must pass under `go test -race ./...`.\n- Lint clean.\n",
     );
-    const r = await propose({
-      line: "Every test must pass under go test -race",
-      correction: "Strike the -race requirement: this host cannot run it.",
+    const r = await correct({
+      replaces: "- Every test must pass under `go test -race ./...`.",
+      text: "- Every test must pass under `go test ./...`: this host has no C compiler, so no `-race`.",
       // A model answering a field called `evidence` writes the label too; the
       // writer strips one rather than doubling it.
       evidence: "Evidence: `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
     });
     expect(r.outcome).toBe("done");
-    expect(r.message).toContain("NOT binding");
+    expect(r.message).toMatch(/^Corrected `ax-rulings\/environment-and-gates.md` as kc-[0-9a-f]{10}/);
+    expect(r.message).toContain("A person may undo it");
 
     const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
-    // The settled line is untouched: a proposal never edits or removes one.
-    expect(body).toContain("- Every test must pass under `go test -race ./...`.");
-    expect(body).toContain(KB_PROPOSALS_HEADING);
-    expect(body).toContain("Nothing here is binding.");
-    expect(body).toContain("**[VIB-1, ");
-    expect(body).toContain(", Operator]** Strike the -race requirement");
-    expect(body).toContain("  Line: Every test must pass under go test -race");
-    expect(body).toContain("exited 127");
-    expect(body).not.toMatch(/Evidence:\s*Evidence:/i);
-    // Filed AFTER the settled text, so a reader meets the rule first.
-    expect(body.indexOf("- Every test must pass")).toBeLessThan(body.indexOf(KB_PROPOSALS_HEADING));
+    // The settled text itself changed; nothing waits under a proposals heading.
+    expect(body).toBe(
+      "# Environment and gates\n\n- Every test must pass under `go test ./...`: this host has no C compiler, so no `-race`.\n- Lint clean.\n",
+    );
 
     const top = task().timeline[0]!;
-    // CANARY (F40-59): write the event as `quality` again, or title it "Ruling
-    // contradicted by evidence", and the proposal reads as a failed review.
-    expect(top.type).toBe("proposal");
-    expect(top.title).toBe(RULING_PROPOSAL_TITLE);
-    expect(RULING_PROPOSAL_TITLE).toBe("Proposed ruling change");
-    expect(top.text).toContain("Not binding until a person promotes it");
-    expect(top.text).toContain("environment-and-gates.md");
-    expect(top.text).toMatch(/Filed as `kp-[0-9a-f]{10}`/);
+    // CANARY: file it as a `proposal` again and the owner is asked to approve
+    // what already happened.
+    expect(top.type).toBe("kb_correction");
+    expect(top.title).toBe(RULINGS_CORRECTED_TITLE);
+    expect(RULINGS_CORRECTED_TITLE).toBe("Rulings corrected");
+    expect(top.text).toMatch(/^Corrected `ax-rulings\/environment-and-gates.md` as `kc-[0-9a-f]{10}`:/);
+    expect(top.text).toContain("- **Was:** ~~- Every test must pass under `go test -race ./...`.~~");
+    expect(top.text).toContain("- **Now:** - Every test must pass under `go test ./...`");
+    expect(top.text).not.toContain("binding");
 
-    expect(
-      listAuditEvents(store.db).some(
-        (e) => e.action === "task.kb_proposal.filed" && e.taskKey === "VIB-1",
-      ),
-    ).toBe(true);
+    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION });
+    expect(row).toMatchObject({ taskKey: "VIB-1", actorLabel: "operator" });
+    expect(row?.details).toMatchObject({
+      filedBy: "Operator",
+      rulings: true,
+      evidence: "`CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
+    });
+    // CANARY: notify the watchers again and every correction rings the bell,
+    // the spam the owner asked to end.
     expect(
       listNotifications(store.db, store.users.arda.id).some(
-        (n) => n.title === RULING_PROPOSAL_TITLE,
+        (n) => n.title === RULINGS_CORRECTED_TITLE || n.title === KB_CORRECTED_TITLE,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("F40-53: proposes against a knowledge base an ENGAGED agent was given, not only the operator's own", async () => {
+  it("F40-53: corrects a knowledge base an ENGAGED agent was given, not only the operator's own", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const dossier = await seedKb(
@@ -4131,11 +4130,11 @@ describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
     engageDeveloperWithKb(dossier);
     // The operator itself holds no knowledge base at all here.
     expect(authority("full").kb).toEqual([]);
-    const r = await propose({
+    const r = await correct({
       kb: dossier,
       doc: "06-platform-facts.md",
-      line: "T-003: wrangler 4.138.0",
-      correction: "The measured wrangler is 4.139.0.",
+      replaces: "- T-003: wrangler 4.138.0 is the pinned version.",
+      text: "- T-003: wrangler 4.139.0 is the pinned version.",
       evidence: "`npx wrangler --version` printed 4.139.0 on WEB-1 at 22:21Z.",
     });
     // CANARY: allow only `authority.kb` (the operator's own grants) and this
@@ -4145,78 +4144,62 @@ describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
       path.join(store.dataRoot, "kb", dossier, "06-platform-facts.md"),
       "utf8",
     );
-    expect(body).toContain("- T-003: wrangler 4.138.0 is the pinned version.");
-    expect(body).toContain("The measured wrangler is 4.139.0.");
+    expect(body).toContain("- T-003: wrangler 4.139.0 is the pinned version.");
+    expect(body).not.toContain("4.138.0");
     const top = task().timeline[0]!;
-    expect(top.type).toBe("proposal");
-    expect(top.title).toBe(KB_CORRECTION_TITLE);
+    expect(top.type).toBe("kb_correction");
+    expect(top.title).toBe(KB_CORRECTED_TITLE);
     expect(top.text).toContain(`${dossier}/06-platform-facts.md`);
   });
 
-  it("refuses a knowledge base no run on the task was given, and a line the document does not hold", async () => {
+  it("refuses a knowledge base no run on the task was given, and a passage the document does not hold exactly", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     await seedRulingsKb("# Gates\n\n- Run every gate.\n");
     const stranger = await seedKb("someone-elses", "notes.md", "# Notes\n\n- A fact.\n");
-    const notOurs = await propose({ kb: stranger, doc: "notes.md", correction: "No.", evidence: "run A" });
+    const notOurs = await correct({ kb: stranger, doc: "notes.md", replaces: "- A fact.", text: "No.", evidence: "run A" });
     expect(notOurs.outcome).toBe("noop");
     expect(notOurs.message).toContain(`No knowledge base \`${stranger}\` was given to a run on this task`);
-    expect(readFileSync(path.join(store.dataRoot, "kb", stranger, "notes.md"), "utf8")).not.toContain(
-      KB_PROPOSALS_HEADING,
-    );
+    expect(readFileSync(path.join(store.dataRoot, "kb", stranger, "notes.md"), "utf8")).toBe("# Notes\n\n- A fact.\n");
 
-    // CANARY: skip the anchor check and a proposal lands "beside" a line the
-    // document never had.
-    const unanchored = await propose({ line: "Deploy on Fridays only", correction: "No.", evidence: "run A" });
+    const unanchored = await correct({ replaces: "Deploy on Fridays only", text: "No.", evidence: "run A" });
     expect(unanchored.outcome).toBe("noop");
-    expect(unanchored.message).toContain("The line you quote is not in the settled text");
+    expect(unanchored.message).toContain("is not in ax-rulings/environment-and-gates.md exactly as you sent it");
+    expect(task().timeline.some((e) => e.type === "kb_correction")).toBe(false);
   });
 
-  it("ruling 466: the audit row counts the entry in UTF-8 bytes", async () => {
+  it("ruling 466: the audit row counts the written text in UTF-8 bytes", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const root = await seedRulingsKb("# Kurallar\n\n- Her kapı çalışır.\n");
-    const r = await propose({
-      correction: "Yarış kapısını kaldır: bu makine çalıştıramaz.",
-      evidence: "`go test -race` çıkış kodu 127 döndü.",
-    });
+    await seedRulingsKb("# Kurallar\n\n- Her kapı çalışır.\n");
+    const text = "- Yarış kapısı yok: bu makine çalıştıramaz.";
+    const r = await correct({ replaces: "- Her kapı çalışır.", text, evidence: "`go test -race` çıkış kodu 127 döndü." });
     expect(r.outcome).toBe("done");
-    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
-    // The first proposal is the document's tail, exactly as filed.
-    const entry = body.slice(body.indexOf("- **[VIB-1,")).trimEnd();
-    const row = listAuditEvents(store.db, { action: "task.kb_proposal.filed" })[0];
-    expect(row?.details).toMatchObject({ bytes: Buffer.byteLength(entry, "utf8") });
-    expect(Buffer.byteLength(entry, "utf8")).toBeGreaterThan(entry.length);
+    const row = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION })[0];
+    expect(row?.details).toMatchObject({ bytes: Buffer.byteLength(text, "utf8") });
+    expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(text.length);
   });
 
-  it("a second proposal stacks under the same heading, and `$` characters are filed as written", async () => {
+  it("writes `$` characters as sent, adds a missing convention at the end, and needs nothing the second time", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
-    expect((await propose({ correction: "First correction.", evidence: "run A" })).outcome).toBe("done");
-    expect(
-      (
-        await propose({
-          correction: "The race gate needs cgo: keep `$&` and `$'` literal.",
-          evidence: "`for p in $$(go list ./...); do go test -race $$p; done` exited 2",
-        })
-      ).outcome,
-    ).toBe("done");
+    const race = "- The race gate needs cgo: `for p in $$(go list ./...); do go test -race $$p; done`, keeping `$&` and `$'` literal.";
+    expect((await correct({ replaces: "- Run every gate.", text: race, evidence: "exited 2" })).outcome).toBe("done");
+    // Ruling 418: a missing convention, with nothing to replace.
+    const convention = "- Pass `--` before any git argument a person supplies.";
+    expect((await correct({ text: convention, evidence: "Review verdict on VIB-1: request changes (AX-19)." })).outcome).toBe("done");
     const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
-    expect(body.split(KB_PROPOSALS_HEADING)).toHaveLength(2);
-    expect(body).toContain("First correction.");
-    expect(body).toContain("for p in $$(go list ./...); do go test -race $$p; done");
-    expect(body).toContain("keep `$&` and `$'` literal");
-    // The same correction of the same line again is the same proposal.
-    const again = await propose({ correction: "First correction.", evidence: "run B" });
+    expect(body).toBe(`# Gates\n\n${race}\n\n${convention}\n`);
+    const again = await correct({ text: convention, evidence: "run B" });
     expect(again.outcome).toBe("noop");
-    expect(again.message).toContain("already proposed");
+    expect(again.message).toContain("already says that");
   });
 
   it("refuses by name when the project names no rulings KB, and when the document is not in the knowledge base", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const noKb = await propose({ doc: "whatever.md" });
+    const noKb = await correct({ doc: "whatever.md" });
     expect(noKb.outcome).toBe("noop");
     expect(noKb.message).toContain("names no rulings knowledge base");
     // The rulings KB is named through the controller (`set_project_rulings_kb`,
@@ -4227,22 +4210,22 @@ describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
     await seedRulingsKb("# Gates\n\n- Run every gate.\n");
     // CANARY: skip the existence check and this CREATES a settled-looking
     // document nobody asked for, named by a typo.
-    const wrongDoc = await propose({ doc: "enviroment-and-gates.md" });
+    const wrongDoc = await correct({ doc: "enviroment-and-gates.md" });
     expect(wrongDoc.outcome).toBe("noop");
     expect(wrongDoc.message).toContain("is not a document in the knowledge base");
     expect(wrongDoc.message).toContain("environment-and-gates.md");
   });
 
-  it("needs the document, the correction and the evidence, and is denied without append-typed-events", async () => {
+  it("needs the document, the text and the evidence, and is denied without append-typed-events", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     await seedRulingsKb("# Gates\n\n- Run every gate.\n");
-    const thin = await propose({ evidence: "  " });
+    const thin = await correct({ evidence: "  " });
     expect(thin.outcome).toBe("noop");
     expect(thin.message).toContain("evidence that proves it");
 
     deployRoster([{ capabilityId: "append-typed-events", mode: "off" }]);
-    const denied = await propose({});
+    const denied = await correct({});
     expect(denied.outcome).toBe("denied");
   });
 });

@@ -49,6 +49,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     canInterruptTurn: false,
     goals: [],
     proposals: [],
+    corrections: { shown: [], total: 0 },
     viewerOwnsActive: false,
     showingAll: false,
     viewerIsOrgAdmin: true,
@@ -1976,7 +1977,8 @@ describe("ruling 476: the controller page and its goals rail", () => {
  * where the owner looks, with a count, and Promote and Dismiss ask the
  * controller to carry the decision out. Live on WEB-1 two operator proposals
  * existed only as timeline events that looked like failed reviews, and nothing
- * brought them back.
+ * brought them back. Since ruling 497 nothing files one, and the ones that
+ * documents still hold are listed under the corrections, with Promote all.
  */
 describe("the project's open knowledge-base proposals (ruling 483)", () => {
   const proposal = {
@@ -2000,10 +2002,10 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
       posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
       return { ok: true, conversationId: "cnv_b" };
     });
-    // CANARY: drop the panel from the rail and nothing on the page says a
-    // proposal waits.
-    const panel = await screen.findByRole("region", { name: "Proposals" });
-    expect(within(panel).getByText("1 open")).toBeTruthy();
+    // CANARY: drop the proposals from the panel and nothing on the page says
+    // one waits.
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(within(panel).getByText("Open proposals (1)")).toBeTruthy();
     expect(within(panel).getByText("akin-rulings/gates.md")).toBeTruthy();
     expect(within(panel).getByText("Gate commands: not yet settled")).toBeTruthy();
     expect(within(panel).getByRole("link", { name: "WEB-1" }).getAttribute("href")).toBe(
@@ -2012,6 +2014,8 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     expect(within(panel).getByRole("link", { name: "Open document" }).getAttribute("href")).toBe(
       proposal.docHref,
     );
+    // One proposal needs no Promote all.
+    expect(within(panel).queryByRole("button", { name: "Promote all" })).toBeNull();
     await act(async () => {
       fireEvent.click(within(panel).getByRole("button", { name: "Promote" }));
     });
@@ -2021,13 +2025,28 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     expect(posted[0]!.text).toContain("resolve_kb_proposal");
   });
 
+  it("Promote all asks once for every open proposal", async () => {
+    const posted: string[] = [];
+    renderPage(view({ proposals: [proposal, { ...proposal, id: "kp-9876543210", doc: "layout.md" }] }), "", async ({ request }) => {
+      posted.push(String((await request.formData()).get("text")));
+      return { ok: true, conversationId: "cnv_b" };
+    });
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    await act(async () => {
+      fireEvent.click(within(panel).getByRole("button", { name: "Promote all" }));
+    });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toContain("Promote all 2 open knowledge-base proposals on this board");
+    expect(posted[0]).toContain("resolve_kb_proposal");
+  });
+
   it("Dismiss confirms first, then asks; a member who is not an org admin is told who decides", async () => {
     const posted: string[] = [];
     renderPage(view({ proposals: [proposal] }), "", async ({ request }) => {
       posted.push(String((await request.formData()).get("text")));
       return { ok: true, conversationId: "cnv_b" };
     });
-    const panel = await screen.findByRole("region", { name: "Proposals" });
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
     fireEvent.click(within(panel).getByRole("button", { name: "Dismiss" }));
     expect(posted).toEqual([]);
     await act(async () => {
@@ -2038,16 +2057,103 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     cleanup();
 
     renderPage(view({ viewerIsOrgAdmin: false, proposals: [{ ...proposal, docHref: null }] }));
-    const memberPanel = await screen.findByRole("region", { name: "Proposals" });
+    const memberPanel = await screen.findByRole("region", { name: "Knowledge base" });
     expect(within(memberPanel).queryByRole("button", { name: "Promote" })).toBeNull();
     expect(within(memberPanel).getByText("An org admin promotes or dismisses proposals.")).toBeTruthy();
     expect(within(memberPanel).queryByRole("link", { name: "Open document" })).toBeNull();
   });
+});
 
-  it("says so when none are open", async () => {
-    renderPage(view({ proposals: [] }));
-    const panel = await screen.findByRole("region", { name: "Proposals" });
-    expect(within(panel).getByText("0 open")).toBeTruthy();
-    expect(within(panel).getByText("Nothing to review.")).toBeTruthy();
+/**
+ * Ruling 497: the owner stopped approving each knowledge-base correction ("No
+ * human can approve all of these while inspecting them thoroughly"). The panel
+ * lists what agents wrote, each passage before and after with its evidence,
+ * and an org admin's Undo puts one back, directly, after a confirm.
+ */
+describe("the project's knowledge-base corrections (ruling 497)", () => {
+  const correction = {
+    id: "kc-0123456789",
+    kb: "akinozer-deploy-runbook",
+    doc: "runbook.md",
+    rulings: false,
+    replaced: "5. Non-production branch builds: on",
+    text: "5. Non-production branch builds: off (previews_enabled: false)",
+    evidence: "GET /builds/workers/e7e2… returned previews_enabled: false",
+    taskKey: "WEB-3",
+    filedBy: "Platform Engineer",
+    at: "2026-09-25T08:20:00.000Z",
+    undone: null,
+    docHref: "/org/settings?tab=resources&kb=akinozer-deploy-runbook&doc=runbook.md",
+  };
+
+  it("lists each with its document, what the passage was and is now, the evidence, the task and the agent", async () => {
+    renderPage(view({ corrections: { shown: [correction], total: 1 } }));
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    // CANARY: drop the list and the owner has nothing to read afterwards.
+    expect(within(panel).getByText("1 corrected")).toBeTruthy();
+    expect(within(panel).getByText("akinozer-deploy-runbook/runbook.md")).toBeTruthy();
+    expect(within(panel).getByText("5. Non-production branch builds: on").tagName).toBe("DEL");
+    expect(within(panel).getByText(/previews_enabled: false\)$/)).toBeTruthy();
+    expect(within(panel).getByText(correction.evidence)).toBeTruthy();
+    expect(within(panel).getByRole("link", { name: "WEB-3" }).getAttribute("href")).toBe(
+      "/projects/viberr-core/tasks/WEB-3",
+    );
+    expect(within(panel).getByText(/Platform Engineer/)).toBeTruthy();
+    expect(within(panel).getByText("kc-0123456789")).toBeTruthy();
+    expect(within(panel).queryByText(/Open proposals/)).toBeNull();
+  });
+
+  it("Undo confirms first, then posts the undo with the reason, directly", async () => {
+    const posted: Record<string, string>[] = [];
+    renderPage(view({ corrections: { shown: [correction], total: 1 } }), "", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, toast: "Undid kc-0123456789." };
+    });
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Undo" }));
+    expect(posted).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Previews are on." } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Undo correction" }));
+    });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    // CANARY: send it to the controller and every undo costs a turn.
+    expect(posted[0]).toMatchObject({ intent: "kb-correction-undo", id: "kc-0123456789", reason: "Previews are on." });
+    expect(await screen.findByText("Undid kc-0123456789.")).toBeTruthy();
+  });
+
+  it("an undone correction says who undid it and offers nothing; a member is told who can undo", async () => {
+    renderPage(
+      view({
+        corrections: {
+          shown: [{ ...correction, undone: { at: "2026-09-25T09:00:00.000Z", by: "Akin", reason: "Previews are on." } }],
+          total: 1,
+        },
+      }),
+    );
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(within(panel).getByText("Undone")).toBeTruthy();
+    expect(within(panel).getByText(/Undone by Akin/).textContent).toContain(": Previews are on.");
+    expect(within(panel).queryByRole("button", { name: "Undo" })).toBeNull();
+    cleanup();
+
+    renderPage(view({ viewerIsOrgAdmin: false, corrections: { shown: [{ ...correction, docHref: null }], total: 1 } }));
+    const memberPanel = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(within(memberPanel).queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(within(memberPanel).getByText("An org admin can undo a correction.")).toBeTruthy();
+    expect(within(memberPanel).queryByRole("link", { name: "Open document" })).toBeNull();
+  });
+
+  it("says what fills it when nothing has been corrected, and how many it leaves out", async () => {
+    renderPage(view());
+    const panel = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(within(panel).getByText("0 corrected")).toBeTruthy();
+    expect(within(panel).getByText(/No corrections yet/)).toBeTruthy();
+    cleanup();
+    renderPage(view({ corrections: { shown: [correction], total: 21 } }));
+    const more = await screen.findByRole("region", { name: "Knowledge base" });
+    expect(within(more).getByText("The newest 1 of 21. The audit log keeps the rest for 90 days.")).toBeTruthy();
   });
 });

@@ -36,7 +36,7 @@ import {
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
-import { proposeKbCorrection } from "./kb-proposal-actions.server";
+import { correctKnowledgeDoc } from "./kb-correction-actions.server";
 import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
 import {
   notifyMentionedUsers,
@@ -115,9 +115,9 @@ const prose = normalizeEscapedNewlines;
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
 
-/** Ruling 483: the specialist's half of `propose_kb_correction`. */
+/** Rulings 483 and 497: the specialist's half of `correct_knowledge_doc`. */
 export const KB_CORRECTION_SPECIALIST_DESCRIPTION =
-  "Propose a correction to a line of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Quote the line and bring the evidence. It is filed under \"Proposed corrections (not binding)\" in that document, so every run that reads the document reads it beside the line, and a person, or the controller when a person asks it, promotes or dismisses it. It changes no settled line and binds nobody, so keep working from what you proved and say so in your report. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run.";
+  "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run.";
 
 /** U11: the same tool for a profile granted evidence but NOT the verdict — it
  *  has no judgment to report, so the description must not ask for one. */
@@ -760,31 +760,32 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   // Engineer wrote "the knowledge-base runbook is read-only to me, so I carried
   // it into the repo", an hour after the Site Engineer found the same stale
   // dossier fact, and the next directives still sent agents to the old lines.
-  // Gated like `read_knowledge_doc`, on the grant itself: an agent may propose
-  // against exactly the knowledge bases it was given, and a proposal binds
-  // nobody until a person promotes it. Mounted after `read_board`, so a
-  // knowledge base alone never widens U11's collaboration gate.
+  // Gated like `read_knowledge_doc`, on the grant itself: an agent corrects
+  // exactly the knowledge bases it was given. Ruling 497 writes the correction
+  // as it is made, and a person undoes what they disagree with. Mounted after
+  // `read_board`, so a knowledge base alone never widens U11's collaboration
+  // gate.
   if (kb.length > 0) {
     tools.push(
       tool(
-        "propose_kb_correction",
+        "correct_knowledge_doc",
         KB_CORRECTION_SPECIALIST_DESCRIPTION,
         {
           kb: z
             .string()
-            .describe("The knowledge base the line is in, by the name its index heading gives it."),
+            .describe("The knowledge base the passage is in, by the name its index heading gives it."),
           doc: z
             .string()
             .describe("The document's path inside that knowledge base, as the index lists it."),
-          line: z
+          replaces: z
             .string()
             .optional()
             .describe(
-              "The line the correction replaces, quoted as the document has it (a distinctive phrase is enough). Omit only when the correction adds something the document does not say.",
+              "The passage the correction replaces, copied EXACTLY as the document has it; it must stand once in the document. Omit only when the correction adds something the document does not say: `text` then goes at the end of the document.",
             ),
-          correction: z
+          text: z
             .string()
-            .describe("What is true instead, in one or two sentences."),
+            .describe("What the document should say in place of `replaces`, in its own form: the corrected fact, not the evidence."),
           evidence: z
             .string()
             .describe(
@@ -795,32 +796,27 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           try {
             const role =
               actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
-            const result = await proposeKbCorrection(db, ctx, {
+            const result = await correctKnowledgeDoc(db, ctx, {
               projectSlug,
               taskKey,
               kb: prose(args.kb),
               doc: prose(args.doc),
-              line: args.line ? prose(args.line) : null,
-              correction: prose(args.correction),
+              replaces: args.replaces ? prose(args.replaces) : null,
+              text: prose(args.text),
               evidence: prose(args.evidence),
               actorRef,
               filedBy: role,
               auditActor: { userId: null, label: encodeActorRef(actorRef) },
-              // Ruling 361: the agent that proposed it, by name.
-              from:
-                actorRef.kind === "agent"
-                  ? { kind: "agent", backend: actorRef.backend, name: role, role }
-                  : OPERATOR_NOTIFY_FROM,
               allowedKbs: kb,
             });
             return textResult(`[${result.outcome}] ${result.message}`);
           } catch (error) {
-            logger.warn("agent propose_kb_correction failed", {
+            logger.warn("agent correct_knowledge_doc failed", {
               taskKey,
               kb: args.kb,
               err: toError(error),
             });
-            return textResult("[error] The correction could not be proposed.");
+            return textResult("[error] The correction could not be written.");
           }
         },
       ),

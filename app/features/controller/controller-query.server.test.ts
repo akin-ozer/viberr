@@ -318,11 +318,12 @@ describe("getControllerSurface — a chain carries its history (ruling 419(h))",
  */
 describe("getControllerSurface — the project's open knowledge-base proposals", () => {
   it("lists them on the project surface only, with the document link for an org admin", async () => {
-    const [{ saveKnowledgeBase, resolveStoreTarget }, { writeStoreDoc }, { fileKbProposal }] =
+    const [{ saveKnowledgeBase, resolveStoreTarget }, { writeStoreDoc }, { parseKbProposals }, { withLegacyProposals }] =
       await Promise.all([
         import("~/server/org/resources.server"),
         import("~/server/org/store-files.server"),
         import("~/server/org/kb-proposals.server"),
+        import("../../../test-support/kb-legacy-proposals"),
       ]);
     const { baseTaskFrontmatter, writeTask } = await import("../../../test-support/test-store");
     const { rebuildAll } = await import("~/server/projections/rebuilder.server");
@@ -333,22 +334,12 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
       dataRoot: store.dataRoot,
     });
     const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
-    writeStoreDoc(store.db, target, [], "facts.md", "# Facts\n\n- A fact.\n", admin);
-    const filed = await fileKbProposal(
-      store.db,
-      {
-        kb: kb.dir,
-        doc: "facts.md",
-        line: "A fact.",
-        correction: "A truer fact.",
-        evidence: "measured",
-        taskKey: "VIB-1",
-        filedBy: "Operator",
-        actor: admin,
-      },
-      { dataRoot: store.dataRoot },
-    );
-    if (!filed.ok) throw new Error(filed.message);
+    // Filed before ruling 497, and still standing in its document.
+    const body = withLegacyProposals("# Facts\n\n- A fact.\n", [
+      { taskKey: "VIB-1", filedBy: "Operator", line: "A fact.", correction: "A truer fact.", evidence: "measured" },
+    ]);
+    writeStoreDoc(store.db, target, [], "facts.md", body, admin);
+    const filed = { proposal: parseKbProposals(kb.dir, "facts.md", body)[0]! };
     const on = (user: { id: string; email: string }, projectSlug: string | null) =>
       getControllerSurface(store.db, user, { projectSlug, conversationId: null, dataRoot: store.dataRoot });
     // CANARY: return `null` for `proposals` and the page has nothing to list.
@@ -365,5 +356,68 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
     ]);
     expect(on(store.users.murat, store.slug).proposals?.[0]?.docHref).toBeNull();
     expect(on(store.users.arda, null).proposals).toBeNull();
+  });
+});
+
+/**
+ * Ruling 497: the project surface lists what agents on its tasks wrote into a
+ * knowledge base, newest first, each with whether a person undid it: the
+ * record the owner reads instead of approving each correction first.
+ */
+describe("getControllerSurface — the project's knowledge-base corrections (ruling 497)", () => {
+  it("lists them newest first on the project surface only, clipped for the page, with the document link for an org admin", async () => {
+    const [{ saveKnowledgeBase, resolveStoreTarget }, { writeStoreDoc }, { mergeKbCorrection }] = await Promise.all([
+      import("~/server/org/resources.server"),
+      import("~/server/org/store-files.server"),
+      import("~/server/org/kb-corrections.server"),
+    ]);
+    const admin = { userId: store.users.arda.id, label: "arda" };
+    const { kb } = await saveKnowledgeBase(store.db, { name: "query-runbook", refresh: "on change" }, admin, {
+      dataRoot: store.dataRoot,
+    });
+    const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+    writeStoreDoc(store.db, target, [], "runbook.md", "# Runbook\n\n- Step one.\n", admin);
+    const merge = async (replaces: string | null, text: string, evidence: string) => {
+      const r = await mergeKbCorrection(
+        store.db,
+        {
+          kb: kb.dir,
+          doc: "runbook.md",
+          replaces,
+          text,
+          evidence,
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          filedBy: "Platform Engineer",
+          actorRef: "operator",
+          rulings: false,
+          actor: { userId: null, label: "operator" },
+        },
+        { dataRoot: store.dataRoot },
+      );
+      if (!r.ok) throw new Error(r.message);
+      return r.correction;
+    };
+    const first = await merge("- Step one.", "- Step one, measured.", "ran it");
+    const second = await merge(null, "- Step two.", "e".repeat(700));
+    const on = (user: { id: string; email: string }, projectSlug: string | null) =>
+      getControllerSurface(store.db, user, { projectSlug, conversationId: null, dataRoot: store.dataRoot }).corrections;
+    const view = on(store.users.arda, store.slug)!;
+    // CANARY: return `null` for `corrections` and the page lists nothing.
+    expect(view.total).toBe(2);
+    expect(view.shown.map((c) => c.id)).toEqual([second.id, first.id]);
+    expect(view.shown[1]).toMatchObject({
+      replaced: "- Step one.",
+      text: "- Step one, measured.",
+      taskKey: "VIB-1",
+      filedBy: "Platform Engineer",
+      undone: null,
+      docHref: `/org/settings?tab=resources&kb=${kb.dir}&doc=runbook.md`,
+    });
+    expect(view.shown[0]!.replaced).toBeNull();
+    // The evidence is clipped for the page; the record keeps it whole.
+    expect(view.shown[0]!.evidence).toBe(`${"e".repeat(600)}…`);
+    expect(on(store.users.murat, store.slug)!.shown[0]!.docHref).toBeNull();
+    expect(on(store.users.arda, null)).toBeNull();
   });
 });

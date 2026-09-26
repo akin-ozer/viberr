@@ -26,6 +26,7 @@ import {
 import { notVisible } from "./controller-tool-guards.server";
 import { openRequestsContextLine } from "./controller-requests.server";
 import { countLabel } from "~/shared/text/plural";
+import { fenceFor } from "~/shared/text/fence";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import {
   kbProposalCountsByProject,
@@ -192,22 +193,6 @@ function projectVisibleTo(
   } catch {
     return null;
   }
-}
-
-/**
- * A fence the fenced content cannot close. A fixed five-backtick fence was
- * forgeable: the task-file writer escapes structural lines (`## `, `title:`, …)
- * but not a line of backticks, so a comment starting with five or more of them
- * closed the block early and anything after it read as the server's own words
- * (review finding 6). CommonMark closes on a run of the same length or longer,
- * so one more than the longest run inside can never be matched.
- */
-export function fenceFor(content: string): string {
-  let longest = 0;
-  for (const run of content.match(/`+/g) ?? []) {
-    if (run.length > longest) longest = run.length;
-  }
-  return "`".repeat(Math.max(4, longest + 1));
 }
 
 /** Said in the server's own voice, immediately above the fenced bytes. The
@@ -530,7 +515,8 @@ function proposalLine(p: KbProposal, rulingsKb: string | null): string {
  * the turn context, so the next conversation knows they wait and raises them.
  * Live on WEB-1 two proposals were never promoted: nothing brought them back
  * after they scrolled off the timeline, and the controller only runs when a
- * person talks to it.
+ * person talks to it. Since ruling 497 an agent's correction is written as it
+ * is made, so these are only the ones filed before, which documents still hold.
  */
 export function projectProposalsContextLine(
   db: DatabaseSync,
@@ -547,10 +533,11 @@ export function projectProposalsContextLine(
   return (
     `\n## Open knowledge-base proposals on this project (${open.length})\n` +
     `Agents filed these from this project's tasks under "Proposed corrections (not binding)" in the ` +
-    `document each corrects. Every run that reads the document reads them beside the line, and none ` +
-    `binds until a person promotes it. If the person has not heard about them in this conversation, ` +
-    `tell them they are waiting. Promote or dismiss one with resolve_kb_proposal only when the person ` +
-    `asks (their Promote and Dismiss buttons on the Controller page send that request).\n${rows.join("\n")}\n`
+    `document each corrects, before corrections were written straight into the document (ruling 497). ` +
+    `Every run that reads the document reads them beside the line, and none binds until a person ` +
+    `promotes it. If the person has not heard about them in this conversation, tell them they are ` +
+    `waiting. Promote or dismiss one with resolve_kb_proposal only when the person asks (their ` +
+    `Promote, Dismiss and Promote all buttons on the Controller page send that request).\n${rows.join("\n")}\n`
   );
 }
 

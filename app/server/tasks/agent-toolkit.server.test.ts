@@ -599,8 +599,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // Named, so a gate that stops mounting its tool is a failure here and not
     // a silently shorter list agreeing with itself.
     expect(mounted).toEqual([
+      "correct_knowledge_doc",
       "github_read",
-      "propose_kb_correction",
       "read_board",
       "read_knowledge_doc",
       "report_outcome",
@@ -859,7 +859,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      * is the KB grant, not U11's collaboration grants — an agent granted a
      * knowledge base and nothing else still has to be able to read it.
      */
-    it("ruling 283 and 483: a KB grant alone mounts read_knowledge_doc and propose_kb_correction, and nothing else", () => {
+    it("rulings 283, 483 and 497: a KB grant alone mounts read_knowledge_doc and correct_knowledge_doc, and nothing else", () => {
       const store = setupTestStore(ctx);
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
@@ -885,16 +885,17 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
       // Ruling 483 mounts after `read_board`, so a knowledge base alone still
       // widens nothing on U11's collaboration gate.
-      expect(Object.keys(names)).toEqual(["read_knowledge_doc", "propose_kb_correction"]);
+      expect(Object.keys(names)).toEqual(["read_knowledge_doc", "correct_knowledge_doc"]);
     });
 
     /**
      * Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
-     * bases wrong files the correction in the document. Live on WEB-3 the
-     * Platform Engineer wrote "the knowledge-base runbook is read-only to me",
-     * an hour after the Site Engineer found the same stale dossier fact.
+     * bases wrong corrects the document. Live on WEB-3 the Platform Engineer
+     * wrote "the knowledge-base runbook is read-only to me", an hour after the
+     * Site Engineer found the same stale dossier fact. Ruling 497 writes the
+     * correction into the settled text as it is made.
      */
-    it("ruling 483: propose_kb_correction files against the agent's own knowledge base, and only its own", async () => {
+    it("rulings 483 and 497: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
       const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
       const { writeStoreDoc } = await import("~/server/org/store-files.server");
       const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
@@ -933,33 +934,37 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
 
       const filed = textResult.parse(
         await client.callTool({
-          name: "propose_kb_correction",
+          name: "correct_knowledge_doc",
           arguments: {
             kb: kb.dir,
             doc: "06-platform-facts.md",
-            line: "T-003: wrangler 4.138.0",
-            correction: "The measured wrangler is 4.139.0.",
+            replaces: "- T-003: wrangler 4.138.0",
+            text: "- T-003: wrangler 4.139.0",
             evidence: "`npx wrangler --version` printed 4.139.0.",
           },
         }),
       );
       // CANARY: drop the tool and the agent can only say so in a comment.
-      expect(filed).toMatch(/^\[done\] Proposed as kp-[0-9a-f]{10}/);
+      expect(filed).toMatch(new RegExp(`^\\[done\\] Corrected \`${kb.dir}/06-platform-facts.md\` as kc-[0-9a-f]{10}`));
       const { readFileSync } = await import("node:fs");
       const path = await import("node:path");
       const body = readFileSync(path.join(store.dataRoot, "kb", kb.dir, "06-platform-facts.md"), "utf8");
-      expect(body).toContain("- T-003: wrangler 4.138.0");
-      expect(body).toContain(", Security review]** The measured wrangler is 4.139.0.");
+      expect(body).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n");
       const top = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!
         .parsed.timeline[0]!;
-      expect(top.type).toBe("proposal");
+      expect(top.type).toBe("kb_correction");
       expect(top.actor).toMatchObject({ kind: "agent", profileId: "security-reviewer" });
+      const { listKbCorrections } = await import("~/server/org/kb-corrections.server");
+      expect(listKbCorrections(store.db, { projectSlug: store.slug })[0]).toMatchObject({
+        filedBy: "Security review",
+        taskKey: "VIB-3",
+      });
 
-      // A knowledge base this run was not given is not its to amend.
+      // A knowledge base this run was not given is not its to correct.
       const refused = textResult.parse(
         await client.callTool({
-          name: "propose_kb_correction",
-          arguments: { kb: "someone-elses", doc: "x.md", correction: "y", evidence: "z" },
+          name: "correct_knowledge_doc",
+          arguments: { kb: "someone-elses", doc: "x.md", text: "y", evidence: "z" },
         }),
       );
       expect(refused).toContain("[noop] No knowledge base `someone-elses` was given to a run on this task");

@@ -105,6 +105,7 @@ const ACT_ICON = {
   quality: "flag",
   continuity: "refresh",
   proposal: "edit",
+  kb_correction: "edit",
   transition: "arrow",
   blocked: "alert",
   agent: "agents",

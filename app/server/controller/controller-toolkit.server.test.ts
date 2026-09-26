@@ -1228,7 +1228,8 @@ describe("instance scope: org-role gate on every management tool", () => {
   it("ruling 483: get_project lists the open proposals and resolve_kb_proposal promotes one, org admins only", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
-    const { fileKbProposal } = await import("~/server/org/kb-proposals.server");
+    const { parseKbProposals } = await import("~/server/org/kb-proposals.server");
+    const { withLegacyProposals } = await import("../../../test-support/kb-legacy-proposals");
     const admin = { userId: ids.orgAdmin, label: "arda" };
     const { kb } = await saveKnowledgeBase(
       app.db,
@@ -1237,22 +1238,17 @@ describe("instance scope: org-role gate on every management tool", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    writeStoreDoc(app.db, target, [], "facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
-    const filed = await fileKbProposal(
-      app.db,
+    // Filed before ruling 497, and still standing in its document.
+    const seeded = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
-        kb: kb.dir,
-        doc: "facts.md",
+        taskKey: "VIB-142",
         line: "T-003: wrangler 4.138.0",
         correction: "The measured wrangler is 4.139.0.",
         evidence: "npx wrangler --version printed 4.139.0",
-        taskKey: "VIB-142",
-        filedBy: "Platform Engineer",
-        actor: admin,
       },
-      { dataRoot: app.dataRoot },
-    );
-    if (!filed.ok) throw new Error(filed.message);
+    ]);
+    writeStoreDoc(app.db, target, [], "facts.md", seeded, admin);
+    const filed = { proposal: parseKbProposals(kb.dir, "facts.md", seeded)[0]! };
 
     // CANARY: drop `openProposals` from get_project and the controller has no
     // read of what waits.
@@ -1287,6 +1283,77 @@ describe("instance scope: org-role gate on every management tool", () => {
         (e) => e.actorLabel === "arda@viberr.dev · via controller",
       ),
     ).toBe(true);
+  });
+
+  /**
+   * Ruling 497: an agent's knowledge-base correction is written as it is made.
+   * The controller reads a project's in `get_project` and undoes one when a
+   * person asks, which notes the undo on the task that made it.
+   */
+  it("ruling 497: get_project lists kbCorrections and undo_kb_correction puts the passage back, org admins only", async () => {
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const { mergeKbCorrection } = await import("~/server/org/kb-corrections.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const admin = { userId: ids.orgAdmin, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      app.db,
+      { name: "toolkit-runbook", refresh: "on change" },
+      admin,
+      { dataRoot: app.dataRoot },
+    );
+    const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
+    writeStoreDoc(app.db, target, [], "runbook.md", "# Step 1\n\n- Preview builds: on\n", admin);
+    const merged = await mergeKbCorrection(
+      app.db,
+      {
+        kb: kb.dir,
+        doc: "runbook.md",
+        replaces: "- Preview builds: on",
+        text: "- Preview builds: off (previews_enabled: false)",
+        evidence: "GET /builds/workers/<id> returned previews_enabled: false",
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        filedBy: "Platform Engineer",
+        actorRef: "operator",
+        rulings: false,
+        actor: { userId: null, label: "operator" },
+      },
+      { dataRoot: app.dataRoot },
+    );
+    if (!merged.ok) throw new Error(merged.message);
+    const id = merged.correction.id;
+
+    // CANARY: drop `kbCorrections` from get_project and the controller cannot
+    // name what an agent changed.
+    const project = z
+      .object({ kbCorrections: z.array(z.object({ id: z.string(), text: z.string(), undone: z.unknown() })) })
+      .parse(JSON.parse(await call(ids.contributor, "get_project")));
+    expect(project.kbCorrections).toEqual([
+      expect.objectContaining({ id, text: "- Preview builds: off (previews_enabled: false)", undone: null }),
+    ]);
+
+    const undo = { id, reason: "Previews are on in the dashboard; that read was stale." };
+    const denied = await call(ids.contributor, "undo_kb_correction", undo);
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("org admin");
+
+    const done = await call(ids.orgAdmin, "undo_kb_correction", undo);
+    expect(done).toContain(`[done] Undid ${id}`);
+    expect(readFileSync(path.join(app.dataRoot, "kb", kb.dir, "runbook.md"), "utf8")).toBe(
+      "# Step 1\n\n- Preview builds: on\n",
+    );
+    const top = readTaskFile({ projectSlug: SLUG, taskKey: "VIB-142", dataRoot: app.dataRoot })!.parsed.timeline[0]!;
+    expect(top).toMatchObject({ type: "kb_correction", title: "Knowledge-base correction undone" });
+    expect(top.actor).toMatchObject({ kind: "human", userId: ids.orgAdmin });
+    expect(top.text).toContain("**Why:** Previews are on in the dashboard; that read was stale.");
+    expect(listAuditEvents(app.db, { action: "task.kb_correction.undone" })[0]).toMatchObject({
+      actorUserId: ids.orgAdmin,
+      actorLabel: "arda@viberr.dev · via controller",
+    });
+    const again = await call(ids.orgAdmin, "undo_kb_correction", undo);
+    expect(again).toContain("[noop]");
+    expect(again).toContain("already undone");
   });
 
   it("create_project is open to a plain org member (FR5 parity): the gate passed and only the GitHub-connection validation refused", async () => {

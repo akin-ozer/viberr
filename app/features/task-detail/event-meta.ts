@@ -47,6 +47,10 @@ const EVENT_META: EventMetaTable = {
   // act read "Review verdict" and sat above a real verdict looking like a
   // failed review. It is a proposal: its own label, and the edit glyph.
   proposal: { node: "proposal", icon: "edit", label: "Proposal" },
+  // Ruling 497: a correction an agent wrote into a knowledge base (or a
+  // person's undo of one). The same tint and glyph as the proposal it replaced,
+  // named for what it touched: the title says corrected or undone.
+  kb_correction: { node: "proposal", icon: "edit", label: "Knowledge base" },
   transition: { node: "transition", icon: "arrow", label: "Transition request" },
   blocked: { node: "blocked", icon: "alert", label: "Blocked decision" },
   // The operator's coordination actions (deploy/engage/run/release a specialist).
@@ -83,6 +87,8 @@ const TYPED_KIND: TypedKindTable = {
   continuity: "risk", // G8: amber warning tone
   // Ruling 483: a decision a person owes, not a verdict and not a warning.
   proposal: "info",
+  // Ruling 497: a change to what every run reads, in the same tone.
+  kb_correction: "info",
   transition: "info",
   blocked: "blocked",
   agent: "agent",

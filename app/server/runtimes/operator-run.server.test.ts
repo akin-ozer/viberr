@@ -1426,8 +1426,9 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
     // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
     // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
-    // 378 added `propose_ruling` (ruling 483 renamed it `propose_kb_correction`),
-    // also in-Viberr and also destroying nothing, so it is 10.
+    // 378 added `propose_ruling` (ruling 483 renamed it `propose_kb_correction`,
+    // ruling 497 `correct_knowledge_doc`), also in-Viberr and also destroying
+    // nothing a person cannot undo, so it is 10.
     // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
     // with delivery and the count stays 10. Ruling 487's two schedule verbs
     // ride a DIRECT dispatch grant, which this operator does not hold, so they
@@ -1438,7 +1439,7 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     expect(tools).toContain("relay_to_task");
     expect(tools).not.toContain("schedule_task_action");
     expect(tools).toContain("set_dependencies");
-    expect(tools).toContain("propose_kb_correction");
+    expect(tools).toContain("correct_knowledge_doc");
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).not.toContain("lease_files");
     expect(tools).toContain("flag_context_conflict");
@@ -1878,28 +1879,30 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(buildCodexOperatorPrompt(snapshot({ openPacket: true, packet: own }), "manual")).not.toContain("not by you");
   });
 
-  it("ruling 418: a reviewer's defect class becomes a proposed convention, on the turn the verdict arrives and on the stage rules", () => {
+  it("ruling 418: a reviewer's defect class becomes a written convention, on the turn the verdict arrives and on the stage rules", () => {
     // CANARY: drop either sentence and the turn the verdict lands on, or every
     // later manual/scheduled turn, says nothing about the rulings learning.
     const reply = "Verdict: request-changes\n\ngit args are passed without --.";
     const onVerdict = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
-    expect(onVerdict).toContain("also `propose_kb_correction` that convention");
+    expect(onVerdict).toContain("also `correct_knowledge_doc` that convention into the rulings document");
     expect(onVerdict).toContain("one per class, never one per finding");
     // Ruling 410's round-two duty is on this turn too, not only in the skill.
     // CANARY: drop that sentence and the only instruction on the turn a second
     // objection lands on is "move back and rework", the loop 410 ended.
     expect(onVerdict).toContain("At the SECOND consecutive objection from the same reviewer");
     const later = buildCodexOperatorPrompt(snapshot({}), "manual");
-    expect(later).toContain("`propose_kb_correction` the convention in the rulings document it belongs to");
+    expect(later).toContain("`correct_knowledge_doc` the convention into the rulings document it belongs to");
+    // Ruling 497: it is written, not proposed.
+    expect(later).toContain("It is written at once, every later run reads it, and a person undoes it if they disagree.");
   });
 
-  it("ruling 483: the turn an agent's report lands on relays a knowledge-base line it proved wrong", () => {
+  it("rulings 483 and 497: the turn an agent's report lands on relays a knowledge-base passage it proved wrong", () => {
     // CANARY: drop the relay sentence and a Codex agent's correction, which it
     // has no tool to file, stays in its report as it did on WEB-3.
     const reply = "## Knowledge-base correction\n\nakin-dossier 06-platform-facts.md T-003 says 4.138.0; measured 4.139.0.";
     const turn = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
     expect(turn).toContain(
-      "If the report says a line in a knowledge base is wrong (a version, a path, a command, a step it measured) and no proposal for it is on the timeline, `propose_kb_correction` it",
+      "If the report says a passage in a knowledge base is wrong (a version, a path, a command, a step it measured) and no correction of it is on the timeline, `correct_knowledge_doc` it",
     );
   });
 
@@ -4029,7 +4032,7 @@ describe("pending trigger queue", () => {
     });
   });
 
-  it("ruling 483: a Codex plan's propose_kb_correction files `<kb>/<doc>` against an engaged agent's knowledge base, beside the line in `reason`", async () => {
+  it("rulings 483 and 497: a Codex plan's correct_knowledge_doc writes `<kb>/<doc>` of an engaged agent's knowledge base, in place of the passage in `reason`", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
     const admin = { userId: store3.users.arda.id, label: "arda" };
@@ -4077,13 +4080,13 @@ describe("pending trigger queue", () => {
         reasoning: "",
         actions: [
           {
-            tool: "propose_kb_correction",
+            tool: "correct_knowledge_doc",
             profileId: null,
             delivers: null,
             toStageId: null,
             packetType: null,
-            text: "The build writes dist/worker and dist/client, not dist/server.",
-            reason: "T-013: output in dist/server/",
+            text: "- T-013: output in dist/worker/ and dist/client/",
+            reason: "- T-013: output in dist/server/",
             packetOptions: null,
             kbSource: `${kb.dir}/06-platform-facts.md`,
             repoSource: "`ls dist` after `npm run build` listed client and worker.",
@@ -4102,8 +4105,7 @@ describe("pending trigger queue", () => {
         path.join(store3.dataRoot, "kb", kb.dir, "06-platform-facts.md"),
         "utf8",
       );
-      expect(body).toContain("  Line: T-013: output in dist/server/");
-      expect(body).toContain("The build writes dist/worker and dist/client, not dist/server.");
+      expect(body).toBe("# Facts\n\n- T-013: output in dist/worker/ and dist/client/\n");
     });
   });
 

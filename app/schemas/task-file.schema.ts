@@ -138,8 +138,13 @@ export const TIMELINE_EVENT_TYPES = [
   // Ruling 483 (F40-59): a proposed correction to a knowledge base — the
   // project's rulings or any base a run was given. It asks a person for a
   // decision (promote or dismiss), so it is neither a review verdict
-  // (`quality`, where ruling 378 filed it) nor a neutral `note`.
+  // (`quality`, where ruling 378 filed it) nor a neutral `note`. Nothing files
+  // one since ruling 497; task files keep the ones they hold.
   "proposal",
+  // Ruling 497: a correction an agent WROTE into a knowledge base, or a
+  // person's undo of one. It asks nobody for anything, so it is not a
+  // `proposal`, and it names what changed, so it is not a bare `note`.
+  "kb_correction",
 ] as const;
 
 /** Stable packet-option kinds (orchestrator ruling 7). Dispatch on these,

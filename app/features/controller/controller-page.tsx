@@ -56,7 +56,8 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { controllerExamples } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
-import { ProposalsPanel } from "./proposals-panel";
+import { KnowledgePanel } from "./knowledge-panel";
+import { useOpResultToast, type ActionResult } from "./op-result";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 
 /**
@@ -73,26 +74,6 @@ import { viewerTimeZone } from "~/shared/dates/time-zone";
  * for a missed settle, and revalidates once the tail says it ended (ruling
  * 457, CTL-2).
  */
-
-interface ActionResult {
-  ok: boolean;
-  error?: string;
-  toast?: string;
-  conversationId?: string;
-}
-
-/**
- * Toasts an interrupt or goal-op result once: the server's `toast` (tinted by
- * `ok`), else a failure's `error`. The run strip and every goal card answer
- * through it.
- */
-function useOpResultToast(fetcher: ReturnType<typeof useFetcher<ActionResult>>) {
-  const push = useToast();
-  useFetcherResult(fetcher, (d) => {
-    if (d.toast) push(d.toast, d.ok ? "success" : "error");
-    else if (!d.ok && d.error) push(d.error, "error");
-  });
-}
 
 /**
  * Where a conversation (or, with `null`, the blank composer) lives on this
@@ -265,13 +246,16 @@ export function ControllerPage({
             buries the list above it nor stretches the page beside it. */}
         <aside className="ctl-side">
           <ConversationList view={view} />
-          {/* Ruling 483 (F40-59): what the board's agents proposed about its
-              knowledge, where the owner looks, before the chains. */}
-          {view.proposals !== null && projectSlug && (
-            <ProposalsPanel
+          {/* Ruling 497: what the board's agents changed in its knowledge,
+              where the owner looks, before the chains; with ruling 483's
+              proposals that documents still hold. */}
+          {view.corrections && view.proposals !== null && projectSlug && (
+            <KnowledgePanel
+              corrections={view.corrections}
               proposals={view.proposals}
               projectSlug={projectSlug}
               canResolve={view.viewerIsOrgAdmin}
+              csrf={csrf}
               available={view.available}
               sending={send.state !== "idle"}
               onAsk={(text) =>
@@ -619,16 +603,20 @@ function Transcript({
   // 476(c): and a reply that lands shows its first line, not its last.
   useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
   // A reply that names an open knowledge-base proposal links it to its entry
-  // in the Proposals panel beside the transcript (owner, 2026-09-25).
+  // in the panel beside the transcript (owner, 2026-09-25), and one that names
+  // a correction to its entry there too (ruling 497).
   const messageLinks = useMemo(
     () =>
-      view.proposals?.length
+      view.proposals?.length || view.corrections?.shown.length
         ? {
             ...view.taskLinks,
-            ...Object.fromEntries(view.proposals.map((p) => [p.id, `#proposal-${p.id}`])),
+            ...Object.fromEntries((view.proposals ?? []).map((p) => [p.id, `#proposal-${p.id}`])),
+            ...Object.fromEntries(
+              (view.corrections?.shown ?? []).map((c) => [c.id, `#correction-${c.id}`]),
+            ),
           }
         : view.taskLinks,
-    [view.taskLinks, view.proposals],
+    [view.taskLinks, view.proposals, view.corrections],
   );
 
   if (!view.conversation) {

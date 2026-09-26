@@ -41,10 +41,8 @@ import { toBoardCard } from "~/features/board/board-card";
 import { cardStatus } from "~/features/board/card-status";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
-import {
-  kbProposalDocHref,
-  listProjectKbProposals,
-} from "~/server/org/kb-proposals.server";
+import { kbDocHref, listProjectKbProposals } from "~/server/org/kb-proposals.server";
+import { listKbCorrections } from "~/server/org/kb-corrections.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -90,8 +88,11 @@ export interface ControllerSurfaceView {
    */
   plannedElsewhere?: PlannedElsewhere[];
   /** Ruling 483 (F40-59): the open knowledge-base proposals agents filed from
-   *  this project's tasks. Project surface only. */
+   *  this project's tasks before ruling 497. Project surface only. */
   proposals: KbProposalView[] | null;
+  /** Ruling 497: the knowledge-base corrections agents on this project's
+   *  tasks wrote, newest first. Project surface only. */
+  corrections: KbCorrectionsView | null;
   viewerOwnsActive: boolean;
   /** Org admin reading every conversation (?all=1). */
   showingAll: boolean;
@@ -116,6 +117,34 @@ export interface KbProposalView {
   /** Where an org admin opens the document (Instance settings); null for
    *  everyone else, who cannot open that page. */
   docHref: string | null;
+}
+
+/** Ruling 497: one knowledge-base correction an agent wrote, as the project
+ *  controller page lists it. The passages are clipped for the page; the
+ *  document and the record hold them whole. */
+export interface KbCorrectionView {
+  id: string;
+  kb: string;
+  doc: string;
+  /** It was written into the project's rulings knowledge base. */
+  rulings: boolean;
+  /** The passage it replaced; null when it added text. */
+  replaced: string | null;
+  text: string;
+  evidence: string;
+  taskKey: string;
+  filedBy: string;
+  at: string;
+  undone: { at: string; by: string; reason: string | null } | null;
+  /** Where an org admin opens the document; null for everyone else. */
+  docHref: string | null;
+}
+
+export interface KbCorrectionsView {
+  /** The newest {@link CORRECTIONS_SHOWN}. */
+  shown: KbCorrectionView[];
+  /** How many are on record for the project (audit retention bounds it). */
+  total: number;
 }
 
 export interface ConversationListItem {
@@ -239,8 +268,48 @@ function projectProposals(
     line: p.line,
     correction: p.correction,
     evidence: p.evidence,
-    docHref: viewerIsOrgAdmin ? kbProposalDocHref(p) : null,
+    docHref: viewerIsOrgAdmin ? kbDocHref(p) : null,
   }));
+}
+
+/** Ruling 497: corrections the page lists before the rest are left to the
+ *  audit log and to `get_project`. */
+const CORRECTIONS_SHOWN = 20;
+
+/** What the page shows of one side of a correction. */
+function clipped(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max).trimEnd()}…` : value;
+}
+
+/**
+ * Ruling 497: what the board's agents changed in the knowledge every run
+ * reads, where the owner looks, with Undo. The owner stopped approving each
+ * correction ("No human can approve all of these while inspecting them
+ * thoroughly"); this list is what they read afterwards instead.
+ */
+function projectCorrections(
+  db: DatabaseSync,
+  projectSlug: string,
+  viewerIsOrgAdmin: boolean,
+): KbCorrectionsView {
+  const all = listKbCorrections(db, { projectSlug });
+  return {
+    total: all.length,
+    shown: all.slice(0, CORRECTIONS_SHOWN).map((c) => ({
+      id: c.id,
+      kb: c.kb,
+      doc: c.doc,
+      rulings: c.rulings,
+      replaced: c.replaced === null ? null : clipped(c.replaced, 1200),
+      text: clipped(c.text, 1200),
+      evidence: clipped(c.evidence, 600),
+      taskKey: c.taskKey,
+      filedBy: c.filedBy,
+      at: c.at,
+      undone: c.undone,
+      docHref: viewerIsOrgAdmin ? kbDocHref(c) : null,
+    })),
+  };
 }
 
 export function getControllerSurface(
@@ -379,6 +448,7 @@ export function getControllerSurface(
     goals,
     plannedElsewhere: [...plannedElsewhere.values()],
     proposals: scope ? projectProposals(db, scope, admin, input.dataRoot) : null,
+    corrections: scope ? projectCorrections(db, scope, admin) : null,
     // Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION —
     // the chain's creator, or run-agents. The page knew only the role half, so
     // it hid Pause, Resume, Cancel, Retry and Skip from the person who created

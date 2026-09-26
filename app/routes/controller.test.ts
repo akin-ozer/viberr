@@ -17,6 +17,7 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 let app: AppTestContext;
 let selin: string; // conversation owner (contributor on viberr-core)
 let murat: string; // another member of viberr-core
+let arda: string; // org admin
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
@@ -25,6 +26,7 @@ beforeAll(async () => {
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   selin = userIds.selin;
   murat = userIds.murat;
+  arda = userIds.arda;
   const { connectFakeBackend } = await import("../../test-support/backend-credentials");
   await connectFakeBackend(app.db, selin, "claude");
 });
@@ -150,5 +152,58 @@ describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s
     // Clean up: the owner stops it so nothing writes after the DB closes.
     await post(surface, selin, { intent: "interrupt", conversationId, runId });
     await settled(runId);
+  });
+});
+
+/**
+ * Ruling 497: the Knowledge base panel's Undo posts `kb-correction-undo`, and
+ * the route undoes the correction itself, no controller turn, for an org admin
+ * only: the undo edits an org knowledge base. Canary: drop the org-admin check
+ * and a member rewrites what every run reads.
+ */
+describe("POST intent=kb-correction-undo on the project surface (ruling 497)", () => {
+  it("an org admin undoes a correction; a member is refused and nothing changes", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const { mergeKbCorrection } = await import("~/server/org/kb-corrections.server");
+    const admin = { userId: arda, label: "arda" };
+    const { kb } = await saveKnowledgeBase(app.db, { name: "route-runbook", refresh: "on change" }, admin, {
+      dataRoot: app.dataRoot,
+    });
+    const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
+    writeStoreDoc(app.db, target, [], "runbook.md", "# Step 1\n\n- Preview builds: on\n", admin);
+    const merged = await mergeKbCorrection(
+      app.db,
+      {
+        kb: kb.dir,
+        doc: "runbook.md",
+        replaces: "- Preview builds: on",
+        text: "- Preview builds: off",
+        evidence: "previews_enabled: false",
+        projectSlug: SLUG,
+        taskKey: "VIB-142",
+        filedBy: "Platform Engineer",
+        actorRef: "operator",
+        rulings: false,
+        actor: { userId: null, label: "operator" },
+      },
+      { dataRoot: app.dataRoot },
+    );
+    if (!merged.ok) throw new Error(merged.message);
+    const id = merged.correction.id;
+    const doc = () => readFileSync(path.join(app.dataRoot, "kb", kb.dir, "runbook.md"), "utf8");
+
+    const refused = refusal.parse(await post("project", murat, { intent: "kb-correction-undo", id }));
+    expect(refused.init?.status).toBe(403);
+    expect(refused.data.error).toContain("Only an org admin can undo a knowledge-base correction");
+    expect(doc()).toBe("# Step 1\n\n- Preview builds: off\n");
+
+    const done = okResult.parse(
+      await post("project", arda, { intent: "kb-correction-undo", id, reason: "Previews are on." }),
+    );
+    expect(done.toast).toContain(`Undid ${id}`);
+    expect(doc()).toBe("# Step 1\n\n- Preview builds: on\n");
   });
 });

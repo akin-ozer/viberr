@@ -206,6 +206,12 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 497 (owner, 2026-09-26): before "Keeping a project's rulings
+    // current" said agents' corrections are written straight into the document
+    // and named `undo_kb_correction` and `kbCorrections`, with proposals only
+    // as the ones documents still hold, and before the gates line stopped
+    // saying to promote a proposal. The owner: "proposal spam is exhausting".
+    "a8e1cd90673ab1b2eccf08aeeff10f1e7f8ae181a4dc0c82518b08303dd5ba85",
     // Ruling 492 (pass 40, F40-69): before "Creating a task" and "Chained
     // goals" said a done signal is something the task can show before
     // acceptance, and that a proof only the merged or deployed code can show
@@ -366,6 +372,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 497 (owner, 2026-09-26): before `propose_kb_correction` became
+    // `correct_knowledge_doc`, which writes the correction into the document
+    // (the exact passage it replaces, the text in its place) instead of filing
+    // a proposal a person had to promote.
+    "195516db43c82959b5d0ec94806e15de0a1b90fd68f02525c95e43d7effdae2d",
     // Ruling 488 (pass 40, F40-67): before the Tools list named
     // `relay_to_task`, the way text moves between tasks of a project.
     "a0e0896423dc9a9344d814181c90346c65a6068f84b7512d4820d6994cbf3bc7",
