@@ -35,6 +35,10 @@ export interface ReviewNote {
   line: number | null;
   /** The first line of a multi-line range, when there is one. */
   startLine: number | null;
+  /** The side `startLine` is numbered on when it is not `side`'s: a range can
+   *  run from a removed line to an added one, as a GitHub comment's
+   *  `start_side` can (ruling 509). Null reads as `side`. */
+  startSide: "new" | "old" | null;
   /** `old` = a removed line, numbered in the file as it was. */
   side: "new" | "old";
   body: string;
@@ -44,13 +48,23 @@ export interface ReviewNote {
 export const REVIEW_NOTES_MAX = 50;
 export const REVIEW_NOTE_MAX_CHARS = 4_000;
 
-/** A panel note as the `review-notes` intent receives it (JSON). */
-const panelNoteSchema = z.object({
-  path: z.string().trim().min(1).max(1_000),
-  line: z.number().int().min(1),
-  side: z.enum(["new", "old"]),
-  body: z.string().trim().min(1).max(REVIEW_NOTE_MAX_CHARS),
-});
+/** A panel note as the `review-notes` intent receives it (JSON). A note on
+ *  several lines (ruling 509) also names its first line and that line's side;
+ *  on one side a range reads downward, as the diff draws it. */
+const panelNoteSchema = z
+  .object({
+    path: z.string().trim().min(1).max(1_000),
+    line: z.number().int().min(1),
+    side: z.enum(["new", "old"]),
+    startLine: z.number().int().min(1).optional(),
+    startSide: z.enum(["new", "old"]).optional(),
+    body: z.string().trim().min(1).max(REVIEW_NOTE_MAX_CHARS),
+  })
+  .refine((note) =>
+    note.startLine === undefined
+      ? note.startSide === undefined
+      : (note.startSide ?? note.side) !== note.side || note.startLine <= note.line,
+  );
 /** The form field: a JSON array of notes. */
 const panelNotesField = z
   .string()
@@ -72,7 +86,11 @@ export function parsePanelReviewNotes(raw: FormDataEntryValue | null): ReviewNot
       `Add between 1 and ${REVIEW_NOTES_MAX} notes, each on a changed line and at most ${REVIEW_NOTE_MAX_CHARS} characters.`,
     );
   }
-  return parsed.data.map((n) => ({ ...n, startLine: null }));
+  return parsed.data.map(({ startLine, startSide, ...note }) => ({
+    ...note,
+    startLine: startLine ?? null,
+    startSide: startSide ?? null,
+  }));
 }
 
 /**
@@ -86,15 +104,23 @@ function defuseMentions(text: string): string {
   return text.replace(/(^|\s)@(?=[A-Za-z])/g, "$1\\@");
 }
 
-/** Where a note points, as the comment quotes it: `path:line`. */
+/** Where a note points, as the comment quotes it: `path:line`, or
+ *  `path:start-end` for lines on one side. A range from a removed line to an
+ *  added one has no single numbering, so it names both ends (ruling 509). */
 function noteTarget(note: ReviewNote & { path: string }): string {
   const path = note.path.replaceAll("`", "'");
   if (note.line === null) return `\`${path}\``;
-  const range =
-    note.startLine !== null && note.startLine < note.line
-      ? `${note.startLine}-${note.line}`
-      : String(note.line);
-  return `\`${path}:${range}\`${note.side === "old" ? " (removed line)" : ""}`;
+  const startSide = note.startSide ?? note.side;
+  if (note.startLine !== null && startSide !== note.side) {
+    const end = (side: "new" | "old", line: number) =>
+      `${side === "old" ? "removed line" : "line"} ${line}`;
+    return `\`${path}\` (${end(startSide, note.startLine)} to ${end(note.side, note.line)})`;
+  }
+  if (note.startLine !== null && note.startLine < note.line) {
+    const removed = note.side === "old" ? " (removed lines)" : "";
+    return `\`${path}:${note.startLine}-${note.line}\`${removed}`;
+  }
+  return `\`${path}:${note.line}\`${note.side === "old" ? " (removed line)" : ""}`;
 }
 
 /**

@@ -524,9 +524,11 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
   patches of `readPullRequestDiff`, BOUND to the delivered revision (`headSha`: the PR's
   live head is read first, and a PR at any other head answers why instead of its files:
   not pushed yet, or moved past the delivery), 200,000 encoded patch characters per
-  read and a file past that loaded alone by `?path=`. A note on a line posts through
-  the task route's `review-notes` intent as ONE comment through `commentToAgent`,
-  addressed `@<deliverer>` and quoting each note's `file:line` (`review-notes.server.ts`),
+  read and a file past that loaded alone by `?path=`. A note on a line, or on a range
+  of one hunk's lines picked by a mouse drag across the numbers or a shift-click (ruling
+  509), posts through the task route's `review-notes` intent as ONE comment through
+  `commentToAgent`, addressed `@<deliverer>` and quoting each note's `file:line` or
+  `file:start-end` (`review-notes.server.ts`),
   refused with a reason when the delivered revision moved since the read or no deployed
   agent delivers the task. GitHub reviews of the delivered head reach the deliverer the
   same way (§6, review relay).
@@ -758,7 +760,9 @@ Facts it records beside the state:
   review, so a quiet pass costs no call) and posts, per reviewer, ONE comment through
   `commentToAgent` as that member (audit label `<email> · via GitHub`): `@<deliverer>`,
   "from GitHub", a CHANGES_REQUESTED body first, then each line comment quoting its
-  `file:line` on the commit it was written on (a LEFT-side comment says "removed line"),
+  `file:line` on the commit it was written on (a LEFT-side comment says "removed line";
+  a multi-line comment keeps its `start_side`, so one from a removed line to an added
+  one names both ends, ruling 509),
   with every other `@` escaped so the deliverer is the one addressee. The ids relayed
   (`review:<id>`, `comment:<id>`) are recorded on `pr.reviewRelay.relayed` in the SAME
   locked write that appends the comment; a review with nothing to relay is recorded on

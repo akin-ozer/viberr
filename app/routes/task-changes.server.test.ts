@@ -93,15 +93,17 @@ describe("ruling 484: the review-notes intent", () => {
   const notes = JSON.stringify([
     { path: "app/server/github/reconcile.ts", line: 42, side: "new", body: "Name the refusal here." },
     { path: "app/server/github/reconcile.ts", line: 7, side: "old", body: "Keep this guard." },
+    // Ruling 509: a note on several lines.
+    { path: "app/server/github/reconcile.ts", line: 60, side: "new", startLine: 51, startSide: "new", body: "Split this loop." },
   ]);
 
-  it("posts ONE comment addressed to the deliverer that quotes each file:line", async () => {
+  it("posts ONE comment addressed to the deliverer that quotes each file:line or range", async () => {
     const result = actionResult.parse(await postNotes(ids.selin, { headSha: VIB_142_HEAD, notes }));
     expect(result).toMatchObject({ ok: true });
     if (!("ok" in result)) return;
     // Selin is a contributor: the comment lands and names the deliverer; her
     // role cannot start its run, and the toast says so, as for any comment.
-    expect(result.toast).toBe("2 notes sent · your role can't trigger agent runs");
+    expect(result.toast).toBe("3 notes sent · your role can't trigger agent runs");
     expect(result.agent).not.toBeNull();
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const newest = readTaskFile({ projectSlug: "viberr-core", taskKey: "VIB-142" })!.parsed
@@ -113,6 +115,7 @@ describe("ruling 484: the review-notes intent", () => {
         "",
         "- `app/server/github/reconcile.ts:42`: Name the refusal here.",
         "- `app/server/github/reconcile.ts:7` (removed line): Keep this guard.",
+        "- `app/server/github/reconcile.ts:51-60`: Split this loop.",
       ].join("\n"),
     );
   });

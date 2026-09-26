@@ -70,9 +70,17 @@ const BIG_FILE: TaskChangesView = {
   truncated: false,
 };
 
-/** One `review-notes` note as the intent receives it. */
+/** One `review-notes` note as the intent receives it; a note on several
+ *  lines also names its first line and that line's side (ruling 509). */
 const postedNotes = z.array(
-  z.object({ path: z.string(), line: z.number(), side: z.enum(["new", "old"]), body: z.string() }),
+  z.strictObject({
+    path: z.string(),
+    line: z.number(),
+    side: z.enum(["new", "old"]),
+    startLine: z.number().optional(),
+    startSide: z.enum(["new", "old"]).optional(),
+    body: z.string(),
+  }),
 );
 
 function renderPanel(opts: { view?: TaskChangesView; revisionSha?: string } = {}) {
@@ -178,7 +186,7 @@ describe("ruling 484: the Changes panel", () => {
       { path: "notes/one.md", line: 2, side: "new", body: "Cut this line." },
       { path: "notes/one.md", line: 1, side: "old", body: "Keep it." },
     ]);
-    await screen.findByText("No notes yet. Select a line number to add one.");
+    await screen.findByText("No notes yet. Select a line number to add one, or drag across several.");
     expect(await screen.findByText("1 note sent · @Content Writer is picking it up")).toBeTruthy();
   });
 
@@ -190,7 +198,7 @@ describe("ruling 484: the Changes panel", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(document.activeElement).toBe(lineOne);
-    expect(screen.getByText("No notes yet. Select a line number to add one.")).toBeTruthy();
+    expect(screen.getByText("No notes yet. Select a line number to add one, or drag across several.")).toBeTruthy();
   });
 
   it("keeps unsent notes while the panel is hidden", async () => {
@@ -237,5 +245,162 @@ describe("ruling 484: the Changes panel", () => {
     expect(alert.textContent).toContain("not the delivered revision 5d1f0e2");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(reads).toHaveLength(2));
+  });
+});
+
+/**
+ * Ruling 509: a note may cover several lines of one hunk. The owner reviewed a
+ * runbook paragraph by paragraph and could only note one line at a time. The
+ * VIEW's `notes/one.md` hunk draws, in order: removed line 1, new lines 1 and
+ * 2 (added), new line 3 (context).
+ */
+describe("ruling 509: a note on several lines", () => {
+  const num = (name: string) => screen.getByRole("button", { name });
+  const selectedRows = (container: HTMLElement) =>
+    [...container.querySelectorAll(".chg-row[data-sel]")].map(
+      (row) => row.querySelector(".chg-num")?.textContent,
+    );
+
+  it("shift-click stretches the open note to another line, and the note is sent with its first line", async () => {
+    const { container, posted } = renderPanel();
+    await open();
+    fireEvent.click(num("Add a note on notes/one.md line 1"));
+    fireEvent.click(num("Add a note on notes/one.md line 3"), { shiftKey: true });
+    const box = screen.getByRole("textbox", { name: "Note on notes/one.md lines 1 to 3" });
+    expect(document.activeElement).toBe(box);
+    expect(box.getAttribute("placeholder")).toBe("What should change on these lines?");
+    expect(selectedRows(container)).toEqual(["1", "2", "3"]);
+    fireEvent.change(box, { target: { value: "Merge these into one sentence." } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+
+    // The note sits under its last line, names its lines, and each of them
+    // is now the button that opens it.
+    const note = container.querySelector(".chg-note")!;
+    expect(note.textContent).toContain("Lines 1 to 3");
+    expect(note.textContent).toContain("Merge these into one sentence.");
+    expect(screen.getAllByRole("button", { name: "Edit the note on notes/one.md lines 1 to 3" })).toHaveLength(3);
+    expect(container.querySelectorAll(".chg-row[data-noted]")).toHaveLength(3);
+    // Focus goes back to the number pressed last.
+    expect(document.activeElement).toBe(
+      screen.getAllByRole("button", { name: "Edit the note on notes/one.md lines 1 to 3" })[2],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send to @Content Writer" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(postedNotes.parse(JSON.parse(posted[0]!.notes))).toEqual([
+      {
+        path: "notes/one.md",
+        line: 3,
+        side: "new",
+        startLine: 1,
+        startSide: "new",
+        body: "Merge these into one sentence.",
+      },
+    ]);
+  });
+
+  it("names both ends of a range that runs from a removed line to an added one", async () => {
+    const { posted } = renderPanel();
+    await open();
+    fireEvent.click(num("Add a note on notes/one.md line 1, removed"));
+    fireEvent.click(num("Add a note on notes/one.md line 2"), { shiftKey: true });
+    const box = screen.getByRole("textbox", { name: "Note on notes/one.md removed line 1 to line 2" });
+    fireEvent.change(box, { target: { value: "The old wording was clearer." } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    expect(screen.getByText("Removed line 1 to line 2")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send to @Content Writer" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(postedNotes.parse(JSON.parse(posted[0]!.notes))).toEqual([
+      {
+        path: "notes/one.md",
+        line: 2,
+        side: "new",
+        startLine: 1,
+        startSide: "old",
+        body: "The old wording was clearer.",
+      },
+    ]);
+  });
+
+  it("a mouse drag across the numbers opens a note on the lines it crossed, and Escape drops it", async () => {
+    const { container } = renderPanel();
+    await open();
+    fireEvent.pointerDown(num("Add a note on notes/one.md line 1"), { pointerType: "mouse", button: 0 });
+    fireEvent.pointerOver(num("Add a note on notes/one.md line 3"));
+    // The lines light up while the button is held; nothing opens yet.
+    expect(selectedRows(container)).toEqual(["1", "2", "3"]);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(selectedRows(container)).toEqual([]);
+    fireEvent.pointerUp(window);
+    expect(screen.queryByRole("textbox")).toBeNull();
+
+    // Upward this time: the note still reads first line to last.
+    fireEvent.pointerDown(num("Add a note on notes/one.md line 3"), { pointerType: "mouse", button: 0 });
+    fireEvent.pointerOver(num("Add a note on notes/one.md line 2"));
+    fireEvent.pointerUp(window);
+    const box = screen.getByRole("textbox", { name: "Note on notes/one.md lines 2 to 3" });
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("a touch on the numbers starts no drag, so the page scrolls", async () => {
+    const { container } = renderPanel();
+    await open();
+    fireEvent.pointerDown(num("Add a note on notes/one.md line 1"), { pointerType: "touch", button: 0 });
+    fireEvent.pointerOver(num("Add a note on notes/one.md line 3"));
+    expect(selectedRows(container)).toEqual([]);
+  });
+
+  it("a drag from a line of the open note re-ranges it and keeps what was typed", async () => {
+    renderPanel();
+    await open();
+    fireEvent.click(num("Add a note on notes/one.md line 1"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Half a thought" } });
+    fireEvent.pointerDown(num("Add a note on notes/one.md line 1"), { pointerType: "mouse", button: 0 });
+    fireEvent.pointerOver(num("Add a note on notes/one.md line 3"));
+    fireEvent.pointerUp(window);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Note on notes/one.md lines 1 to 3" });
+    expect(box.value).toBe("Half a thought");
+  });
+
+  it("a range stops before a line that has its own note, and a line carries one note", async () => {
+    const { container } = renderPanel();
+    await open();
+    fireEvent.click(num("Add a note on notes/one.md line 2"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep this line." } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+
+    fireEvent.click(num("Add a note on notes/one.md line 1"));
+    fireEvent.click(num("Add a note on notes/one.md line 3"), { shiftKey: true });
+    expect(screen.getByRole("textbox", { name: "Note on notes/one.md line 1" })).toBeTruthy();
+    expect(selectedRows(container)).toEqual(["1"]);
+
+    // Dragged up across the noted line and released there: the note stays on
+    // the line the drag could reach.
+    fireEvent.pointerDown(num("Add a note on notes/one.md line 3"), { pointerType: "mouse", button: 0 });
+    fireEvent.pointerOver(num("Add a note on notes/one.md line 1"));
+    fireEvent.pointerUp(num("Add a note on notes/one.md line 1"));
+    expect(screen.getByRole("textbox", { name: "Note on notes/one.md line 3" })).toBeTruthy();
+  });
+
+  it("pressing any line of a note opens it, and saving a new range rewrites that note", async () => {
+    renderPanel();
+    await open();
+    fireEvent.click(num("Add a note on notes/one.md line 1"));
+    fireEvent.click(num("Add a note on notes/one.md line 3"), { shiftKey: true });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Too long." } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+
+    const middle = screen.getAllByRole("button", { name: "Edit the note on notes/one.md lines 1 to 3" })[1]!;
+    fireEvent.click(middle);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Note on notes/one.md lines 1 to 3" });
+    expect(box.value).toBe("Too long.");
+    // Shift-click from the note's first line narrows it to two lines.
+    fireEvent.click(middle, { shiftKey: true });
+    expect(screen.getByRole("textbox", { name: "Note on notes/one.md lines 1 to 2" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    expect(screen.getByText("1 note for @Content Writer, sent as one comment.")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Edit the note on notes/one.md lines 1 to 2" })).toHaveLength(2);
+    expect(num("Add a note on notes/one.md line 3")).toBeTruthy();
   });
 });
