@@ -12,6 +12,7 @@ import {
   groupThoughts,
   HEARTBEAT_NOTE,
   heartbeatLabel,
+  filePathOf,
   hiddenArguments,
   hoistRunInputs,
   roleShort,
@@ -694,6 +695,16 @@ describe("foldWaits + waitText (ruling 366)", () => {
  * below grows a link for its `timeout`; drop the clip check and a clipped
  * prompt reads as shown.
  */
+describe("filePathOf (ruling 499)", () => {
+  it("names the file a row's whole summary is, and nothing inside a command", () => {
+    const row = (name: string, text: string, input: LogLine["input"]) => L({ ev: "tool", tag: "tool_use", name, text, input });
+    expect(filePathOf(row("Read", "/w/a.md", { file_path: "/w/a.md", limit: 5 }))).toBe("/w/a.md");
+    expect(filePathOf(row("Bash", "cat /w/a.md", { command: "cat /w/a.md" }))).toBeNull();
+    expect(filePathOf(row("Grep", "TODO /w", { pattern: "TODO", path: "/w" }))).toBeNull();
+    expect(filePathOf(L({ ev: "out", text: "/w/a.md", input: { file_path: "/w/a.md" } }))).toBeNull();
+  });
+});
+
 describe("hiddenArguments + argumentRows + commandNote (ruling 366(d))", () => {
   const tool = (name: string, text: string, input: LogLine["input"] = null) => L({ ev: "tool", tag: "tool_use", name, text, input });
 
@@ -731,6 +742,16 @@ describe("hiddenArguments + argumentRows + commandNote (ruling 366(d))", () => {
     expect(commandNote(tool("Bash", "npm test", { command: "npm test" }))).toBeNull();
     expect(commandNote(tool("Bash", "npm test", { command: "npm test", description: "   " }))).toBeNull();
     expect(commandNote(tool("mcp__viberr__run_agent", "x", { description: "not a shell" }))).toBeNull();
+  });
+
+  it("ruling 499: names nothing the row already draws in full (an edit's diff, a to-do list)", () => {
+    const edit = tool("Edit", "app/a.ts", { file_path: "app/a.ts", old_string: "const a = 1;\nconst b = 2;", new_string: "const a = 2;\nconst b = 3;" });
+    expect(hiddenArguments(edit, ["old_string", "new_string"])).toBeNull();
+    // Only what is drawn drops out: another cut argument keeps its link.
+    expect(hiddenArguments(tool("X", "", { edits: [1, 2], note: "n".repeat(80) }), ["edits"])).toEqual({
+      keys: ["note"],
+      label: "+ note",
+    });
   });
 
   it("discloses only the named keys, in full, in the link's order", () => {

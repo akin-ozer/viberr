@@ -447,6 +447,14 @@ const codexItem = z.object({
   tool: wireText,
   arguments: wireMcpArguments,
   error: wireError,
+  /** Ruling 499: a `todo_list` item's steps. */
+  items: z
+    .array(
+      z
+        .object({ text: wireText, completed: wireFlag })
+        .catch(() => ({ text: "", completed: false })),
+    )
+    .catch(() => []),
 });
 
 const codexEnvelopeFields = z.object({
@@ -1091,8 +1099,24 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
                 facts: {},
               }
             : { display: null, facts: {} };
+        case "todo_list": {
+          // Ruling 499: the plan's steps ride on the line, so the console draws
+          // the agent's to-do list instead of an empty row. Completed only, as
+          // before: the plan as the turn left it. Codex marks a step done or
+          // not; it names no step in progress, so none is drawn as one.
+          if (!completed) return { display: null, facts: {} };
+          const todos = item.items
+            .filter((step) => step.text.trim() !== "")
+            .map((step) => ({
+              text: step.text,
+              status: step.completed ? ("completed" as const) : ("pending" as const),
+            }));
+          const done = todos.filter((step) => step.status === "completed").length;
+          const text = `${done} of ${countLabel(todos.length, "to-do")} done`;
+          return { display: { t, ev: "meta", tag: "todo_list", text, todos }, facts: {} };
+        }
         default:
-          // todo_list and any item type a future SDK adds — completed only, meta.
+          // Any item type a future SDK adds — completed only, meta.
           return completed
             ? { display: { t, ev: "meta", tag: item.type || "item", text: item.text ?? item.query ?? "" }, facts: {} }
             : { display: null, facts: {} };

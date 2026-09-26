@@ -807,6 +807,40 @@ const CONFIRM_FIRST_KINDS: ReadonlySet<PacketOptionKind> = new Set([
   "resolve_remote_collision",
 ]);
 
+/**
+ * Ruling 500 (AICSS's Approval Card): the packet's head. A tile in the packet's
+ * tone (amber for a question, coral for a block) with its glyph, the kind as
+ * the card's title, and the attribution at the right. Attribution is a
+ * whisper, not a badge: the boxed `.agent-glyph.op` (a filled 26px square) was
+ * the brightest object on a card whose content is the options (owner
+ * 2026-08-21). The bare shield at text size carries the same identity in the
+ * header's own voice.
+ */
+function PacketHead({ kind, from, blocked }: { kind: string; from: string; blocked: boolean }) {
+  return (
+    <div className="packet-top">
+      <span className="packet-tile" aria-hidden="true">
+        <Icon name={blocked ? "alert" : "hand"} />
+      </span>
+      <span className="packet-kind">{kind}</span>
+      <span className="from">
+        from <Icon name="shield" /> <strong className="from-name">{from}</strong>
+      </span>
+    </div>
+  );
+}
+
+/** Ruling 500: an option's key, the digit that selects it (the radiogroup's
+ *  shortcut), where the radio circle stood; filled once chosen. Past nine an
+ *  option has no digit, and the key stays for the column. */
+function OptionKey({ index }: { index: number }) {
+  return (
+    <span className="opt-key" aria-hidden="true">
+      {index < 9 ? index + 1 : ""}
+    </span>
+  );
+}
+
 export function DecisionPacket({
   packet,
   busy,
@@ -1118,15 +1152,7 @@ export function DecisionPacket({
     const draft = p.goalDraft;
     return (
       <div className={"packet " + (isBlocked ? "blocked" : "input")} data-decided="">
-        <div className="packet-top">
-          <Pill kind={isBlocked ? "blocked" : "input"} dot sm>
-            {p.kind}
-          </Pill>
-          <span className="from">
-            from <Icon name="shield" />{" "}
-            <strong className="from-name">{p.from}</strong>
-          </span>
-        </div>
+        <PacketHead kind={p.kind} from={p.from} blocked={isBlocked} />
         <div className="packet-body">
           <h2>{p.title}</h2>
           <PacketBody text={p.body} />
@@ -1140,7 +1166,7 @@ export function DecisionPacket({
                 className={"opt" + (i === decided.optionIndex ? " sel" : "")}
                 data-chosen={i === decided.optionIndex ? "" : undefined}
               >
-                <span className="radio" />
+                <OptionKey index={i} />
                 <span>
                   {/* U39-21: an option is written like the body, with `code`. */}
                   <div className="ot">{renderInlineCode(o.t)}</div>
@@ -1195,19 +1221,7 @@ export function DecisionPacket({
   }
   return (
     <div className={"packet " + (isBlocked ? "blocked" : "input")}>
-      <div className="packet-top">
-        <Pill kind={isBlocked ? "blocked" : "input"} dot sm>
-          {p.kind}
-        </Pill>
-        <span className="from">
-          {/* Attribution is a whisper, not a badge: the boxed `.agent-glyph.op`
-              (a filled 26px square) was the brightest object on a card whose
-              content is the options (owner 2026-08-21). The bare shield at text
-              size carries the same identity in the header's own voice. */}
-          from <Icon name="shield" />{" "}
-          <strong className="from-name">{p.from}</strong>
-        </span>
-      </div>
+      <PacketHead kind={p.kind} from={p.from} blocked={isBlocked} />
       <div className="packet-body">
         <h2>{p.title}</h2>
         <PacketBody text={p.body} />
@@ -1288,6 +1302,7 @@ export function DecisionPacket({
                 // stills its hover and press (`.opt[aria-disabled="true"]`
                 // in app.css); the inline .55 it wore is gone.
                 aria-disabled={blocked || undefined}
+                aria-keyshortcuts={i < 9 ? String(i + 1) : undefined}
                 tabIndex={tabStop === i ? 0 : -1}
                 className={
                   "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
@@ -1298,7 +1313,7 @@ export function DecisionPacket({
                   selectOption(i);
                 }}
               >
-                <span className="radio" />
+                <OptionKey index={i} />
                 <span>
                   {/* U39-21: an option is written like the body, with `code`,
                       and printed its backticks ("It answered this on
@@ -1366,7 +1381,6 @@ export function DecisionPacket({
                     </Pill>
                   </span>
                 )}
-                {i < 9 && <kbd className="kbd opt-kbd">{i + 1}</kbd>}
               </button>
             );
           })}
@@ -1381,11 +1395,12 @@ export function DecisionPacket({
                 optionRefs.current[customIndex] = el;
               }}
               aria-checked={customSelected}
+              aria-keyshortcuts={customIndex < 9 ? String(customIndex + 1) : undefined}
               tabIndex={tabStop === customIndex ? 0 : -1}
               className={"opt opt-custom" + (customSelected ? " sel" : "")}
               onClick={() => selectOption(customIndex)}
             >
-              <span className="radio" />
+              <OptionKey index={customIndex} />
               <span>
                 {/* Ruling 478(e) (F40-31): on an agent's question the words go
                     back to that agent (`resolvePacket`), not to the operator.
@@ -1398,9 +1413,6 @@ export function DecisionPacket({
                     : "Answer in your own words. The operator re-engages with exactly what you type."}
                 </div>
               </span>
-              {customIndex < 9 && (
-                <kbd className="kbd opt-kbd">{customIndex + 1}</kbd>
-              )}
             </button>
           )}
         </div>

@@ -63,9 +63,9 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
     `toolchain.server.test.ts` clears it with `primeToolchain(null)` to drive the
     resolver with injected fakes, and restores it with `primeHermeticToolchain()`.
 - `test-support/setup-dom.ts` (a no-op under node) polyfills `<dialog>`
-  `show/showModal/close`, stubs `ResizeObserver` (dnd-kit reads it on import) and makes
-  `HTMLCanvasElement.getContext` return `null` quietly (the run console's
-  `thinking-orbs` canvas, ruling 366).
+  `show/showModal/close` and stubs `ResizeObserver` (dnd-kit reads it on import). It no
+  longer stubs a canvas: the run console's orb is CSS since ruling 499, and nothing in
+  the app draws on one.
 - **Availability is a fact about a PERSON, so a test seeds it like data (ruling 127).**
   `test-support/backend-credentials.ts` gives `connectFakeBackend(db, userId, backend)`,
   `connectFakeBackends(db, userId)` and `disconnectFakeBackend(db, userId, backend)`,

@@ -91,9 +91,11 @@ describe("DecisionPacket", () => {
     );
     const card = container.querySelector(".packet")!;
     expect(card.classList.contains("input")).toBe(true);
-    expect(container.querySelector(".packet-top .pill")!.textContent).toContain(
+    // Ruling 500: the kind is the head's title beside its tile.
+    expect(container.querySelector(".packet-top .packet-kind")!.textContent).toBe(
       "Completion report",
     );
+    expect(container.querySelector(".packet-top .packet-tile")!.getAttribute("aria-hidden")).toBe("true");
     expect(container.querySelector(".packet-body h2")!.textContent).toBe(
       packet142.title,
     );
@@ -4627,11 +4629,17 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
       />,
     );
     const group = container.querySelector('[role="radiogroup"]')!;
-    const chips = [...container.querySelectorAll(".opt-kbd")].map(
+    // Ruling 500: each option leads with its key, which the button also
+    // declares as its shortcut; the chosen option's key fills (the sheet).
+    const chips = [...container.querySelectorAll(".opt-key")].map(
       (k) => k.textContent,
     );
     // Three authored options + the custom choice.
     expect(chips).toEqual(["1", "2", "3", "4"]);
+    expect(
+      [...container.querySelectorAll('[role="radio"]')].map((o) => o.getAttribute("aria-keyshortcuts")),
+    ).toEqual(["1", "2", "3", "4"]);
+    expect(container.querySelector(".opt .radio")).toBeNull();
     fireEvent.keyDown(group, { key: "2" });
     const options = [...container.querySelectorAll('[role="radio"]')];
     expect(options[1]?.getAttribute("aria-checked")).toBe("true");

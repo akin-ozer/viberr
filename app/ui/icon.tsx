@@ -74,12 +74,18 @@ const ICON_PATHS = {
   grip: '<circle cx="9" cy="5.5" r="1"/><circle cx="15" cy="5.5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18.5" r="1"/><circle cx="15" cy="18.5" r="1"/>',
   ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   term: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9.5l3 3-3 3M13 15.5h4"/>',
+  // Ruling 500: a code block's head in a comment (the angle brackets).
+  code: '<path d="M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5"/>',
   // Ruling 365: the board card's status and problem marks — a circle family
   // (failed, done, held, resting) so the chips read as one set at 13px.
   xcircle: '<circle cx="12" cy="12" r="8.5"/><path d="M9 9l6 6M15 9l-6 6"/>',
   checkcircle: '<circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.5 2.5L16 9.5"/>',
   ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6.5 6.5l11 11"/>',
   ring: '<circle cx="12" cy="12" r="5.5"/>',
+  // Ruling 499: an agent's to-do step, in the same circle family: a dotted
+  // ring waiting, an arrow in the ring under way, `checkcircle` done.
+  todo: '<circle cx="12" cy="12" r="8.5" stroke-dasharray=".1 3.2"/>',
+  todonow: '<circle cx="12" cy="12" r="8.5"/><path d="M8 12h7.5M12.5 9l3 3-3 3"/>',
   // Ruling 366: the product's own mark, for the console chip of a Viberr tool.
   viberr: '<path d="M5 5l7 14 7-14"/>',
   // Ruling 458(f): the glyphs the mock drew as local SVGs (kb-browser.jsx's

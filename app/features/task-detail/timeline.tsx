@@ -773,9 +773,11 @@ export function Timeline({
             >
               {sendHint} to send
             </span>
+            {/* Ruling 500: the frame's one action, primary as the
+                controller composer's Send is. */}
             <button
               type="button"
-              className="btn sm"
+              className="btn primary sm"
               onClick={send}
               disabled={busy}
               aria-busy={busy}

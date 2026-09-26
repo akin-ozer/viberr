@@ -3,14 +3,16 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from "react";
-import { createContext, memo, useContext, useMemo, useState } from "react";
+import { createContext, isValidElement, memo, useContext, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { z } from "zod";
 import { Link } from "react-router";
 import { PROPOSAL_ID_IN_TEXT_RE, TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
 
 /** What a text can link through its {@link TaskLinks}: task keys, and the
  *  proposal ids a page showing them resolved to their entries. */
 const LINKABLE_IN_TEXT_RE = new RegExp(`${TASK_KEY_IN_TEXT_RE.source}|${PROPOSAL_ID_IN_TEXT_RE.source}`, "g");
+import { CopyGlyph } from "./copy-glyph";
 import { Icon } from "./icon";
 
 /**
@@ -318,6 +320,68 @@ function MarkdownImg({
   );
 }
 
+/** What react-markdown hands a fenced block's `<pre>`: the `code` element it
+ *  made, with the fence's language as `language-<tag>` and the text inside. */
+const fenceProps = z.object({ className: z.string().optional(), children: z.string() });
+
+/**
+ * Ruling 500 (AICSS's Code Block): a fenced block in a comment gets a head,
+ * the language its fence names (or "code") and Copy, and, past one line, the
+ * attachment reader's line-number gutter (`.code-view`, ruling 363), which a
+ * selection skips. The code itself is not highlighted here: a comment's block
+ * renders at once, and the reader keeps its grammars. A `<pre>` this does not
+ * recognise renders as it came.
+ */
+function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const fence = isValidElement(children) ? fenceProps.safeParse(children.props) : null;
+  if (!fence?.success) return <pre>{children}</pre>;
+  const text = fence.data.children.replace(/\n$/, "");
+  const lang = /\blanguage-([\w+#.-]+)/.exec(fence.data.className ?? "")?.[1] ?? null;
+  const lines = text.split("\n");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard denied: the code is on screen and selectable.
+    }
+  };
+  return (
+    <div className="md-code">
+      <div className="mc-head">
+        <Icon name="code" />
+        <span className="mc-lang">{lang ?? "code"}</span>
+        <button
+          type="button"
+          className="mc-copy"
+          onClick={copy}
+          aria-label={copied ? "Copied this code" : "Copy this code"}
+        >
+          <CopyGlyph copied={copied} />
+          {copied ? <span className="copy-done">Copied</span> : "Copy"}
+        </button>
+      </div>
+      {lines.length > 1 ? (
+        <pre className="code-view" data-digits={String(lines.length).length}>
+          <code className={"mono" + (fence.data.className ? " " + fence.data.className : "")}>
+            {/* Each line keeps its newline, so the text reads and copies as
+                written; a block's trailing newline draws no extra line. */}
+            {lines.map((line, i) => (
+              <span className="line" key={i}>
+                {i < lines.length - 1 ? line + "\n" : line}
+              </span>
+            ))}
+          </code>
+        </pre>
+      ) : (
+        <pre>{children}</pre>
+      )}
+    </div>
+  );
+}
+
 function componentsFor(
   attachments: ReadonlySet<string> | undefined,
   base: string | undefined,
@@ -399,6 +463,9 @@ function componentsFor(
       // Inline code and fenced-block code both flow through here; the block case
       // is wrapped in <pre> by react-markdown, so a single mono class covers both.
       return <code className={"mono" + (className ? " " + className : "")}>{children}</code>;
+    },
+    pre({ children }: ComponentPropsWithoutRef<"pre">) {
+      return <MarkdownCodeBlock>{children}</MarkdownCodeBlock>;
     },
     table({ children }: ComponentPropsWithoutRef<"table">) {
       return (

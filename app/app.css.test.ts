@@ -520,7 +520,7 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
 
   it("holds 4.5:1 for --faint on the --blue-soft selection fill", () => {
     // Pass 30: a selected decision-packet option (`.opt.sel`) paints
-    // --blue-soft under --faint text (`.opt .od`, `.opt .opt-kbd`). The R19-12
+    // --blue-soft under --faint text (`.opt .od`). The R19-12
     // sweep pairs text only with its own selector part's backdrop, so this
     // sibling-state combination is invisible to it — and the dark pair clears
     // AA by just 0.17, the thinnest real margin in the sheet. Enumerated here
@@ -1828,6 +1828,14 @@ const RENDERED_INSIDE = new Map(Object.entries({
   "lw-glyph": {
     container: ".console",
     why: "ruling 459: a wait row's orb-and-clock cell sits in a `.log-line`'s `.lx` inside `div.console` (runs-panels.tsx), so its clock is measured on the console's fixed dark fill.",
+  },
+  "log-orb": {
+    container: ".console",
+    why: "ruling 499: the wait row's CSS orb is drawn in that same `.lw-glyph` cell inside `div.console` (console-blocks.tsx), so its dots' ink is measured on the console's fixed dark fill, never on the page's --bg.",
+  },
+  "log-think": {
+    container: ".console",
+    why: "ruling 499: the thinking block's summary button is the `.lx` of a `.log-line.think` row inside `div.console` (runs-panels.tsx), the same fixed near-black fill every console row is measured against.",
   },
 }));
 
@@ -6088,8 +6096,10 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
   });
 
   it("(F42) the wait row's orb and clock share one 20px cell, and the orb stops drawing once hidden", () => {
-    // CANARY: set `.lw-glyph` to 14px, or drop `paused={!live}` (a hidden
-    // orb keeps its animation-frame loop running on every row seen live).
+    // CANARY: set `.lw-glyph` to 14px, or drop the paused rule (a hidden orb
+    // keeps its dots animating on every row seen live). Ruling 499: the orb is
+    // AICSS's CSS lattice now, not a canvas, so its size and its pause are the
+    // sheet's.
     const cell = own(plain, ".lw-glyph");
     expect(cell.get("display")).toBe("inline-grid");
     expect(cell.get("place-items")).toBe("center");
@@ -6100,9 +6110,12 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
     expect(own(plain, ".lw-glyph > .ico").get("width")).toBe("14px");
     const row = source("./features/runtime/runs-panels.tsx");
     const markup = /<span className="lw-glyph"[^>]*>([\s\S]*?)<\/span>/.exec(row)![1]!;
-    // The orb's canvas is exactly the cell, so neither state moves the chip.
-    expect(/size=\{(\d+)\}/.exec(markup)?.[1]).toBe(cell.get("width")!.replace("px", ""));
-    expect(markup).toMatch(/paused=\{!live\}/);
+    // The orb is exactly the cell, so neither state moves the chip.
+    const orb = own(plain, ".log-orb");
+    expect(orb.get("width")).toBe(cell.get("width"));
+    expect(orb.get("height")).toBe(cell.get("height"));
+    expect(own(plain, ".lw-glyph:not([data-live]) > .log-orb > i").get("animation-play-state")).toBe("paused");
+    expect(markup).toMatch(/<ConsoleOrb motion=/);
     expect(markup).toMatch(/<Icon name="clock" \/>/);
     // Only the row's own clock is sized, never the Viberr chip's mark.
     expect(RULES.flatMap(parts).filter((s) => s.startsWith(".lw-glyph") && s.endsWith(" .ico") && !s.endsWith("> .ico"))).toEqual([]);
@@ -6421,5 +6434,47 @@ describe("app.css ruling 459: the dock's deferred half", () => {
     for (const state of [RESTORED_FAB, [...RESTORED_FAB, HOME]]) {
       expect(transition(state, { phone: true, reduced: true })).toBe("none");
     }
+  });
+});
+
+/**
+ * Ruling 500 (AICSS's AI Agent Input, Approval Card, Data Table and Code
+ * Block on the task page): the task's composer takes the controller
+ * composer's frame, the packet's tone is its head's tile, and a comment's
+ * table and fenced block are one card each.
+ */
+describe("app.css ruling 500: the task page's agent components", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decl = (selector: string, prop: string) => {
+    let value: string | undefined;
+    for (const r of plain) if (parts(r).includes(selector) && r.decls.has(prop)) value = r.decls.get(prop);
+    return value;
+  };
+
+  it("frames the task composer as the controller's: the card radius and the 4px ring", () => {
+    // CANARY: put `.composer-box` back on `--radius-box` and the two inputs an
+    // agent is addressed through are two shapes again.
+    expect(decl(".composer-box", "border-radius")).toBe(decl(".ctl-composer", "border-radius"));
+    expect(decl(".composer-box:focus-within", "box-shadow")).toBe(decl(".ctl-composer:focus-within", "box-shadow"));
+  });
+
+  it("carries the packet's tone on its tile, not a left accent, and fills the chosen key", () => {
+    expect(decl(".packet", "border-left")).toBeUndefined();
+    expect(decl(".packet-tile", "color")).toBe("var(--amber-dark)");
+    expect(decl(".packet.blocked .packet-tile", "color")).toBe("var(--coral-dark)");
+    expect(decl(".opt.sel .opt-key", "background")).toBe("var(--cta-bg)");
+    expect(decl(".opt.sel .opt-key", "color")).toBe("var(--cta-fg)");
+    expect(RULES.flatMap(parts).filter((s) => /\.opt \.radio|opt-kbd/.test(s))).toEqual([]);
+  });
+
+  it("draws a comment's table and fenced block as one card each", () => {
+    expect(decl(".md-table-wrap", "border-radius")).toBe("var(--radius-button)");
+    // Hairlines between cells, not a box around each.
+    expect(decl(".md-body td", "border")).toBeUndefined();
+    expect(decl(".md-body td", "border-top")).toBe("1px solid var(--hairline)");
+    expect(decl(".md-body th", "border-left")).toBe("1px solid var(--hairline)");
+    expect(decl(".md-code", "overflow")).toBe("hidden");
+    expect(decl(".md-body .md-code pre", "border")).toBe("0");
   });
 });

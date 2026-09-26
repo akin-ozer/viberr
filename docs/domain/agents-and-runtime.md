@@ -1019,7 +1019,24 @@ is marked by whose tool it is: the product's own carry the agent tint and the V 
 org server's prints `server · tool`, a built-in stays neutral; a row that clipped or
 elided an argument links to it by name (`+ full prompt`), and Bash's description prints
 beside its command. The footer's event total counts up to its figure, a frame-loop ticker
-with the figure itself on `data-count` (ruling 366(f)). The strip's phase and step
+with the figure itself on `data-count` (ruling 366(f)).
+
+Ruling 499 draws what an agent did the way agent tools draw it. An `Edit`, `MultiEdit` or
+`Write` row prints its file repo-relative (the path the call named on hover) with `+N −M`
+(a `Write`, its line count: the record holds no earlier file), and under it the diff
+(`edit-diff.ts` over `shared/line-diff.ts`): removed lines then added ones, tinted, the
+changed words of a paired line marked, three unchanged lines around each change and a
+longer run folded behind "N unchanged lines"; past ten rows the rest waits behind "Show N
+more lines", the row's own disclosure. A `Read` prints its file repo-relative too; a path
+inside a command is never rewritten. A `TodoWrite` row, and a Codex `todo_list` item (whose
+steps the projection now carries as `todos`), draw the agent's to-do list: a header with
+the list's progress and count, each step done, under way or waiting, and the step under way
+shimmering while the run is live and it is the list the agent wrote last. A thought fold
+reads "Thought for Ns" beside a chevron, and "Thinking" with a shimmer while it is the live
+tail; multi-line output is a code block with a head (what it holds, its size, Copy) and
+numbered lines; the wait row's orb is a CSS lattice. The to-do list, the code block, the
+thinking block and the orb take their design from AICSS's free components (MIT,
+`THIRD_PARTY_NOTICES.md`). `{ } raw` shows every stored envelope and none of this. The strip's phase and step
 arrive as a new line when their words change, and its Elapsed, Turns and Tokens figures
 roll their digits (rulings 366(e), 451).
 
