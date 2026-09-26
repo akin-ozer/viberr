@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,9 +14,6 @@ import { defaultEpicColor, type EpicStatus } from "~/schemas/epic-file.schema";
 import { createEpicFile } from "~/server/files/epic-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { searchWorkspace } from "./command-search.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * R15-5 — the ⌘K palette's query. The scoping assertions matter most: the

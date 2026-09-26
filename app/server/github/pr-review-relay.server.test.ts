@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -24,9 +23,6 @@ import { listRunsForTaskRows, upsertRun } from "~/server/runtimes/run-store.serv
 import type { Engagement } from "~/schemas/task-file.schema";
 import { reconcileTask } from "./github-reconciler.server";
 import { readReviewRelay } from "./pr-review-relay.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * Ruling 484 (pass 40, F40-54): a project member's GitHub review of the

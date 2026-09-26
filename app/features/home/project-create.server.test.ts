@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { effortsFor } from "~/server/runtimes/model-catalog.server";
@@ -25,10 +24,6 @@ import { createProject, type CreateProjectInput } from "./project-create.server"
 /** The single columns these tests read back off a just-written row. */
 const defaultBranchRow = z.object({ default_branch: z.string() });
 const idRow = z.object({ id: z.string() });
-
-// Hermetic env for the secret box.
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(() => {

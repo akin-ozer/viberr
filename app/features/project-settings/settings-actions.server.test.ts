@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -40,9 +39,6 @@ import {
   recolorStage,
 } from "./settings-actions.server";
 import { isStageColor } from "~/shared/workflow/stage-colors";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * P13-D-1 — the stage editor maintains the transition chain.
@@ -864,7 +860,6 @@ describe("inviteMember", () => {
     expect(result.toast).toBe(`Added ${store.users.deniz.email}, who joins as Viewer`);
   });
 });
-
 
 /**
  * Pass 34 review: one prefix a project cannot take. It was `GOAL`, because the

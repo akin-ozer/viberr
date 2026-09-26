@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -33,9 +32,6 @@ const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
 interface PollerHost {
   [POLLER_KEY]?: ReturnType<typeof setInterval>;
 }
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);

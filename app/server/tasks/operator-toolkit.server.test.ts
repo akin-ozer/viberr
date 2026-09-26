@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -14,9 +13,6 @@ import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());

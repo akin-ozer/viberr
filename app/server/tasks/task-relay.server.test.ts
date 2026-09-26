@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -33,9 +32,6 @@ import { stageOutcome } from "./agent-outcome.server";
 import { operatorSnapshot, resolveOperatorAuthority } from "./operator-actions.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { applyAgentCompletionEffects, type TaskActionContext } from "./task-actions.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * Ruling 488 (F40-67): work on one task reaches another task in the same

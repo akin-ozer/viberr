@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -36,9 +35,6 @@ import { reconcileTask } from "~/server/github/github-reconciler.server";
  * write ever moves behind the `changed` guard), that test fails and the two
  * queries stop meaning what the UI says they mean.
  */
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(() => {
