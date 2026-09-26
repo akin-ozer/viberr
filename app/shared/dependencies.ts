@@ -17,9 +17,18 @@
  * Anything else is refused at write time by name (`DEPENDENCY_GRAMMAR_HINT`).
  * States are resolved at READ time (`app/server/projections/dependencies.server.ts`),
  * never cached, so rebuild order cannot stale them.
+ *
+ * The parser is in `task-refs.ts`, re-exported here: the task schema
+ * canonicalizes every entry with it, and that schema ships to every page
+ * (ruling 457, FL-1), so it must not import this module.
  */
 
-export type DependencyRef = { kind: "task"; task: string };
+export {
+  canonicalDependencyRef,
+  formatDependencyRef,
+  parseDependencyRef,
+  type DependencyRef,
+} from "./task-refs";
 
 /** The state a reference resolves to at read time. `failed` is an archived
  *  task, a wait that can never complete; `missing` is a reference nothing in
@@ -61,33 +70,6 @@ export function isReservedTaskPrefix(prefix: string): boolean {
 /** What a writer tells the person who typed it. */
 export const RESERVED_TASK_PREFIX_REFUSAL =
   `"${RESERVED_TASK_PREFIX}" is not available as a task prefix: an epic's id is spelled epic-1, so tasks keyed EPIC-1 would read as epics everywhere they are named. Pick another prefix.`;
-
-const TASK_REF_RE = /^([A-Za-z]+)-(\d+)$/;
-
-/** Parse one spelling. Whitespace is trimmed and the prefix upper-cased so the
- *  canonical form is what {@link formatDependencyRef} prints. Returns null for
- *  anything else. An epic id is not refused here: it reads as a task key the
- *  store then does not know ("EPIC-1 is not a task in this project"), and a
- *  project keyed EPIC before the prefix was reserved keeps tasks that can be
- *  waited on. */
-export function parseDependencyRef(text: string): DependencyRef | null {
-  const normalized = text.trim().replace(/\s+/g, " ");
-  if (!normalized) return null;
-  const task = TASK_REF_RE.exec(normalized);
-  if (!task) return null;
-  return { kind: "task", task: `${task[1]!.toUpperCase()}-${Number(task[2])}` };
-}
-
-/** The canonical spelling of a reference — what the file stores. */
-export function formatDependencyRef(ref: DependencyRef): string {
-  return ref.task;
-}
-
-/** Canonicalize a spelling, or null when it does not parse. */
-export function canonicalDependencyRef(text: string): string | null {
-  const ref = parseDependencyRef(text);
-  return ref ? formatDependencyRef(ref) : null;
-}
 
 /** Split the free-text form the Details editor submits (one entry per line or
  *  comma) into raw entries. */

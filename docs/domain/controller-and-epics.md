@@ -6,6 +6,7 @@
 > and the project epics it plans work into for a person (§7), which replaced its chained goals.
 > Source of truth: `app/server/controller/*`, `app/server/tasks/epic-actions.server.ts`,
 > `app/server/files/epic-writer.server.ts`, `app/schemas/epic-file.schema.ts`,
+> `app/shared/task-refs.ts` (the epic id and statuses),
 > `app/server/projections/epic-query.server.ts`, `app/server/tasks/goal-epic-conversion.server.ts`,
 > `app/server/projections/rebuilder.server.ts` (the epic projection), `app/features/epics/*`,
 > `app/routes/project.epics.tsx`, `app/routes/project.epic.tsx`, `app/features/controller/*`,

@@ -16,6 +16,12 @@ export const CONTROLLER_BUDGETS: PerfBudgetTable = {
   // Lowered 22 -> 21 by ruling 459's deferred dock half (2026-09-24): the
   // dock's entrance is a transition a close retargets, so it no longer pins
   // its live pose and ui/live-pose.ts left its closure (dialogs keep it).
+  // Held at 21 through ruling 503 (2026-09-26): the task schema is in this
+  // closure (sse-event.schema takes its READINESS_VALUES), so whatever it
+  // imports is too. The epic id it validates brought the epic file schema and
+  // the stage presets (23); it now takes that and the `blockedBy` spelling
+  // from shared/task-refs.ts, a leaf that also took shared/dependencies.ts's
+  // place.
   "controller:closed-dock.static-modules": {
     ceiling: 21,
     unit: "count",

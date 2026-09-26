@@ -9,8 +9,10 @@ import {
   type TolerantField,
   type TolerantListField,
 } from "./file-diagnostics";
-import { canonicalDependencyRef } from "~/shared/dependencies";
-import { EPIC_ID_RE } from "./epic-file.schema";
+// Ruling 457 (FL-1): this schema is in the closed dock's static closure, which
+// root ships to every page, so every module it imports ships there too. The
+// spellings it validates come from their import-free leaf.
+import { canonicalDependencyRef, EPIC_ID_RE } from "~/shared/task-refs";
 import { headCarriesRevision, type RefreshLink } from "~/shared/revision-drift";
 
 /**
@@ -962,7 +964,7 @@ export type PacketObservation = z.infer<typeof packetObservationSchema>;
 
 /**
  * Ruling 131: one `blockedBy` entry as stored — a spelling
- * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (the task
+ * `app/shared/task-refs.ts` parses, CANONICALIZED on the way in (the task
  * prefix upper-cased, whitespace collapsed) so the file
  * carries exactly what the surfaces print and the resolver looks up.
  */

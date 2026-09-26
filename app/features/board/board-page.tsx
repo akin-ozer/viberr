@@ -50,7 +50,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import type { EpicOption } from "~/ui/epic-chip";
-import { EPIC_STATUS_LABEL, isEpicOpen } from "~/schemas/epic-file.schema";
+import { EPIC_STATUS_LABEL, isEpicOpen } from "~/shared/task-refs";
 import { createVelocityTracker, springFrames, springProgress, type Spring } from "~/ui/spring";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";

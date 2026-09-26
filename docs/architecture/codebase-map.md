@@ -170,7 +170,9 @@ ruling 166), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-
 scopes, grant couplings), `acceptance-disclosure.ts` (the accept echo contract),
 `mcp-reserved.ts`, `mcp-tools.ts` (admin-marked MCP write tools, ruling 176),
 `model-ids.ts`, `freshness.ts` (stale after 1 h), `controller-locks.ts` (ruling 108),
-`dependencies.ts` (the `blockedBy` vocabulary, ruling 131), `file-leases.ts` (ruling
+`dependencies.ts` (the `blockedBy` vocabulary, ruling 131), `task-refs.ts` (the
+`blockedBy` and epic id spellings the task schema validates, and the epic statuses:
+import-free, because that schema reaches every page, ruling 457), `file-leases.ts` (ruling
 245), `credential-scopes.ts` (violation vs advisory GitHub scopes, ruling 380(b)),
 `github-handle.ts` (ruling 154), `names.ts`, `attachment-kinds.ts`, `page-title.ts`
 (one title grammar), `errors.ts` (`toError` / `errorMessage`, the one normalization of a

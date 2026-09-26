@@ -13,7 +13,7 @@ import { useFetcher, type FetcherWithComponents } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { PRIORITY_VALUES, type TaskPriority } from "~/schemas/task-file.schema";
 import type { DependencyRender, DependencyState } from "~/shared/dependencies";
-import { EPIC_STATUS_LABEL, isEpicOpen } from "~/schemas/epic-file.schema";
+import { EPIC_STATUS_LABEL, isEpicOpen } from "~/shared/task-refs";
 import { epicHref } from "~/shared/epic-href";
 import { Calendar } from "~/ui/calendar";
 import { useCsrfToken } from "~/ui/csrf-input";
