@@ -195,7 +195,7 @@ function renderPage(
     },
     {
       path: "/projects/:slug/tasks/:key",
-      Component: () => <p className="landed">{useParams().key}</p>,
+      Component: () => <p data-testid="landed">{useParams().key}</p>,
     },
   ]);
   return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
@@ -676,7 +676,7 @@ describe("PullRequestsPanel", () => {
     );
     // A row opens its task.
     fireEvent.click(rows[0]!);
-    await waitFor(() => expect(container.querySelector(".landed")?.textContent).toBe("VIB-142"));
+    await waitFor(() => expect(container.querySelector('[data-testid="landed"]')?.textContent).toBe("VIB-142"));
   });
 
   /* F19-33: the count and the note took their type scale and spacing from two
@@ -749,7 +749,7 @@ describe("BranchesPanel", () => {
     expect(rows[2]!.querySelector(".pill.done")).not.toBeNull();
 
     fireEvent.click(rows[1]!);
-    await waitFor(() => expect(container.querySelector(".landed")?.textContent).toBe("VIB-151"));
+    await waitFor(() => expect(container.querySelector('[data-testid="landed"]')?.textContent).toBe("VIB-151"));
   });
 
   /**
