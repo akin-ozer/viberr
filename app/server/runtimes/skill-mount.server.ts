@@ -1,9 +1,14 @@
 import {
-  cpSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fchmodSync,
   lstatSync,
   mkdirSync,
+  openSync,
+  readdirSync,
   readFileSync,
+  type Stats,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -21,11 +26,7 @@ import {
   type WorkspaceGit,
 } from "~/server/tasks/workspace-git.server";
 import { toError } from "~/shared/errors";
-import {
-  makeCopyGroupRemovable,
-  makeGroupRemovable,
-  type AgentLaunch,
-} from "./agent-isolation.server";
+import type { AgentLaunch } from "./agent-isolation.server";
 import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
 
 /**
@@ -64,11 +65,16 @@ import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
  * race the old in-checkout mount needed a per-process marker to survive).
  *
  * Ruling 495(a), F40-71: the plugin is the server's, in a tree the task's
- * person removes, and unlinking needs write on the directory. Its directories
- * are 2775 and its files group-readable, set explicitly after the copy
- * (`makeCopyGroupRemovable`, `makeGroupRemovable`): `cpSync` gives a copy the
- * store folder's own modes, and a store folder's 0755 had left every settled
- * run's plugin on disk, its files unlinkable by the person.
+ * person removes, and unlinking needs write on the directory. Every entry is
+ * made anew with the mode that removal needs and is never changed once it
+ * exists ({@link copySkillFolder}, {@link writeNewPluginFile}): its folders
+ * by `mkdir` under the server's umask in the workspace's setgid chain (2775
+ * in the workspace's group), its files group-readable, set on their own new
+ * descriptor. `cpSync` had given the copy the store folder's own modes, and a
+ * store folder's 0755 had left every settled run's plugin on disk, its files
+ * unlinkable by the person. A chmod walk after the copy would not do: the
+ * plugin's folders are the group's to write, and a path through a folder an
+ * agent swapped for a link reaches whatever the link names.
  */
 
 /** The plugin name the CLI qualifies skills with: `viberr:<skill>`. */
@@ -258,7 +264,7 @@ export async function mountGrantedSkills(input: {
     // died mid-mount) must not leak an earlier grant set into this run.
     await removeAgentTree(pluginRoot, person);
     mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
-    writeFileSync(
+    writeNewPluginFile(
       path.join(pluginRoot, ".claude-plugin", "plugin.json"),
       `${JSON.stringify(PLUGIN_MANIFEST)}\n`,
     );
@@ -294,23 +300,6 @@ export async function mountGrantedSkills(input: {
     });
   }
   if (!mounted.length) return { mounted, skipped, plugin: null };
-  // Ruling 495(a): the plugin's own entries, like its skill folders, each
-  // after what is in it. Best effort: the plugin works as it is, and what the
-  // person cannot unlink at the settle the server opens then (495(b)).
-  try {
-    makeGroupRemovable([
-      skillsRoot,
-      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
-      path.join(pluginRoot, ".claude-plugin"),
-      pluginRoot,
-      path.dirname(pluginRoot),
-    ]);
-  } catch (error) {
-    logger.warn("the run's skill plugin could not be given the group's modes", {
-      pluginRoot,
-      err: toError(error),
-    });
-  }
   const plugin: SkillPlugin = { path: pluginRoot, name: SKILL_PLUGIN_NAME };
   if (person) plugin.person = person;
   return { mounted, skipped, plugin };
@@ -403,12 +392,7 @@ function mountOneSkill(
     mkdirSync(skillsRoot, { recursive: true });
     // The WHOLE folder: skills are multi-file (checklists/, examples.md, scripts)
     // and the SDK loads those on demand once the model invokes the skill.
-    cpSync(src, dest, {
-      recursive: true,
-      force: true,
-      dereference: false,
-      filter: copyableEntry,
-    });
+    copySkillFolder(src, dest);
     const { data, body } = splitFrontmatter(readFileSync(resolved.file, "utf8"));
     const frontmatter = skillFrontmatterSchema.safeParse(data);
     // NORMALIZE the frontmatter — do not copy it through. Two reasons:
@@ -423,7 +407,7 @@ function mountOneSkill(
     //    the run's tool policy from inside a skill. Only `name` (pinned to the
     //    mounted folder, so it matches the filter we pass the SDK exactly) and
     //    `description` survive.
-    writeFileSync(
+    writeNewPluginFile(
       path.join(dest, "SKILL.md"),
       serializeFrontmatterFile(
         {
@@ -438,10 +422,6 @@ function mountOneSkill(
         body,
       ),
     );
-    // Ruling 495(a): whatever modes the store folder carries, the copy's
-    // folders are the group's to write and its files the group's to read, so
-    // the person's removal at the settle unlinks every one.
-    makeCopyGroupRemovable(src, dest);
   } catch (error) {
     // A half-copied folder must not be listed: this run falls back to
     // prompt-text injection for the skill, because we return a reason below.
@@ -457,15 +437,67 @@ function mountOneSkill(
   return null;
 }
 
-/** Refuse symlinks (they leave the store) and nested `.git` dirs (an imported
- *  skill folder carrying one would turn the plugin into a nested repo). */
-function copyableEntry(src: string): boolean {
-  if (path.basename(src) === ".git") return false;
+/**
+ * Ruling 495(a): make one file of a run's plugin, in a tree every agent in
+ * the group can write. It is made anew (`O_EXCL`), never opened where an
+ * entry already is, and never through a link at its own name (`O_NOFOLLOW`);
+ * its mode is set on the new file's own descriptor, so it is group-readable
+ * whatever the umask: 0644, or 0755 when `executable`. A folder above it that
+ * an agent swapped for a link can only lead it to make a new file elsewhere.
+ */
+function writeNewPluginFile(file: string, content: string | Uint8Array, executable = false): void {
+  const fd = openSync(
+    file,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+    0o600,
+  );
   try {
-    return !lstatSync(src).isSymbolicLink();
-  } catch {
-    return false;
+    fchmodSync(fd, executable ? 0o755 : 0o644);
+    writeFileSync(fd, content);
+  } finally {
+    closeSync(fd);
   }
+}
+
+/**
+ * Ruling 495(a), F40-71: copy a store skill folder into the run's plugin at
+ * `dest`, making every entry anew. A folder is made by `mkdir` (never one
+ * already there) under the server's umask, 0002 whenever it launches agents
+ * (boot sets it), in the workspace's setgid chain: 2775 in the workspace's
+ * group. A file is made by {@link writeNewPluginFile}. Nothing is chmod'ed
+ * once it exists, so a folder an agent swaps for a link mid-copy leads the
+ * copy to make new entries elsewhere or to stop at one already there, never
+ * to change what it finds. The store's modes are not copied (`cpSync` kept
+ * them, and a store folder's 0755 left the person unable to unlink the
+ * copy's files); a file keeps only whether it is executable. Left behind:
+ * symlinks (they leave the store), nested `.git` (an imported skill folder
+ * carrying one would turn the plugin into a nested repo), anything that is
+ * not a folder or a file, and the store's own SKILL.md, which the mount
+ * writes normalized. Exported for its own test.
+ */
+export function copySkillFolder(src: string, dest: string): void {
+  const visit = (from: string, to: string, top: boolean) => {
+    mkdirSync(to, { mode: 0o775 });
+    for (const name of readdirSync(from)) {
+      // Case-folded: on a case-insensitive disk `skill.md` is SKILL.md.
+      if (name === ".git" || (top && name.toLowerCase() === "skill.md")) continue;
+      let st: Stats;
+      try {
+        st = lstatSync(path.join(from, name));
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) visit(path.join(from, name), path.join(to, name), false);
+      else if (st.isFile()) {
+        writeNewPluginFile(
+          path.join(to, name),
+          readFileSync(path.join(from, name)),
+          (st.mode & 0o111) !== 0,
+        );
+      }
+    }
+  };
+  visit(src, dest, true);
 }
 
 /** The one-line description the model reads when deciding to invoke a skill. */

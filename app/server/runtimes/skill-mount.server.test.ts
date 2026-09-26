@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  copySkillFolder,
   isSdkSkillName,
   mountGrantedSkills,
   removeSkillPlugin,
@@ -305,10 +306,10 @@ describe("mountGrantedSkills", () => {
     // own modes, so a settled run's plugin had its files in 0755 folders the
     // person could not write, and its removal as the person failed on every
     // run ("EACCES on …/skills/sourced-content/SKILL.md", 52 plugins left).
-    // Unlinking needs write on the folder, not on the file. CANARY: drop the
-    // walk after the copy (`makeCopyGroupRemovable`) and the copied folders
-    // keep the store's 0700; drop the plugin's own entries
-    // (`makeGroupRemovable`) and `skills/` keeps the umask's 0755.
+    // Unlinking needs write on the folder, not on the file. CANARY: copy with
+    // `cpSync` again and the copied folders and files keep the store's 0700
+    // and 0600; make a file without setting its mode on its descriptor and it
+    // is 0600, and a script loses its execute bits.
     const dataRoot = storeWithSkills([
       {
         name: "sourced-content",
@@ -333,8 +334,10 @@ describe("mountGrantedSkills", () => {
     };
     for (const [rel, mode] of Object.entries(sourceModes)) chmodSync(path.join(src, rel), mode);
     const ws = await gitCheckout();
-    // The server's own umask with isolation off: nothing below comes from it.
-    const umask = process.umask(0o022);
+    // The server's umask whenever it launches agents (boot sets it): the
+    // folders are made under it. The files' modes are set on their own
+    // descriptors, whatever the umask.
+    const umask = process.umask(0o002);
     let result: Awaited<ReturnType<typeof mountGrantedSkills>>;
     try {
       result = await mountGrantedSkills({
@@ -375,13 +378,57 @@ describe("mountGrantedSkills", () => {
       ]),
     );
     const copy = path.join(plugin, "skills", "sourced-content");
-    // A script stays a script.
-    expect(lstatSync(path.join(copy, "scripts", "check.sh")).mode & 0o111).toBe(0o111);
+    // Group-readable and never group-writable; a script stays a script.
+    const fileModes = {
+      [path.join(plugin, ".claude-plugin", "plugin.json")]: 0o644,
+      [path.join(copy, "SKILL.md")]: 0o644,
+      [path.join(copy, "checklists", "sources.md")]: 0o644,
+      [path.join(copy, "checklists", "deep", "claims.md")]: 0o644,
+      [path.join(copy, "scripts", "check.sh")]: 0o755,
+    };
+    for (const [file, mode] of Object.entries(fileModes)) {
+      expect(lstatSync(file).mode & 0o7777, path.relative(plugin, file)).toBe(mode);
+    }
     expect(pluginSkillMd(plugin, "sourced-content")).toContain("name: sourced-content");
+    expect(readFileSync(path.join(copy, "checklists", "deep", "claims.md"), "utf8")).toBe("# Claims\n");
     // The store is read, never changed.
     for (const [rel, mode] of Object.entries(sourceModes)) {
       expect(lstatSync(path.join(src, rel)).mode & 0o7777).toBe(mode);
     }
+  });
+
+  it("ruling 495(a): the copy changes nothing already there, so a folder an agent swapped for a link cannot widen what it leads to", () => {
+    // Review of ruling 495: the copy's modes were set by a chmod walk after
+    // `cpSync`, through paths whose folders the agents' group writes, so an
+    // agent that swapped `skills/<name>` for a link to a folder of the
+    // server's had the copy land in it and 2775 and 0644 set on whatever of
+    // the skill's names it held. Every entry is now made anew and never
+    // changed once it exists. CANARY: make a folder with `recursive` (so one
+    // already there is taken) and set its mode after, and the server's
+    // private folder behind the link is widened.
+    const dataRoot = storeWithSkills([
+      { name: "sourced-content", skillMd: "# Sourced content\n", extra: { "checklists/claims.md": "# Claims\n" } },
+    ]);
+    const root = temp.make("viberr-plugin-swap-");
+    // A private folder of the server's holding entries of the skill's names.
+    const held = path.join(root, "server-private", "sourced-content");
+    mkdirSync(path.join(held, "checklists"), { recursive: true });
+    writeFileSync(path.join(held, "checklists", "claims.md"), "private\n");
+    const privateModes = { "": 0o700, checklists: 0o700, "checklists/claims.md": 0o600 };
+    for (const [rel, mode] of Object.entries(privateModes)) chmodSync(path.join(held, rel), mode);
+    // The run's `skills/`, swapped for a link to it.
+    const skills = path.join(root, "plugin", "skills");
+    mkdirSync(path.dirname(skills));
+    symlinkSync(path.dirname(held), skills);
+
+    expect(() =>
+      copySkillFolder(path.join(dataRoot, "skills", "sourced-content"), path.join(skills, "sourced-content")),
+    ).toThrow(/EEXIST/);
+
+    for (const [rel, mode] of Object.entries(privateModes)) {
+      expect(lstatSync(path.join(held, rel)).mode & 0o7777, rel || ".").toBe(mode);
+    }
+    expect(readFileSync(path.join(held, "checklists", "claims.md"), "utf8")).toBe("private\n");
   });
 
   it("mounts ONLY the granted skills — the rest of the store stays out", async () => {
