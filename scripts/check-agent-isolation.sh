@@ -338,12 +338,15 @@ else
   pass "an agent cannot hard-link a server file it cannot write into its tree"
 fi
 rm -f "$WS/server-file" "$WS/agent-link" 2>/dev/null
+# (Modes are compared with what was read before: in the setgid workspace GNU
+# chmod keeps a folder's setgid bit under a numeric mode.)
 mkdir -p "$WS/opened-not" && chmod 0700 "$WS/opened-not" && ln -s "$WS/opened-not" "$WS/link-to-opened-not"
+mode_before=$(stat -c '%a' "$WS/opened-not")
 chmod -R -P g+rwX -- "$WS/link-to-opened-not" 2>/dev/null
-if [ "$(stat -c '%a' "$WS/opened-not")" = "700" ]; then
+if [ "$(stat -c '%a' "$WS/opened-not")" = "$mode_before" ]; then
   pass "the server's chmod -R -P follows no link it is handed"
 else
-  fail "the server's chmod -R -P followed a link to $(stat -c '%a' "$WS/opened-not")"
+  fail "the server's chmod -R -P followed a link: $mode_before became $(stat -c '%a' "$WS/opened-not")"
 fi
 rm -rf "$WS/opened-not" "$WS/link-to-opened-not"
 # One server call through the image's tsx (APP_ROOT, above): prints what it
@@ -432,14 +435,15 @@ fi
 # the server's chmod and rmdir are not run through it.
 LINKED="$WS/server-owned"
 mkdir -p "$LINKED/data/kept" "$LINKED/empty" && chmod 0750 "$LINKED" "$LINKED/data" "$LINKED/empty"
+mode_before=$(stat -c '%a' "$LINKED/data")
 as_agent "$UID_A" "mkdir -p '$WS/sup' && ln -s '$LINKED' '$WS/sup/rev'"
 through_data=$(remove_as_person "$WS/sup/rev/data")
 through_empty=$(remove_as_person "$WS/sup/rev/empty")
 if [ "$through_data" != "removed" ] && [ "$through_empty" != "removed" ] \
-  && [ "$(stat -c '%a' "$LINKED/data")" = "750" ] && [ -d "$LINKED/data/kept" ] && [ -d "$LINKED/empty" ]; then
+  && [ "$(stat -c '%a' "$LINKED/data")" = "$mode_before" ] && [ -d "$LINKED/data/kept" ] && [ -d "$LINKED/empty" ]; then
   pass "the server opens and removes nothing through a folder an agent swapped for a link"
 else
-  fail "the server acted through an agent's link: data is $(stat -c '%a' "$LINKED/data" 2>&1), empty/ $([ -d "$LINKED/empty" ] && echo kept || echo removed)"
+  fail "the server acted through an agent's link: data $mode_before became $(stat -c '%a' "$LINKED/data" 2>&1), empty/ $([ -d "$LINKED/empty" ] && echo kept || echo removed)"
 fi
 as_agent "$UID_A" "rm -rf '$WS/sup'"
 rm -rf "$LINKED"
