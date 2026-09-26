@@ -115,7 +115,7 @@ describe("unlinkDir handling (E13)", () => {
       .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
       .all(store.slug);
     expect(left.map((r) => r.task_key)).toEqual(["VIB-2"]);
-  }, 15000);
+  });
 
   it("a recursive PROJECT rm reconciles the whole project (no orphan rows)", async () => {
     const store = setupTestStore(ctx);
@@ -132,7 +132,7 @@ describe("unlinkDir handling (E13)", () => {
       "project + task rows pruned",
       () => pokeDir(path.join(store.dataRoot, "projects")),
     );
-  }, 15000);
+  });
 });
 
 describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
@@ -180,7 +180,7 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
       () => projectedTitle() === "Edited title after pruning",
       "task.md reprojected after edit",
     );
-  }, 15000);
+  });
 });
 
 /**
@@ -388,7 +388,7 @@ describe("watcher liveness (E8)", () => {
 
     watcher.emit("error", new Error("EMFILE: too many open files"));
     expect(isFileWatcherAlive()).toBe(false);
-  }, 15000);
+  });
 
   it("ENOENT is benign: deleting a watched path must not kill the watcher", async () => {
     // Deleting a watched subtree can race chokidar into a spurious ENOENT
@@ -403,7 +403,7 @@ describe("watcher liveness (E8)", () => {
       }),
     );
     expect(isFileWatcherAlive()).toBe(true);
-  }, 15000);
+  });
 });
 
 describe("watcher re-arm lifecycle (F10-08)", () => {
@@ -431,5 +431,5 @@ describe("watcher re-arm lifecycle (F10-08)", () => {
     } finally {
       vi.useRealTimers();
     }
-  }, 15000);
+  });
 });

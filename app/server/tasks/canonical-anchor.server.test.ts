@@ -478,5 +478,5 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     expect(inputs!.cloned).toBe(false);
     expect(inputs!.delivers).toBe(true);
     expect(inputs!.personaChars).toBeGreaterThan(0);
-  }, 20_000);
+  });
 });

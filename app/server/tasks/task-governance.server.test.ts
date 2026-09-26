@@ -1054,7 +1054,7 @@ describe("resolvePacket kind matrix", () => {
 
   // 20s (see the routing tests): resolving this packet starts a real run through
   // the fake adapter, which under full-suite parallelism can exceed the 5s default.
-  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", { timeout: 20_000 }, async () => {
+  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", async () => {
     // Canary: reinstate the unconditional `assertStageEligible` in
     // dispatchAgentRun (the resolution's retry is refused).
     installFakeRuntime();
@@ -1106,7 +1106,7 @@ describe("resolvePacket kind matrix", () => {
     expect(started?.details).toMatchObject({ profileId: "dev", backend: "claude", stageEligibility: "engaged-deliverer" });
   });
 
-  it("retry_other_backend: packet cleared, run restarts on the target backend, and the switch is PINNED past the live profile (T7/F27-B1)", { timeout: 20_000 }, async () => {
+  it("retry_other_backend: packet cleared, run restarts on the target backend, and the switch is PINNED past the live profile (T7/F27-B1)", async () => {
     const { interruptRun } = await import(
       "~/server/runtimes/run-service.server"
     );
