@@ -9,7 +9,6 @@ import {
   formatDayDotTimeUTC,
   formatDayTime,
   formatRelative,
-  utcDayKey,
 } from "./format";
 
 // Fixed "now": July 4 of the current-ish year, 10:45 local.
@@ -149,7 +148,7 @@ describe("formatCalendarDate is host-zone BY CONSTRUCTION (pass 34, C6)", () => 
     // that would silently re-word every rendered date. The zone-neutral first
     // pass surfaces render instead is `utcDayKey`, which never moves.
     expect(auckland.utcDayKey(iso)).toBe("2026-07-03");
-    expect(utc.utcDayKey(iso)).toBe(utcDayKey(iso));
+    expect(utc.utcDayKey(iso)).toBe("2026-07-03");
   });
 });
 

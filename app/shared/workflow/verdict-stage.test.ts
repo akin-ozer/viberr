@@ -209,5 +209,17 @@ describe("verdictStageFor: only a task at or past the review stage is returned",
         [],
       ),
     ).toBeNull();
+    // A stage standing past the review stage (its own edge into Done) is sent
+    // back to it.
+    const pastReview = {
+      stages: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "done" }],
+      workflow: [
+        { from: "a", to: "b" },
+        { from: "b", to: "done" },
+        { from: "b", to: "c" },
+        { from: "c", to: "done" },
+      ],
+    };
+    expect(verdictStageFor(pastReview, { stage: "c", engagements: [] }, [])).toBe("b");
   });
 });

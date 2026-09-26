@@ -26,7 +26,7 @@ export const DEFAULT_GUARDRAIL_IDS: readonly string[] = DEFAULT_GUARDRAILS.map(
 
 /** The branch-cleanup row lives in project.md's `guardrails` too but is owned
  *  by the GitHub settings card, so the Policy card never toggles it. */
-export const GITHUB_MANAGED_GUARDRAIL_ID = "delete-branch-after-merge";
+const GITHUB_MANAGED_GUARDRAIL_ID = "delete-branch-after-merge";
 
 export type GuardrailKind = "default" | "github" | "unknown";
 

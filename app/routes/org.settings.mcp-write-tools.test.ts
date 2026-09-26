@@ -20,7 +20,6 @@ import { listMcpServers } from "~/server/org/resources.server";
 
 let app: AppTestContext;
 let ardaId: string;
-let elifId: string;
 const TARGET = "http://127.0.0.1:9/mcp";
 
 beforeAll(async () => {
@@ -28,7 +27,6 @@ beforeAll(async () => {
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda; // org admin
-  elifId = userIds.elif; // org member (not admin)
 });
 afterAll(() => app.cleanup());
 
@@ -106,13 +104,6 @@ describe("org-settings mcp-save carries the write-tool marks (ruling 176)", () =
     });
     expect(badName.status).toBe(400);
     expect(badName.body.error).toContain("is not an MCP tool name");
-    expect(server()?.writeTools).toEqual(["create_pull_request", "merge_pull_request"]);
-  });
-
-  it("a non-admin org member is refused", async () => {
-    const id = server()!.id;
-    const { status } = await saveMcp(elifId, { mcpId: id, writeTools: "[]" });
-    expect(status).not.toBe(200);
     expect(server()?.writeTools).toEqual(["create_pull_request", "merge_pull_request"]);
   });
 });

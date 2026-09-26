@@ -49,7 +49,7 @@ const PENDING_SCHEDULES_SCHEMA = z
  * only one a reader is owed. Null when nothing is pending — which the caller
  * has already ruled out via `waiting`, so this is the belt to that braces.
  */
-export function nextScheduleDueAt(schedulesJson: string): string | null {
+function nextScheduleDueAt(schedulesJson: string): string | null {
   let parsed: { dueAt: string; status: string }[];
   try {
     parsed = PENDING_SCHEDULES_SCHEMA.parse(JSON.parse(schedulesJson));
@@ -615,7 +615,7 @@ export function withLiveAgentIdentities(
   return { ...summary, specialist, reviewers };
 }
 
-export function mapOperatorRef(
+function mapOperatorRef(
   ref: OperatorRef | null,
   stages: { id: string; name: string }[],
 ): OperatorRender | null {

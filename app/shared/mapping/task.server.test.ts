@@ -4,14 +4,12 @@ import type { DependencyRender } from "~/shared/dependencies";
 import {
   withLiveRun,
   isAtAcceptanceBoundary,
-  mapOperatorRef,
   mapPrChecks,
   mapPrChecksUnread,
   prChecksRead,
   mapPrMergeable,
   mapPrReview,
   mapTaskProjectionRow,
-  nextScheduleDueAt,
   withLiveAgentIdentities,
   type LiveAgentIdentity,
   type TaskProjectionRow,
@@ -688,9 +686,12 @@ describe("isAtAcceptanceBoundary mirrors the server's stage gate", () => {
   });
 });
 
-describe("mapOperatorRef sinceLabel (F7-UI2)", () => {
+describe("the operator card names the stage it was assigned at (F7-UI2)", () => {
   it("renders the real stage NAME, not an index", () => {
-    expect(mapOperatorRef({ assignedAtStageId: "ready" }, STAGES)).toEqual({
+    expect(
+      summarize(row({ operator_json: JSON.stringify({ assignedAtStageId: "ready" }) }), false)
+        .operator,
+    ).toEqual({
       name: "Operator",
       assignedAtStageId: "ready",
       sinceStageIndex: 2,
@@ -699,14 +700,14 @@ describe("mapOperatorRef sinceLabel (F7-UI2)", () => {
   });
 
   it("an unknown/removed stage id renders an honest dash", () => {
-    expect(mapOperatorRef({ assignedAtStageId: "ghost" }, STAGES)).toMatchObject({
-      sinceStageIndex: null,
-      sinceLabel: "since a removed stage",
-    });
+    expect(
+      summarize(row({ operator_json: JSON.stringify({ assignedAtStageId: "ghost" }) }), false)
+        .operator,
+    ).toMatchObject({ sinceStageIndex: null, sinceLabel: "since a removed stage" });
   });
 
-  it("null ref maps to null", () => {
-    expect(mapOperatorRef(null, STAGES)).toBeNull();
+  it("no operator maps to null", () => {
+    expect(summarize(row(), false).operator).toBeNull();
   });
 });
 
@@ -814,17 +815,19 @@ describe("withLiveAgentIdentities (live deployment wins over the engage-time sna
  * itself back up. The read boundary is where a corrupt value must stop, the
  * same rule `parseTaskLabels` follows.
  */
-describe("nextScheduleDueAt", () => {
+describe("resumesAt: the schedule a clock-resting task picks itself back up on", () => {
   const occurrence = (dueAt: string, status: string) => ({
     id: `sch_${dueAt}`,
     action: "run-operator",
     dueAt,
     status,
   });
+  const resumesAt = (schedulesJson: string, waiting: TaskProjectionRow["waiting"] = "schedule") =>
+    summarize(row({ waiting, schedules_json: schedulesJson }), false).resumesAt;
 
   it("answers the occurrence that fires NEXT, not the one listed first", () => {
     expect(
-      nextScheduleDueAt(
+      resumesAt(
         JSON.stringify([
           occurrence("2026-09-14T06:00:00.000Z", "pending"),
           occurrence("2026-09-14T02:28:00.000Z", "pending"),
@@ -835,23 +838,26 @@ describe("nextScheduleDueAt", () => {
 
   it("ignores occurrences that already fired", () => {
     expect(
-      nextScheduleDueAt(
+      resumesAt(
         JSON.stringify([
           occurrence("2026-09-13T08:19:58.271Z", "fired"),
           occurrence("2026-09-14T02:28:00.000Z", "pending"),
         ]),
       ),
     ).toBe("2026-09-14T02:28:00.000Z");
-    expect(
-      nextScheduleDueAt(JSON.stringify([occurrence("2026-09-13T08:19:58.271Z", "fired")])),
-    ).toBeNull();
+    expect(resumesAt(JSON.stringify([occurrence("2026-09-13T08:19:58.271Z", "fired")]))).toBeNull();
   });
 
   it("yields no time rather than throwing on a value it cannot read", () => {
-    expect(nextScheduleDueAt("not json")).toBeNull();
-    expect(nextScheduleDueAt("[]")).toBeNull();
-    expect(nextScheduleDueAt(JSON.stringify([{ nonsense: true }]))).toBeNull();
-    expect(nextScheduleDueAt(JSON.stringify([occurrence("whenever", "pending")]))).toBeNull();
+    expect(resumesAt("not json")).toBeNull();
+    expect(resumesAt("[]")).toBeNull();
+    expect(resumesAt(JSON.stringify([{ nonsense: true }]))).toBeNull();
+    expect(resumesAt(JSON.stringify([occurrence("whenever", "pending")]))).toBeNull();
+  });
+
+  it("is null while the task waits on anything but its schedule", () => {
+    const pending = JSON.stringify([occurrence("2026-09-14T02:28:00.000Z", "pending")]);
+    expect(resumesAt(pending, "human")).toBeNull();
   });
 });
 

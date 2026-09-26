@@ -91,6 +91,6 @@ describe("/resources/controller-unseen (O39-d)", () => {
         pattern: "/resources/controller-unseen",
         context: new RouterContextProvider(),
       }),
-    ).rejects.toBeDefined();
+    ).rejects.toMatchObject({ status: 302 });
   });
 });

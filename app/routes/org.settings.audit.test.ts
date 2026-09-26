@@ -76,7 +76,7 @@ describe("audit-export download route", () => {
   });
 
   it("refuses a non-admin", async () => {
-    await expect(download(elifId, "csv")).rejects.toBeDefined();
+    await expect(download(elifId, "csv")).rejects.toMatchObject({ status: 403 });
   });
 });
 

@@ -92,6 +92,7 @@ describe("palette-shell loader (ruling 145)", () => {
   });
 
   it("still refuses an anonymous viewer on a page route", async () => {
-    await expect(loadShell("/org/settings")).rejects.toBeDefined();
+    // The page route's own guard: the login redirect, not a crash.
+    await expect(loadShell("/org/settings")).rejects.toMatchObject({ status: 302 });
   });
 });

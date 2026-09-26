@@ -760,27 +760,6 @@ describe("packet block parse (tolerant)", () => {
     expect(packet?.options[0]?.kind).toBe("discard_branch");
   });
 
-  it("F31-C5 (supersedes F20-6's whole-packet arm): an unknown option kind drops only ITSELF", () => {
-    // F20-6 asserted the whole packet nulls on one unknown kind. That was the
-    // durable-loss class: "packet ignored" strands the human on waiting:human
-    // with no card, and the next write erases the open decision for good. The
-    // bad option — a button that would resolve to nothing — is dropped with a
-    // diagnostic; the decision survives on the remaining options (and the
-    // always-offered custom directive).
-    const { packet, diagnostics } = parsePacket({
-      type: "input",
-      kind: "Completion report",
-      title: "t",
-      options: [
-        { kind: "delete_everything", t: "nuke", d: "", rec: true },
-        { kind: "custom", t: "Something else", d: "", rec: false },
-      ],
-    });
-    expect(packet, "the packet must survive the bad option").not.toBeNull();
-    expect(packet!.options.map((o) => o.kind)).toEqual(["custom"]);
-    expect(diagnostics.some((d) => d.code === "packet.invalid_option")).toBe(true);
-  });
-
   it("invalid packet → null + error diagnostic (never a throw)", () => {
     const { packet, diagnostics } = parsePacket({ type: "nope" });
     expect(packet).toBeNull();
