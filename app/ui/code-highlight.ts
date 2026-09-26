@@ -13,9 +13,12 @@ import type {
  * JavaScript regex engine (no WebAssembly) load on the first file opened; each
  * grammar is its own chunk, fetched the first time a file of that language
  * opens. The css-variables theme is the only theme: every token resolves to
- * one of nine scope families, which `toToken` turns into a class the
+ * one of its scope families, which `toToken` turns into a class the
  * stylesheet colours from the `--syn-*` palette — no inline colours, both
- * themes served by `app.css` alone.
+ * themes served by `app.css` alone. Every family but punctuation has a
+ * colour, and `app.css.test.ts` reads the families off the theme itself, so
+ * one Shiki adds cannot go uncoloured unnoticed (ruling 508: a diff's lines
+ * and a log's levels did).
  *
  * Highlighting is decoration. The text is on screen before any of this runs,
  * and every failure here (a grammar that will not load, an engine the browser
@@ -89,7 +92,8 @@ export const LANGUAGE_LOADERS: ReadonlyMap<string, GrammarLoader> = new Map<
   ["r", () => import("@shikijs/langs/r")],
   ["perl", () => import("@shikijs/langs/perl")],
   ["diff", () => import("@shikijs/langs/diff")],
-  ["log", () => import("@shikijs/langs/log")],
+  // Upstream's grammar with whole numbers and levels by severity (ruling 508).
+  ["log", () => import("./log-grammar")],
   ["csv", () => import("@shikijs/langs/csv")],
   ["tsv", () => import("@shikijs/langs/tsv")],
   ["nginx", () => import("@shikijs/langs/nginx")],
@@ -114,6 +118,14 @@ export const LANGUAGE_LOADERS: ReadonlyMap<string, GrammarLoader> = new Map<
 ]);
 
 const THEME = "css-variables";
+
+/** The one theme's options. `app.css.test.ts` builds the same theme to read
+ *  its scope families, so the stylesheet is checked against what this emits. */
+export const THEME_OPTIONS = {
+  name: THEME,
+  variablePrefix: "--shiki-",
+  fontStyle: true,
+} as const;
 
 /** A line longer than this is one plain token — a minified bundle is not
  *  something a regex grammar should be asked to parse character by character.
@@ -144,13 +156,7 @@ function core(): Promise<HighlighterCore> {
     import("shiki/engine/javascript"),
   ]).then(([shiki, js]) =>
     shiki.createHighlighterCore({
-      themes: [
-        shiki.createCssVariablesTheme({
-          name: THEME,
-          variablePrefix: "--shiki-",
-          fontStyle: true,
-        }),
-      ],
+      themes: [shiki.createCssVariablesTheme(THEME_OPTIONS)],
       langs: [],
       engine: js.createJavaScriptRegexEngine(),
     }),

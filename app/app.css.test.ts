@@ -1,8 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createCssVariablesTheme } from "shiki/core";
 import { describe, expect, it } from "vitest";
 import { escapeRegExp } from "~/shared/text/regexp";
+import { THEME_OPTIONS, toToken } from "~/ui/code-highlight";
 import { balanced, cssRules, type CssRule } from "../test-support/css-rules";
 
 /**
@@ -3348,20 +3350,37 @@ describe("app.css: the quiet tier reaches every surface (design pass 2026-09-08)
 
 /* Ruling 363: the code reader's syntax palette is small text on --bg (the
    reader's ground) inside a dialog on --surface — both must clear AA, in both
-   themes, for every scope family the highlighter can colour. */
+   themes, for every scope family the highlighter can colour.
+   Ruling 508: the families are read off the reader's own theme, through the
+   reader's own token-to-class map. A hand-written list of eight left out the
+   three a diff's lines and a log's levels resolve to, so both rendered in the
+   plain foreground. Punctuation is the one family that stays --fg. */
 describe("app.css code reader palette meets WCAG AA (ruling 363)", () => {
   const AA_SMALL_TEXT = 4.5;
-  const SYNTAX_FAMILIES = [
-    "keyword",
-    "string",
-    "string-expression",
-    "comment",
-    "constant",
-    "parameter",
-    "function",
-    "link",
+  const FOREGROUND_FAMILIES = ["punctuation"];
+  const EMITTED_FAMILIES = [
+    ...new Set(
+      (createCssVariablesTheme(THEME_OPTIONS).tokenColors ?? []).flatMap(({ settings }) => {
+        const className = toToken({ content: "", offset: 0, color: settings.foreground })
+          .className;
+        return className ? [className.replace(/^tk-/, "")] : [];
+      }),
+    ),
   ];
+  const SYNTAX_FAMILIES = EMITTED_FAMILIES.filter(
+    (family) => !FOREGROUND_FAMILIES.includes(family),
+  );
   const THEMES = { light: LIGHT_ROOT, dark: DARK_ROOT };
+
+  it("reads every family off the theme, the diff and log families among them", () => {
+    // A floor, so a theme whose colours stop parsing cannot pass by listing none.
+    expect(EMITTED_FAMILIES).toEqual(
+      expect.arrayContaining([
+        "keyword", "string", "string-expression", "comment", "constant", "parameter",
+        "function", "link", "inserted", "deleted", "changed", ...FOREGROUND_FAMILIES,
+      ]),
+    );
+  });
   for (const [theme, root] of Object.entries(THEMES)) {
     it(`${theme} theme: every --syn-* token clears 4.5:1 on --bg and --surface`, () => {
       for (const family of SYNTAX_FAMILIES) {
