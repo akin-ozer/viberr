@@ -1023,6 +1023,20 @@ author (ruling 361); a question an agent asks arrives under that agent's name (r
 222). Loading a task page marks all of the viewer's unread notifications for that task
 read (ruling 71); the bell and inbox mark-read explicitly.
 
+A row opens the thing it is about (ruling 497, `notifications.href`): a notice about a
+timeline event opens that event (`#event-<occurredAt>`: a verdict, a failed run, a
+delivery or PR note, a release, a lease, a scope violation, an ownership change, a
+mention's comment), a packet or an agent's question opens `#decision`, a recommendation
+opens `#recommendations`, a knowledge-base proposal opens its entry on the project
+Controller page, "GitHub sync is failing" opens the project's GitHub page, and goal
+progress opens its chain or its link's row. A task notice names its subject
+(`TaskWatcherNotice.about`); the anchors are spelled once in `app/shared/page-anchors.ts`.
+A stored link is used only inside the row's own project, and a row with none opens the
+task, or the project's board for a project-level row (B-FD6). On the task page the named
+event is marked and focused, the filter tab that hid it opens, and older events load
+until it is among them; a click on a row about the page already on screen brings the
+place back into view (`useHashTarget`, `app/ui/use-hash-target.ts`).
+
 ## 15. File leases
 
 A **file lease** (ruling 245) says one task owns some paths until it merges: `project.md`

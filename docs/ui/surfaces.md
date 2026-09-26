@@ -95,7 +95,11 @@ Intents behind `project.task.tsx` are explained in
   once the page has re-read the counts since, whatever values they came back with (at
   once while open). A failed load shows "Couldn't load notifications." with Try again,
   never the error page. At the cap the list discloses it ("Showing the newest
-  100", UI-14) (ruling 457). The
+  100", UI-14) (ruling 457). A row opens the thing it is about (ruling 497): the event
+  on its task's timeline (marked, focused, its filter tab opened, older events loaded
+  until it is shown), the task's `#decision` or `#recommendations`, a proposal's entry
+  on the Controller page, the project's GitHub page, a goal chain; a click on a row
+  about the page already on screen brings the place back into view. The
   account menu is a Radix ARIA menu (arrows, typeahead, Home/End, focus back to the
   avatar on close; ruling 166), fetched when the pointer or focus reaches the avatar or
   on the first press, which opens it on arrival unless Escape, a second press, or a press
