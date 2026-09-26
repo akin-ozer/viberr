@@ -335,7 +335,8 @@ svg.ico { width: 16px; height: 16px; flex: none; }
    the lock beside a 700 field label take the heavier stroke. */
 .nav-item .ico, .seg .ico, .fchip .ico, .chip .ico, .card-head .trace .ico, .pick-chip.mono > .ico,
 .menu-item .ico, .toast .ico, .deny-note .ico, .pill.quiet .ico, .sched-when .ico,
-.stage-menu-btn .sm-caret, .rq-row .wait-tag.human .ico, .gh-freshness .ico, .ctl-msg-who .ico { stroke-width: 2; }
+.stage-menu-btn .sm-caret, .rq-row .wait-tag.human .ico, .gh-freshness .ico, .ctl-msg-who .ico,
+.prop-empty .ico, .wait-chip .ico { stroke-width: 2; }
 .btn .ico, .pill .ico, .wait-tag .ico, .op-rec-kind .ico, .model-sub .ico, .cmdk-row .ico,
 .rev-add .ico, .own-btn .ico, .rsel-btn .caret, .pick-chip:not(.mono) > .ico, .go-hint .ico, .ag-newbtn .ico,
 .trans-lock .ico, .trans-path .ico, .guard-name .ico, .cred-top .ico, .org-tile .lbl .ico,
@@ -1701,29 +1702,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .goal-textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .goal-edit-actions { display: flex; gap: .5rem; }
 
-/* Lightweight metadata editor (priority / labels / due date) under the goal.
-   Mirrors the goal-edit vocabulary so the two editors read as siblings. */
-.meta-edit-btn { display: inline-flex; align-items: center; gap: .375rem; margin-top: .5rem; padding: .125rem .5rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-small); cursor: pointer; transition: transform .15s var(--ease-out); }
-.meta-edit-btn:hover { border-color: var(--blue); }
-.meta-edit-btn .ico { width: 13px; height: 13px; }
-/* The icon side less 2px, as .btn (ruling 459). */
-.meta-edit-btn:has(> .ico:first-child) { padding-left: .375rem; }
-/* F26-13: shown in place of the Edit-details button on an archived task, whose
-   planning metadata is frozen until it is restored. */
-.meta-archived-note { margin-top: .5rem; font-size: .75rem; color: var(--muted); }
-.meta-edit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-top: .5rem; max-width: 70ch; }
-/* The same editor as a side panel (Details): fields stack full-width. */
-.meta-edit-panel { display: flex; flex-direction: column; gap: .5rem; }
-.meta-field { display: flex; flex-direction: column; gap: .25rem; }
-.meta-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
-.meta-edit .meta-field select, .meta-edit .meta-field input,
-.meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font: inherit; font-size: .88rem; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .25rem .5rem; }
-.meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { width: 100%; }
-.meta-edit .meta-field select:focus, .meta-edit .meta-field input:focus,
-.meta-edit-panel .meta-field select:focus, .meta-edit-panel .meta-field input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
-.meta-edit-actions { display: flex; gap: .5rem; align-items: center; }
-/* The labels row in the Details panel wraps its chips. */
-.meta-chips { display: flex; flex-wrap: wrap; gap: .25rem; justify-content: flex-end; }
+/* F26-13: on an archived task, whose planning metadata is frozen until it is
+   restored, the Details panel says why its values are not controls. */
+.meta-archived-note { display: flex; align-items: center; gap: .375rem; margin: .75rem 0 0; font-size: .75rem; color: var(--muted); }
+.meta-archived-note .ico { width: 12px; height: 12px; flex: none; }
 
 /* Visually-hidden — aria-live status regions, off-screen labels. */
 .vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
@@ -4570,8 +4552,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   .top-search input, .board-filter-input input, .cmdk-input,
   .composer-box .composer-ce, .composer-box .composer-placeholder, .goal-textarea,
   .label-input-field, .stg-input, .op-steer,
-  .guard-ctl input[type="number"],
-  .meta-edit-panel .meta-field select, .meta-edit-panel .meta-field input { font-size: 1rem; }
+  .guard-ctl input[type="number"] { font-size: 1rem; }
   .field input[type="text"].mono, .field input[type="email"].mono,
   .field input[type="password"].mono { font-size: 1rem; }
   /* The rest are declared in appended sections at equal specificity, so each
@@ -5752,7 +5733,7 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .be-opt:active:not(:disabled), .org-tile.go:active, .pj-card:has(> .pj-link:active) { transform: translateY(0) scale(.99); }
 .deploy-row:active:not(:disabled), .pj-row:has(> .pj-link:active) { transform: scale(.99); }
 .ag-newbtn:active, .live-row:active, .ctl-example:active:not(:disabled), .ctl-conv:active, .project-switch:active, .ntf-item:active:not([aria-disabled="true"]), .attach-file:active, .attach-thumb:active, .tl-attach-thumb:active, .tl-attach-file:active, button.top-search:active { transform: scale(.99); }
-.seg button:active:not(:disabled), .fchip:active:not(:disabled), button.pick-chip:active:not(:disabled), .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active:not(:disabled), .handoff-chip:active:not(:disabled), .keybtn:active, .goal-edit-btn:active, .meta-edit-btn:active { transform: scale(.96); }
+.seg button:active:not(:disabled), .fchip:active:not(:disabled), button.pick-chip:active:not(:disabled), .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active:not(:disabled), .handoff-chip:active:not(:disabled), .keybtn:active, .goal-edit-btn:active, .prop-btn:active:where(:not([aria-busy="true"])) { transform: scale(.96); }
 .nav-item:active { transform: scale(.96); }
 .rev-x:active:not(:disabled), .stg-x:active:not(:disabled), .own-x:active, .col-head .add:active, .session-id-copy:active { transform: scale(.96); }
 .rsel-btn:active, .cal-nav:active, .cal-day:active, button.kbd:active, .home-user:active, .board-orphan-key:active { transform: scale(.96); }
@@ -5766,7 +5747,7 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    what nauseates; opacity still aids comprehension). Ruling 148(c): this OS
    preference is the ONE reduced-motion signal; the in-app kill switch is gone. */
 @media (prefers-reduced-motion: reduce) {
-  .user-menu, .user-menu[data-side="top"], .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .stage-menu-pop[data-side="top"], .datepick-pop,
+  .user-menu, .user-menu[data-side="top"], .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .stage-menu-pop[data-side="top"], .datepick-pop, .prop-pop,
   .confirm-card, .modal-card, .page-overlay, .toast, .login-card,
   .cap-mbody { animation: fade-in .12s ease; }
   /* The login pitch fades with the card, all at once (ruling 459): it rose
@@ -8526,3 +8507,77 @@ button.chg-num:hover, button.chg-num[aria-expanded="true"] { color: var(--blue-p
 .chg-count { flex: 1 1 14rem; }
 .chg-foot-acts { display: flex; flex-wrap: wrap; gap: .5rem; }
 .chg-foot > .form-err { flex-basis: 100%; }
+
+/* ---------- appended: ruling 501, the Details panel's properties ---------- */
+/* Linear's and GitHub's issue sidebars: a property's value is its control. At
+   rest a value is the vocabulary the board card already draws (the flag, the
+   label chips, the due pill) or, with nothing to say, a quiet line, never the
+   bold --fg a side panel gives a fact. For a person who may edit it is a ghost
+   trigger that takes the hover fill and opens its editor under the row. The
+   rows keep the side column's shape (label left, value right, a hairline
+   between), so Details reads as the third panel of one column. */
+.kv.props .kv-row { position: relative; min-height: 2.25rem; padding: .25rem .125rem; }
+.kv.props .kv-row .k { flex: none; }
+.kv.props .kv-row .v { flex-wrap: wrap; justify-content: flex-end; font-weight: 400; }
+.prop-val { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .25rem; min-width: 0; }
+/* The invitation takes the placeholder rung, a step under the row's own
+   label, and comes up to --muted under the pointer. */
+.prop-empty { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; font-weight: 500; color: var(--placeholder); white-space: nowrap; }
+.prop-empty .ico { width: 12px; height: 12px; }
+/* The trigger lets its padding run past the row's edge, so the value it holds
+   lines up with the values of the panels above it. */
+.prop-btn {
+  display: inline-flex; align-items: center; max-width: calc(100% + .375rem); min-height: 1.75rem;
+  margin-right: -.375rem; padding: .25rem .375rem;
+  border: 1px solid transparent; border-radius: var(--radius-button);
+  background: transparent; color: var(--fg); font: inherit; text-align: right;
+  cursor: pointer;
+  transition: background-color .14s ease, border-color .14s ease, transform .15s var(--ease-out);
+}
+.prop-btn:hover:where(:not([aria-busy="true"])) { background: var(--tint-hover); border-color: var(--hairline); }
+.prop-btn:hover:where(:not([aria-busy="true"])) .prop-empty { color: var(--muted); }
+.prop-btn[aria-expanded="true"] { background: var(--tint-hover); border-color: var(--blue); }
+.prop-btn[aria-busy="true"] { cursor: default; }
+/* The editor floats under its row, right-aligned with the trigger. */
+.prop-pop {
+  position: absolute; top: calc(100% + .25rem); right: -.25rem; z-index: 60;
+  width: max-content; max-width: calc(100vw - 2rem);
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-box);
+  box-shadow: var(--shadow-ring), var(--shadow-menu);
+  font-size: .88rem; font-weight: 400; text-align: left; white-space: normal;
+  transform-origin: top right;
+  animation: menu-in .16s var(--ease-out);
+}
+/* Concentric (ruling 459): an 8px .menu-item + .25rem is the popover's 12, and
+   a 6px calendar day + .375rem the same. */
+.prop-pop.prop-menu { min-width: 11rem; padding: .25rem; }
+.prop-pop.prop-calendar { padding: .375rem; }
+.prop-pop.prop-form { width: 18rem; padding: .75rem; }
+.prop-menu-list { display: flex; flex-direction: column; gap: 1px; }
+/* The Stage menu's size beside it in the column, not the account menu's. */
+.prop-menu .menu-item { padding: .375rem .5rem; font-size: .75rem; }
+.prop-menu .menu-item .ico { width: 14px; height: 14px; }
+.prop-menu .menu-item[aria-checked="true"] { color: var(--fg); }
+/* Each priority's flag in its pill's tone; Normal keeps the menu's quiet ink. */
+.prop-menu .menu-item[data-priority="urgent"] > .ico:first-child { color: var(--coral-dark); }
+.prop-menu .menu-item[data-priority="high"] > .ico:first-child { color: var(--blue-pressed); }
+.prop-menu .menu-item[data-priority="low"] > .ico:first-child { color: var(--muted); }
+.prop-menu .menu-item .prop-check { margin-left: auto; width: 14px; height: 14px; color: var(--blue); }
+.prop-form-body { display: flex; flex-direction: column; gap: .75rem; }
+.prop-form-body .fine { margin: 0; line-height: 1.45; }
+.prop-acts { display: flex; justify-content: flex-end; gap: .5rem; }
+.prop-calendar .prop-acts { margin-top: .375rem; padding-top: .375rem; border-top: 1px solid var(--hairline); }
+/* What the task waits on: each entry a chip with its status ring (the to-do
+   family, ruling 499) and, once it has settled, the word. A wait that can
+   never complete (ruling 355) is a problem the row has to show. */
+.label-chip.wait-chip { gap: .25rem; padding-left: .25rem; }
+.wait-chip .ico { width: 11px; height: 11px; flex: none; }
+.wait-chip[data-wait-state="done"] .ico { color: var(--success-dark); }
+.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"], [data-wait-state="cancelled"]) {
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger), transparent 55%);
+}
+/* Ruling 241's note under the wait is a sentence: it takes the row's width. */
+.kv.props .kv-row.prop-note { flex-direction: column; align-items: flex-start; gap: .25rem; padding: .5rem .125rem; }
+.kv.props .kv-row.prop-note .v { display: block; font-size: .75rem; line-height: 1.5; color: var(--muted); }

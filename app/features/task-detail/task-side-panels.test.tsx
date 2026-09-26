@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
-import { CurrentStatePanel, TaskDetailsPanel } from "./task-side-panels";
+import { toISODate } from "~/ui/calendar";
+import { CurrentStatePanel } from "./task-side-panels";
+import { TaskDetailsPanel } from "./task-details-panel";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -285,6 +287,32 @@ describe("ruling 131: the Current-state Waiting-on row names the other work", ()
   });
 });
 
+/** The Details panel, capturing every form it posts. */
+function renderCapturing(patch: Partial<TaskDetail>, canEdit: boolean) {
+  const task = detail(patch);
+  const posted: Record<string, string>[] = [];
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <ToastProvider>
+          <TaskDetailsPanel task={task} canEdit={canEdit} labelSuggestions={["qa", "codex"]} />
+        </ToastProvider>
+      ),
+      action: async ({ request }) => {
+        const fd = await request.formData();
+        posted.push(Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)])));
+        return { ok: true };
+      },
+    },
+  ]);
+  return { ...render(<Stub initialEntries={["/"]} />), posted };
+}
+
+/** A property's trigger: named by its row's label and its value. */
+const trigger = (view: { getByRole: ReturnType<typeof render>["getByRole"] }, label: string) =>
+  view.getByRole("button", { name: new RegExp(`^${label} `) });
+
 describe("ruling 131: the Details panel's Blocked by row and its own form", () => {
   const entries = [
     { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done" as const, taskKey: "JC-3", goalId: "goal-1" },
@@ -292,54 +320,40 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
     { ref: "JC-7", label: "JC-7", state: "open" as const, taskKey: "JC-7", goalId: null },
   ];
 
-  function renderCapturing(patch: Partial<TaskDetail>, canEdit: boolean) {
-    const task = detail(patch);
-    const posted: Record<string, string>[] = [];
-    const Stub = createRoutesStub([
-      {
-        path: "/",
-        Component: () => (
-          <ToastProvider>
-            <TaskDetailsPanel task={task} canEdit={canEdit} />
-          </ToastProvider>
-        ),
-        action: async ({ request }) => {
-          const fd = await request.formData();
-          posted.push(Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)])));
-          return { ok: true };
-        },
-      },
-    ]);
-    return { ...render(<Stub initialEntries={["/"]} />), posted };
-  }
-
-  it("reads the wait as a kv row with each entry's state", () => {
+  it("reads the wait as a kv row with each entry's state, and its status ring", () => {
     const { container } = renderCapturing({ blockedBy: entries }, false);
     expect(kv(container, "Blocked by")).toBe("goal-1 link 2 (JC-3) · doneJC-6 · archivedJC-7");
+    // Ruling 501: each entry is a chip carrying its state for the sheet's ring.
+    // CANARY: drop `data-wait-state` and the done and dead rings lose their tone.
+    const chips = [...container.querySelectorAll(".wait-chip")];
+    expect(chips.map((c) => c.getAttribute("data-wait-state"))).toEqual(["done", "failed", "open"]);
+    expect(chips.every((c) => c.querySelector("svg.ico"))).toBe(true);
     const { container: bare } = renderCapturing({}, false);
     expect(kv(bare, "Blocked by")).toBe("Nothing");
   });
 
   it("edits through its OWN form and intent: the submitted list is the field's text, and an empty field clears", async () => {
-    // Canary: remove the dependency form (no "Edit what it waits on"), or
+    // Canary: remove the dependency editor from the Blocked by trigger, or
     // route it through the metadata form's intent.
-    const { container, getByText, posted } = renderCapturing({ blockedBy: entries }, true);
-    fireEvent.click(getByText("Edit what it waits on"));
-    const form = container.querySelector<HTMLFormElement>("form[data-dependency-form]")!;
+    const view = renderCapturing({ blockedBy: entries }, true);
+    fireEvent.click(trigger(view, "Blocked by"));
+    const form = view.container.querySelector<HTMLFormElement>("form[data-dependency-form]")!;
     expect(form).toBeTruthy();
     const input = form.querySelector<HTMLInputElement>('input[name="blockedBy"]')!;
     // Prefilled with the CANONICAL refs, not the display labels.
     expect(input.value).toBe("goal-1 link 2, JC-6, JC-7");
     fireEvent.change(input, { target: { value: "JC-7, goal-2 link 1" } });
     fireEvent.click(form.querySelector('button[type="submit"]')!);
-    await waitFor(() => expect(posted).toHaveLength(1));
-    expect(posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, goal-2 link 1" });
-    expect(posted[0]!.priority).toBeUndefined();
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, goal-2 link 1" });
+    expect(view.posted[0]!.priority).toBeUndefined();
+    // A saved wait closes its editor.
+    await waitFor(() => expect(view.container.querySelector("form[data-dependency-form]")).toBeNull());
   });
 
   it("an archived task offers no dependency editor", () => {
-    const { queryByText } = renderCapturing({ blockedBy: entries, archived: true }, true);
-    expect(queryByText("Edit what it waits on")).toBeNull();
+    const { queryByRole } = renderCapturing({ blockedBy: entries, archived: true }, true);
+    expect(queryByRole("button", { name: /^Blocked by/ })).toBeNull();
   });
 });
 
@@ -401,26 +415,122 @@ describe("TaskDetailsPanel", () => {
     expect(container.querySelector("[data-queued-questions]")).toBeNull();
   });
 
-  it("shows 'Normal / None / None' for a bare task", () => {
+  it("shows 'Normal / None / None' for a bare task, quietly", () => {
     const { container } = renderDetails({}, false);
     expect(kv(container, "Priority")).toContain("Normal");
     expect(kv(container, "Labels")).toContain("None");
     expect(kv(container, "Due date")).toContain("None");
+    // Ruling 501: an empty value is the quiet line, never the bold fact the
+    // owner's screenshot showed four times. CANARY: print them bare in `.v`.
+    expect(container.querySelectorAll(".kv-row .prop-empty")).toHaveLength(4);
+  });
+});
+
+/**
+ * Ruling 501: the Details panel draws its properties the way Linear's and
+ * GitHub's issue sidebars do. Each value is its own control, which edits that
+ * one property in a popover and posts only its own field; the "Edit details"
+ * and "Edit what it waits on" buttons, and the three-field form, are gone.
+ */
+describe("ruling 501: each Details property is its own control", () => {
+  it("gives a viewer text, and an editor one trigger per property, with the empty ones as invitations", () => {
+    // CANARY: render the triggers for a viewer, or bring back the footer buttons.
+    const viewer = renderCapturing({}, false);
+    expect(viewer.container.querySelectorAll("button")).toHaveLength(0);
+    cleanup();
+    const editor = renderCapturing({}, true);
+    for (const [label, value] of [
+      ["Priority", "Normal"],
+      ["Labels", "Add labels"],
+      ["Due date", "Set due date"],
+      ["Blocked by", "Add dependency"],
+    ] as const) {
+      const btn = trigger(editor, label);
+      expect(btn.getAttribute("aria-expanded"), label).toBe("false");
+      expect(kv(editor.container, label), label).toBe(value);
+    }
+    expect(editor.container.querySelectorAll("button")).toHaveLength(4);
+    expect(editor.queryByText(/Edit details|Edit what it waits on/)).toBeNull();
   });
 
-  it("offers the editor only to an editor, and opening it reveals the form", () => {
-    const viewer = renderDetails({}, false);
-    expect(viewer.queryByRole("button", { name: /Edit details/ })).toBeNull();
-    cleanup();
+  it("sets the priority from a menu, posting that field alone", async () => {
+    // CANARY: post the whole metadata triple again, and `labels` rides along.
+    const view = renderCapturing({ labels: ["qa"] }, true);
+    fireEvent.click(trigger(view, "Priority"));
+    const menu = view.getByRole("menu");
+    const items = within(menu).getAllByRole("menuitemradio");
+    // Most urgent first; the current one checked, and focused as it opens.
+    expect(items.map((i) => i.textContent)).toEqual(["Urgent", "High", "Normal", "Low"]);
+    expect(items.map((i) => i.getAttribute("aria-checked"))).toEqual(["false", "false", "true", "false"]);
+    expect(document.activeElement).toBe(items[2]);
+    // Arrow keys rove the menu.
+    fireEvent.keyDown(items[2]!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[1]);
+    // Picking the current priority closes it and posts nothing.
+    fireEvent.click(items[2]!);
+    expect(view.queryByRole("menu")).toBeNull();
+    fireEvent.click(trigger(view, "Priority"));
+    fireEvent.click(within(view.getByRole("menu")).getByRole("menuitemradio", { name: "High" }));
+    expect(view.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-metadata", priority: "high" });
+    expect(Object.keys(view.posted[0]!).sort()).toEqual(["_csrf", "intent", "priority"]);
+  });
 
-    const editor = renderDetails({ priority: "high" }, true);
-    const edit = editor.getByRole("button", { name: /Edit details/ });
-    fireEvent.click(edit);
-    // The inline form appears with the priority select, the token label input,
-    // and the calendar date-picker trigger.
-    expect(editor.getByLabelText(/Add a label/)).toBeTruthy();
-    expect(editor.container.querySelector(".datepick-trigger")).toBeTruthy();
-    expect(editor.getByRole("button", { name: "Save" })).toBeTruthy();
+  it("closes on Escape and hands focus back to the trigger", () => {
+    const view = renderCapturing({}, true);
+    const btn = trigger(view, "Priority");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(view.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("edits the labels in their own popover, posting the labels alone, and a Save with no change posts nothing", async () => {
+    // CANARY: drop the unchanged check and the first Save posts a no-op.
+    const view = renderCapturing({ labels: ["qa"], priority: "high" }, true);
+    fireEvent.click(trigger(view, "Labels"));
+    const dialog = view.getByRole("dialog", { name: "Labels" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(view.posted).toHaveLength(0);
+    fireEvent.click(trigger(view, "Labels"));
+    const field = within(view.getByRole("dialog", { name: "Labels" })).getByLabelText(/Add a label/);
+    fireEvent.change(field, { target: { value: "codex" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.click(within(view.getByRole("dialog", { name: "Labels" })).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-metadata", labels: "qa,codex" });
+    expect(view.posted[0]!.priority).toBeUndefined();
+    expect(view.posted[0]!.dueDate).toBeUndefined();
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  });
+
+  it("picks the due date on a calendar and clears it from there, posting the date alone", async () => {
+    const view = renderCapturing({}, true);
+    fireEvent.click(trigger(view, "Due date"));
+    const dialog = view.getByRole("dialog", { name: "Due date" });
+    const now = new Date();
+    const iso = toISODate(new Date(now.getFullYear(), now.getMonth(), 15));
+    fireEvent.click(dialog.querySelector<HTMLButtonElement>(`button[data-iso="${iso}"]`)!);
+    expect(view.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(Object.keys(view.posted[0]!).sort()).toEqual(["_csrf", "dueDate", "intent"]);
+    expect(view.posted[0]!.dueDate).toBe(iso);
+    cleanup();
+    const dated = renderCapturing({ dueDate: iso }, true);
+    fireEvent.click(trigger(dated, "Due date"));
+    fireEvent.click(within(dated.getByRole("dialog", { name: "Due date" })).getByRole("button", { name: /Clear due date/ }));
+    await waitFor(() => expect(dated.posted).toHaveLength(1));
+    expect(dated.posted[0]).toMatchObject({ intent: "set-task-metadata", dueDate: "" });
+  });
+
+  it("an archived task's values are text, with the reason under them", () => {
+    const { container, getByText } = renderCapturing({ archived: true, priority: "urgent" }, true);
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(getByText("Archived. Restore this task to edit its details.")).toBeTruthy();
+    expect(kv(container, "Priority")).toContain("urgent");
   });
 });
 

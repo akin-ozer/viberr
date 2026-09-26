@@ -112,7 +112,9 @@ word `none` as an owner at creation.
 Priority is `low | normal | high | urgent` (`urgent` also sets the legacy boolean the
 board highlights), labels are at most 12 of 32 characters (`MAX_TASK_LABELS`,
 `MAX_LABEL_LENGTH`), due date is a plain `YYYY-MM-DD`. `edit-task-meta` grooms these
-later without touching any gate. The title is edited through `updateTaskTitle`, gated on
+later without touching any gate, one property at a time from the task page's Details
+panel: each edit writes only the axis its form carries, so it never overwrites another
+(ruling 501). The title is edited through `updateTaskTitle`, gated on
 `update-goal` (ruling 295): at most 200 characters (`TASK_TITLE_MAX_CHARS`), an
 unchanged title writes nothing, and a rename writes a "Title updated" note naming the old
 and new titles (the key does not change) and a `task.title.updated` audit row.

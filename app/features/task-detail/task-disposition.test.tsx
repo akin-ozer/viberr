@@ -3120,19 +3120,22 @@ describe("ruling 368: the task page's requests in flight", () => {
     });
   });
 
-  it("a details save reads Saving…, busy, the loader spinning", async () => {
-    // Canary: drop `aria-busy` from the details form's Save in task-side-panels.tsx.
+  it("a details save reads Saving… on the property that started it, busy, the loader spinning", async () => {
+    // Ruling 501: a Details property is its own control, so its trigger is
+    // the button that started the save. Canary: drop `aria-busy` from the
+    // property trigger in task-details-panel.tsx.
     const held = heldAction();
     const { container, submitted } = renderPage({ myRole: "admin", held });
-    fireEvent.click(findButton(container, "Edit details")!);
-    fireEvent.click(
-      container.querySelector<HTMLButtonElement>(".meta-edit-actions button[type=submit]")!,
-    );
+    const priority = container.querySelector<HTMLButtonElement>('[data-prop="priority"] .prop-btn')!;
+    fireEvent.click(priority);
+    fireEvent.click(container.querySelector<HTMLButtonElement>('[role="menu"] [data-priority="high"]')!);
     await waitFor(() => expect(submitted).toHaveLength(1));
-    const saving = findButton(container, "Saving…")!;
-    await waitFor(() => expect(saving.getAttribute("aria-busy")).toBe("true"));
-    expect(saving.disabled).toBe(true);
-    expect(saving.querySelector("svg.ico.spin")).not.toBeNull();
+    await waitFor(() => expect(priority.getAttribute("aria-busy")).toBe("true"));
+    expect(priority.textContent).toBe("Saving…");
+    expect(priority.querySelector("svg.ico.spin")).not.toBeNull();
+    // Its siblings only wait: nothing else claims the work.
+    const labels = container.querySelector<HTMLButtonElement>('[data-prop="labels"] .prop-btn')!;
+    expect(labels.hasAttribute("aria-busy")).toBe(false);
     await act(async () => {
       held.answer();
     });

@@ -1843,6 +1843,7 @@ const RENDERED_INSIDE = new Map(Object.entries({
  *  meaningful non-text element, not 1.4.3's 4.5:1 — checked, at the right bar. */
 const GLYPH_NOT_TEXT = new Map(Object.entries({
   ".stage-menu-pop .sm-check": "a 14×14 check mark marking the current stage in the stage menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
+  ".prop-menu .menu-item .prop-check": "ruling 501: the same 14×14 check, marking the current priority in the Details panel's priority menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
 }));
 
 /**
@@ -4176,7 +4177,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     for (const selector of [
       "select:focus", ".goal-textarea:focus", ".datepick-trigger:focus-visible", ".op-steer:focus",
       '.field input[type="text"]', ".field input:focus", ".field textarea:focus",
-      ".meta-edit-panel .meta-field input:focus", ".fm-gh input:focus", ".feed-filters .ff-task:focus",
+      ".fm-gh input:focus", ".feed-filters .ff-task:focus",
       '.guard-ctl input[type="number"]:focus', ".stg-input",
     ]) {
       expect(cascade(plain, selector).get("outline") ?? "", selector).not.toMatch(/^(0|none)$/);
@@ -4690,7 +4691,6 @@ describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
     [".btn.sm", [".btn.sm:has(> .ico:first-child:not(.ico-end))", ".btn.sm:has(> .copy-glyph:first-child)"]],
     [".seg button", [".seg button:has(> .ico:first-child)"]],
     [".fchip", [".fchip:has(> .ico:first-child)"]],
-    [".meta-edit-btn", [".meta-edit-btn:has(> .ico:first-child)"]],
     [".rev-add", [".rev-add:has(> .ico:first-child)"]],
     [".rev-add.sm", [".rev-add.sm:has(> .ico:first-child)"]],
   ];
@@ -5273,7 +5273,7 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     const stepOf = (part: string, rules: "plain" | "phone" = "plain") =>
       PRESSES.find((p) => p.at === rules && p.part === part)?.transform;
     for (const part of [
-      ".meta-edit-btn:active", ".rsel-btn:active", ".cal-nav:active", ".cal-day:active", "button.kbd:active",
+      '.prop-btn:active:where(:not([aria-busy="true"]))', ".rsel-btn:active", ".cal-nav:active", ".cal-day:active", "button.kbd:active",
       ".home-user:active", ".board-orphan-key:active",
     ]) {
       expect(stepOf(part), part).toBe("scale(.96)");
@@ -5634,6 +5634,8 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".rq-row .wait-tag.human .ico": ".rq-row .wait-tag.human",
       ".gh-freshness .ico": ".gh-freshness",
       ".ctl-msg-who .ico": ".ctl-msg-who",
+      ".prop-empty .ico": ".prop-empty",
+      ".wait-chip .ico": ".label-chip",
       ".btn .ico": ".btn",
       ".pill .ico": ".pill",
       ".wait-tag .ico": ".wait-tag",
@@ -6476,5 +6478,54 @@ describe("app.css ruling 500: the task page's agent components", () => {
     expect(decl(".md-body th", "border-left")).toBe("1px solid var(--hairline)");
     expect(decl(".md-code", "overflow")).toBe("hidden");
     expect(decl(".md-body .md-code pre", "border")).toBe("0");
+  });
+});
+
+describe("app.css ruling 501: the Details panel's properties", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decl = (rules: CssRule[], selector: string, prop: string) => {
+    let value: string | undefined;
+    for (const r of rules) if (parts(r).includes(selector) && r.decls.has(prop)) value = r.decls.get(prop);
+    return value;
+  };
+
+  it("never sets a Details value in the bold a side panel gives a fact, and says an empty one quietly", () => {
+    // CANARY: drop the `.kv.props` weight and "Normal / None / None / Nothing"
+    // are the four loudest words in the panel again, the owner's screenshot.
+    expect(decl(plain, ".kv-row .v", "font-weight")).toBe("700");
+    expect(decl(plain, ".kv.props .kv-row .v", "font-weight")).toBe("400");
+    expect(decl(plain, ".prop-empty", "color")).toBe("var(--placeholder)");
+    expect(decl(plain, ".prop-empty", "font-weight")).toBe("500");
+  });
+
+  it("makes the value a ghost trigger: no chrome at rest, the hover fill, a blue edge while open", () => {
+    expect(decl(plain, ".prop-btn", "background")).toBe("transparent");
+    expect(decl(plain, ".prop-btn", "border")).toBe("1px solid transparent");
+    expect(decl(plain, '.prop-btn:hover:where(:not([aria-busy="true"]))', "background")).toBe("var(--tint-hover)");
+    expect(decl(plain, '.prop-btn[aria-expanded="true"]', "border-color")).toBe("var(--blue)");
+    // Its padding runs past the row's edge, so the value it holds lines up
+    // with the values of the panels above it.
+    expect(decl(plain, ".prop-btn", "margin-right")).toBe("-.375rem");
+    expect(decl(plain, ".prop-btn", "padding")).toBe(".25rem .375rem");
+  });
+
+  it("floats the editor as the app's menus float, and fades it under reduced motion", () => {
+    // CANARY: take `.prop-pop` out of the reduced-motion list and it drops in
+    // with the menu-in rise for a person who asked for none.
+    expect(decl(plain, ".prop-pop", "box-shadow")).toBe("var(--shadow-ring), var(--shadow-menu)");
+    expect(decl(plain, ".prop-pop", "border-radius")).toBe("var(--radius-box)");
+    expect(decl(plain, ".prop-pop", "position")).toBe("absolute");
+    expect(decl(plain, ".kv.props .kv-row", "position")).toBe("relative");
+    expect(decl(reduced, ".prop-pop", "animation")).toBe("fade-in .12s ease");
+  });
+
+  it("rings a wait's entry by its state, and paints one that can never complete as a problem", () => {
+    expect(decl(plain, '.wait-chip[data-wait-state="done"] .ico', "color")).toBe("var(--success-dark)");
+    const dead = '.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"], [data-wait-state="cancelled"])';
+    expect(RULES.some((r) => r.selector.includes(dead) && r.decls.get("color") === "var(--danger)")).toBe(true);
+    // The retired editor's rules are gone with it.
+    expect(RULES.flatMap(parts).filter((s) => /meta-edit|meta-field|meta-label|meta-chips/.test(s))).toEqual([]);
   });
 });
