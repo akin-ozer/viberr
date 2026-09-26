@@ -80,6 +80,10 @@ const ICON_PATHS = {
   checkcircle: '<circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.5 2.5L16 9.5"/>',
   ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6.5 6.5l11 11"/>',
   ring: '<circle cx="12" cy="12" r="5.5"/>',
+  // Ruling 499: an agent's to-do step, in the same circle family: a dotted
+  // ring waiting, an arrow in the ring under way, `checkcircle` done.
+  todo: '<circle cx="12" cy="12" r="8.5" stroke-dasharray=".1 3.2"/>',
+  todonow: '<circle cx="12" cy="12" r="8.5"/><path d="M8 12h7.5M12.5 9l3 3-3 3"/>',
   // Ruling 366: the product's own mark, for the console chip of a Viberr tool.
   viberr: '<path d="M5 5l7 14 7-14"/>',
   // Ruling 458(f): the glyphs the mock drew as local SVGs (kb-browser.jsx's

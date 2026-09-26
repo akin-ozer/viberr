@@ -11,8 +11,8 @@ import {
   type RefObject,
 } from "react";
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
-import { ThinkingOrb } from "thinking-orbs";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
+import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 import { AgentGlyph } from "~/ui/identity";
 import { CopyGlyph, GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
@@ -43,6 +43,7 @@ import {
   consoleCodeBlock,
   diffLineKind,
   fileChangeChips,
+  filePathOf,
   fmtClock,
   fmtTok,
   HEARTBEAT_NOTE,
@@ -72,6 +73,9 @@ import {
 import type { RunLogStore, StreamedLine } from "./run-log-store";
 import { useConsoleStatus, useConsoleThread, useRunFacts } from "./use-run-log-stream";
 import { readableStep } from "./readable-step";
+import { ConsoleOrb, DiffStat, EditDiffBlock, FilePath, TodoCard } from "./console-blocks";
+import { consoleTodos } from "./console-todos";
+import { editDiff } from "./edit-diff";
 
 /**
  * Ruling 366(e): the counts that climb while a run waits roll their digits
@@ -894,7 +898,7 @@ function WaitRow({
   const n = lines.length;
   // Ruling 459: a row seen live keeps its orb once the wait ends, paused and
   // hidden, so the sheet can trade it for the clock in place instead of
-  // swapping a 20px canvas for a 14px glyph in one frame. A row first drawn
+  // swapping a 20px orb for a 14px glyph in one frame. A row first drawn
   // ended never mounts one. Same set-state-in-render latch as `useFreshLine`.
   const [seenLive, setSeenLive] = useState(live);
   if (live && !seenLive) setSeenLive(true);
@@ -907,20 +911,10 @@ function WaitRow({
           <span className="log-wait">
             <span className="lw-glyph" data-live={live ? "true" : undefined} aria-hidden="true">
               {seenLive && (
-                // Pinned to its dark ink: the console paints its own near-black
-                // fill in BOTH app themes, and `auto` would read the light
-                // theme's `data-theme` off `:root` and draw dark dots on it.
-                // Decorative — the words beside it carry the state, so it is
-                // hidden from assistive tech. Paused once the wait ends, so a
-                // hidden orb draws no more frames.
-                <ThinkingOrb
-                  state={who.kind === "viberr" ? "connecting" : "working"}
-                  size={20}
-                  theme="dark"
-                  paused={!live}
-                  className="log-orb"
-                  aria-hidden="true"
-                />
+                // Ruling 499: AICSS's lattice orb, in CSS. Decorative — the
+                // words beside it carry the state, so it is hidden from
+                // assistive tech; the sheet stops its dots once the wait ends.
+                <ConsoleOrb motion={who.kind === "viberr" ? "ring" : "wave"} />
               )}
               <Icon name="clock" />
             </span>
@@ -1012,20 +1006,32 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
     }
   };
   const lines = block.code.split("\n");
+  // Ruling 499: AICSS's code block. A head naming what the block holds, its
+  // size and a Copy control (the copy mark trading for the check, as every
+  // other copy control does since ruling 451(c)); the lines numbered in a
+  // gutter the selection skips.
   return (
     <span className="log-code">
       <span className="lk-head">
         <span className="lk-meta">
-          {lines.length} line{lines.length === 1 ? "" : "s"}
+          <Icon name="term" />
+          <span>
+            {block.diff ? "Diff" : "Output"}
+            <span className="lk-size">
+              {" "}
+              · {lines.length} line{lines.length === 1 ? "" : "s"}
+            </span>
+          </span>
         </span>
         <button
           type="button"
-          className="log-more"
+          className="lk-copy"
           onClick={copy}
-          aria-label="Copy this output"
+          aria-label={copied ? "Copied this output" : "Copy this output"}
         >
-          {/* Ruling 451(c): the confirmation rises in; "copy" returns at once. */}
-          {copied ? <span className="copy-done">copied</span> : "copy"}
+          <CopyGlyph copied={copied} />
+          {/* Ruling 451(c): the confirmation rises in; "Copy" returns at once. */}
+          {copied ? <span className="copy-done">Copied</span> : "Copy"}
         </button>
       </span>
       <span className="lk-body">
@@ -1033,7 +1039,10 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
           const kind = block.diff ? diffLineKind(line) : null;
           return (
             <span className={"lk-line" + (kind ? " lk-" + kind : "")} key={n}>
-              {line === "" ? " " : line}
+              <span className="lk-num" aria-hidden="true">
+                {n + 1}
+              </span>
+              <span className="lk-text">{line === "" ? " " : line}</span>
             </span>
           );
         })}
@@ -1042,10 +1051,17 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
   );
 }
 
-/** A folded row's lines as a thought fold draws them (P19-RC1). */
-function ThoughtRow({ rowKey, lines, startedAt, hydrated, open, onToggle }: FoldRowProps) {
+/**
+ * A folded row's lines as a thought fold draws them (P19-RC1). Ruling 499:
+ * AICSS's thinking block. While the run is going and nothing has landed after
+ * the fold (`live`), its label shimmers "Thinking"; once anything follows it
+ * reads "Thought for Ns", the verb above the figure, with the chevron that
+ * opens the steps.
+ */
+function ThoughtRow({ rowKey, lines, live = false, startedAt, hydrated, open, onToggle }: FoldRowProps) {
   const head = lines[0]!.display;
   const clock = (t: string) => (hydrated ? localLogClock(t, startedAt) : t);
+  const label = thoughtLabel(lines);
   return (
     <>
       <div className="log-line think">
@@ -1054,11 +1070,24 @@ function ThoughtRow({ rowKey, lines, startedAt, hydrated, open, onToggle }: Fold
         <span className="lx">
           <button
             type="button"
-            className="log-more"
+            className="log-think"
             aria-expanded={open}
             onClick={() => onToggle("thoughts", rowKey)}
           >
-            {thoughtLabel(lines)}
+            {live ? (
+              <>
+                <span className="log-shimmer" data-text="Thinking">
+                  Thinking
+                </span>
+                {label.slice(label.indexOf(" · "))}
+              </>
+            ) : (
+              <>
+                <span className="lk-verb">Thought</span>
+                {label.slice("Thought".length)}
+              </>
+            )}
+            <Icon name="chevron" className="lk-chev" />
           </button>
         </span>
       </div>
@@ -1083,6 +1112,7 @@ const RAW_PENDING = "loading the stored envelope…";
 function LineRow({
   line,
   raw,
+  live,
   startedAt,
   hydrated,
   backend,
@@ -1092,6 +1122,8 @@ function LineRow({
 }: {
   line: StreamedLine;
   raw: boolean;
+  /** Ruling 499: the run is going and this is the to-do list it last wrote. */
+  live: boolean;
   startedAt: string | null;
   hydrated: boolean;
   backend: RunView["backend"];
@@ -1149,9 +1181,14 @@ function LineRow({
   // console used to flatten. All three are computed only when `raw` is off —
   // under it the stored envelope prints verbatim, unchanged.
   const chip = raw ? null : toolChip(display);
+  // Ruling 499: an edit drawn as its diff, a to-do list as its steps. What
+  // they draw in full is no longer cut from the row.
+  const diff = raw ? null : editDiff(display);
+  const todos = raw ? null : consoleTodos(display);
+  const path = diff ? null : filePathOf(display);
   // Ruling 366(d): what the one-line summary cut, if anything worth a click,
   // and Bash's description for the row itself.
-  const hidden = raw ? null : hiddenArguments(display);
+  const hidden = raw ? null : hiddenArguments(display, diff?.drawn ?? todos?.drawn ?? []);
   const argsOpen = hidden !== null && open;
   const note = raw ? null : commandNote(display);
   const files = raw ? null : fileChangeChips(display);
@@ -1172,13 +1209,21 @@ function LineRow({
               {chip ? (
                 <span className={"log-chip" + (chip.who.kind === "viberr" ? " vb" : "")}>
                   <ToolName who={chip.who} />
-                  {chip.detail || note || hidden ? (
+                  {(chip.detail && !todos) || note || hidden ? (
                     // The note and the link live INSIDE the detail's own text
                     // flow: as flex items of the chip they were squeezed to a
                     // letter a line, and after the chip they dangled on a line
                     // of their own once the detail wrapped.
                     <span className="lc-detail">
-                      {chip.detail}
+                      {diff ? (
+                        <>
+                          <FilePath path={diff.path} shown={diff.shown} /> <DiffStat diff={diff} />
+                        </>
+                      ) : path !== null ? (
+                        <FilePath path={path} shown={normalizeWorkspacePaths(path)} />
+                      ) : todos ? null : (
+                        chip.detail
+                      )}
                       {note ? <span className="log-more-note"> # {note}</span> : null}
                       {hidden ? (
                         <span className="log-more-note">
@@ -1201,10 +1246,15 @@ function LineRow({
                 <>
                   {display.name ? <b className="ln">{display.name} </b> : null}
                   {/* When the text IS the block below, printing it here too
-                      would render the whole dump twice. */}
-                  {code ? null : (prose ?? display.text)}
+                      would render the whole dump twice; a to-do list's count
+                      is the card's own header. */}
+                  {code || todos ? null : (prose ?? display.text)}
                 </>
               )}
+              {diff ? (
+                <EditDiffBlock diff={diff} open={open} onToggle={() => onToggle("args", line.key)} />
+              ) : null}
+              {todos ? <TodoCard todos={todos} live={live} /> : null}
               {files ? (
                 <span className="log-files">
                   {files.map((f, n) => (
@@ -1228,6 +1278,17 @@ function LineRow({
       ) : null}
     </>
   );
+}
+
+/** The key of the last row that states a to-do list, or null. Read off the
+ *  row's name and fields, not by parsing it: it runs on every appended line. */
+function latestTodoRow(rows: readonly ConsoleRow<StreamedLine>[]): string | null {
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i]!;
+    if (row.kind !== "line") continue;
+    if (row.line.display.todos || row.line.display.name === "TodoWrite") return row.key;
+  }
+  return null;
 }
 
 /** The disclosure a row opens, if it opens one (a row opens at most one). */
@@ -1264,7 +1325,9 @@ const ConsoleEntry = memo(function ConsoleEntry({
 }: {
   row: ConsoleRow<StreamedLine>;
   raw: boolean;
-  /** A wait row only: the run is going and nothing has landed after it. */
+  /** The run is going and this row is still the latest of its kind: a wait
+   *  or a thought fold with nothing after it, or the to-do list the agent
+   *  last wrote (ruling 499). */
   live: boolean;
   startedAt: string | null;
   hydrated: boolean;
@@ -1293,6 +1356,7 @@ const ConsoleEntry = memo(function ConsoleEntry({
       <ThoughtRow
         rowKey={row.key}
         lines={row.lines}
+        live={live}
         startedAt={startedAt}
         hydrated={hydrated}
         open={open}
@@ -1321,6 +1385,7 @@ const ConsoleEntry = memo(function ConsoleEntry({
     <LineRow
       line={row.line}
       raw={raw}
+      live={live}
       startedAt={startedAt}
       hydrated={hydrated}
       backend={backend}
@@ -1472,6 +1537,9 @@ const ConsoleView = memo(function ConsoleView({
   // (ruling 457: the page no longer revalidates per line to move it). Take the
   // larger, so the count never goes backwards.
   const eventCount = Math.max(lineCount, thread?.total ?? 0);
+  // Ruling 499: the to-do list the agent wrote last, whose step under way is
+  // the one in progress now while the run is going.
+  const latestTodos = running && !raw ? latestTodoRow(rows) : null;
   return (
     <>
       <div
@@ -1548,7 +1616,12 @@ const ConsoleView = memo(function ConsoleView({
               key={row.key}
               row={row}
               raw={raw}
-              live={row.kind === "wait" && running && i === rows.length - 1}
+              live={
+                running &&
+                (row.kind === "wait" || row.kind === "thought"
+                  ? i === rows.length - 1
+                  : row.key === latestTodos)
+              }
               startedAt={startedAt}
               hydrated={hydrated}
               backend={backend}

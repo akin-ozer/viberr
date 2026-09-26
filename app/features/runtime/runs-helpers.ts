@@ -530,11 +530,17 @@ const SUBSTANTIVE_CHARS = 40;
 const stringValue = z.string();
 const recordValue = z.record(z.string(), z.unknown());
 
-export function hiddenArguments(line: LogLine): HiddenArguments | null {
+export function hiddenArguments(
+  line: LogLine,
+  /** Ruling 499: arguments the row already draws in full (an edit's diff, a
+   *  to-do list), which it therefore does not cut. */
+  drawn: readonly string[] = [],
+): HiddenArguments | null {
   if (line.ev !== "tool" || !line.input) return null;
   const text = flat(line.text);
   const hidden: { key: string; label: string }[] = [];
   for (const [key, value] of Object.entries(line.input)) {
+    if (drawn.includes(key)) continue;
     const str = stringValue.safeParse(value);
     if (str.success) {
       const v = flat(str.data);
@@ -576,6 +582,18 @@ export function commandNote(line: LogLine): string | null {
   if (line.ev !== "tool" || line.name !== "Bash" || !line.input) return null;
   const note = stringValue.safeParse(line.input.description);
   return note.success && note.data.trim() ? note.data.trim() : null;
+}
+
+/**
+ * Ruling 499: the file a tool row names as its whole summary (Claude's Read,
+ * Edit, Write, …), so the row can print it repo-relative. Null for any other
+ * row, a Bash command's included: a path inside a command is the command's
+ * own words, and rewriting it would change what the command says.
+ */
+export function filePathOf(line: LogLine): string | null {
+  if (line.ev !== "tool" || !line.input) return null;
+  const path = stringValue.safeParse(line.input.file_path);
+  return path.success && path.data === line.text ? path.data : null;
 }
 
 /** One argument, in full: a string as itself, anything else as its JSON. */

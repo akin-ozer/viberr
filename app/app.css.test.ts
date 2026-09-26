@@ -1829,6 +1829,14 @@ const RENDERED_INSIDE = new Map(Object.entries({
     container: ".console",
     why: "ruling 459: a wait row's orb-and-clock cell sits in a `.log-line`'s `.lx` inside `div.console` (runs-panels.tsx), so its clock is measured on the console's fixed dark fill.",
   },
+  "log-orb": {
+    container: ".console",
+    why: "ruling 499: the wait row's CSS orb is drawn in that same `.lw-glyph` cell inside `div.console` (console-blocks.tsx), so its dots' ink is measured on the console's fixed dark fill, never on the page's --bg.",
+  },
+  "log-think": {
+    container: ".console",
+    why: "ruling 499: the thinking block's summary button is the `.lx` of a `.log-line.think` row inside `div.console` (runs-panels.tsx), the same fixed near-black fill every console row is measured against.",
+  },
 }));
 
 /** Rules whose `color` paints a GLYPH, not text. WCAG 1.4.11 asks 3:1 of a
@@ -6088,8 +6096,10 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
   });
 
   it("(F42) the wait row's orb and clock share one 20px cell, and the orb stops drawing once hidden", () => {
-    // CANARY: set `.lw-glyph` to 14px, or drop `paused={!live}` (a hidden
-    // orb keeps its animation-frame loop running on every row seen live).
+    // CANARY: set `.lw-glyph` to 14px, or drop the paused rule (a hidden orb
+    // keeps its dots animating on every row seen live). Ruling 499: the orb is
+    // AICSS's CSS lattice now, not a canvas, so its size and its pause are the
+    // sheet's.
     const cell = own(plain, ".lw-glyph");
     expect(cell.get("display")).toBe("inline-grid");
     expect(cell.get("place-items")).toBe("center");
@@ -6100,9 +6110,12 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
     expect(own(plain, ".lw-glyph > .ico").get("width")).toBe("14px");
     const row = source("./features/runtime/runs-panels.tsx");
     const markup = /<span className="lw-glyph"[^>]*>([\s\S]*?)<\/span>/.exec(row)![1]!;
-    // The orb's canvas is exactly the cell, so neither state moves the chip.
-    expect(/size=\{(\d+)\}/.exec(markup)?.[1]).toBe(cell.get("width")!.replace("px", ""));
-    expect(markup).toMatch(/paused=\{!live\}/);
+    // The orb is exactly the cell, so neither state moves the chip.
+    const orb = own(plain, ".log-orb");
+    expect(orb.get("width")).toBe(cell.get("width"));
+    expect(orb.get("height")).toBe(cell.get("height"));
+    expect(own(plain, ".lw-glyph:not([data-live]) > .log-orb > i").get("animation-play-state")).toBe("paused");
+    expect(markup).toMatch(/<ConsoleOrb motion=/);
     expect(markup).toMatch(/<Icon name="clock" \/>/);
     // Only the row's own clock is sized, never the Viberr chip's mark.
     expect(RULES.flatMap(parts).filter((s) => s.startsWith(".lw-glyph") && s.endsWith(" .ico") && !s.endsWith("> .ico"))).toEqual([]);

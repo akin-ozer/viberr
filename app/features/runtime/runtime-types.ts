@@ -60,6 +60,15 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+/** Where a step of an agent's to-do list stands (ruling 499). */
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+/** One step of an agent's to-do list, as the console draws it. */
+export interface ConsoleTodo {
+  text: string;
+  status: TodoStatus;
+}
+
 /**
  * Projected LogLine — one console row. Mirrors the mock's `cc.*`/`cx.*`
  * builder output (runs.md §3.2). `ev` selects the row color + raw-envelope
@@ -109,6 +118,11 @@ export interface LogLine {
   } | null;
   /** Codex file_change changes → raw `file_change.changes`. */
   changes?: { path: string; kind: "add" | "update" | "delete" }[] | null;
+  /** Ruling 499: a Codex `todo_list` item's steps, which the console draws as
+   *  the agent's to-do list (Claude's `TodoWrite` carries its own in `input`).
+   *  Codex marks a step done or not; it names no step in progress. Absent on
+   *  every other line, and on lines projected before the ruling. */
+  todos?: ConsoleTodo[];
   /** Ruling 130(a) (pass 34): the adapter's classified failure record, on the
    *  terminal `err` line only (beside its `run·error·<kind>` tag). Every
    *  reader of a failure consumes THIS, never a second regex over the raw

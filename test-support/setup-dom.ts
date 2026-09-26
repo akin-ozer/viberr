@@ -42,17 +42,6 @@ if ("window" in globalThis && !Object.hasOwn(window, "ResizeObserver")) {
 }
 
 /**
- * jsdom implements no 2D canvas: `getContext` reports "not implemented" through
- * the virtual console's error channel and returns null. The run console's wait
- * row mounts a `thinking-orbs` canvas (ruling 366), which returns early on a
- * null context — so the honest stub answers null quietly, and a panel test's
- * output is not an error the code under test never raised.
- */
-if ("window" in globalThis && "HTMLCanvasElement" in window) {
-  window.HTMLCanvasElement.prototype.getContext = () => null;
-}
-
-/**
  * jsdom has no AnimationEvent. React picks, once as it loads, the event name
  * its `onAnimationEnd` listens for: with no AnimationEvent it falls back to the
  * prefixed `webkitAnimationEnd`, a name no current browser fires, so a test's

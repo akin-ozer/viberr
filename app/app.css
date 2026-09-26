@@ -6409,7 +6409,7 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 /* The fold's summary is an affordance, so it reads as one: `.log-line.think`
    italicises its `.lx` (the model's voice) and the button was inheriting that,
    which made the one clickable thing in the block look like more reasoning. */
-.log-line.think .log-more { font-style: normal; }
+.log-line.think .log-more, .log-line.think .log-think { font-style: normal; }
 
 /* Tool call — the verb, promoted out of the prose so a reader scanning for
    what the agent DID lands on it. Ruling 366: the chip is NEUTRAL, so a scan
@@ -6501,45 +6501,217 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .log-file.lf-update { border-color: #5c5330; color: #e8cf92; }
 .log-file.lf-delete { border-color: #5f333a; color: #f0a3a3; }
 
-/* Multi-line output and diffs, lifted out of the row. Bounded and SCROLLABLE,
-   never truncated: dropping the tail of a build log would be exactly the
-   dishonesty the `{ } raw` toggle exists to rule out. */
-.log-code {
+/* ---------- Ruling 499: what an agent did, drawn as agent tools draw it ----------
+   An edit as its diff, a to-do list as its steps, output as a code block, a
+   thought as a thinking block, a wait as an orb. The to-do list, the code
+   block, the thinking block and the orb take their design from AICSS's free
+   components (MIT, (c) 2026 AICSS; THIRD_PARTY_NOTICES.md): a card a shade
+   above the console, a hairline ring, quiet ink for what is done or waiting
+   and bright ink for what is under way. The diff is the Changes panel's rows
+   (ruling 484) in these colours. Literal hex like every console rule: the
+   console is dark in both themes (`RENDERED_INSIDE` measures them on it). */
+
+/* The card every block sits in. White-space goes back to normal: `.lx` is
+   pre-wrap for prose, and the markup's own indentation would read as blank
+   lines inside the card. */
+.log-code, .log-diff, .log-todo {
   display: block;
   white-space: normal;
-  margin-top: .25rem;
-  border: 1px solid #232936;
-  border-radius: var(--radius-small);
-  background: #070910;
+  margin-top: .375rem;
+  border: 1px solid #262d3d;
+  border-radius: var(--radius-box);
+  background: #131823;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 4px rgba(0, 0, 0, .3);
   overflow: hidden;
 }
+
+/* Output lifted out of the row. Bounded and SCROLLABLE, never truncated:
+   dropping the tail of a build log would be exactly the dishonesty the
+   `{ } raw` toggle exists to rule out. Its head names what it holds and its
+   size and carries Copy; its lines are numbered in a gutter the selection
+   skips. */
 .log-code .lk-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: .5rem;
-  padding: .25rem .5rem;
-  border-bottom: 1px solid #232936;
-  background: #0d111a;
+  padding: .25rem .25rem .25rem .75rem;
+  border-bottom: 1px solid #222838;
 }
-/* #808aa4, not the `.ltag` grey one shade darker: measured 5.77:1 on this
-   block's own #070910 fill (the console's fixed dark), where #6b7590 lands at
-   4.33:1 — under AA for small text. */
-.log-code .lk-meta { color: #808aa4; font-size: .69rem; }
+.log-code .lk-meta { display: inline-flex; align-items: center; gap: .375rem; min-width: 0; color: #c9d1e3; font-size: .69rem; }
+.log-code .lk-meta .ico { width: 13px; height: 13px; flex: none; color: #8a95b1; }
+.log-code .lk-size { color: #8a95b1; white-space: pre; }
+.log-code .lk-copy {
+  display: inline-flex; align-items: center; gap: .25rem; flex: none;
+  padding: .125rem .375rem; border: 0; border-radius: var(--radius-small);
+  background: none; color: #8a95b1; font: inherit; font-size: .69rem; cursor: pointer;
+}
+.log-code .lk-copy:hover { color: #e6e9f2; background: #1c2230; }
+.log-code .lk-copy .ico { width: 13px; height: 13px; }
 .log-code .lk-body {
   display: block;
   max-height: 16rem;
   overflow: auto;
-  padding: .25rem .5rem;
+  padding: .375rem 0;
   font-family: var(--font-mono);
   font-size: .69rem;
-  line-height: 1.5;
+  line-height: 1.6;
 }
-.log-code .lk-line { display: block; white-space: pre; color: #9fa9bf; }
+.log-code .lk-line { display: grid; grid-template-columns: 5ch max-content; }
+.log-code .lk-num {
+  padding-right: .5rem; margin-right: .5rem; border-right: 1px solid #222838;
+  color: #7c87a2; text-align: right; font-variant-numeric: tabular-nums; user-select: none;
+}
+/* Code reads as typed: no ligature draws `!==` as one glyph. */
+.log-code .lk-text { white-space: pre; padding-right: .75rem; color: #a9b0c4; font-variant-ligatures: none; }
 /* Diff polarity, again glyph-first: the stored line already begins with its own
    +/− , so the colour is reinforcement rather than the only signal. */
-.log-code .lk-line.lk-add { color: #86e0b4; }
-.log-code .lk-line.lk-del { color: #f0a3a3; }
+.log-code .lk-line.lk-add .lk-text { color: #86e0b4; }
+.log-code .lk-line.lk-del .lk-text { color: #f0a3a3; }
+
+/* The row of an edit: its file, the folder quiet and the name plain, then
+   `+N −M` (or a written file's line count). A path wraps anywhere, so a deep
+   one never pushes the console sideways on a phone. */
+.log-chip .lc-path { overflow-wrap: anywhere; }
+.log-chip .lc-dir { color: #8a95b1; }
+.log-chip .lc-base { color: #dfe4ee; }
+.log-chip .lc-stat { margin-left: .375rem; white-space: nowrap; color: #8a95b1; }
+.log-chip .lc-add { color: #86e0b4; }
+.log-chip .lc-del { color: #f0a3a3; }
+.log-chip .lc-tag {
+  margin-left: .375rem; padding: 0 .375rem;
+  border: 1px solid #333a4d; border-radius: var(--radius-small); color: #a9b0c4;
+}
+
+/* The diff under it: removed lines, then added ones, tinted, the changed words
+   in a stronger tint, the +/− in a column of its own (a glyph as well as a
+   colour, WCAG 1.4.1) that the selection skips. Code wraps rather than
+   scrolling, as in the Changes panel, so a phone reads a long line whole. */
+.log-diff { font-size: .69rem; line-height: 1.6; }
+.log-diff .ld-body { display: block; padding: .25rem 0; }
+.log-diff .ld-row { display: grid; grid-template-columns: 2.5ch minmax(0, 1fr); padding-right: .75rem; }
+.log-diff[data-numbered] .ld-row { grid-template-columns: 5ch minmax(0, 1fr); }
+.log-diff[data-numbered] .ld-mark { display: none; }
+.log-diff .ld-num { padding-right: .75rem; color: #7c87a2; text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+.log-diff .ld-mark { color: #7c87a2; text-align: center; user-select: none; }
+.log-diff .ld-code { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #a9b0c4; font-variant-ligatures: none; }
+.log-diff .ld-row[data-kind="add"] { background: rgba(63, 185, 115, .13); }
+.log-diff .ld-row[data-kind="del"] { background: rgba(240, 96, 96, .12); }
+.log-diff .ld-row[data-kind="add"] .ld-mark { color: #86e0b4; }
+.log-diff .ld-row[data-kind="del"] .ld-mark { color: #f0a3a3; }
+.log-diff .ld-row[data-kind="add"] .ld-code,
+.log-diff .ld-row[data-kind="del"] .ld-code { color: #dfe4ee; }
+.log-diff .ld-w { border-radius: 2px; color: #f4f6fb; }
+.log-diff .ld-row[data-kind="add"] .ld-w { background: rgba(63, 185, 115, .34); }
+.log-diff .ld-row[data-kind="del"] .ld-w { background: rgba(240, 96, 96, .32); }
+/* The unchanged run folded behind its count, a MultiEdit's edit markers and
+   the row that shows the rest: quiet bands in the card's own colours. */
+.log-diff .ld-fold, .log-diff .ld-edit, .log-diff .ld-more {
+  display: flex; align-items: center; gap: .375rem; width: 100%;
+  padding: .125rem .75rem .125rem 2.5ch; border: 0;
+  background: #10141d; color: #8a95b1; font: inherit; text-align: left;
+}
+.log-diff .ld-fold, .log-diff .ld-more { cursor: pointer; }
+.log-diff .ld-fold:hover, .log-diff .ld-more:hover { color: #e6e9f2; }
+.log-diff .ld-edit:not(:first-child) { margin-top: .25rem; }
+.log-diff .ld-more { padding: .375rem .75rem; border-top: 1px solid #222838; color: #a9b0c4; }
+.log-diff .ld-more .ico { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .2s var(--ease-out); }
+.log-diff .ld-more[aria-expanded="true"] .ico { transform: rotate(-90deg); }
+
+/* An agent's to-do list (AICSS's to-do list): a header with the list's
+   progress and count, then each step. Waiting steps and done ones are quiet,
+   the done ones struck through; the step under way is bright, and shimmers
+   while the run is going and this is the list it last wrote. */
+.log-todo { max-width: 36rem; padding: .375rem .75rem .5rem; font-family: var(--font-body); font-size: .75rem; line-height: 1.45; }
+.log-todo .td-head {
+  display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 22px;
+  padding: 0; border: 0; background: none; color: #e6e9f2; font: inherit; text-align: left; cursor: pointer;
+}
+.log-todo .td-state { position: relative; display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; }
+.log-todo .td-state > * { grid-area: 1 / 1; width: 14px; height: 14px; transition: opacity .14s ease; }
+.log-todo .td-chev { opacity: 0; transform: rotate(90deg); color: #c9d1e3; }
+.log-todo .td-head[aria-expanded="false"] .td-chev { transform: none; }
+.log-todo .td-head:hover .td-chev, .log-todo .td-head:focus-visible .td-chev { opacity: 1; }
+.log-todo .td-head:hover .td-state > :first-child, .log-todo .td-head:focus-visible .td-state > :first-child { opacity: 0; }
+.log-todo .td-all { color: #86e0b4; }
+.log-todo .td-pie { overflow: visible; fill: none; }
+.log-todo .td-pie-ring { stroke: #8a95b1; }
+.log-todo .td-pie-fill { stroke: #e6e9f2; }
+.log-todo .td-title { font-weight: 600; }
+.log-todo .td-count { margin-left: auto; color: #8a95b1; font-variant-numeric: tabular-nums; }
+.log-todo .td-list { display: flex; flex-direction: column; gap: .375rem; padding-top: .5rem; }
+.log-todo .td-item { display: flex; align-items: flex-start; gap: .5rem; color: #8a95b1; }
+.log-todo .td-item > .ico { width: 14px; height: 14px; flex: none; margin-top: .1em; color: #8a95b1; }
+.log-todo .td-item[data-status="in_progress"], .log-todo .td-item[data-status="in_progress"] > .ico { color: #e6e9f2; }
+.log-todo .td-item[data-status="completed"] .td-text { text-decoration: line-through; }
+.log-todo .td-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* The thinking block's summary (AICSS's): the verb above the figure, and the
+   chevron that opens the steps, pointing down folded and up open. */
+.log-think {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: 0; border: 0; background: none;
+  color: #8f9ab3; font: inherit; font-style: normal; cursor: pointer;
+}
+.log-think:hover { color: #c9d1e3; }
+.log-think .lk-verb { color: #c9d1e3; }
+.log-think .lk-chev { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .2s var(--ease-out); }
+.log-think[aria-expanded="true"] .lk-chev { transform: rotate(-90deg); }
+
+/* The shimmer a live label carries: a band of light over its own words (the
+   controller's working line, ruling 451(a), in the console's ink). The copy
+   is drawn from `data-text` and read by nobody (`/ ""`). */
+.log-shimmer, .log-todo .td-item[data-live] .td-text { position: relative; }
+.log-shimmer::before, .log-todo .td-item[data-live] .td-text::before {
+  content: attr(data-text) / "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 40%, #ffffff 50%, transparent 60%) 100% 0 / 400% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+
+/* AICSS's lattice orb in CSS: nine dots, the centre leading a wave out to the
+   corners while a tool runs, and a comet round the ring on a Viberr tool,
+   tinted as its chip is. The dots rest at a fifth of their ink between beats
+   and stop once the wait ends. */
+.log-orb { display: grid; grid-template-columns: repeat(3, 3px); gap: 2px; place-content: center; width: 20px; height: 20px; color: #c9d1e3; }
+.log-orb > i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .2; animation: orb-wave 1.7s cubic-bezier(.66, 0, .34, 1) infinite both; }
+.log-orb > i:nth-child(odd) { animation-delay: 990ms; }
+.log-orb > i:nth-child(even) { animation-delay: 700ms; }
+.log-orb > i:nth-child(5) { animation-delay: -180ms; }
+.log-orb[data-orb="ring"] { color: #d9ccff; }
+.log-orb[data-orb="ring"] > i { animation-name: orb-comet; animation-timing-function: linear; }
+.log-orb[data-orb="ring"] > i:nth-child(1) { animation-delay: 0ms; }
+.log-orb[data-orb="ring"] > i:nth-child(2) { animation-delay: -1487ms; }
+.log-orb[data-orb="ring"] > i:nth-child(3) { animation-delay: -1275ms; }
+.log-orb[data-orb="ring"] > i:nth-child(6) { animation-delay: -1062ms; }
+.log-orb[data-orb="ring"] > i:nth-child(9) { animation-delay: -850ms; }
+.log-orb[data-orb="ring"] > i:nth-child(8) { animation-delay: -637ms; }
+.log-orb[data-orb="ring"] > i:nth-child(7) { animation-delay: -425ms; }
+.log-orb[data-orb="ring"] > i:nth-child(4) { animation-delay: -212ms; }
+.log-orb[data-orb="ring"] > i:nth-child(5) { animation: none; opacity: .1; }
+.lw-glyph:not([data-live]) > .log-orb > i { animation-play-state: paused; }
+/* The easing is the animation's own (above), so the keyframes set nothing
+   but opacity and transform and the loop stays on the compositor. */
+@keyframes orb-wave {
+  0% { opacity: .2; transform: scale(1); }
+  28% { opacity: 1; transform: scale(1.18); }
+  56%, 100% { opacity: .2; transform: scale(1); }
+}
+@keyframes orb-comet {
+  0% { opacity: 1; transform: scale(1.2); }
+  45%, 100% { opacity: .2; transform: scale(1); }
+}
+/* Under reduced motion nothing sweeps, turns or pulses: the orb holds its
+   centre lit, the shimmer is not drawn, and the chevrons turn at once. */
+@media (prefers-reduced-motion: reduce) {
+  .log-orb > i, .log-orb[data-orb="ring"] > i:nth-child(5) { animation: none; }
+  .log-orb > i:nth-child(5) { opacity: 1; }
+  .log-shimmer::before, .log-todo .td-item[data-live] .td-text::before { display: none; }
+  .log-think .lk-chev, .log-diff .ld-more .ico, .log-todo .td-state > * { transition: none; }
+}
 
 /* R19-17 — why an MCP server is unreachable, on the row itself.
    The probe's reason used to live only in the toast it returned, so once that

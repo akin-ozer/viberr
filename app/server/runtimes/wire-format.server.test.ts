@@ -207,6 +207,36 @@ describe("projectEnvelope — Codex JSONL", () => {
     ).toBe("diff");
   });
 
+  it("ruling 499: a completed todo_list carries its steps, done or waiting, and says how far it got", () => {
+    // CANARY: drop `todos` from the line and the console draws the empty row
+    // it drew before.
+    const { display } = projectEnvelope("codex", {
+      type: "item.completed",
+      item: {
+        type: "todo_list",
+        items: [
+          { text: "Plan the change", completed: true },
+          { text: "  ", completed: false },
+          { text: "Write the tests", completed: false },
+        ],
+      },
+    });
+    expect(display).toMatchObject({
+      ev: "meta",
+      tag: "todo_list",
+      text: "1 of 2 to-dos done",
+      todos: [
+        { text: "Plan the change", status: "completed" },
+        { text: "Write the tests", status: "pending" },
+      ],
+    });
+    // The plan as the turn left it: a started or updated list is not a row.
+    expect(projectEnvelope("codex", { type: "item.updated", item: { type: "todo_list", items: [] } }).display).toBeNull();
+    // A list with junk steps keeps the good ones.
+    const junk = projectEnvelope("codex", { type: "item.completed", item: { type: "todo_list", items: [7, { text: "Ship", completed: false }] } });
+    expect(junk.display?.todos).toEqual([{ text: "Ship", status: "pending" }]);
+  });
+
   it("command_execution started → tool; completed exit 0 → out, non-zero → err", () => {
     expect(projectEnvelope("codex", { type: "item.started", item: { type: "command_execution", command: 'bash -lc "ls"' } }).display?.ev).toBe("tool");
     expect(projectEnvelope("codex", { type: "item.completed", item: { type: "command_execution", exit_code: 0, aggregated_output: "ok\n" } }).display?.ev).toBe("out");

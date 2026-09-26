@@ -479,7 +479,7 @@ describe("AgentLogsPanel", () => {
   it("folds a reasoning RUN behind a measured summary, and the raw toggle still shows every line", () => {
     const rawA = '{"type":"reasoning","text":"weighing the options"}';
     const rawB = '{"type":"reasoning","text":"picking the branch"}';
-    const { container, getByText, queryByText } = render(
+    const { container, getByText, queryByText, getByRole, queryByRole } = render(
       <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
         sel="primary"
@@ -493,10 +493,16 @@ describe("AgentLogsPanel", () => {
       />,
     );
     // Folded: the summary is measured from the stored clocks, and the steps are
-    // behind it rather than gone.
-    expect(getByText("Thought for 4s · 2 steps")).toBeTruthy();
+    // behind it rather than gone. Ruling 499: the verb stands above the figure
+    // and a chevron opens the steps (AICSS's thinking block); a finished run's
+    // fold never shimmers.
+    const summary = getByRole("button", { name: "Thought for 4s · 2 steps" });
+    expect(summary.querySelector(".lk-verb")!.textContent).toBe("Thought");
+    expect(summary.querySelector(".log-shimmer")).toBeNull();
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
     expect(queryByText("weighing the options")).toBeNull();
-    fireEvent.click(getByText("Thought for 4s · 2 steps"));
+    fireEvent.click(summary);
+    expect(summary.getAttribute("aria-expanded")).toBe("true");
     expect(getByText("weighing the options")).toBeTruthy();
     expect(getByText("picking the branch")).toBeTruthy();
 
@@ -504,7 +510,7 @@ describe("AgentLogsPanel", () => {
     fireEvent.click(getByText("{ } raw"));
     expect(container.textContent).toContain(rawA);
     expect(container.textContent).toContain(rawB);
-    expect(queryByText(/Thought for/)).toBeNull();
+    expect(queryByRole("button", { name: /Thought for/ })).toBeNull();
   });
 
   it("renders a tool call as a chip and file changes as per-file chips", () => {
@@ -590,8 +596,13 @@ describe("AgentLogsPanel", () => {
     expect(rows.length).toBe(1);
     const row = rows[0]!;
     expect(row.className).toContain("lw-live");
-    expect(row.querySelector("canvas.log-orb")).not.toBeNull();
-    expect(row.querySelector("canvas.log-orb")!.getAttribute("aria-hidden")).toBe("true");
+    // Ruling 499: AICSS's lattice orb, nine CSS dots; a Viberr tool's runs its
+    // ring rather than radiating.
+    const orb = row.querySelector(".log-orb")!;
+    expect(orb).not.toBeNull();
+    expect(orb.getAttribute("aria-hidden")).toBe("true");
+    expect(orb.getAttribute("data-orb")).toBe("ring");
+    expect(orb.querySelectorAll(":scope > i")).toHaveLength(9);
     expect(row.textContent).toContain("still running · 1m");
     // 366(d): the fold says what it hid, and opens to list every heartbeat
     // under a note that says what one is.
@@ -659,7 +670,7 @@ describe("AgentLogsPanel", () => {
 
   it("lifts multi-line output into a bounded block, whole and copyable", () => {
     const out = ["> npm test", "", "34 passed", "done in 1.2s"].join("\n");
-    const { container, getByText } = render(
+    const { container, getByRole } = render(
       <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 1 })]}
         sel="primary"
@@ -676,7 +687,22 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelectorAll(".log-code .lk-line")).toHaveLength(4);
     expect(block.textContent).toContain("34 passed");
     expect(block.textContent).toContain("done in 1.2s");
-    expect(getByText("4 lines")).toBeTruthy();
+    // Ruling 499: AICSS's code block. The head names what it holds and its
+    // size, and carries Copy with the copy mark; the lines are numbered in a
+    // gutter assistive tech and the selection skip.
+    expect(block.querySelector(".lk-meta")!.textContent).toBe("Output · 4 lines");
+    const copy = getByRole("button", { name: "Copy this output" });
+    expect(copy.textContent).toBe("Copy");
+    expect(copy.querySelector(".copy-glyph")).not.toBeNull();
+    const nums = [...block.querySelectorAll(".lk-num")];
+    expect(nums.map((n) => n.textContent)).toEqual(["1", "2", "3", "4"]);
+    expect(nums.every((n) => n.getAttribute("aria-hidden") === "true")).toBe(true);
+    expect([...block.querySelectorAll(".lk-text")].map((t) => t.textContent)).toEqual([
+      "> npm test",
+      " ",
+      "34 passed",
+      "done in 1.2s",
+    ]);
     // The text is not ALSO printed inline above the block.
     expect(container.querySelectorAll(".log-line.out .lx")[0]!.textContent).toBe(
       block.textContent,
@@ -2139,22 +2165,23 @@ describe("ruling 459: the wait row's orb trades for the clock in place", () => {
   );
 
   it("keeps the orb it watched live, marked ended, so the sheet fades it out as the clock comes in", () => {
-    // CANARY: render `{live ? <ThinkingOrb … /> : <Icon name="clock" />}`
-    // again and the canvas is gone the moment the wait ends.
+    // CANARY: render `{live ? <ConsoleOrb … /> : <Icon name="clock" />}`
+    // again and the orb is gone the moment the wait ends.
     const { container, rerender } = render(panel([call, beat(1, 30), beat(2, 60)]));
     const cell = container.querySelector(".log-line.wait .lw-glyph")!;
     expect(cell.getAttribute("aria-hidden")).toBe("true");
     expect(cell.getAttribute("data-live")).toBe("true");
-    const orb = cell.querySelector(":scope > canvas.log-orb")!;
+    const orb = cell.querySelector(":scope > .log-orb")!;
     const clock = cell.querySelector(":scope > svg.ico")!;
     expect(orb).not.toBeNull();
+    expect(orb.getAttribute("data-orb")).toBe("wave");
     expect(clock).not.toBeNull();
 
     rerender(panel([call, beat(1, 30), beat(2, 60), done]));
     // The same cell and the same two glyphs; only the mark moved.
     expect(container.querySelector(".log-line.wait .lw-glyph")).toBe(cell);
     expect(cell.hasAttribute("data-live")).toBe(false);
-    expect(cell.querySelector(":scope > canvas.log-orb")).toBe(orb);
+    expect(cell.querySelector(":scope > .log-orb")).toBe(orb);
     expect(cell.querySelector(":scope > svg.ico")).toBe(clock);
   });
 
@@ -2162,7 +2189,7 @@ describe("ruling 459: the wait row's orb trades for the clock in place", () => {
     const { container } = render(panel([call, beat(1, 30), beat(2, 60), done]));
     const cell = container.querySelector(".log-line.wait .lw-glyph")!;
     expect(cell.hasAttribute("data-live")).toBe(false);
-    expect(cell.querySelector("canvas")).toBeNull();
+    expect(cell.querySelector(".log-orb")).toBeNull();
     expect(cell.querySelectorAll(":scope > svg.ico")).toHaveLength(1);
   });
 });
@@ -2241,5 +2268,186 @@ describe("ruling 368: run requests in flight", () => {
     expect(waiting.disabled).toBe(true);
     expect(waiting.hasAttribute("aria-busy")).toBe(false);
     expect(waiting.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 499: the console draws what an agent did the way agent tools draw
+ * it. An edit is its diff (the owner, 2026-09-26, of the `+ old_string,
+ * new_string` link: "this diff looks dated"), a to-do list is its steps, a
+ * thought still running shimmers "Thinking", and `{ } raw` still shows every
+ * stored envelope and none of it.
+ */
+describe("ruling 499: the console draws an agent's edits, to-dos and thinking", () => {
+  const W = "/data/projects/akinozer-com/tasks/WEB-3/workspace/website/";
+  const line = (display: LogLine, n: number): StreamedLine => ({
+    display,
+    raw: `{"n":${n}}`,
+    key: `0:${n}`,
+  });
+  const panel = (lines: StreamedLine[], run: Partial<RunView> = { state: "idle", lifecycle: "finished" }) => (
+    <Logs
+      runtime={[mkRun({ lineCount: lines.length, ...run })]}
+      sel="primary"
+      onSel={() => {}}
+      linesByThread={{ primary: lines }}
+    />
+  );
+  const edit = line(
+    {
+      t: "10:00:01", ev: "tool", tag: "tool_use", name: "Edit", text: W + "docs/deploy-runbook.md",
+      input: {
+        file_path: W + "docs/deploy-runbook.md",
+        old_string: "## Step 1\n5. Non-production branch builds: on",
+        new_string: "## Step 1\n5. Non-production branch builds: off\nIts writes are unmeasured.",
+      },
+    },
+    1,
+  );
+
+  it("draws an Edit as its diff: the file repo-relative, +N −M, the changed words marked, no link", () => {
+    // CANARY: drop `diff?.drawn` from hiddenArguments and the row offers
+    // `+ old_string, new_string` again beside the diff that shows them.
+    const { container, queryByText } = render(panel([edit]));
+    const row = container.querySelector(".log-line.tool")!;
+    const path = row.querySelector(".lc-path")!;
+    expect(path.textContent).toBe("docs/deploy-runbook.md");
+    expect(path.getAttribute("title")).toBe(W + "docs/deploy-runbook.md");
+    expect(path.querySelector(".lc-base")!.textContent).toBe("deploy-runbook.md");
+    expect(row.querySelector(".lc-stat")!.textContent).toBe("+2 added, −1 removed");
+    expect(queryByText(/old_string/)).toBeNull();
+    const rows = [...row.querySelectorAll(".log-diff .ld-row")];
+    expect(rows.map((r) => [r.getAttribute("data-kind"), r.querySelector(".ld-code")!.textContent])).toEqual([
+      ["ctx", "## Step 1"],
+      ["del", "removed: 5. Non-production branch builds: on"],
+      ["add", "added: 5. Non-production branch builds: off"],
+      ["add", "added: Its writes are unmeasured."],
+    ]);
+    // The +/− is a glyph as well as a tint, hidden from assistive tech, which
+    // reads the words instead.
+    expect(rows[1]!.querySelector(".ld-mark")!.getAttribute("aria-hidden")).toBe("true");
+    expect(rows[1]!.querySelector(".ld-mark")!.textContent).toBe("−");
+    expect([...row.querySelectorAll("mark.ld-w")].map((m) => m.textContent)).toEqual(["on", "off"]);
+  });
+
+  it("shows a long diff's first rows, then the rest on the row's own disclosure", () => {
+    const content = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n");
+    const write = line(
+      { t: "10:00:02", ev: "tool", tag: "tool_use", name: "Write", text: W + "docs/new.md", input: { file_path: W + "docs/new.md", content } },
+      2,
+    );
+    const { container, getByRole } = render(panel([write]));
+    // A Write numbers its lines and claims no +/−.
+    expect(container.querySelector(".lc-stat")!.textContent).toBe("15 lines");
+    expect(container.querySelectorAll(".ld-row")).toHaveLength(10);
+    expect(container.querySelector(".ld-num")!.textContent).toBe("1");
+    const more = getByRole("button", { name: "Show 5 more lines" });
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(more);
+    expect(container.querySelectorAll(".ld-row")).toHaveLength(15);
+    expect(getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens an unchanged run in place", () => {
+    const old = Array.from({ length: 12 }, (_, i) => `l${i}`);
+    const next = [...old];
+    next[0] = "changed";
+    const long = line(
+      { t: "10:00:03", ev: "tool", tag: "tool_use", name: "Edit", text: "/tmp/a.ts", input: { file_path: "/tmp/a.ts", old_string: old.join("\n"), new_string: next.join("\n") } },
+      3,
+    );
+    const { container, getByRole } = render(panel([long]));
+    expect(container.querySelectorAll(".ld-row")).toHaveLength(5);
+    fireEvent.click(getByRole("button", { name: "8 unchanged lines" }));
+    expect(container.querySelectorAll(".ld-row")).toHaveLength(13);
+    expect(container.querySelector(".ld-fold")).toBeNull();
+  });
+
+  it("prints a Read's file repo-relative too, but never rewrites a path inside a command", () => {
+    const { container } = render(
+      panel([
+        line({ t: "10:00:04", ev: "tool", tag: "tool_use", name: "Read", text: W + "docs/x.md", input: { file_path: W + "docs/x.md" } }, 4),
+        line({ t: "10:00:05", ev: "tool", tag: "tool_use", name: "Bash", text: "cat " + W + "docs/x.md", input: { command: "cat " + W + "docs/x.md" } }, 5),
+      ]),
+    );
+    const details = [...container.querySelectorAll(".lc-detail")].map((d) => d.textContent);
+    expect(details).toEqual(["docs/x.md", "cat " + W + "docs/x.md"]);
+  });
+
+  const todos = (n: number, current: number): StreamedLine =>
+    line(
+      {
+        t: `10:00:1${n}`, ev: "tool", tag: "tool_use", name: "TodoWrite", text: "todos: [3 items]",
+        input: {
+          todos: ["Read the runbook", "Correct the steps", "Run the link check"].map((content, i) => ({
+            content,
+            status: i < current ? "completed" : i === current ? "in_progress" : "pending",
+            activeForm: content,
+          })),
+        },
+      },
+      10 + n,
+    );
+
+  it("draws TodoWrite as the agent's to-do list, and folds it from its header", () => {
+    const { container, getByRole, queryByText } = render(panel([todos(0, 1)]));
+    const card = container.querySelector(".log-todo")!;
+    const head = getByRole("button", { name: /To-dos/ });
+    expect(head.textContent).toBe("To-dos1/3 done");
+    expect([...card.querySelectorAll(".td-item")].map((i) => [i.getAttribute("data-status"), i.textContent])).toEqual([
+      ["completed", "done: Read the runbook"],
+      ["in_progress", "in progress: Correct the steps"],
+      ["pending", "to do: Run the link check"],
+    ]);
+    // The list IS the row; the arguments line and its link are not printed.
+    expect(queryByText(/todos: \[/)).toBeNull();
+    expect(queryByText(/\+ todos/)).toBeNull();
+    // A finished run's list holds still.
+    expect(card.querySelector("[data-live]")).toBeNull();
+    fireEvent.click(head);
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    expect(card.querySelector(".td-list")).toBeNull();
+  });
+
+  it("shimmers the step under way only on the list a running agent wrote last", () => {
+    // CANARY: pass `live` to every to-do row and the stale list shimmers too.
+    const { container } = render(panel([todos(0, 0), todos(1, 1)], { state: "running", lifecycle: "running" }));
+    const cards = [...container.querySelectorAll(".log-todo")];
+    expect(cards[0]!.querySelector("[data-live]")).toBeNull();
+    const live = cards[1]!.querySelector(".td-item[data-live]")!;
+    expect(live.textContent).toBe("in progress: Correct the steps");
+    expect(live.querySelector(".td-text")!.getAttribute("data-text")).toBe("Correct the steps");
+  });
+
+  it("draws a Codex plan as the same list, with no empty row above it", () => {
+    const codex = line(
+      { t: "10:00:20", ev: "meta", tag: "todo_list", text: "1 of 2 to-dos done", todos: [{ text: "Plan", status: "completed" }, { text: "Build", status: "pending" }] },
+      20,
+    );
+    const { container } = render(panel([codex]));
+    const row = container.querySelector(".log-line.meta")!;
+    expect(row.querySelector(".lx")!.textContent).toBe("To-dos1/2 donedone: Planto do: Build");
+  });
+
+  it("shimmers \"Thinking\" on the last thought of a running agent, and reads \"Thought for\" once anything follows", () => {
+    const think = (n: number, text: string): StreamedLine =>
+      line({ t: `10:00:3${n}`, ev: "think", tag: "reasoning", text }, 30 + n);
+    const live = render(panel([think(0, "weighing"), think(4, "picking")], { state: "running", lifecycle: "running" }));
+    const button = live.getByRole("button", { name: "Thinking · 2 steps" });
+    expect(button.querySelector(".log-shimmer")!.getAttribute("data-text")).toBe("Thinking");
+    live.unmount();
+    const done = render(
+      panel([think(0, "weighing"), think(4, "picking"), edit], { state: "running", lifecycle: "running" }),
+    );
+    expect(done.getByRole("button", { name: "Thought for 4s · 2 steps" }).querySelector(".log-shimmer")).toBeNull();
+  });
+
+  it("keeps `{ } raw` authoritative: every stored envelope, no diff, no list", () => {
+    const { container, getByText } = render(panel([edit, todos(0, 1)]));
+    fireEvent.click(getByText("{ } raw"));
+    expect(container.querySelector(".log-diff")).toBeNull();
+    expect(container.querySelector(".log-todo")).toBeNull();
+    expect(container.textContent).toContain('{"n":1}');
+    expect(container.textContent).toContain('{"n":10}');
   });
 });
