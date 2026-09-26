@@ -79,7 +79,7 @@ export function canonicalRequestUri(basePath: string, key: string): string {
 }
 
 /** The two time forms SigV4 needs, from an ISO instant. */
-export interface SigV4Dates {
+interface SigV4Dates {
   /** YYYYMMDDTHHMMSSZ */
   amzDate: string;
   /** YYYYMMDD */
@@ -87,7 +87,7 @@ export interface SigV4Dates {
 }
 
 /** Split an ISO instant into the amzDate + dateStamp SigV4 needs. */
-export function sigV4Dates(iso: string): SigV4Dates {
+function sigV4Dates(iso: string): SigV4Dates {
   // 2026-08-23T11:22:33.444Z → 20260823T112233Z
   const compact = iso.replace(/[-:]/g, "").replace(/\.\d+/, "");
   const amzDate = compact.endsWith("Z") ? compact : `${compact}Z`;

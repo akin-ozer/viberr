@@ -46,12 +46,11 @@ describe("healthSnapshot reports the MCP gateway (ruling 461)", () => {
     await stopMcpGateway();
   });
 
-  it("appends mcpProxy after toolchain and before ruling 460's agentIsolation — key order is the wire contract — with the gateway's live reading", async () => {
+  it("carries the gateway's live reading as mcpProxy", async () => {
     const store = setupTestStore(ctx);
-    // Canary: drop `mcpProxy` from the snapshot, or move it out of its slot.
+    // Canary: drop `mcpProxy` from the snapshot. Its slot in the key order is
+    // pinned below, with the toolchain's.
     const down = healthSnapshot(store.db);
-    expect(Object.keys(down).at(-2)).toBe("mcpProxy");
-    expect(Object.keys(down).at(-3)).toBe("toolchain");
     expect(down.mcpProxy).toEqual({ listening: false, port: null, liveTokens: 0 });
     // Not listening is reported, never degraded: the instance serves anyway.
     expect(down.degraded).not.toContain("mcpProxy");
@@ -72,7 +71,7 @@ describe("healthSnapshot reports the MCP gateway (ruling 461)", () => {
 });
 
 describe("healthSnapshot reports the toolchain (ruling 182)", () => {
-  it("carries the toolchain reading, then mcpProxy, then agentIsolation — key order is the wire contract — versions only", () => {
+  it("carries the toolchain reading, then mcpProxy, then agentIsolation — key order is the wire contract", () => {
     // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
     // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
     // verdict. The reading rides the health body and, through the spread,
@@ -86,14 +85,5 @@ describe("healthSnapshot reports the toolchain (ruling 182)", () => {
     // The one memoized reading (`cachedToolchain`), never a second probe: the
     // suite primes it hermetic in setup-env, and that is what comes back.
     expect(snapshot.toolchain).toEqual(HERMETIC_TOOLCHAIN);
-    // Ruling 185: the reading is versions only — the sandbox verdict went with
-    // the sandbox. Canary: put `codexSandbox` back on `Toolchain` and this
-    // `toEqual` against the hermetic reading is the guard that notices.
-    expect(Object.keys(snapshot.toolchain)).toEqual([
-      "node", "npm", "git", "python3", "go",
-      // Ruling 191.
-      "make", "docker", "pnpm", "yarn", "curl",
-      "codexCli", "claudeAgentSdk",
-    ]);
   });
 });

@@ -5,7 +5,6 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { createAuth, type ViberrAuth } from "~/lib/auth.server";
 import { hashPassword } from "./password.server";
 import {
-  CREDENTIAL_PROVIDER,
   isBetterAuthPasswordHash,
   provisionIdentity,
   revokeUserSessions,
@@ -78,7 +77,8 @@ describe("identity provisioning", () => {
         .prepare(`SELECT providerId, password FROM account WHERE userId='u_arda'`)
         .get(),
     );
-    expect(acct.providerId).toBe(CREDENTIAL_PROVIDER);
+    // better-auth's own id for an email+password account.
+    expect(acct.providerId).toBe("credential");
 
     // The raw-provisioned credential verifies through better-auth sign-in.
     const res = await a.api.signInEmail({

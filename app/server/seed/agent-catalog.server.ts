@@ -212,7 +212,7 @@ export function defaultAgentDeployments(): AgentDeployment[] {
  *  operator absorbs advisory duties (scope clarification, decision packets), and
  *  the Reviewer is the single quality specialist (it reviews AND tests), so there
  *  is no separate Advisor or Tester profile. */
-export const BASE_AGENT_PROFILE_IDS = [
+const BASE_AGENT_PROFILE_IDS = [
   "operator",
   "developer",
   "reviewer",

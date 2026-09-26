@@ -56,7 +56,7 @@ const seeded = new WeakMap<Request, RequestCorrelation>();
 
 /** Compact, log-greppable id. Not security-bearing — collisions only ever cost
  *  a confusing grep, so 12 hex chars is plenty. */
-export function newRequestId(): string {
+function newRequestId(): string {
   return randomUUID().replaceAll("-", "").slice(0, 12);
 }
 
@@ -102,7 +102,7 @@ export function runWithRequestContext<T>(
 }
 
 /** {@link runWithRequestContext} seeded from an inbound Request. */
-export function withRequestContext<T>(request: Request, fn: () => T): T {
+function withRequestContext<T>(request: Request, fn: () => T): T {
   return storage.run(correlationFor(request), fn);
 }
 

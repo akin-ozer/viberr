@@ -32,7 +32,6 @@ const {
   resetMaintenanceStateForTests,
   runMaintenancePass,
   startMaintenanceScheduler,
-  stopMaintenanceScheduler,
 } = await import("./maintenance.server");
 
 const ctx = createTestDbContext();
@@ -236,12 +235,12 @@ describe("startMaintenanceScheduler (gap 15)", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
-  it("is idempotent, unref'd, and stoppable", () => {
+  it("is idempotent and stoppable", () => {
     vi.useFakeTimers();
     const store = storeWithTerminalTask();
     startMaintenanceScheduler(store.db, { intervalMs: 1_000 });
     startMaintenanceScheduler(store.db, { intervalMs: 1_000 });
-    stopMaintenanceScheduler();
+    resetMaintenanceStateForTests();
     vi.advanceTimersByTime(10_000);
     expect(maintenanceState().lastPassAt).toBeNull();
     expect(maintenanceState().scheduled).toBe(false);

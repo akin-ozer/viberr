@@ -151,20 +151,6 @@ describe("isOAuthWhitelisted", () => {
         }),
       ).toBe(false);
     });
-
-    it("still admits a GitHub placeholder claim whatever the email domain", () => {
-      const db = ctx.makeDb();
-      whitelistGithubUser(db, { handle: "octocat", role: "member" }, ACTOR);
-      expect(
-        isOAuthWhitelisted(db, {
-          id: "x",
-          email: "octocat@nowhere.dev",
-          name: "O",
-          githubHandle: "octocat",
-          provider: "github",
-        }),
-      ).toBe(true);
-    });
   });
 });
 

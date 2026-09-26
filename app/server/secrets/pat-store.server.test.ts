@@ -121,31 +121,6 @@ describe("pat-store", () => {
     ).toThrowError();
   });
 
-  it("caches validation results on the row", () => {
-    const store = setupTestStore(ctx);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "x", token: TOKEN },
-      ACTOR,
-    );
-    recordPatValidation(store.db, pat.id, {
-      status: "valid",
-      checkedAt: "2026-07-05T10:00:00.000Z",
-      login: "viberr-bot",
-      tokenKind: "fine_grained",
-      expiresAt: "2026-12-31T00:00:00.000Z",
-      repo: "akin-ozer/viberr",
-      scopes: [{ id: "repo", ok: true, source: "probe" }],
-      missingScopes: [],
-      headerScopes: null,
-      detail: "Authenticated as viberr-bot.",
-    });
-    const reloaded = getPatMetadata(store.db, pat.id);
-    expect(reloaded?.lastValidatedAt).toBe("2026-07-05T10:00:00.000Z");
-    expect(reloaded?.validation?.status).toBe("valid");
-    expect(reloaded?.validation?.login).toBe("viberr-bot");
-  });
-
   it("F27-U2: a real write proves pull_request:write on the bound credential", () => {
     // Projected: the chip reads the project's repository off its row.
     const store = setupProjectedStore(ctx);

@@ -245,11 +245,6 @@ export function cachedToolchain(): Toolchain {
   return cached;
 }
 
-/** Test-only: drop the cached resolution (the override, if any, still wins). */
-export function resetToolchainCacheForTests(): void {
-  cached = null;
-}
-
 // ------------------------------------------------- probing an arbitrary tool
 
 /**

@@ -12,7 +12,6 @@ import { seedDefaultAgentAssets } from "./default-assets.server";
 import { ensureBaseAgentsDeployed } from "./ensure-base-agents.server";
 import {
   baseAgentDeployments,
-  BASE_AGENT_PROFILE_IDS,
   SEED_AGENT_PROFILES,
 } from "./agent-catalog.server";
 import { buildSpecialistPersona } from "~/server/tasks/specialist-run.server";
@@ -43,7 +42,7 @@ describe("seed profile models", () => {
 describe("baseAgentDeployments", () => {
   it("is the operator plus Developer / Reviewer", () => {
     const ids = baseAgentDeployments().map((d) => d.profileId).sort();
-    expect(ids).toEqual([...BASE_AGENT_PROFILE_IDS].sort());
+    expect(ids).toEqual(["developer", "operator", "reviewer"]);
     expect(ids).toContain("operator");
     expect(ids).toContain("developer");
     expect(ids).toContain("reviewer");

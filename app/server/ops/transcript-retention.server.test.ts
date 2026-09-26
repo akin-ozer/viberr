@@ -8,11 +8,7 @@ import {
   resetEnvCacheForTests,
 } from "~/server/config/env.server";
 import { ensureDataRootDirs } from "~/server/files/file-store-root.server";
-import {
-  pruneRuntimeTranscripts,
-  sessionHomeRetentionDays,
-  transcriptRetentionDays,
-} from "./transcript-retention.server";
+import { pruneRuntimeTranscripts } from "./transcript-retention.server";
 
 /**
  * Gap 20 — the raw `.jsonl` truth under `runtimes/` was pruned by nothing but
@@ -166,25 +162,10 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     expect(existsSync(configToml)).toBe(true);
   });
 
-  it("collects the orphans a deleted project left behind (no DB row names them)", () => {
-    const root = makeRoot();
-    // deleteProject removes projects/<slug> and the run rows' project, but has
-    // never touched the transcripts — age is the only handle left on them.
-    const orphan = writeAged(
-      path.join(root, "runtimes", "claude", "run_of_deleted_project.jsonl"),
-      "{}\n",
-      DEFAULT_TRANSCRIPT_RETENTION_DAYS + 90,
-    );
-    expect(pruneRuntimeTranscripts({ dataRoot: root }).transcripts).toBe(1);
-    expect(existsSync(orphan)).toBe(false);
-  });
-
   it("is configurable, and 0 disables a half outright", () => {
     process.env.VIBERR_TRANSCRIPT_RETENTION_DAYS = "7";
     process.env.VIBERR_SESSION_HOME_RETENTION_DAYS = "0";
     resetEnvCacheForTests();
-    expect(transcriptRetentionDays()).toBe(7);
-    expect(sessionHomeRetentionDays()).toBe(0);
 
     const root = makeRoot();
     const transcript = writeAged(

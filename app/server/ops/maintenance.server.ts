@@ -416,7 +416,7 @@ export function startMaintenanceScheduler(
 }
 
 /** Stop the timers (tests + graceful shutdown). */
-export function stopMaintenanceScheduler(): void {
+function stopMaintenanceScheduler(): void {
   for (const handle of timers()) clearInterval(handle);
   setTimers([]);
 }

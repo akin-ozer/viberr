@@ -8,9 +8,7 @@ import {
   createReconcileBehindByLookup,
   latestProjectReconcileAt,
   latestReconcileObservation,
-  latestProvenance,
   latestTaskReconcileAt,
-  listProvenance,
   taskProvenancePath,
 } from "./provenance-query.server";
 
@@ -257,39 +255,5 @@ describe("ruling 494: the compare's head and the push it does not describe", () 
     // A push row is not an observation of the compare.
     recordProvenance(db, { sourcePath: PATH_142, action: "github.push", details: { headSha: B } });
     expect(latestReconcileObservation(db, PATH_142)).toEqual({ sync: "behind_main", headSha: A });
-  });
-});
-
-describe("generic provenance reads", () => {
-  it("lists a file's observations newest-first, optionally by action", () => {
-    const db = ctx.makeDb();
-    // The rebuilder's kinds had no reader at all before this module.
-    recordProvenance(db, {
-      sourcePath: PATH_142,
-      action: "projected",
-      contentHash: "aaa",
-    });
-    recordProvenance(db, {
-      sourcePath: PATH_142,
-      action: "error",
-      details: { message: "unparseable frontmatter" },
-    });
-    recordProvenance(db, { sourcePath: PATH_142, action: "removed" });
-
-    expect(listProvenance(db, { sourcePath: PATH_142 }).map((r) => r.action))
-      .toEqual(["removed", "error", "projected"]);
-    const errors = listProvenance(db, {
-      sourcePath: PATH_142,
-      action: "error",
-    });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.details).toEqual({ message: "unparseable frontmatter" });
-    expect(
-      latestProvenance(db, { sourcePath: PATH_142, action: "projected" })
-        ?.contentHash,
-    ).toBe("aaa");
-    expect(
-      latestProvenance(db, { sourcePath: PATH_142, action: "rescan" }),
-    ).toBeNull();
   });
 });

@@ -1,10 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import {
-  AUDIT_BROWSE_DEFAULT_LIMIT,
-  listRecentAuditEvents,
-} from "./audit-browse.server";
+import { listRecentAuditEvents } from "./audit-browse.server";
 
 /**
  * PG26-A: the in-app audit browse query. Recent events newest-first, with the
@@ -154,7 +151,7 @@ describe("listRecentAuditEvents", () => {
     expect(rows.find((r) => r.id === "a2")?.action).toBe("github.pat.created");
   });
 
-  it("clamps the limit and never pages the whole table", () => {
+  it("honours a limit and clamps a zero one up to one row", () => {
     const db = ctx.makeDb();
     for (let i = 0; i < 5; i++) {
       insert(db, {
@@ -168,8 +165,7 @@ describe("listRecentAuditEvents", () => {
     }
     expect(listRecentAuditEvents(db, { limit: 2 })).toHaveLength(2);
     // Zero / negative is clamped up to 1, not "no rows".
-    expect(listRecentAuditEvents(db, { limit: 0 }).length).toBeGreaterThanOrEqual(1);
-    expect(AUDIT_BROWSE_DEFAULT_LIMIT).toBeGreaterThan(0);
+    expect(listRecentAuditEvents(db, { limit: 0 })).toHaveLength(1);
   });
 
   it("returns an empty array when nothing is recorded", () => {

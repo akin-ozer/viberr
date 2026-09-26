@@ -10,11 +10,9 @@ import {
   currentRequestId,
   echoRequestId,
   forkCorrelation,
-  newRequestId,
   REQUEST_ID_HEADER,
   requestContextMiddleware,
   runWithRequestContext,
-  withRequestContext,
   type RequestCorrelation,
 } from "./request-context.server";
 
@@ -183,24 +181,6 @@ describe("correlationFor", () => {
     );
     expect(long.requestId).not.toContain("xxxx");
   });
-
-  it("newRequestId is unique enough to grep by", () => {
-    const ids = new Set(Array.from({ length: 200 }, () => newRequestId()));
-    expect(ids.size).toBe(200);
-  });
-});
-
-describe("withRequestContext", () => {
-  it("binds a correlation seeded from the request", () => {
-    const seen = withRequestContext(
-      new Request("http://localhost/board", {
-        headers: { "X-Request-Id": "req_from_header" },
-      }),
-      () => currentRequestId(),
-    );
-    expect(seen).toBe("req_from_header");
-    expect(currentRequestId()).toBeNull();
-  });
 });
 
 /**
@@ -233,7 +213,7 @@ describe("echoRequestId (ruling 458(d))", () => {
     const request = new Request("http://localhost/x", {
       headers: { "X-Request-Id": "req_upstream" },
     });
-    const inside = withRequestContext(request, () =>
+    const inside = runWithRequestContext(correlationFor(request), () =>
       echoRequestId(new Response("a"), request),
     );
     // Outside the context (React Router's data hook runs there).

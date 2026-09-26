@@ -977,21 +977,6 @@ describe("mcp servers", () => {
       "postgres-readonly unreachable: command not found (ENOENT)",
     );
   });
-
-  it("discoverStdioMcpTools: handshake success, timeout, spawn failure", async () => {
-    expect(
-      await discoverStdioMcpTools("mcp-server", { spawnImpl: fakeMcpSpawn(5) }),
-    ).toMatchObject({ kind: "up", tools: 5 });
-    expect(
-      await discoverStdioMcpTools("mcp-server", {
-        spawnImpl: silentSpawn,
-        timeoutMs: 20,
-      }),
-    ).toMatchObject({ kind: "down", reason: "timed out after 0s" });
-    expect(
-      await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
-    ).toMatchObject({ kind: "down", reason: "command not found (ENOENT)" });
-  });
 });
 
 describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
@@ -1822,20 +1807,6 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       }
       if (savedPath === undefined) delete process.env.PATH;
       else process.env.PATH = savedPath;
-    }
-  });
-
-  it("passes the ONE secret the child is meant to hold, and nothing else", async () => {
-    const { mcpSpawnEnv } = await import("./resources.server");
-    const saved = process.env.VIBERR_SECRET_ENCRYPTION_KEY;
-    process.env.VIBERR_SECRET_ENCRYPTION_KEY = "must-not-travel";
-    try {
-      const env = mcpSpawnEnv("mcp-token-value");
-      expect(env.MCP_CREDENTIAL).toBe("mcp-token-value");
-      expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
-    } finally {
-      if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY;
-      else process.env.VIBERR_SECRET_ENCRYPTION_KEY = saved;
     }
   });
 

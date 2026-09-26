@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   deleteOAuthProvider,
@@ -13,6 +13,7 @@ import {
 import { testOAuthCredentials } from "./oauth-credential-test.server";
 
 const dbCtx = createTestDbContext();
+afterEach(dbCtx.cleanup);
 const ACTOR = { userId: "u_admin", label: "admin@viberr.dev" };
 
 function setup() {

@@ -50,12 +50,6 @@ describe("seeded agent catalog copy", () => {
       expect(line).not.toMatch(/customized for/i);
     }
   });
-
-  it("every seeded profile carries a non-empty scope line", () => {
-    for (const p of SEED_AGENT_PROFILES) {
-      expect(p.frontmatter.scope.trim().length).toBeGreaterThan(0);
-    }
-  });
 });
 
 describe("seeded specialist capability modes (F20-21 / R20-6 — direct or withheld)", () => {

@@ -28,24 +28,6 @@ const provenanceDetailsSchema = z.record(z.string(), z.json());
 
 export type ProvenanceDetails = z.infer<typeof provenanceDetailsSchema>;
 
-export interface ProvenanceRow {
-  id: number;
-  sourcePath: string;
-  contentHash: string | null;
-  observedAt: string;
-  action: string;
-  details: ProvenanceDetails | null;
-}
-
-type RawRow = {
-  id: number;
-  source_path: string;
-  content_hash: string | null;
-  observed_at: string;
-  action: string;
-  details_json: string | null;
-};
-
 function parseDetails(json: string | null): ProvenanceDetails | null {
   if (!json) return null;
   try {
@@ -56,17 +38,6 @@ function parseDetails(json: string | null): ProvenanceDetails | null {
   }
 }
 
-function mapRow(row: RawRow): ProvenanceRow {
-  return {
-    id: row.id,
-    sourcePath: row.source_path,
-    contentHash: row.content_hash,
-    observedAt: row.observed_at,
-    action: row.action,
-    details: parseDetails(row.details_json),
-  };
-}
-
 /** Store-relative provenance key for a task file — the exact string the
  *  rebuilder and the reconciler write under (`storeRelativePath` of the task
  *  file), reproduced here so slug+key callers need no filesystem access. */
@@ -75,50 +46,6 @@ export function taskProvenancePath(
   taskKey: string,
 ): string {
   return `projects/${projectSlug}/tasks/${taskKey}/task.md`;
-}
-
-/** Newest-first observations for one store file (optionally one action).
- *  This is what makes the rebuilder's `projected|removed|error|rescan` rows
- *  readable at all — they had no reader before. */
-export function listProvenance(
-  db: DatabaseSync,
-  options: { sourcePath: string; action?: string; limit?: number },
-): ProvenanceRow[] {
-  const limit = options.limit ?? 50;
-  // SAFETY: `provenance` (0001_baseline.sql) declares every column this row
-  // maps — `id` INTEGER PRIMARY KEY, `source_path`/`observed_at`/`action` TEXT
-  // NOT NULL, `content_hash`/`details_json` nullable TEXT.
-  const rows = (
-    options.action
-      ? db
-          .prepare(
-            `SELECT * FROM provenance WHERE source_path = ? AND action = ?
-             ORDER BY id DESC LIMIT ?`,
-          )
-          .all(options.sourcePath, options.action, limit)
-      : db
-          .prepare(
-            `SELECT * FROM provenance WHERE source_path = ?
-             ORDER BY id DESC LIMIT ?`,
-          )
-          .all(options.sourcePath, limit)
-  ) as RawRow[];
-  return rows.map(mapRow);
-}
-
-/** The newest observation for one file+action, or null. */
-export function latestProvenance(
-  db: DatabaseSync,
-  options: { sourcePath: string; action: string },
-): ProvenanceRow | null {
-  // SAFETY: same column guarantees as {@link listProvenance}.
-  const row = db
-    .prepare(
-      `SELECT * FROM provenance WHERE source_path = ? AND action = ?
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get(options.sourcePath, options.action) as RawRow | undefined;
-  return row ? mapRow(row) : null;
 }
 
 /**
@@ -233,7 +160,7 @@ export interface BaseCompareReading {
 }
 
 /** The three columns the compare lookup reads from a provenance row (a type
- *  alias, like {@link RawRow}, so a statement's row is comparable to it). */
+ *  alias, so a statement's row is comparable to it). */
 type CompareLookupRow = {
   id: number;
   observed_at: string;

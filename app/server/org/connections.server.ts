@@ -65,19 +65,6 @@ import { formatCalendarDate } from "~/shared/dates/format";
  * validator semantics, unchanged.
  */
 
-/**
- * The minimum a connection must hold for Viberr's own writes (branch push,
- * PR open, PR merge). Owner ruling 2026-07-25: the mock-era `workflow`
- * requirement is gone — it blocked classic tokens that were perfectly able to
- * deliver, and it is unprovable for fine-grained ones; a workflow-file push
- * that GitHub refuses surfaces as a scope violation at the moment it matters.
- *
- * B-GH6: ONE definition, aliased. The connection gate and the project scope
- * chips must never be able to disagree about what "the minimum" is, and two
- * identical `as const` tuples in two modules made that a one-edit mistake.
- */
-export const CONNECTION_REQUIRED_SCOPES = DEFAULT_REQUIRED_SCOPES;
-
 export type ConnectionValidationState = "valid" | "failed" | "unvalidated";
 
 /**
@@ -381,7 +368,7 @@ export async function ensureConnectionFresh(
   const token = getPatToken(db, connection.patId);
   if (!token) return connection;
   const probe: ValidatePatTokenOptions = {
-    requiredScopes: [...CONNECTION_REQUIRED_SCOPES],
+    requiredScopes: [...DEFAULT_REQUIRED_SCOPES],
     repo: null,
     knownExpiresAt: connection.expiresAt,
   };
@@ -453,7 +440,7 @@ function failureMessage(validation: PatValidation): string {
     // telling people to widen a token Viberr no longer wants.
     return (
       `Validation failed — token is missing ${missing}. ` +
-      `Minimum scopes: ${CONNECTION_REQUIRED_SCOPES.join(" · ")}. Nothing was saved.`
+      `Minimum scopes: ${DEFAULT_REQUIRED_SCOPES.join(" · ")}. Nothing was saved.`
     );
   }
   const detail = validation.detail.trim().replace(/\.?$/, ".");
@@ -513,7 +500,7 @@ async function validateConnectionToken(
   | { ok: false; message: string }
 > {
   const probe: ValidatePatTokenOptions = {
-    requiredScopes: [...CONNECTION_REQUIRED_SCOPES],
+    requiredScopes: [...DEFAULT_REQUIRED_SCOPES],
     repo: null,
   };
   // Only a test hands one over; production must reach the real `fetch`.
@@ -718,7 +705,7 @@ export async function recheckConnection(
     };
   }
   const probe: ValidatePatTokenOptions = {
-    requiredScopes: [...CONNECTION_REQUIRED_SCOPES],
+    requiredScopes: [...DEFAULT_REQUIRED_SCOPES],
     repo: null,
     knownExpiresAt: existing.expiresAt,
   };

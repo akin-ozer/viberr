@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalRequestUri,
   putObjectToS3,
-  sigV4Dates,
   signS3Put,
   signingKey,
   type S3Config,
@@ -22,15 +21,6 @@ describe("SigV4 signing key (AWS published KAT)", () => {
     expect(key.toString("hex")).toBe(
       "2c94c0cf5378ada6887f09bb697df8fc0affdb34ba1cdd5bda32b664bd55b73c",
     );
-  });
-});
-
-describe("sigV4Dates", () => {
-  it("splits an ISO instant into amzDate + dateStamp", () => {
-    expect(sigV4Dates("2026-08-23T11:22:33.444Z")).toEqual({
-      amzDate: "20260823T112233Z",
-      dateStamp: "20260823",
-    });
   });
 });
 

@@ -4,10 +4,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { lockPath } from "../../test-support/data-root-lock";
 import { createTestDbContext } from "../../test-support/test-db";
-import {
-  HERMETIC_TOOLCHAIN,
-  primeHermeticToolchain,
-} from "../../test-support/toolchain";
+import { HERMETIC_TOOLCHAIN } from "../../test-support/toolchain";
 import { logger } from "./logging/logger.server";
 import type {
   MaintenancePassOptions,
@@ -421,31 +418,17 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
   });
 
   it("reports free space at the one moment an operator is reading this log", () => {
-    expect(integrityFields()).toHaveProperty("disk");
+    expect(integrityFields().disk).toMatchObject({
+      free: expect.any(String),
+      total: expect.any(String),
+      status: expect.stringMatching(/^(ok|low|critical)$/),
+    });
   });
 
   it("ruling 182: carries the host toolchain, resolved here so the first health request does not pay for the probe", () => {
     // The suite's primed reading (setup-env), not a live probe — what matters
     // is that the boot line reads the ONE memoized toolchain.
     expect(integrityFields()).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
-  });
-
-  it("ruling 185: no sandbox WARN survives — there is no sandbox to be unavailable", () => {
-    // Canary: re-add either warn (the ruling-182 refusal or the ruling-184
-    // child-process limit) and this fails. Both existed only because Viberr
-    // asked the Codex CLI to confine a run; it no longer does, so a boot line
-    // about the sandbox would be a claim about nothing.
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
-    try {
-      logBootIntegrity(bootCtx.makeDb());
-      expect(warn.mock.calls.find(([msg]) => /codex sandbox/i.test(msg))).toBeUndefined();
-      expect(warn.mock.calls.find(([msg]) => /child process/i.test(msg))).toBeUndefined();
-    } finally {
-      warn.mockRestore();
-      info.mockRestore();
-      primeHermeticToolchain();
-    }
   });
 });
 

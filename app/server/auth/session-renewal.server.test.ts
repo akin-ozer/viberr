@@ -12,13 +12,14 @@ import { setupAppTest, type AppTestContext } from "../../../test-support/test-ap
  * the DB thought the session was renewed while the browser's cookie still
  * expired at login+30d. An active user would be logged out mid-work.
  *
- * The fix is two halves, and BOTH are load-bearing, so both are pinned here:
- * `authenticateWithHeaders` captures the header (returnHeaders: true), and
- * root's `sessionRenewalMiddleware` forwards it onto the response. Ruling 457
- * moved the forwarding from the root loader to the middleware: root no longer
- * re-runs on live events and navigations (RF-7), and the day's one renewal
- * lands on whichever GET first asks once it is due, often a layout's `.data`
- * that root sits out.
+ * The fix is two halves, and BOTH are load-bearing: `authenticateWithHeaders`
+ * captures the header (returnHeaders: true), and root's
+ * `sessionRenewalMiddleware` forwards it onto the response. Both are pinned
+ * through the middleware: drop the capture and it has nothing to forward.
+ * Ruling 457 moved the forwarding from the root loader to the middleware: root
+ * no longer re-runs on live events and navigations (RF-7), and the day's one
+ * renewal lands on whichever GET first asks once it is due, often a layout's
+ * `.data` that root sits out.
  */
 
 let app: AppTestContext;
@@ -74,38 +75,7 @@ async function throughMiddleware(
 }
 
 describe("F10-17: rolling-session renewal reaches the browser", () => {
-  it("authenticateWithHeaders returns the identity AND a Headers bag", async () => {
-    const { authenticateWithHeaders } = await import(
-      "~/server/auth/require-user.server"
-    );
-    const { cookie } = await app.cookieFor(ardaId);
-    const { ctx, renewalHeaders } = await authenticateWithHeaders(
-      app.request("/", { cookie }),
-    );
-
-    expect(ctx?.user.id).toBe(ardaId);
-    // Always a Headers — callers can ask for getSetCookie() unconditionally.
-    expect(renewalHeaders).toBeInstanceOf(Headers);
-  });
-
-  it("a session past the updateAge emits a renewal Set-Cookie", async () => {
-    const { authenticateWithHeaders } = await import(
-      "~/server/auth/require-user.server"
-    );
-    const { cookie, sessionId } = await app.cookieFor(ardaId);
-    ageSession(sessionId, 3);
-
-    const { ctx, renewalHeaders } = await authenticateWithHeaders(
-      app.request("/", { cookie }),
-    );
-
-    expect(ctx?.user.id).toBe(ardaId);
-    const setCookies = renewalHeaders.getSetCookie();
-    expect(setCookies.length).toBeGreaterThan(0);
-    expect(setCookies.join("\n")).toContain("session_token");
-  });
-
-  it("root's middleware FORWARDS that renewal cookie onto the response", async () => {
+  it("root's middleware FORWARDS a due renewal cookie onto the response", async () => {
     const { requireUser } = await import("~/server/auth/require-user.server");
     const { cookie, sessionId } = await app.cookieFor(ardaId);
     ageSession(sessionId, 3);

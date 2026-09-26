@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assertCsrfWithSecret,
-  assertTrustedOrigin,
-  CSRF_FIELD_NAME,
-  csrfTokenForSession,
-} from "./csrf.server";
+import { assertTrustedOrigin, csrfTokenForSession } from "./csrf.server";
 
 const SECRET = "csrf-secret-csrf-secret-csrf-secret-1234";
 const SESSION_ID = "abc123sessionhash";
@@ -15,11 +10,9 @@ function postRequest(options: {
   origin?: string;
   secFetchSite?: string;
   referer?: string;
-  token?: string | null;
-  headerToken?: string;
   /** Send no origin signal at all — the shape a non-browser caller produces. */
   bare?: boolean;
-} = {}) {
+} = {}): Request {
   const headers = new Headers();
   // Every app form post is a same-origin browser POST, which always carries at
   // least Origin — so that is the default here, and a case that wants the
@@ -30,16 +23,10 @@ function postRequest(options: {
   }
   if (options.secFetchSite) headers.set("Sec-Fetch-Site", options.secFetchSite);
   if (options.referer) headers.set("Referer", options.referer);
-  if (options.headerToken) headers.set("X-Csrf-Token", options.headerToken);
-  const formData = new FormData();
-  if (options.token !== null && options.token !== undefined) {
-    formData.set(CSRF_FIELD_NAME, options.token);
-  }
-  const request = new Request("http://localhost:5173/logout", {
+  return new Request("http://localhost:5173/logout", {
     method: "POST",
     headers,
   });
-  return { request, formData };
 }
 
 const validToken = () => csrfTokenForSession(SESSION_ID, SECRET);
@@ -59,18 +46,17 @@ describe("assertTrustedOrigin", () => {
     // Origin alone (every cross-origin-capable POST carries it), Sec-Fetch-Site
     // alone, a same-origin Referer alone, and all of them together.
     expect(() =>
-      assertTrustedOrigin(postRequest({ origin: SAME_ORIGIN }).request),
+      assertTrustedOrigin(postRequest({ origin: SAME_ORIGIN })),
     ).not.toThrow();
     expect(() =>
-      assertTrustedOrigin(postRequest({ secFetchSite: "same-origin" }).request),
+      assertTrustedOrigin(postRequest({ secFetchSite: "same-origin" })),
     ).not.toThrow();
     expect(() =>
-      assertTrustedOrigin(postRequest({ secFetchSite: "none" }).request),
+      assertTrustedOrigin(postRequest({ secFetchSite: "none" })),
     ).not.toThrow();
     expect(() =>
       assertTrustedOrigin(
-        postRequest({ referer: `${SAME_ORIGIN}/projects/viberr-core/board` })
-          .request,
+        postRequest({ referer: `${SAME_ORIGIN}/projects/viberr-core/board` }),
       ),
     ).not.toThrow();
     expect(() =>
@@ -79,7 +65,7 @@ describe("assertTrustedOrigin", () => {
           origin: SAME_ORIGIN,
           secFetchSite: "same-origin",
           referer: `${SAME_ORIGIN}/logout`,
-        }).request,
+        }),
       ),
     ).not.toThrow();
   });
@@ -97,7 +83,7 @@ describe("assertTrustedOrigin", () => {
     ]) {
       let thrown: unknown;
       try {
-        assertTrustedOrigin(bad.request);
+        assertTrustedOrigin(bad);
       } catch (error) {
         thrown = error;
       }
@@ -115,7 +101,7 @@ describe("assertTrustedOrigin", () => {
   it("rejects a request that carries NO origin signal at all (fails closed)", () => {
     let thrown: unknown;
     try {
-      assertTrustedOrigin(postRequest({ bare: true }).request);
+      assertTrustedOrigin(postRequest({ bare: true }));
     } catch (error) {
       thrown = error;
     }
@@ -123,67 +109,5 @@ describe("assertTrustedOrigin", () => {
     // SAFETY: the assertion above throws unless `thrown` is a Response, so
     // reaching this line means the catch binding is one.
     expect((thrown as Response).status).toBe(403);
-  });
-});
-
-describe("assertCsrfWithSecret", () => {
-  it("passes with a valid form token", async () => {
-    const { request, formData } = postRequest({
-      origin: "http://localhost:5173",
-      token: validToken(),
-    });
-    await expect(
-      assertCsrfWithSecret(request, SESSION_ID, SECRET, formData),
-    ).resolves.toBeUndefined();
-  });
-
-  it("passes with a valid X-Csrf-Token header", async () => {
-    const { request } = postRequest({ headerToken: validToken() });
-    await expect(
-      assertCsrfWithSecret(request, SESSION_ID, SECRET),
-    ).resolves.toBeUndefined();
-  });
-
-  it("rejects a missing token", async () => {
-    const { request, formData } = postRequest({ token: null });
-    await expect(
-      assertCsrfWithSecret(request, SESSION_ID, SECRET, formData),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("rejects a wrong / other-session token", async () => {
-    const wrong = postRequest({ token: "not-the-token" });
-    await expect(
-      assertCsrfWithSecret(wrong.request, SESSION_ID, SECRET, wrong.formData),
-    ).rejects.toMatchObject({ status: 403 });
-
-    const otherSession = postRequest({
-      token: csrfTokenForSession("other-session", SECRET),
-    });
-    await expect(
-      assertCsrfWithSecret(
-        otherSession.request,
-        SESSION_ID,
-        SECRET,
-        otherSession.formData,
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("rejects a valid token on a request with no origin signal (the two layers are AND)", async () => {
-    const { request, formData } = postRequest({ bare: true, token: validToken() });
-    await expect(
-      assertCsrfWithSecret(request, SESSION_ID, SECRET, formData),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("rejects a valid token when the origin is cross-site", async () => {
-    const { request, formData } = postRequest({
-      origin: "https://evil.example",
-      token: validToken(),
-    });
-    await expect(
-      assertCsrfWithSecret(request, SESSION_ID, SECRET, formData),
-    ).rejects.toMatchObject({ status: 403 });
   });
 });
