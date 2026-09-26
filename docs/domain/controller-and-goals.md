@@ -11,7 +11,7 @@
 > `app/routes/resources.controller.ts`, `app/routes/resources.controller-unseen.ts`, `app/root.tsx`
 > (the dock mount), `app/features/org-settings/controller-admin-panel.tsx`,
 > `db/migrations/0001_baseline.sql` (the two controller tables).
-> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 398, 411, 483 and 492 in
+> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 398, 411, 483, 492 and 502 in
 > [decisions.md](../architecture/decisions.md) set most of what is here.
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
@@ -433,9 +433,13 @@ a notification row: replies stay out of the bell (§8).
    paragraph (ruling 312: a ruling number inside a tool description is Viberr's own
    product decision, while a project's rules live in its knowledge base, number from 1,
    and are cited by document and section); the per-turn tool manifest generated from both
-   in-process servers' registries (ruling 297); and the measured shell inventory
-   (ruling 191). The dynamic tail behind the SDK's boundary is: the granted MCP servers
-   that did NOT mount this turn, each with the reason its own probe gave and the
+   in-process servers' registries (ruling 297); the measured shell inventory (ruling 191);
+   and the writing guide, the vendored Humanizer skill every operator drive also carries
+   (ruling 502, [operator.md §4](operator.md)). The controller writes its replies, goals
+   and directives by the guide and never names it; no profile grants it, so the settings
+   panel (§6), `configSkills` and the run's `run_inputs` skills row never list it, and no
+   lock or save removes it. The dynamic tail behind the SDK's boundary is: the granted MCP
+   servers that did NOT mount this turn, each with the reason its own probe gave and the
    instruction not to infer a cause the server did not give (ruling 310), and the
    conversation block — the asker, their live org role, the binding (and for a task
    anchor, "tools default to both, and every turn opens with the task's canonical file as

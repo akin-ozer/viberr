@@ -129,6 +129,7 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 | `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 458(c)) |
 | `vitest.config.ts` | `vitest-config.test.ts` | `testTimeout: 20_000` |
 | `tools/oxlint/anti-slop/` | `anti-slop-vendor-sync.test.ts` | matches `tools/oxlint/anti-slop.manifest.json`; re-pin with `node scripts/anti-slop-manifest.mjs` |
+| `app/server/runtimes/humanizer/`, `THIRD_PARTY_NOTICES.md` | `humanizer.server.test.ts` | holds only upstream's `SKILL.md` (matching `HUMANIZER_SKILL_SHA256`) and its `LICENSE`, and the notices name the repository, the commit and the licence; re-vendor from upstream and move the pin and `HUMANIZER_SOURCE` with it (ruling 502) |
 
 Code comments cite `docs/architecture/decisions.md` (ruling numbers),
 `docs/architecture/file-formats.md`, `docs/operations/deployment.md`,

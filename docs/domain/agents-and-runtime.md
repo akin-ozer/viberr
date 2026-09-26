@@ -1519,6 +1519,12 @@ runtime's answer for a missing grant.
   run with no checkout, and for a skill whose name the SDK would not accept
   (`isSdkSkillName`), bodies are injected into the prompt under a shared 24 000-char
   budget (`skill-body.server.ts`); symlinked folders or files are refused.
+- **The writing guide** (ruling 502): the operator's and the controller's prompts close
+  their static block with `HUMANIZER_PROMPT_SECTION`, the Humanizer skill vendored
+  unchanged in `app/server/runtimes/humanizer/` (MIT, pinned by hash,
+  `humanizer.server.ts`). It is not a store skill and no profile grants it, so it spends
+  none of the budget above, and no grant list, plugin or `run_inputs` skills row names
+  it. A specialist run does not carry it.
 - **The persona's order** (ruling 370): `buildSpecialistPromptPrefix` returns the persona
   as a static block (definition, the native-skill banner, the attached-resources banner,
   injected skill bodies, the knowledge-base notes and indexes, the MCP governance rules,
