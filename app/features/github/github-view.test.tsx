@@ -449,7 +449,6 @@ describe("CredentialManageActions (finding #13)", () => {
     const attach = render(
       <CredentialManageActions
         configured={false}
-        canManage
         inFlight={null}
         onSet={onSet}
         onClear={onClear}
@@ -463,7 +462,6 @@ describe("CredentialManageActions (finding #13)", () => {
     const bound = render(
       <CredentialManageActions
         configured
-        canManage
         inFlight={null}
         onSet={onSet}
         onClear={onClear}
@@ -495,19 +493,6 @@ describe("CredentialManageActions (finding #13)", () => {
       }),
     );
     expect(onClear).toHaveBeenCalled();
-  });
-
-  it("renders nothing when the viewer can't manage credentials", () => {
-    const { container } = render(
-      <CredentialManageActions
-        configured
-        canManage={false}
-        inFlight={null}
-        onSet={() => {}}
-        onClear={() => {}}
-      />,
-    );
-    expect(container.querySelector(".cred-manage")).toBeNull();
   });
 });
 
@@ -1287,7 +1272,6 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
     render(
       <CredentialManageActions
         configured={configured}
-        canManage
         inFlight={inFlight}
         onSet={() => {}}
         onClear={() => {}}
@@ -1371,7 +1355,6 @@ describe("ruling 480: the credential row says what re-attach does and where a to
     const { container, getByText } = render(
       <CredentialManageActions
         configured={false}
-        canManage
         inFlight={null}
         onSet={() => {}}
         onClear={() => {}}

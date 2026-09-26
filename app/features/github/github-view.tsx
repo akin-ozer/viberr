@@ -577,7 +577,6 @@ export function GithubViewPage({
   const manageActions = canGrant ? (
     <CredentialManageActions
       configured={data.credential.source === "pat"}
-      canManage={canGrant}
       inFlight={inFlightIntent(credFetcher)}
       replaceHref={
         instanceAdmin ? replaceTokenHref(data.credential.connectionId) : null

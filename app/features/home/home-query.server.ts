@@ -15,7 +15,6 @@ import {
 } from "~/server/org/resources.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { initialsOf } from "~/ui/initials";
-import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { indexDecisionInbox } from "~/server/projections/notifications.server";
 
 /**
@@ -145,36 +144,33 @@ interface HomeTaskAgg {
   updated_at: string | null;
 }
 
-export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
+/** Every project's card but the per-viewer counts `listHomeProjectsForUser`
+ *  adds (R8-3: "waiting on you" is the viewer's own decisions, never a
+ *  project-global tally). */
+function listHomeProjects(
+  db: DatabaseSync,
+): Omit<HomeProjectCard, "waiting" | "overrideWaiting">[] {
   const projects = listProjects(db);
 
   // Push the card counts into SQL (settings-query.server.ts pattern) instead of
   // loading every task row — JSON blob columns and all — into JS just to tally
   // them (pass-4 WI-9). Two GROUP BY queries cover all projects at once.
   //
-  // Per-stage distribution + per-stage pending decisions. `w` counts tasks
-  // with an open packet OR a pending operator recommendation — the SAME live
-  // rule the notifications "Waiting on you" bucket applies (F7-NOTIF1); the
-  // terminal stage is excluded per project below (needs the stage list).
+  // Per-stage distribution.
   const distBySlug = new Map<string, Record<string, number>>();
-  const waitingByStage = new Map<string, Map<string, number>>();
   // SAFETY: the row type is the SELECT list itself — `project_slug`/`stage` are
-  // NOT NULL columns, and both aggregates are integers on every group the
-  // GROUP BY emits (a group has at least one row, and the summed CASE is never
-  // NULL, so neither alias can come back null).
+  // NOT NULL columns, and the count is an integer on every group the GROUP BY
+  // emits.
   const distRows = db
     .prepare(
-      `SELECT project_slug, stage, COUNT(*) AS n,
-              SUM(CASE WHEN (packet_json IS NOT NULL AND packet_json <> '')
-                         OR recommendation_count > 0
-                       THEN 1 ELSE 0 END) AS w
+      `SELECT project_slug, stage, COUNT(*) AS n
        FROM task_projections
-       -- R14-3: archived tasks leave the home card's stage bar and its
-       -- waiting count, the same way they leave the board's default view.
+       -- R14-3: archived tasks leave the home card's stage bar, the same way
+       -- they leave the board's default view.
        WHERE archived = 0
        GROUP BY project_slug, stage`,
     )
-    .all() as { project_slug: string; stage: string; n: number; w: number }[];
+    .all() as { project_slug: string; stage: string; n: number }[];
   for (const r of distRows) {
     let d = distBySlug.get(r.project_slug);
     if (!d) {
@@ -182,12 +178,6 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
       distBySlug.set(r.project_slug, d);
     }
     d[r.stage] = r.n;
-    let w = waitingByStage.get(r.project_slug);
-    if (!w) {
-      w = new Map();
-      waitingByStage.set(r.project_slug, w);
-    }
-    w.set(r.stage, r.w);
   }
 
   // Per-project totals: task count and the latest updatedAt.
@@ -254,13 +244,6 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
     });
 
     const agg = aggBySlug.get(project.slug);
-    // Live "waiting on you" (F7-NOTIF1): sum the per-stage pending-decision
-    // counts, skipping the project's terminal stage — a Done task's leftover
-    // packet/recommendation is a resolved decision, not a pending one.
-    let waiting = 0;
-    for (const [stage, w] of waitingByStage.get(project.slug) ?? []) {
-      if (!isTerminalStage(stage, project.stages)) waiting += w;
-    }
     return {
       slug: project.slug,
       name: project.name,
@@ -276,11 +259,6 @@ export function listHomeProjects(db: DatabaseSync): HomeProjectCard[] {
       dist: distBySlug.get(project.slug) ?? {},
       total: agg?.total ?? 0,
       running: agg?.running ?? 0,
-      // Project-global pending-decision count. `listHomeProjectsForUser`
-      // replaces this with the viewer's member-scoped `mine` count (R8-3);
-      // kept here as a fallback for any non-user-scoped caller.
-      waiting,
-      overrideWaiting: 0,
       members,
       // UI-02: NEVER fall back to `project.parsedAt` — that column is
       // `nowIso()` at projection time, not a change timestamp.

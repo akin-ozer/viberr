@@ -2351,7 +2351,6 @@ export function RepoPanel({
           manageActions={
             <CredentialManageActions
               configured={credential.source === "pat"}
-              canManage={canGrant}
               inFlight={credInFlight}
               replaceHref={
                 instanceAdmin ? replaceTokenHref(credential.connectionId) : null
