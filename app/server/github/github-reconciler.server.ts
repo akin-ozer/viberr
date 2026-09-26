@@ -356,6 +356,30 @@ function projectMemberIds(
   return new Set(file.parsed.frontmatter.members.map((m) => m.userId));
 }
 
+/**
+ * Ruling 496 (pass 40, F40-72): the `pr.checksUnread` record for a check-runs
+ * read GitHub refused on this pass. `at` is when the refusal was first seen:
+ * the same refusal again on the same PR (the caller passes that PR's cached
+ * record, so the same number) with the same status and message keeps the
+ * cached record whole, and a refusal that differs is stamped now.
+ *
+ * Stamping every refused pass made the task's `{pr, github}` snapshot differ
+ * from its file on every poll. Live on WEB-12 (deploy 10), whose credential has
+ * no `checks:read`, each five-minute pass rewrote task.md, rebuilt the
+ * projection (every open page revalidated) and wrote a `github.reconcile` row
+ * that differed from the last only in the time: 19 rows in 80 minutes, where
+ * DG-3 records a poll only when it changed something.
+ */
+function checksRefusal(
+  refused: { status: number | null; message: string },
+  cached: PrRef["checksUnread"],
+): NonNullable<PrRef["checksUnread"]> {
+  if (cached && cached.status === refused.status && cached.message === refused.message) {
+    return cached;
+  }
+  return { status: refused.status, message: refused.message, at: new Date().toISOString() };
+}
+
 /** Body of `reconcileTask` — only ever entered through the per-task lock. */
 async function reconcileTaskUnlocked(
   db: DatabaseSync,
@@ -480,15 +504,11 @@ async function reconcileTaskUnlocked(
   const checks = pr ? (pr.checks ?? cachedPr?.checks ?? null) : null;
   // Ruling 360: a refused read is a fact of its own. It rides through a pass
   // that read nothing like every other cached PR fact, and the first read that
-  // succeeds drops it.
+  // succeeds drops it. Ruling 496: the same refusal keeps its first `at`.
   const checksUnread = checks
     ? null
     : pr?.checksUnread
-      ? {
-          status: pr.checksUnread.status,
-          message: pr.checksUnread.message,
-          at: new Date().toISOString(),
-        }
+      ? checksRefusal(pr.checksUnread, cachedPr?.checksUnread)
       : (cachedPr?.checksUnread ?? null);
   // Ruling 360: a 403 on the check-runs read is the credential, exactly as a
   // 403 on the PR create is (pull_request:write) or on the compare (repo). It
@@ -695,6 +715,10 @@ async function reconcileTaskUnlocked(
     // Each fact below is an OPTIONAL KEY, never a null one: absent means "not
     // read this pass" (so the writer omits it and the reader keeps the cached
     // value), which is a different claim from "read, and there is nothing".
+    // Ruling 496: the keys are set in `prRefSchema`'s order, then the loose
+    // ones, because `changed` below compares this object with the parsed file
+    // as text and the parse returns that order. A key set out of it reads as a
+    // change on every pass.
     const owned: PrRef = {
       number: pr.number,
       state: prState ?? pr.state,
@@ -718,16 +742,18 @@ async function reconcileTaskUnlocked(
         ? (cachedPr.paths ?? null)
         : null);
     if (carriedPaths) owned.paths = carriedPaths;
+    // Ruling 135: the head as GitHub reported it on THIS read. Before the
+    // drift, as the schema orders them: set after it, a PR carrying a drift
+    // differed from its own file on every pass (ruling 496).
+    if (pr.headSha) owned.headSha = pr.headSha;
     // A measured drift wins; on a settled PR (nothing measured this pass) the
     // last measurement is carried forward for the SAME PR — see `driftMeasurable`.
     const carriedDrift =
       revisionDrift ?? (driftMeasurable ? null : (cachedPr?.revisionDrift ?? null));
     if (carriedDrift) owned.revisionDrift = carriedDrift;
-    // Ruling 135: the head as GitHub reported it on THIS read, and the
-    // unpushed record: measured this pass, else the SAME PR's cached record.
-    // `unpushedRevisionOf` refuses a record for a revision that is no longer
-    // current, so carrying is never a lie about a later revision.
-    if (pr.headSha) owned.headSha = pr.headSha;
+    // Ruling 135: the unpushed record: measured this pass, else the SAME PR's
+    // cached record. `unpushedRevisionOf` refuses a record for a revision that
+    // is no longer current, so carrying is never a lie about a later revision.
     const carriedUnpushed = unpushedMeasured
       ? unpushed
       : (cachedPr?.unpushedRevision ?? null);

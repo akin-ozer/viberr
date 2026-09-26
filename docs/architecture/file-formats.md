@@ -603,11 +603,13 @@ Notes:
   - `verdicts[].reviews` (ruling 416(b): same-result reviews of the revision, fought or not;
     absent reads as `rounds`) and `verdicts[].answers: completeness` (ruling 421: the reviewer
     answered the completeness question on this revision in the current same-result streak);
-  - `pr.checksUnread: { status, message, at }` (ruling 360: the last refused check-runs read,
-    kept only while `checks` has never been read) and `pr.paths: { headSha, changed,
-    truncated }` (ruling 236: the paths the PR changes, pinned to the head they were read at,
-    capped at `PR_PATHS_MAX` = 300). Every `pr` fact is an optional key: absent means never
-    read, and an unparseable value reads as null without dropping the PR;
+  - `pr.checksUnread: { status, message, at }` (ruling 360: a check-runs read GitHub refused,
+    kept only while `checks` has never been read; `at` is when that refusal was first seen,
+    kept by every later pass that meets the same status and message on the same PR, ruling
+    496) and `pr.paths: { headSha, changed, truncated }` (ruling 236: the paths the PR
+    changes, pinned to the head they were read at, capped at `PR_PATHS_MAX` = 300). Every
+    `pr` fact is an optional key: absent means never read, and an unparseable value reads as
+    null without dropping the PR;
   - `github.otherCommits` (ruling 179: branch commits without this task's `[KEY]` prefix) and
     `github.commits[].pushed` (ruling 187: whether the remote has the commit; absent = not
     judged).
