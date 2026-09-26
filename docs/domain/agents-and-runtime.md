@@ -48,7 +48,9 @@ retry), the **asker** for a controller turn. A task with no owner cannot run age
 **Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
 backend (`MAX_ACCOUNTS_PER_BACKEND`), one `user_backend_credentials` row each. Exactly one
 per (person, backend) is **active**, the one every run on that backend bills: the most
-recently selected (`selected_at`, ties to the newer row; `ACTIVE_FIRST`). Connecting, by a
+recently selected (`selected_at`; `ACTIVE_FIRST`). Every selection is stamped past the
+person's latest one on that backend (`selectionStamp`), so two selections in one millisecond
+still rank in the order they happened. Connecting, by a
 hosted sign-in or a pasted key, adds an account and makes it active; switching
 (`switchBackendAccount`, Profile → Agent accounts' **Use this account**) stamps
 `selected_at` and nothing else, so no vendor process runs and no file moves, and a run

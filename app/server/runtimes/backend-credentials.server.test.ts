@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -92,6 +92,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   resetFakeVendorEnv();
   vendors.cleanup();
   ctx.cleanup();
@@ -519,6 +520,9 @@ describe("recordBackendLogin", () => {
 
 describe("switching accounts (ruling 507)", () => {
   it("makes another account the one runs bill, with no vendor process and no file moved", () => {
+    // Both sign-ins and the switch land in one millisecond: the account
+    // selected last wins on its stamp, never on the order of the random ids.
+    vi.useFakeTimers({ toFake: ["Date"] });
     const work = signIn("claude", "claudeai", { email: "work@example.com" });
     const personal = signIn("claude", "claudeai", { email: "personal@example.com" });
     expect(getBackendCredential(db, actor.userId, "claude")?.id).toBe(personal.row.id);
@@ -865,7 +869,10 @@ describe("userBackendHealth", () => {
 
   it("says a working account is one switch away when the one in use cannot run (ruling 507)", async () => {
     await pasteKey("claude");
-    signIn("claude", "claudeai", { email: "wiped@example.com" }, { file: false });
+    const wiped = signIn("claude", "claudeai", { email: "wiped@example.com" }, { file: false });
+    // A wiped volume takes the account's home with it, so no platform can
+    // count the sign-in as present (macOS honours a home without the file).
+    rmSync(wiped.home, { recursive: true, force: true });
     const health = userBackendHealth(db, actor.userId, "claude", { dataRoot, platform: "linux" });
     expect(health.available).toBe(false);
     expect(health.detail).toBe(
@@ -1023,7 +1030,8 @@ describe("runCredentialFor", () => {
   });
 
   it("refuses a sign-in whose file is gone, naming the wiped volume", () => {
-    signIn("codex", "device", {}, { file: false });
+    const wiped = signIn("codex", "device", {}, { file: false });
+    rmSync(wiped.home, { recursive: true, force: true });
     const error = thrownFrom(() => runCredentialFor(db, actor.userId, "codex", dataRoot));
     expect(error?.code).toBe(ERROR_CODES.RUN_UNAVAILABLE);
     expect(error?.userMessage).toContain("sign-in file is missing");
