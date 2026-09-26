@@ -70,9 +70,3 @@ export function throttledMessage(what: string, retryAfterMs: number): string {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
   return `${what} already ran a moment ago — try again in ${seconds}s.`;
 }
-
-/** Clears cooldowns (tests, and any future "force" affordance). */
-export function resetSingleFlight(key?: string): void {
-  if (key === undefined) lastRunAt.clear();
-  else lastRunAt.delete(key);
-}
