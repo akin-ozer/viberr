@@ -62,13 +62,13 @@ import {
  * cut on `### ` boundaries — and says how many it dropped.
  */
 
-export const TASK_FILE_CONTEXT_CHARS = 24_000;
+const TASK_FILE_CONTEXT_CHARS = 24_000;
 export const BOARD_CONTEXT_TASKS = 40;
 const BOARD_CONTEXT_MEMBERS = 20;
 const BOARD_CONTEXT_EPICS = 20;
 const BOARD_CONTEXT_CHARS = 12_000;
 const INSTANCE_CONTEXT_PROJECTS = 40;
-export const CONTEXT_BLOCK_CHARS = 32_000;
+const CONTEXT_BLOCK_CHARS = 32_000;
 
 export interface ControllerContextInput {
   projectSlug: string | null;

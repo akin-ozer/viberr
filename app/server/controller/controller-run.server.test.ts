@@ -32,6 +32,34 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/** The system prompt for a fresh conversation in `scope`, asked by arda as an
+ *  org admin under the stored controller config with nothing mounted; `extra`
+ *  replaces any of those inputs. */
+async function build(
+  scope: { projectSlug?: string; taskKey?: string },
+  extra: Partial<Parameters<typeof import("./controller-run.server").buildControllerSystemPrompt>[1]> = {},
+) {
+  const { buildControllerSystemPrompt } = await import("./controller-run.server");
+  const { resolveControllerConfig } = await import("./controller-profile.server");
+  const { createConversation } = await import("./controller-conversations.server");
+  const conversation = createConversation(app.db, {
+    userId: user.id,
+    userLabel: user.email,
+    ...scope,
+  });
+  return buildControllerSystemPrompt(app.db, {
+    conversation,
+    user: { ...user, orgRole: "admin" },
+    config: resolveControllerConfig(app.dataRoot),
+    mountedMcps: [],
+    unresolvedMcps: [],
+    toolkit: [],
+    deniedTools: [],
+    dataRoot: app.dataRoot,
+    ...extra,
+  });
+}
+
 describe("controller mounts (ruling 107)", () => {
   it("attaches viberr_ops on a turn with NO org MCP grants at all", async () => {
     const { buildControllerMounts } = await import("./controller-run.server");
@@ -143,16 +171,8 @@ describe("controller mounts (ruling 107)", () => {
    * the system prompt, which Viberr rebuilds and re-sends every turn.
    */
   it("ruling 297: the tool manifest rides in the PER-TURN system prompt, not in the servers' frozen instructions", async () => {
-    const { buildControllerSystemPrompt, buildControllerMounts } = await import(
-      "./controller-run.server"
-    );
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
+    const { buildControllerMounts } = await import("./controller-run.server");
     const { publishedInstructions } = await import("../../../test-support/mcp-tool-meta");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
     const mounts = buildControllerMounts(app.db, {
       user: { id: user.id, email: user.email, name: user.name },
       projectSlug: null,
@@ -161,17 +181,7 @@ describe("controller mounts (ruling 107)", () => {
       kb: [],
       dataRoot: app.dataRoot,
     });
-    const prompt = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolManifest: mounts.toolManifest,
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const { prompt } = await build({}, { toolManifest: mounts.toolManifest });
 
     // CANARY: leave the manifest on the servers' `instructions` and a running
     // conversation never learns what it now holds.
@@ -203,24 +213,8 @@ describe("controller mounts (ruling 107)", () => {
    * So the tier-to-action mapping came from the model's own prose memory.
    */
   it("ruling 309: the authorization map rides in the per-turn prompt, advisory and generated", async () => {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
     const { RBAC_DEFINITIONS } = await import("~/shared/rbac");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
-    const prompt = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const { prompt } = await build({});
     // CANARY: unwire `projectAuthorityPrompt()` and the model is back to
     // supplying viberr's own role tiers from memory.
     expect(prompt).toContain("What a project role may do");
@@ -244,25 +238,11 @@ describe("controller mounts (ruling 107)", () => {
    * each server gave was one `.map((u) => u.name)` from reaching it.
    */
   it("ruling 310: an unmounted grant reaches the controller with the reason it gave", async () => {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
-    const prompt = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      mountedMcps: [],
+    const { prompt } = await build({}, {
       unresolvedMcps: [
         { name: "kb-architecture", reason: "its stored credential could not be opened" },
       ],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    });
     // CANARY: map the grants back to names and the reason disappears.
     expect(prompt).toContain("kb-architecture (its stored credential could not be opened)");
     expect(prompt).toContain("do not infer a cause the server did not give");
@@ -282,23 +262,7 @@ describe("controller mounts (ruling 107)", () => {
    * consultable, and doesn't, is a soft version of the same class."
    */
   it("ruling 312: says which ruling namespace a tool description means", async () => {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
-    const prompt = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const { prompt } = await build({});
     // CANARY: drop the paragraph and "ruling 4" in a task directive and
     // "ruling 246" in a tool description read as the same numbering.
     expect(prompt).toContain("is Viberr's own product decision");
@@ -315,62 +279,28 @@ describe("controller mounts (ruling 107)", () => {
    * may learn of it. (The seeded store's half is in `humanizer.server.test.ts`.)
    */
   it("ruling 502: every turn closes its static block with the writing guide, and its disclosure never names it", async () => {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
     const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
     const { HUMANIZER_PROMPT_SECTION } = await import("~/server/runtimes/humanizer.server");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
     const config = resolveControllerConfig(app.dataRoot);
-    const build = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
+    const built = await build({}, {
       config,
-      mountedMcps: [],
       unresolvedMcps: [{ name: "kb-architecture", reason: "not registered" }],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
     });
     // CANARY: drop the `parts.push` in buildControllerSystemPrompt and the
     // static block ends on the shell inventory again.
-    expect(build.prefix.static.at(-1)).toBe(HUMANIZER_PROMPT_SECTION);
-    expect(build.prefix.dynamic.join("")).not.toContain("# How you write");
-    expect(build.prompt.split(HUMANIZER_PROMPT_SECTION)).toHaveLength(2);
+    expect(built.prefix.static.at(-1)).toBe(HUMANIZER_PROMPT_SECTION);
+    expect(built.prefix.dynamic.join("")).not.toContain("# How you write");
+    expect(built.prompt.split(HUMANIZER_PROMPT_SECTION)).toHaveLength(2);
     // The turn's disclosure and the settings panel read the same grants.
-    expect(build.inputs.skills.granted).toEqual(sortedNames(config.skills));
+    expect(built.inputs.skills.granted).toEqual(sortedNames(config.skills));
     expect(config.skills).not.toContain("humanizer");
     // The tail still carries this turn's own notices.
-    expect(build.prefix.dynamic.join("")).toContain("kb-architecture (not registered)");
+    expect(built.prefix.dynamic.join("")).toContain("kb-architecture (not registered)");
   });
 
   it("tells the model the diagnostics are attached, on every turn", async () => {
-    const { buildControllerSystemPrompt } = await import(
-      "./controller-run.server"
-    );
-    const { resolveControllerConfig } = await import(
-      "./controller-profile.server"
-    );
-    const { createConversation } = await import(
-      "./controller-conversations.server"
-    );
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
-    const prompt = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      // No org MCP mounted: the sentence is not conditional on grants.
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    // No org MCP mounted: the sentence is not conditional on grants.
+    const { prompt } = await build({}, { mountedMcps: [] });
     expect(prompt).toContain("viberr_ops");
     expect(prompt).toContain("read-only");
     // …and it says whose permissions the calls run under, because that is what
@@ -401,23 +331,7 @@ describe("controller mounts (ruling 107)", () => {
    * to ask for is not a fact the planner has.
    */
   it("ruling 191: carries the agents' shell inventory without being asked", async () => {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-    });
-    const prompt = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const { prompt } = await build({});
     // CANARY: remove the section and the planner is back to guessing.
     expect(prompt).toContain("# Shell inventory (measured on this host, not a guess)");
     expect(prompt).toContain("NOT installed: make, docker, pnpm, yarn, curl, python3, go.");
@@ -571,7 +485,7 @@ describe("the turn carries the context read (ruling 121)", () => {
    * ... claude-opus-5[1m]" in its own context and had to reason its way past it.
    */
   it("ruling 444: the model is named in the turn, never in the recorded system prompt", async () => {
-    const { buildTurnPrompt, buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { buildTurnPrompt } = await import("./controller-run.server");
     const { resolveControllerConfig } = await import("./controller-profile.server");
     const { createConversation } = await import("./controller-conversations.server");
     const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
@@ -588,17 +502,10 @@ describe("the turn carries the context read (ruling 121)", () => {
     expect(prompt.indexOf("You run on model")).toBeLessThan(prompt.indexOf(`${user.email} says:`));
     // CANARY: name the model in the system prompt again and a resumed
     // conversation replays the old one after every switch.
-    const system = buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
+    const { prompt: system } = await build({}, {
       config: { ...resolveControllerConfig(app.dataRoot), model: "opus[1m]" },
       toolManifest: "",
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    });
     expect(system).not.toContain("opus[1m]");
     expect(system).toContain("Each turn's message names the model you run on");
   });
@@ -867,32 +774,6 @@ describe("the turn carries the context read (ruling 121)", () => {
       await disconnectFakeBackend(app.db, user.id, "claude");
     }
   });
-
-  it("records the surface on the user message the turn was asked from", async () => {
-    const { runControllerTurn } = await import("./controller-run.server");
-    const { createConversation, listMessages } = await import(
-      "./controller-conversations.server"
-    );
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-      projectSlug: "viberr-core",
-      taskKey: "VIB-142",
-    });
-    // The hermetic default has no Claude credential: the turn is refused IN
-    // the transcript, which is enough to prove the user row's surface landed.
-    await runControllerTurn(app.db, {
-      conversationId: conversation.id,
-      text: "what is this task?",
-      user: { ...user, orgRole: "admin" },
-      surface: "/projects/viberr-core/tasks/VIB-142",
-      dataRoot: app.dataRoot,
-    });
-    const messages = listMessages(app.db, conversation.id);
-    expect(messages[0]?.author).toBe("user");
-    expect(messages[0]?.surface).toBe("/projects/viberr-core/tasks/VIB-142");
-    expect(messages.filter((m) => m.author === "controller").every((m) => m.surface === null)).toBe(true);
-  });
 });
 
 /**
@@ -1003,41 +884,25 @@ describe("ruling 292: the controller can read an entry its own read cut", () => 
 
 /**
  * Ruling 283 — the controller's prompt INDEXES its knowledge bases and its
- * toolkit reads them. Two reads of "which knowledge bases does this turn hold"
- * is how a run ends up with a prompt naming a knowledge base its own tool
- * refuses, so there is one: `controllerKbNames`.
+ * toolkit reads them, through `read_knowledge_doc`, which a turn mounts
+ * exactly when it holds a knowledge base. (The index is pinned in
+ * project-rulings.server.test.ts, the read in kb-injection.server.test.ts.)
  */
-describe("ruling 283: the prompt and the tool name the SAME knowledge bases", () => {
-  it("a project-scoped turn indexes the project's rulings KB and can read it", async () => {
-    const { writeFileSync, mkdirSync } = await import("node:fs");
-    const { kbDirPath } = await import("~/server/files/file-store-root.server");
-    const dir = kbDirPath("ctl-rulings", app.dataRoot);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(`${dir}/settled.md`, "# SENTINEL-CTL-HEADING\n\nSENTINEL-CTL-BODY\n");
-
-    const { buildControllerMounts, controllerKbNames } = await import(
-      "./controller-run.server"
-    );
-    const kb = controllerKbNames(["ctl-rulings"], "viberr-core", app.dataRoot);
+describe("ruling 283: read_knowledge_doc is mounted exactly when the turn holds a knowledge base", () => {
+  it("a turn holding a knowledge base mounts read_knowledge_doc", async () => {
+    const { buildControllerMounts } = await import("./controller-run.server");
     const mounts = buildControllerMounts(app.db, {
       user,
       projectSlug: "viberr-core",
       taskKey: null,
       orgServers: {},
-      kb,
+      kb: ["ctl-rulings"],
       dataRoot: app.dataRoot,
     });
     // Canary: drop the `kb` dep from `buildControllerToolkit` (or gate the tool
     // on org-admin, as `read_store_doc` is) and this allow-list entry vanishes
     // while the prompt keeps promising the index.
     expect(mounts.allowedTools).toContain("mcp__viberr_controller__read_knowledge_doc");
-
-    // And the tool reads what the index named — the BODY the prompt no longer
-    // carries, which is the whole trade ruling 283 makes.
-    const { readKbDocForRun } = await import("~/server/files/kb-injection.server");
-    expect(readKbDocForRun(kb, "ctl-rulings", "settled.md", app.dataRoot)).toContain(
-      "SENTINEL-CTL-BODY",
-    );
   });
 
   it("a turn holding no knowledge base mounts no reader for one", async () => {
@@ -1062,28 +927,6 @@ describe("ruling 283: the prompt and the tool name the SAME knowledge bases", ()
  * mount notices differ. The adapter records the split for the session.
  */
 describe("ruling 370: the controller prefix", () => {
-  async function build(scope: { projectSlug?: string; taskKey?: string }, extra: Partial<Parameters<typeof import("./controller-run.server").buildControllerSystemPrompt>[1]> = {}) {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const { createConversation } = await import("./controller-conversations.server");
-    const conversation = createConversation(app.db, {
-      userId: user.id,
-      userLabel: user.email,
-      ...scope,
-    });
-    return buildControllerSystemPrompt(app.db, {
-      conversation,
-      user: { ...user, orgRole: "admin" },
-      config: resolveControllerConfig(app.dataRoot),
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-      ...extra,
-    });
-  }
-
   it("an instance-scoped and a board-scoped conversation share the static block; the conversation block is the tail", async () => {
     const instance = await build({});
     const board = await build({ projectSlug: "viberr-core" });

@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { createRoutesStub, useLocation, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, surfaceLabel } from "./controller-page";
-import { readableStep } from "./turn-step";
+import { readableStep } from "~/features/runtime/readable-step";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
@@ -26,7 +26,8 @@ import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
  * accounts.
  */
 
-// jsdom's Element carries no `scrollIntoView`; the transcript calls it on mount.
+// jsdom's Element has no `scrollIntoView`; the ruling 419(b) case spies on it
+// to prove the page never calls it.
 Element.prototype.scrollIntoView = () => {};
 
 afterEach(cleanup);
@@ -299,80 +300,31 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     expect(box.placeholder).toContain("only the conversation's owner");
     expect(box.placeholder).not.toContain("Claude");
   });
-
-  /**
-   * Ruling 259 (pass 37, F37-90): the composer keeps the words until the server
-   * takes them.
-   *
-   * `setText("")` ran synchronously after `fetcher.submit`, optimistically, and
-   * nothing anywhere held the string. An expired CSRF token is refused BEFORE
-   * the engine runs, so the text reached no transcript at all; a 404 on a scope
-   * that is not open, or any transport failure, did the same. The person got a
-   * toast that unmounts itself after 2,600 ms, and their message was gone. Four
-   * of the five longest messages on the live board are 1,800 to 2,200
-   * characters, typed into a two-row textarea.
-   */
-  it("ruling 259: a failed send leaves the typed message in the box", async () => {
-    const typed = "A long ask I do not want to retype. ".repeat(20);
-    const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [] }),
-      // The CSRF arm: refused before the controller engine is ever reached.
-      () => ({ ok: false, error: "That request expired. Reload the page and try again." }),
-    );
-    await screen.findByText("Managing this instance with your own permissions.");
-    const box = composer(container);
-    fireEvent.change(box, { target: { value: typed } });
-    expect(box.value).toBe(typed);
-
-    const send = screen.getByRole("button", { name: "Send" });
-    await act(async () => {
-      fireEvent.click(send);
-    });
-
-    // CANARY: move `setText("")` back beside `send.submit(...)` and this is "".
-    expect(box.value).toBe(typed);
-  });
-
-  it("ruling 259: a successful send clears it", async () => {
-    const posted: Record<string, string>[] = [];
-    const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [] }),
-      async ({ request }) => {
-        const form = await request.formData();
-        posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
-        return { ok: true, conversationId: "cv_new" };
-      },
-    );
-    await screen.findByText("Managing this instance with your own permissions.");
-    const box = composer(container);
-    fireEvent.change(box, { target: { value: "short ask" } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    });
-    // CANARY: clear on neither path and the box keeps every message ever sent.
-    expect(box.value).toBe("");
-    // U39-24: the zone this page prints times in goes with the message, so
-    // the controller quotes times in it. CANARY: drop it from `sendForm`.
-    expect(posted[0]?.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
-  });
 });
 
 /**
- * Ruling 259's clear, for a message that ends in whitespace. The composer
- * sends the TRIMMED text, and the success handler used to compare that against
- * the raw box, so "hello " or a message ending in a newline stayed in the box
- * after the controller had taken it.
+ * Ruling 259 (pass 37, F37-90): the composer keeps the words until the server
+ * takes them. It used to clear the box as it submitted, so a send refused
+ * before the engine ran (an expired CSRF token, a scope that is not open, a
+ * transport failure) lost the message; four of the five longest messages on
+ * the live board are 1,800 to 2,200 characters.
+ *
+ * And the clear, for a message that ends in whitespace. The composer sends the
+ * TRIMMED text, and the success handler used to compare that against the raw
+ * box, so "hello " or a message ending in a newline stayed in the box after
+ * the controller had taken it.
  */
 describe("ruling 259: the box is compared with what went out, trimmed", () => {
   const typed = "hello \n";
 
   /** An action the test settles by hand, so the send stays in flight. */
   function held(result: { ok: boolean; error?: string }) {
-    const posted: string[] = [];
+    const posted: Record<string, string>[] = [];
     let settle!: () => void;
     const gate = new Promise<void>((r) => (settle = r));
     const action: ActionFunction = async ({ request }) => {
-      posted.push(String((await request.formData()).get("text")));
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
       await gate;
       return result;
     };
@@ -404,7 +356,10 @@ describe("ruling 259: the box is compared with what went out, trimmed", () => {
     const { action, posted, settle } = held({ ok: true });
     const box = await sendTyped(action);
     await land(settle);
-    expect(posted).toEqual(["hello"]);
+    expect(posted.map((p) => p.text)).toEqual(["hello"]);
+    // U39-24: the zone this page prints times in goes with the message, so
+    // the controller quotes times in it. CANARY: drop it from `sendForm`.
+    expect(posted[0]!.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     // CANARY: compare the raw box (`cur === sent`) and this stays "hello \n".
     expect(box.value).toBe("");
   });
@@ -422,7 +377,8 @@ describe("ruling 259: the box is compared with what went out, trimmed", () => {
     const { action, settle } = held({ ok: false, error: "That request expired. Reload the page and try again." });
     const box = await sendTyped(action);
     await land(settle);
-    // CANARY: drop the `data.ok` guard and the failed message is gone.
+    // CANARY: move `setText("")` back beside `send.submit(...)`, or drop the
+    // `data.ok` guard, and the failed message is gone.
     expect(box.value).toBe(typed);
   });
 });
@@ -479,15 +435,7 @@ describe("the open conversation's execution", () => {
       conversation,
       viewerOwnsActive: true,
       turn: { working: true, runId: "run_ctl", phase: null, step: null, answering: null, queued: [] },
-      // The elapsed cell below is asserted to the second, and `run.startedAt`
-      // is stamped once when this describe body evaluates — so every test that
-      // runs BEFORE it spent part of that assertion's budget, and under a full
-      // suite the clock read 01:07 against a window written for 01:05–01:06.
-      // Stamped per render instead: the only gap left is this call to
-      // `useElapsed`'s first tick, which is milliseconds. (The same defect
-      // SHOP-35 is fixing in the clone — a fixture's cost sitting inside a
-      // waiting test's budget — in Viberr's own suite.)
-      runtime: [{ ...run, startedAt: new Date(Date.now() - 65_000).toISOString() }],
+      runtime: [run],
       canInterruptTurn: true,
       ...over,
     });
@@ -621,7 +569,7 @@ describe("the open conversation's execution", () => {
     );
   });
 
-  it("renders the strip (elapsed, turns, tokens, model, View logs, Interrupt) and the console", async () => {
+  it("renders the strip (phase, step, model, Interrupt) and discloses the console on it", async () => {
     // Canary: render only the transcript's "is working" row again and every
     // assertion below fails.
     const { container } = renderPage(working(), "?c=cnv_b");
@@ -629,23 +577,12 @@ describe("the open conversation's execution", () => {
     expect(screen.getByText("1 agent running")).toBeTruthy();
     expect(screen.getByText("Working")).toBeTruthy();
     expect(screen.getByText("viberr_controller · list_tasks")).toBeTruthy();
-    // Elapsed derives from the run's own startedAt (~65 s), never a counter;
-    // `useElapsed` reads the clock after mount, so wait for its first tick.
-    await waitFor(() =>
-      expect(container.querySelector(".run-cell .lw-clock")?.getAttribute("data-clock")).toMatch(/^01:0[56]$/),
+    // The Elapsed, Turns and Tokens cells are LiveRunPanel's own, pinned in
+    // runs-panels.test.tsx; the model the turn runs on is read here.
+    const runtimeCell = [...container.querySelectorAll(".run-cell")].find(
+      (c) => c.querySelector(".lbl")?.textContent === "Runtime",
     );
-    // Ruling 366(e): Elapsed and Tokens roll their digits, and carry the plain
-    // figure on the wrapper's `data-` attribute; the cell is read through it.
-    // Ruling 451(e): so does Turns.
-    const plain = (c: Element) =>
-      c.querySelector(".lbl")!.textContent +
-      (c.querySelector(".lw-clock")?.getAttribute("data-clock") ??
-        c.querySelector(".lw-clock")?.getAttribute("data-tokens") ??
-        c.querySelector(".lw-clock")?.getAttribute("data-turns") ??
-        c.querySelector(".val")!.textContent);
-    const cells = [...container.querySelectorAll(".run-cell")].map(plain);
-    expect(cells[0]).toMatch(/^Elapsed01:0[56]$/);
-    expect(cells.slice(1)).toEqual(["Turns3", "Tokens1.2k", "Runtimeclaude-opus-4-8"]);
+    expect(runtimeCell?.querySelector(".val")?.textContent).toBe("claude-opus-4-8");
     expect(screen.getByRole("button", { name: "Interrupt" })).toBeTruthy();
 
     // F39 (owner decision): while the turn streams, its console is DISCLOSED

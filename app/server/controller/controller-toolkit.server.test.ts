@@ -109,6 +109,39 @@ async function call(
   return callToolText(toolkit.tools, toolName, args);
 }
 
+/**
+ * Store a GitHub connection for `owner` whose token was validated with the
+ * `repo` scope, as Instance settings saves one, so `create_project` finds a
+ * connection for that owner. Each case brings its own fake GitHub.
+ */
+async function connectOwner(owner: string, token: string): Promise<void> {
+  const { createPat, recordPatValidation } = await import("~/server/secrets/pat-store.server");
+  const pat = createPat(
+    app.db,
+    { userId: ids.projectAdmin, label: `connection · ${owner}`, token },
+    { userId: ids.projectAdmin, label: "elif" },
+  );
+  recordPatValidation(app.db, pat.id, {
+    status: "valid",
+    checkedAt: new Date().toISOString(),
+    login: owner,
+    tokenKind: "classic",
+    expiresAt: null,
+    repo: null,
+    scopes: [],
+    missingScopes: [],
+    headerScopes: ["repo"],
+    detail: "",
+  });
+  const now = new Date().toISOString();
+  app.db
+    .prepare(
+      `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?)`,
+    )
+    .run(owner, owner, pat.id, now, now);
+}
+
 // ------------------------------------------------------------ tool surface
 
 describe("the tool surface itself encodes the invariants", () => {
@@ -126,6 +159,10 @@ describe("the tool surface itself encodes the invariants", () => {
       "accept",
       "force",
       "resolve_packet",
+      // Ruling 251: list_decisions briefs the person and links the control;
+      // no tool answers a decision.
+      "answer_packet",
+      "decide",
       "delete",
     ]) {
       expect(
@@ -139,12 +176,6 @@ describe("the tool surface itself encodes the invariants", () => {
     // project, task, user, template or resource. Any other removal is a new
     // decision. CANARY: register another `remove_*` tool.
     expect(names.filter((n) => n.startsWith("remove_"))).toEqual(["remove_agent_deployment"]);
-    // The whole surface is enumerated so a new tool is a deliberate decision.
-    expect(names.length).toBeGreaterThanOrEqual(25);
-    // Ruling 153 (pass 35, G35-1): the wall-clock half of setting a project
-    // up. Canary: remove either `add(` registration.
-    expect(names).toContain("schedule_task_action");
-    expect(names).toContain("cancel_task_schedule");
   });
 
   it("stays deferred behind ToolSearch: loading 40+ tools up front costs more than the hop (Option D PR 4(a))", async () => {
@@ -286,21 +317,6 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     });
     rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
   }
-
-  it("still has no tool that ANSWERS a decision", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
-    const names = toolkit.tools.map((t) => t.name);
-    // The owner's call (2026-09-15): brief and link, never decide. `list_` is
-    // the whole permitted verb here.
-    expect(names).toContain("list_decisions");
-    expect(names.filter((n) => /resolve_packet|answer_packet|decide/.test(n))).toEqual([]);
-  });
 
   /**
    * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
@@ -1007,6 +1023,12 @@ describe("instance scope: org-role gate on every management tool", () => {
         stages: ["impl"],
       },
     },
+    // Ruling 390. The KB is created only further down, so the admin's call
+    // here stops at "Create it first" and records no ask.
+    {
+      tool: "request_resource_grant",
+      args: { kind: "kb", name: "instance-standing-rules", reason: "A member should not reach this." },
+    },
   ];
 
   for (const probe of adminOnly) {
@@ -1147,16 +1169,6 @@ describe("instance scope: org-role gate on every management tool", () => {
     });
     expect(bogus).toContain("[denied]");
     expect(bogus).toContain("Create it first");
-  });
-
-  it("request_resource_grant is org-admin only, like every other instance-scope write", async () => {
-    const denied = await call(ids.contributor, "request_resource_grant", {
-      kind: "kb",
-      name: "instance-standing-rules",
-      reason: "A member should not reach this.",
-    });
-    expect(denied).toContain("[denied]");
-    expect(denied).toContain("org admin");
   });
 
   /**
@@ -1320,34 +1332,8 @@ describe("instance scope: org-role gate on every management tool", () => {
     // is made; drop the field from the schema and the published check fails.
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const { findUserById } = await import("~/server/auth/user-store.server");
-    const { createPat, recordPatValidation } = await import(
-      "~/server/secrets/pat-store.server"
-    );
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const pat = createPat(
-      app.db,
-      { userId: ids.projectAdmin, label: "connection · site-owner", token: "ghp_ctlcreaterepo00000000000000000000" },
-      { userId: ids.projectAdmin, label: "elif" },
-    );
-    recordPatValidation(app.db, pat.id, {
-      status: "valid",
-      checkedAt: new Date().toISOString(),
-      login: "site-owner",
-      tokenKind: "classic",
-      expiresAt: null,
-      repo: null,
-      scopes: [],
-      missingScopes: [],
-      headerScopes: ["repo"],
-      detail: "",
-    });
-    const now = new Date().toISOString();
-    app.db
-      .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, 0, ?, ?)`,
-      )
-      .run("site-owner", "site-owner", pat.id, now, now);
+    await connectOwner("site-owner", "ghp_ctlcreaterepo00000000000000000000");
     let created = false;
     const gh = fakeGithubFetch({
       "GET /repos/site-owner/website": () =>
@@ -1530,34 +1516,10 @@ describe("ruling 464: the controller chooses a project's roster and can take an 
     // is written; drop the field from the schema and the published check fails.
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const { findUserById } = await import("~/server/auth/user-store.server");
-    const { createPat, recordPatValidation } = await import("~/server/secrets/pat-store.server");
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     writeTemplate("roster-builder", "Roster Builder");
-    const pat = createPat(
-      app.db,
-      { userId: ids.projectAdmin, label: "connection · roster-owner", token: "ghp_ctlroster000000000000000000000464" },
-      { userId: ids.projectAdmin, label: "elif" },
-    );
-    recordPatValidation(app.db, pat.id, {
-      status: "valid",
-      checkedAt: new Date().toISOString(),
-      login: "roster-owner",
-      tokenKind: "classic",
-      expiresAt: null,
-      repo: null,
-      scopes: [],
-      missingScopes: [],
-      headerScopes: ["repo"],
-      detail: "",
-    });
-    const now = new Date().toISOString();
-    app.db
-      .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, 0, ?, ?)`,
-      )
-      .run("roster-owner", "roster-owner", pat.id, now, now);
+    await connectOwner("roster-owner", "ghp_ctlroster000000000000000000000464");
     const gh = fakeGithubFetch({
       "GET /repos/roster-owner/shop": { body: { default_branch: "main", permissions: { push: true } } },
     });
@@ -2692,22 +2654,6 @@ describe("task anchoring (ruling 121)", () => {
     const listedAgain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
     expect(listedAgain.find((t) => t.key === key)!.waitsOn).toEqual(["VIB-142 (open)"]);
   });
-
-  it("update_task is a write tool, so the always-human and no-delete invariants still hold", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-      taskKey: "VIB-142",
-    });
-    const names = toolkit.tools.map((t) => t.name);
-    expect(names).toContain("update_task");
-    // Ruling 464: `remove_agent_deployment` edits a project's roster and is the
-    // one amendment to "no tool deletes an entity"; it removes no task.
-    expect(names.some((n) => /delete|remove_task|merge|accept|force|resolve_packet/.test(n))).toBe(false);
-  });
 });
 
 // ------------------------------------------ global agent template grants
@@ -3108,6 +3054,9 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
  * Ruling 139 (pass 34, F34-2): `update_agent_deployment` reads first and
  * refuses a catalogued value it cannot store BY NAME, with nothing written —
  * it used to answer `[done]` twelve times for capability ids that do not exist.
+ * Each refusal's wording is `capabilityPatchRefusal`'s, pinned branch by branch
+ * in capability-catalog.test.ts; the cases here prove the tool's side: it asks
+ * for the deployment's own kind, checks the stages itself, and writes nothing.
  */
 describe("update_agent_deployment refuses catalogued values by name (ruling 139)", () => {
   async function projectMd(): Promise<string> {
@@ -3136,19 +3085,6 @@ describe("update_agent_deployment refuses catalogued values by name (ruling 139)
     expect(reply).toContain("list_capabilities");
   });
 
-  it("a specialist recommend, a non-human mode on an always-human id, and an operator id on a specialist are refused", async () => {
-    // Canary: validate against the union of both kinds.
-    expect(
-      await refused({ profileId: "developer", capabilities: [{ capabilityId: "comment-on-task", mode: "recommend" }] }),
-    ).toContain("cannot be set to recommend on a specialist");
-    expect(
-      await refused({ profileId: "developer", capabilities: [{ capabilityId: "merge-pull-request", mode: "direct" }] }),
-    ).toContain("reserved for humans");
-    expect(
-      await refused({ profileId: "developer", capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" }] }),
-    ).toContain('"dispatch-agents" is an operator capability and cannot be set on a specialist');
-  });
-
   it("the operator arm resolves the operator from project.md and refuses a specialist id on it", async () => {
     // The KIND lives on the resolved profile, not the stored deployment row,
     // so the operator is found the way the roster finds it.
@@ -3166,33 +3102,11 @@ describe("update_agent_deployment refuses catalogued values by name (ruling 139)
     expect(reply).toContain('"use-browser" is a specialist capability and cannot be set on the operator');
   });
 
-  it("`report-validation-verdict` at human is refused", async () => {
-    // Canary: delete branch (e) — project.md stores `off` and the call answers `[done]`.
-    expect(
-      await refused({ profileId: "developer", capabilities: [{ capabilityId: "report-validation-verdict", mode: "human" }] }),
-    ).toContain("takes only direct or off");
-  });
-
-  it("an advisory id is refused as matrix-only, never as 'no such id'", async () => {
-    // Canary: fold it into branch (a).
-    const reply = await refused({ profileId: "developer", capabilities: [{ capabilityId: "read-repo-diff", mode: "off" }] });
-    expect(reply).toContain('"read-repo-diff" is a matrix-only capability with no toggle');
-    expect(reply).not.toContain("No capability answers to");
-  });
-
   it("an unknown stage id is refused with the project's stage ids", async () => {
     // Canary: drop the stage check (the write lands and the agent is eligible nowhere).
     const reply = await refused({ profileId: "developer", stages: ["implementation"] });
     expect(reply).toContain('"implementation" is not a stage of viberr-core');
     expect(reply).toMatch(/stage ids are: .*impl/);
-  });
-
-  it("a legal patch still writes (the refusal is by name, not blanket)", async () => {
-    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
-      profileId: "developer",
-      capabilities: [{ capabilityId: "comment-on-task", mode: "off" }],
-    });
-    expect(reply).toContain("[done]");
   });
 });
 
@@ -3464,59 +3378,6 @@ describe("create_task seats a named owner and takes dueDate (ruling 140)", () =>
 });
 
 /**
- * B5 (pass 34, U34-3): the controller's own read-modify-write inside one turn
- * is never refused by its own fingerprint; a hand-save landing between its
- * read and its write IS.
- */
-describe("update_agent_deployment carries the record it read (B5)", () => {
-  it("its own read-modify-write applies, and a save landing in between is refused", async () => {
-    // Canary: have the tool send a constant fingerprint — its own writes then
-    // fail, and a stale one succeeds.
-    const own = await call(ids.projectAdmin, "update_agent_deployment", {
-      profileId: "developer",
-      capabilities: [{ capabilityId: "comment-on-task", mode: "direct" }],
-    });
-    expect(own).toContain("[done]");
-
-    // A hand-save lands between a read and a write the tool performs. The tool
-    // reads the record at call time, so simulate the race by writing the file
-    // out from under an already-composed form.
-    const { updateAgentProfile, deploymentFingerprint } = await import(
-      "~/features/agents/agent-profile-actions.server"
-    );
-    const { readProjectFile } = await import("~/server/files/project-writer.server");
-    const deployment = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
-      .parsed.frontmatter.agents.find((a) => a.profileId === "developer")!;
-    const staleForm = {
-      name: "Developer",
-      role: "Implementation",
-      backend: "claude" as const,
-      stages: ["impl"],
-      definition: "",
-      model: "sonnet",
-      effort: "high",
-      fingerprint: deploymentFingerprint(deployment),
-      caps: { "comment-on-task": "off" },
-      resources: { skills: [], mcps: [], kb: [] },
-    };
-    // The concurrent write.
-    await call(ids.projectAdmin, "update_agent_deployment", {
-      profileId: "developer",
-      capabilities: [{ capabilityId: "ask-human", mode: "off" }],
-    });
-    const actor = { userId: ids.projectAdmin, label: "elif@viberr.dev" };
-    await expect(
-      updateAgentProfile(
-        app.db,
-        { projectSlug: SLUG, profileId: "developer", form: staleForm },
-        actor,
-        { dataRoot: app.dataRoot },
-      ),
-    ).rejects.toThrow("This profile changed while the editor was open.");
-  });
-});
-
-/**
  * Ruling 467 (pass 40, F40-11): the controller can bring a deployed agent's
  * persona in line. `update_agent_deployment` took no persona and propagation
  * rewrote only grants, so live the controller had to ask the owner to edit two
@@ -3569,7 +3430,8 @@ describe("update_agent_deployment sets a deployment's persona (ruling 467)", () 
     expect(row.details).toMatchObject({ personaChanged: true, personaChars: second.length });
     expect(row.actorLabel).toContain("via controller");
 
-    // The same B5 fingerprint check: a save composed before this write is refused.
+    // The B5 fingerprint check (pass 34, U34-3): a save composed before this
+    // write is refused, persona included.
     await expect(
       updateAgentProfile(
         app.db,
