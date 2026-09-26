@@ -744,7 +744,7 @@ function failedTurnNote(failure: RunFailure | null): string {
     const reset = facts?.resetsAt ? ` It reopens at ${formatAbsoluteUTC(facts.resetsAt)}.` : "";
     return (
       `I could not finish this turn: your Claude account's ${window} window is spent.${reset} ` +
-      "Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts, then send your message again." +
+      "Wait for it, or switch to or connect a different Claude account (or an API key) on Profile → Agent accounts, then send your message again." +
       (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
     );
   }
@@ -756,7 +756,7 @@ function failedTurnNote(failure: RunFailure | null): string {
         : "the provider rejected the credential";
     return (
       `I could not finish this turn: your Claude account was refused by the provider${code ? ` (${code})` : ""}: ${cause}. ` +
-      "Connect a different Claude account or an API key on Profile → Agent accounts, then send your message again." +
+      "Switch to or connect a different Claude account (or an API key) on Profile → Agent accounts, then send your message again." +
       (failure.providerText ? ` ${PROVIDER_TEXT_MARKER.trim()} ${failure.providerText}` : "")
     );
   }

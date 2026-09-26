@@ -35,9 +35,12 @@ export const PROFILE_DATA: ProfileData = {
         connectedAt: null,
         detail:
           "Claude isn't connected. Connect it on your Profile → Agent accounts.",
+        accountId: null,
+        accountName: null,
       },
       login: null,
       methods: { signIn: ["claudeai", "console"], paste: ["api_key"] },
+      accounts: [],
     },
     {
       backend: "codex",
@@ -53,9 +56,12 @@ export const PROFILE_DATA: ProfileData = {
         connectedAt: null,
         detail:
           "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+        accountId: null,
+        accountName: null,
       },
       login: null,
       methods: { signIn: ["device"], paste: ["api_key", "access_token"] },
+      accounts: [],
     },
   ],
   prefs: { notifs: DEFAULT_NOTIF_PREFS, tlDefault: "all" },

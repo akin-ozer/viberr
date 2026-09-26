@@ -12,6 +12,7 @@ import {
 } from "../../../test-support/test-store";
 import { updateUserFields } from "~/server/auth/user-store.server";
 import {
+  loginTargetFor,
   recordBackendLogin,
   setBackendApiKey,
 } from "./backend-credentials.server";
@@ -22,7 +23,7 @@ import {
 } from "./run-principal.server";
 import {
   claudeLoginCredentialPath,
-  ensureUserBackendHome,
+  ensureBackendAccountHome,
 } from "./user-homes.server";
 
 /**
@@ -62,7 +63,7 @@ async function connectClaude(userId: string, label: string): Promise<void> {
     "claude",
     "api_key",
     CLAUDE_KEY,
-    { fetchImpl: acceptingProvider, dataRoot: store.dataRoot },
+    { fetchImpl: acceptingProvider },
   );
 }
 
@@ -191,12 +192,14 @@ describe("resolveTaskRunPrincipal", () => {
   });
 
   it("appends the specific reason when the owner's sign-in FILE is the problem", () => {
+    const target = loginTargetFor(store.db, store.users.murat.id, "claude");
     recordBackendLogin(
       store.db,
       { userId: store.users.murat.id, label: store.users.murat.email },
       "claude",
       "claudeai",
       { authMethod: "claudeai" },
+      target,
     );
     writeOwnedTask("VIB-6", store.users.murat.id);
 
@@ -213,8 +216,14 @@ describe("resolveTaskRunPrincipal", () => {
     expect(message).toContain("isn't connected for");
     expect(message).toContain("sign-in file is missing from this server");
 
-    // …and the moment the file is back, the same task resolves.
-    const home = ensureUserBackendHome(store.users.murat.id, "claude", store.dataRoot);
+    // …and the moment the file is back — in the account's own home (ruling
+    // 507) — the same task resolves.
+    const { home } = ensureBackendAccountHome(
+      store.users.murat.id,
+      "claude",
+      target,
+      store.dataRoot,
+    );
     writeFileSync(claudeLoginCredentialPath(home), "{}");
     const healed = resolveTaskRunPrincipal(
       store.db,

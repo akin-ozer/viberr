@@ -95,7 +95,8 @@ const BACKED_UP_STORE_DIRS = [
 
 /**
  * `runtimes/` holds LIVE agent credentials — since ruling 127 each person's own
- * (`users/<userId>/codex-home/auth.json`) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
+ * (`users/<userId>/codex-home/accounts/<accountId>/auth.json`, one per account
+ * since ruling 507) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
  */
@@ -365,7 +366,7 @@ function excludes(includeRuntimes: boolean, instanceSecrets: boolean): string[] 
     ...(includeRuntimes
       ? []
       : [
-          "runtimes/ — each person's agent CLI logins (users/<id>/codex-home/auth.json is a LIVE credential) and run transcripts. Everyone re-authenticates after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
+          "runtimes/ — each person's agent CLI logins (every users/<id>/codex-home/accounts/<account>/auth.json is a LIVE credential) and run transcripts. Everyone re-authenticates after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
         ]),
     "state/writer.lock — the running process's lock; restoring one would refuse the next boot.",
     ...(instanceSecrets

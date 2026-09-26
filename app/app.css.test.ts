@@ -3755,10 +3755,10 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
       }
     }
     expect(problems).toEqual([]);
-    // Eighteen boxes keyed on a refusal counter, and the login page's two.
+    // Nineteen boxes keyed on a refusal counter, and the login page's two.
     // Ruling 478(e) added the packet's "Choose an answer" and "Write your
-    // answer" refusals.
-    expect(carriers).toHaveLength(20);
+    // answer" refusals; ruling 507 the agent account's over-long name.
+    expect(carriers).toHaveLength(21);
   });
 
   it("every motion this ruling adds has a reduced-motion answer that does not move", () => {

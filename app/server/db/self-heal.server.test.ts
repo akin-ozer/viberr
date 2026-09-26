@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
 import {
@@ -57,8 +58,8 @@ function seedRealDb(
       "INSERT INTO users (id,email,name,role,idp,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
     );
     for (let i = 0; i < users; i++) {
-      // Pad the name so each row spans real bytes → many pages for a large
-      // count, so a mid-file garble lands inside the users btree.
+      // Pad the name so each row spans real bytes → many leaf pages for a
+      // large count, so a garbled middle leaf leaves a readable prefix.
       u.run(`u${i}`, `u${i}@viberr.dev`, `User ${i} ${"x".repeat(240)}`, "admin", "local", now, now);
     }
     db.prepare(
@@ -84,17 +85,54 @@ function seedRealDb(
   db.close();
 }
 
-/** Garble ONE page a fraction through the file — quick_check fails while other
- *  btrees still read. */
-function garblePage(dbPath: string, fraction = 0.5): void {
-  const PAGE = 4096;
-  const pages = Math.floor(statSync(dbPath).size / PAGE);
+const PAGE = 4096;
+
+/** Overwrite one page (0-based index) with garbage. */
+function garblePageAt(dbPath: string, index: number): void {
   const fd = openSync(dbPath, "r+");
   try {
-    writeSync(fd, Buffer.alloc(PAGE, 0xdb), 0, PAGE, Math.floor(pages * fraction) * PAGE);
+    writeSync(fd, Buffer.alloc(PAGE, 0xdb), 0, PAGE, index * PAGE);
   } finally {
     closeSync(fd);
   }
+}
+
+/** Garble ONE page a fraction through the file — quick_check fails while other
+ *  btrees still read. */
+function garblePage(dbPath: string, fraction = 0.5): void {
+  const pages = Math.floor(statSync(dbPath).size / PAGE);
+  garblePageAt(dbPath, Math.floor(pages * fraction));
+}
+
+const leafPagesSchema = z.array(z.object({ pageno: z.number() }));
+
+/** Garble the MIDDLE leaf of `table`'s own btree, found with `dbstat`, so a
+ *  full scan reads a prefix of its rows and then hits the corrupt page. The
+ *  btree is located rather than guessed from a fraction of the file: the
+ *  baseline's longer DDL moves every page along, and a fixed offset can then
+ *  land on one of the table's INDEX leaves, which a table scan never reads. */
+function garbleMiddleLeafOf(dbPath: string, table: string): void {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  let leaves: number[];
+  try {
+    leaves = leafPagesSchema
+      .parse(
+        db
+          .prepare(
+            "SELECT pageno FROM dbstat WHERE name = ? AND pagetype = 'leaf' ORDER BY pageno",
+          )
+          .all(table),
+      )
+      .map((row) => row.pageno);
+  } finally {
+    db.close();
+  }
+  const middle = leaves[Math.floor(leaves.length / 2)];
+  if (middle === undefined || leaves.length < 3) {
+    throw new Error(`${table} spans ${leaves.length} leaf pages; the test needs several`);
+  }
+  // dbstat numbers pages from 1; the file offset is 0-based.
+  garblePageAt(dbPath, middle - 1);
 }
 
 describe("isCorruptionError", () => {
@@ -159,10 +197,10 @@ describe("selfHealProjectionDbIfCorrupt", () => {
 
   it("salvages the PREFIX of a partially-corrupt users table (not just loses it whole)", () => {
     const p = tmpDb();
-    // Large users table so a mid-file page is a users leaf; PAT is inserted with
-    // the users, on early pages.
+    // Large users table so it spans many leaves, the middle one garbled; the
+    // PAT is inserted with the users, on early pages.
     seedRealDb(p, { users: 2000, filler: 0 });
-    garblePage(p, 0.5);
+    garbleMiddleLeafOf(p, "users");
     const result = selfHealProjectionDbIfCorrupt(p);
     expect(result.healed).toBe(true);
     // Some users survived, but NOT all — the whole-table drop bug would give 0.

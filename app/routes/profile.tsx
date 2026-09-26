@@ -21,13 +21,15 @@ import {
   cancelBackendSignIn,
   changeOwnPassword,
   connectBackendKey,
-  disconnectBackendAccount,
+  disconnectAgentAccount,
   disconnectGithubIdentity,
+  renameAgentAccount,
 
   setNotifRoutingPref,
   setTimelineDefaultPref,
   startBackendSignIn,
   submitBackendSignInCode,
+  switchAgentAccount,
   updateProfileIdentity,
 } from "~/features/profile/profile-actions.server";
 import {
@@ -72,6 +74,15 @@ const overlayReturnState = z
 const backendField = z.enum(["claude", "codex"]);
 const loginMethodField = z.enum(["claudeai", "console", "device"]);
 const pasteKindField = z.enum(["api_key", "access_token"]);
+/** Ruling 507: an account id, shaped the way `newId("ubc")` mints them. The
+ *  store only ever looks one up together with the session's own user. */
+const accountField = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+
+/** The optional `account` of a sign-in: absent or empty means a new account. */
+function optionalAccount(value: FormDataEntryValue | null): string | undefined {
+  if (value === null || value === "") return undefined;
+  return decodeOr(accountField.safeParse(value), "Unknown account.");
+}
 
 /** The one sentence every unknown backend/method/kind value gets. */
 function decodeOr<T>(parsed: z.ZodSafeParseResult<T>, message: string): T {
@@ -143,10 +154,11 @@ export async function action({ request }: Route.ActionArgs) {
         const { toast } = disconnectGithubIdentity(db, actor);
         return { ok: true as const, intent, toast };
       }
-      // Ruling 127: the five Agent-accounts intents. None of them toasts a
-      // success here except the two that ARE complete when they return; a
-      // sign-in is only connected once the vendor's own binary says so, which
-      // the panel learns from /resources/backend-login.
+      // Ruling 127: the Agent-accounts intents. None of them toasts a success
+      // here except the ones that ARE complete when they return; a sign-in is
+      // only connected once the vendor's own binary says so, which the panel
+      // learns from /resources/backend-login. Ruling 507 added switching and
+      // naming accounts, and made a disconnect name the account it removes.
       case "backend-login-start": {
         startBackendSignIn(
           db,
@@ -159,8 +171,26 @@ export async function action({ request }: Route.ActionArgs) {
             loginMethodField.safeParse(formData.get("method")),
             "Unknown sign-in method.",
           ),
+          optionalAccount(formData.get("account")),
         );
         return { ok: true as const, intent };
+      }
+      case "backend-account-switch": {
+        const { toast } = switchAgentAccount(
+          db,
+          actor,
+          decodeOr(accountField.safeParse(formData.get("account")), "Unknown account."),
+        );
+        return { ok: true as const, intent, toast };
+      }
+      case "backend-account-rename": {
+        const { toast } = renameAgentAccount(
+          db,
+          actor,
+          decodeOr(accountField.safeParse(formData.get("account")), "Unknown account."),
+          String(formData.get("name") ?? ""),
+        );
+        return { ok: true as const, intent, toast };
       }
       case "backend-login-code": {
         submitBackendSignInCode(
@@ -202,13 +232,10 @@ export async function action({ request }: Route.ActionArgs) {
         return { ok: true as const, intent, toast };
       }
       case "backend-disconnect": {
-        const { toast } = await disconnectBackendAccount(
+        const { toast } = await disconnectAgentAccount(
           db,
           actor,
-          decodeOr(
-            backendField.safeParse(formData.get("backend")),
-            "Unknown agent backend.",
-          ),
+          decodeOr(accountField.safeParse(formData.get("account")), "Unknown account."),
         );
         return { ok: true as const, intent, toast };
       }

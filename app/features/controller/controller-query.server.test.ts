@@ -41,7 +41,6 @@ afterEach(() => ctx.cleanup());
 async function connectClaude(userId: string, label: string): Promise<void> {
   await setBackendApiKey(store.db, { userId, label }, "claude", "api_key", CLAUDE_KEY, {
     fetchImpl: acceptingProvider,
-    dataRoot: store.dataRoot,
   });
 }
 

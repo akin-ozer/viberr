@@ -14,7 +14,10 @@ import {
 import { removeAgentTreeSync } from "./agent-trees.server";
 import { patchRun, type AgentRunRow } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { getBackendAccount } from "./backend-credentials.server";
 import {
+  backendAccountHome,
+  codexCompactionHomeId,
   codexRunHomeDir,
   finishCodexRunHome,
   userBackendHome,
@@ -184,7 +187,8 @@ export function finalizeOrphanedRuns(
   // that never got a concurrency slot never got a start.)
   const orphans = db
     .prepare(
-      `SELECT id, project_slug, task_key, kind, backend, credential_user_id, started_at
+      `SELECT id, project_slug, task_key, kind, backend, credential_user_id,
+              credential_account_id, started_at
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
@@ -195,6 +199,8 @@ export function finalizeOrphanedRuns(
     kind: string;
     backend: string;
     credential_user_id: string | null;
+    /** Ruling 507: nullable — a run from before the ruling, or a refused one. */
+    credential_account_id: string | null;
     /** Ruling 310(b): null for a run that never got a concurrency slot. */
     started_at: string | null;
   }[];
@@ -238,7 +244,6 @@ export function finalizeOrphanedRuns(
     // written back when its bytes changed, the directory removed.
     if (run.backend === "codex" && run.credential_user_id) {
       const sharedHome = userBackendHome(run.credential_user_id, "codex", deps.dataRoot);
-      const dir = codexRunHomeDir(sharedHome, run.id);
       // Ruling 460: the write-back is the server's file, handed back to the
       // person's uid like the adapter's settle does; ruling 485: the run home
       // their CLI wrote is removed as them.
@@ -250,7 +255,30 @@ export function finalizeOrphanedRuns(
               removeAgentTreeSync(target, agentGitLaunchFor(db, principal, deps.dataRoot)),
           }
         : undefined;
-      if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, runId: run.id }, person);
+      // Ruling 507: the refreshed sign-in goes back to the account the run
+      // billed. A run from before the ruling billed the one account there was,
+      // whose sign-in sits in the shared home; an account removed since then
+      // gets nothing back (its home is gone, and the write-back refuses to
+      // resurrect a sign-in the person removed).
+      const account = run.credential_account_id
+        ? getBackendAccount(db, principal, run.credential_account_id)
+        : null;
+      const authHome = !run.credential_account_id
+        ? sharedHome
+        : account
+          ? backendAccountHome(principal, "codex", account, deps.dataRoot)
+          : backendAccountHome(
+              principal,
+              "codex",
+              { id: run.credential_account_id, legacyHome: false },
+              deps.dataRoot,
+            );
+      // The run's own home, and its completion compaction's when the restart
+      // landed during that epilogue (ruling 376), each finished like a settle.
+      for (const id of [run.id, codexCompactionHomeId(run.id)]) {
+        const dir = codexRunHomeDir(sharedHome, id);
+        if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, authHome, runId: id }, person);
+      }
     }
     patchRun(db, run.id, {
       state: "interrupted",

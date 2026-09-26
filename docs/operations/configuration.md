@@ -305,8 +305,8 @@ the script removed when the git process exits. Agents hold no GitHub credential.
 | Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |
 | Per-project workflow, members, agent deployments, guardrails, credential policy | `projects/<slug>/project.md` | Project admins through Policy / Settings / Agents |
 | Per-user theme, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
-| Personal backend credentials (ruling 127) | `user_backend_credentials` (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in `runtimes/users/<id>/{claude-home,codex-home}` | The person, Profile → Agent accounts |
-| Which account a run bills (the credential principal) | derived per run and persisted as `agent_runs.credential_user_id` | Nobody sets it: task runs take the task owner, controller turns the asker (`run-principal.server.ts`) |
+| Personal backend credentials (ruling 127), several accounts per backend (ruling 507) | `user_backend_credentials`, one row per account (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in that account's home, `runtimes/users/<id>/{claude-home,codex-home}/accounts/<accountId>` | The person, Profile → Agent accounts: connect, switch, rename, disconnect |
+| Which account a run bills (the credential principal) | derived per run and persisted as `agent_runs.credential_user_id`, and which of that person's accounts as `agent_runs.credential_account_id` | Nobody sets the person: task runs take the task owner, controller turns the asker (`run-principal.server.ts`); the account is the one that person has in use, which they choose on Profile → Agent accounts |
 
 ## 5. What the container image bakes in
 
@@ -327,7 +327,8 @@ The image bakes **no** backend credential and **no** runtime home, and it declar
 `docker compose stop` SIGTERM reaches the process that checkpoints the WAL and releases
 the writer lock), and compose's `init: true` reaps orphans. Each person's home is created
 on demand at `/data/runtimes/users/<userId>/{claude-home,codex-home}` by
-`ensureUserBackendHome` and handed to that person's agent uid.
+`ensureUserBackendHome`, each of their accounts' homes inside it by
+`ensureBackendAccountHome` (ruling 507), and all of it is handed to that person's agent uid.
 
 Ruling 460's image pieces are build arguments, not environment variables: the Dockerfile's
 global `ARG VIBERR_AGENT_UID_FLOOR=20001`, `VIBERR_AGENT_UID_MAX=59999`,

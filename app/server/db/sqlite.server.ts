@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { getEnv } from "../config/env.server";
 import { logger } from "../logging/logger.server";
 import {
@@ -19,6 +20,7 @@ import {
   type LockHolder,
 } from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
+import { withTransaction } from "./transaction.server";
 import { backfillControllerReplyLinks } from "../controller/controller-reply-links.server";
 import { toError } from "../../shared/errors";
 
@@ -445,6 +447,10 @@ const BASELINE_COLUMNS: readonly {
       { name: "last_prompt_tokens", ddl: "last_prompt_tokens INTEGER NOT NULL DEFAULT 0" },
       { name: "compactions", ddl: "compactions INTEGER NOT NULL DEFAULT 0" },
       { name: "credential_kind", ddl: "credential_kind TEXT" },
+      // Ruling 507: which of the principal's accounts the run billed. `upsertRun`
+      // names it on every insert — the ruling-127 failure shape again. NULL is
+      // the truth for a run that predates it: the one account there was.
+      { name: "credential_account_id", ddl: "credential_account_id TEXT" },
     ],
   },
   {
@@ -595,25 +601,11 @@ const BASELINE_TABLES: readonly string[] = [
      result_json TEXT NOT NULL,
      checked_at TEXT NOT NULL
    )`,
-  // Ruling 127: the per-person agent backends. Same sibling as the
-  // `runs.credential_user_id` column above — that commit added the column to
-  // BASELINE_COLUMNS but left the TABLE it points at out of this list, so a
-  // root created before it boots with the column and without the table and
-  // 500s the first time anyone opens Profile → Agent accounts or starts a run.
-  `CREATE TABLE IF NOT EXISTS user_backend_credentials (
-     id TEXT PRIMARY KEY,
-     user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-     backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
-     kind TEXT NOT NULL CHECK (kind IN ('login', 'api_key', 'access_token')),
-     method TEXT,
-     secret_box TEXT,
-     secret_suffix TEXT,
-     detail_json TEXT NOT NULL DEFAULT '{}',
-     verified_at TEXT,
-     created_at TEXT NOT NULL,
-     updated_at TEXT NOT NULL,
-     UNIQUE (user_id, backend)
-   )`,
+  // Ruling 127's `user_backend_credentials` is not in this list any more: ruling
+  // 507 changed its shape in a way `CREATE TABLE IF NOT EXISTS` cannot carry
+  // onto a root that already has the table, so `ensureBackendAccountsTable`
+  // below owns both cases (missing, and the one-account shape) from the
+  // baseline's own DDL.
   // Ruling 460: each person's agent uid. A root that predates it would refuse
   // every run start in the image ("no such table") — the uid is allocated
   // before the launch.
@@ -726,6 +718,19 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       );
     }
   }
+  try {
+    const outcome = ensureBackendAccountsTable(db);
+    if (outcome !== "current") {
+      logger.info("user_backend_credentials brought to the several-accounts shape (ruling 507)", {
+        outcome,
+      });
+    }
+  } catch (error) {
+    logger.warn(
+      "user_backend_credentials could not be brought to the several-accounts shape — connecting a second account fails until it is; it is retried next boot",
+      { err: toError(error) },
+    );
+  }
   for (const ddl of BASELINE_INDEXES) {
     try {
       db.exec(ddl);
@@ -736,6 +741,116 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       );
     }
   }
+}
+
+const BACKEND_ACCOUNTS_TABLE = "user_backend_credentials";
+
+/** One `PRAGMA index_list` row: `origin` is `u` for an index a UNIQUE
+ *  constraint created, `c` for a CREATE INDEX, `pk` for the primary key. */
+const indexListSchema = z.array(z.object({ origin: z.string() }).loose());
+
+/**
+ * Ruling 507: a person may hold several accounts per backend, and the table
+ * that holds them was created, before that ruling, with `UNIQUE (user_id,
+ * backend)`: the second account would be refused at its INSERT. ALTER TABLE
+ * can add a column but never drop a constraint, and re-baselining the whole
+ * projection database would destroy the users, sessions and sealed keys
+ * nothing can rebuild. So the table alone is rebuilt from the shipped
+ * baseline's own DDL (read from a throwaway in-memory migration, the recipe
+ * `widenNotificationKindCheck` uses at boot), in one transaction:
+ *
+ *  - every row is carried, and each becomes its person's ACTIVE account on its
+ *    backend (`selected_at` = when it was last written): there was one per
+ *    (person, backend), so nothing changes for a run;
+ *  - each is marked `legacy_home = 1`: its vendor sign-in was written into the
+ *    person's backend home itself, and it stays there — Viberr never moves a
+ *    vendor's credential file (ruling 127). Accounts connected from now on get
+ *    a home of their own.
+ *
+ * A root that predates the table altogether gets it created from the same DDL.
+ * Idempotent: the current shape is left alone after two PRAGMA reads.
+ */
+export function ensureBackendAccountsTable(
+  db: DatabaseSync,
+): "current" | "created" | "rebuilt" {
+  const present = tableColumnNames(db, BACKEND_ACCOUNTS_TABLE);
+  if (present.length > 0) {
+    const constraints = indexListSchema.parse(
+      db.prepare(`PRAGMA index_list(${BACKEND_ACCOUNTS_TABLE})`).all(),
+    );
+    if (!constraints.some((index) => index.origin === "u") && present.includes("selected_at")) {
+      return "current";
+    }
+  }
+  const expectedDb = new DatabaseSync(":memory:");
+  try {
+    runMigrations(expectedDb);
+    const table = sqlRowSchema.parse(
+      expectedDb
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
+        .get(BACKEND_ACCOUNTS_TABLE),
+    );
+    // `sql` is NULL only for sqlite's own automatic indexes, which the filter
+    // excludes; every remaining row is a CREATE INDEX statement.
+    const indexes = z
+      .array(sqlRowSchema)
+      .parse(
+        expectedDb
+          .prepare(
+            `SELECT sql FROM sqlite_master
+              WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL`,
+          )
+          .all(BACKEND_ACCOUNTS_TABLE),
+      );
+    if (present.length === 0) {
+      withTransaction(db, () => {
+        db.exec(table.sql);
+        for (const index of indexes) db.exec(index.sql);
+      });
+      return "created";
+    }
+    const expected = tableColumnNames(expectedDb, BACKEND_ACCOUNTS_TABLE);
+    // The columns both shapes have are copied as they are; the three ruling
+    // 507 added are given the meaning described above, unless the old root
+    // somehow has them already.
+    const carried = expected.filter((column) => present.includes(column));
+    const derived: [string, string][] = [
+      ["selected_at", "updated_at"],
+      ["legacy_home", "1"],
+    ];
+    const extra = derived.filter(([column]) => !carried.includes(column));
+    const into = [...carried, ...extra.map(([column]) => column)].join(", ");
+    const from = [...carried, ...extra.map(([, value]) => value)].join(", ");
+    const staging = `${BACKEND_ACCOUNTS_TABLE}__accounts`;
+    withTransaction(db, () => {
+      db.exec(
+        table.sql.replace(
+          new RegExp(`^CREATE TABLE ${BACKEND_ACCOUNTS_TABLE}\\b`),
+          `CREATE TABLE ${staging}`,
+        ),
+      );
+      db.exec(`INSERT INTO ${staging} (${into}) SELECT ${from} FROM ${BACKEND_ACCOUNTS_TABLE}`);
+      db.exec(`DROP TABLE ${BACKEND_ACCOUNTS_TABLE}`);
+      db.exec(`ALTER TABLE ${staging} RENAME TO ${BACKEND_ACCOUNTS_TABLE}`);
+      for (const index of indexes) db.exec(index.sql);
+    });
+    return "rebuilt";
+  } finally {
+    expectedDb.close();
+  }
+}
+
+/** A `sqlite_master` row's DDL. */
+const sqlRowSchema = z.object({ sql: z.string() });
+
+const tableInfoSchema = z.array(z.object({ name: z.string() }).loose());
+
+/** One `PRAGMA table_info` read → the column names, in table order (empty when
+ *  the table does not exist). `table` is a constant at every call site. */
+function tableColumnNames(db: DatabaseSync, table: string): string[] {
+  return tableInfoSchema
+    .parse(db.prepare(`PRAGMA table_info(${table})`).all())
+    .map((column) => column.name);
 }
 
 /** Closes and forgets the cached handle (tests / graceful shutdown). Clears the

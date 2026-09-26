@@ -343,15 +343,18 @@ reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 `projection.rescan|rebuild`, `seed.*`, `secrets.resealed`, `store.restored`.
 
 **`profile.backend.*` (ruling 127).** Connecting or dropping a personal agent account
-is governed, because it changes whose provider account this instance's runs bill. Five
+is governed, because it changes whose provider account this instance's runs bill. Seven
 actions, all instance-scoped (no `project_slug`, no `task_key`), actor the person
-themselves: `profile.backend.login_started` {backend, method} when the vendor's own
-binary is spawned, `profile.backend.login_failed` {backend, method, reason} on a
-non-zero exit, an unconfirmed sign-in or the 15/16-minute timeout,
-`profile.backend.login_cancelled` {backend, method}, `profile.backend.connected`
-{backend, kind, method | verified} on success or a saved key, and
-`profile.backend.disconnected` {backend, kind}. Subject kind is `backend_login` for
-the session rows and `backend_credential` for the stored ones. The `reason` is the
+themselves: `profile.backend.login_started` {backend, method, accountId,
+existingAccount} when the vendor's own binary is spawned, `profile.backend.login_failed`
+{backend, method, reason} on a non-zero exit, an unconfirmed sign-in or the
+15/16-minute timeout, `profile.backend.login_cancelled` {backend, method},
+`profile.backend.connected` {backend, kind, method, signedInAgain | verified} on success
+or a saved key, `profile.backend.disconnected` {backend, kind, wasActive}, and (ruling
+507) `profile.backend.switched` {backend, kind, from} when another of the person's
+accounts becomes the one their runs bill and `profile.backend.renamed` {backend, named}.
+Subject kind is `backend_login` for the session rows and `backend_credential` (the
+account) for the stored ones. The `reason` is the
 same already-redacted sentence the person sees; a key, a token, a one-time code and a
 raw vendor line never reach an audit row.
 
@@ -525,13 +528,34 @@ provider account their agent runs bill: runs on tasks they own, and their own co
 turns. There is no deployment-wide Claude or Codex credential, so this panel is the only
 place either backend is connected.
 
+**Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
+backend; one is **in use**, the one their runs bill. A connected card leads with it
+(its health, usage and refusals are about that account; once there is a choice the
+green line opens "Runs use <name>"), then lists **Other Claude accounts** as
+connection rows, each with **Use this account** (`backend-account-switch` {account}):
+a switch, not a sign-in, because every account keeps its vendor sign-in in a home of its
+own on this server; it takes effect for the next run, a run already going keeps its
+account, and the toast says "Claude runs now use <name>". An account whose sign-in file
+is gone offers its sign-in instead of the switch, into that same account
+(`backend-login-start` with its `account`). **Add another Claude account** opens the same
+sign-in and paste methods a fresh card has, says the new account becomes the one in use
+and the others stay connected, and is disabled with a sentence at the ceiling. Every
+account, the one in use included, has **Rename** (`backend-account-rename` {account,
+name}: the same field idiom as the key form, at most 60 characters refused in the store's
+own words per ruling 147, an empty name going back to the vendor's facts) and
+**Disconnect**. An account is named by the person's label, else the email Claude's
+`auth status` reported, else its kind ("ChatGPT sign-in", "API key ending in abcd").
+
 Two routes in, both the vendor's own:
 
 - **Hosted sign-in.** `backend-login-start` spawns the UNMODIFIED bundled vendor binary
   (`claude auth login --claudeai` or `--console`; `codex login --device-auth`) with
-  `filteredSpawnEnv()` plus that person's own runtime home
-  (`<dataRoot>/runtimes/users/<id>/{claude-home,codex-home}`), argv only, never a shell,
-  every stream piped. Only the vendor being signed in to has to be installed
+  `filteredSpawnEnv()` plus the home of the ONE account it signs in (ruling 507: a new,
+  empty `<dataRoot>/runtimes/users/<id>/{claude-home,codex-home}/accounts/<accountId>`,
+  or with `account` that existing sign-in's own home), argv only, never a shell, every
+  stream piped. A sign-in into a new account that does not end connected takes its
+  half-made home with it once the vendor process has exited, and the account ceiling is
+  refused before any process starts. Only the vendor being signed in to has to be installed
   (`resolveBackendBinary`), so a host whose other optional platform package never landed
   still connects the one it has; when the package IS missing the person is told which
   binary is absent and that an admin can reinstall without `--omit=optional`. The card
@@ -556,12 +580,18 @@ Two routes in, both the vendor's own:
 - **A pasted credential.** `backend-set-key` verifies an Anthropic Console or OpenAI
   Platform API key with a FREE `GET /v1/models` probe before sealing it; a ChatGPT
   workspace access token has no free probe and is stored `verified_at = null` with the
-  card saying so. `backend-disconnect` runs the vendor's own logout, removes the
-  credential file and drops the row (transcripts stay). The card's Disconnect asks first
-  (ruling 481(b)): the shared `ConfirmDialog`, "Disconnect Claude?" (or Codex), whose body
-  says tasks the person owns and their controller conversations can't start a run on
-  that backend until they connect again, confirmed by "Disconnect Claude". One tap used
-  to sign the vendor session out with no undo short of a fresh sign-in.
+  card saying so. A saved key is a new account and becomes the one in use (ruling 507);
+  nothing that was connected is logged out. `backend-disconnect` {account} removes ONE
+  account: it runs the vendor's own logout in that account's home, removes the account's
+  home (its credential file only, for an account connected before ruling 507) and drops
+  the row (transcripts stay). Removing the one in use hands runs to the account used
+  before it, and the toast names both. The card's Disconnect asks first (ruling 481(b)):
+  the shared `ConfirmDialog`, "Disconnect Claude?" (or Codex) for a person's only account
+  on the backend, whose body says tasks the person owns and their controller
+  conversations can't start a run on that backend until they connect again, confirmed by
+  "Disconnect Claude"; with several accounts it names the account ("Disconnect Work?")
+  and says which account runs keep, or switch to. One tap used to sign the vendor session
+  out with no undo short of a fresh sign-in.
 
 **The last refusal Viberr observed** (ruling 130(d)). A connected card also reads the
 quota store (`latestBackendRateLimits`) and shows, ONLY when the record's
@@ -571,13 +601,14 @@ reopens <when>" pill with a "Usage window" row. The copy says what the pill is: 
 refusal Viberr observed on this account, which any completed run on that backend
 retires, so the absence of a pill is not proof the account works. Another person's
 refusal, or a record written before principals were stored, never appears on this card.
-The record is evidence about the account that was billed, so a change to the viewer's
-credential on that backend retires it too (ruling 165): a confirmed sign-in, a pasted key
-the vendor accepted, a disconnect, or the removal of their account
+The record is evidence about the account that was billed, so a change of the account the
+viewer's runs bill on that backend retires it too (ruling 165, extended by ruling 507): a
+confirmed sign-in, a pasted key the vendor accepted, a switch, the disconnect of the
+account in use, or the removal of their account
 (`retireBackendRecordsFor`, called from the credential store's own writers, so the
 driver's confirmation and an org admin's account removal reach it without passing through
-the Profile action). The card says so ("as does connecting a different Claude account
-here"), and the dispatch hold that rests on the same record lifts with it. A record
+the Profile action). The card says so ("as does switching to or connecting a different
+Claude account here"), and the dispatch hold that rests on the same record lifts with it. A record
 naming another person, or nobody, is untouched; signing back into the SAME spent account
 retires it as well, because Viberr never stores the vendor identity behind a sign-in and
 cannot tell, and one refused run re-records the window.

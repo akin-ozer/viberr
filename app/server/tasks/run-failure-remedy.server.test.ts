@@ -136,7 +136,7 @@ describe("describeRunFailure", () => {
     expect(d.reason).toContain("11:50 UTC");
     expect(d.reason).toContain(`${store.users.arda.name}'s`);
     expect(d.remedy).toContain("Profile → Agent accounts");
-    expect(d.remedy).toContain("different Claude account or an API key");
+    expect(d.remedy).toContain("switch to or connect a different Claude account (or an API key)");
     expect(d.resetLabel).toContain("11:50 UTC");
     expect(d.owner).toEqual({ userId: store.users.arda.id, name: store.users.arda.name });
     const rec = d.options.find((o) => o.recommended)!;
@@ -203,7 +203,7 @@ describe("describeRunFailure", () => {
     expect(d.remedy).toContain("Retrying with the same account fails the same way");
     expect(d.remedy).toContain("Profile → Agent accounts");
     const rec = d.options.find((o) => o.recommended)!;
-    expect(rec.title).toContain("I connected a different Claude account or an API key");
+    expect(rec.title).toContain("I switched to or connected a different Claude account or an API key");
     expect(rec.ev).toContain("No project policy was changed");
   });
 

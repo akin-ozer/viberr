@@ -28,7 +28,7 @@ import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.
  * specialist a GitHub-scope block had been lifted (JC-6), undoing the owner's
  * decision. Under ruling 127 the remedy for `quota` and `auth` belongs to the
  * credential principal (the task owner): wait until the reset instant, or
- * connect a different account or an API key on Profile → Agent accounts.
+ * switch to or connect a different account (or an API key) on Profile → Agent accounts.
  * Generic advice ("fix the credential", "retry on the other backend", "review
  * the runtime configuration") is never written for a classified refusal, and
  * a recovery option's label states only what the human asserts.
@@ -186,7 +186,7 @@ export function describeRunFailure(
         ? `${backend} refused ${runWord}: ${whose} ${window} is spent${resetLabel ? ` and reopens at ${resetLabel}` : ""}.`
         : `${backend} refused ${runWord}: ${whose} account is over its usage limit${resetLabel ? ` until ${resetLabel}` : ""}.`;
       remedy = owner
-        ? `${owner.name} can wait until the window reopens${resetLabel ? ` (${resetLabel})` : ""}, or connect a different ${backend} account or an API key on ${profile}.`
+        ? `${owner.name} can wait until the window reopens${resetLabel ? ` (${resetLabel})` : ""}, or switch to or connect a different ${backend} account (or an API key) on ${profile}.`
         : `The task has no owner to bill; seat an owner whose ${backend} account has room, or wait for the window to reopen${resetLabel ? ` (${resetLabel})` : ""}.`;
       break;
     }
@@ -201,7 +201,7 @@ export function describeRunFailure(
             : `the provider rejected the credential${status ? ` (HTTP ${status})` : ""}${code ? `, ${code}` : ""}`;
       reason = `${backend} refused ${runWord}: ${detail}.`;
       remedy = owner
-        ? `${owner.name} can connect a different ${backend} account or an API key on ${profile}${code === "oauth_org_not_allowed" ? ", or have the organization enable it" : ""}. Retrying with the same account fails the same way.`
+        ? `${owner.name} can switch to or connect a different ${backend} account (or an API key) on ${profile}${code === "oauth_org_not_allowed" ? ", or have the organization enable it" : ""}. Retrying with the same account fails the same way.`
         : `The task has no owner to bill; seat an owner whose ${backend} account the provider accepts.`;
       break;
     }
@@ -368,11 +368,11 @@ function operatorOptions(
     return [
       {
         kind: "block_on_policy",
-        title: `I connected a different ${backend} account or an API key on Profile → Agent accounts: re-run`,
+        title: `I switched to or connected a different ${backend} account or an API key on Profile → Agent accounts: re-run`,
         detail: "Closes this decision and starts a fresh operator run on the owner's current account.",
         recommended: true,
         backend: failed,
-        ev: `**Decision:** a different ${backend} account or an API key was connected; re-run the operator. No project policy was changed.`,
+        ev: `**Decision:** a different ${backend} account or an API key was switched to or connected; re-run the operator. No project policy was changed.`,
       },
       redirect,
       hold,

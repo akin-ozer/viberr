@@ -360,12 +360,15 @@ CREATE TABLE project_github_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
--- Ruling 127: a person's connected agent backends. One row per (user, backend); connecting a new
--- method REPLACES the previous row. `kind = 'login'` rows carry NO secret: the vendor binary
--- holds the credential in the user's runtime home. API keys / access tokens are sealed boxes
--- (registered in SEALED_STORES so key rotation reaches them).
+-- Ruling 127: a person's connected agent backends. `kind = 'login'` rows carry NO secret: the
+-- vendor binary holds the credential in the user's runtime home. API keys / access tokens are
+-- sealed boxes (registered in SEALED_STORES so key rotation reaches them).
+-- Ruling 507: one row per ACCOUNT, and a person may keep several per backend. Connecting adds an
+-- account instead of replacing one, and exactly one per (user, backend) is ACTIVE — the one runs
+-- bill: the most recently selected (`selected_at`; ties go to the newer row). Switching accounts
+-- is a write to this table and nothing else; no vendor sign-in runs.
 CREATE TABLE user_backend_credentials (
-  id TEXT PRIMARY KEY,                       -- newId("ubc")
+  id TEXT PRIMARY KEY,                       -- newId("ubc"); names the account's home (below)
   user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
   backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
   kind TEXT NOT NULL CHECK (kind IN ('login', 'api_key', 'access_token')),
@@ -377,10 +380,20 @@ CREATE TABLE user_backend_credentials (
   -- `claude auth status`, or {"status":"Logged in using ChatGPT"} from `codex login status`.
   detail_json TEXT NOT NULL DEFAULT '{}',
   verified_at TEXT,                          -- last time the provider itself accepted it
+  -- Ruling 507: the person's own name for the account ("Work"); NULL = named by its vendor facts.
+  label TEXT,
+  -- Ruling 507: when this account last became the active one (connected, or switched to). The
+  -- active account is the newest value, so removing it hands runs back to the one used before.
+  selected_at TEXT NOT NULL DEFAULT '',
+  -- Ruling 507: 1 = connected before ruling 507, so its vendor sign-in lives in the person's
+  -- backend home itself (`runtimes/users/<id>/claude-home`); 0 = it has a home of its own,
+  -- `<backend home>/accounts/<id>`, where its sign-in was written and stays.
+  legacy_home INTEGER NOT NULL DEFAULT 0 CHECK (legacy_home IN (0, 1)),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE (user_id, backend)
+  updated_at TEXT NOT NULL
 );
+CREATE INDEX idx_user_backend_credentials__user
+  ON user_backend_credentials (user_id, backend, selected_at);
 -- Ruling 460: the OS user each person's agent processes run as. Allocated once, sequentially
 -- from 20001 (`agentUidFor`), and never deleted — deliberately no foreign key to `users`: a
 -- removed account's transcripts stay on disk owned by its uid, and a uid handed to a second
@@ -717,6 +730,13 @@ CREATE TABLE "agent_runs" (
   -- backend still records the owner (refusedPrincipalUserId). Also the key the
   -- transcript lookup uses — a run's session lives in that person's runtime home.
   credential_user_id TEXT,
+  -- Ruling 507: WHICH of the principal's accounts on this backend the run billed
+  -- (`user_backend_credentials.id`, the account that was active when it started).
+  -- No foreign key: the run outlives the account. Boot recovery reads it to hand
+  -- an orphaned Codex run's refreshed sign-in back to the account it came from,
+  -- and to nobody when that account has since been removed. NULL on a run
+  -- refused before a credential was opened, and on runs from before the ruling.
+  credential_account_id TEXT,
   -- Pass 35 U35-7 (ruling 158 addendum): WHY an `interrupted` run stopped when
   -- no person did it. 'restart' = boot recovery (finalizeOrphanedRuns, and the
   -- operator drive's own orphan sweep) found the row still queued/running with

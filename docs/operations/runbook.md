@@ -338,24 +338,28 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   |---|---|---|
   | unowned | the task has no owner, so no account can pay for the run | take the task (Assign me) and run again |
   | owner-missing | the owner's user row is gone or disabled | assign a new owner |
-  | no-credential | the owner (or the asker) has not connected that backend, or their sign-in file is missing | that person connects it on their own Profile → Agent accounts |
+  | no-credential | the owner (or the asker) has not connected that backend, or the sign-in file of the account they have in use is missing | that person connects it on their own Profile → Agent accounts, or switches to another of their accounts there (ruling 507; the sentence says when one works) |
 
   Each writes an honest `run·unavailable` error run and the usual blocked recovery packet
   through the normal completion pipeline. No agent process is started, so there is nothing
   to interrupt and no partial work to reconcile.
 
 - **A missing sign-in file after a volume wipe** is the common Docker case. A hosted
-  sign-in lives only at
-  `$VIBERR_DATA_ROOT/runtimes/users/<userId>/claude-home/.credentials.json` or
-  `.../codex-home/auth.json`; deleting or recreating that directory removes it while the
-  credential ROW stays in `user_backend_credentials` (a wipe of the WHOLE `viberr-data`
-  volume takes the database with it, and then the row is gone too). Health for that person
-  then reads "Your <Backend> sign-in file is missing from this server (the runtime volume
-  was wiped). Sign in again on your Profile → Agent accounts." Do not copy a file in by
-  hand: the vendor binary owns that file, and Viberr never reads or writes its contents.
-  The person signs in again. (On macOS only, an existing home with no credential file is
-  honoured as a Keychain login and reported with the weaker `presence` verification
-  rather than hidden.)
+  sign-in lives only in its account's own home (ruling 507),
+  `$VIBERR_DATA_ROOT/runtimes/users/<userId>/claude-home/accounts/<accountId>/.credentials.json`
+  or `.../codex-home/accounts/<accountId>/auth.json` (directly in `claude-home/` or
+  `codex-home/` for an account connected before ruling 507); deleting or recreating that
+  directory removes it while the credential ROW stays in `user_backend_credentials` (a
+  wipe of the WHOLE `viberr-data` volume takes the database with it, and then the row is
+  gone too). Health for that person then reads "Your <Backend> sign-in file is missing
+  from this server (the runtime volume was wiped). Sign in again on your Profile → Agent
+  accounts.", followed by "Another of your <Backend> accounts is connected there:
+  switching to it needs no sign-in." when one of their other accounts still works. Do not
+  copy a file in by hand: the vendor binary owns that file, and Viberr never reads or
+  writes its contents. The person signs that account in again from its row on the card
+  (into the same account), or switches. (On macOS only, an existing account home with no
+  credential file is honoured as a Keychain login and reported with the weaker `presence`
+  verification rather than hidden.)
 
 - **Check who is connected** without touching a credential:
 
@@ -381,14 +385,18 @@ history opens with "Converted from goal-N …", and the project's Activity colum
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync("/tmp/viberr-snap/projection.sqlite");
     console.table(db.prepare(`
-      SELECT u.email, c.backend, c.kind, c.method, c.verified_at, c.created_at
+      SELECT u.email, c.backend, c.id AS account, c.label, c.kind, c.method,
+             c.verified_at, c.selected_at, c.legacy_home, c.created_at
         FROM user_backend_credentials c JOIN users u ON u.id = c.user_id
-       ORDER BY u.email, c.backend`).all());
+       ORDER BY u.email, c.backend, c.selected_at DESC, c.created_at DESC, c.id DESC`).all());
     db.close();
   '
   # 3. throw the copy away
   docker compose exec -T app rm -rf /tmp/viberr-snap
   ```
+
+  A person may hold several accounts per backend (ruling 507): the first row of each
+  (email, backend) in that order is the account their runs bill.
 
   On bare metal (one host, one app process, a local `VIBERR_DATA_ROOT`) the rule is the
   same: copy `$VIBERR_DATA_ROOT/state/projection.sqlite` and `projection.sqlite-wal` to a

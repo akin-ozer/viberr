@@ -42,7 +42,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user), same page layout as the project controller (ruling 419; a reply shown from its first line and announced by one always-mounted status region, ruling 476(c), (d)); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `interrupt` (`conversationId`, `runId`) |
 | `/insights` | `insights.tsx` | org admin | run analytics under the standalone-page header (ruling 145): totals, coordination share, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate, ruling 158), breakdowns naming what their top 8 left out, the **Prompt cache** table (ruling 369: by run kind, by backend and run kind and by credential kind, with the planning baseline's columns and, under it, resumes by idle time and operator bursts, ruling 505; every figure on a `data-` attribute, rows keyed `data-cache-row="by run kind:primary"`, resume rows `data-resume-row="codex · login"` with each bucket's `data-past-ttl`, the burst note `data-operator-bursts`), oversight cards naming their exceptions (ruling 290), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)). Details in [../domain/auth-and-rbac.md §6](../domain/auth-and-rbac.md#6-insights-insights-org-admin-only) | |
-| `/profile` | `profile.tsx` | user | identity, password, notification routing (nine in-app toggles, agent questions on their own; and the per-browser Desktop notifications switch, the one place the browser permission is asked for; ruling 481), appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it, in the past tense once its window has reset, ruling 481(d); Disconnect asks first, ruling 481(b)), GitHub identity (its Disconnect asks first too). The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
+| `/profile` | `profile.tsx` | user | identity, password, notification routing (nine in-app toggles, agent questions on their own; and the per-browser Desktop notifications switch, the one place the browser permission is asked for; ruling 481), appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it, in the past tense once its window has reset, ruling 481(d); Disconnect asks first, ruling 481(b); ruling 507: several accounts per backend, the one in use first, the others one "Use this account" away with no sign-in, each renamable and disconnected on its own, and "Add another account"), GitHub identity (its Disconnect asks first too). The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-account-switch`, `backend-account-rename`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user (CSRF as a result) | fetcher target; GET redirects to `/notifications` | `read` (the default; repeatable `id`), `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user (CSRF as a result) | writes `theme` to the user row and the `viberr_theme` cookie; GET redirects to `/` | |
@@ -59,13 +59,18 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | `?run=<id>`: resume-script download | |
 
-The five `backend-*` intents on `/profile` are the Agent-accounts panel: `backend-login-start`
-{backend, method} spawns the vendor's own binary (`claude auth login --claudeai|--console`,
-`codex login --device-auth`) in that person's runtime home; `backend-login-code` {backend, code}
+The seven `backend-*` intents on `/profile` are the Agent-accounts panel: `backend-login-start`
+{backend, method, account?} spawns the vendor's own binary (`claude auth login
+--claudeai|--console`, `codex login --device-auth`) in the home of a new account, or with
+`account` in that existing sign-in's own home (ruling 507); `backend-login-code` {backend, code}
 writes Anthropic's one-time code to the child's stdin (Claude only); `backend-login-cancel`
 {backend} kills it; `backend-set-key` {backend, kind, secret} verifies and seals a pasted API
-key or ChatGPT workspace access token; `backend-disconnect` {backend} runs the vendor logout,
-deletes the credential file and drops the row. Full behaviour in
+key or ChatGPT workspace access token as a new account; `backend-account-switch` {account}
+makes another of the person's accounts the one their runs bill, with no sign-in;
+`backend-account-rename` {account, name} names it (an empty name clears it);
+`backend-disconnect` {account} runs that account's vendor logout, deletes its home (or its
+credential file) and drops its row. An `account` is refused unless it is the session user's
+own. Full behaviour in
 [../domain/auth-and-rbac.md §7](../domain/auth-and-rbac.md#7-profile-and-preferences-profile).
 
 Intents behind `project.task.tsx` are explained in

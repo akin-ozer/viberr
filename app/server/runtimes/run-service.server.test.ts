@@ -48,6 +48,7 @@ import {
   disconnectFakeBackend,
   fakeBackendSecret,
 } from "../../../test-support/backend-credentials";
+import { getBackendCredential } from "./backend-credentials.server";
 import {
   compactedRunSpecs,
   installFakeRuntime,
@@ -668,7 +669,14 @@ describe("ruling 460: a run executes as its principal's own OS user", () => {
       home: path.join(userRoot, "home"),
     });
     expect(spec?.env?.HOME).toBe(path.join(userRoot, "home"));
-    expect(spec?.env?.CLAUDE_CONFIG_DIR).toBe(path.join(userRoot, "claude-home"));
+    // Ruling 507: the launcher hands back the whole backend home, but the CLI
+    // is pointed at the billed account's own home inside it, and the row
+    // records which account that was.
+    const account = getBackendCredential(store.db, store.users.arda.id, "claude")!;
+    const accountHome = path.join(userRoot, "claude-home", "accounts", account.id);
+    expect(spec?.env?.CLAUDE_CONFIG_DIR).toBe(accountHome);
+    expect(spec?.accountHome).toBe(accountHome);
+    expect(getRun(store.db, runId)!.credential_account_id).toBe(account.id);
   });
 
   it("refuses the run, naming the launch, when the principal's home cannot be handed over", async () => {

@@ -286,20 +286,26 @@ function ownedBy(uid: number, dir: string): boolean {
  * this server launches no agents (`off`). The person's runtime root, the
  * vendor home and their agent `$HOME` are handed to their uid when they are not
  * already theirs (a fresh home, or one the server just created) — the common
- * case is three `lstat`s. Throws a `run_unavailable` AppError naming what
- * failed; the caller refuses the run with it.
+ * case is three `lstat`s. `alsoOwn` names the directories inside the vendor
+ * home the server may have created since it was handed over — an account's own
+ * home and the shared directories it links to (ruling 507) — which get the
+ * same treatment; the vendor home stays the one the launcher hands back after
+ * the process exits, so that walk covers every account in it. Throws a
+ * `run_unavailable` AppError naming what failed; the caller refuses the run
+ * with it.
  */
 export function agentLaunchFor(
   db: DatabaseSync,
   userId: string,
   backendHome: string,
   dataRoot?: string,
+  alsoOwn: readonly string[] = [],
 ): AgentLaunch | null {
   if (!launchesAgents()) return null;
   const uid = agentUidFor(db, userId);
   const root = userRuntimeRoot(userId, dataRoot);
   const home = path.join(root, AGENT_HOME_DIR);
-  for (const dir of [root, backendHome, home]) {
+  for (const dir of [root, backendHome, ...alsoOwn, home]) {
     if (!ownedBy(uid, dir)) prepareAgentPath(uid, dir);
   }
   return { uid, launcher: launcherPath, launchHome: backendHome, home };

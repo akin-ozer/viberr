@@ -532,7 +532,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     // one's. The principal check cannot catch it, because the same person owns
     // both accounts. CANARY: drop the `connectedAt` comparison in `ownReading`.
     const quota = await import("~/server/runtimes/backend-quota.server");
-    const { recordBackendLogin } = await import(
+    const { recordBackendLogin, loginTargetFor } = await import(
       "~/server/runtimes/backend-credentials.server"
     );
     // ORDER MATTERS, and it is the whole reason this test exists separately
@@ -547,6 +547,7 @@ describe("/profile agent accounts (ruling 127)", () => {
       "claude",
       "claudeai",
       { email: "the-new-account@example.com" },
+      loginTargetFor(app.db, ardaId, "claude"),
     );
     quota.recordBackendRateLimit(app.db, "claude", {
       credentialUserId: ardaId,
@@ -576,7 +577,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     // runs on the new account went through. Canary: drop the
     // `retireBackendRecordsFor` call from `recordBackendLogin`.
     const quota = await import("~/server/runtimes/backend-quota.server");
-    const { recordBackendLogin } = await import(
+    const { recordBackendLogin, loginTargetFor } = await import(
       "~/server/runtimes/backend-credentials.server"
     );
     quota.recordBackendQuotaExhaustion(app.db, "claude", {
@@ -596,6 +597,7 @@ describe("/profile agent accounts (ruling 127)", () => {
         "claude",
         "claudeai",
         { email: "another@example.com" },
+        loginTargetFor(app.db, ardaId, "claude"),
       );
       expect((await backendsOf(ardaId))[0]!.lastRefusal).toBeNull();
     } finally {
@@ -713,9 +715,11 @@ describe("/profile agent accounts (ruling 127)", () => {
     // A login row carries no secret at all: the vendor's client owns the file.
     expect(claude.health.secretSuffix).toBeNull();
 
+    // Ruling 507: a disconnect names the account it removes.
     const disconnected = await postAction(murId, {
       intent: "backend-disconnect",
       backend: "claude",
+      account: claude.accounts![0]!.id,
     });
     expect(disconnected.data.toast).toBe("Claude disconnected");
     expect((await backendsOf(murId))[0]!.health.available).toBe(false);
@@ -743,6 +747,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     const gone = await postAction(ardaId, {
       intent: "backend-disconnect",
       backend: "codex",
+      account: codex.accounts![0]!.id,
     });
     expect(gone.data.toast).toBe("Codex disconnected");
   });
@@ -774,7 +779,113 @@ describe("/profile agent accounts (ruling 127)", () => {
     const claude = (await backendsOf(ardaId))[0]!;
     expect(claude.health.kind).toBe("api_key");
     expect(claude.health.verifiedAt).not.toBeNull();
-    await postAction(ardaId, { intent: "backend-disconnect", backend: "claude" });
+    const gone = await postAction(ardaId, {
+      intent: "backend-disconnect",
+      backend: "claude",
+      account: claude.accounts![0]!.id,
+    });
+    expect(gone.data.ok).toBe(true);
+  });
+
+  it("ruling 507: a second account, a switch with no sign-in, a name, and the disconnect of the one in use", async () => {
+    const realFetch = globalThis.fetch;
+    // SAFETY: as above — the probe reads only `ok` and `status`.
+    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+    try {
+      for (const secret of ["sk-ant-api03-route-first-1111", "sk-ant-api03-route-second-2222"]) {
+        const connected = await postAction(ardaId, {
+          intent: "backend-set-key",
+          backend: "claude",
+          kind: "api_key",
+          secret,
+        });
+        expect(connected.data.ok).toBe(true);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    // Two accounts, the newer one in use; the loader lists both, active first.
+    let claude = (await backendsOf(ardaId))[0]!;
+    expect(claude.accounts!.map((a) => [a.name, a.active])).toEqual([
+      ["API key ending in 2222", true],
+      ["API key ending in 1111", false],
+    ]);
+    expect(claude.health.secretSuffix).toBe("2222");
+    expect(claude.limits).toEqual({ maxAccounts: 10, maxLabelLength: 60 });
+    const first = claude.accounts![1]!.id;
+    const second = claude.accounts![0]!.id;
+
+    // Switch back to the first: no sign-in, one request, and the toast says
+    // which account runs use now.
+    const switched = await postAction(ardaId, {
+      intent: "backend-account-switch",
+      backend: "claude",
+      account: first,
+    });
+    expect(switched.data).toMatchObject({ ok: true, toast: "Claude runs now use API key ending in 1111" });
+    claude = (await backendsOf(ardaId))[0]!;
+    expect(claude.accounts![0]!.id).toBe(first);
+    expect(claude.health.secretSuffix).toBe("1111");
+
+    const again = await postAction(ardaId, {
+      intent: "backend-account-switch",
+      backend: "claude",
+      account: first,
+    });
+    expect(again.status).toBe(400);
+    expect(again.data.error).toBe("API key ending in 1111 is already the Claude account in use.");
+
+    const renamed = await postAction(ardaId, {
+      intent: "backend-account-rename",
+      backend: "claude",
+      account: first,
+      name: "Work",
+    });
+    expect(renamed.data).toMatchObject({ ok: true, toast: "Claude account renamed Work" });
+    expect((await backendsOf(ardaId))[0]!.accounts![0]!.name).toBe("Work");
+
+    // Disconnecting the one in use hands runs to the one used before it.
+    const gone = await postAction(ardaId, {
+      intent: "backend-disconnect",
+      backend: "claude",
+      account: first,
+    });
+    expect(gone.data.toast).toBe("Work disconnected · Claude runs now use API key ending in 2222");
+    claude = (await backendsOf(ardaId))[0]!;
+    expect(claude.accounts!.map((a) => a.id)).toEqual([second]);
+    const last = await postAction(ardaId, {
+      intent: "backend-disconnect",
+      backend: "claude",
+      account: second,
+    });
+    expect(last.data.toast).toBe("Claude disconnected");
+    expect((await backendsOf(ardaId))[0]!.accounts).toEqual([]);
+  });
+
+  it("ruling 507: one person's account id is refused to another person", async () => {
+    const realFetch = globalThis.fetch;
+    // SAFETY: as above — the probe reads only `ok` and `status`.
+    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+    try {
+      await postAction(ardaId, {
+        intent: "backend-set-key",
+        backend: "codex",
+        kind: "api_key",
+        secret: "sk-proj-route-owned-by-arda",
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    const ardasAccount = (await backendsOf(ardaId))[1]!.accounts![0]!.id;
+    for (const intent of ["backend-account-switch", "backend-account-rename", "backend-disconnect"]) {
+      const refused = await postAction(murId, { intent, backend: "codex", account: ardasAccount, name: "Mine" });
+      expect(refused.status, intent).toBe(400);
+      expect(refused.data.error, intent).toBe("That account isn't connected any more.");
+    }
+    // Arda's account is exactly as it was.
+    const codex = (await backendsOf(ardaId))[1]!;
+    expect(codex.accounts!.map((a) => [a.id, a.label])).toEqual([[ardasAccount, null]]);
+    await postAction(ardaId, { intent: "backend-disconnect", backend: "codex", account: ardasAccount });
   });
 
   it("maps every AppError to a {ok:false,error} result, never a thrown boundary", async () => {
@@ -814,11 +925,30 @@ describe("/profile agent accounts (ruling 127)", () => {
     expect(badKind.status).toBe(400);
     expect(badKind.data.error).toBe("Unknown credential kind.");
 
-    const notConnected = await postAction(ardaId, {
+    // Ruling 507: an account id is required, shaped like one, and the
+    // person's own — a malformed one is refused by name before any lookup, a
+    // well-formed one that is not theirs as not connected.
+    const noAccount = await postAction(ardaId, {
       intent: "backend-disconnect",
       backend: "codex",
     });
+    expect(noAccount.status).toBe(400);
+    expect(noAccount.data.error).toBe("Unknown account.");
+
+    const notConnected = await postAction(ardaId, {
+      intent: "backend-disconnect",
+      backend: "codex",
+      account: "ubc_nobodys0000",
+    });
     expect(notConnected.status).toBe(400);
-    expect(notConnected.data.error).toBe("Codex isn't connected.");
+    expect(notConnected.data.error).toBe("That account isn't connected any more.");
+
+    const badSwitch = await postAction(ardaId, {
+      intent: "backend-account-switch",
+      backend: "codex",
+      account: "../../etc",
+    });
+    expect(badSwitch.status).toBe(400);
+    expect(badSwitch.data.error).toBe("Unknown account.");
   });
 });

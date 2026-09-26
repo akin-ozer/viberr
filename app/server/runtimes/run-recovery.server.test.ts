@@ -23,7 +23,13 @@ import {
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
-import { ensureUserBackendHome, prepareCodexRunHome } from "./user-homes.server";
+import {
+  codexCompactionHomeId,
+  ensureBackendAccountHome,
+  ensureUserBackendHome,
+  prepareCodexRunHome,
+} from "./user-homes.server";
+import { loginTargetFor, recordBackendLogin } from "./backend-credentials.server";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -226,6 +232,63 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     // The shared directories behind the links survive the removal.
     expect(existsSync(path.join(sharedHome, "sessions"))).toBe(true);
     expect(getRun(store.db, "run_codex_orphan")!.state).toBe("interrupted");
+  });
+
+  it("ruling 507: an orphaned run's refreshed sign-in goes back to the ACCOUNT it billed, its compaction's fork too", () => {
+    // Two accounts: an older one whose sign-in sits in the shared home, and
+    // the one the orphaned run billed, in a home of its own. Canary: finish
+    // the run home against the shared home again and the older account's
+    // sign-in is overwritten with the billed one's token.
+    const arda = store.users.arda;
+    const sharedHome = ensureUserBackendHome(arda.id, "codex", store.dataRoot);
+    writeFileSync(path.join(sharedHome, "auth.json"), '{"token":"other-account"}');
+    const target = loginTargetFor(store.db, arda.id, "codex");
+    recordBackendLogin(store.db, { userId: arda.id, label: arda.email }, "codex", "device", {}, target);
+    const { home: accountHome } = ensureBackendAccountHome(arda.id, "codex", target, store.dataRoot);
+    writeFileSync(path.join(accountHome, "auth.json"), '{"token":"billed-old"}');
+
+    const run = prepareCodexRunHome(sharedHome, "run_codex_acct", undefined, accountHome);
+    writeFileSync(path.join(run.dir, "auth.json"), '{"token":"billed-refreshed"}');
+    // The restart also cut the run's completion compaction, in its own fork.
+    const compaction = prepareCodexRunHome(
+      sharedHome,
+      codexCompactionHomeId("run_codex_acct"),
+      undefined,
+      accountHome,
+    );
+    seedRun("run_codex_acct", {
+      state: "running",
+      kind: "primary",
+      role: "Implementation",
+      agentProfileId: "developer",
+      backend: "codex",
+      model: "gpt-5.6-luna",
+      sdk: "Codex SDK",
+      credentialUserId: arda.id,
+      credentialAccountId: target.id,
+    });
+    expect(finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).finalized).toBe(1);
+    expect(existsSync(run.dir)).toBe(false);
+    expect(existsSync(compaction.dir)).toBe(false);
+    expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"token":"billed-refreshed"}');
+    expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"other-account"}');
+  });
+
+  it("ruling 507: an orphaned run of an account removed since hands its token back to nobody", () => {
+    const arda = store.users.arda;
+    const sharedHome = ensureUserBackendHome(arda.id, "codex", store.dataRoot);
+    writeFileSync(path.join(sharedHome, "auth.json"), '{"token":"other-account"}');
+    const run = prepareCodexRunHome(sharedHome, "run_codex_removed");
+    writeFileSync(path.join(run.dir, "auth.json"), '{"token":"refreshed"}');
+    seedRun("run_codex_removed", {
+      state: "running",
+      backend: "codex",
+      credentialUserId: arda.id,
+      credentialAccountId: "ubc_removed00000",
+    });
+    finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    expect(existsSync(run.dir)).toBe(false);
+    expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"other-account"}');
   });
 
   it("re-invokes the operator for an orphan under the crash-loop cap", () => {

@@ -214,7 +214,7 @@ describe("conversation access", () => {
       "./controller-conversations.server"
     );
     const { runControllerTurn } = await import("./controller-run.server");
-    const { recordBackendLogin } = await import(
+    const { recordBackendLogin, loginTargetFor } = await import(
       "~/server/runtimes/backend-credentials.server"
     );
     const { connectFakeBackend, disconnectFakeBackend } = await import(
@@ -229,6 +229,7 @@ describe("conversation access", () => {
       "claude",
       "claudeai",
       { authMethod: "claudeai" },
+      loginTargetFor(app.db, ownerId, "claude"),
     );
     try {
       const conversation = createConversation(app.db, {

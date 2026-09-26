@@ -35,8 +35,10 @@ import {
   startRun,
 } from "~/server/runtimes/run-service.server";
 import {
-  disconnectBackend,
+  disconnectBackendAccount,
+  renameBackendAccount,
   setBackendApiKey,
+  switchBackendAccount,
 } from "~/server/runtimes/backend-credentials.server";
 import {
   cancelBackendLogin,
@@ -845,25 +847,67 @@ describe("governed actions record audit rows (table-driven)", () => {
             "claude",
             "api_key",
             "sk-ant-api03-audit-sweep-key",
-            { fetchImpl: acceptingProvider, dataRoot: store.dataRoot },
+            { fetchImpl: acceptingProvider },
           ),
       },
       {
-        name: "disconnectBackend",
+        name: "disconnectBackendAccount",
         action: "profile.backend.disconnected",
         instanceWide: true,
         run: async () => {
-          await setBackendApiKey(
+          const row = await setBackendApiKey(
             store.db,
             actorArda(),
             "codex",
             "api_key",
             "sk-proj-audit-sweep-key",
-            { fetchImpl: acceptingProvider, dataRoot: store.dataRoot },
+            { fetchImpl: acceptingProvider },
           );
-          await disconnectBackend(store.db, actorArda(), "codex", {
+          await disconnectBackendAccount(store.db, actorArda(), row.id, {
             dataRoot: store.dataRoot,
           });
+        },
+      },
+      {
+        // Ruling 507: which of a person's accounts bills their runs is the
+        // same governed fact as connecting one, so switching leaves a row too.
+        name: "switchBackendAccount",
+        action: "profile.backend.switched",
+        instanceWide: true,
+        run: async () => {
+          const first = await setBackendApiKey(
+            store.db,
+            actorArda(),
+            "codex",
+            "api_key",
+            "sk-proj-audit-sweep-first",
+            { fetchImpl: acceptingProvider },
+          );
+          await setBackendApiKey(
+            store.db,
+            actorArda(),
+            "codex",
+            "api_key",
+            "sk-proj-audit-sweep-second",
+            { fetchImpl: acceptingProvider },
+          );
+          switchBackendAccount(store.db, actorArda(), first.id, { dataRoot: store.dataRoot });
+        },
+      },
+      {
+        name: "renameBackendAccount",
+        action: "profile.backend.renamed",
+        instanceWide: true,
+        run: async () => {
+          const row = await setBackendApiKey(
+            store.db,
+            actorArda(),
+            "claude",
+            "api_key",
+            "sk-ant-api03-audit-sweep-named",
+            { fetchImpl: acceptingProvider },
+          );
+          renameBackendAccount(store.db, actorArda(), row.id, "Work");
         },
       },
       {
@@ -1174,6 +1218,9 @@ describe("governed actions record audit rows (table-driven)", () => {
         "profile.backend.login_started",
         "profile.backend.login_failed",
         "profile.backend.login_cancelled",
+        // Ruling 507: which of those accounts runs bill, and its name.
+        "profile.backend.switched",
+        "profile.backend.renamed",
         // Ruling 156: a project-scoped row with no task.
         "project.agent_profile.resources_synced",
         // Ruling 462: the repository a new project is created with.

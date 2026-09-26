@@ -5303,7 +5303,7 @@ describe("runOperator — authority, ordering, orphans", () => {
       expect(rendered).not.toContain("Claude");
     });
 
-    it("auth: names the org restriction and the account remedy; recommends 'I connected a different account or an API key'", async () => {
+    it("auth: names the org restriction and the account remedy; recommends 'I switched to or connected a different account or an API key'", async () => {
       const packet = await failed("Claude refused the run: the account was rejected.", {
         ...emptyRunFailureFacts("auth"),
         apiError: "oauth_org_not_allowed",
@@ -5316,7 +5316,7 @@ describe("runOperator — authority, ordering, orphans", () => {
       expect(packet.body).not.toMatch(/retry on the other backend|fix the credential/i);
       const rec = packet.options.find((o) => o.rec)!;
       expect(rec.kind).toBe("block_on_policy");
-      expect(rec.t).toBe("I connected a different Claude account or an API key on Profile → Agent accounts: re-run");
+      expect(rec.t).toBe("I switched to or connected a different Claude account or an API key on Profile → Agent accounts: re-run");
       expect(rec.ev).toContain("No project policy was changed");
     });
 

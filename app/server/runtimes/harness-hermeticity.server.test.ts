@@ -304,10 +304,11 @@ describe("a run's child env carries exactly its principal's credential", () => {
 
     const child = captured.claude;
     expect(child).toBeTruthy();
-    // The principal's own key, and their own home — nobody else's.
+    // The principal's own key, and their own home — nobody else's. Ruling
+    // 507: the home of the ACCOUNT the run bills, inside the person's own.
     expect(child?.ANTHROPIC_API_KEY).toBe(credential.secrets[0]);
-    expect(child?.CLAUDE_CONFIG_DIR).toBe(credential.homeDir);
-    expect(child?.CLAUDE_CONFIG_DIR).toContain(path.join("users", "u_owner"));
+    expect(child?.CLAUDE_CONFIG_DIR).toBe(credential.accountHome);
+    expect(child?.CLAUDE_CONFIG_DIR).toContain(path.join("users", "u_owner", "claude-home", "accounts"));
     // Ordinary runtime settings survive; the workspace overlay lands.
     expect(child?.PATH).toBeTruthy();
     expect(child?.GIT_CEILING_DIRECTORIES).toBe(
@@ -342,7 +343,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
     const claudeRun = await withAmbientHomes(() =>
       startWithEnv(claudeCredential.env),
     );
-    expect(claudeRun.claude?.CLAUDE_CONFIG_DIR).toBe(claudeCredential.homeDir);
+    expect(claudeRun.claude?.CLAUDE_CONFIG_DIR).toBe(claudeCredential.accountHome);
     expect(claudeRun.claude?.CODEX_HOME).toBeUndefined();
     expect(claudeRun.claude?.CODEX_SQLITE_HOME).toBeUndefined();
 

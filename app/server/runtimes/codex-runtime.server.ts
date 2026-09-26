@@ -36,6 +36,7 @@ import {
   SESSION_STORE_UNREADABLE_RE,
 } from "./session-export.server";
 import {
+  codexCompactionHomeId,
   finishCodexRunHome,
   prepareCodexRunHome,
   type CodexRunHome,
@@ -60,7 +61,7 @@ import {
 } from "./codex-app-server.server";
 import { launchEnv, prepareAgentPath, type AgentLaunch } from "./agent-isolation.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
-import { toError } from "~/shared/errors";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
@@ -776,11 +777,14 @@ export function createCodexAdapter(
     /**
      * Ruling 376: compact the thread a run just left through the CLI's
      * app-server (`thread/compact/start`; neither `exec` nor the SDK has a
-     * command for it). Runs in the principal's SHARED home — the run's forked
-     * home is gone by the time a run has exited (`finishCodexRunHome`), and
-     * the rollout lives in the shared one — with the same credential overlay
-     * and the shared summarizer prompt. The sizes are not in the reply; the
-     * run service reads them off the rollout the CLI just extended.
+     * command for it). The run's forked home is gone by the time a run has
+     * exited (`finishCodexRunHome`), so the compaction gets a fork of its own
+     * from the principal's SHARED home (ruling 507: seeded with the sign-in of
+     * the account the run billed, settled like a run's), with the same
+     * credential overlay and the shared summarizer prompt; the rollout it
+     * extends lives in the shared home through the fork's links. The sizes are
+     * not in the reply; the run service reads them off the rollout the CLI
+     * just extended.
      */
     async compact(spec: RunSpec, threadId: string, cb: CompactCallbacks): Promise<CompactOutcome> {
       cb.onPhase?.(RUN_PHASE.compacting, "at the end of the run");
@@ -796,20 +800,46 @@ export function createCodexAdapter(
       const env = baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
       // Its own marker: the run's settle sweep must not reap the app-server.
       if (env?.[RUN_MARKER_ENV]) Object.assign(env, compactionMarkerEnv(spec.runId));
-      const config: ThreadResumeConfig = {};
-      const compaction = codexCompactionConfig(spec.kind);
-      if (compaction.compact_prompt) config.compact_prompt = compaction.compact_prompt;
-      const input: Parameters<typeof compactCodexThread>[0] = {
-        threadId,
-        cwd: spec.workdir,
-        config,
-      };
-      if (spec.model) input.model = spec.model;
-      if (env) input.env = env;
-      if (deps.spawnAppServer) input.spawn = deps.spawnAppServer;
-      // Ruling 460: as the person's own OS user, like the run it compacts.
-      if (spec.agent) input.launch = spec.agent;
-      const outcome = await compactCodexThread(input);
+      // Ruling 507: the compaction bills the account the run billed, so it runs
+      // in a private fork of the shared home like the run did (ruling 181),
+      // seeded with THAT account's sign-in. The shared home holds no sign-in of
+      // an account connected since the ruling, and may hold an earlier
+      // account's that is not the one this run billed.
+      const sharedHome = spec.env?.CODEX_HOME;
+      let compactHome: CodexRunHome | null = null;
+      let outcome: CompactOutcome;
+      try {
+        if (env && sharedHome) {
+          compactHome = prepareCodexRunHome(
+            sharedHome,
+            codexCompactionHomeId(spec.runId),
+            agentOwner(spec.agent),
+            spec.accountHome ?? sharedHome,
+          );
+          env.CODEX_HOME = compactHome.dir;
+          env.CODEX_SQLITE_HOME = compactHome.sharedHome;
+        }
+        const config: ThreadResumeConfig = {};
+        const compaction = codexCompactionConfig(spec.kind);
+        if (compaction.compact_prompt) config.compact_prompt = compaction.compact_prompt;
+        const input: Parameters<typeof compactCodexThread>[0] = {
+          threadId,
+          cwd: spec.workdir,
+          config,
+        };
+        if (spec.model) input.model = spec.model;
+        if (env) input.env = env;
+        if (deps.spawnAppServer) input.spawn = deps.spawnAppServer;
+        // Ruling 460: as the person's own OS user, like the run it compacts.
+        if (spec.agent) input.launch = spec.agent;
+        outcome = await compactCodexThread(input);
+      } catch (error) {
+        // A home that could not be built compacts nothing; the run it follows
+        // has already settled, so this is the epilogue's failure and no more.
+        outcome = { compacted: false, reason: errorMessage(error) };
+      } finally {
+        if (compactHome) finishCodexRunHome(compactHome, agentOwner(spec.agent));
+      }
       if (!outcome.compacted) {
         const occurredAt = new Date().toISOString();
         cb.onLine({
@@ -1071,7 +1101,13 @@ export function createCodexAdapter(
         // merged env, whose process.env fallback could carry an ambient home.
         const sharedHome = spec.env?.CODEX_HOME;
         if (mergedEnv && sharedHome) {
-          runHome = prepareCodexRunHome(sharedHome, spec.runId, agentOwner(spec.agent));
+          runHome = prepareCodexRunHome(
+            sharedHome,
+            spec.runId,
+            agentOwner(spec.agent),
+            // Ruling 507: the sign-in of the account this run bills.
+            spec.accountHome ?? sharedHome,
+          );
           mergedEnv.CODEX_HOME = runHome.dir;
           mergedEnv.CODEX_SQLITE_HOME = runHome.sharedHome;
         }

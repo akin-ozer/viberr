@@ -3684,7 +3684,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
     expect(event.text).toContain("No changes were delivered.");
     expect(event.text).toContain(
-      `${owner} can wait until the window reopens (Sep 7, 2026 · 11:50 UTC), or connect a different Claude account or an API key on Profile → Agent accounts.`,
+      `${owner} can wait until the window reopens (Sep 7, 2026 · 11:50 UTC), or switch to or connect a different Claude account (or an API key) on Profile → Agent accounts.`,
     );
     expect(event.text).not.toMatch(/retry on the other backend|fix the credential|\.\./i);
 

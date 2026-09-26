@@ -12,12 +12,17 @@ import { useToast } from "~/ui/toast";
 import { utcDayKey } from "~/shared/dates/format";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { BackendLoginPollData } from "~/routes/resources.backend-login";
-import type { ProfileBackend,
+import type {
+  ProfileBackend,
+  ProfileBackendAccount,
   ProfileBackendRefusal,
 } from "./profile-query.server";
 import type { ProfileActionData } from "./profile-page";
 import type { LoginState } from "~/server/runtimes/backend-login.server";
-import type { LoginMethod } from "~/server/runtimes/backend-credentials.server";
+import type {
+  LoginMethod,
+  UserBackendHealth,
+} from "~/server/runtimes/backend-credentials.server";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
@@ -43,6 +48,15 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * process runs server-side: nothing else would ever tell the browser that the
  * URL appeared or that the sign-in finished. Every toast settles on a fetcher
  * RESULT, never at submit time.
+ *
+ * Ruling 507: a person may keep several accounts per backend. The card leads
+ * with the one their runs use (its health, usage and refusals, which are about
+ * that account), lists the others with "Use this account" — a switch, not a
+ * sign-in: each account's sign-in stays in its own home on this server — and
+ * offers "Add another account", which connects through the same sign-in and
+ * paste methods and makes the new account the one in use. Rename and
+ * Disconnect are per account; disconnecting the one in use hands runs to the
+ * account used before it.
  */
 
 /** How each vendor's own sign-in flow is named to the person starting it. */
@@ -551,6 +565,140 @@ function usagePillKind(usage: NonNullable<ProfileBackend["usage"]>): "neutral" |
   return usage.isUsingOverage || usage.status.includes("warning") ? "risk" : "neutral";
 }
 
+/**
+ * Ruling 507: how an account was connected, as the line under its name says
+ * it. The name itself says WHICH account (`backendAccountName`); this says what
+ * kind, so a person holding a sign-in and a key can tell them apart at a glance.
+ */
+const ACCOUNT_KIND_WORD = {
+  claudeai: "Claude sign-in (claude.ai)",
+  console: "Console sign-in",
+  device: "ChatGPT sign-in",
+} as const satisfies Record<LoginMethod, string>;
+
+function accountKindWord(health: UserBackendHealth): string {
+  if (health.kind === "login") {
+    return health.method ? ACCOUNT_KIND_WORD[health.method] : "Sign-in";
+  }
+  return health.kind === "access_token" ? "Workspace access token" : "API key";
+}
+
+/**
+ * The accounts a card lists. The loader always sends them (ruling 507); a
+ * fixture from before the ruling carries only the active account's `health`,
+ * which stands for the one account it describes.
+ */
+function cardAccounts(data: ProfileBackend): ProfileBackendAccount[] {
+  if (data.accounts) return data.accounts;
+  if (data.health.kind === null) return [];
+  return [
+    {
+      id: data.health.accountId ?? "",
+      name: data.health.accountName ?? BACKEND_LABEL[data.backend],
+      label: null,
+      active: true,
+      health: data.health,
+    },
+  ];
+}
+
+/**
+ * Ruling 507: give an account the person's own name, or clear it. The same
+ * field idiom as the key paste form (a `.field` with its label and the card's
+ * button row), prefilled with the name it has; an empty save clears the name
+ * and the account is named by its vendor facts again. Ruling 147: Save is
+ * enabled until the request starts, and an over-long name is refused here
+ * with the store's own sentence.
+ */
+function RenameForm({
+  backend,
+  account,
+  maxLength,
+  busy,
+  inFlight,
+  onCancel,
+  submit,
+}: {
+  backend: "claude" | "codex";
+  account: ProfileBackendAccount;
+  maxLength: number;
+  busy: boolean;
+  inFlight: boolean;
+  onCancel: () => void;
+  submit: (fields: Record<string, string>) => void;
+}) {
+  const [name, setName] = useState(account.label ?? "");
+  const [refused, setRefused] = useState(0);
+  const refusalShake = useRefusalShake(refused);
+  const field = useRef<HTMLInputElement | null>(null);
+  const fieldId = `agentacc-${account.id}-name`;
+  const errId = `${fieldId}-err`;
+  const tooLong = name.trim().length > maxLength;
+  const invalid = refused > 0 && tooLong;
+
+  useEffect(() => {
+    field.current?.focus();
+  }, []);
+
+  const save = () => {
+    if (busy) return;
+    if (tooLong) {
+      setRefused((n) => n + 1);
+      field.current?.focus();
+      return;
+    }
+    submit({ intent: "backend-account-rename", backend, account: account.id, name });
+  };
+
+  return (
+    <div className="field spaced">
+      <label className="flabel" htmlFor={fieldId}>
+        Account name{" "}
+        <span className="fhint">shown only to you; leave it empty to go back to {account.name}</span>
+      </label>
+      <input
+        ref={field}
+        id={fieldId}
+        type="text"
+        value={name}
+        autoComplete="off"
+        spellCheck={false}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? errId : undefined}
+        placeholder="Work, Personal…"
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            save();
+          }
+        }}
+      />
+      {invalid ? (
+        <div
+          key={`refused-${refused}`}
+          id={errId}
+          className={"login-err" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
+          role="alert"
+        >
+          <Icon name="alert" />
+          An account name can be at most {maxLength} characters.
+        </div>
+      ) : null}
+      <div className="cred-manage">
+        <button type="button" className="btn sm" disabled={busy} aria-busy={inFlight || undefined} onClick={save}>
+          {inFlight && <Icon name="loader" className="spin" />}
+          {inFlight ? "Saving…" : "Save name"}
+        </button>
+        <button type="button" className="btn ghost sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AgentAccountCard({
   data,
   fetcher,
@@ -562,6 +710,12 @@ function AgentAccountCard({
 }) {
   const { backend, health, methods } = data;
   const label = BACKEND_LABEL[backend];
+  // Ruling 507: every account the person holds here, the active one first.
+  const accounts = cardAccounts(data);
+  const active = accounts.find((account) => account.active) ?? null;
+  const others = accounts.filter((account) => !account.active);
+  const limits = data.limits ?? { maxAccounts: Number.POSITIVE_INFINITY, maxLabelLength: 60 };
+  const atLimit = accounts.length >= limits.maxAccounts;
   // Ruling 130(d) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
   // person's own account. The card used to say "connected · verified" while
   // every run on the account was refused with a 403.
@@ -572,7 +726,11 @@ function AgentAccountCard({
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
-  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // Ruling 507: the account a Disconnect is asking about, the account whose
+  // name is being edited, and whether "Add another account" is open.
+  const [confirmDisconnect, setConfirmDisconnect] = useState<ProfileBackendAccount | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   // The poll fetcher is the card's OWN: `/resources/backend-login` answers for
   // the signed-in caller only, and loading it on the panel's action fetcher
@@ -624,9 +782,25 @@ function AgentAccountCard({
     }
     announced.current = done.id;
     push(`${label} connected`);
+    setAdding(false);
     // The card's connected state, the health pill and every other surface that
     // reads this person's backends come from the loader, not from the poll.
     void revalidator.revalidate();
+  });
+
+  // A completed rename or saved key closes what the person had open for it.
+  // Settled on the RESULT, so a refusal leaves the field as it was. The
+  // disconnect dialog closes on either outcome: it holds its busy state until
+  // the answer lands, and then the toast or the inline error says what
+  // happened (the card stays mounted now that other accounts may remain).
+  useFetcherResult(fetcher, (result) => {
+    if (result.intent === "backend-disconnect") setConfirmDisconnect(null);
+    if (!result.ok) return;
+    if (result.intent === "backend-account-rename") setRenaming(null);
+    if (result.intent === "backend-set-key") {
+      setPaste(null);
+      setAdding(false);
+    }
   });
 
   const busy = fetcher.state !== "idle";
@@ -635,8 +809,15 @@ function AgentAccountCard({
   // and every other control (this card's and the other card's) only waits.
   const sent = inFlightIntent(fetcher);
   const inFlight = sent !== null && fetcher.formData?.get("backend") === backend ? sent : null;
+  // Ruling 507: and within the card, the ACCOUNT it names ("" for a sign-in
+  // that adds a new one), so only that row's button shows the work.
+  const inFlightAccount = inFlight !== null ? String(fetcher.formData?.get("account") ?? "") : null;
   const startingMethod =
     inFlight === "backend-login-start" ? String(fetcher.formData?.get("method") ?? "") : null;
+  const starting = (method: LoginMethod, account: string) =>
+    startingMethod === method && inFlightAccount === account;
+  const accountBusy = (intent: string, account: string) =>
+    inFlight === intent && inFlightAccount === account;
   /** The badge says where this account STANDS, in the person's vocabulary. The
    *  stored `kind` (`api_key`, `access_token`) is our schema, not their word.
    *  An unconnected card says so in words: the "−" this slot used to show read
@@ -652,6 +833,108 @@ function AgentAccountCard({
     health.connectedAt && utcDayKey(health.connectedAt) ? health.connectedAt : null;
   const verifiedOn =
     health.verifiedAt && utcDayKey(health.verifiedAt) ? health.verifiedAt : null;
+
+  /** Start a sign-in: into a new account, or (`account`) into that existing
+   *  sign-in again (ruling 507). */
+  const startSignIn = (method: LoginMethod, account: string) => {
+    if (account) submit({ intent: "backend-login-start", backend, method, account });
+    else submit({ intent: "backend-login-start", backend, method });
+  };
+
+  /** A "Sign in with …" button for each vendor flow: into a new account, or
+   *  (`account`) into that existing sign-in again. The vendor's own sign-in
+   *  leads when `lead` is set; the other flows stay neutral. */
+  const signInButtons = (account: string, lead: boolean) =>
+    methods.signIn.map((method, i) => (
+      <button
+        key={method}
+        type="button"
+        className={"btn sm" + (lead && i === 0 ? " primary" : "")}
+        disabled={busy}
+        aria-busy={starting(method, account) || undefined}
+        onClick={() => startSignIn(method, account)}
+      >
+        {starting(method, account) && <Icon name="loader" className="spin" />}
+        {starting(method, account) ? "Starting sign-in…" : SIGN_IN_LABEL[method]}
+      </button>
+    ));
+
+  /** The ways to connect an account: every sign-in the vendor offers, then the
+   *  paste methods, and the paste form when one is open. The whole of a fresh
+   *  card, and what "Add another account" opens on a connected one. */
+  const connectWays = (
+    <>
+      <div className="cred-manage">
+        {signInButtons("", true)}
+        {methods.paste.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            className="btn ghost sm"
+            onClick={() => setPaste(paste === kind ? null : kind)}
+          >
+            {PASTE_LABEL[kind]}
+          </button>
+        ))}
+      </div>
+      {paste && (
+        <PasteForm
+          backend={backend}
+          kind={paste}
+          busy={busy}
+          onCancel={() => setPaste(null)}
+          submit={submit}
+        />
+      )}
+    </>
+  );
+
+  /** The two manage buttons every account carries, the active one included. */
+  const manageButtons = (account: ProfileBackendAccount) => (
+    <>
+      <button
+        type="button"
+        className="btn ghost sm"
+        disabled={busy}
+        onClick={() => setRenaming(renaming === account.id ? null : account.id)}
+      >
+        Rename
+      </button>
+      <button
+        type="button"
+        // Ruling 149: dropping the stored credential is destructive.
+        className="btn ghost sm danger"
+        disabled={busy}
+        aria-busy={accountBusy("backend-disconnect", account.id) || undefined}
+        // Ruling 481(b) (F40-49): it asks first, like every other one-way
+        // control (ruling 458(f)). One tap used to sign the vendor session
+        // out, with no undo short of a fresh sign-in.
+        onClick={() => setConfirmDisconnect(account)}
+      >
+        {accountBusy("backend-disconnect", account.id) && <Icon name="loader" className="spin" />}
+        {accountBusy("backend-disconnect", account.id) ? "Disconnecting…" : "Disconnect"}
+      </button>
+    </>
+  );
+
+  const renameFor = (account: ProfileBackendAccount) =>
+    renaming === account.id ? (
+      <RenameForm
+        backend={backend}
+        account={account}
+        maxLength={limits.maxLabelLength}
+        busy={busy}
+        inFlight={accountBusy("backend-account-rename", account.id)}
+        onCancel={() => setRenaming(null)}
+        submit={submit}
+      />
+    ) : null;
+
+  // The account a running or failed sign-in is FOR, when it is one the person
+  // already has (signing an existing sign-in in again, ruling 507).
+  const loginAccount =
+    login?.existingAccount ? accounts.find((account) => account.id === login.accountId) ?? null : null;
+
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -674,37 +957,56 @@ function AgentAccountCard({
               type="button"
               className="btn sm"
               disabled={busy}
-              aria-busy={startingMethod === login.method || undefined}
+              aria-busy={starting(login.method, login.existingAccount ? login.accountId : "") || undefined}
               onClick={() =>
-                submit({
-                  intent: "backend-login-start",
-                  backend,
-                  method: login.method,
-                })
+                // Ruling 507: again into the same account the failed flow was
+                // for; a new account's attempt starts a new one.
+                startSignIn(login.method, login.existingAccount ? login.accountId : "")
               }
             >
-              {startingMethod === login.method && <Icon name="loader" className="spin" />}
-              {startingMethod === login.method ? "Starting sign-in…" : "Start again"}
+              {starting(login.method, login.existingAccount ? login.accountId : "") && (
+                <Icon name="loader" className="spin" />
+              )}
+              {starting(login.method, login.existingAccount ? login.accountId : "")
+                ? "Starting sign-in…"
+                : "Start again"}
             </button>
           </div>
         </>
       )}
 
       {running && login ? (
-        <SignInSteps
-          key={login.id}
-          backend={backend}
-          label={label}
-          login={login}
-          busy={busy}
-          inFlight={inFlight}
-          submit={submit}
-        />
-      ) : health.kind !== null ? (
+        <>
+          {/* Ruling 507: which account the sign-in is for, when the card
+              already has one — the steps below look the same either way. */}
+          {accounts.length > 0 ? (
+            <p className="fine spaced">
+              {loginAccount
+                ? `Signing in to ${loginAccount.name} again.`
+                : `Adding another ${label} account. The ${accounts.length === 1 ? "one" : "ones"} you have stay${accounts.length === 1 ? "s" : ""} connected.`}
+            </p>
+          ) : null}
+          <SignInSteps
+            key={login.id}
+            backend={backend}
+            label={label}
+            login={login}
+            busy={busy}
+            inFlight={inFlight}
+            submit={submit}
+          />
+        </>
+      ) : active ? (
         <>
           <div className={health.available ? "cred-ok" : "cred-warn"}>
             <Icon name={health.available ? "check" : "alert"} />
             <span>
+              {/* Ruling 507: which account runs bill, once there is a choice. */}
+              {others.length > 0 ? (
+                <>
+                  Runs use <strong>{active.name}</strong> ·{" "}
+                </>
+              ) : null}
               {health.kind === "login" && health.method
                 ? SIGN_IN_CONNECTED[health.method]
                 : health.kind === "access_token"
@@ -806,8 +1108,8 @@ function AgentAccountCard({
                     <LocalDayDotTime iso={lastRefusal.observedAt} />:{" "}
                     {lastRefusal.providerText} This is the last refusal Viberr
                     observed on this account; any completed {label} run retires
-                    it, as does connecting a different {label} account here, so
-                    its absence is not proof the account works.
+                    it, as does switching to or connecting a different {label}{" "}
+                    account here, so its absence is not proof the account works.
                   </>
                 ) : (
                   <>
@@ -818,8 +1120,8 @@ function AgentAccountCard({
                       </>
                     ) : null}
                     . Any completed {label} run retires this notice, as does
-                    connecting a different {label} account here; until then,
-                    runs billed to this account are refused.
+                    switching to or connecting a different {label} account here;
+                    until then, runs billed to this account are refused.
                   </>
                 )}
               </span>
@@ -830,59 +1132,148 @@ function AgentAccountCard({
                 again on your Profile → Agent accounts", which is THIS card: so
                 the card has to carry the sign-in it names, or the only way out
                 of a wiped runtime volume would be to guess that Disconnect
-                comes first. */}
-            {!health.available &&
-              methods.signIn.map((method) => (
-                <button
-                  key={method}
-                  type="button"
-                  className="btn sm"
-                  disabled={busy}
-                  aria-busy={startingMethod === method || undefined}
-                  onClick={() =>
-                    submit({ intent: "backend-login-start", backend, method })
-                  }
-                >
-                  {startingMethod === method && <Icon name="loader" className="spin" />}
-                  {startingMethod === method ? "Starting sign-in…" : SIGN_IN_LABEL[method]}
-                </button>
-              ))}
-            <button
-              type="button"
-              // Ruling 149: dropping the stored credential is destructive.
-              className="btn ghost sm danger"
-              disabled={busy}
-              aria-busy={inFlight === "backend-disconnect" || undefined}
-              // Ruling 481(b) (F40-49): it asks first, like every other
-              // one-way control (ruling 458(f)). One tap used to sign the
-              // vendor session out, with no undo short of a fresh sign-in.
-              onClick={() => setConfirmDisconnect(true)}
-            >
-              {inFlight === "backend-disconnect" && <Icon name="loader" className="spin" />}
-              {inFlight === "backend-disconnect" ? "Disconnecting…" : "Disconnect"}
-            </button>
+                comes first. Ruling 507: into THIS account's own home, when it
+                is a sign-in; a pasted key never goes missing. */}
+            {!health.available && health.kind === "login" && signInButtons(active.id, false)}
+            {manageButtons(active)}
           </div>
+          {renameFor(active)}
+
+          {/* Ruling 507: the person's other accounts on this backend, each one
+              switch away from billing their runs — no sign-in, nothing moved,
+              and a run already going keeps the account it started on. */}
+          {others.length > 0 ? (
+            <div className="acct-list">
+              <h3 className="flabel">Other {label} accounts</h3>
+              <div className="conn-list">
+                {others.map((account) => {
+                  const on =
+                    account.health.connectedAt && utcDayKey(account.health.connectedAt)
+                      ? account.health.connectedAt
+                      : null;
+                  return (
+                    <div className="conn-row" key={account.id} data-account={account.id}>
+                      <span className="conn-main">
+                        <b>{account.name}</b>
+                        <span className="sub">
+                          {accountKindWord(account.health)}
+                          {on ? (
+                            <>
+                              {" "}· connected <LocalCalendarDate iso={on} />
+                            </>
+                          ) : null}
+                          {account.health.available ? "" : " · sign-in file missing"}
+                        </span>
+                        {renameFor(account)}
+                      </span>
+                      {/* The row's own flex wrap spaces the buttons, as on
+                          the connections list (`.conn-row`). */}
+                      {account.health.available ? (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          disabled={busy}
+                          aria-busy={accountBusy("backend-account-switch", account.id) || undefined}
+                          onClick={() =>
+                            submit({ intent: "backend-account-switch", backend, account: account.id })
+                          }
+                        >
+                          {accountBusy("backend-account-switch", account.id) && (
+                            <Icon name="loader" className="spin" />
+                          )}
+                          {accountBusy("backend-account-switch", account.id)
+                            ? "Switching…"
+                            : "Use this account"}
+                        </button>
+                      ) : account.health.kind === "login" ? (
+                        signInButtons(account.id, false)
+                      ) : null}
+                      {manageButtons(account)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {adding ? (
+            <div className="acct-list">
+              <h3 className="flabel">Add another {label} account</h3>
+              <p className="fine">
+                It becomes the account your runs use; the{" "}
+                {accounts.length === 1 ? "one" : "ones"} you have stay connected, and
+                switching back needs no sign-in.
+              </p>
+              {connectWays}
+              <div className="cred-manage">
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => {
+                    setAdding(false);
+                    setPaste(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="cred-manage">
+              <button
+                type="button"
+                className="btn ghost sm"
+                disabled={busy || atLimit}
+                onClick={() => setAdding(true)}
+              >
+                <Icon name="plus" />
+                Add another {label} account
+              </button>
+              {atLimit ? (
+                <span className="fine">
+                  {limits.maxAccounts} is the most one person can keep; disconnect one to add another.
+                </span>
+              ) : null}
+            </div>
+          )}
           {confirmDisconnect && (
             <ConfirmDialog
               screenLabel="Disconnect agent account dialog"
-              title={`Disconnect ${label}?`}
+              title={
+                accounts.length > 1 ? `Disconnect ${confirmDisconnect.name}?` : `Disconnect ${label}?`
+              }
               body={
                 <>
-                  Viberr signs this server out of your {label} account and
-                  deletes the stored credential. Tasks you own and your
-                  controller conversations can&apos;t start a {label} run until
-                  you connect again.
+                  Viberr signs this server out of{" "}
+                  {accounts.length > 1 ? <>this {label} account</> : <>your {label} account</>} and
+                  deletes the stored credential.{" "}
+                  {!confirmDisconnect.active ? (
+                    <>Your runs keep using {active.name}.</>
+                  ) : others.length > 0 ? (
+                    <>
+                      Your runs switch to {others[0]!.name}, the {label} account you used
+                      before it.
+                    </>
+                  ) : (
+                    <>
+                      Tasks you own and your controller conversations can&apos;t start a{" "}
+                      {label} run until you connect again.
+                    </>
+                  )}
                 </>
               }
-              confirmLabel={`Disconnect ${label}`}
+              confirmLabel={
+                accounts.length > 1 ? `Disconnect ${confirmDisconnect.name}` : `Disconnect ${label}`
+              }
               busy={busy}
-              onCancel={() => setConfirmDisconnect(false)}
+              onCancel={() => setConfirmDisconnect(null)}
               onConfirm={() => {
                 // Close any paste form the card was showing before this
                 // connection existed, so disconnecting does not re-reveal a
                 // half-typed key field.
                 setPaste(null);
-                submit({ intent: "backend-disconnect", backend });
+                setRenaming(null);
+                submit({ intent: "backend-disconnect", backend, account: confirmDisconnect.id });
               }}
             />
           )}
@@ -901,45 +1292,7 @@ function AgentAccountCard({
               own {label} account.
             </span>
           </div>
-          <div className="cred-manage">
-            {methods.signIn.map((method, i) => (
-              <button
-                key={method}
-                type="button"
-                // The vendor's own sign-in leads; the other sign-ins stay
-                // neutral and the paste methods ghost — one recommended path
-                // per card instead of six equal buttons.
-                className={"btn sm" + (i === 0 ? " primary" : "")}
-                disabled={busy}
-                aria-busy={startingMethod === method || undefined}
-                onClick={() =>
-                  submit({ intent: "backend-login-start", backend, method })
-                }
-              >
-                {startingMethod === method && <Icon name="loader" className="spin" />}
-                {startingMethod === method ? "Starting sign-in…" : SIGN_IN_LABEL[method]}
-              </button>
-            ))}
-            {methods.paste.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                className="btn ghost sm"
-                onClick={() => setPaste(paste === kind ? null : kind)}
-              >
-                {PASTE_LABEL[kind]}
-              </button>
-            ))}
-          </div>
-          {paste && (
-            <PasteForm
-              backend={backend}
-              kind={paste}
-              busy={busy}
-              onCancel={() => setPaste(null)}
-              submit={submit}
-            />
-          )}
+          {connectWays}
         </>
       )}
     </div>

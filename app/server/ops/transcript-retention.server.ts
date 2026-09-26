@@ -41,8 +41,8 @@ import { toError } from "~/shared/errors";
  *   app-owned per-person directories (`listUserRuntimeRoots`, ruling 127) and
  *   nothing else is walked — no host `~/.claude`, no personal `~/.codex`, no
  *   directory whose name is not a path-safe user id.
- * - **Only `*.jsonl` files.** `codex-home/auth.json` and
- *   `claude-home/.credentials.json` are the VENDOR-held sign-ins that make
+ * - **Only `*.jsonl` files.** `auth.json` and `.credentials.json` (in each
+ *   account's home, ruling 507) are the VENDOR-held sign-ins that make
  *   those people's backends usable, and `.claude.json` is config; deleting any
  *   of them signs somebody out of their own account (P11-04, and now it would
  *   be one person's account, not the instance's). Extension-gated, never

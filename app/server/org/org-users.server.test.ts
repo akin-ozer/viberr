@@ -229,14 +229,15 @@ describe("edit / role / reset / remove", () => {
    * Ruling 127: the credential ROWS cascade with the account, but the vendor's
    * own sign-in file lives on the filesystem, where no foreign key reaches. Left
    * behind it is a live Claude.ai / ChatGPT credential on this server that no
-   * row accounts for, that the person can never again reach `disconnectBackend`
-   * to revoke, and that every backup of the runtime volume carries forward.
+   * row accounts for, that the person can never again reach a disconnect to
+   * revoke, and that every backup of the runtime volume carries forward.
+   * Ruling 507: EVERY account goes, the ones not in use included — an inactive
+   * account's sign-in is as live a credential as the active one's.
    */
-  it("delete retires the person's agent accounts, sign-in file included", async () => {
-    const { recordBackendLogin, getBackendCredential } = await import(
-      "~/server/runtimes/backend-credentials.server"
-    );
-    const { userBackendHome, claudeLoginCredentialPath } = await import(
+  it("delete retires the person's agent accounts, sign-in files included", async () => {
+    const { recordBackendLogin, getBackendCredential, loginTargetFor, listBackendAccounts } =
+      await import("~/server/runtimes/backend-credentials.server");
+    const { backendAccountHome, claudeLoginCredentialPath } = await import(
       "~/server/runtimes/user-homes.server"
     );
     const { writeFakeVendorBinaries } = await import(
@@ -251,19 +252,27 @@ describe("edit / role / reset / remove", () => {
       { name: "Leaver", email: "leaver@test.dev", role: "member" },
       ACTOR,
     );
-    // The state a hosted sign-in leaves: a `login` row carrying no secret, and
-    // the vendor client's own credential file inside this person's home.
-    recordBackendLogin(
-      db,
-      { userId: user.id, label: user.email },
-      "claude",
-      "claudeai",
-      { authMethod: "claudeai" },
-    );
-    const home = userBackendHome(user.id, "claude", dataRoot);
-    mkdirSync(home, { recursive: true });
-    const credentialFile = claudeLoginCredentialPath(home);
-    writeFileSync(credentialFile, JSON.stringify({ fake: true }));
+    // The state two hosted sign-ins leave: a `login` row per account carrying
+    // no secret, and the vendor client's own credential file inside each
+    // account's own home (ruling 507). The second one is the account in use.
+    const credentialFiles: string[] = [];
+    for (const email of ["work@example.com", "personal@example.com"]) {
+      const target = loginTargetFor(db, user.id, "claude");
+      recordBackendLogin(
+        db,
+        { userId: user.id, label: user.email },
+        "claude",
+        "claudeai",
+        { authMethod: "claudeai", email },
+        target,
+      );
+      const home = backendAccountHome(user.id, "claude", target, dataRoot);
+      mkdirSync(home, { recursive: true });
+      const credentialFile = claudeLoginCredentialPath(home);
+      writeFileSync(credentialFile, JSON.stringify({ fake: true }));
+      credentialFiles.push(credentialFile);
+    }
+    expect(listBackendAccounts(db, user.id, "claude")).toHaveLength(2);
 
     // Fake binaries: removing an account must never spawn the REAL
     // `claude auth logout` from a test.
@@ -277,8 +286,11 @@ describe("edit / role / reset / remove", () => {
       fake.cleanup();
     }
 
-    expect(existsSync(credentialFile)).toBe(false);
+    for (const credentialFile of credentialFiles) {
+      expect(existsSync(credentialFile)).toBe(false);
+    }
     expect(getBackendCredential(db, user.id, "claude")).toBeNull();
+    expect(listBackendAccounts(db, user.id, "claude")).toEqual([]);
     // The revocation is auditable, not silent.
     const removal = listAuditEvents(db, { action: "org.user.removed" }).find(
       (e) => e.subjectId === user.id,

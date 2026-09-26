@@ -553,10 +553,12 @@ interface CacheEntry {
   catalog: ModelCatalog;
   /** Ruling 127: WHOSE account produced this list. A live catalog is what one
    *  person's Claude subscription offers, so serving it to a second viewer
-   *  would show them models their own account may refuse. The home dir is the
-   *  per-person identity `runCredentialFor` already hands us; a hit for a
-   *  different one is a miss. */
-  homeDir: string;
+   *  would show them models their own account may refuse. Ruling 507 narrows
+   *  "whose" to WHICH account: one person's work and personal subscriptions
+   *  may offer different models, so the key is the account's own home, the
+   *  identity `runCredentialFor` already hands us; a hit for a different one
+   *  is a miss. */
+  accountHome: string;
 }
 
 const CATALOG_KEY = Symbol.for("viberr.modelCatalog");
@@ -673,7 +675,8 @@ export function claudeProbeOptions(
     maxTurns: 1,
   };
   // Pass 40 review (R-launcher-1): the probe runs the vendored CLI against the
-  // viewer's own `claude-home`, and a CLI whose OAuth token has expired
+  // viewer's own `claude-home` (their active account's home inside it, ruling
+  // 507), and a CLI whose OAuth token has expired
   // refreshes it and rewrites `.credentials.json` there (0600). Run as the
   // server, that left a `node:node` file the viewer's agent uid could not
   // read, and their next run failed as signed out. So it runs as the viewer,
@@ -773,7 +776,7 @@ export async function getModelCatalog(
   const hit = cache.get("claude");
   if (
     hit &&
-    hit.homeDir === credential.homeDir &&
+    hit.accountHome === credential.accountHome &&
     Date.now() - hit.at < LIVE_TTL_MS
   ) {
     return stamp(cloneCatalog(hit.catalog));
@@ -788,7 +791,7 @@ export async function getModelCatalog(
       return stamp(curatedCatalog("claude"));
     }
     try {
-      launch = agentLaunchFor(deps.db, deps.userId, credential.homeDir);
+      launch = agentLaunchFor(deps.db, deps.userId, credential.homeDir, undefined, credential.ownDirs);
     } catch (error) {
       logger.info("model catalog live fetch skipped — the probe cannot run as the viewer", {
         backend,
@@ -806,7 +809,7 @@ export async function getModelCatalog(
       return stamp(curatedCatalog("claude"));
     }
     const catalog = claudeCatalogFromLive(live);
-    cache.set("claude", { at: Date.now(), catalog, homeDir: credential.homeDir });
+    cache.set("claude", { at: Date.now(), catalog, accountHome: credential.accountHome });
     return stamp(cloneCatalog(catalog));
   } catch (error) {
     logger.info("model catalog live fetch failed — using curated", {

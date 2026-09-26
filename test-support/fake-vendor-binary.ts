@@ -40,6 +40,11 @@ const FAKE_VENDOR_MODE_ENV = "VIBERR_FAKE_VENDOR_MODE";
 const FAKE_VENDOR_STATUS_ENV = "VIBERR_FAKE_VENDOR_STATUS";
 const FAKE_VENDOR_DELAY_ENV = "VIBERR_FAKE_VENDOR_DELAY_MS";
 const FAKE_VENDOR_LOGOUT_EXIT_ENV = "VIBERR_FAKE_VENDOR_LOGOUT_EXIT";
+/** Ruling 507: a directory OUTSIDE every home where a logout also records
+ *  itself. Disconnecting an account removes that account's whole home — the
+ *  `fake-logout.json` inside it included — so a test that must prove the
+ *  logout ran in that home reads this durable copy instead. */
+const FAKE_VENDOR_EVIDENCE_ENV = "VIBERR_FAKE_VENDOR_EVIDENCE_DIR";
 
 /** The device code the fake Codex prints, in OpenAI's own format. */
 export const FAKE_DEVICE_CODE = "WDJB-MJHT";
@@ -74,12 +79,23 @@ function drop(name, data) {
     // A script that was handed no home has nothing to prove and exits below.
   }
 }
+function evidence(name, data) {
+  const dir = process.env.${FAKE_VENDOR_EVIDENCE_ENV};
+  if (!dir) return;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, name), data + "\\n");
+  } catch {
+    // Evidence is best effort; the home copy above is the primary one.
+  }
+}
 // The driver kills a replaced (or cancelled, or timed-out) sign-in with SIGTERM.
 // Recording it in the home is how a test can prove the child actually died
 // rather than being orphaned: an unhandled SIGTERM would end the process with no
 // trace, and a leaked child would keep running with none either.
 process.on("SIGTERM", () => {
   drop("fake-terminated.txt", "sigterm\\n");
+  evidence("terminated.jsonl", JSON.stringify({ home }));
   process.exit(0);
 });
 if (args[0] === "auth" && args[1] === "status") {
@@ -95,6 +111,7 @@ if (args[0] === "auth" && args[1] === "status") {
   process.exit(0);
 } else if (args[0] === "auth" && args[1] === "logout") {
   drop("fake-logout.json", JSON.stringify({ argv: args, env: process.env }));
+  evidence("logouts.jsonl", JSON.stringify({ argv: args, env: process.env }));
   process.exit(Number(process.env.${FAKE_VENDOR_LOGOUT_EXIT_ENV} || "0"));
 } else {
   drop("fake-env.json", JSON.stringify(process.env, null, 2));
@@ -145,12 +162,23 @@ function drop(name, data) {
     // A script that was handed no home has nothing to prove and exits below.
   }
 }
+function evidence(name, data) {
+  const dir = process.env.${FAKE_VENDOR_EVIDENCE_ENV};
+  if (!dir) return;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, name), data + "\\n");
+  } catch {
+    // Evidence is best effort; the home copy above is the primary one.
+  }
+}
 // The driver kills a replaced (or cancelled, or timed-out) sign-in with SIGTERM.
 // Recording it in the home is how a test can prove the child actually died
 // rather than being orphaned: an unhandled SIGTERM would end the process with no
 // trace, and a leaked child would keep running with none either.
 process.on("SIGTERM", () => {
   drop("fake-terminated.txt", "sigterm\\n");
+  evidence("terminated.jsonl", JSON.stringify({ home }));
   process.exit(0);
 });
 if (args[0] === "login" && args[1] === "status") {
@@ -163,6 +191,7 @@ if (args[0] === "login" && args[1] === "status") {
   process.exit(0);
 } else if (args[0] === "logout") {
   drop("fake-logout.json", JSON.stringify({ argv: args, env: process.env }));
+  evidence("logouts.jsonl", JSON.stringify({ argv: args, env: process.env }));
   process.exit(Number(process.env.${FAKE_VENDOR_LOGOUT_EXIT_ENV} || "0"));
 } else {
   drop("fake-env.json", JSON.stringify(process.env, null, 2));
@@ -231,6 +260,13 @@ export function setFakeVendorLogoutExit(code: number | null): void {
   else process.env[FAKE_VENDOR_LOGOUT_EXIT_ENV] = String(code);
 }
 
+/** Ruling 507: also record every logout in `dir`, which outlives the home the
+ *  logout ran in (see `FAKE_VENDOR_EVIDENCE_ENV`). */
+export function setFakeVendorEvidenceDir(dir: string | null): void {
+  if (dir === null) delete process.env[FAKE_VENDOR_EVIDENCE_ENV];
+  else process.env[FAKE_VENDOR_EVIDENCE_ENV] = dir;
+}
+
 /** Clear every knob. Call it in `afterEach`: these live on the worker's own
  *  process env and would otherwise leak into the next file. */
 export function resetFakeVendorEnv(): void {
@@ -238,6 +274,7 @@ export function resetFakeVendorEnv(): void {
   delete process.env[FAKE_VENDOR_STATUS_ENV];
   delete process.env[FAKE_VENDOR_DELAY_ENV];
   delete process.env[FAKE_VENDOR_LOGOUT_EXIT_ENV];
+  delete process.env[FAKE_VENDOR_EVIDENCE_ENV];
 }
 
 /** The environment map is written by the fake itself, so it is DECODED, not
@@ -288,6 +325,45 @@ export function fakeVendorLogout(
   home: string,
 ): z.infer<typeof logoutDumpSchema> | null {
   return readJson(path.join(home, "fake-logout.json"), logoutDumpSchema);
+}
+
+const terminationSchema = z.object({ home: z.string() });
+
+/** The homes of every fake child that received SIGTERM and exited, as recorded
+ *  in an evidence directory (`setFakeVendorEvidenceDir`). Ruling 507: a
+ *  cancelled or replaced sign-in into a NEW account takes its home with it
+ *  once the child has exited, so the in-home marker cannot be read after. */
+export function fakeVendorTerminations(dir: string): string[] {
+  return readJsonLines(path.join(dir, "terminated.jsonl"), terminationSchema).map(
+    (entry) => entry.home,
+  );
+}
+
+/** Every logout recorded in an evidence directory (`setFakeVendorEvidenceDir`),
+ *  in the order they ran; a line that does not decode is skipped. */
+export function fakeVendorLogouts(dir: string): z.infer<typeof logoutDumpSchema>[] {
+  return readJsonLines(path.join(dir, "logouts.jsonl"), logoutDumpSchema);
+}
+
+/** One JSON value per line; a line that does not decode is skipped. */
+function readJsonLines<T>(file: string, schema: z.ZodType<T>): T[] {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .flatMap((line) => {
+      try {
+        const parsed = schema.safeParse(JSON.parse(line));
+        return parsed.success ? [parsed.data] : [];
+      } catch {
+        return [];
+      }
+    });
 }
 
 function readJson<T>(file: string, schema: z.ZodType<T>): T | null {

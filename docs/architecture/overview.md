@@ -271,12 +271,14 @@ table list with retention is in [data-model.md](data-model.md).
   credential. Each person connects Claude and Codex on Profile → Agent accounts; a hosted
   sign-in is executed by the unmodified vendor binary and its credential file stays in
   that person's own runtime home (`<dataRoot>/runtimes/users/<userId>/{claude-home,
-  codex-home}`, owned by that person's agent uid, ruling 460), while a pasted key or
-  workspace token is sealed in
+  codex-home}`, owned by that person's agent uid, ruling 460), in a home of its own per
+  account (ruling 507: a person keeps several accounts per backend and switches between
+  them without signing in again), while a pasted key or workspace token is sealed in
   `user_backend_credentials` and never returned to a loader. Every run resolves ONE
   principal (the task owner, or the asker on a controller turn), persisted as
-  `agent_runs.credential_user_id`; a run with no available principal is refused before any
-  process starts. Viberr implements none of the vendors' OAuth and stores no Claude.ai or
+  `agent_runs.credential_user_id`, and bills the account that person has in use,
+  persisted as `agent_runs.credential_account_id`; a run with no available principal is
+  refused before any process starts. Viberr implements none of the vendors' OAuth and stores no Claude.ai or
   ChatGPT session token.
 - **Org MCP credentials (ruling 461)**: a credentialed org MCP server is never handed to
   an agent process. The server hosts a loopback MCP gateway (`127.0.0.1` only, not a

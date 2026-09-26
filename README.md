@@ -30,8 +30,9 @@ Stack: React Router 8 (framework mode, SSR) · Node >= 26 · TypeScript 7 · `no
 · Zod v4 · SSE for live updates (no websockets) · one stylesheet, `app/app.css`, the
 ported `viberr.css` design system set in Inter (no Tailwind). Agent runtimes: Claude
 Agent SDK + Codex SDK. Each person connects their own Claude and Codex accounts on
-Profile → Agent accounts (ruling 127), and every run bills exactly one person: the task
-owner on a task, the asker on a controller conversation. A backend nobody connected simply has no runs; a run whose principal has
+Profile → Agent accounts (ruling 127), several of each if they want, and switches between
+them without signing in again (ruling 507). Every run bills exactly one person, on the
+account that person has in use: the task owner on a task, the asker on a controller conversation. A backend nobody connected simply has no runs; a run whose principal has
 not connected it fails fast with an honest error and starts no process.
 
 **Status: pre-production.** Schema and file formats change without migrations or
@@ -135,16 +136,26 @@ Each backend card offers a hosted sign-in and a pasted credential:
   token** (workspace entitlements rather than Platform billing; stored unverified, because
   there is no free way to check one).
 
+A person can keep several accounts on each backend, up to ten (ruling 507): a Claude Max
+subscription next to a Console key, say, or a personal and a work ChatGPT sign-in. Adding
+one signs nothing else out. One account per backend is **in use**, and every run on that
+backend bills it. The card lists the others with **Use this account**, which switches
+without a sign-in and without running the vendor's binary: the next run uses it, and a run
+already going finishes on the account it started with. Each account can be renamed and
+disconnected on its own. Viberr never moves a run to another account by itself; when the
+account in use can't run and another of yours can, the refusal says so.
+
 **Viberr never stores your sign-in tokens.** It does not implement the vendors' OAuth,
 never reads or copies a Claude.ai or ChatGPT session token, and offers no "paste your
 setup-token" field. Anthropic's [Claude Code legal and compliance
 page](https://code.claude.com/docs/en/legal-and-compliance) requires a platform that hosts
 Claude Code to have each end user authenticate with their own credentials, billed to them,
 and forbids apps from collecting or storing Claude.ai credentials. So a hosted sign-in is
-run by the vendor's own binary and the credential it writes stays in that person's runtime
-home on this server, at `/data/runtimes/users/<userId>/claude-home/` or
-`.../codex-home/` in the store (a directory Viberr creates and hands to that person's own
-agent user, ruling 460, and nothing else about that file). A pasted key is sealed with `VIBERR_SECRET_ENCRYPTION_KEY`
+run by the vendor's own binary and the credential it writes stays in that account's own
+runtime home on this server, at `/data/runtimes/users/<userId>/claude-home/accounts/<accountId>/`
+or `.../codex-home/accounts/<accountId>/` in the store (a sign-in made before ruling 507
+stays in `claude-home/` or `codex-home/` itself). Viberr creates that directory and hands
+it to that person's own agent user (ruling 460), and does nothing else about that file. A pasted key is sealed with `VIBERR_SECRET_ENCRYPTION_KEY`
 in the database, is never shown again (only its last 4 characters), and reaches only the
 child process of a run that person's account is paying for; the run sink redacts it from
 every persisted log line.

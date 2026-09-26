@@ -3,6 +3,7 @@ import {
   closeSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -13,7 +14,9 @@ import {
   symlinkSync,
   writeFileSync,
   type Dirent,
+  type Stats,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -52,6 +55,26 @@ import { toError } from "~/shared/errors";
  * Claude Code legal page: a hosting platform may not collect or store
  * Claude.ai credentials). The only thing this module asserts about them is
  * whether they EXIST, which is what per-person availability is derived from.
+ * (Codex's `auth.json` is the one exception, and only inside the person's own
+ * home: ruling 181's per-run fork copies it in and back.)
+ *
+ * Ruling 507: a person may keep several accounts per backend, so each account
+ * connected since that ruling has a home of its OWN inside the backend home,
+ * where its vendor sign-in was written and stays:
+ *
+ *   <backend home>/accounts/<accountId>   → that account's CLAUDE_CONFIG_DIR, or
+ *                                           the home its `codex login` wrote to
+ *
+ * Switching accounts moves no file: it changes which home the next run is
+ * pointed at, so a sign-in never has to be repeated and a run already going on
+ * one account is never handed another's credential halfway through (Claude
+ * rotates its refresh token on every refresh, so two accounts sharing one
+ * credential file would spend each other's). What must stay ONE per person is
+ * shared by link: a Claude account home's `projects/` points at the backend
+ * home's, so every transcript lands where resume, the exporter and the
+ * retention sweep look, whichever account wrote it. An account connected
+ * before ruling 507 keeps its sign-in in the backend home itself
+ * (`legacyHome`).
  */
 
 /** Re-exported so a consumer of the per-user homes needs one import, not two.
@@ -132,6 +155,117 @@ export function ensureUserBackendHome(
   return home;
 }
 
+// ------------------------------------------------ per-account homes (507)
+
+/** The directory under a backend home that holds its accounts' own homes. */
+export const ACCOUNT_HOMES_DIR = "accounts";
+
+/** What locates one account's vendor home (ruling 507): its id, and whether it
+ *  was connected before the ruling and so lives in the backend home itself. */
+export interface BackendAccountRef {
+  id: string;
+  legacyHome: boolean;
+}
+
+/**
+ * The directories an account home shares with its backend home, by link, per
+ * backend. Claude writes its transcripts under `projects/` and every reader of
+ * them (`probeSessionContinuity`, the exporter, the retention sweep, a resume on
+ * another account) looks in the backend home's. Codex needs none: its runs fork
+ * a private home from the backend home anyway (ruling 181) and only take the
+ * account's `auth.json` from here.
+ */
+export const ACCOUNT_HOME_SHARED_DIRS = {
+  claude: ["projects"],
+  codex: [],
+} as const satisfies Record<RealBackend, readonly string[]>;
+
+/** An account id becomes a path segment, so it is validated as one: Viberr
+ *  mints them as `ubc_<base64url>` (`newId`). */
+function assertPathSafeAccountId(accountId: string): string {
+  if (!PATH_SAFE_SEGMENT_RE.test(accountId)) {
+    throw AppError.validation(
+      "That account id cannot be used for a runtime home.",
+      { accountIdLength: accountId.length },
+    );
+  }
+  return accountId;
+}
+
+/**
+ * The vendor home of ONE account (ruling 507): where its sign-in was written,
+ * what a Claude run on it gets as `CLAUDE_CONFIG_DIR`, and where a Codex run on
+ * it takes its `auth.json` from (and hands the refreshed one back to).
+ */
+export function backendAccountHome(
+  userId: string,
+  backend: RealBackend,
+  account: BackendAccountRef,
+  dataRoot?: string,
+): string {
+  const home = userBackendHome(userId, backend, dataRoot);
+  return account.legacyHome
+    ? home
+    : path.join(home, ACCOUNT_HOMES_DIR, assertPathSafeAccountId(account.id));
+}
+
+export interface EnsuredAccountHome {
+  home: string;
+  /**
+   * Ruling 460: the directories an agent process on this account writes that
+   * the server may have just created as itself — the account home and the
+   * shared directories it links to. `agentLaunchFor` hands each one that is not
+   * already the person's to their uid (the launcher also takes over the
+   * `accounts/` directory on the way). Empty for a legacy account, whose home
+   * is the backend home the launch already prepares.
+   */
+  ownDirs: string[];
+}
+
+/**
+ * Materialize an account's home (mode 0o700, like the backend home) with its
+ * links to the backend home, and return it. The links are made before any
+ * vendor process runs in the home, so the CLI writes through them from its
+ * first transcript; a real directory already standing where a link belongs is
+ * left alone (its transcripts are not ours to move) and said in the log.
+ */
+export function ensureBackendAccountHome(
+  userId: string,
+  backend: RealBackend,
+  account: BackendAccountRef,
+  dataRoot?: string,
+): EnsuredAccountHome {
+  const backendHome = ensureUserBackendHome(userId, backend, dataRoot);
+  const home = backendAccountHome(userId, backend, account, dataRoot);
+  if (account.legacyHome) return { home, ownDirs: [] };
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  const ownDirs = [home];
+  for (const name of ACCOUNT_HOME_SHARED_DIRS[backend]) {
+    const shared = path.join(backendHome, name);
+    mkdirSync(shared, { recursive: true, mode: 0o700 });
+    ownDirs.push(shared);
+    const link = path.join(home, name);
+    let standing: Stats | null = null;
+    try {
+      standing = lstatSync(link);
+    } catch {
+      standing = null;
+    }
+    if (!standing) {
+      // Relative, like the Codex run home's links, so a restored or moved data
+      // root still resolves: `<backend home>/accounts/<id>/<name>` → `../../<name>`.
+      symlinkSync(path.join("..", "..", name), link, "dir");
+    } else if (!standing.isSymbolicLink()) {
+      logger.warn("an account home holds its own copy of a directory it should share", {
+        backend,
+        accountId: account.id,
+        name,
+      });
+    }
+  }
+  return { home, ownDirs };
+}
+
 /** Where `claude auth login` keeps a file-based login (macOS uses the login
  *  Keychain instead, which is why availability has a `presence` verdict). */
 export function claudeLoginCredentialPath(home: string): string {
@@ -141,6 +275,13 @@ export function claudeLoginCredentialPath(home: string): string {
 /** Where `codex login` writes its credential. */
 export function codexLoginCredentialPath(home: string): string {
   return path.join(home, "auth.json");
+}
+
+/** The vendor's own sign-in file in `home`, for either backend. */
+export function vendorLoginCredentialPath(backend: RealBackend, home: string): string {
+  return backend === "claude"
+    ? claudeLoginCredentialPath(home)
+    : codexLoginCredentialPath(home);
 }
 
 /**
@@ -183,12 +324,15 @@ export function listUserRuntimeRoots(
  *
  * So a run is handed `<codex-home>/runs/<runId>/` as its `CODEX_HOME`:
  *
- *  - `auth.json` and `config.toml` are COPIED in (when present). A copy, not a
- *    link: the CLI rewrites `auth.json` on a token refresh, and two runs
- *    writing one shared file through a link is the race this must not have.
- *    The refreshed file is carried back at the end, under a per-person lock,
- *    only when its bytes changed — and only while the shared file still
- *    exists, so a run cannot resurrect a sign-in the person removed meanwhile.
+ *  - `auth.json` and `config.toml` are COPIED in (when present): the sign-in
+ *    from the home of the account the run bills (ruling 507; the shared home
+ *    for an account connected before it), the config from the shared home. A
+ *    copy, not a link: the CLI rewrites `auth.json` on a token refresh, and two
+ *    runs writing one shared file through a link is the race this must not
+ *    have. The refreshed file is carried back at the end to that same
+ *    account's home, under that home's lock, only when its bytes changed — and
+ *    only while the account's file still exists, so a run cannot resurrect a
+ *    sign-in the person removed meanwhile.
  *  - `sessions/`, `skills/` and `memories/` are SYMLINKS to the shared home's
  *    directories (created first so the CLI writes through them), which is
  *    what keeps rollouts where `probeSessionContinuity` / the exporter look
@@ -212,6 +356,14 @@ export const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as cons
 const CODEX_HOME_SEEDED_FILES = ["auth.json", "config.toml"] as const;
 
 const AUTH_WRITE_BACK_LOCK = ".auth.json.lock";
+/** Ruling 507: beside a run home's seeded `auth.json`, the digest of what it
+ *  was seeded with, so the settle can tell a token the CLI refreshed from a
+ *  copy that merely went stale while another run refreshed the account. */
+const AUTH_SEED_DIGEST = ".auth.json.seed";
+
+function digestOf(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
 /** How long a settle waits for another run's write-back before breaking the
  *  lock: the write itself is one small file, so a holder older than this is a
  *  process that died holding it. */
@@ -224,12 +376,28 @@ export interface CodexRunHome {
   dir: string;
   /** The person's shared codex-home it was forked from. */
   sharedHome: string;
+  /**
+   * Ruling 507: the home of the account the run bills, which its `auth.json`
+   * is copied from and the refreshed one is written back to (under that home's
+   * own lock). The shared home itself for an account connected before the
+   * ruling. Never another account's: a run that started on one account and
+   * settles after a switch hands its refreshed token back to the account it
+   * refreshed, and the account now active is left exactly as it was.
+   */
+  authHome: string;
   runId: string;
 }
 
 /** `<sharedHome>/runs/<runId>` — where one run's private home lives. */
 export function codexRunHomeDir(sharedHome: string, runId: string): string {
   return path.join(sharedHome, CODEX_RUN_HOMES_DIR, assertPathSafeRunId(runId));
+}
+
+/** Ruling 507: the id a run's completion compaction forks its own private home
+ *  under (`runs/<runId>-compaction`), beside the run's. Path-safe, unlike the
+ *  compaction's process marker (`compactionRunId`, which carries a colon). */
+export function codexCompactionHomeId(runId: string): string {
+  return `${runId}-compaction`;
 }
 
 /**
@@ -265,11 +433,14 @@ function removeRunHomeTree(target: string, person: RunHomePerson | undefined): v
  *  `person`, the shared directories it had to create and the run home itself
  *  are handed to the person's uid before the CLI starts (it throws when that
  *  fails: a run whose home it cannot use must not start), and a predecessor's
- *  tree is removed as them. */
+ *  tree is removed as them. `authHome` is the billed account's home (ruling
+ *  507); the sign-in is taken from there and from nowhere else, so a pasted-key
+ *  account's run never inherits another account's `auth.json`. */
 export function prepareCodexRunHome(
   sharedHome: string,
   runId: string,
   person?: RunHomePerson,
+  authHome: string = sharedHome,
 ): CodexRunHome {
   const own = person?.own;
   const dir = codexRunHomeDir(sharedHome, runId);
@@ -277,14 +448,17 @@ export function prepareCodexRunHome(
   removeRunHomeTree(dir, person);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const name of CODEX_HOME_SEEDED_FILES) {
-    const source = path.join(sharedHome, name);
+    const source = path.join(name === "auth.json" ? authHome : sharedHome, name);
     if (!existsSync(source)) continue;
     const target = path.join(dir, name);
     copyFileSync(source, target);
     // A credential copy is private whatever the source mode was (to its
     // owner and, once `own` has run, the server's group); the config keeps
     // its own.
-    if (name === "auth.json") chmodSync(target, 0o600);
+    if (name === "auth.json") {
+      chmodSync(target, 0o600);
+      writeFileSync(path.join(dir, AUTH_SEED_DIGEST), digestOf(readFileSync(target)), { mode: 0o600 });
+    }
   }
   for (const name of CODEX_HOME_SHARED_DIRS) {
     const shared = path.join(sharedHome, name);
@@ -296,7 +470,7 @@ export function prepareCodexRunHome(
     symlinkSync(path.join("..", "..", name), path.join(dir, name), "dir");
   }
   own?.(dir);
-  return { dir, sharedHome, runId };
+  return { dir, sharedHome, authHome, runId };
 }
 
 /** `own`, never throwing: the settle half must not. */
@@ -313,23 +487,24 @@ function ownQuietly(own: HomeOwner | undefined, target: string, runId: string): 
 }
 
 /**
- * The settle half: carry a refreshed `auth.json` back to the shared home when
- * its bytes changed (under the per-person lock), then remove the run home.
- * Never throws — a settle that cannot clean up is logged, not propagated.
+ * The settle half: carry a refreshed `auth.json` back to the billed account's
+ * home (`authHome`, ruling 507) when the CLI refreshed it (under that home's
+ * lock), then remove the run home. Never throws — a settle that cannot clean
+ * up is logged, not propagated.
  *
  * With a `person` (ruling 460): the run home is first handed to the person's
  * uid and the server's group as a whole, so the server can read what the CLI
  * wrote there 0600; the written-back `auth.json` is the server's file, so it
- * is handed back too, or the next compaction (which runs as the person in the
- * shared home) could not read its own sign-in. The run home is then removed
- * as the person (ruling 485).
+ * is handed back too, or the vendor's own `login status` and `logout`, which
+ * run as the person in that home, could not read their own sign-in. The run
+ * home is then removed as the person (ruling 485).
  */
 export function finishCodexRunHome(home: CodexRunHome, person?: RunHomePerson): void {
   const own = person?.own;
   ownQuietly(own, home.dir, home.runId);
   for (const dbFile of codexStateDatabases(home.sharedHome)) ownQuietly(own, dbFile, home.runId);
   try {
-    if (writeBackAuth(home)) ownQuietly(own, path.join(home.sharedHome, "auth.json"), home.runId);
+    if (writeBackAuth(home)) ownQuietly(own, path.join(home.authHome, "auth.json"), home.runId);
   } catch (error) {
     logger.warn("codex run home: the refreshed sign-in could not be written back", {
       runId: home.runId,
@@ -509,16 +684,27 @@ function codexStateDatabases(sharedHome: string): string[] {
   }
 }
 
-/** True when the shared `auth.json` was replaced. */
+/** True when the account's `auth.json` was replaced. */
 function writeBackAuth(home: CodexRunHome): boolean {
   const refreshed = readIfPresent(path.join(home.dir, "auth.json"));
   if (!refreshed) return false;
-  const sharedAuth = path.join(home.sharedHome, "auth.json");
+  // Ruling 507: a copy the CLI never refreshed is not news — handing it back
+  // would put the seed over a token another run of the same account refreshed
+  // meanwhile (and a refresh token that was rotated away with it). A run home
+  // from before the digest existed has none, and keeps the old comparison.
+  const seed = readIfPresent(path.join(home.dir, AUTH_SEED_DIGEST));
+  if (seed && seed.toString("utf8") === digestOf(refreshed)) return false;
+  const sharedAuth = path.join(home.authHome, "auth.json");
+  // Checked again under the lock below; this early answer is for an account
+  // whose whole home went while the run was live (ruling 507), where there is
+  // no directory to put a lock in and nothing to hand a token back to.
+  if (!existsSync(sharedAuth)) return false;
   let written = false;
-  withAuthLock(home.sharedHome, home.runId, () => {
+  withAuthLock(home.authHome, home.runId, () => {
     const current = readIfPresent(sharedAuth);
-    // The person disconnected while the run was live: the shared file is gone
-    // on purpose, and a token the run refreshed must not bring it back.
+    // The person disconnected (or removed this account) while the run was
+    // live: the file is gone on purpose, and a token the run refreshed must
+    // not bring it back.
     if (!current) return;
     if (current.equals(refreshed)) return;
     const staging = `${sharedAuth}.${home.runId}.tmp`;
@@ -539,9 +725,10 @@ function readIfPresent(file: string): Buffer | null {
 
 /** A lockfile with retry: `O_EXCL` create, poll while held, break a holder
  *  that is older than a settle could possibly be. Serializes the write-back
- *  between concurrent runs of one person; last writer wins by design. */
-function withAuthLock(sharedHome: string, runId: string, action: () => void): void {
-  const lock = path.join(sharedHome, AUTH_WRITE_BACK_LOCK);
+ *  between concurrent runs of one account (the lock sits in its home, ruling
+ *  507); last writer wins by design. */
+function withAuthLock(authHome: string, runId: string, action: () => void): void {
+  const lock = path.join(authHome, AUTH_WRITE_BACK_LOCK);
   const deadline = Date.now() + AUTH_LOCK_WAIT_MS;
   for (;;) {
     try {
