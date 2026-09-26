@@ -7494,9 +7494,9 @@ export async function transitionStage(
  * its profile can no longer be resolved (undeployed between the run and Review),
  * fall back CONSERVATIVE (false) — never push a workspace whose grant we can't
  * confirm. Only a task with NO deliverer at all (no grant to enforce) is
- * permissive. Extracted + exported so the guard is unit-tested directly.
+ * permissive.
  */
-export async function resolveDeliveryPushGrant(
+async function resolveDeliveryPushGrant(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -9342,7 +9342,7 @@ const RE_REVIEW_REFRESH: PersonRefreshPurpose = {
 };
 
 /** Ruling 449: the directive each re-run reviewer receives. */
-export function reReviewDirective(branch: string, base: string, mergeSha: string | null): string {
+function reReviewDirective(branch: string, base: string, mergeSha: string | null): string {
   return (
     `A person asked for a re-review before accepting. \`${branch}\` was brought up to date ` +
     `with \`${base}\`${mergeSha ? ` (merge commit \`${mergeSha.slice(0, 7)}\`)` : ""}, so the ` +
@@ -9952,7 +9952,7 @@ function createTaskHoldsDecider(
  * is no deadlock: this runs on every packet resolution, and most of them have
  * nothing to do with a review.
  */
-export async function retryReviewDeadlockEscalation(
+async function retryReviewDeadlockEscalation(
   db: DatabaseSync,
   ctx: TaskActionContext,
   projectSlug: string,

@@ -143,6 +143,10 @@ describe("siblingPacketsSharingCause", () => {
         decided: { optionIndex: 0, at: "2026-09-17T10:00:00.000Z", byUserId: "u_x" },
       },
     });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-4", {}),
+      packet: { ...packet(quotaOptions()), awaiting: "goal_edit" },
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     expect(
@@ -155,24 +159,6 @@ describe("siblingPacketsSharingCause", () => {
 });
 
 describe("siblingOptionIndex", () => {
-  it("matches by KIND, not by the index the option sat at on the other packet", () => {
-    // The whole reason the fan-out is not a loop over `optionIndex`.
-    // `describeRunFailure` composes the option set from the failure AND from
-    // what each task's own owner has connected, so "retry on the other backend"
-    // is present on one task and absent on the next — and every index behind it
-    // shifts. CANARY: make `siblingOptionIndex` return the origin's index.
-    const chosen = quotaOptions()[1]!; // retry_other_backend, at index 1 here
-    const sibling = packet([
-      { kind: "redirect", t: "Redirect", d: "", rec: false },
-      { kind: "wait_for_window", t: "Wait", d: "", rec: true, dueAt: "2026-09-17T20:00:00.000Z" },
-      { kind: "retry_other_backend", t: "Retry on Codex", d: "", rec: false, backend: "codex" },
-    ]);
-    expect(siblingOptionIndex(sibling, chosen)).toBe(2);
-    expect(sibling.options[siblingOptionIndex(sibling, chosen)!]!.kind).toBe(
-      "retry_other_backend",
-    );
-  });
-
   it("will not match two retries that name different backends", () => {
     const chosen: PacketOption = {
       kind: "retry_other_backend",

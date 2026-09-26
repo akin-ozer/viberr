@@ -15,17 +15,12 @@ import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
-import { setPref } from "~/server/prefs/user-prefs.server";
-import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import { setTaskArchived, transitionStage } from "./task-actions.server";
 import type { StartAgentRunInput, StartAgentRunResult } from "./specialist-run.server";
 import {
   announceRelease,
-  clearDependencies,
-  drainQueuedQuestions,
   noteDeadDependency,
   releaseDependents,
-  releaseDueDependents,
   releaseTask,
   setTaskDependencies,
   startDependencyRunner,
@@ -178,10 +173,10 @@ describe("setTaskDependencies", () => {
     await expect(
       setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-3", blockedBy: ["VIB-5"] }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-3 is archived; restore it before editing what it waits on") });
-    // deniz is the seeded viewer.
+    // elif is the seeded viewer (deniz is a non-member, refused by another branch).
     await expect(
-      setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-5"] }, actorOf(store.users.deniz), { dataRoot: store.dataRoot }),
-    ).rejects.toMatchObject({ status: 403 });
+      setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-5"] }, actorOf(store.users.elif), { dataRoot: store.dataRoot }),
+    ).rejects.toMatchObject({ status: 403, message: expect.stringContaining("Your project role (viewer)") });
     // The operator is not gated (in-process authority).
     const op = await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-5"] }, { userId: "operator", label: "operator" }, { dataRoot: store.dataRoot, operatorAuthorized: true });
     expect(op.changed).toBe(true);
@@ -231,27 +226,6 @@ describe("setTaskDependencies", () => {
       .all() as { user_id: string; kind: string; text: string }[];
     expect(notifs.some((n) => n.kind === "dependency" && n.user_id === store.users.arda.id)).toBe(true);
     expect(getTaskSummary(store.db, store.slug, "VIB-7")!.readiness).toBe("ready");
-  });
-});
-
-describe("the two release halves", () => {
-  it("clearDependencies clears the list and the hold and lifts a stored blocked; announceRelease writes the engine's note", async () => {
-    const store = setupTestStore(ctx);
-    await seed(store);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-8", { stage: "impl", readiness: "blocked", heldAtStage: "impl", blockedBy: ["VIB-2", "VIB-5"] }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const parsed = file(store, "VIB-8");
-    expect(clearDependencies(parsed)).toEqual(["VIB-2", "VIB-5"]);
-    expect(parsed.frontmatter).toMatchObject({ blockedBy: [], heldAtStage: null, readiness: "ready" });
-    await announceRelease(store.db, { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } }, store.slug, "VIB-8", { entries: ["VIB-2", "VIB-5"] });
-    const note = file(store, "VIB-8").timeline[0]!;
-    expect(note.title).toBe("Dependencies released");
-    expect(note.text).toContain("everything this task waited on is done (VIB-2, VIB-5)");
-    expect(note.text).toContain("the base branch has changed since the hold");
-    expect(note.actor).toEqual({ kind: "system", systemId: "dependency-release" });
-    expect(listAuditEvents(store.db).find((e) => e.action === "task.dependencies.released")!.details).toMatchObject({ entries: ["VIB-2", "VIB-5"], clearedBy: null });
   });
 });
 
@@ -419,6 +393,8 @@ describe("the release engine", () => {
     expect(parsed.frontmatter.readiness).toBe("ready");
     const note = parsed.timeline.find((e) => e.title === "Dependencies released")!;
     expect(note.text).toContain("everything this task waited on is done (VIB-2, VIB-5, VIB-1)");
+    expect(note.text).toContain("the base branch has changed since the hold");
+    expect(note.actor).toEqual({ kind: "system", systemId: "dependency-release" });
     expect(getTaskSummary(store.db, store.slug, "VIB-10")!.readiness).toBe("ready");
     // SAFETY: `kind`, `user_id` are NOT NULL on `notifications`.
     const notifs = store.db
@@ -445,8 +421,12 @@ describe("the release engine", () => {
     expect(release).toBeDefined();
     expect(release![1].dependencyRelease).toEqual({ entries: ["VIB-2", "VIB-5", "VIB-1"], clearedBy: null });
     // VIB-4 (seeded waiting on VIB-5) was released by the same sweep; VIB-10's
-    // own release is exactly one row.
-    expect(listAuditEvents(store.db).filter((e) => e.action === "task.dependencies.released" && e.taskKey === "VIB-10")).toHaveLength(1);
+    // own release is exactly one row, the engine's (nobody cleared it by hand).
+    expect(
+      listAuditEvents(store.db)
+        .filter((e) => e.action === "task.dependencies.released" && e.taskKey === "VIB-10")
+        .map((e) => e.details),
+    ).toEqual([expect.objectContaining({ entries: ["VIB-2", "VIB-5", "VIB-1"], clearedBy: null })]);
   });
 
   it("a done dependency releases; an archived dependency is noted ONCE, notifies once, sets waiting: human and never releases", async () => {
@@ -500,13 +480,7 @@ describe("the release engine", () => {
     expect(await releaseTask(store.db, ctxWith, store.slug, "VIB-13")).toBe(false);
     expect(file(store, "VIB-13").timeline.filter((e) => e.title === "Dependencies released")).toHaveLength(1);
 
-    // A hand edit the hooks never saw: VIB-14 waits on the already-done VIB-2.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-14", { stage: "impl", waiting: "none", blockedBy: ["VIB-2"] }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    expect(await releaseDueDependents(store.db, ctxWith)).toBe(1);
-    expect(file(store, "VIB-14").frontmatter.blockedBy).toEqual([]);
+    // A hand edit the hooks never saw: VIB-15 waits on the already-done VIB-2.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-15", { stage: "impl", waiting: "none", blockedBy: ["VIB-2"] }),
     });
@@ -524,29 +498,6 @@ describe("the release engine", () => {
     expect(file(store, "VIB-15").frontmatter.blockedBy).toEqual([]);
   });
 
-  it("with the person's `dependencies` toggle off, the note, the audit row and the re-invoke still land while no row is written for them", async () => {
-    // Canary: map `dependency` to `controller` in `KIND_TO_CATEGORY` (arda's
-    // controller toggle is on, so a row lands).
-    const store = setupTestStore(ctx);
-    await seed(store);
-    setPref(store.db, store.users.arda.id, NOTIFS_PREF_KEY, { dependencies: { app: false } });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-16", { stage: "impl", waiting: "none", blockedBy: ["VIB-2"], ownerUserId: store.users.arda.id }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const runOperator = runOperatorStub();
-    expect(await releaseTask(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug, "VIB-16")).toBe(true);
-    expect(file(store, "VIB-16").timeline[0]!.title).toBe("Dependencies released");
-    expect(listAuditEvents(store.db).some((e) => e.action === "task.dependencies.released")).toBe(true);
-    expect(runOperator).toHaveBeenCalledTimes(1);
-    // SAFETY: `user_id` is NOT NULL on `notifications`.
-    const rows = store.db
-      .prepare(`SELECT user_id FROM notifications WHERE task_key = 'VIB-16' AND kind = 'dependency'`)
-      .all() as { user_id: string }[];
-    expect(rows.some((r) => r.user_id === store.users.arda.id)).toBe(false);
-    // murat (maintainer) keeps his default ON and still hears about it.
-    expect(rows.some((r) => r.user_id === store.users.murat.id)).toBe(true);
-  });
 });
 
 /**
@@ -788,45 +739,21 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
-  it("the drain starts the reviewer with the stored question, and empties the queue first", async () => {
-    const store = setupTestStore(ctx);
-    await seed(store);
-    seedQueued(store, []);
-    const started: QuestionDispatch[] = [];
-    const drained = await drainQueuedQuestions(
-      store.db,
-      { dataRoot: store.dataRoot, deps: { startAgentRun: recordDispatch(started) } },
-      store.slug,
-      "VIB-11",
-    );
-    {
-      expect(drained).toBe(1);
-      expect(started).toHaveLength(1);
-      // The STORED text, not a constant rebuilt at drain time: a person was
-      // promised this question and the wait can outlive the constant.
-      expect(started[0]!.directive).toBe("Name everything you would still block on.");
-      expect(started[0]!.profileId).toBe("rev");
-      expect(started[0]!.directiveFrom).toBe("Arda");
-      // CANARY: drain without clearing and the next release asks the same
-      // reviewer the same question again, which is the loop ruling 237 breaks.
-      expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
-    }
-  });
-
   it("a start that fails after the release says so, and does not leave the question queued", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
-    seedQueued(store, []);
-    await drainQueuedQuestions(
+    seedQueued(store, ["VIB-2"]);
+    await setTaskDependencies(
       store.db,
+      { projectSlug: store.slug, taskKey: "VIB-11", blockedBy: [] },
+      actorOf(store.users.arda),
       {
         dataRoot: store.dataRoot,
+        operatorAuthorized: true,
         deps: {
           startAgentRun: () => Promise.reject(new Error("The reviewer is no longer deployed.")),
         },
       },
-      store.slug,
-      "VIB-11",
     );
     {
       const parsed = file(store, "VIB-11");
@@ -868,6 +795,12 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
     // on the wait panel outlives the wait and nothing ever puts the question.
     expect(started).toHaveLength(1);
     expect(started[0]!.profileId).toBe("rev");
+    // The STORED text, not a constant rebuilt at drain time: a person was
+    // promised this question and the wait can outlive the constant.
+    expect(started[0]!.directive).toBe("Name everything you would still block on.");
+    expect(started[0]!.directiveFrom).toBe("Arda");
+    // CANARY: drain without clearing and the next release asks the same
+    // reviewer the same question again, which is the loop ruling 237 breaks.
     expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
   });
 

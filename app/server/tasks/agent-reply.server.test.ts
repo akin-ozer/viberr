@@ -219,11 +219,6 @@ describe("resolveMentionedAgent", () => {
     expect(target!.actorRef).toMatchObject({ kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" });
   });
 
-  it("resolves by backend (@claude)", () => {
-    const target = call("@claude please continue");
-    expect(target).toMatchObject({ profileId: "dev", backend: "claude" });
-  });
-
   /**
    * B-AG2: a backend handle names a RUNTIME, not an agent. It used to be folded
    * into the same lookup as name/id, so on a project running two claude
@@ -1507,56 +1502,6 @@ describe("commentToAgent", () => {
     expect(audit[0]?.taskKey).toBe("VIB-1");
   }, 30_000);
 
-  it("A8: a comment whose run FAILS to start still posts the comment and reports the reason", async () => {
-    deployDevSpecialist();
-    // A live DELIVERING run holds the single-flight slot, so a fresh @dev run is
-    // refused at start — the exact partial-success shape A8 surfaces instead of a
-    // bare error that reads as "the comment failed".
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-    });
-
-    const result = await commentToAgent(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev take a look" },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-
-    // The run did NOT start, and the call did NOT throw. (Hunt 2026-08-29:
-    // the mention path now refuses a live SAME-PROFILE run up front — before
-    // the resume/fresh split, closing the resume branch's single-flight bypass
-    // — so the reason is that guard's own copy, which also tells the commenter
-    // their comment still reaches the agent.)
-    expect(result.triggered).toBeNull();
-    expect(result.agent).toMatchObject({ profileId: "dev" });
-    expect(result.runNotStarted).toContain(
-      "already has a run in progress on this task",
-    );
-    // The human's comment IS on the timeline (recorded before the start attempt).
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      dataRoot: store.dataRoot,
-    })!;
-    const humanComment = file.parsed.timeline.find(
-      (e) => e.type === "comment" && e.actor.kind === "human",
-    );
-    expect(humanComment?.text).toContain("@dev take a look");
-  });
-
   /**
    * Ruling 203 (F37-23, live on SHOP-6). A8's refusal used to end with a
    * promise — "it will see the comment when it next re-anchors" — that nothing
@@ -1593,6 +1538,10 @@ describe("commentToAgent", () => {
       { dataRoot: store.dataRoot },
     );
     expect(refused.triggered).toBeNull();
+    // A8: the call does not throw; it names the agent and says why no run
+    // started (the live same-profile guard's own copy).
+    expect(refused.agent).toMatchObject({ profileId: "dev" });
+    expect(refused.runNotStarted).toContain("already has a run in progress on this task");
     // The refusal now states what viberr will DO, not what it hopes the agent
     // will notice. CANARY: put the old sentence back and this fails.
     expect(refused.runNotStarted).toContain(
@@ -1969,8 +1918,11 @@ describe("commentToAgent", () => {
     ).toBeGreaterThan(priorCount);
 
     // …and it was told the decision AND the human's free-text qualifier, which
-    // is the part an operator-mediated cold restart most often loses.
-    const spec = startedRunSpecs().at(-1);
+    // is the part an operator-mediated cold restart most often loses. The
+    // asker's spec is the one resuming its session: the operator's own turn
+    // may start after it.
+    await waitFor(() => startedRunSpecs().some((s) => s.resumeSessionId === priorSessionId));
+    const spec = startedRunSpecs().find((s) => s.resumeSessionId === priorSessionId);
     const file = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -1983,7 +1935,7 @@ describe("commentToAgent", () => {
     expect(relayed!.text).toContain("Target the staging config");
     expect(relayed!.text).toContain("staging only, production needs sign-off");
     expect(relayed!.text).toContain("do not re-open the same question");
-    if (spec) expect(spec.prompt).toContain("Target the staging config");
+    expect(spec?.prompt).toContain("Target the staging config");
   }, 30_000);
 
   /**
@@ -2276,7 +2228,7 @@ describe("commentToAgent", () => {
     expect(named.triggered).toBe("started");
   }, 20_000);
 
-  it("records a viewer/reviewer @mention but does NOT trigger a run (RBAC)", async () => {
+  it("records a contributor or viewer @mention but does NOT trigger a run (RBAC)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       const before = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
       const result = await commentToAgent(
@@ -2291,8 +2243,6 @@ describe("commentToAgent", () => {
       // Comment recorded; no new run.
       const after = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
       expect(after).toBe(before);
-      const runs = listRunsForTask(store.db, store.slug, "VIB-1");
-      void runs; // (no assertion beyond count — kept for clarity)
     }
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     // Two human comments recorded (one per denied user).

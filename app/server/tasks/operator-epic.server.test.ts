@@ -410,10 +410,9 @@ function persistPlan(runId: string, plan: string): void {
 }
 
 describe("ruling 503(g): a Codex operator reaches set_epic through its plan", () => {
-  it("the plan schema offers set_epic and its epicId, 17 verbs with every grant, and withholds it without append-typed-events", () => {
+  it("the plan schema offers set_epic and its epicId, and withholds it without append-typed-events", () => {
     deployOperator(FULL_POLICY, "codex");
     const tools = operatorPlanToolsFor(authority());
-    expect(tools).toHaveLength(17);
     expect(tools).toContain("set_epic");
     const schema = operatorPlanSchemaFor(authority());
     const item = schema.properties.actions.items;

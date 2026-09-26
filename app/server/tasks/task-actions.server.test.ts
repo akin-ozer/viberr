@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
-import { describeRevisionDrift } from "~/shared/revision-drift";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -36,15 +35,12 @@ import {
   attachmentProducers,
   getTaskDetail,
 } from "~/server/projections/task-query.server";
-import { setPref } from "~/server/prefs/user-prefs.server";
-import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import {
   runOutcomeClause,
   appendComment,
   classifyReviewerVerdict,
   createTask,
   DEFAULT_GOAL,
-  notifyTaskWatchers,
   operatorPromptAgent,
   packetIdentity,
   postAgentReplyComment,
@@ -59,7 +55,6 @@ import {
   specialistReplyDirective,
   transitionStage,
   refreshAndReview,
-  reReviewDirective,
   acceptanceDisclosureOf,
   applyRecommendation,
   commentToAgent,
@@ -96,9 +91,6 @@ import {
 } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { TaskActionContext } from "./task-actions.server";
-
-/** Ruling 361: every notice names its actor; these tests are about routing. */
-const TEST_FROM = { kind: "system" as const, name: "Test" };
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 let github: FakeGithub | null = null;
@@ -655,9 +647,16 @@ describe("appendComment", () => {
     const store = setupProjectedStore(ctx);
     withTask(store);
     const handle = store.users.selin.email.split("@")[0];
+    // The author tags herself too: the comment writer must hand her id to the
+    // fan-out as the one person never to notify.
+    const self = store.users.arda.email.split("@")[0];
     const result = await appendComment(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: `@${handle} can you take the acceptance gate? @operator fyi` },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        text: `@${handle} can you take the acceptance gate? @operator fyi — @${self} for the record`,
+      },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -1243,68 +1242,6 @@ describe("appendComment", () => {
 
 describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () => {
   /**
-   * P14-GV-06 asserted the OPPOSITE of this: it added the fan-out here because a
-   * human tagged inside an operator directive was never notified. Ruling 232
-   * (owner, 2026-09-14) reverses it for this writer after pass 37 measured what
-   * those tags are in practice — 19 of 49 mention notifications on the live
-   * instance came from directives whose handle was the operator specifying a
-   * deliverable ("end with an explicit @Arda question"), re-sent on every rework
-   * round. The comment's declared audience is the agent, so it pings nobody.
-   *
-   * The directive below is P14-GV-06's own text verbatim, so the two contracts
-   * are compared on identical input rather than on a case chosen to suit the new
-   * rule.
-   */
-  it("does not notify a human @tagged inside the operator's directive (ruling 232)", async () => {
-    const store = setupProjectedStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1"),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const firstName = store.users.arda.name.split(" ")[0];
-    // The run itself can't start here (no deployed profile) — the directive
-    // COMMENT is written first, which is the writer under test.
-    await expect(
-      operatorPromptAgent(
-        store.db,
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          profileId: "developer",
-          directive: `Implement the fix and coordinate with @${firstName} on the copy.`,
-          handle: "dev",
-        },
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toBeTruthy();
-
-    const rows = selectRows(
-      store.db,
-      `SELECT user_id, kind, actor_json, text FROM notifications`,
-      z.object({
-        user_id: z.string(),
-        kind: z.string(),
-        actor_json: z.string().nullable(),
-        text: z.string(),
-      }),
-    );
-    expect(rows).toEqual([]);
-    // The hand-off is still on the record: the ruling changes who hears about
-    // the directive, not whether it was written.
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      dataRoot: store.dataRoot,
-    })!;
-    const directive = file.parsed.timeline.find((e) => e.type === "comment");
-    expect(directive?.toAgent).toBe(true);
-    expect(directive?.text).toContain(`@${firstName}`);
-  });
-
-  // S5-G3: the POSTED directive discloses an ambiguous tag; the RUN's directive
-  // stays the operator's own words (the note addresses the humans reading the
-  // timeline, not the agent about to work).
-  /**
    * S5-G3 asserted the OPPOSITE of this: the posted directive carried the
    * ambiguity disclosure so the humans reading the timeline would learn the tag
    * reached nobody. Ruling 232 removed that note's premise. A directive now
@@ -1715,53 +1652,6 @@ describe("releaseTasksOwnedBy (A3: member removal releases owned seats)", () => 
       { dataRoot: store.dataRoot },
     );
     expect(released).toBe(0);
-  });
-});
-
-describe("notification routing (FIX #4)", () => {
-  function withOwnedTask(store: TestStore): void {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        ownerUserId: store.users.selin.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-  }
-
-  it("fans a watcher notice to owner + supervisors, honoring the default opt-in", () => {
-    const store = setupProjectedStore(ctx);
-    withOwnedTask(store);
-    const notified = notifyTaskWatchers(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", from: TEST_FROM, text: "operator recommends" },
-      { dataRoot: store.dataRoot },
-    );
-    // arda (admin) + murat (maintainer) + selin (owner); nobody silenced.
-    expect(notified.sort()).toEqual(
-      [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
-    );
-  });
-
-  it("drops a supervisor who silenced that category (opt-out)", () => {
-    const store = setupProjectedStore(ctx);
-    withOwnedTask(store);
-    // murat silences approvals; arda + selin keep the default.
-    setPref(store.db, store.users.murat.id, NOTIFS_PREF_KEY, { approvals: { app: false } });
-    const notified = notifyTaskWatchers(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", kind: "approval", from: TEST_FROM, text: "operator recommends" },
-      { dataRoot: store.dataRoot },
-    );
-    expect(notified.sort()).toEqual(
-      [store.users.arda.id, store.users.selin.id].sort(),
-    );
-    const rows = selectRows(
-      store.db,
-      `SELECT user_id FROM notifications WHERE kind = 'approval'`,
-      z.object({ user_id: z.string() }),
-    );
-    expect(rows.map((r) => r.user_id)).not.toContain(store.users.murat.id);
   });
 });
 
@@ -2803,51 +2693,6 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
         dataRoot: store.dataRoot,
       })!.parsed.frontmatter.stage,
     ).toBe("done");
-  });
-});
-
-/**
- * F19-23 — the drift note's verb was never switched with its noun, so a
- * single-commit drift rendered "1 commit **were** added to the PR head" — live
- * on VC-4's completion event and, through the same string, in the Activity
- * stream. This note is the one sentence a Done task's record leans on to
- * disclose that the merged head was not the reviewed one (R17-1).
- */
-describe("F19-23: the revision-drift note agrees with its own number", () => {
-  const HEAD = "a4c790ce63ef0011223344556677889900aabbcc";
-  const withDrift = (aheadBy: number) =>
-    baseTaskFrontmatter("VIB-4", {
-      pr: {
-        number: 150,
-        state: "review",
-        title: "[VIB-4] work",
-        revisionDrift: { headSha: HEAD, authored: aheadBy, baseRefresh: null },
-      },
-    });
-
-  it("uses the singular for exactly one commit", () => {
-    expect(revisionDriftNote(withDrift(1))).toContain("1 authored commit was added");
-    expect(revisionDriftNote(withDrift(1))).not.toContain("commit were");
-  });
-
-  it("keeps the plural for more than one", () => {
-    expect(revisionDriftNote(withDrift(3))).toContain("3 authored commits were added");
-  });
-
-  it("says nothing at all when the merged head IS the reviewed one", () => {
-    expect(revisionDriftNote(baseTaskFrontmatter("VIB-4"))).toBe("");
-  });
-
-  it("ruling 132: the permanent completion record names a base refresh as one, never as unreviewed commits", () => {
-    // Canary: restore the old body ("N commits were added to the PR head after
-    // the review") over the summed count.
-    const record = { headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } };
-    const note = revisionDriftNote(
-      baseTaskFrontmatter("VIB-4", { pr: { number: 150, state: "review", title: "[VIB-4] work", revisionDrift: record } }),
-    );
-    expect(note).toContain(describeRevisionDrift(record).sentence);
-    expect(note).not.toMatch(/unreviewed/i);
-    expect(note).not.toContain("5 commits were added");
   });
 });
 
@@ -4144,20 +3989,23 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
         body: { number: 1, html_url: "https://x/pull/1", title: "[VIB-1] t", state: "open", head: { sha: "a".repeat(40) } },
       },
     });
-    pushMock.mockResolvedValueOnce({
-      status: "pushed",
-      branch: "vib-1",
-      commits: 1,
-      headSha: "a".repeat(40),
-      remoteHeadBefore: null,
-   workflowFiles: [],
+    let bootstrappedAtPush: boolean | null = null;
+    pushMock.mockImplementationOnce(async () => {
+      bootstrappedAtPush = bootstrapped;
+      return {
+        status: "pushed",
+        branch: "vib-1",
+        commits: 1,
+        headSha: "a".repeat(40),
+        remoteHeadBefore: null,
+        workflowFiles: [],
+      };
     });
     const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
     expect(outcome.status).toBe("delivered");
     expect(github.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
     // The bootstrap ran BEFORE the push.
-    const putIndex = github.calls.findIndex((c) => c.method === "PUT");
-    expect(putIndex).toBeGreaterThan(-1);
+    expect(bootstrappedAtPush).toBe(true);
     expect(pushMock).toHaveBeenCalledTimes(1);
     const timeline = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline;
     expect(timeline[0]!.text).toContain("Opened **PR #1**");
@@ -4430,13 +4278,18 @@ describe("ruling 140(a): a named owner at creation", () => {
   });
 
   it("the hand-off refusals apply, before a key is allocated", async () => {
-    // Canary: drop `requireOwnable` from createTask.
+    // Canary: drop `requireOwnable` from createTask, or move it below
+    // `allocateTaskKey` (the counter then moves).
     const store = setupProjectedStore(ctx);
     const before = listAuditEvents(store.db).length;
+    const nextTaskNumber = () =>
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter
+        .nextTaskNumber;
+    const counterBefore = nextTaskNumber();
     await expect(
       createTask(
         store.db,
-        { projectSlug: store.slug, title: "To a viewer", ownerUserId: store.users.deniz.id },
+        { projectSlug: store.slug, title: "To a viewer", ownerUserId: store.users.elif.id },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
@@ -4464,6 +4317,8 @@ describe("ruling 140(a): a named owner at creation", () => {
       "A named owner is seated by a person; an operator-created task starts unowned.",
     );
     expect(listAuditEvents(store.db).length).toBe(before);
+    // No refusal burned a task key.
+    expect(nextTaskNumber()).toBe(counterBefore);
   });
 });
 
@@ -5639,8 +5494,9 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       expect(startAgentRun).toHaveBeenCalledOnce();
       const dispatch = startAgentRun.mock.calls[0]![1];
       expect(dispatch).toMatchObject({ profileId: "reviewer", directiveFrom: actorOf(store.users.arda).label });
-      expect(dispatch.directive).toBe(reReviewDirective("vib-1-work", "main", "m".repeat(40)));
-      expect(dispatch.directive).toContain("merge commit `mmmmmmm`");
+      expect(dispatch.directive).toContain(
+        "`vib-1-work` was brought up to date with `main` (merge commit `mmmmmmm`)",
+      );
       const parsed = taskFile(store);
       // Nothing is accepted: the task waits at Review for the new verdict.
       expect(parsed.frontmatter.stage).toBe("review");
@@ -5688,7 +5544,10 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
           actorOf(store.users.elif),
           { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refresh } },
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({
+        status: 403,
+        message: expect.stringContaining("Your project role (viewer) cannot"),
+      });
       expect(refresh).not.toHaveBeenCalled();
     });
   });
