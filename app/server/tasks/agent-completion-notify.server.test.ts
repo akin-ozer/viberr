@@ -256,6 +256,20 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
     const rows = notifications(store).filter((r) => r.kind === "mention");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.user_id).toBe(store.users.arda.id);
+    // Ruling 497: the verdict's row opens the verdict ("Approval noted…",
+    // "Review passed", "Changes requested"), and the mention's row opens the
+    // report that tagged the person. CANARY: drop `verdictAt` from the
+    // verdict notice and its rows open the task's top.
+    const events = timeline(store);
+    const verdictAt = events.find((e) => e.type === "quality")!.occurredAt;
+    const reportAt = events.find((e) => e.type === "comment")!.occurredAt;
+    const hrefs = store.db
+      .prepare(`SELECT DISTINCT kind, href FROM notifications ORDER BY kind`)
+      .all();
+    expect(hrefs).toEqual([
+      { kind: "mention", href: `/projects/${store.slug}/tasks/VIB-1#event-${reportAt}` },
+      { kind: "quality", href: `/projects/${store.slug}/tasks/VIB-1#event-${verdictAt}` },
+    ]);
   });
 });
 

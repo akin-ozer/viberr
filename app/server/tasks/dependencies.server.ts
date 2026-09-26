@@ -510,9 +510,10 @@ export async function announceRelease(
     : input.atBirth
       ? `Released: everything this task waits on was done before it was created (${list}), so nothing held it.`
       : `Released: everything this task waited on is done (${list}). The task can move again; the base branch has changed since the hold, so the work re-reads it before continuing.`;
+  const at = new Date().toISOString();
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
+      occurredAt: at,
       type: "note",
       actor: { kind: "system", systemId: "dependency-release" },
       title: "Dependencies released",
@@ -545,6 +546,7 @@ export async function announceRelease(
       kind: "dependency",
       title: `${taskKey} can move again`,
       text,
+      about: { event: at },
       // Ruling 361: the engine, by the name its timeline note carries.
       from: DEPENDENCY_RELEASE_FROM,
     },
@@ -827,10 +829,11 @@ export async function noteDeadDependency(
     const text = `${spelled} can never complete. This task stays held; edit what it waits on (remove the entry or point it elsewhere) to release it.`;
     const newestNote = existing.parsed.timeline.find((e) => e.type === "note" && e.title === DEAD_NOTE_TITLE);
     if (newestNote?.text === text) continue;
+    const at = new Date().toISOString();
     await updateTaskFile(ref, (parsed) => {
       parsed.frontmatter.waiting = "human";
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: at,
         type: "note",
         actor: { kind: "system", systemId: "dependency-release" },
         title: DEAD_NOTE_TITLE,
@@ -848,6 +851,7 @@ export async function noteDeadDependency(
         kind: "dependency",
         title: `${held.taskKey} waits on archived work`,
         text,
+        about: { event: at },
         from: DEPENDENCY_RELEASE_FROM,
       },
       ctx,

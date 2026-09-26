@@ -943,11 +943,17 @@ describe("notifyOwnerSeatChange", () => {
       actor,
       actorName: "Arda",
       change: { kind: "handed_off", taskKey: "JC-3" },
+      eventAt: "2026-09-26T08:00:00.000Z",
     });
     expect(told).toEqual({ userId: store.users.murat.id });
     const row = listNotifications(store.db, store.users.murat.id).find((n) => n.kind === "ownership")!;
     expect(row.title).toBe("Arda handed you JC-3");
     expect(row.taskKey).toBe("JC-3");
+    // Ruling 497: the row opens the `assign` event that recorded the change.
+    // Canary: drop `href` from the notifier — the row opens the task's top.
+    expect(
+      store.db.prepare(`SELECT href FROM notifications WHERE id = ?`).get(row.id),
+    ).toEqual({ href: `/projects/${store.slug}/tasks/JC-3#event-2026-09-26T08:00:00.000Z` });
 
     const self = notifyOwnerSeatChange(store.db, {
       projectSlug: store.slug,
@@ -955,6 +961,7 @@ describe("notifyOwnerSeatChange", () => {
       actor,
       actorName: "Arda",
       change: { kind: "taken_over", taskKey: "JC-3" },
+      eventAt: "2026-09-26T08:00:00.000Z",
     });
     expect(self).toBeNull();
     expect(
@@ -973,6 +980,7 @@ describe("notifyOwnerSeatChange", () => {
       actor: { userId: store.users.arda.id, label: store.users.arda.email },
       actorName: "Arda",
       change: { kind: "admin_released", taskKey: "JC-3" },
+      eventAt: "2026-09-26T08:00:00.000Z",
     });
     expect(answer).toEqual({ skipped: "failed" });
   });

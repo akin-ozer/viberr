@@ -310,11 +310,11 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
   const policyRows = (store: TestStore) =>
     store.db
       .prepare(
-        `SELECT user_id AS userId, title FROM notifications
+        `SELECT user_id AS userId, title, href FROM notifications
           WHERE project_slug = ? AND kind = 'policy'
           ORDER BY user_id ASC`,
       )
-      .all(store.slug) as { userId: string; title: string }[];
+      .all(store.slug) as { userId: string; title: string; href: string | null }[];
 
   it("stays silent below the threshold, then notifies admins + maintainers once", () => {
     // Project the members into `project_members` (what listProjectMembers reads).
@@ -335,6 +335,9 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
       [store.users.arda.id, store.users.murat.id].sort(),
     );
     expect(alerted[0]!.title).toBe("GitHub sync is failing for this project");
+    // Ruling 497: the credential is fixed on the project's GitHub page, so the
+    // row opens there, not on the board. CANARY: drop `href` from the alert.
+    expect(alerted[0]!.href).toBe(`/projects/${store.slug}/github`);
 
     // Further failures do NOT pile up duplicate rows (alerted flag + stable id).
     noteReconcileFailure(store.db, store.slug);

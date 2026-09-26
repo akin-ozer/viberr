@@ -32,7 +32,8 @@ import {
 } from "~/server/files/goal-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
-import { createNotification } from "~/server/projections/notifications.server";
+import { createNotification, goalLink } from "~/server/projections/notifications.server";
+import { goalLinkAnchor } from "~/shared/goal-anchor";
 import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { rolesForAction } from "~/shared/rbac";
@@ -1034,6 +1035,7 @@ export async function updateGoal(
             declined.parsed.frontmatter,
             input.projectSlug,
             "A link retry did not start its task. Retry the link again.",
+            { linkIndex: retryLinkIndex },
           );
         }
         rebuildGoalFile(db, input.projectSlug, input.goalId, { dataRoot: ctx.dataRoot });
@@ -1059,6 +1061,7 @@ export async function updateGoal(
           after.parsed.frontmatter,
           input.projectSlug,
           "A link retry could not start its task. Resume or redirect the goal to try again.",
+          { linkIndex: retryLinkIndex },
         );
       }
       rebuildGoalFile(db, input.projectSlug, input.goalId, {
@@ -1090,14 +1093,17 @@ export async function updateGoal(
 // ----------------------------------------------------------------- advance
 
 /** Notify the goal's creator (kind `controller`) — chain progress reaches the
- *  human who defined it even when nobody is watching the board. */
+ *  human who defined it even when nobody is watching the board. Ruling 497:
+ *  the row opens the chain on the Controller page, at the link it names. */
 function notifyCreator(
   db: DatabaseSync,
   fm: GoalFrontmatter,
   projectSlug: string,
   text: string,
-  taskKey?: string | null,
+  about: { taskKey?: string; linkIndex?: number | null } = {},
 ): void {
+  const anchor =
+    about.linkIndex != null ? goalLinkAnchor(fm.id, about.linkIndex) : fm.id;
   try {
     createNotification(db, {
       userId: fm.createdBy,
@@ -1105,7 +1111,8 @@ function notifyCreator(
       title: `${fm.id} · ${fm.title}`,
       text,
       projectSlug,
-      taskKey: taskKey ?? null,
+      taskKey: about.taskKey ?? null,
+      href: goalLink(projectSlug, anchor),
       from: { kind: "agent", name: "Controller" },
     });
   } catch (error) {
@@ -1280,13 +1287,10 @@ async function startLinkTaskLocked(
       });
     });
   }
-  notifyCreator(
-    db,
-    fm,
-    projectSlug,
-    `Link ${linkIndex} started as ${created.key}.`,
-    created.key,
-  );
+  notifyCreator(db, fm, projectSlug, `Link ${linkIndex} started as ${created.key}.`, {
+    taskKey: created.key,
+    linkIndex,
+  });
   return created.key;
 }
 
@@ -1326,6 +1330,8 @@ export async function reconcileGoal(
 
   let completedNow = false;
   let attentionNow: string | null = null;
+  /** The link that parked the chain, when one did (ruling 497: the row opens it). */
+  let attentionLink: number | null = null;
   let failedLink: { index: number; title: string; taskKey: string } | null = null;
   /**
    * Ruling 398: the links to start on this pass. A LIST, not a single index.
@@ -1398,6 +1404,7 @@ export async function reconcileGoal(
         failedLink !== null
           ? `Link ${failedLink.index} failed. The chain is paused for your decision: retry it, skip it, or cancel the goal.`
           : "A link failed. The chain is paused for your decision.";
+      attentionLink = failedLink?.index ?? null;
       history.push("Chain paused (attention): a link failed.");
     }
     // …and un-parks when THIS pass saw the failure undone. `attention` is the
@@ -1462,6 +1469,7 @@ export async function reconcileGoal(
               attentionNow =
                 `Link ${link.index} (${link.title}) waits on work that can never complete. ` +
                 "The chain is paused for your decision: edit the wait, skip the link, or cancel the goal.";
+              attentionLink = link.index;
               history.push(
                 `Chain paused (attention): link ${link.index}'s wait can never complete.`,
               );
@@ -1479,7 +1487,7 @@ export async function reconcileGoal(
 
   if (attentionNow) {
     const fm = readGoalFile(ref)?.parsed.frontmatter;
-    if (fm) notifyCreator(db, fm, projectSlug, attentionNow);
+    if (fm) notifyCreator(db, fm, projectSlug, attentionNow, { linkIndex: attentionLink });
   }
   if (completedNow) {
     const fm = readGoalFile(ref)?.parsed.frontmatter;
@@ -1556,6 +1564,7 @@ export async function reconcileGoal(
             after,
             projectSlug,
             `The chain could not advance: creating link ${linkIndex}'s task failed. Resume the goal to retry.`,
+            { linkIndex },
           );
         }
         break;

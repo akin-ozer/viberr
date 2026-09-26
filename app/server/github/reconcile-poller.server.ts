@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
-import { createNotification } from "~/server/projections/notifications.server";
+import { createNotification, projectGithubLink } from "~/server/projections/notifications.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { POLICY_ENGINE_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
 import {
@@ -177,6 +177,8 @@ export function noteReconcileFailure(db: DatabaseSync, slug: string): void {
         projectSlug: slug,
         title,
         text,
+        // Ruling 497: the credential is fixed on the project's GitHub page.
+        href: projectGithubLink(slug),
         from: POLICY_ENGINE_NOTIFY_FROM,
       });
     }

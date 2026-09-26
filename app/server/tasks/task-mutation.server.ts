@@ -10,6 +10,10 @@ import {
   type CreateNotificationInput,
   createNotification,
   markTaskPacketApprovalRead,
+  proposalLink,
+  taskDecisionLink,
+  taskEventLink,
+  taskRecommendationsLink,
 } from "~/server/projections/notifications.server";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import type {
@@ -272,6 +276,29 @@ export const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operato
  *  escalation (ruling 237) all send as it. */
 export const POLICY_ENGINE_NOTIFY_FROM: ActorRender = { kind: "system", name: "Policy engine" };
 
+/**
+ * Ruling 497: the one thing a task notice is about, so its row opens there and
+ * not at the top of a page the person then has to search.
+ */
+export type NoticeSubject =
+  /** The timeline event written at this time (its `occurredAt`). */
+  | { event: string }
+  /** The task's open decision packet (an operator's, or an agent's question). */
+  | "decision"
+  /** The task's pending recommendation cards. */
+  | "recommendations"
+  /** A knowledge-base proposal, by id (ruling 483). */
+  | { proposal: string };
+
+/** Where a row about `about` on this task opens (the links in
+ *  `notifications.server.ts`). */
+export function noticeHref(projectSlug: string, taskKey: string, about: NoticeSubject): string {
+  if (about === "decision") return taskDecisionLink(projectSlug, taskKey);
+  if (about === "recommendations") return taskRecommendationsLink(projectSlug, taskKey);
+  if ("event" in about) return taskEventLink(projectSlug, taskKey, about.event);
+  return proposalLink(projectSlug, about.proposal);
+}
+
 export interface TaskWatcherNotice {
   projectSlug: string;
   taskKey: string;
@@ -286,6 +313,9 @@ export interface TaskWatcherNotice {
    *  the Operator had done what the reviewer or the release engine did. */
   from: ActorRender;
   occurredAt?: string;
+  /** Ruling 497: what the notice is about, which is where its row opens.
+   *  Omitted or null (the writer found nothing to point at), it opens the task. */
+  about?: NoticeSubject | null;
   /** Skip this user (e.g. the human who triggered the event). */
   exceptUserId?: string;
   /** Skip these users — e.g. recipients an earlier notification about the SAME
@@ -363,6 +393,9 @@ export function notifyOwnerSeatChange(
     actor: TaskActor;
     actorName: string;
     change: OwnerSeatChange;
+    /** Ruling 497: when the timeline's `assign` event for this change was
+     *  written, so the row opens on it. */
+    eventAt: string;
   },
 ): OwnerSeatNotified | null {
   if (input.recipientUserId === input.actor.userId) return null;
@@ -383,6 +416,7 @@ export function notifyOwnerSeatChange(
       }),
       projectSlug: input.projectSlug,
       taskKey: input.change.taskKey,
+      href: noticeHref(input.projectSlug, input.change.taskKey, { event: input.eventAt }),
     });
     // `createNotification` answers null when the reader silenced the category.
     return id ? { userId: input.recipientUserId } : { skipped: "silenced" };
@@ -454,6 +488,7 @@ export function notifyTaskWatchers(
       projectSlug: notice.projectSlug,
       taskKey: notice.taskKey,
     };
+    if (notice.about) notification.href = noticeHref(notice.projectSlug, notice.taskKey, notice.about);
     // No caller timestamp ⇒ leave the key off and let the writer stamp `now`.
     if (notice.occurredAt) notification.occurredAt = notice.occurredAt;
     const id = createNotification(db, notification);

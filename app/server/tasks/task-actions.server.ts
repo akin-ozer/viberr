@@ -890,6 +890,8 @@ export async function createTask(
       actor: creator,
       actorName: userName(db, creator.userId),
       change: { kind: "seated_at_creation", taskKey: key },
+      // The creation's `assign` event carries the file's own `now`.
+      eventAt: now,
     });
     if (seatNotified) createdDetails.notified = seatNotified;
   }
@@ -3972,6 +3974,8 @@ export async function recordAgentCompletion(
   // noted, rework still needed", NOT a pass.
   let title = "";
   let summary = "";
+  /** Ruling 497: when the verdict event was written, so its notice opens on it. */
+  let verdictAt: string | null = null;
   // R19-8 (F19-21, live VC-5): a verdict-capable reviewer approving a task that
   // has NOTHING to deliver had nothing to bind to — the verdict was dropped, the
   // event read "there is no delivered revision to bind the verdict to yet", and
@@ -4363,6 +4367,7 @@ export async function recordAgentCompletion(
         };
         if (attachments) verdictEvent.attachments = attachments;
         parsed.timeline.unshift(verdictEvent);
+        verdictAt = verdictEvent.occurredAt;
         // Ruling 237: the escalation note goes ABOVE the verdict that caused
         // it, which means last, and with a stamp that cannot be older than what
         // it sits on.
@@ -4453,6 +4458,8 @@ export async function recordAgentCompletion(
           ptype: "input",
           title: `Decision needed: ${deadlockEscalation.packet.title}`,
           text: deadlockEscalation.packet.body,
+          // Ruling 497: the row opens the packet, where it is decided.
+          about: "decision",
           // Ruling 237: `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any
           // notice that names nobody, so leaving this off told the inbox the
           // Operator raised it — contradicting the card, which says
@@ -4551,6 +4558,8 @@ export async function recordAgentCompletion(
         kind: "question",
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
+        // Ruling 497: the row opens the question's card, where it is answered.
+        about: "decision",
         // Ruling 361: the asker by name; the Operator only when the operator asked.
         from:
           actorRef.kind === "agent"
@@ -4586,6 +4595,7 @@ export async function recordAgentCompletion(
           kind: "quality",
           title,
           text: summary,
+          about: verdictAt ? { event: verdictAt } : null,
           // Ruling 361: the reviewer that judged, not the Operator — 673
           // "Review passed" notifications on this instance named the wrong agent.
           from:
@@ -5584,9 +5594,10 @@ export async function applyAgentCompletionEffects(
         }${providerBlock}`;
     // Files the run saved before it died still get their producer named.
     const failureAttachments = sanitizeEventAttachmentNames(runAttachments);
+    const failedAt = new Date().toISOString();
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const failureEvent: TaskFileEvent = {
-        occurredAt: new Date().toISOString(),
+        occurredAt: failedAt,
         type: "blocked",
         actor: actorRef,
         title: null,
@@ -5684,6 +5695,8 @@ export async function applyAgentCompletionEffects(
       text: classified
         ? `${input.role} run failed. ${described.reason}`
         : `${input.role} run failed: ${endSentence(reasonText)}`,
+      // Ruling 497: the row opens the failure's own event, which says why.
+      about: { event: failedAt },
       // Ruling 361: the agent whose run failed — the timeline's actor for the
       // same event.
       from: { kind: "agent", backend: input.backend, name: input.role, role: input.role },
@@ -6641,6 +6654,7 @@ export async function setOwner(
     actor,
     actorName,
     change: { kind: "handed_off", taskKey: input.taskKey },
+    eventAt: event.occurredAt,
   });
   const displaced =
     currentOwnerId && currentOwnerId !== input.targetUserId
@@ -6650,6 +6664,7 @@ export async function setOwner(
           actor,
           actorName,
           change: { kind: "taken_over", taskKey: input.taskKey },
+          eventAt: event.occurredAt,
         })
       : null;
   const ownershipDetails: NonNullable<AuditEventInput["details"]> = {
@@ -6749,6 +6764,7 @@ export async function releaseOwner(
         actor,
         actorName: userName(db, actor.userId),
         change: { kind: "admin_released", taskKey: input.taskKey },
+        eventAt: event.occurredAt,
       });
   const releaseDetails: NonNullable<AuditEventInput["details"]> = {
     previousOwnerUserId: currentOwnerId,
@@ -8897,9 +8913,10 @@ async function surfaceDeliveryEvent(
   timelineDetail?: string,
 ): Promise<void> {
   try {
+    const at = new Date().toISOString();
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: at,
         type: "github",
         actor: { kind: "system", systemId: "delivery" },
         title: null,
@@ -8918,6 +8935,8 @@ async function surfaceDeliveryEvent(
         kind: "policy",
         title,
         text,
+        // Ruling 497: the row opens the note, which carries git's own output.
+        about: { event: at },
         // Ruling 361: the same system actor the note above carries.
         from: { kind: "system", name: systemIdToName("delivery") },
       },
@@ -9089,6 +9108,8 @@ async function recordDeliveredNextStep(
         ptype: "input",
         title: `Next step recorded: ${label}`,
         text: detail,
+        // Ruling 497: the row opens the card, where it is applied.
+        about: "recommendations",
         from: { kind: "system", name: "Delivery" },
       },
       ctx,
@@ -10027,6 +10048,8 @@ export async function retryReviewDeadlockEscalation(
         ptype: "input",
         title: `Decision needed: ${packet.title}`,
         text: packet.body,
+        // Ruling 497: the row opens the packet, where it is decided.
+        about: "decision",
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,
@@ -12831,6 +12854,8 @@ export async function requestPacketMaintainerDecision(
     title: `Decision needs a maintainer: ${packet.title}`,
     text: noteText,
     occurredAt,
+    // Ruling 497: the row opens the packet the maintainer is asked to decide.
+    about: "decision",
     // Ruling 361: the person who asked, or the operator when it did.
     from: actor.userId
       ? {

@@ -2918,6 +2918,11 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
       listNotifications(store.db, userId).filter((n) => n.kind === "packet");
     expect(packets(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
     expect(packets(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    // Ruling 497: the row opens the packet, where it is decided. CANARY: drop
+    // `about` from the notice and the row opens the task's top.
+    expect(packets(store.users.murat.id)[0]!.href).toBe(
+      `/projects/${store.slug}/tasks/VIB-1#decision`,
+    );
     // The audit trail records it.
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
       "task.operator.packet_opened",
@@ -3562,6 +3567,11 @@ describe("applyRecommendation / dismissRecommendation", () => {
     // …a contributor and a viewer do not (not task supervisors).
     expect(approvals(store.users.selin.id)).toHaveLength(0);
     expect(approvals(store.users.elif.id)).toHaveLength(0);
+    // Ruling 497: the row opens the card, where it is applied. CANARY: drop
+    // `about` from the notice and the row opens the task's top.
+    expect(approvals(store.users.murat.id)[0]!.href).toBe(
+      `/projects/${store.slug}/tasks/VIB-1#recommendations`,
+    );
   });
 
   it("a re-running operator does not re-notify the same pending recommendation", async () => {
@@ -4118,6 +4128,15 @@ describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
         (n) => n.title === RULING_PROPOSAL_TITLE,
       ),
     ).toBe(true);
+    // Ruling 497: the row opens the proposal's own entry on the Controller
+    // page, where it is promoted or dismissed, not the task it came from.
+    // CANARY: drop `about` from the notice and the row opens VIB-1's top.
+    const id = /Filed as `(kp-[0-9a-f]{10})`/.exec(top.text)![1];
+    expect(
+      store.db
+        .prepare(`SELECT href FROM notifications WHERE user_id = ? AND title = ?`)
+        .get(store.users.arda.id, RULING_PROPOSAL_TITLE),
+    ).toEqual({ href: `/projects/${store.slug}/controller#proposal-${id}` });
   });
 
   it("F40-53: proposes against a knowledge base an ENGAGED agent was given, not only the operator's own", async () => {

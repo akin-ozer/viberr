@@ -562,6 +562,16 @@ const BASELINE_COLUMNS: readonly {
       },
     ],
   },
+  {
+    table: "notifications",
+    columns: [
+      // Ruling 497: where a row opens. `createNotification` names it on every
+      // insert and its callers fail open, so a root that predates it would
+      // drop every notification without a word. No backfill: NULL opens the
+      // task or the board, which is where every older row opened.
+      { name: "href", ddl: "href TEXT" },
+    ],
+  },
 ];
 
 /**

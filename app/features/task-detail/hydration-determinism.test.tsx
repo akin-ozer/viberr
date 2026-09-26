@@ -397,7 +397,7 @@ function withAcceptCard(): PageProps {
 
 /** Load the page in one environment: the zone is applied BEFORE the import so
  *  the module-level formatters resolve it (see the header). */
-async function pageIn(zone: string): Promise<(props: PageProps) => ReactElement> {
+async function pageIn(zone: string, entry = "/"): Promise<(props: PageProps) => ReactElement> {
   process.env.TZ = zone;
   vi.resetModules();
   const page: PageModule = await import("./task-detail-page");
@@ -422,7 +422,7 @@ async function pageIn(zone: string): Promise<(props: PageProps) => ReactElement>
         action: async () => ({ ok: true }),
       },
     ]);
-    return <Stub initialEntries={["/"]} />;
+    return <Stub initialEntries={[entry]} />;
   };
 }
 
@@ -456,9 +456,11 @@ async function hydrate(
   html: string,
   sighting: () => PageProps,
   interrupt?: (container: HTMLElement) => void,
+  /** The URL the viewer opened (ruling 497: its hash never reaches the server). */
+  entry = "/",
 ): Promise<{ container: HTMLElement; report: HydrationReport }> {
   vi.setSystemTime(new Date(VIEWER_NOW));
-  const element = await pageIn(VIEWER_ZONE);
+  const element = await pageIn(VIEWER_ZONE, entry);
   const container = document.createElement("div");
   container.innerHTML = html;
   document.body.appendChild(container);
@@ -530,6 +532,29 @@ describe.each([
     expect(html).toContain(">23:31:05<");
     // A calendar-shaped date never renders host-zone on the first pass.
     expect(html).not.toMatch(/Jul \d{1,2}, 2026/);
+  });
+
+  /**
+   * Ruling 497: a notification's link names an event by the URL's hash, which a
+   * browser never sends. A document load of that link (a refresh, a pasted
+   * URL, the router's reload after a deploy) is rendered by the server with no
+   * mark, so the mark is drawn after hydration, never during it. CANARY: read
+   * `location.hash` in `useHashTarget` without `useHydrated` and the item's
+   * `tabIndex` and `data-targeted` come back as attribute-mismatch warnings.
+   */
+  it("hydrates a link to an event cleanly and marks the event after hydration", async () => {
+    freezeClock();
+    const html = await serverHtml(sighting);
+    const { container, report } = await hydrate(
+      html,
+      sighting,
+      undefined,
+      "/#event-2026-07-03T09:41:00.000Z",
+    );
+    expect(report.recoverable, report.recoverable.join("\n\n")).toEqual([]);
+    expect(report.warnings, report.warnings.join("\n\n")).toEqual([]);
+    const marked = [...container.querySelectorAll(".tl-item[data-targeted]")].map((el) => el.id);
+    expect(marked).toEqual(["event-2026-07-03T09:41:00.000Z"]);
   });
 
   it("hydrates the server's markup in the viewer's zone with no recoverable error", async () => {

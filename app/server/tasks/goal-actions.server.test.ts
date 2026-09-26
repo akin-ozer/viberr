@@ -336,6 +336,16 @@ describe("chained goals", () => {
       )
       .get(contributorId) as { n: number };
     expect(notified.n).toBeGreaterThan(0);
+    // Ruling 497: "Link 2 started as …" opens that link's row in its chain on
+    // the Controller page. CANARY: drop `href` from `notifyCreator`.
+    expect(
+      app.db
+        .prepare(
+          `SELECT href FROM notifications
+            WHERE user_id = ? AND kind = 'controller' AND title LIKE ? AND text LIKE 'Link 2 started as %'`,
+        )
+        .all(contributorId, `${goalId} · %`),
+    ).toEqual([{ href: `/projects/${SLUG}/controller#${goalId}-link-2` }]);
   });
 
   it("reconcile is convergent: a second pass changes nothing", async () => {
