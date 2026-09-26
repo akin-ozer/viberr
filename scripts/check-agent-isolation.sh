@@ -322,14 +322,17 @@ as_agent "$UID_A" "rm -rf '$WS/support' '$DELIVER'"
 # and every run's settle failed to remove it (52 plugins left); and a finished
 # task's workspace root is the server's, in a task directory only the server
 # writes, so no agent uid could unlink it, empty or not (15 workspaces logged
-# on every boot). The mount now leaves every folder 2775 and every file
-# group-readable; the removal opens what the server wrote before that
-# (`chmod -R -P g+rwX` as the server) and removes an emptied root the server
-# owns with `rmdir` (`removeAgentTree`, run with the image's `tsx`).
+# on every boot). The mount now makes every entry of a plugin anew, folders
+# 2775 under the server's umask and files group-readable; the removal opens
+# what the server wrote before that (`chmod -R -P g+rwX` as the server) and
+# removes an emptied root the server owns with `rmdir` (`removeAgentTree`, run
+# with the image's `tsx`). Hard-link protection is the HOST kernel's setting
+# (a container reads the kernel's /proc/sys/fs), so this fails on a host that
+# has it off, whatever the image.
 if [ "$(cat /proc/sys/fs/protected_hardlinks 2>/dev/null)" = "1" ]; then
-  pass "the kernel protects hard links (fs.protected_hardlinks = 1)"
+  pass "the host kernel protects hard links (fs.protected_hardlinks = 1)"
 else
-  fail "fs.protected_hardlinks is '$(cat /proc/sys/fs/protected_hardlinks 2>&1)', not 1"
+  fail "the host kernel's fs.protected_hardlinks is '$(cat /proc/sys/fs/protected_hardlinks 2>&1)', not 1"
 fi
 (umask 0022 && echo server > "$WS/server-file")
 if as_agent "$UID_A" "ln '$WS/server-file' '$WS/agent-link'" >/dev/null 2>&1; then
@@ -444,6 +447,25 @@ if [ "$through_data" != "removed" ] && [ "$through_empty" != "removed" ] \
   pass "the server opens and removes nothing through a folder an agent swapped for a link"
 else
   fail "the server acted through an agent's link: data $mode_before became $(stat -c '%a' "$LINKED/data" 2>&1), empty/ $([ -d "$LINKED/empty" ] && echo kept || echo removed)"
+fi
+as_agent "$UID_A" "rm -rf '$WS/sup'"
+rm -rf "$LINKED"
+# The same through a link of the server's own that an agent moved into a
+# folder it writes: a symlink a repository commits is the server's once its
+# clone checks it out, and the checkout's folders are the group's.
+mkdir -p "$LINKED/data/kept" "$LINKED/empty" && chmod 0750 "$LINKED" "$LINKED/data" "$LINKED/empty"
+mode_before=$(stat -c '%a' "$LINKED/data")
+ln -s "$LINKED" "$WS/checked-out-link"
+as_agent "$UID_A" "mkdir -p '$WS/sup' && mv '$WS/checked-out-link' '$WS/sup/rev'"
+through_data=$(remove_as_person "$WS/sup/rev/data")
+through_empty=$(remove_as_person "$WS/sup/rev/empty")
+if [ "$(stat -c '%u' "$WS/sup/rev" 2>/dev/null)" != "$(id -u)" ]; then
+  fail "the moved link is not the server's ($(stat -c '%U' "$WS/sup/rev" 2>&1)): this check proves nothing"
+elif [ "$through_data" != "removed" ] && [ "$through_empty" != "removed" ] \
+  && [ "$(stat -c '%a' "$LINKED/data")" = "$mode_before" ] && [ -d "$LINKED/data/kept" ] && [ -d "$LINKED/empty" ]; then
+  pass "the server opens and removes nothing through a link of its own an agent moved into a folder it writes"
+else
+  fail "the server acted through its own link an agent moved: data $mode_before became $(stat -c '%a' "$LINKED/data" 2>&1), empty/ $([ -d "$LINKED/empty" ] && echo kept || echo removed)"
 fi
 as_agent "$UID_A" "rm -rf '$WS/sup'"
 rm -rf "$LINKED"

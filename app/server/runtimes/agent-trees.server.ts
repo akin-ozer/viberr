@@ -57,7 +57,7 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  * `rmdir -- <tree>`. A target still holding entries stays a fault naming the
  * path and the OS error, and an empty one an agent uid owns is left to the
  * agent passes. What the mount writes from now on needs neither step
- * (`makeCopyGroupRemovable`, `agent-isolation.server.ts`).
+ * (`copySkillFolder`, `skill-mount.server.ts`).
  *
  * 485's safety argument holds:
  *  - no recursive remove runs with the server's authority: its steps are a
@@ -71,17 +71,32 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  *    the server does not own, and `g+rwX` opens an entry only to the group it
  *    already has: `state/` and the raw run logs are in the server's own group,
  *    which no agent uid is in;
- *  - protected hardlinks stop an agent linking a server file into its tree,
- *    where the chmod would reach it: `/proc/sys/fs/protected_hardlinks` is 1
- *    in the image (measured 2026-09-26 in a container of the e2e image;
- *    `protected_symlinks` is 1 too), so an agent uid may link only a file it
- *    owns or can already read and write;
+ *  - `chmod -R` has no way to leave out a file with a second link, so what
+ *    matters is which of the server's files a tree can hold a link to. The
+ *    server makes some itself: its clone of a checkout from the project
+ *    mirror (`git clone --local`) hardlinks the checkout's objects to the
+ *    mirror's, and an agent can put one where its person's pass cannot
+ *    remove it, so the step reaches it. Boot keeps every mirror file in the
+ *    server's own group (`revokeMirrorWrites`, `agent-isolation.server.ts`;
+ *    the hand-over before R-seams-1 had put some in the agents' group), so
+ *    the step opens such a file to no agent, and the next boot takes the
+ *    group write back off. An agent cannot link any other file of the
+ *    server's that it cannot already read and write, because
+ *    `fs.protected_hardlinks` is 1. That is the host kernel's setting, not
+ *    the image's (a container reads the kernel's `/proc/sys/fs`): measured 1
+ *    in the e2e stack's container, on this host's kernel, on 2026-09-26
+ *    (`protected_symlinks` 1 too), and `scripts/check-agent-isolation.sh`
+ *    fails on a host that has it off;
  *  - neither server step runs while a directory above the tree is a link an
- *    agent uid owns (`agentLinkAbove`), through which the steps would reach
- *    another directory of the tree's name. The check reads before each step;
- *    a link swapped in between the read and the step is not covered, and what
- *    it could reach is a directory of that name the server owns, where the
- *    steps add group permissions, or remove it if it is empty.
+ *    agent could have put there (`agentLinkAbove`): one an agent uid owns, or
+ *    any link in a folder an agent can write, since an agent can move a link
+ *    the server made (a symlink a repository commits, checked out by the
+ *    server's clone) into any folder it writes. The server puts no link on
+ *    these paths itself. Through such a link the steps would reach another
+ *    directory of the tree's name. The check reads before each step; a link
+ *    swapped in between the read and the step is not covered, and what it
+ *    could reach is a directory of that name the server owns, where the steps
+ *    add group permissions, or remove it if it is empty.
  */
 
 /** How many fallback rounds run as the owners found in what is left. */
@@ -134,7 +149,9 @@ export interface TreeView {
    *  empty directory the server's own uid owns), or `other` (an empty
    *  directory an agent uid owns, a file, a link). */
   left(target: string): "entries" | "empty-server" | "other";
-  /** A directory above the target that is a link an agent uid owns, or null. */
+  /** A directory above the target that is a link an agent could have put
+   *  there (one an agent uid owns, or any link in a folder an agent can
+   *  write), or null. */
   agentLinkAbove(target: string): string | null;
 }
 
@@ -208,13 +225,30 @@ function leftOf(target: string): "entries" | "empty-server" | "other" {
   return st.uid === process.getuid?.() ? "empty-server" : "other";
 }
 
+/** Ruling 495: a folder an agent could have put a link in: an agent uid owns
+ *  it, or it grants group or other write. Which group is not asked: the
+ *  folders agents write are 2770 or 2775 in theirs, and a folder of the
+ *  server's that its umask left writable to its own group holds no link of
+ *  the server's either. A folder the server cannot look at counts as one. */
+function agentWritableFolder(dir: string): boolean {
+  try {
+    const st = lstatSync(dir);
+    return isAgentUid(st.uid) || (st.mode & 0o022) !== 0;
+  } catch {
+    return true;
+  }
+}
+
 /** Ruling 495: the first directory above `target` that is a link an agent
- *  uid owns (an agent swapped a folder it can write for it), or null. */
+ *  could have put there, or null: a link an agent uid owns, or any link in a
+ *  folder an agent can write, whoever owns it. A link the server made (a
+ *  symlink a repository commits, checked out by the server's clone) is the
+ *  server's, and an agent can move it to any folder it writes. */
 function agentLinkAboveOf(target: string): string | null {
   for (let dir = path.dirname(target); ; dir = path.dirname(dir)) {
     try {
       const st = lstatSync(dir);
-      if (st.isSymbolicLink() && isAgentUid(st.uid)) return dir;
+      if (st.isSymbolicLink() && (isAgentUid(st.uid) || agentWritableFolder(path.dirname(dir)))) return dir;
     } catch {
       // Not there: nothing below it resolves through it either.
     }
@@ -274,7 +308,7 @@ export function* removalPlan(
   function serverMayAct(): boolean {
     const link = view.agentLinkAbove(target);
     if (link === null) return true;
-    logger.warn("the server's own removal steps were skipped: a directory above the tree is a link an agent uid owns", {
+    logger.warn("the server's own removal steps were skipped: a directory above the tree is a link an agent could have put there", {
       target,
       link,
     });

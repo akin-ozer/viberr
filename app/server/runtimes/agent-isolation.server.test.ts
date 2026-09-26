@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  chownSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -228,6 +229,53 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
     expect(mode(path.join(staged, "objects", "cdef"))).toBe(0o444);
     expect(mode(staged) & 0o2070).toBe(0o2070);
   });
+
+  /**
+   * Ruling 495: a removal's server step (`chmod -R -P g+rwX`,
+   * `agent-trees.server.ts`) can reach a checkout's object linked from the
+   * mirror, and opens it to the group it is in. The hand-over before
+   * R-seams-1 had moved such objects to the agents' group, and taking their
+   * write back kept that group, so in such a store the step would have opened
+   * the mirror's copy to every agent. Boot puts them back in the server's own
+   * group. The suite stands in a second group it is in for the agents'.
+   */
+  const serverGid = process.getgid?.() ?? 0;
+  const agentsGroup = process.getgroups?.().find((g) => g !== serverGid);
+  it.skipIf(agentsGroup === undefined)(
+    "puts a mirror file an earlier hand-over gave the agents' group back in the server's own group",
+    () => {
+      // CANARY: keep the file's own group in `revokeMirrorWrites` and the
+      // mirror object (and the checkout's link to it) stays the agents'.
+      if (agentsGroup === undefined) throw new Error("skipped when the suite is in one group only");
+      const root = preRulingStore();
+      const mirrorObject = path.join(root, "projects/demo/.repo-mirror/acme__app.git/objects/ab/cdef");
+      mkdirSync(path.dirname(mirrorObject), { recursive: true });
+      writeFileSync(mirrorObject, "object\n");
+      const linked = path.join(root, "projects/demo/tasks/DEMO-1/workspace/repo/.git/objects/ab/cdef");
+      mkdirSync(path.dirname(linked), { recursive: true });
+      linkSync(mirrorObject, linked);
+      // What the old hand-over and the revoke after it left: the agents'
+      // group, no group write.
+      chownSync(mirrorObject, -1, agentsGroup);
+      chmodSync(mirrorObject, 0o444);
+      const mirrorFile = path.join(root, "projects/demo/.repo-mirror/acme__app.git/HEAD");
+      writeFileSync(mirrorFile, "ref: refs/heads/main\n");
+      chmodSync(mirrorFile, 0o644);
+
+      const report = enforceStoreLayout(root, { gid: agentsGroup });
+
+      expect(report.failures).toEqual([]);
+      expect(statSync(mirrorObject).gid).toBe(serverGid);
+      expect(statSync(linked).gid).toBe(serverGid);
+      expect(mode(mirrorObject)).toBe(0o444);
+      // Agents still read it, through its other-read bits.
+      expect(mode(mirrorObject) & 0o004).toBe(0o004);
+      // A mirror file already the server's alone is left as it is.
+      expect(statSync(mirrorFile).gid).toBe(serverGid);
+      expect(mode(mirrorFile)).toBe(0o644);
+      expect(report.mirrorWritesRevoked).toBe(1);
+    },
+  );
 });
 
 describe("agentIsolation in /resources/health (ruling 460)", () => {

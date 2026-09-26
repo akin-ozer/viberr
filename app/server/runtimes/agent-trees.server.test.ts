@@ -1,9 +1,11 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -411,7 +413,10 @@ describe("the server opens its own residue and removes an emptied root it owns (
       );
       expect(steps).toEqual(pass(AGENT_UID_FLOOR, "u+rwX", target));
     }
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("link an agent uid owns"), { target, link });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("link an agent could have put there"), {
+      target,
+      link,
+    });
   });
 });
 
@@ -535,5 +540,57 @@ describe("F40-71's trees, removed through the drivers (ruling 495)", () => {
     expect(failure).toBeInstanceOf(AgentTreeRemovalError);
     expect(failure?.message).toBe(`${workspace} could not be removed: EACCES on ${path.join(stuck, "f")}`);
     expect(existsSync(path.join(stuck, "f"))).toBe(true);
+  });
+
+  /** A folder of the server's the agents' group may enter and not write
+   *  (0750), holding `data/kept/f`, and `holder`, the folder a link to it
+   *  sits in. The link is the suite's own, as a symlink a repository commits
+   *  is the server's once its clone checks it out. */
+  function linkedServerFolder(holderMode: number) {
+    const root = ctx.makeTempDir("viberr-495-link-");
+    const outside = path.join(root, "server-owned");
+    const kept = path.join(outside, "data", "kept");
+    mkdirSync(kept, { recursive: true });
+    writeFileSync(path.join(kept, "f"), "x");
+    for (const dir of [outside, path.dirname(kept), kept]) chmodSync(dir, 0o750);
+    const holder = path.join(root, "holder");
+    mkdirSync(holder);
+    chmodSync(holder, holderMode);
+    const link = path.join(holder, "site-reviewer");
+    symlinkSync(outside, link);
+    return { outside, link, target: path.join(link, "data") };
+  }
+
+  it("opens and removes nothing through a link the server made that an agent moved into a folder it writes", async () => {
+    // Review of ruling 495: an agent can move any link out of a checkout the
+    // server cloned (its folders are the group's) to `<workspace>/support`,
+    // `.viberr-plugins` or `.gates`, and the check read only links an agent
+    // uid owns. CANARY: flag only those again and the server's chmod opens
+    // `server-owned/data` through the link, and the person's pass removes it.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const { outside, link, target } = linkedServerFolder(0o770);
+    const { launch } = groupBoundLauncher();
+
+    const failure = await removeAgentTree(target, launch).then(
+      () => null,
+      (error: Error) => error,
+    );
+
+    expect(failure).toBeInstanceOf(AgentTreeRemovalError);
+    expect(existsSync(path.join(outside, "data", "kept", "f"))).toBe(true);
+    expect(lstatSync(path.join(outside, "data")).mode & 0o7777).toBe(0o750);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("link an agent could have put there"), { target, link });
+  });
+
+  it("still acts through a link in a folder only the server writes (a system path such as macOS's /var)", async () => {
+    // The check is not "any link above": the store may sit below a link no
+    // agent could have made, and every tree there must still be removable.
+    const { outside, target } = linkedServerFolder(0o755);
+    const { launch } = groupBoundLauncher();
+
+    await removeAgentTree(target, launch);
+
+    expect(existsSync(path.join(outside, "data"))).toBe(false);
+    expect(existsSync(outside)).toBe(true);
   });
 });
