@@ -520,7 +520,7 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
 
   it("holds 4.5:1 for --faint on the --blue-soft selection fill", () => {
     // Pass 30: a selected decision-packet option (`.opt.sel`) paints
-    // --blue-soft under --faint text (`.opt .od`, `.opt .opt-kbd`). The R19-12
+    // --blue-soft under --faint text (`.opt .od`). The R19-12
     // sweep pairs text only with its own selector part's backdrop, so this
     // sibling-state combination is invisible to it — and the dark pair clears
     // AA by just 0.17, the thinnest real margin in the sheet. Enumerated here
@@ -6434,5 +6434,47 @@ describe("app.css ruling 459: the dock's deferred half", () => {
     for (const state of [RESTORED_FAB, [...RESTORED_FAB, HOME]]) {
       expect(transition(state, { phone: true, reduced: true })).toBe("none");
     }
+  });
+});
+
+/**
+ * Ruling 500 (AICSS's AI Agent Input, Approval Card, Data Table and Code
+ * Block on the task page): the task's composer takes the controller
+ * composer's frame, the packet's tone is its head's tile, and a comment's
+ * table and fenced block are one card each.
+ */
+describe("app.css ruling 500: the task page's agent components", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decl = (selector: string, prop: string) => {
+    let value: string | undefined;
+    for (const r of plain) if (parts(r).includes(selector) && r.decls.has(prop)) value = r.decls.get(prop);
+    return value;
+  };
+
+  it("frames the task composer as the controller's: the card radius and the 4px ring", () => {
+    // CANARY: put `.composer-box` back on `--radius-box` and the two inputs an
+    // agent is addressed through are two shapes again.
+    expect(decl(".composer-box", "border-radius")).toBe(decl(".ctl-composer", "border-radius"));
+    expect(decl(".composer-box:focus-within", "box-shadow")).toBe(decl(".ctl-composer:focus-within", "box-shadow"));
+  });
+
+  it("carries the packet's tone on its tile, not a left accent, and fills the chosen key", () => {
+    expect(decl(".packet", "border-left")).toBeUndefined();
+    expect(decl(".packet-tile", "color")).toBe("var(--amber-dark)");
+    expect(decl(".packet.blocked .packet-tile", "color")).toBe("var(--coral-dark)");
+    expect(decl(".opt.sel .opt-key", "background")).toBe("var(--cta-bg)");
+    expect(decl(".opt.sel .opt-key", "color")).toBe("var(--cta-fg)");
+    expect(RULES.flatMap(parts).filter((s) => /\.opt \.radio|opt-kbd/.test(s))).toEqual([]);
+  });
+
+  it("draws a comment's table and fenced block as one card each", () => {
+    expect(decl(".md-table-wrap", "border-radius")).toBe("var(--radius-button)");
+    // Hairlines between cells, not a box around each.
+    expect(decl(".md-body td", "border")).toBeUndefined();
+    expect(decl(".md-body td", "border-top")).toBe("1px solid var(--hairline)");
+    expect(decl(".md-body th", "border-left")).toBe("1px solid var(--hairline)");
+    expect(decl(".md-code", "overflow")).toBe("hidden");
+    expect(decl(".md-body .md-code pre", "border")).toBe("0");
   });
 });

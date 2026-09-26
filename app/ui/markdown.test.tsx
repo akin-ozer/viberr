@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { Markdown } from "./markdown";
 
@@ -60,6 +60,37 @@ describe("Markdown", () => {
     expect(codes.length).toBeGreaterThanOrEqual(2);
     // A fenced block is wrapped in <pre>.
     expect(container.querySelector("pre code.mono")).not.toBeNull();
+  });
+
+  it("ruling 500: a fenced block has a head naming its language, Copy, and the reader's gutter past one line", async () => {
+    // CANARY: render `<pre>{children}</pre>` for every block again and the
+    // head, the Copy and the gutter are gone.
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const code = "export const a = 1;\nexport const b = 2;";
+    const { container, getAllByRole } = render(<Markdown text={"```ts\n" + code + "\n```\n\n```\nnpm test\n```"} />);
+    const [ts, plain] = [...container.querySelectorAll(".md-code")];
+    expect(ts!.querySelector(".mc-lang")!.textContent).toBe("ts");
+    const pre = ts!.querySelector("pre.code-view")!;
+    expect(pre.getAttribute("data-digits")).toBe("1");
+    expect([...pre.querySelectorAll(".line")].map((l) => l.textContent)).toEqual([
+      "export const a = 1;\n",
+      "export const b = 2;",
+    ]);
+    // The text reads, copies and is announced exactly as written.
+    expect(pre.querySelector("code.mono")!.textContent).toBe(code);
+    // A one-line block takes the head but no gutter, and "code" names it.
+    expect(plain!.querySelector(".mc-lang")!.textContent).toBe("code");
+    expect(plain!.querySelector(".code-view")).toBeNull();
+    expect(plain!.querySelector("pre code.mono")!.textContent).toBe("npm test\n");
+    const copy = getAllByRole("button", { name: "Copy this code" })[0]!;
+    expect(ts!.contains(copy)).toBe(true);
+    expect(copy.textContent).toBe("Copy");
+    await act(async () => {
+      fireEvent.click(copy);
+    });
+    expect(writeText).toHaveBeenCalledWith(code);
+    expect(copy.querySelector(".copy-glyph")!.getAttribute("data-copied")).toBe("true");
   });
 
   it("renders bold and italic emphasis", () => {

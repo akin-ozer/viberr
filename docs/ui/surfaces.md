@@ -490,6 +490,16 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   your choice · 4,000 characters max", or "required · …" (and the `*`) when the chosen
   option carries `reply`; the directive's hint reads "resolves this decision · goes back
   to <agent>". Every other packet keeps "Note for the operator".
+- **The task page's agent components** (ruling 500, AICSS's free components redrawn in the
+  app's tokens): the decision packet is an approval card, a tile in its tone (amber for a
+  question with a hand, coral for a block with an alert) beside the kind as its title and
+  "from <who>" at the right, its options each led by their key, the digit that selects them
+  (`aria-keyshortcuts`), where the radio stood, the chosen key filled with the call to
+  action; a comment's or note's fenced block has a head, the language its fence names (or
+  "code") and Copy, over the block, which past one line takes the attachment reader's
+  line-number gutter; a comment's table is one card, its header a quiet band, hairlines
+  between cells; and the task's composer takes the controller composer's frame (the card
+  radius, the 4px focus ring) with Comment as its primary action.
 - **Written text sits under the page's headings and shows what it holds** (ruling 478(a),
   (f)): typed timeline events render as markdown like comments (a fenced block scrolls on
   its own, inline code breaks); a timeline entry's or a packet body's top heading renders
