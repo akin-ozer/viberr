@@ -705,6 +705,41 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(released.task.timeline.some((e) => e.type === "note" && /Dependencies released/.test(e.title ?? ""))).toBe(true);
   });
 
+  it("ruling 501 set-task-metadata: an edit writes only the axis its form carries", async () => {
+    // Canary: read an absent field as empty again (the old full replace), and
+    // the priority edit below clears VIB-142's labels and due date.
+    const before = await runLoader("VIB-142", ids.arda);
+    expect(before.task.labels.length).toBeGreaterThan(0);
+    expect(before.task.dueDate).not.toBeNull();
+    // SAFETY: arda holds `edit-task-meta`, so each post returns the intent's
+    // ok arm with its toast.
+    const priority = (await postIntent("VIB-142", ids.arda, {
+      intent: "set-task-metadata", priority: "high",
+    })) as { ok: true; toast: string };
+    expect(priority.toast).toBe("Priority updated");
+    const raised = await runLoader("VIB-142", ids.arda);
+    expect(raised.task.priority).toBe("high");
+    expect(raised.task.labels).toEqual(before.task.labels);
+    expect(raised.task.dueDate).toBe(before.task.dueDate);
+    // A present empty field still clears its own axis, and only that one.
+    // SAFETY: the same ok arm.
+    const undated = (await postIntent("VIB-142", ids.arda, {
+      intent: "set-task-metadata", dueDate: "",
+    })) as { ok: true; toast: string };
+    expect(undated.toast).toBe("Due date updated");
+    const cleared = await runLoader("VIB-142", ids.arda);
+    expect(cleared.task.dueDate).toBeNull();
+    expect(cleared.task.priority).toBe("high");
+    expect(cleared.task.labels).toEqual(before.task.labels);
+    // Put VIB-142 back as the fixture seeded it.
+    await postIntent("VIB-142", ids.arda, {
+      intent: "set-task-metadata", priority: before.task.priority, dueDate: before.task.dueDate ?? "",
+    });
+    const restored = await runLoader("VIB-142", ids.arda);
+    expect(restored.task.priority).toBe(before.task.priority);
+    expect(restored.task.dueDate).toBe(before.task.dueDate);
+  });
+
   it("request_edit: clears the packet, flips waiting to agent, writes option.ev", async () => {
     queueFakeRun({
       lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],

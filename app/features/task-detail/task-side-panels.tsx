@@ -1,24 +1,12 @@
 import { holdEntriesSentence } from "~/shared/dependencies";
-import { useState } from "react";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
-import { useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import {
-  coercePriority,
-  PRIORITY_VALUES,
-  type TaskPriority,
-} from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
-import { useCsrfToken } from "~/ui/csrf-input";
-import { DatePicker } from "~/ui/date-picker";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
-import { LabelInput } from "~/ui/label-input";
 import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
-import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
-import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
@@ -27,11 +15,11 @@ import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 import { GateResults } from "./gate-results";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
-import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
- * The task-detail SIDE column: Current state (the next action), the GitHub
- * trace and Details. Split out of `task-detail-page.tsx` (pass 16, pure
+ * The task-detail SIDE column: Current state (the next action) and the GitHub
+ * trace; Details, the column's last panel, is `task-details-panel.tsx`
+ * (ruling 501). Split out of `task-detail-page.tsx` (pass 16, pure
  * structural refactor). The Permissions panel that used to close the column
  * — the viewer's role grants restated row by row — is gone (owner, 2026-09-08,
  * ruling 167): what a person may do here is said where they would do it.
@@ -604,273 +592,6 @@ function GatesRow({
           <GlyphSwap rest="refresh" alt="loader" on={running} spinAlt />
           {running ? "Queuing gates…" : gates.state === "not_run" ? "Run gates" : "Run gates again"}
         </button>
-      )}
-    </div>
-  );
-}
-
-/**
- * The task's lightweight planning metadata (priority · labels · due date) as a
- * side panel, after Current state and the GitHub trace.
- * Reads as `.kv` rows like the panels around it; a contributor+ (`edit-task-meta`)
- * gets an inline editor. Re-seeds from server truth on every open so a concurrent
- * edit is never clobbered (the goal-editor rule).
- */
-export function TaskDetailsPanel({
-  task,
-  canEdit,
-  labelSuggestions = [],
-  queuedQuestions = [],
-}: {
-  task: TaskDetail;
-  canEdit: boolean;
-  /** Labels already used in this project, offered as label autocomplete. */
-  labelSuggestions?: string[];
-  /** Ruling 241: reviewer questions the hold refused, put when it lifts. They
-   *  belong under the wait because they ARE what happens when it ends. */
-  queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
-}) {
-  const csrf = useCsrfToken();
-  const fetcher = useFetcher<ActionResult>();
-  useActionFeedback(fetcher);
-  const [open, setOpen] = useState(false);
-  // Ruling 131 (pass 34): the wait has its OWN form, fetcher, toast and
-  // refusal. Riding the metadata form would let its close-on-success swallow
-  // a dependency refusal, and a bad reference is exactly what must stay on
-  // screen.
-  const depFetcher = useFetcher<ActionResult>();
-  useActionFeedback(depFetcher);
-  const [depOpen, setDepOpen] = useState(false);
-  const [depText, setDepText] = useState(task.blockedBy.map((e) => e.ref).join(", "));
-  useFetcherResult(depFetcher, (d) => {
-    if (d.ok) setDepOpen(false);
-  });
-  const startDepEdit = () => {
-    setDepText(task.blockedBy.map((e) => e.ref).join(", "));
-    setDepOpen(true);
-  };
-  const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [labels, setLabels] = useState<string[]>(task.labels);
-  const [due, setDue] = useState(task.dueDate ?? "");
-  useFetcherResult(fetcher, (d) => {
-    if (d.ok) setOpen(false);
-  });
-
-  const startEdit = () => {
-    setPriority(task.priority);
-    setLabels(task.labels);
-    setDue(task.dueDate ?? "");
-    setOpen(true);
-  };
-
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <Icon name="sliders" />
-        <h2>Details</h2>
-      </div>
-      {open ? (
-        <fetcher.Form method="post" className="meta-edit-panel">
-          <input type="hidden" name="intent" value="set-task-metadata" />
-          <input type="hidden" name="_csrf" value={csrf} />
-          <label className="meta-field">
-            <span className="meta-label">Priority</span>
-            <select
-              name="priority"
-              value={priority}
-              onChange={(e) =>
-                setPriority(coercePriority(e.currentTarget.value) ?? "normal")
-              }
-            >
-              {PRIORITY_VALUES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="meta-field">
-            <span className="meta-label">Labels</span>
-            {/* Custom token input — a hidden field carries the value into the
-                fetcher.Form's serialization. */}
-            <input type="hidden" name="labels" value={labels.join(",")} />
-            <LabelInput
-              value={labels}
-              onChange={setLabels}
-              suggestions={labelSuggestions}
-            />
-          </div>
-          <div className="meta-field">
-            <span className="meta-label">Due date</span>
-            <input type="hidden" name="dueDate" value={due} />
-            <DatePicker
-              label="Due date"
-              // Visible text inside the name "Due date: not set" (label in name).
-              placeholder="Not set"
-              value={due || null}
-              onChange={(v) => setDue(v ?? "")}
-            />
-          </div>
-          <div className="meta-edit-actions">
-            {/* Ruling 368: the save in flight shows itself here. */}
-            <button
-              type="submit"
-              className="btn primary sm"
-              disabled={fetcher.state !== "idle"}
-              aria-busy={fetcher.state !== "idle" || undefined}
-            >
-              {fetcher.state !== "idle" && <Icon name="loader" className="spin" />}
-              {fetcher.state !== "idle" ? "Saving…" : "Save"}
-            </button>
-            <button
-              type="button"
-              className="btn sm"
-              onClick={() => setOpen(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </fetcher.Form>
-      ) : (
-        <>
-          <div className="kv">
-            <div className="kv-row">
-              <span className="k">Priority</span>
-              <span className="v">
-                {task.priority === "normal" ? (
-                  <span className="sub">Normal</span>
-                ) : (
-                  <PriorityFlag priority={task.priority} sm />
-                )}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="k">Labels</span>
-              <span className="v meta-chips">
-                {task.labels.length > 0 ? (
-                  <LabelChips labels={task.labels} max={6} />
-                ) : (
-                  <span className="sub">None</span>
-                )}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="k">Due date</span>
-              <span className="v">
-                {task.dueDate ? (
-                  <DueDatePill dueDate={task.dueDate} sm />
-                ) : (
-                  <span className="sub">None</span>
-                )}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="k">Blocked by</span>
-              <span className="v meta-chips" data-blocked-by={task.blockedBy.length}>
-                {task.blockedBy.length > 0 ? (
-                  task.blockedBy.map((e) => (
-                    <span
-                      key={e.ref}
-                      className="pill neutral sm"
-                      data-wait-state={e.state}
-                      title={`${e.label} · ${e.state}`}
-                    >
-                      {e.label}
-                      {e.state !== "open" ? ` · ${e.state === "failed" ? "archived" : e.state}` : ""}
-                    </span>
-                  ))
-                ) : (
-                  <span className="sub">Nothing</span>
-                )}
-              </span>
-            </div>
-            {queuedQuestions.length > 0 && (
-              // Ruling 241: without this the only trace of a queued question is
-              // one timeline note, and a promise a person cannot see is the
-              // defect this pass kept finding.
-              <div className="kv-row" data-queued-questions={queuedQuestions.length}>
-                <span className="k">When it clears</span>
-                <span className="v sub">
-                  {queuedQuestions.length === 1
-                    ? `Viberr puts ${queuedQuestions[0]!.decidedByLabel}'s question to `
-                    : `Viberr puts ${queuedQuestions.length} queued questions to `}
-                  {queuedQuestions
-                    .map((q) => {
-                      // Ruling 232: a handle is a NAME. The reviewer's live
-                      // profile name, falling back to its role and then to the
-                      // profile id, so an undeployed profile still reads as
-                      // something a person can act on.
-                      const live = [task.specialist, ...task.reviewers].find(
-                        (a) => a?.profileId === q.profileId,
-                      );
-                      return live?.profileName || live?.role || q.profileId;
-                    })
-                    .join(", ")}
-                  {" before the operator gets the task back."}
-                </span>
-              </div>
-            )}
-          </div>
-          {depOpen && (
-            <depFetcher.Form method="post" className="meta-edit-panel" data-dependency-form>
-              <input type="hidden" name="intent" value="set-task-dependencies" />
-              <input type="hidden" name="_csrf" value={csrf} />
-              <label className="meta-field">
-                <span className="meta-label">Blocked by</span>
-                <input
-                  className="mono"
-                  type="text"
-                  name="blockedBy"
-                  value={depText}
-                  placeholder="VIB-12, goal-1 link 3"
-                  aria-label="What this task waits on"
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(e) => setDepText(e.target.value)}
-                />
-                <span className="sub xs dim">
-                  Task keys and goal links in this project, comma-separated. Empty
-                  clears the wait and releases the task.
-                </span>
-              </label>
-              <div className="meta-edit-actions">
-                <button
-                  type="submit"
-                  className="btn primary sm"
-                  disabled={depFetcher.state !== "idle"}
-                  aria-busy={depFetcher.state !== "idle" || undefined}
-                >
-                  {depFetcher.state !== "idle" && <Icon name="loader" className="spin" />}
-                  {depFetcher.state !== "idle" ? "Saving…" : "Save"}
-                </button>
-                <button type="button" className="btn sm" onClick={() => setDepOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            </depFetcher.Form>
-          )}
-          {/* F26-13: an archived task's planning metadata is frozen (the server
-              refuses the write too) — restore it first. */}
-          {canEdit &&
-            (task.archived ? (
-              <p className="meta-archived-note">
-                Archived. Restore this task to edit its details.
-              </p>
-            ) : (
-              <>
-                <button type="button" className="meta-edit-btn" onClick={startEdit}>
-                  <Icon name="sliders" />
-                  Edit details
-                </button>
-                {!depOpen && (
-                  <button type="button" className="meta-edit-btn" onClick={startDepEdit}>
-                    <Icon name="lock" />
-                    Edit what it waits on
-                  </button>
-                )}
-              </>
-            ))}
-        </>
       )}
     </div>
   );

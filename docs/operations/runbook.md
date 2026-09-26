@@ -218,7 +218,7 @@ at `blocked`, the card leads with a neutral "blocked by …" chip, the task page
 each entry with its live state, and `waiting` is `none` unless a packet or a
 recommendation is open. Nothing is owed by anyone while it waits.
 
-- **Who set it:** the task page's "Edit what it waits on" form, the controller's
+- **Who set it:** the task page's Details panel (its "Blocked by" row), the controller's
   `update_task` / `create_task` / a goal link, or the operator's `set_dependencies`
   tool. Every write is a "Dependencies updated" note and a `task.dependencies.updated`
   audit row; a bad reference is refused by name (unknown, archived, self, a cycle).

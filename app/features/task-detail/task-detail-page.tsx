@@ -51,11 +51,8 @@ import {
   useRunControls,
   type ActionResult,
 } from "./task-detail-hooks";
-import {
-  CurrentStatePanel,
-  GithubTrace,
-  TaskDetailsPanel,
-} from "./task-side-panels";
+import { CurrentStatePanel, GithubTrace } from "./task-side-panels";
+import { TaskDetailsPanel } from "./task-details-panel";
 import {
   DiagnosticsPanel,
   ExecutionSection,

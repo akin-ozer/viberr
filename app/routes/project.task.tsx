@@ -733,26 +733,39 @@ export async function action({ request, params }: Route.ActionArgs) {
         return { ok: true as const, intent, toast: changed ? "Goal updated" : "Goal unchanged" };
       }
       case "set-task-metadata": {
-        // The detail editor submits all three axes at once, so it is a full
-        // replace: an empty labels field clears the set, an empty due date
-        // clears the date. `setTaskMetadata` validates priority + due date and
-        // normalizes labels; a bad value throws before any write.
-        const priorityRaw = String(formData.get("priority") ?? "").trim();
-        const labelsRaw = String(formData.get("labels") ?? "");
-        const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
-        const metaInput: Parameters<typeof setTaskMetadata>[1] = {
-          projectSlug,
-          taskKey,
-          labels: labelsRaw
+        // Ruling 501: the Details panel edits one property at a time, so an
+        // axis is written only when the form carries its field; an absent
+        // field leaves that axis as it stands (and a concurrent edit to it
+        // unclobbered). A present field replaces its axis: an empty labels
+        // field clears the set, an empty due date clears the date.
+        // `setTaskMetadata` validates priority + due date and normalizes
+        // labels; a bad value throws before any write.
+        const metaInput: Parameters<typeof setTaskMetadata>[1] = { projectSlug, taskKey };
+        const edited: string[] = [];
+        if (formData.has("priority")) {
+          const priority = coercePriority(String(formData.get("priority") ?? "").trim());
+          if (priority) {
+            metaInput.priority = priority;
+            edited.push("Priority");
+          }
+        }
+        if (formData.has("labels")) {
+          metaInput.labels = String(formData.get("labels") ?? "")
             .split(/[,\n]/)
             .map((s) => s.trim())
-            .filter(Boolean),
-          dueDate: dueDateRaw,
-        };
-        const priority = coercePriority(priorityRaw);
-        if (priority) metaInput.priority = priority;
+            .filter(Boolean);
+          edited.push("Labels");
+        }
+        if (formData.has("dueDate")) {
+          metaInput.dueDate = String(formData.get("dueDate") ?? "").trim();
+          edited.push("Due date");
+        }
         await setTaskMetadata(db, metaInput, actor);
-        return { ok: true as const, intent, toast: "Task metadata updated" };
+        return {
+          ok: true as const,
+          intent,
+          toast: edited.length === 1 ? `${edited[0]} updated` : "Task metadata updated",
+        };
       }
       case "set-task-dependencies": {
         // Ruling 131: the Details panel's own form. The FULL list is submitted
