@@ -63,7 +63,7 @@ Identity facts:
 | Surface | Who | Notes |
 |---|---|---|
 | `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). |
-| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Proposals panel** (§4.3, ruling 483) and the **Goals panel** (§7.5). Third item in the workspace rail (after Board and Review queue). Same execution panels as the instance page. |
+| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 497) and the **Goals panel** (§7.5); `POST intent=kb-correction-undo` is the panel's Undo (org admins). Third item in the workspace rail (after Board and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
 | `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
@@ -382,10 +382,11 @@ a notification row: replies stay out of the bell (§8).
      running, and waiting on them (ruling 307);
    - on a board or a task, the project's open knowledge-base proposals (ruling 483,
      `projectProposalsContextLine`): the ones its tasks filed under "Proposed corrections
-     (not binding)" in any knowledge base, up to 10 by id with the document, the task and
-     filer, the line and the correction, and the instruction to tell the person they wait
-     and to close one with `resolve_kb_proposal` only when the person asks; at the instance
-     scope, the count per visible project;
+     (not binding)" in any knowledge base before ruling 497 ended the filing, up to 10 by id
+     with the document, the task and filer, the line and the correction, and the instruction
+     to tell the person they wait and to close one with `resolve_kb_proposal` only when the
+     person asks; at the instance scope, the count per visible project. Corrections agents
+     wrote (ruling 497) owe nobody anything and are not in the read: `get_project` lists them;
    - in every scope, the controller's own open resource-grant requests (§6, ruling 390),
      `They are looking at: <surface>` when the message carried one, and the zone the person
      reads times in with the local clock, and the rule that every tool instant is UTC and a
@@ -497,7 +498,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**55 tools**: 54 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**57 tools**: 56 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -531,7 +532,8 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `set_user_org_role` | Admin or member; the last active admin cannot be demoted | org admin |
 | `request_resource_grant` | Records an ask for a skill, KB or MCP server on the controller's OWN profile in `agents/controller-requests.md`; idempotent per (kind, name) while open; a name no resource carries is refused (§6, ruling 390) | org admin |
 | `save_knowledge_base` | Create or update a KB (name, refresh mode) and optionally write one document (§4.1) | org admin |
-| `resolve_kb_proposal` | Close one open knowledge-base proposal by id (§4.3, ruling 483): `promote` writes `text` into the document's settled text in place of `replaces` (which must stand there once, outside the proposals section) or appended to it, and removes the entry; `dismiss` removes the entry only; audited `org.kb.proposal_promoted` / `org.kb.proposal_dismissed` with the `reason` | org admin |
+| `resolve_kb_proposal` | Close one open knowledge-base proposal by id (§4.3, ruling 483; filed before ruling 497): `promote` writes `text` into the document's settled text in place of `replaces` (which must stand there once, outside the proposals section) or appended to it, and removes the entry; `dismiss` removes the entry only; audited `org.kb.proposal_promoted` / `org.kb.proposal_dismissed` with the `reason` | org admin |
+| `undo_kb_correction` | Undo one knowledge-base correction an agent wrote, by its `kc-` id (§4.3, ruling 497): puts back the passage it replaced (or removes the text it added) when the written text still stands once, notes the undo on the task that made it, and records `task.kb_correction.undone` with the person's `reason`, which an agent that tries to write the same text again is shown; a document edited since is refused | org admin, when a person asks |
 | `save_skill` | Create or update a skill (name, summary, SKILL.md body) (§4.1) | org admin |
 | `save_mcp_server` | Create or update a connection; takes no credential; reserved names refused; `writeTools` marks the tools withheld from runs without repo-write and from every operator run (ruling 176), and a save with none set names the tools that look like writes. Its description says an HTTP server that asks for an OAuth sign-in is signed in by an org admin in Instance settings, which the controller cannot do, and a save that meets the sign-in challenge says so instead of "add a secret" (ruling 469). `requestedScopes` records the OAuth scopes the next sign-in asks for (space-separated; omitted keeps them, "" clears them), which the authorization server may grant or not (ruling 486) | org admin |
 | `test_mcp_server` | Probe one connection now and report its health in the command's words; an OAuth server reads "needs sign-in", "healthy … signed in (expires in …, renews itself)" or "sign-in expired: an admin must sign in again" (ruling 469), a healthy one ending with its grant ("· read-only · 194 scopes", ruling 486) | org admin |
@@ -548,7 +550,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 
 | Tool | What it does |
 |---|---|
-| `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), goals summary, `rulingsKb` (ruling 239), `openProposals` (ruling 483, §4.3), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247), `gates` (ruling 482) |
+| `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), goals summary, `rulingsKb` (ruling 239), `openProposals` (ruling 483, §4.3), `kbCorrections` (ruling 497, §4.3: the newest 20, each with its passages, evidence, task, filer and whether a person undid it), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247), `gates` (ruling 482) |
 | `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, goal-chain chip and `waitsOn`; Done included, archived only with `includeArchived` |
 | `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
@@ -741,35 +743,52 @@ given)"), stages, autonomy, each patched capability and each grant list — as
 `[done] Developer updated on viberr-core: backend Claude → Codex; effort high → max; …`,
 and a call that changes nothing answers `[done] … No field changed.`
 
-### 4.3 Knowledge-base proposals (ruling 483)
+### 4.3 Knowledge-base corrections (rulings 483 and 497)
 
-Any agent on a task can propose a correction to a knowledge base its run was given: a
-Claude specialist with `propose_kb_correction`, the operator with its own (which also
-relays a Codex agent's reported correction), both through `proposeKbCorrection`
-(`app/server/tasks/kb-proposal-actions.server.ts`). The entry lives in the corrected
-document itself under `## Proposed corrections (not binding)`
-([file-formats.md §7](../architecture/file-formats.md)), and the document is the record:
-`listKbProposals` / `listProjectKbProposals` (`app/server/org/kb-proposals.server.ts`)
-read every knowledge base's documents (parsed entries cached per file identity), and a
-proposal belongs to the project whose task its stamp names. There is no second list to
-drift from it: a person who deletes an entry in the document editor has closed it.
+Any agent on a task corrects a knowledge base its run was given by writing the correction
+into the document (ruling 497): a Claude specialist with `correct_knowledge_doc`, the operator
+with its own (which also relays a Codex agent's reported correction), both through
+`correctKnowledgeDoc` (`app/server/tasks/kb-correction-actions.server.ts`), which calls
+`mergeKbCorrection` (`app/server/org/kb-corrections.server.ts`; the edit rules are
+[file-formats.md §8](../architecture/file-formats.md)). Nobody approves it first: the owner
+chose it on 2026-09-26 ("No human can approve all of these while inspecting them
+thoroughly"). The task records it in one `kb_correction` event (the document, the id, the
+passage before and after) and notifies nobody. The record is the
+`task.kb_correction.merged` audit row, which carries both passages, so an undo is the same
+edit in reverse.
 
-- **Where it is raised.** The per-turn context read of a board or a task lists the
-  project's open ones and tells the controller to say they wait; the instance read
-  counts them per visible project; `get_project` carries `openProposals` (each with
-  `rulings`, whether it stands in the project's rulings KB).
-- **How it is closed.** `resolve_kb_proposal` (org admin, because it edits an org
-  knowledge base), and only when a person asks. The project controller page's
-  **Proposals panel** (`proposals-panel.tsx`, loader `projectProposals` in
-  `controller-query.server.ts`) lists each open proposal with its kind (Ruling or
-  Knowledge base), document, the line it corrects, the correction, the evidence, the task
-  (linked), the filer, the day and the id, and a count in its head. For an org admin it
-  carries **Promote** and **Dismiss** (Dismiss confirms first) and **Open document**
-  (`/org/settings?tab=resources&kb=<dir>&doc=<path>`, which opens that knowledge base's
-  browser on the document). Promote and Dismiss do not write anything: each SENDS the
-  request to the controller in the open conversation (the page's `send` intent), in the
-  words `proposalRequest` builds, and the controller carries it out with the tool. Anyone
-  else reads "An org admin promotes or dismisses proposals."
+- **Where it is read.** `get_project` carries `kbCorrections`. The project controller page's
+  **Knowledge base panel** (`knowledge-panel.tsx`, loader `projectCorrections` in
+  `controller-query.server.ts`) lists the newest 20 (`listKbCorrections`, audit retention
+  bounds the rest) with the count on record: each with its kind (Ruling or Knowledge base),
+  document, the passage it replaced (struck through) and the text it wrote, the evidence
+  (collapsed), the task (linked), the filer, the time and the id, and "Open document" for an
+  org admin. A `kb_correction` event on a task links "Review or undo" to the panel, and a
+  controller reply naming a `kc-` id links to its entry.
+- **How it is undone.** An org admin's **Undo** (confirmed first, with an optional reason) posts
+  `intent=kb-correction-undo` to the project controller route, which calls
+  `undoKbCorrectionOnTask` directly: no controller turn, since there is nothing to compose.
+  `undo_kb_correction` does the same for a person who asks the controller. The undo puts the
+  passage back when the written text still stands once (a document edited since is refused),
+  notes it on the task that made the correction ("Knowledge-base correction undone", as the
+  person), and records `task.kb_correction.undone`. An agent that later tries to write the
+  same text into that document is refused, told who undid it and why.
+- **Proposals filed before ruling 497.** Ruling 483 filed each correction as a proposal under
+  `## Proposed corrections (not binding)` in the document
+  ([file-formats.md §7](../architecture/file-formats.md)) for a person to promote. Nothing
+  files one now, but documents keep the ones they hold, and the document is still their
+  record: `listKbProposals` / `listProjectKbProposals` (`app/server/org/kb-proposals.server.ts`)
+  read every knowledge base's documents (parsed entries cached per file identity), a proposal
+  belongs to the project whose task its stamp names, and a person who deletes an entry in the
+  document editor has closed it. The per-turn context read of a board or a task lists them
+  and tells the controller to say they wait (§3), and `get_project` carries them in
+  `openProposals`. The Knowledge base panel lists them under the corrections with their
+  count; for an org admin each carries **Promote** and **Dismiss** (Dismiss confirms first),
+  and **Promote all** asks for the lot in one request. None of the three writes anything:
+  each SENDS the request to the controller in the open conversation (the page's `send`
+  intent), in the words `proposalRequest` / `promoteAllRequest` build, and the controller
+  carries it out with `resolve_kb_proposal` (org admin, because it edits an org knowledge
+  base). Anyone else reads "An org admin promotes or dismisses proposals."
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 

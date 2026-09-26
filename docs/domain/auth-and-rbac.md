@@ -328,9 +328,10 @@ Action families (about 200 distinct strings; the authoritative list is a grep fo
 `project.rulings_kb.updated` and `project.stage.recolored`), `task.*` (creation, title,
 goal, metadata, dependencies, comments, attachments, transitions, ownership, packets,
 acceptance, recommendations, quality, schedules, review deadlocks, agent and operator
-actions, session compactions `task.agent.compaction`, knowledge-base proposals
-`task.kb_proposal.filed`, ruling 483), `org.kb.proposal_promoted` and
-`org.kb.proposal_dismissed` (ruling 483), `goal.*`, `github.*` (branches, PRs, delivery,
+actions, session compactions `task.agent.compaction`, knowledge-base corrections
+`task.kb_correction.merged` and their undo `task.kb_correction.undone`, ruling 497, and
+before it the proposals `task.kb_proposal.filed`, ruling 483), `org.kb.proposal_promoted`
+and `org.kb.proposal_dismissed` (ruling 483), `goal.*`, `github.*` (branches, PRs, delivery,
 reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 `runtime.operator.plan_executed`, `run.recovery.*`, `run.completion.effects_lost`
 (ruling 207(a)), `controller.authority.denied`, the controller's audited reads

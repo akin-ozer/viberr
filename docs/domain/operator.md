@@ -313,12 +313,13 @@ work itself otherwise.
 
 **Knowledge the work proved wrong.** The `agent-reply` instruction carries two duties
 about knowledge bases. A reviewer's objection to a defect CLASS the rulings have no
-convention for is proposed as that convention (ruling 418). And a report that says a
-line in a knowledge base is wrong (a version, a path, a command, a step it measured),
-with no proposal for it on the timeline, is relayed with `propose_kb_correction` against
-that document and the agent's evidence (ruling 483): a Codex agent has no tool to file
-one itself, and its prompt tells it to end its report with a `Knowledge-base correction`
-section for exactly this.
+convention for is written into the rulings as that convention (ruling 418). And a report
+that says a passage in a knowledge base is wrong (a version, a path, a command, a step it
+measured), with no correction of it on the timeline, is relayed with
+`correct_knowledge_doc` into that document with the agent's evidence (rulings 483 and 497):
+a Codex agent has no tool to make one itself, and its prompt tells it to end its report
+with a `Knowledge-base correction` section, the passage exactly as the document has it,
+for exactly this. Either is written at once; a person undoes what they disagree with.
 
 `get_task` returns the `OperatorTaskSnapshot` (JSON-embedded in the Codex prompt):
 
@@ -403,7 +404,7 @@ On Codex it runs in a scratch working directory with the task store and checkout
 and returns a structured plan over sixteen verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
-`set_dependencies`, `propose_kb_correction`, `lease_files`, `schedule_task_action`,
+`set_dependencies`, `correct_knowledge_doc`, `lease_files`, `schedule_task_action`,
 `cancel_task_schedule`, `relay_to_task`), the schema narrowed to what its policy allows
 (`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
 in the all-denied fallback) and its packet options carrying every payload the
@@ -433,7 +434,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `relay_to_task` | `operatorRelayToTask` → `relayToTask` (ruling 488: posts `text` on ANOTHER task of this project as the operator's comment headed "From <this task> (operator):", audits `task.relayed {from, to}`, wakes that task's operator with the `relayed` trigger and writes "Relayed to <task>: <first line>…" on this task; refuses another project (`denied`), this task, a missing task and a closed one, Done or archived (`noop`)) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one). Its `goal` field is described with `DONE_SIGNAL_RULE`, as are `goalDraft` and `newTask.goal` (§6) and, in the Codex plan, the `text` that carries `set_goal`'s goal (ruling 492) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
-| `propose_kb_correction` | `operatorProposeKbCorrection` → `proposeKbCorrection` (rulings 378 and 483: files one non-binding, dated, task-stamped entry, `- **[<task>, <day>, Operator]** <correction>` with `Line:` and `Evidence:`, under `## Proposed corrections (not binding)` in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the quoted `line` must stand in the settled text; edits no settled line; the same open correction of the same line is a `noop`; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold; writes a `proposal` event titled "Proposed ruling change" or "Proposed knowledge-base correction", audit `task.kb_proposal.filed`, and a `quality` notification to the task's watchers; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved) | `append-typed-events` |
+| `correct_knowledge_doc` | `operatorCorrectKnowledgeDoc` → `correctKnowledgeDoc` → `mergeKbCorrection` (rulings 378, 483 and 497: writes `text` in place of `replaces`, the exact passage, which must stand once in the settled text, or at the end of the document when `replaces` is omitted, in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the written text must stand once afterwards, each side at most 8 KB; a document that already says it is a `noop`, and so is text a person undid in that document, naming them and their reason; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold, a missing passage with the document's closest lines; writes a `kb_correction` event titled "Rulings corrected" or "Knowledge base corrected" and audit `task.kb_correction.merged` carrying both passages and the evidence, and notifies nobody; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved; a person undoes it from the Controller page) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84; refuses while a packet is open) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |

@@ -679,13 +679,20 @@ Packet notes:
   diagnostic is recorded when it happens; that diagnostic reports the damage,
   it does not undo it.
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
-  `<space>·<space>` (U+00B7). `type` is one of the 12 contract types in
+  `<space>·<space>` (U+00B7). `type` is one of the 13 contract types in
   `TIMELINE_EVENT_TYPES` (`comment completion github policy note quality transition blocked
-  agent assign continuity proposal`); unknown types are kept (info diagnostic) and render as plain
-  comments. `proposal` is a proposed knowledge-base correction (ruling 483), titled
-  "Proposed ruling change" or "Proposed knowledge-base correction"; it asks a person to
+  agent assign continuity proposal kb_correction`); unknown types are kept (info diagnostic) and
+  render as plain comments. `proposal` is a proposed knowledge-base correction (ruling 483),
+  titled "Proposed ruling change" or "Proposed knowledge-base correction"; it asked a person to
   decide, so it is neither a review verdict (`quality`, where ruling 378 filed it) nor a
-  neutral `note`. `continuity` marks a runtime-continuity RESET — a resumed session whose provider
+  neutral `note`. Nothing writes one since ruling 497, and task files keep theirs.
+  `kb_correction` is a correction an agent wrote into a knowledge base, titled "Knowledge base
+  corrected" (or "Rulings corrected" in the project's rulings), or a person's undo of one,
+  titled "Knowledge-base correction undone" (ruling 497, §8). Its text names the document and
+  the correction's id, then lists the passage before and after as `- **Was:** ~~…~~` and
+  `- **Now:** …` (`- **Added:**` or `- **Removed:**` for text added at the end), each side
+  flattened to one line and clipped; an undo adds `**Why:**` with the person's reason.
+  `continuity` marks a runtime-continuity RESET — a resumed session whose provider
   transcript was gone, so the agent re-anchored on `task.md` in a fresh one. It is
   warning-toned on purpose: nothing was violated (not `policy`) and nothing is stuck (not
   `blocked`), but a supervisor scanning the board must get a cue that context was lost and
@@ -895,17 +902,19 @@ re-attach them.)
 | `agents/definitions/{operator,controller}.md` | boot (`seedDefaultAgentAssets`) | frontmatter `id`, `name`, `backend` + the doctrine body. The controller's body is the instructions its settings edit (locked by default, ruling 108); a save keeps the frontmatter head. |
 | `agents/controller-requests.md` | the controller's `request_resource_grant` tool (ruling 390); Instance settings lists the open ones | frontmatter `requests:`, newest first, each `{ id, kind (skills \| kb \| mcps), name, reason, askedAt, askedByUserId, askedByLabel, status (open \| granted \| declined \| withdrawn), closedAt, closedByLabel }`, parsed per row, + a one-line header body. One open request per (`kind`, `name`). A request leaves `open` through `closeResourceRequest`: `granted` when a Controller-tab save (`saveControllerConfig`) leaves the resource in the controller's resolved grants, `declined` from the tab's Decline button. Either stamps `closedAt` and `closedByLabel` (the admin's email), and the closed row stays as history. Nothing in the app writes `withdrawn`. |
 | `skills/<name>/SKILL.md` | the org skill writers and the store browser | markdown; every writer judges the body with `assertSkillBodyWellFormed` (ruling 183). A mounted copy gets normalized frontmatter. |
-| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; a proposal filed from a task (ruling 483) | any documents; agents read the live folder at run time. A document may end in a proposals section (§7) |
+| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; an agent's correction from a task and a person's undo of one (ruling 497, §8) | any documents; agents read the live folder at run time. A document may still end in a proposals section filed before ruling 497 (§7) |
 | `state/shipped-assets.json` | boot | JSON map of store-relative asset path → SHA-256 of the bytes last shipped |
 | `audit-exports/audit-events-<YYYY-MM-DD>.jsonl` | the audit purge | one `audit_events` row per line, exactly as the table stores it, appended per purge day |
 | `runtimes/<backend>/<runId>.jsonl` | the run sink | one raw provider envelope per line; the truth `run_log_lines` projects |
 
-## 7. A knowledge-base document's proposals section (ruling 483)
+## 7. A knowledge-base document's proposals section (rulings 378 and 483)
 
-An agent that proves a line of a knowledge-base document wrong files the correction in
-that document (`fileKbProposal`, `app/server/org/kb-proposals.server.ts`). The section is
-the record: an entry is open while it stands under the heading, and nothing else lists
-proposals.
+Before ruling 497 an agent that proved a line of a knowledge-base document wrong filed the
+correction in that document, for a person to promote or dismiss. Nothing files one now
+(§8 writes the correction into the settled text instead), but a document keeps the section it
+holds until its entries are closed: `app/server/org/kb-proposals.server.ts` reads them, and
+`resolveKbProposal` promotes or dismisses one. The section is the record: an entry is open
+while it stands under the heading, and nothing else lists proposals.
 
 ```markdown
 ## Proposed corrections (not binding)
@@ -917,19 +926,43 @@ Raised by agents from evidence on a task. **Nothing here is binding.** A person,
   Evidence: `ls dist` after `npm run build` listed client and worker.
 ```
 
-- The heading is `KB_PROPOSALS_HEADING`, created at the END of the document the first
-  time; later entries are filed at the end of the section, in order. The reader also
-  takes ruling 378's `## Proposed (not binding)` as the section, and the next filing
-  renames it. A heading inside a fenced block is not the section; the section ends at
-  the next `#` or `##` heading.
+- The heading is `## Proposed corrections (not binding)`; the filing created it at the END of
+  the document and filed later entries at the end of the section, in order. The reader also
+  takes ruling 378's `## Proposed (not binding)` as the section. A heading inside a fenced
+  block is not the section; the section ends at the next `#` or `##` heading.
 - An entry is a list item opening with a bold `[<task key>, <YYYY-MM-DD>, <filer>]`
   stamp (ruling 378's entries have no filer), then the correction; its other lines are
   indented two spaces: `Line:` (the settled line it corrects, absent when it adds
-  something) and `Evidence:`. Blank lines inside a value are dropped, since they would
-  end the list item.
+  something) and `Evidence:`.
 - An entry's id is `kp-` and the first ten hex characters of the SHA-256 of
   `<kb>\n<doc>\n<entry text>`: stable while nobody edits that entry.
-- The settled text is the document without this section. A filed `line` must stand in
-  it (compared without case, emphasis, quotes or runs of whitespace), and a promotion's
-  `replaces` must stand in it exactly once. Promoting or dismissing the last entry
-  removes the heading and the intro with it.
+- The settled text is the document without this section: a promotion's `replaces` must stand
+  in it exactly once, and so must the passage a ruling-497 correction replaces. Promoting or
+  dismissing the last entry removes the heading and the intro with it.
+
+## 8. A knowledge-base correction (ruling 497)
+
+An agent that proves a passage of a knowledge-base document wrong writes the correction into
+the document (`mergeKbCorrection`, `app/server/org/kb-corrections.server.ts`); a person undoes
+it (`undoKbCorrection`). The document carries no mark of either: its text simply reads as
+corrected, or as it did before. The record is the audit row (below).
+
+- **Replace.** `replaces` must stand exactly once in the settled text (§7: an unmerged
+  proposals section is not part of it), compared exactly once the two normalizations below
+  are applied; `text` takes its place. A refusal hands back the document's closest lines verbatim, fenced, for the agent to
+  copy.
+- **Add.** With no `replaces`, `text` goes at the end of the settled text (before a proposals
+  section the document still holds) after one blank line, and ends with a newline.
+- **Both.** Leading and trailing blank lines are dropped from both sides, and both are written
+  in the document's own line endings (CRLF when the document has any). After the write `text`
+  must stand exactly once in the settled text, so an undo can find it; each side is at most
+  8 KB (`KB_CORRECTION_MAX_BYTES`, UTF-8 bytes). A document that already reads as `text` is
+  left alone.
+- **Undo.** The written `text` must still stand exactly once: the undo puts `replaces` back in
+  its place, or removes an addition with the blank line that set it apart. A document edited
+  since is refused and left to be changed by hand.
+- **Record.** `task.kb_correction.merged` (subject the task; details `id` = `kc-` and ten hex
+  characters, `kb`, `doc`, `rulings`, `replaced`, `text`, `evidence` clipped to 4,000
+  characters, `filedBy`, `actorRef`, `bytes`) and `task.kb_correction.undone` (`id`, `kb`,
+  `doc`, `reason`, `byName`), beside the `org.store.doc_written` row every store write makes.
+  Audit retention (90 days) bounds how long a correction is listed and undoable.
