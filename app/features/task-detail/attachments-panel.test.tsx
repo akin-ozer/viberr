@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub, MemoryRouter } from "react-router";
 import type { ReactNode } from "react";
@@ -92,6 +92,72 @@ describe("AttachmentsPanel", () => {
     );
     const img = container.querySelector<HTMLImageElement>(".attach-thumb img")!;
     expect(img.getAttribute("src")).toBe(`${BASE}/after%20fix%20%232.png`);
+  });
+});
+
+/* -------------------------------------------- ruling 510: the long list */
+
+/**
+ * Ruling 510 (owner, 2026-09-26): the panel listed every file flat, so a task
+ * whose gates ran twice listed fifteen files and pushed its timeline a screen
+ * down. A long list now folds the way a long comment does.
+ */
+describe("AttachmentsPanel folds a long list like a long comment (ruling 510)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const files = [
+    entry("checkout.png"),
+    entry("receipt.png"),
+    ...Array.from({ length: 13 }, (_, i) => entry(`gate-${String(i + 1).padStart(2, "0")}.log`, 1024 + i)),
+  ];
+
+  /** jsdom lays nothing out, so the list reports `px` as its full height. */
+  const listHeight = (px: number) =>
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("attach-list") ? px : 0;
+    });
+
+  /** `AttachFile` uses `useFetcher`, so the control needs a data router. */
+  const renderPanel = (ui: ReactNode) => {
+    const Stub = createRoutesStub([
+      { path: "/t", Component: () => <>{ui}</>, action: async () => ({ ok: true }) },
+    ]);
+    return render(<Stub initialEntries={["/t"]} />);
+  };
+
+  it("clamps pictures and files behind Show more, with the heading, its count and the attach control above the fold", () => {
+    // CANARY: render the grid and the rows straight into the section, without
+    // `Collapsible`, and the list never folds.
+    listHeight(660);
+    const { container } = renderPanel(<AttachmentsPanel base={BASE} attachments={files} canAttach />);
+    const section = container.querySelector("section.panel")!;
+    const list = section.querySelector<HTMLElement>(".attach-list")!;
+    expect(list.classList.contains("clamped")).toBe(true);
+    expect(list.style.maxHeight).toBe("340px");
+    // Only the view folds: every picture and every file is still there.
+    expect(list.querySelectorAll(".attach-thumb")).toHaveLength(2);
+    expect(list.querySelectorAll(".attach-file")).toHaveLength(13);
+    // What the panel holds, and the control that adds to it, stay in sight.
+    const fold = list.closest(".md-collapse")!;
+    expect(fold.parentElement).toBe(section);
+    expect(fold.contains(section.querySelector(".panel-head"))).toBe(false);
+    expect(fold.contains(section.querySelector(".attach-add"))).toBe(false);
+    expect(section.querySelector(".panel-head")!.textContent).toContain("15 files");
+
+    const toggle = fold.querySelector<HTMLButtonElement>(".md-collapse-toggle")!;
+    expect(toggle.textContent).toBe("Show more");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(list.classList.contains("clamped")).toBe(false);
+    expect(toggle.textContent).toBe("Show less");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("leaves a short list whole, with no toggle", () => {
+    listHeight(126);
+    const { container } = render(<AttachmentsPanel base={BASE} attachments={files.slice(2, 5)} />);
+    expect(container.querySelector(".attach-list")!.classList.contains("clamped")).toBe(false);
+    expect(container.querySelector(".md-collapse-toggle")).toBeNull();
   });
 });
 

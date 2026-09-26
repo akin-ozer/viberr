@@ -16,6 +16,7 @@ import type { GateNoteState } from "~/shared/project-gates";
 import { Icon, type IconName } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
+import { Collapsible } from "~/ui/collapsible";
 import { AttachmentThumb } from "./attachment-image";
 import { GateResults } from "./gate-results";
 import { fileExtension, fileFamily } from "./attachment-kind";
@@ -68,9 +69,6 @@ function isEventAnchor(id: string): boolean {
   return timelineEventTime(id) !== null;
 }
 
-/** Comments taller than this (px) clamp by default with a "Show more" toggle. */
-const COLLAPSE_MAX = 340;
-
 /**
  * Ruling 478(f) (F40-35): every entry sits under the Timeline's own h2, so the
  * top heading its author wrote renders one level below it, and deeper levels
@@ -80,12 +78,9 @@ const ENTRY_HEADING_BASE = 3;
 
 /**
  * A comment body that clamps when it's very tall (long agent replies) so a
- * single answer can't dominate the timeline. Measures the rendered markdown's
- * full height after mount; if it exceeds COLLAPSE_MAX it renders clamped (with
- * a soft fade) behind a Show more / Show less toggle. Expanding restores the
- * full output verbatim — nothing is truncated from the record, only the view.
- * SSR-safe: starts un-clamped (matches the server render), then the effect
- * measures on the client and clamps.
+ * single answer can't dominate the timeline: `Collapsible` (`~/ui/collapsible`)
+ * measures it and folds it behind Show more / Show less, the fold the
+ * attachments panel shares (ruling 510).
  */
 function CollapsibleComment({
   text,
@@ -104,59 +99,22 @@ function CollapsibleComment({
   attachmentNames?: ReadonlySet<string>;
   attachmentsBase?: string;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [overflowing, setOverflowing] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   // Embedded attachment images in the body open the same lightbox the
   // thumbnail strip uses (no provider ⇒ the factory is inert, embeds stay
   // plain images).
   const lightbox = useAttachmentLightbox();
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // scrollHeight reports the FULL content height even while clamped by
-    // max-height, so this stays correct in both states.
-    const measure = () => setOverflowing(el.scrollHeight > COLLAPSE_MAX + 24);
-    measure();
-    // The first measure above is the whole contract on a host that provides no
-    // ResizeObserver (jsdom); only the re-measure on resize is lost.
-    if (!("ResizeObserver" in globalThis)) return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [text]);
-
-  const clamped = overflowing && !expanded;
   return (
-    <div className="md-collapse">
-      <div
-        ref={ref}
-        className={"tl-text md-body" + (clamped ? " clamped" : "")}
-        style={clamped ? { maxHeight: COLLAPSE_MAX } : undefined}
-      >
-        <Markdown
-          text={text}
-          mentionNames={mentionNames}
-          headingBase={ENTRY_HEADING_BASE}
-          {...(taskLinks ? { taskLinks } : {})}
-          {...(attachmentNames ? { attachmentNames } : {})}
-          {...(attachmentsBase ? { attachmentsBase } : {})}
-          onAttachmentOpen={lightbox}
-        />
-      </div>
-      {overflowing && (
-        <button
-          type="button"
-          className="md-collapse-toggle"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          <Icon name="chevron" />
-          {expanded ? "Show less" : "Show more"}
-        </button>
-      )}
-    </div>
+    <Collapsible className="tl-text md-body" contentKey={text}>
+      <Markdown
+        text={text}
+        mentionNames={mentionNames}
+        headingBase={ENTRY_HEADING_BASE}
+        {...(taskLinks ? { taskLinks } : {})}
+        {...(attachmentNames ? { attachmentNames } : {})}
+        {...(attachmentsBase ? { attachmentsBase } : {})}
+        onAttachmentOpen={lightbox}
+      />
+    </Collapsible>
   );
 }
 

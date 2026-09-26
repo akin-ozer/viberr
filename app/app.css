@@ -4878,9 +4878,11 @@ a.task-ref, a.kp-ref { white-space: nowrap; }
 .md-body th { background: var(--tint-hover); font-weight: 600; color: var(--muted); white-space: nowrap; }
 
 /* Collapsible long comments — a very tall agent reply clamps by default and a
-   soft fade signals more below; the toggle expands to the full output. */
+   soft fade signals more below; the toggle expands to the full output. A task's
+   long attachment list folds the same way (ruling 510). `~/ui/collapsible`
+   reads the fade's 78% stop as the edge of what is in plain sight. */
 .md-collapse { position: relative; }
-.md-collapse .md-body.clamped {
+.md-collapse > .clamped {
   overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
   mask-image: linear-gradient(to bottom, #000 78%, transparent);
@@ -6910,12 +6912,24 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   border: 0;
 }
 
+/* Ruling 510: the panel's files fold as one list (`Collapsible`), spaced by
+   its gap. A clamped box clips what paints outside it, and the rows run the
+   panel's full width, so the list reaches 4px past them all round: room for
+   the focus ring (2px at a 2px offset), with the negative margin keeping every
+   row where it stood. A flex column, so the first row's space no longer
+   collapses through the box and nothing moves when the fold clamps. */
+.attach-list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: 4px;
+  margin: -4px;
+}
 .attach-file {
   display: flex;
   align-items: center;
   gap: .5rem;
   padding: .5rem .5rem;
-  margin-top: .5rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-box);
   background: var(--surface);
