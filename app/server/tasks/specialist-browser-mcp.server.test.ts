@@ -51,6 +51,7 @@ describe("R19-19 resolveBrowserMcp", () => {
   it("mounts the Playwright MCP CLI for a granted profile, writing into the task's attachments dir", () => {
     const dir = tmpAttachments();
     const r = resolveBrowserMcp({
+      // No `use-web-search-fetch` grant: absent egress is the catalog default, direct.
       grants: [g("use-browser", "direct")],
       attachmentsDir: dir,
       backend: "claude",
@@ -89,17 +90,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(r.refused!.reason).toContain("use-web-search-fetch");
     // A refused mount creates nothing.
     expect(existsSync(dir)).toBe(false);
-    rmSync(path.dirname(dir), { recursive: true, force: true });
-  });
-
-  it("absent egress means GRANTED egress (catalog default direct) — the browser mounts", () => {
-    const dir = tmpAttachments();
-    const r = resolveBrowserMcp({
-      grants: [g("use-browser", "direct")],
-      attachmentsDir: dir,
-      backend: "claude",
-    });
-    expect(r.server).not.toBeNull();
     rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 

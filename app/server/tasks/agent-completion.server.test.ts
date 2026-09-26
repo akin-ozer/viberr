@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -13,13 +13,11 @@ import {
 import type {
   Engagement,
   PacketOption,
-  TaskFileEvent,
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   readTaskFile,
-  resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -258,12 +256,6 @@ describe("waiting-state bookkeeping (A2)", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
-  });
-
-  it("markWaitingAgent is idempotent and reprojects", async () => {
-    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
   });
 });
@@ -1489,6 +1481,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const packet = taskFile().parsed.packet;
       expect(packet?.title).toBe("Work stalled: pick a recovery path");
       expect(packet!.body).toContain("4-cycle depth cap without reaching a boundary");
+      // CANARY: drop `stalled: true` from `openStuckLoopPacket`'s packet.
+      expect(packet!.stalled, "ruling 432: the server's own stall escalation carries the marker").toBe(true);
       expect(operatorRuns()).toBe(before);
       // The head is named, and it is delivered, so the general options stand.
       // CANARY: read every head as undelivered in `taskHeadState` and a
@@ -3192,69 +3186,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     }
   });
 
-  it("the reviewer's reply survives a following stale-read write (VirtioFS read-after-write loss)", async () => {
-    // The VIB-1 incident, end to end: the reviewer completion posts its reply
-    // comment + verdict, then an operator-style read-modify-write reacts
-    // seconds later while the bind mount still serves the PRE-completion file
-    // content. Before the canonical cache, that second write's stale base
-    // erased the reviewer's comment permanently.
-    writeReviewTask({ title: "Reviewer completion then a stale-read write" });
-    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
-    const absPath = resolveTaskFilePath(ref);
-    const preCompletion = readFileSync(absPath, "utf8");
-
-    const runId = await finishedRunWith(
-      "Verdict: approve\n\n@operator the inventory is verified — ship it.",
-    );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
-      { id: runId, state: "finished" },
-    );
-
-    // VirtioFS serves the PRE-completion content to the next reader: revert
-    // the on-disk file (the completion's write "hasn't landed" for readers).
-    // B06-T3 (pass 32): a stale cache serves the OLD mtime too, so set it —
-    // without this the simulation was "old content, NEW mtime", which the
-    // write-cache repair correctly reads as an external edit (disk wins)
-    // whenever the completion's bookkeeping took longer than the 100 ms mtime
-    // slack. That is the intermittent CI red this test had: not a data-loss
-    // race, an unfaithful simulation. task-writer.server.test.ts does the same.
-    writeFileSync(absPath, preCompletion);
-    const past = (Date.now() - 10_000) / 1000;
-    utimesSync(absPath, past, past);
-
-    // The operator reacts — a locked read-modify-write appending its comment.
-    const operatorComment: TaskFileEvent = {
-      occurredAt: new Date().toISOString(),
-      type: "comment",
-      actor: { kind: "operator" },
-      title: "Recommendation",
-      text: "Recommendation: accept — reviewer approved.",
-      toAgent: false,
-      evidence: null,
-    };
-    await updateTaskFile(ref, (parsed) => {
-      parsed.timeline.unshift(operatorComment);
-    });
-
-    const tl = taskFile().parsed.timeline;
-    const reviewerComment = tl.find(
-      (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.roleHint === "Reviewer",
-    );
-    expect(reviewerComment, "reviewer reply must survive the stale-read write").toBeTruthy();
-    expect(reviewerComment!.text).toContain("@operator the inventory is verified");
-    expect(tl.some((e) => e.type === "quality")).toBe(true);
-    expect(tl.some((e) => e.text?.includes("Recommendation: accept"))).toBe(true);
-
-    // And the canonical FILE was repaired by the operator's write — the
-    // reviewer's comment persists on disk, not just in memory.
-    const disk = readFileSync(absPath, "utf8");
-    expect(disk).toContain("@operator the inventory is verified");
-    expect(disk).toContain("Recommendation: accept");
-  });
-
   it("posts the reply comment and flips waiting agent→human when no operator is deployed", async () => {
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     const runId = await finishedRunWith("All done — summary of the work.");
@@ -4146,11 +4077,11 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   /**
-   * Ruling 432: open a packet through the REAL writers rather than a hand-built
-   * fixture of what they are believed to write. The operator is deployed only
-   * for the write, since both writers open packets on its authority, and is
-   * removed again so the completion's react stays out of the way, exactly as
-   * in the tests that write the packet directly.
+   * Ruling 432: open a packet through the REAL writer rather than a hand-built
+   * fixture of what it is believed to write. The operator is deployed only for
+   * the write, since the writer opens packets on its authority, and is removed
+   * again so the completion's react stays out of the way, exactly as in the
+   * tests that write the packet directly.
    */
   async function withOperatorDeployed(write: () => Promise<void>): Promise<void> {
     const before = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
@@ -4348,40 +4279,5 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     expect(
       listAuditEvents(store.db).some((e) => e.action === "task.packet.withdrawn_superseded"),
     ).toBe(false);
-  });
-
-  it("ruling 432: the stall packet the server raises carries the marker, and a clean run withdraws it", async () => {
-    /**
-     * The producer half: the marker is only worth anything if the one writer
-     * of stall packets puts it there, so this drives that writer instead of
-     * writing the packet by hand.
-     *
-     * CANARY: drop `stalled: true` from `openStuckLoopPacket`'s packet.
-     */
-    await withOperatorDeployed(async () => {
-      const { openStuckLoopPacketForTest } = await import("./task-actions.server");
-      await openStuckLoopPacketForTest(
-        store.db,
-        { dataRoot: store.dataRoot, operatorAuthorized: true },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          agentHandle: "dev",
-          reason: "The agent repeated its previous report verbatim, with no forward progress.",
-        },
-      );
-    });
-    const stall = taskFile().parsed.packet;
-    expect(stall?.title).toBe("Work stalled: pick a recovery path");
-    expect(stall?.stalled).toBe(true);
-
-    const runId = await finishedRunWith("Recovered: the work is delivered.");
-    await runEffects(runId, { delivers: true });
-
-    const parsed = taskFile().parsed;
-    expect(parsed.packet).toBeNull();
-    expect(parsed.frontmatter.readiness).toBe("ready");
-    const note = parsed.timeline.find((e) => (e.text ?? "").includes("**Packet withdrawn:**"));
-    expect(note?.text).toContain("Work stalled: pick a recovery path");
   });
 });

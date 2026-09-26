@@ -116,7 +116,7 @@ const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
 
 /** Rulings 483 and 498: the specialist's half of `correct_knowledge_doc`. */
-export const KB_CORRECTION_SPECIALIST_DESCRIPTION =
+const KB_CORRECTION_SPECIALIST_DESCRIPTION =
   "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run.";
 
 /** U11: the same tool for a profile granted evidence but NOT the verdict — it

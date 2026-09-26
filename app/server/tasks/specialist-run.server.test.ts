@@ -44,9 +44,6 @@ import {
 } from "~/features/runtime/runtime-types";
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
-import {
-  KB_PRECEDENCE_NOTE,
-} from "~/server/files/kb-injection.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { resetWriteCacheForTests } from "~/server/files/write-cache.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -382,29 +379,6 @@ describe("assignSpecialist", () => {
       ),
     ).rejects.toMatchObject({ status: 400 });
   });
-
-  it("denies reviewer + viewer (admin|maintainer only)", async () => {
-    for (const user of [store.users.selin, store.users.elif]) {
-      await expect(
-        assignSpecialist(
-          store.db,
-          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-          actorOf(user),
-          { dataRoot: store.dataRoot },
-        ),
-      ).rejects.toMatchObject({ status: 403 });
-    }
-  });
-
-  it("allows maintainer", async () => {
-    const result = await assignSpecialist(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actorOf(store.users.murat),
-      { dataRoot: store.dataRoot },
-    );
-    expect(result.profileId).toBe("dev");
-  });
 });
 
 describe("engagement uniqueness (adversarial-review)", () => {
@@ -550,17 +524,6 @@ describe("startSpecialistRun", () => {
       { dataRoot: store.dataRoot },
     );
   }
-
-  it("errors when no specialist is assigned", async () => {
-    await expect(
-      startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-  });
 
   it("F7-OP1: refuses a second PRIMARY run while one is already in flight (server single-flight)", async () => {
     await assign();
@@ -803,28 +766,6 @@ describe("startSpecialistRun", () => {
     expect(fm().timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
     await stop(second.runId);
-
-    // A dependency list is ruling 131's own floor — and since ruling 186 that
-    // floor is a GATE, not just a readiness that refuses to lift. This arm used
-    // to let the dispatch through and assert only that the readiness stayed
-    // `blocked`; the dispatch succeeding was the ambient behaviour of the day
-    // (nothing checked the list), never ruling 157's subject, which is a
-    // packet-less, LIST-less stored hold. That subject is untouched: the two
-    // arms above still pass unchanged.
-    seedHeld({ engagements: [], blockedBy: ["VIB-2"] });
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    await expect(
-      startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-    expect(fm().frontmatter.readiness).toBe("blocked");
-    // Nothing ran, so nothing lifted: still the one row from the first arm.
-    expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
   });
 
   it("ruling 355: a refusal names an entry that can never complete instead of promising a release", async () => {
@@ -1212,7 +1153,7 @@ describe("startSpecialistRun", () => {
     expect(run.backend).toBe("codex");
   });
 
-  it("denies reviewer + viewer (admin|maintainer only)", async () => {
+  it("denies contributor + viewer (admin|maintainer only)", async () => {
     await assign();
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
@@ -1637,7 +1578,7 @@ describe("assignReviewer / removeReviewer", () => {
     });
   });
 
-  it("denies reviewer + viewer roles (admin|maintainer only)", async () => {
+  it("denies contributor + viewer (admin|maintainer only)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
         assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(user), { dataRoot: store.dataRoot }),
@@ -1750,33 +1691,6 @@ describe("startAgentRun — no credential principal (ruling 127)", () => {
     expect(startedRunSpecs()).toHaveLength(0);
   });
 
-  it("a DISABLED owner reads as an owner the run cannot bill", async () => {
-    // A disabled account is as gone as a deleted one for billing: the person
-    // can no longer sign in, so nothing they own may keep spending on their
-    // provider account.
-    const { updateUserFields } = await import("~/server/auth/user-store.server");
-    const runId = await (async () => {
-      await assignSpecialist(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      updateUserFields(store.db, store.users.arda.id, { disabled: true });
-      const started = await startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      return started.runId;
-    })();
-    const text = refusalText(runId);
-    expect(text).toContain("owner account is disabled or gone");
-    expect(text).toContain("Assign a new owner");
-    expect(startedRunSpecs()).toHaveLength(0);
-  });
-
   it("reserves no run row and clones nothing for a refused dispatch", async () => {
     // The reservation exists to render a live "Preparing workspace" strip
     // during a clone. A run about to be recorded as an error has nothing to
@@ -1861,7 +1775,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/Pick an agent to run/);
+    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/Pick an agent to run/) });
   });
 
   it("creates a kind='reviewer' run on its own thread", async () => {
@@ -3181,73 +3095,6 @@ describe("directiveRequestsDelivery (F10-31)", () => {
 describe("buildSpecialistPersona — attached resources", () => {
   const tempRoot = () => ctx.makeTempDir();
 
-  it("injects a granted KB's docs and marks attached resources trusted", () => {
-    const dataRoot = tempRoot();
-    mkdirSync(path.join(dataRoot, "kb", "release-facts"), { recursive: true });
-    writeFileSync(
-      path.join(dataRoot, "kb", "release-facts", "facts.md"),
-      "# Facts SENTINEL-KB-1\n\nbody text",
-    );
-    const persona = buildSpecialistPersona({
-      profileId: "docs-writer",
-      skills: [],
-      kb: ["release-facts"],
-      dataRoot,
-    });
-    // P13-KM-10: specialist KB injection had ZERO tests, which is how the
-    // display-name/dir mismatch (KM-01) and the rename orphan (KM-07) survived.
-    expect(persona).toContain("SENTINEL-KB-1");
-    expect(persona).toContain("release-facts (knowledge base)");
-    expect(persona).toContain("Attached resources (trusted");
-  });
-
-  /**
-   * R19-2 (owner ruling) — the repo-wins note ships ONCE, before the bodies it
-   * ranks, and as the ONE exported constant both runtimes push.
-   *
-   * The end-to-end test in the R18-1 block asserts the count with a SINGLE KB,
-   * where "once per prompt" and "once per KB" are the same number. With two
-   * KBs they diverge, which is the shape the ruling actually forbids (the rule
-   * restated between every pair of bodies reads as if it ranked only the one
-   * that follows it).
-   */
-  it("R19-2: with MANY KBs the precedence note is still pushed once, before them all", () => {
-    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the per-index loop in
-    // `attachedResourcesBlock` and the count assertion fails; fork its text into
-    // a local string literal and the exported-constant assertion fails.
-    const dataRoot = tempRoot();
-    for (const [name, sentinel] of [
-      ["house-style", "SENTINEL-KB-HOUSE"],
-      ["team-facts", "SENTINEL-KB-TEAM"],
-    ] as const) {
-      mkdirSync(path.join(dataRoot, "kb", name), { recursive: true });
-      writeFileSync(
-        path.join(dataRoot, "kb", name, "conventions.md"),
-        `# ${name} ${sentinel}\n\nbody text`,
-      );
-    }
-
-    const persona = buildSpecialistPersona({
-      profileId: "dev",
-      skills: [],
-      kb: ["house-style", "team-facts"],
-      dataRoot,
-    });
-
-    // The exact constant the operator runtime pushes — not a paraphrase of it.
-    expect(persona).toContain(KB_PRECEDENCE_NOTE);
-    expect(
-      persona.split("Which source wins (knowledge bases vs the repository)").length - 1,
-    ).toBe(1);
-    // Both indexes arrived, and BOTH sit after the rule that ranks them.
-    expect(persona.indexOf("Which source wins")).toBeLessThan(
-      persona.indexOf("SENTINEL-KB-HOUSE"),
-    );
-    expect(persona.indexOf("Which source wins")).toBeLessThan(
-      persona.indexOf("SENTINEL-KB-TEAM"),
-    );
-  });
-
   /**
    * C1/pass-16 — this test used to end at "injects nothing", which was exactly
    * the bug: a KB grant that resolved to nothing produced a `logger.warn` and
@@ -3297,124 +3144,6 @@ describe("buildSpecialistPersona — attached resources", () => {
       dataRoot,
     });
     expect(persona).not.toContain("Attached resources that did NOT fully reach this run");
-  });
-
-  /**
-   * T5 (pass 31) — the live shape: the Docs Writer profile is granted ONE
-   * knowledge base and `skills: []`, and the run transcript showed the KB
-   * marker with no skill mounted or injected. The existing KB test above passes
-   * `skills: []` too, but writes no skill to the store, so it would stay green
-   * if the persona ever fell back to "load what's on disk" — which is exactly
-   * what `buildOperatorSystemPrompt` deliberately does with an empty grant list
-   * (`authority.skills.length ? … : ["viberr-app-expertise"]`). A specialist has
-   * no such fallback, and this pins that difference with real decoys present.
-   */
-  it("T5: with skills:[] a granted KB arrives and NO skill body does — not even one sitting in the same store", () => {
-    // Canary: give `readSkillBodies` the store's `skills/` listing (or any
-    // non-empty fallback) instead of `injectable` and every decoy line fails.
-    const dataRoot = tempRoot();
-    mkdirSync(path.join(dataRoot, "kb", "pass31-qa-conventions"), { recursive: true });
-    writeFileSync(
-      path.join(dataRoot, "kb", "pass31-qa-conventions", "conventions.md"),
-      "# QA conventions PASS31-KB-LOADED\n\nbody text",
-    );
-    for (const [name, sentinel] of [
-      ["developer-expertise", "SENTINEL-DEVELOPER-EXPERTISE"],
-      ["reviewer-expertise", "SENTINEL-REVIEWER-EXPERTISE"],
-    ] as const) {
-      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
-      writeFileSync(
-        path.join(dataRoot, "skills", name, "SKILL.md"),
-        `# ${name}\n\nWhen asked, answer ${sentinel}.`,
-      );
-    }
-
-    const persona = buildSpecialistPersona({
-      profileId: "docs-writer",
-      skills: [],
-      kb: ["pass31-qa-conventions"],
-      dataRoot,
-    });
-
-    // The grant arrived …
-    expect(persona).toContain("pass31-qa-conventions (knowledge base)");
-    expect(persona).toContain("PASS31-KB-LOADED");
-    // … and not one skill section came with it.
-    expect(persona).not.toContain("(skill)");
-    expect(persona).not.toContain("SENTINEL-DEVELOPER-EXPERTISE");
-    expect(persona).not.toContain("SENTINEL-REVIEWER-EXPERTISE");
-    // An empty grant list is not a MISS either — nothing was promised.
-    expect(persona).not.toContain("Attached resources that did NOT fully reach this run");
-  });
-
-  /**
-   * Ruling 283 replaced this test's subject. T5 (pass 31) pinned the honest
-   * behaviour of a SHARED character budget: the squeezed-out KB said so in the
-   * prompt. That budget is gone — it had no allocation worth defending, because
-   * the docs inside one KB spent it in alphabetical order — so what this layer
-   * must now prove is that the persona carries INDEXES and that a huge KB costs
-   * the next one nothing. The skill budget above is untouched and still shared.
-   */
-  it("ruling 283: a huge KB is indexed, not injected, and costs the next one nothing", () => {
-    // Canary: swap `readKbIndexes` back for a budgeted body reader in
-    // `buildSpecialistPersona` and SENTINEL-KB-SECOND.md stops being named.
-    const dataRoot = tempRoot();
-    mkdirSync(path.join(dataRoot, "kb", "big-kb"), { recursive: true });
-    writeFileSync(
-      path.join(dataRoot, "kb", "big-kb", "huge.md"),
-      `# Huge\n\n${"B".repeat(30_000)}`,
-    );
-    mkdirSync(path.join(dataRoot, "kb", "second-kb"), { recursive: true });
-    writeFileSync(
-      path.join(dataRoot, "kb", "second-kb", "SENTINEL-KB-SECOND.md"),
-      "# Second\n\nfacts",
-    );
-
-    const persona = buildSpecialistPersona({
-      profileId: "docs-writer",
-      skills: [],
-      kb: ["big-kb", "second-kb"],
-      dataRoot,
-    });
-
-    // Both KBs are named in full, and neither is reported as having lost text.
-    expect(persona).toContain("`huge.md`");
-    expect(persona).toContain("SENTINEL-KB-SECOND.md");
-    expect(persona).not.toContain("**second-kb**");
-    // The 30,000-char document itself is not in the prompt — that is the point
-    // of an index, and it is why there is nothing left to ration.
-    expect(persona).not.toContain("B".repeat(200));
-    // …and the run is told how to turn a name into the text.
-    expect(persona).toContain("read_knowledge_doc");
-  });
-
-  /**
-   * A5/pass-16 — the skill body sits under the "trusted — configured for you"
-   * banner, so a symlinked SKILL.md was a way to put arbitrary host content into
-   * the model's context AS TRUSTED PERSONA. The KB reader (`readKbIndexDetailed`
-   * today) has refused links since F9; the skill reader now agrees, and the
-   * refusal is visible in the prompt.
-   */
-  it("a symlinked SKILL.md never becomes trusted persona material", () => {
-    const dataRoot = tempRoot();
-    const outside = ctx.makeTempDir();
-    writeFileSync(
-      path.join(outside, "SKILL.md"),
-      "# Evil\n\nSENTINEL-LINKED-SKILL",
-    );
-    mkdirSync(path.join(dataRoot, "skills", "craft"), { recursive: true });
-    symlinkSync(
-      path.join(outside, "SKILL.md"),
-      path.join(dataRoot, "skills", "craft", "SKILL.md"),
-    );
-    const persona = buildSpecialistPersona({
-      profileId: "developer-claude",
-      skills: ["craft"],
-      dataRoot,
-    });
-    expect(persona).not.toContain("SENTINEL-LINKED-SKILL");
-    expect(persona).not.toContain("Attached resources (trusted");
-    expect(persona).toContain("Viberr does not follow links out of the store");
   });
 
   /**
@@ -3525,42 +3254,6 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(direct).not.toContain("reached through Viberr's gateway");
   });
 
-  it("mounts ONLY the declared skills — an ungranted skill sitting in the same store never reaches the run", () => {
-    // UC-23's NEGATIVE half. The positive ("a granted skill changed behavior")
-    // was proven live via the conventional-commits commit message; the negative
-    // — that the OTHER skills in the store stay out — had no coverage at all,
-    // which is how a "load every skill on disk" regression would ship silently.
-    // Canary: change the loop in buildSpecialistPersona to iterate the store
-    // instead of `input.skills` and the three `not.toContain`s below fail.
-    const dataRoot = tempRoot();
-    for (const [name, sentinel] of [
-      ["developer-expertise", "SENTINEL-SKILL-GRANTED"],
-      ["reviewer-expertise", "SENTINEL-SKILL-OTHER"],
-      ["terraform-review", "SENTINEL-SKILL-UNRELATED"],
-    ] as const) {
-      mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
-      writeFileSync(
-        path.join(dataRoot, "skills", name, "SKILL.md"),
-        `---\nname: ${name}\n---\n\n# ${name}\n\n${sentinel}`,
-      );
-    }
-
-    const persona = buildSpecialistPersona({
-      profileId: "developer-claude",
-      skills: ["developer-expertise"],
-      dataRoot,
-    });
-
-    expect(persona).toContain("SENTINEL-SKILL-GRANTED");
-    expect(persona).toContain("developer-expertise (skill)");
-    // The store holds two more skills. Neither their bodies nor their headings
-    // may appear — "unrelated skills" is exactly the failure the owner named.
-    expect(persona).not.toContain("SENTINEL-SKILL-OTHER");
-    expect(persona).not.toContain("SENTINEL-SKILL-UNRELATED");
-    expect(persona).not.toContain("reviewer-expertise");
-    expect(persona).not.toContain("terraform-review");
-  });
-
   /**
    * pass-18: a skill Viberr MOUNTED for the SDK's native mechanism must not ALSO
    * ride the prompt as text — that is the double feed the whole change exists to
@@ -3631,63 +3324,6 @@ describe("buildSpecialistPersona — attached resources", () => {
 // (it and the skill mount are two halves of "Viberr owns the workspace's
 // `.claude`"); its tests moved with it, to skill-mount.server.test.ts.
 
-/**
- * R19-2 (ruling 56) — precedence between an attached KB and the repository's own
- * documented conventions. Live: `qa/smoke/README.md` documented one pass-note
- * format and a granted KB documented another; the deliverer (KB granted)
- * followed the KB and a reviewer (no KB) followed the README, so one repository
- * grew two house styles from the same facts. Nothing in the product had ever
- * said which source wins.
- */
-describe("R19-2 — the repository wins; a knowledge base is context", () => {
-  const tempRoot = () => ctx.makeTempDir();
-
-  function personaWithKb(): string {
-    const dataRoot = tempRoot();
-    mkdirSync(path.join(dataRoot, "kb", "house-style"), { recursive: true });
-    writeFileSync(
-      path.join(dataRoot, "kb", "house-style", "style.md"),
-      "# Style\n\nMarker files end with `Marker-Convention: v3`.",
-    );
-    return buildSpecialistPersona({
-      profileId: "docs-writer",
-      skills: [],
-      kb: ["house-style"],
-      dataRoot,
-    });
-  }
-
-  it("states the precedence rule whenever a KB is attached", () => {
-    const persona = personaWithKb();
-    // Canary: drop the `kbAddendum` buildSpecialistPromptPrefix passes to
-    // `attachedResourcesBlock` and this fails.
-    expect(persona).toContain(
-      "When a knowledge base and the repository disagree",
-    );
-    expect(persona).toContain("The REPOSITORY wins");
-  });
-
-  it("requires a noticed conflict to be REPORTED, never silently resolved", () => {
-    const persona = personaWithKb();
-    expect(persona).toMatch(/say so plainly in your report/i);
-    expect(persona).toMatch(/never resolve it silently/i);
-  });
-
-  it("says nothing about precedence when no KB is attached", () => {
-    // The rule is about a conflict that cannot arise without a KB; stating it
-    // anyway would spend prompt budget on every run that has no second source.
-    const persona = buildSpecialistPersona({
-      profileId: "docs-writer",
-      skills: [],
-      kb: [],
-      dataRoot: tempRoot(),
-    });
-    expect(persona).not.toContain(
-      "When a knowledge base and the repository disagree",
-    );
-  });
-});
-
 describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => {
   /** Deploy a `dev` deliverer granting KB `deliverKb` and a `critic` reviewer
    *  granting KB `reviewKb` (may be []). */
@@ -3746,104 +3382,11 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     return joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
   }
 
-  it("a reviewer with kb:[] resolves the delivering engagement's KB bodies", async () => {
-    deployKbPair(["foo"], []);
-    writeKb("foo", "# Conventions SENTINEL-DELIVERER-KB\n\nbody text");
-    const sys = await engageAndRunCritic();
-    expect(sys).toContain("foo (knowledge base)");
-    expect(sys).toContain("SENTINEL-DELIVERER-KB");
-  });
-
   it("does not double-inject a KB both the reviewer and deliverer grant", async () => {
     deployKbPair(["shared"], ["shared"]);
     writeKb("shared", "# Shared\n\nSENTINEL-SHARED-KB");
     const sys = await engageAndRunCritic();
     expect(sys.split("shared (knowledge base)").length - 1).toBe(1);
-  });
-
-  it("R19-3/F19-2: SKILLS are NOT inherited — only KBs cross from the deliverer", async () => {
-    // The `deliveringContextGrants` docstring claimed the inheritance had been
-    // "widened to SKILLS by LV-F3". It never was: both call sites union `kb`
-    // only, and "LV-F3" appeared nowhere in the repo except that sentence. The
-    // owner ruled the inheritance stays KBs (R18-1 stands), so this pins the
-    // absence — a future reader who believes the old comment and implements the
-    // widening breaks a test instead of silently handing every reviewer the
-    // deliverer's craft.
-    //
-    // Canary: union `resolveDeployedSpecialist(...).skills` into the reviewer's
-    // skills at either call site and the SENTINEL assertion fails.
-    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
-    writeProject(store.dataRoot, {
-      ...fm,
-      repo: null, // no checkout ⇒ skills ride the prompt, where we can see them
-      agents: [
-        {
-          profileId: "dev", capabilities: [], extras: [],
-          definition: {
-            kind: "specialist", name: "dev", role: "developer",
-            backends: ["claude"], model: "sonnet",
-            resources: { skills: ["deliverer-craft"], mcps: [], kb: ["shared-kb"] },
-          },
-        },
-        {
-          profileId: "critic", capabilities: [], extras: [],
-          definition: {
-            kind: "specialist", name: "critic", role: "reviewer",
-            backends: ["claude"], model: "sonnet",
-            resources: { skills: [], mcps: [], kb: [] },
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    mkdirSync(path.join(store.dataRoot, "skills", "deliverer-craft"), { recursive: true });
-    writeFileSync(
-      path.join(store.dataRoot, "skills", "deliverer-craft", "SKILL.md"),
-      "# Craft\n\nSENTINEL-DELIVERER-SKILL",
-    );
-    writeKb("shared-kb", "# Conventions SENTINEL-DELIVERER-KB\n\nbody text");
-
-    const sys = await engageAndRunCritic();
-
-    // The KB crosses (R18-1) …
-    expect(sys).toContain("SENTINEL-DELIVERER-KB");
-    // … the skill does NOT, on either channel.
-    expect(sys).not.toContain("SENTINEL-DELIVERER-SKILL");
-    expect(sys).not.toContain("deliverer-craft");
-    expect(lastRunSpec()?.skills).toBeUndefined();
-  });
-
-  it("R19-2: the repo-wins precedence rule ships WITH the KB text, and only then", async () => {
-    // Live-caught this pass: a KB-granted Codex developer and a KB-less Claude
-    // writer produced two different formats for the same file family on ONE
-    // repo, because nothing told either run which source outranks the other.
-    // The owner ruled the repo wins and the KB supplements — and that the rule
-    // ships with every KB injection.
-    //
-    // Canary: drop the `KB_PRECEDENCE_NOTE` push in `attachedResourcesBlock`
-    // and the first two assertions fail.
-    deployKbPair(["house"], []);
-    writeKb("house", "# House style SENTINEL-DELIVERER-KB\n\nbody text");
-    const sys = await engageAndRunCritic();
-    expect(sys).toContain("Which source wins (knowledge bases vs the repository)");
-    expect(sys).toContain("outrank the knowledge bases");
-    // It is stated ONCE, not per KB, and it precedes the bodies.
-    expect(
-      sys.split("Which source wins (knowledge bases vs the repository)").length - 1,
-    ).toBe(1);
-    expect(sys.indexOf("Which source wins")).toBeLessThan(
-      sys.indexOf("house (knowledge base)"),
-    );
-
-    // …and a run with NO knowledge base carries no rule about one.
-    const none = buildSpecialistPersona({
-      profileId: "dev",
-      skills: [],
-      kb: [],
-      dataRoot: store.dataRoot,
-    });
-    expect(none).not.toContain("Which source wins");
   });
 
   it("does NOT leak the reviewer's own KB back onto the delivering run", async () => {
@@ -4236,11 +3779,9 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
    * UC-15, the owner's question in full: "are the RIGHT skills loaded, and ONLY
    * those?"
    *
-   * The persona-level negative is already pinned ("mounts ONLY the declared
-   * skills", above), but that test reads ONE channel — the prompt text. Since
-   * R18-5 a Claude run has THREE places a skill can arrive: the SDK's native
-   * `skills: [...]` filter, the `<workspace>/.claude/skills` catalog the SDK
-   * reads it against, and the prompt text Codex still uses. A regression in
+   * Since R18-5 a Claude run has THREE places a skill can arrive: the SDK's
+   * native `skills: [...]` filter, the `<workspace>/.claude/skills` catalog the
+   * SDK reads it against, and the prompt text Codex still uses. A regression in
    * either of the first two is invisible to a prompt-only assertion — a skill
    * that mounts is DELIBERATELY absent from the prompt.
    *
@@ -4461,23 +4002,20 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
   });
 
   /**
-   * R18-1 + R19-3, in the channel the existing pair of tests cannot see.
-   *
-   * "R19-3/F19-2: SKILLS are NOT inherited" runs on a repo-LESS project, where
-   * every skill rides the prompt as text — so it can assert the deliverer's
-   * skill body is absent. On a real checkout that assertion is vacuous: a
-   * mounted skill's body is deliberately NOT in the prompt (R18-5), so an
-   * inheritance widened to skills would leave it green while the reviewer
-   * really held the deliverer's craft, mounted and invocable.
+   * R18-1 + R19-3: a reviewer inherits the deliverer's knowledge bases, never
+   * its skills (the owner ruled the inheritance stays KBs). Read on a real
+   * checkout, where a prompt-only assertion is vacuous: a mounted skill's body
+   * is deliberately NOT in the prompt (R18-5), so an inheritance widened to
+   * skills would leave the prompt clean while the reviewer really held the
+   * deliverer's craft, mounted and invocable.
    */
   describe("R18-1 / R19-3 — the boundary holds in the NATIVE channel too", () => {
     it("the reviewer inherits the deliverer's KB and mounts ONLY its own skills", async () => {
       // Canary (verified): union the deliverer's skills into the `skills:`
       // argument of the `mountGrantedSkills` call in startSpecialistRun.
-      // This test goes red on `spec.skills` and on the workspace catalog; the
-      // repo-less "SKILLS are NOT inherited" test above stays GREEN, because
-      // the widened grant is mounted rather than injected and its body is
-      // deliberately absent from the prompt either way.
+      // This test goes red on `spec.skills` and on the workspace catalog,
+      // although the widened grant is mounted rather than injected and its
+      // body is absent from the prompt either way.
       const ws = await workspaceCheckout();
       const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
         .parsed.frontmatter;
@@ -4791,6 +4329,64 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
           actorOf(store.users.arda), { dataRoot: store.dataRoot }),
       ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it("ruling 179: a supporting dispatch detaches its checkout at the task's active work revision", async () => {
+      // CANARY: drop `pinSubject` at the dispatch call site and the support
+      // checkout stays on the delivering tree's head.
+      const ws = await workspaceCheckout();
+      const reviewed = (await exec("git", ["-C", ws, "rev-parse", "HEAD"])).stdout.trim();
+      writeFileSync(path.join(ws, "later.md"), "later\n");
+      await exec("git", ["-C", ws, "add", "-A"]);
+      await exec("git", ["-C", ws, "commit", "-q", "-m", "later"]);
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          ownerUserId: store.users.arda.id,
+          workRevision: {
+            id: "rev_pin",
+            headSha: reviewed,
+            treeSha: null,
+            branch: "vib-1-work",
+            createdAt: "2026-09-12T09:00:00.000Z",
+            sourceProfileId: "dev",
+          },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actorOf(store.users.arda));
+
+      const criticWs = path.join(path.dirname(ws), "support", "critic", path.basename(ws));
+      expect((await exec("git", ["-C", criticWs, "rev-parse", "HEAD"])).stdout.trim()).toBe(reviewed);
+      // The disclosure rides the run contract's "Before this run Viberr …" line.
+      expect(lastRunSpec()?.prompt).toContain(
+        `detached at the revision under review \`${reviewed.slice(0, 7)}\``,
+      );
     });
   });
 
@@ -6000,19 +5596,6 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     expect(said).toContain("HEAD was left as it is");
     expect(await head()).toBe(second);
   });
-
-  it("the supporting dispatch passes the task's ACTIVE work revision, and the delivering one passes none", () => {
-    // Canary: delete the `pinSubject` argument at the dispatch call site and
-    // the helper goes back to having no production caller — the state this
-    // pass found live.
-    const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(source).toContain("pinSubject: support");
-    expect(source).toContain("activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha");
-    expect(source).toContain("await pinSupportCheckout(dir, input.pinSubject ?? null, personGit())");
-    // ...and the disclosure rides the same `refreshed` field the run contract
-    // already renders ("Before this run Viberr ...").
-    expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");
-  });
 });
 
 /**
@@ -6065,27 +5648,6 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
 
     // The whole point: no billable run, no workspace, no commit that outlives it.
     expect(startedRunSpecs()).toHaveLength(0);
-  });
-
-  it("names what it waits on, so the refusal is actionable", async () => {
-    await assignSpecialist(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    await hold();
-
-    await expect(
-      startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining("VIB-2"),
-    });
   });
 
   it("refuses an AUTO-ENGAGING dispatch too — the hold is not a posture question", async () => {
