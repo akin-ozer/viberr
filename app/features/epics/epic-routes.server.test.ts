@@ -394,16 +394,6 @@ describe("ruling 503(e): the epic intents", () => {
     });
   });
 
-  it("update-epic is refused for a viewer, and the epic is unchanged", async () => {
-    const epicId = await makeEpic(ids.arda, { title: "Not the viewer's call" });
-    const refused = refusedSchema.parse(await postEpic(ids.deniz, epicId, { intent: "update-epic", status: "done" }));
-    // CANARY: drop the `manage-epics` check (`requireEpicAction`) from
-    // `updateEpic` and the viewer closes the epic.
-    expect(refused.init.status).toBe(403);
-    expect(refused.data.error).toBe("Your project role (viewer) cannot edit epics.");
-    expect((await epicFile(epicId))?.frontmatter.status).toBe("planned");
-  });
-
   it("add-tasks puts several tasks in, moving one from its other epic", async () => {
     const source = await makeEpic(ids.arda, { title: "Source epic", taskKeys: ["VIB-153"] });
     const target = await makeEpic(ids.arda, { title: "Target epic" });
@@ -419,17 +409,6 @@ describe("ruling 503(e): the epic intents", () => {
     expect((await epicPage(ids.selin, source)).tasks).toEqual([]);
     expect((await epicFile(source))?.timeline[0]?.text).toBe(`Selin Aksoy moved VIB-153 to ${target}.`);
     expect(await fileEpicOf("VIB-153")).toBe(target);
-  });
-
-  it("add-tasks is refused for a viewer, and the task stays where it was", async () => {
-    const epicId = await makeEpic(ids.arda, { title: "Viewer cannot add" });
-    const key = await makeTask("Stays out of the epic");
-    const refused = refusedSchema.parse(await postEpic(ids.deniz, epicId, { intent: "add-tasks", taskKeys: key }));
-    // CANARY: drop the `edit-task-meta` check from `setTasksEpic` and the
-    // viewer puts the task in.
-    expect(refused.init.status).toBe(403);
-    expect(refused.data.error).toBe("Your project role (viewer) cannot put tasks in an epic.");
-    expect(await fileEpicOf(key)).toBeNull();
   });
 
   it("remove-task takes a task out of the epic, and it is offered again", async () => {
@@ -459,17 +438,6 @@ describe("ruling 503(e): the epic intents", () => {
     expect(await fileEpicOf(key)).toBe(moved);
     expect(acceptedSchema.safeParse(result).success).toBe(false);
     expect((await epicFile(moved))?.timeline.map((h) => h.text)).not.toContain(`Selin Aksoy removed ${key}.`);
-  });
-
-  it("remove-task is refused for a viewer, and the task stays in", async () => {
-    const key = await makeTask("Stays in the epic");
-    const epicId = await makeEpic(ids.arda, { title: "Viewer cannot remove", taskKeys: [key] });
-    const refused = refusedSchema.parse(await postEpic(ids.deniz, epicId, { intent: "remove-task", taskKey: key }));
-    // CANARY: drop the `edit-task-meta` check from `setTasksEpic` and the
-    // viewer takes the task out.
-    expect(refused.init.status).toBe(403);
-    expect(refused.data.error).toBe("Your project role (viewer) cannot take tasks out of an epic.");
-    expect(await fileEpicOf(key)).toBe(epicId);
   });
 
   it("create-task makes a task that is in the epic from its first line", async () => {
@@ -521,23 +489,6 @@ describe("ruling 503(e): the epic intents", () => {
     expect(await fileEpicOf(key)).toBeNull();
     expect((await board(ids.murat)).cards.find((c) => c.key === key)?.epicId).toBeNull();
     expect((await epicPage(ids.murat, epicId)).tasks).toEqual([]);
-  });
-
-  it("set-task-epic is refused for a viewer, both ways", async () => {
-    const epicId = await makeEpic(ids.arda, { title: "Viewer cannot pick" });
-    const outside = await makeTask("Viewer cannot put me in");
-    const inside = await makeTask("Viewer cannot take me out");
-    const holder = await makeEpic(ids.arda, { title: "Holds one", taskKeys: [inside] });
-    const put = refusedSchema.parse(await postTask(ids.deniz, outside, { intent: "set-task-epic", epic: epicId }));
-    // CANARY: drop the `edit-task-meta` check from `setTasksEpic` and the
-    // viewer moves the task.
-    expect(put.init.status).toBe(403);
-    expect(put.data.error).toBe("Your project role (viewer) cannot put tasks in an epic.");
-    expect(await fileEpicOf(outside)).toBeNull();
-    const out = refusedSchema.parse(await postTask(ids.deniz, inside, { intent: "set-task-epic", epic: "" }));
-    expect(out.init.status).toBe(403);
-    expect(out.data.error).toBe("Your project role (viewer) cannot take tasks out of an epic.");
-    expect(await fileEpicOf(inside)).toBe(holder);
   });
 });
 

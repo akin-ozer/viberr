@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { isRuntimeSessionOpen } from "./activity-page";
 
 /**
  * Route-level tests for /projects/:slug/activity against the seeded demo
@@ -95,5 +96,34 @@ describe("/projects/:slug/activity", () => {
     // and nothing from other projects.
     expect(result.stream.length).toBeGreaterThan(0);
     expect(result.stream.every((row) => row.taskKey === "DEP-31")).toBe(true);
+  });
+
+  it("R19-7: the audit column's fold recognises the session row the projection ships", async () => {
+    // The view model carries no action name, so the page folds these rows by
+    // their rendered sentence (`isRuntimeSessionOpen`). The sentence itself is
+    // pinned at the projection (activity-feed-phase10.server.test.ts); this
+    // binds the recogniser to the row the loader actually ships.
+    // CANARY: reword the `runtime.run.started` case in activity-feed.server.ts
+    // alone and this goes red instead of the column silently un-compacting.
+    const { recordAudit, OPERATOR_AUDIT_ACTOR } = await import(
+      "~/server/audit/audit-recorder.server"
+    );
+    const { cookie } = await app.cookieFor(ardaId);
+    const shown = new Set((await runLoader("viberr-core", cookie)).audit.map((e) => e.id));
+    // The run service's own call: no human actor, a role, a task.
+    recordAudit(app.db, {
+      action: "runtime.run.started",
+      actor: OPERATOR_AUDIT_ACTOR,
+      subjectKind: "run",
+      subjectId: "run_r19_7",
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+      details: { role: "Reviewer" },
+    });
+    const added = (await runLoader("viberr-core", cookie)).audit.filter(
+      (e) => !shown.has(e.id),
+    );
+    expect(added).toHaveLength(1);
+    expect(isRuntimeSessionOpen(added[0]!)).toBe(true);
   });
 });

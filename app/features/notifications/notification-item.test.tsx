@@ -67,6 +67,7 @@ describe("NotificationItem (shared bell/page row)", () => {
     expect(container.querySelector(".pev-ico")!.classList.contains("act-blocked")).toBe(true);
     item.click();
     expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "n-142-packet" }));
   });
 });
 
