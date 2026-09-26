@@ -21,7 +21,7 @@ import { toError } from "~/shared/errors";
  * `network_unavailable` results. None of these throw, so the poller must read the
  * returned summary rather than relying on its try/catch.
  */
-export function reconcileSummaryFailed(summary: ProjectReconcileSummary): boolean {
+function reconcileSummaryFailed(summary: ProjectReconcileSummary): boolean {
   if (summary.status !== "ok") return true;
   return summary.results.some(
     (r) => r.status === "auth_failed" || r.status === "network_unavailable",
@@ -130,7 +130,7 @@ async function nudgeMergePendingTasks(
  * exactly like the poller handle: a restart re-counts from zero and re-crosses
  * the threshold within N ticks if the outage persists.
  */
-export const RECONCILE_FAILURE_ALERT_THRESHOLD = 3;
+const RECONCILE_FAILURE_ALERT_THRESHOLD = 3;
 
 const FAILURE_KEY = Symbol.for("viberr.githubReconcileFailures");
 interface FailureHost {
@@ -144,7 +144,7 @@ function failureTracker(): Map<string, { fails: number; alerted: boolean }> {
 
 /** A project reconcile succeeded — clear any failure streak so a new outage
  *  re-alerts (and, if we had alerted, stop suppressing future alerts). */
-export function noteReconcileSuccess(slug: string): void {
+function noteReconcileSuccess(slug: string): void {
   const tracker = failureTracker();
   if (tracker.has(slug)) tracker.delete(slug);
 }
@@ -152,7 +152,7 @@ export function noteReconcileSuccess(slug: string): void {
 /** A project reconcile threw — count it, and at the threshold notify the people
  *  who can fix the credential, exactly once until it recovers. Best-effort:
  *  the alert must never turn a per-project failure into a poll-aborting throw. */
-export function noteReconcileFailure(db: DatabaseSync, slug: string): void {
+function noteReconcileFailure(db: DatabaseSync, slug: string): void {
   const tracker = failureTracker();
   const entry = tracker.get(slug) ?? { fails: 0, alerted: false };
   entry.fails += 1;

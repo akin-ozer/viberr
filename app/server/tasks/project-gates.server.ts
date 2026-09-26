@@ -204,12 +204,6 @@ export async function whenProjectGatesIdle(): Promise<void> {
   }
 }
 
-/** Tests: forget every queued run (a run in flight finishes on its own). */
-export function resetProjectGatesForTests(): void {
-  pending.length = 0;
-  live.clear();
-}
-
 // ------------------------------------------------------------ requesting
 
 function refOf(input: { projectSlug: string; taskKey: string; dataRoot?: string | undefined }): TaskFileRef {
@@ -488,7 +482,7 @@ class BoundedLog {
   }
 }
 
-export interface GateCommandInput {
+interface GateCommandInput {
   command: string;
   cwd: string;
   timeoutMs: number;
@@ -498,7 +492,7 @@ export interface GateCommandInput {
   marker: string;
 }
 
-export interface GateCommandOutcome {
+interface GateCommandOutcome {
   exitCode: number | null;
   timedOut: boolean;
   wallMs: number;
@@ -509,7 +503,7 @@ export interface GateCommandOutcome {
 
 /** `sh -c <command>` as `launch` (or as the server), its own process group,
  *  killed with its group at the timeout. Never rejects. */
-export function runGateCommand(input: GateCommandInput): Promise<GateCommandOutcome> {
+function runGateCommand(input: GateCommandInput): Promise<GateCommandOutcome> {
   return new Promise((resolve) => {
     const started = Date.now();
     const log = new BoundedLog();

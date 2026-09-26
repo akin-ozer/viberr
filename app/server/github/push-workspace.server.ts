@@ -252,13 +252,6 @@ function pushFailed(reason: string, detail: string): PushWorkspaceResult {
 
 export type { Exec, ExecOutcome } from "~/server/tasks/workspace-git.server";
 
-/** The server's own git (`serverExec`: `serverGitEnv()` unless the caller
- *  hands a credentialed env built on it). Exported ONLY so its timeout
- *  detection can be proven against a really-killed child. Injecting a fake
- *  `exec` in a test proves the classification above but says nothing about
- *  whether a kill is detected at all. */
-export const defaultExec: Exec = serverExec;
-
 /**
  * The two runners a delivery takes: the workspace's own git (as the task's
  * person) and the server's (a stage the server owns). A test that injects one

@@ -37,8 +37,6 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
 import {
   recoverProjectGates,
   requestProjectGates,
-  resetProjectGatesForTests,
-  runGateCommand,
   whenProjectGatesIdle,
 } from "./project-gates.server";
 import {
@@ -184,7 +182,6 @@ afterEach(async () => {
   // A failing run's operator hand-off is fire-and-forget: let it settle
   // before the store it reads is removed.
   await flush();
-  resetProjectGatesForTests();
   resetAgentIsolationForTests();
   ctx.cleanup();
 });
@@ -290,6 +287,16 @@ describe("the gate run (ruling 482)", () => {
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(run().results[0]).toMatchObject({ name: "hang", exitCode: null, timedOut: true });
     expect(task().timeline[0]!.text).toContain("`hang` timed out");
+  });
+
+  it("records a gate killed by a signal as 128 + the signal, not as a start failure", async () => {
+    // CANARY: drop the `signalled` fallback in runGateCommand's close handler
+    // and the exit code reads null, the shape of a gate that never started.
+    setGates([{ name: "signalled", command: "kill -TERM $$" }]);
+    writeDeliveredTask();
+    await gateOnce();
+    expect(run()).toMatchObject({ status: "finished", error: null });
+    expect(run().results[0]).toMatchObject({ name: "signalled", exitCode: 143, timedOut: false });
   });
 
   it("records a run that could not execute, with the reason, instead of passing it", async () => {
@@ -657,19 +664,5 @@ describe("as the task owner's agent uid (ruling 460)", () => {
     await gateOnce();
     expect(run()).toMatchObject({ status: "error", results: [] });
     expect(run().error).toContain("no owner to run them as");
-  });
-});
-
-describe("runGateCommand", () => {
-  it("reports a signalled process as 128 + the signal, not as a start failure", async () => {
-    const outcome = await runGateCommand({
-      command: "kill -TERM $$",
-      cwd: ctx.makeTempDir("viberr-gate-"),
-      timeoutMs: 10_000,
-      launch: null,
-      env: { PATH: process.env.PATH ?? "" },
-      marker: "gate_test-1",
-    });
-    expect(outcome).toMatchObject({ exitCode: 143, timedOut: false, spawnError: null });
   });
 });

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { PrCacheState } from "./pr-linker.server";
 import {
   decidePrAdoption,
   prAdoptionRefusalNote,
@@ -45,20 +44,6 @@ describe("decidePrAdoption non-review states (fail closed, F17-L4 split)", () =>
     expect(decision).toEqual({ adopt: false, refusal: "closed" });
   });
 
-  it("keeps 'merged' and 'closed' as distinct refusals (the split matters)", () => {
-    const merged = decidePrAdoption({
-      state: "merged",
-      prHeadSha: REVISION,
-      revisionHeadSha: REVISION,
-    });
-    const closed = decidePrAdoption({
-      state: "closed",
-      prHeadSha: REVISION,
-      revisionHeadSha: REVISION,
-    });
-    expect(merged).not.toEqual(closed);
-  });
-
   it("treats the Viberr-only 'accepted' state as un-adoptable via the 'closed' arm", () => {
     // "accepted" (human-accepted, real merge pending) is not "merged", so it
     // falls into the non-merged branch and refuses as "closed".
@@ -82,58 +67,26 @@ describe("decidePrAdoption non-review states (fail closed, F17-L4 split)", () =>
 });
 
 describe("decidePrAdoption review state (identity check)", () => {
-  it("refuses with 'no_revision' when the task has delivered nothing (null)", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: REVISION,
-      revisionHeadSha: null,
+  it.each([
+    ["null (the task has delivered nothing)", null],
+    ["undefined", undefined],
+    ["whitespace only", "   "],
+  ] as const)("refuses with 'no_revision' when the delivered revision is %s", (_label, revisionHeadSha) => {
+    expect(decidePrAdoption({ state: "review", prHeadSha: REVISION, revisionHeadSha })).toEqual({
+      adopt: false,
+      refusal: "no_revision",
     });
-    expect(decision).toEqual({ adopt: false, refusal: "no_revision" });
   });
 
-  it("refuses with 'no_revision' when the delivered revision is undefined", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: REVISION,
-      revisionHeadSha: undefined,
+  it.each([
+    ["null (it could not be read, fail closed)", null],
+    ["undefined", undefined],
+    ["whitespace only", "  "],
+  ] as const)("refuses with 'head_unknown' when the PR head is %s", (_label, prHeadSha) => {
+    expect(decidePrAdoption({ state: "review", prHeadSha, revisionHeadSha: REVISION })).toEqual({
+      adopt: false,
+      refusal: "head_unknown",
     });
-    expect(decision).toEqual({ adopt: false, refusal: "no_revision" });
-  });
-
-  it("refuses with 'no_revision' when the delivered revision is whitespace only", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: REVISION,
-      revisionHeadSha: "   ",
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "no_revision" });
-  });
-
-  it("refuses with 'head_unknown' when the PR head could not be read (null, fail closed)", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: null,
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "head_unknown" });
-  });
-
-  it("refuses with 'head_unknown' when the PR head is undefined", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: undefined,
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "head_unknown" });
-  });
-
-  it("refuses with 'head_unknown' when the PR head is whitespace only", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: "  ",
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "head_unknown" });
   });
 
   it("refuses with 'head_mismatch' when a readable head is not the delivered revision", () => {
@@ -153,7 +106,6 @@ describe("decidePrAdoption review state (identity check)", () => {
       revisionHeadSha: REVISION,
     });
     expect(decision).toEqual({ adopt: true });
-    expect(decision.adopt).toBe(true);
   });
 
   it("adopts after trimming surrounding whitespace on both shas", () => {
@@ -176,37 +128,6 @@ describe("decidePrAdoption refusal-arm precedence", () => {
       revisionHeadSha: null,
     });
     expect(decision).toEqual({ adopt: false, refusal: "no_revision" });
-  });
-
-  it("emits the NAMED refusal of its own arm (no leaked adopt:true, no shared reason)", () => {
-    // F17-L4: `merged` and `closed` are separate reasons — a single `not_open`
-    // would let the two most different delivery hazards share one sentence.
-    const cases: {
-      state: PrCacheState;
-      head: string | null;
-      rev: string | null;
-      refusal: PrAdoptionRefusal;
-    }[] = [
-      { state: "merged", head: REVISION, rev: REVISION, refusal: "merged" },
-      { state: "closed", head: REVISION, rev: REVISION, refusal: "closed" },
-      { state: "review", head: REVISION, rev: null, refusal: "no_revision" },
-      { state: "review", head: null, rev: REVISION, refusal: "head_unknown" },
-      {
-        state: "review",
-        head: "deadbeef",
-        rev: REVISION,
-        refusal: "head_mismatch",
-      },
-    ];
-    for (const c of cases) {
-      expect(
-        decidePrAdoption({
-          state: c.state,
-          prHeadSha: c.head,
-          revisionHeadSha: c.rev,
-        }),
-      ).toEqual({ adopt: false, refusal: c.refusal });
-    }
   });
 });
 

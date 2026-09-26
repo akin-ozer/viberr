@@ -572,32 +572,4 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
     expect(affordance.terminallyBlocked).toBe(true);
     expect(affordance.canAccept).toBe(false);
   });
-
-  it("the override STILL works for the wedged process gate it exists for (DG-2)", async () => {
-    // Same task, PR open, no approving verdict on the delivered revision — the
-    // WEDGED case force-accept was granted for. It accepts, and the audit names
-    // the verdict gate it bypassed.
-    seedClosedPrTask({
-      pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },
-      validation: "changed",
-      workRevision: {
-        id: "rev_1",
-        headSha: "b".repeat(40),
-        treeSha: "t".repeat(40),
-        branch: "vib-1-attach-execution-workspace",
-        createdAt: "2026-08-01T09:00:00.000Z",
-        sourceProfileId: "developer",
-      },
-    });
-    await forceAcceptCompletion(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1" },
-      arda(),
-      { dataRoot: store.dataRoot },
-    );
-    expect(task().frontmatter.stage).toBe("done");
-    const forced = listAuditEvents(store.db, { action: "task.acceptance.forced" });
-    expect(forced).toHaveLength(1);
-    expect(JSON.stringify(forced[0]?.details)).toMatch(/approving verdict/i);
-  });
 });

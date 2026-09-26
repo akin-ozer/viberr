@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -56,7 +56,6 @@ import {
   recheckOpenReviewPrs,
   reconcileProject,
   reconcileTask,
-  resetReconcileCursorsForTests,
   resolveRemoteBranchCollision,
   type OperatorWake,
 } from "./github-reconciler.server";
@@ -1796,7 +1795,7 @@ describe("reconcileTask", () => {
     expect(alert!.title).toContain("merge can't complete");
   });
 
-  it("degrades typed: no branch, no PAT, network down; 403 opens a repo violation", async () => {
+  it("degrades typed on a branchless task, and a 403 on the compare opens a repo violation", async () => {
     const { store, actor } = setup();
     // Task without a branch.
     writeTask(store.dataRoot, store.slug, {
@@ -2746,10 +2745,6 @@ describe("R15-6 post-merge branch cleanup", () => {
  * rate-limit budget in a single burst on a large board.
  */
 describe("reconcileProject fan-out control", () => {
-  // The rotation cursor is module-global and keyed by slug — without this a
-  // second budgeted test inherits the first one's resume point.
-  beforeEach(resetReconcileCursorsForTests);
-
   function boardOf(count: number): ReturnType<typeof setup> {
     const { store, actor } = setup();
     for (let i = 0; i < count; i++) {

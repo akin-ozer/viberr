@@ -8,23 +8,22 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { fakeGithubFetch, type FakeResponder } from "../../../test-support/fake-github";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  type FakeResponder,
+} from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
-  noteReconcileFailure,
-  noteReconcileSuccess,
   pollGithubReconcile,
-  reconcileSummaryFailed,
-  RECONCILE_FAILURE_ALERT_THRESHOLD,
   startGithubReconcilePoller,
   stopGithubReconcilePoller,
 } from "./reconcile-poller.server";
 import * as reconciler from "./github-reconciler.server";
-import type { ProjectReconcileSummary } from "./github-reconciler.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 
 /** The registry symbol `reconcile-poller.server.ts` parks its interval handle
@@ -34,57 +33,6 @@ const POLLER_KEY = Symbol.for("viberr.githubReconcilePoller");
 interface PollerHost {
   [POLLER_KEY]?: ReturnType<typeof setInterval>;
 }
-
-/**
- * C7 (pass-24 fix): the alert fires from a returned SUMMARY, not only a thrown
- * error — because `reconcileProject` NEVER throws for a revoked/expired/removed
- * credential or a network drop (those come back as `status !== "ok"` or per-task
- * `auth_failed`/`network_unavailable` results). Before the fix `noteReconcileSuccess`
- * ran every tick and cleared the streak, so the "GitHub sync failing" alert was
- * dead for the exact class its own copy names.
- */
-describe("reconcileSummaryFailed (C7)", () => {
-  const summary = (
-    patch: Partial<ProjectReconcileSummary>,
-  ): ProjectReconcileSummary => ({
-    status: "ok",
-    results: [],
-    reconciled: 0,
-    changed: 0,
-    failed: 0,
-    skipped: 0,
-    ...patch,
-  });
-
-  it("a clean pass is NOT a failure", () => {
-    expect(reconcileSummaryFailed(summary({ results: [] }))).toBe(false);
-    expect(
-      reconcileSummaryFailed(
-        summary({ results: [{ status: "no_branch", taskKey: "T-1" }] }),
-      ),
-    ).toBe(false);
-  });
-
-  it("a credential/repo problem at context resolution (status !== ok) is a failure", () => {
-    expect(reconcileSummaryFailed(summary({ status: "no_pat_configured" }))).toBe(true);
-    expect(reconcileSummaryFailed(summary({ status: "no_repo_configured" }))).toBe(true);
-  });
-
-  it("a per-task auth or network failure (a revoked PAT / a dropped network) is a failure", () => {
-    expect(
-      reconcileSummaryFailed(
-        summary({ results: [{ status: "auth_failed", message: "401" }] }),
-      ),
-    ).toBe(true);
-    expect(
-      reconcileSummaryFailed(
-        summary({
-          results: [{ status: "network_unavailable", message: "ENOTFOUND" }],
-        }),
-      ),
-    ).toBe(true);
-  });
-});
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -316,36 +264,51 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
       )
       .all(store.slug) as { userId: string; title: string; href: string | null }[];
 
-  it("stays silent below the threshold, then notifies admins + maintainers once", () => {
+  /**
+   * C7 (pass-24 fix): `reconcileProject` never THROWS for the failures the
+   * alert names. A revoked, expired or removed credential or a dropped network
+   * comes back in the summary (`status !== "ok"`, or per-task
+   * `auth_failed`/`network_unavailable` results); before the fix every such
+   * tick ran `noteReconcileSuccess` and cleared the streak, so the alert was
+   * dead for the exact class its own copy names. Driven through the poll: an
+   * unreachable GitHub fails the task's compare.
+   */
+  it("a pass whose tasks cannot reach GitHub counts toward the alert: silent below the threshold, then admins + maintainers once", async () => {
     // Project the members into `project_members` (what listProjectMembers reads).
     const store = setupProjectedStore(ctx);
-    noteReconcileSuccess(store.slug); // clear any global streak from a prior test
+    seedBranchedTask(store, "VIB-1");
+    const poll = (fetchImpl: typeof fetch) =>
+      pollGithubReconcile(store.db, { dataRoot: store.dataRoot, fetchImpl });
+    const alerts = () =>
+      policyRows(store).filter((r) => r.title === "GitHub sync is failing for this project");
 
-    for (let i = 1; i < RECONCILE_FAILURE_ALERT_THRESHOLD; i += 1) {
-      noteReconcileFailure(store.db, store.slug);
-    }
+    // The failure streak is process-global and keyed by slug: a clean pass
+    // first clears whatever an earlier poll in this file left behind.
+    await poll(fakeGithubFetch(happyRoutes("vib-1")).fetchImpl);
+    await poll(unreachableFetch());
+    await poll(unreachableFetch());
     // Below the threshold: nothing yet.
-    expect(policyRows(store)).toHaveLength(0);
+    expect(alerts()).toHaveLength(0);
 
-    // Crossing the threshold alerts arda (admin) + murat (maintainer), NOT selin
-    // (contributor cannot edit policy / fix the credential).
-    noteReconcileFailure(store.db, store.slug);
-    const alerted = policyRows(store);
+    // The third failing pass alerts arda (admin) + murat (maintainer), NOT
+    // selin (a contributor cannot fix the credential). CANARY: drop the
+    // `reconcileSummaryFailed` read in pollGithubReconcile and nothing alerts.
+    await poll(unreachableFetch());
+    const alerted = alerts();
     expect(alerted.map((r) => r.userId).sort()).toEqual(
       [store.users.arda.id, store.users.murat.id].sort(),
     );
-    expect(alerted[0]!.title).toBe("GitHub sync is failing for this project");
     // Ruling 497: the credential is fixed on the project's GitHub page, so the
     // row opens there, not on the board. CANARY: drop `href` from the alert.
     expect(alerted[0]!.href).toBe(`/projects/${store.slug}/github`);
 
     // Further failures do NOT pile up duplicate rows (alerted flag + stable id).
-    noteReconcileFailure(store.db, store.slug);
-    noteReconcileFailure(store.db, store.slug);
-    expect(policyRows(store)).toHaveLength(2);
+    await poll(unreachableFetch());
+    await poll(unreachableFetch());
+    expect(alerts()).toHaveLength(2);
 
-    // A success clears the streak so a genuinely-new outage can alert again.
-    noteReconcileSuccess(store.slug);
+    // A clean pass clears the streak again, so later tests start from zero.
+    await poll(fakeGithubFetch(happyRoutes("vib-1")).fetchImpl);
   });
 })
 

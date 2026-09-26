@@ -26,7 +26,6 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { startRun } from "~/server/runtimes/run-service.server";
-import { composePrBody, latestEvidenceLines } from "~/server/github/pr-open.server";
 import {
   applyAgentCompletionEffects,
   deliveredWorkEvidence,
@@ -40,7 +39,9 @@ import { resolveAgentCollab, stageOutcome } from "./agent-outcome.server";
  * Parser, serializer, escape rule, `evidence_json` column, projection decode
  * and renderer all shipped; the tree held 42 `evidence: null` literals and ZERO
  * non-null writes, and `composePrBody`'s `evidence` param was never passed by
- * its one caller. These tests cover the three producers that close that.
+ * its one caller. These tests cover the producers that close that; the PR
+ * body's read of the newest rows is proven through `openTaskPr`
+ * (pr-open.server.test.ts).
  */
 
 let ctx: TestDbContext;
@@ -258,19 +259,6 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
 });
 
 describe("the agent's channel: attach-evidence-references is a REAL grant", () => {
-  it("resolveAgentCollab reads the grant that gates report_outcome's evidence field", () => {
-    expect(
-      resolveAgentCollab([
-        { capabilityId: "attach-evidence-references", mode: "human" },
-      ]).evidence,
-    ).toBe(false);
-    expect(
-      resolveAgentCollab([
-        { capabilityId: "attach-evidence-references", mode: "direct" },
-      ]).evidence,
-    ).toBe(true);
-  });
-
   it("the SEEDED reviewer profile actually holds it (its advertised label is now true)", async () => {
     const { SEED_AGENT_PROFILES } = await import("~/server/seed/agent-catalog.server");
     const reviewer = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "reviewer")!;
@@ -427,7 +415,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
       { label: "9 file(s) changed on `vib-1-work`", add: "+412", del: "−87" },
       { label: "1 commit(s) delivered, revision aaaaaaa", add: "—", del: "—" },
     ]);
-  }, 20_000);
+  });
 
   it("an agent WITHOUT the evidence grant contributes none of its own rows", async () => {
     deployReviewer([{ capabilityId: "report-validation-verdict", mode: "direct" }, { capabilityId: "attach-evidence-references", mode: "off" }]);
@@ -446,64 +434,5 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
     expect(JSON.stringify(quality.evidence)).not.toContain("smuggled/row");
     // The server-derived delivery rows still land.
     expect(quality.evidence).toHaveLength(2);
-  }, 20_000);
-});
-
-describe("composePrBody finally receives evidence (P13-D-26)", () => {
-  it("latestEvidenceLines reads the NEWEST evidence-bearing event", () => {
-    const ev = (occurredAt: string, label: string): TaskFileEvent => ({
-      occurredAt,
-      type: "quality",
-      actor: { kind: "operator" },
-      title: null,
-      text: "t",
-      toAgent: false,
-      evidence: [{ label, add: "+1", del: "0" }],
-    });
-    const timeline: TaskFileEvent[] = [
-      {
-        occurredAt: "2026-07-24T12:00:00.000Z",
-        type: "comment",
-        actor: { kind: "operator" },
-        title: null,
-        text: "no evidence here",
-        toAgent: false,
-        evidence: null,
-      },
-      ev("2026-07-24T11:00:00.000Z", "newest"),
-      ev("2026-07-24T10:00:00.000Z", "older"),
-    ];
-    expect(latestEvidenceLines(timeline)).toEqual(["newest · +1 · 0"]);
-    expect(latestEvidenceLines([])).toBeNull();
-  });
-
-  it("drops empty count columns from the PR-body line", () => {
-    expect(
-      latestEvidenceLines([
-        {
-          occurredAt: "2026-07-24T10:00:00.000Z",
-          type: "quality",
-          actor: { kind: "operator" },
-          title: null,
-          text: "t",
-          toAgent: false,
-          evidence: [{ label: "2 commit(s) delivered", add: "—", del: "—" }],
-        },
-      ]),
-    ).toEqual(["2 commit(s) delivered"]);
-  });
-
-  it("renders an ## Evidence section in the PR body", () => {
-    const body = composePrBody({
-      taskKey: "VIB-1",
-      projectSlug: "p",
-      title: "Attach execution workspace",
-      goal: "Attach a repo and run the specialist.",
-      appOrigin: "https://viberr.test",
-      changeSummary: "9 file(s) changed (+412/-87).",
-      evidence: ["unit/policy_gate_test · +14 · 0"],
-    });
-    expect(body).toContain("## Evidence");
-    expect(body).toContain("- unit/policy_gate_test · +14 · 0");
   });
 });

@@ -286,7 +286,7 @@ const ghCompareSchema = z
  *    this reader dropped answers null.
  * Anything else, including an answer with no status, is null: an unknown head.
  */
-export function comparedHeadSha(input: {
+function comparedHeadSha(input: {
   status: string | undefined;
   baseSha: string | null;
   mergeBaseSha: string | null;

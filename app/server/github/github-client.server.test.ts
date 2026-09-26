@@ -94,6 +94,7 @@ describe("github-client", () => {
     });
     const failure = await broken.request("GET", "/down", z.unknown());
     expect(failure.ok).toBe(false);
+    expect(failure.ok === false && failure.kind).toBe("http");
     if (!failure.ok && failure.kind === "http") {
       expect(failure.status).toBe(500);
       expect(failure.message).toBe("boom");
@@ -125,6 +126,7 @@ describe("github-client", () => {
     });
     const result = await c.request("GET", "/missing", z.unknown());
     expect(result.ok).toBe(false);
+    expect(result.ok === false && result.kind).toBe("http");
     if (!result.ok && result.kind === "http") {
       expect(result.status).toBe(404);
       expect(result.message).toBe("Not Found");

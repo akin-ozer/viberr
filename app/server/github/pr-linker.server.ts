@@ -242,7 +242,7 @@ export interface PrReviewEvent {
 /** The submitted reviews off the SAME `/reviews` payload the pill reads. A
  *  PENDING review is the reviewer's unsent draft, and an entry with no id or
  *  no login cannot be listed or attributed, so none of those is kept. */
-export function reviewEventsOf(reviews: readonly GhReview[]): PrReviewEvent[] {
+function reviewEventsOf(reviews: readonly GhReview[]): PrReviewEvent[] {
   const events: PrReviewEvent[] = [];
   for (const review of reviews) {
     const state = (review.state ?? "").toUpperCase();

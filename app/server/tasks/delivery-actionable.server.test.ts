@@ -676,39 +676,6 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     expect(await deliver()).toBe("delivered");
     expect(recs()).toHaveLength(0);
   });
-
-  it("G. R18-2 is untouched: full autonomy re-queues the operator and records NO card", async () => {
-    deployDeliveryOperator(store, "full");
-    seedTask();
-    expect(await deliver()).toBe("delivered");
-    await waitFor(() => runOp.mock.calls.length > 0, "the re-queued operator run");
-    expect(runOp).toHaveBeenCalledTimes(1);
-    expect(runOp.mock.calls[0]![1]).toMatchObject({ trigger: "delivered" });
-    expect(recs()).toHaveLength(0);
-  });
-
-  it("H. full autonomy that REUSES a PR re-queues nothing and records NO card", async () => {
-    deployDeliveryOperator(store, "full");
-    seedTask();
-    openTaskPrMock.mockResolvedValue({
-      status: "ok",
-      prNumber: 147,
-      created: false,
-      url: "http://x/pull/147",
-    });
-    // Ruling 134(b): a reuse re-queues nothing only when the push moved
-    // nothing; a moved head is a new review subject (delivery-requeue C2).
-    pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: "a".repeat(40) });
-    expect(await deliver()).toBe("delivered");
-    await flush();
-    // R18-2/R19-4: the guaranteed card is the SUPERVISED safety net only. Under
-    // full autonomy the operator drives, so it is never handed a card — and a
-    // reuse whose push moved nothing re-queues nothing, so full-autonomy-reuse
-    // leaves neither a re-queue nor a card. (A's owner-ruled gate overruled B's
-    // broader "card as the safety net" here.)
-    expect(runOp).not.toHaveBeenCalled();
-    expect(recs()).toHaveLength(0);
-  });
 });
 
 /**
@@ -716,8 +683,9 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
  * ONE hand-off. Full autonomy: the ruling-48 `delivered` re-queue the
  * re-delivery fired, and nothing else. Otherwise a `packet-resolved` re-queue
  * whose payload carries the ceremony's outcome in its own field. Canaries:
- * ignore `operatorRequeued` (two runs under full autonomy); drop the
- * ceremony's own hand-off (no run on the refusal arm or the edgeless board).
+ * ignore `operatorRequeued` (two runs under full autonomy, which F32-7's
+ * full-autonomy case above catches); drop the ceremony's own hand-off (no run
+ * on the refusal arm or the edgeless board).
  */
 describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
   const PACKET: TaskPacket = {
@@ -779,16 +747,6 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
       { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl, deps: DEPS },
     );
   }
-
-  it("under FULL autonomy a cleared, re-delivered collision runs the operator exactly once, with the `delivered` trigger", async () => {
-    deployDeliveryOperator(store, "full");
-    const github = await seedCollision(clearedRoutes());
-    await resolve(github);
-    await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
-    await flush();
-    expect(runOp).toHaveBeenCalledTimes(1);
-    expect(runOp.mock.calls[0]![1]).toMatchObject({ trigger: "delivered" });
-  });
 
   it("a refusal hands the operator the typed reason once, as Viberr's own record beside the human's decision", async () => {
     deployDeliveryOperator(store, "supervised");

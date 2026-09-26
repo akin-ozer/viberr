@@ -583,7 +583,7 @@ describe("ensureTaskBranch", () => {
     });
   });
 
-  it("degrades typed without a PAT / repo / default branch", async () => {
+  it("degrades typed without a PAT, refuses a base it cannot bootstrap, and answers task_not_found for an unknown task", async () => {
     // No PAT bound.
     const bare = setupTestStore(ctx);
     writeTask(bare.dataRoot, bare.slug, {

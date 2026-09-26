@@ -311,14 +311,12 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(
       (await ensureDefaultBranch(store.db, contextFor(store, unauthorized), { projectSlug: store.slug }, ACTOR, { dataRoot: store.dataRoot })).status,
     ).toBe("auth_failed");
-    const gh = contextFor(store, fakeGithubFetch({}));
     const { unreachableFetch } = await import("../../../test-support/fake-github");
     const offline = getProjectGithubContext(store.db, store.slug, { fetchImpl: unreachableFetch() });
     if (offline.status !== "ok") throw new Error("context");
     expect(
       (await ensureDefaultBranch(store.db, offline, { projectSlug: store.slug }, ACTOR, { dataRoot: store.dataRoot })).status,
     ).toBe("network_unavailable");
-    void gh;
   });
 });
 

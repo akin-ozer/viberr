@@ -244,7 +244,7 @@ export function humanVerdictNote(approval: PrHumanApproval): string {
  * a reviewer who approved on GitHub, saw nothing change, and has no idea their
  * account was never linked. Each sentence names the concrete repair.
  */
-export function humanApprovalRefusalNote(fm: {
+function humanApprovalRefusalNote(fm: {
   pr: PrRef | null;
   workRevision: WorkRevision | null;
 }): string | null {

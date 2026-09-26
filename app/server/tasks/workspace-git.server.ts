@@ -85,7 +85,7 @@ const execFileRejection = z
   .catch(() => ({ stdout: "", stderr: "", killed: false, signal: null }));
 
 /** `execFile` as an {@link ExecOutcome}: never throws. */
-export async function execOutcome(
+async function execOutcome(
   file: string,
   args: string[],
   options: ExecFileOptions,
