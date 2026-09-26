@@ -1487,10 +1487,13 @@ runtime's answer for a missing grant.
   run id when the row was reserved before the mount, else by a fresh id; the run carries
   the path) and run-service removes it when the run settles, the dispatch when a run fails
   before it starts, as the task's person (ruling 485). Whatever modes the store's skill
-  folder carries, the plugin's folders are 2775 and its files group-readable once the
-  copy is made (`makeCopyGroupRemovable`, `makeGroupRemovable`, ruling 495(a)): `cpSync`
-  keeps the source's modes, and a store folder's 0755 had left every settled run's plugin
-  behind, its files beyond the person's removal (F40-71). A plugin that is gone by the
+  folder carries, every entry of the plugin is made anew with the mode that removal needs
+  and never changed once it exists (`copySkillFolder`, `writeNewPluginFile`, ruling
+  495(a)): its folders by `mkdir` under the server's umask in the workspace's setgid
+  chain (2775), its files group-readable on their own new descriptor (0644, 0755 when
+  executable). `cpSync` kept the source's modes, and a store folder's 0755 had left every
+  settled run's plugin behind, its files beyond the person's removal (F40-71); a chmod
+  walk after the copy would follow a folder an agent swapped for a link. A plugin that is gone by the
   start enables no skill and the persona is corrected (`droppedSkillsNotice`). Residual: a run that never settles in-process (a
   crash) leaves its directory, inert, until the workspace is reclaimed. Canaried inside
   the image 2026-09-11 (SDK 0.3.261 / CLI 2.1.261): the init lists `viberr:<slug>` and the
@@ -1748,7 +1751,9 @@ runtime's answer for a missing grant.
   (`chmod -R -P g+rwX`, `-P` so it follows no link, not even the tree's own) and the
   person's pass and the rounds run again; when they leave an empty directory the server
   owns, the server removes it with `rmdir`. The server never runs `rm` there, and neither
-  step runs while a directory above the tree is a link an agent uid owns. A tree still
+  step runs while a directory above the tree is a link an agent could have put there (one
+  an agent uid owns, or any link in a folder an agent can write, a link the server's own
+  clone checked out included). A tree still
   there is a fault naming the path and the errno ("EACCES on …/dev-1wnDsF"). With no
   launcher the same two commands run as the server and nothing else; with isolation on
   and no owner to name the removal refuses and nothing is removed. A checkout with no `.git/HEAD` found when a
@@ -1764,7 +1769,9 @@ runtime's answer for a missing grant.
   workspace) with `origin` rewritten to the credential-free
   `https://github.com/<repo>.git`; a shallow direct clone (into a stage too) is the
   fallback. The mirror is the server's alone: boot takes group and other write off every
-  mirror file, and a hand-over never widens a file with a second link.
+  mirror file and puts it back in the server's own group (ruling 495: a removal's
+  `chmod -R -P g+rwX` can reach a checkout's object linked from the mirror, and opens it
+  only to the group it is in), and a hand-over never widens a file with a second link.
 - Credentials never touch argv or `.git/config`: the PAT is delivered through
   `GIT_ASKPASS` (`x-access-token`), `GIT_TERMINAL_PROMPT=0`, credential helper reset.
   Clone timeout 15 min (`VIBERR_GIT_CLONE_TIMEOUT_MS`); progress is streamed to the run
