@@ -148,8 +148,7 @@ describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
  * with no shared generator. They MUST expose the same governed-action vocabulary
  * for the same authority, or an operator would silently be able to do different
  * things on Codex than on Claude. This pins that parity: add a governed action
- * to one list but not the other and this fails — the guard F21-3 already gives
- * OPERATOR_READ_ONLY_DENIED_TOOLS via capability-denylist-markers.test.
+ * to one list but not the other and this fails.
  */
 describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (F27-O3)", () => {
   // get_task / read_default_branch_file are read-only Claude tools with no plan

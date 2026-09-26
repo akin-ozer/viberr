@@ -1375,7 +1375,7 @@ function failRunUnavailable(
  * principal resolved but their credential did not survive to spawn time, that
  * credential's own health detail.
  */
-export type RunUnavailability =
+type RunUnavailability =
   | { kind: "refusal"; refusal: RunPrincipalRefusal }
   /** A full sentence from the credential store (`UserBackendHealth.detail`, or
    *  the un-openable-key refusal `runCredentialFor` raises). */

@@ -1122,7 +1122,7 @@ describe("U39-19: a conversation is titled by its first sentence", () => {
  */
 describe("U39-30: the answer does not wait for the compaction", () => {
   it("is in the transcript while the compaction runs, and only once after it", async () => {
-    // CANARY: drop the `registerRunAnswered` hook and the transcript is empty
+    // CANARY: drop the `onAnswered` hook and the transcript is empty
     // of the reply during the compaction; drop the settle's `replyPosted`
     // check and the reply is posted twice.
     const { createConversation, listMessages } = await import("./controller-conversations.server");

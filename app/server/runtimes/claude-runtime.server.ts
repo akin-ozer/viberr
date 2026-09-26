@@ -376,8 +376,7 @@ export const INTERRUPT_ABORT_GRACE_MS = 10_000;
  * `kind: "operator"` run) and again in `operator-run.server.ts` (stated where
  * the run is built), as two unguarded literals with nothing tying them
  * together. Two copies of a confinement list is one copy away from a run that
- * believes it is read-only and is not, so `operator-run` imports this one and
- * `capability-denylist-markers.test.ts` pins the join.
+ * believes it is read-only and is not, so `operator-run` imports this one.
  *
  * Defined HERE rather than in `operator-run` because this module is a leaf of
  * the runtime graph: `operator-run` already imports the run service (which

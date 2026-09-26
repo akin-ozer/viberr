@@ -141,7 +141,7 @@ import {
   resolveTaskRunPrincipal,
   type RunPrincipalResolution,
 } from "./run-principal.server";
-// F21-3: the ONE operator confinement list (see the re-export below).
+// F21-3: the ONE operator confinement list, defined in claude-runtime.
 import { OPERATOR_READ_ONLY_DENIED_TOOLS } from "./claude-runtime.server";
 import {
   registerRunCompletion,
@@ -1760,15 +1760,12 @@ export async function ensureOperatorRepoCheckout(
  * names its confinement, and the operator spec no longer depends on a lookup
  * keyed by run kind to be read-only.)
  *
- * F21-3: this used to be a SECOND literal copy of that list. It is now a
- * re-export of the one in `claude-runtime.server` — the two can no longer drift
- * apart, and `capability-denylist-markers.test.ts` pins that they don't.
+ * F21-3: the list is imported from `claude-runtime.server`, its single source.
  * (`Bash` being on it is why the anchored default-branch read has to be a tool:
  * the operator cannot run `git show` itself — see `readDefaultBranchFile`.)
+ *
+ * The denylist for one operator run: read-only always, web egress by grant.
  */
-export { OPERATOR_READ_ONLY_DENIED_TOOLS };
-
-/** The denylist for one operator run: read-only always, web egress by grant. */
 function operatorDisallowedTools(authority: OperatorAuthority): string[] {
   return [
     ...OPERATOR_READ_ONLY_DENIED_TOOLS,
