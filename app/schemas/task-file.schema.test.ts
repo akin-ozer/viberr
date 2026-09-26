@@ -1014,8 +1014,8 @@ describe("pass 34 frontmatter additions", () => {
   it("ruling 131: `blockedBy` round-trips canonicalized, absent reads [] with no diagnostic, a malformed row drops only itself", () => {
     // Canary: delete the `blockedBy: tolerantRows(...)` line from the parse
     // (falling back to `[]`) and the first assertion reads `[]`.
-    const ok = parseTaskFrontmatter({ ...base, blockedBy: ["jc-6", "Goal-1 link 3"] });
-    expect(ok.frontmatter.blockedBy).toEqual(["JC-6", "goal-1 link 3"]);
+    const ok = parseTaskFrontmatter({ ...base, blockedBy: ["jc-6", "ax-12"] });
+    expect(ok.frontmatter.blockedBy).toEqual(["JC-6", "AX-12"]);
     expect(ok.diagnostics.filter((d) => d.path?.startsWith("blockedBy"))).toEqual([]);
 
     const absent = parseTaskFrontmatter(base);
@@ -1029,6 +1029,13 @@ describe("pass 34 frontmatter additions", () => {
     const diag = mixed.diagnostics.find((d) => d.code === "frontmatter.invalid_field");
     expect(diag?.path).toBe("blockedBy[0]");
     expect(diag?.message).toContain("nope");
+
+    // Ruling 503: a goal link is no longer a spelling. The boot conversion
+    // respelled every stored one by task key, so one written by hand since is
+    // a malformed row like any other, and drops only itself.
+    const legacy = parseTaskFrontmatter({ ...base, blockedBy: ["goal-1 link 3", "JC-7"] });
+    expect(legacy.frontmatter.blockedBy).toEqual(["JC-7"]);
+    expect(legacy.diagnostics.find((d) => d.path === "blockedBy[0]")?.message).toContain("goal-1 link 3");
   });
 
   it("ruling 132: `baseRefreshes` round-trips per row and absent reads []", () => {

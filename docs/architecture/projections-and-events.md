@@ -27,9 +27,9 @@ Writers (`app/server/files/`):
   "no space left on the data root" error; `ESTALE`/`EIO` become a 503 naming the data
   root unreachable.
 - **Per-file mutex**: `withFileLock(key)` (Web Locks, `navigator.locks`, in-process)
-  wraps every read-modify-write of `task.md`, `project.md` and goal files, plus a
-  goals-directory lock (`withGoalsLock`) around minting a goal id.
-- **Read-your-own-writes**: `write-cache.server.ts`, shared by the task, project and goal
+  wraps every read-modify-write of `task.md`, `project.md` and epic files, plus an
+  epics-directory lock (`withEpicsLock`) around minting an epic id.
+- **Read-your-own-writes**: `write-cache.server.ts`, shared by the task, project and epic
   writers, remembers the last content this process wrote per path and prefers it when a
   locked read disagrees and the mtime has not advanced past the write by more than
   100 ms (bind mounts over VirtioFS serve stale reads).
@@ -41,12 +41,12 @@ Writers (`app/server/files/`):
   bind-mount read is never pinned; each caller gets its own `structuredClone`.
 - **Trust guard**: `updateTaskFile` and `updateProjectFile` refuse to write a file whose
   parse produced a hard-stop diagnostic (`file_not_trusted`, 409): a write would replace
-  the human's content with defaults. `updateGoalFile` refuses a goal file that does not
-  parse (409). `updateTaskFile` always bumps `updatedAt`; `updateGoalFile` writes nothing
+  the human's content with defaults. `updateEpicFile` refuses an epic file that does not
+  parse (409). `updateTaskFile` always bumps `updatedAt`; `updateEpicFile` writes nothing
   when the bytes are unchanged.
 - **Frontmatter**: `---` fences, YAML between, markdown body after; BOM stripped,
   CRLF and lone CR normalized; unknown top-level keys round-trip verbatim in task,
-  project, goal and agent-profile files (an agent profile also warns
+  project, epic and agent-profile files (an agent profile also warns
   `agent_profile.unknown_field`).
 
 ## 2. The watcher
@@ -55,10 +55,10 @@ Writers (`app/server/files/`):
 symlink following, atomic-write coalescing) with a **250 ms trailing debounce per
 path**. It ignores any dot-prefixed segment, any `*.tmp`, and everything at depth 4 or
 deeper except `tasks/<KEY>/task.md`, so `workspace/`, `attachments/` and mirrors are
-never traversed. It reacts to `project.md`, `task.md` and `goals/*.md` with
+never traversed. It reacts to `project.md`, `task.md` and `epics/*.md` with
 `rebuildPath`, and reconciles directory deletions: a removed project or `tasks/`
 directory re-checks every projected task of the project, a removed task directory
-projects the task's removal, and a removed `goals/` directory prunes its goal rows.
+projects the task's removal, and a removed `epics/` directory prunes its epic rows.
 
 A rebuild that fails (a throw, `rebuildPath` answering `error`, or a `project.md` whose
 cascade left `failedTasks`) is retried per file at 2, 5, 15, 45 and 120 seconds, reset
@@ -99,16 +99,17 @@ list), `frontmatter.unresolved_stage`, `frontmatter.duplicate_engagement`,
 `packet.no_yaml_block | invalid_yaml | invalid_option | invalid_observation | invalid |
 rec_count`, `timeline.malformed_heading | invalid_timestamp | unknown_actor |
 malformed_evidence | stray_content | unknown_type | out_of_order`,
-`reference.unknown_stage`, `agent_profile.invalid | unknown_field`. Goal files are the
-exception: a goal whose frontmatter is not a map or fails the schema has no partially
-usable form, so every finding (`frontmatter.not_a_map`, `frontmatter.invalid_field`,
-plus the fence codes) is a hard stop and the goal does not project.
+`reference.unknown_stage`, `agent_profile.invalid | unknown_field`. Epic files are the
+exception: an epic whose frontmatter is not a map, fails the schema, or names an id other
+than its file's has no partially usable form, so every finding (`frontmatter.not_a_map`,
+`frontmatter.invalid_field`, plus the fence codes) is a hard stop and the epic does not
+project.
 
-`npm run store:check` lists every project, task and goal file the app cannot trust
+`npm run store:check` lists every project, task and epic file the app cannot trust
 (hard stop) or that is degraded (error), with the offending line. `npm run rescan`
 counts rebuilds that ended in `error`, not untrusted files: a malformed task or project
 file still projects (with defaults and a hard stop) and reports zero errors there, while
-an unparseable goal file counts as one.
+an unparseable epic file counts as one.
 
 ## 4. Projection tables and the rebuilder
 
@@ -128,7 +129,7 @@ an unparseable goal file counts as one.
   (the watcher's retry included) runs the cascade again. A write that only moves
   `nextTaskNumber` (every task creation), a file lease or the description costs the
   project row and one `project.updated`. The rescans read the same answer
-  (`taskFacingChanged`) before they force a project's tasks and goals. A vanished
+  (`taskFacingChanged`) before they force a project's tasks. A vanished
   `project.md` deletes its diagnostics first and the `projects` row last (members
   cascade), and emits `project.removed`.
 - `rebuildTaskFile` computes the derived `readiness` (`deriveReadiness`: the
@@ -142,7 +143,7 @@ an unparseable goal file counts as one.
   when a stored `human` wait rests only on a pending schedule occurrence with no packet,
   no recommendation, nothing a human could accept now, no `blockedBy` and not archived,
   ruling 225; a stored `schedule` projects as `human`), `repo` always the project's,
-  counts and `recommendation_kinds`, `schedules_json`, `goal_id` / `goal_link_index`,
+  counts and `recommendation_kinds`, `schedules_json`, `epic_id` (ruling 503),
   `work_revision_sha` (the active work revision; a discarded one projects as null,
   ruling 161), `board_rank`; writes `task_events` (position 0 = newest, actor
   snapshot denormalized into `actor_json` so events survive member removal, agent
@@ -153,19 +154,20 @@ an unparseable goal file counts as one.
   does not remount (ruling 457); stores `""` as the hash until events and diagnostics
   landed; emits `task.updated`. A vanished `task.md` deletes events and
   diagnostics first and the projection row last, and emits `task.removed`.
-- `rebuildGoalFile` reconciles link statuses against live task rows (a terminal-stage
-  task makes its link `done`, an archived one `failed` unless already `done`, `skipped`
-  stays, and a `done`/`failed` link whose task moved back becomes `active`) and emits
-  `goal.updated`. A goal file that does not parse writes its hard-stop diagnostics and a
-  provenance `error` row and keeps its previous projection.
+- `rebuildEpicFile` (ruling 503) projects the epic file's own fields into
+  `epic_projections` and emits `epic.updated`; it reads no task, because an epic's tasks
+  are the task rows whose `epic_id` names it and its progress is counted from them at read
+  time (`epic-query.server.ts`). An epic file that does not parse writes its hard-stop
+  diagnostics and a provenance `error` row and keeps its previous projection; a vanished
+  one deletes its row and emits `epic.updated`.
 - `dependencies.server.ts` (ruling 131) is the READ model beside the rebuilder:
   `resolveDependencies` / `dependencyResolver` map each stored entry to
   `open | done | failed | missing` from the live projections (a task at the
-  terminal stage is `done`, an archived one `failed`; a goal link takes its task's
-  state once created, else its own status, `skipped` counting as done). The board
+  terminal stage is `done`, an archived one `failed`; every entry is a task key since
+  ruling 503 retired the goal-link spelling). The board
   query resolves every row through ONE resolver; the task query resolves on read;
   nothing caches a resolved state. `listHeldTasks` feeds the release engine.
-- Each file's re-projection (project, task, goal) runs as ONE transaction, its
+- Each file's re-projection (project, task, epic) runs as ONE transaction, its
   projection events held until COMMIT; a caller already inside a transaction (the full
   rebuild, a project's cascade) runs it inline (ruling 457). A rebuild that throws rolls
   back and announces nothing; a cascaded task rolls back only to its savepoint (above).
@@ -189,10 +191,10 @@ Whole-store operations:
 
 | Operation | What | Cooldown | Where |
 |---|---|---|---|
-| **Rescan** | Walk projects → tasks → goals, re-project changed files by hash, prune vanished rows, one `rescan` provenance row, `projection.rebuilt {scope: full}`. Audit `projection.rescan`. | 10 s (`RESCAN_MIN_INTERVAL_MS`) | Home store strip (org admin), `npm run rescan` (takes the writer lock; `--force` reprojects everything), boot |
+| **Rescan** | Walk projects → tasks → epics, re-project changed files by hash, prune vanished rows, one `rescan` provenance row, `projection.rebuilt {scope: full}`. Audit `projection.rescan`. | 10 s (`RESCAN_MIN_INTERVAL_MS`) | Home store strip (org admin), `npm run rescan` (takes the writer lock; `--force` reprojects everything), boot |
 | **Project rescan** | `rescanProject` → `rebuildProject`: the same reconcile confined to one project, `projection.rebuilt {scope: project}`. Audit `projection.rescan` with the slug. | none | Board Re-scan (`rescan-project`: project admin or maintainer) |
 | **Rebuild** | One transaction: `DELETE` `task_events`, `diagnostics`, `task_projections`, `projects` (members cascade), then a forced full rescan; events buffered until commit. Audit `projection.rebuild`. Users, sessions, secrets, audit, notifications, provenance and runs untouched. | 30 s (`REBUILD_MIN_INTERVAL_MS`) | Home store strip (org admin, confirm dialog) |
-| **Store check** | Read-only parse of every project, task and goal file, no lock. | none | `npm run store:check` |
+| **Store check** | Read-only parse of every project, task and epic file, no lock. | none | `npm run store:check` |
 
 The single-flight helper is a cooldown, not a mutex: it stamps the timestamp before
 the work runs and a throttled call answers `{ status: "throttled", retryAfterMs }`
@@ -203,7 +205,7 @@ the work runs and a throttled call answers `{ status: "throttled", retryAfterMs 
 **Projection events** (`projection-events.server.ts`): `task.updated`, `task.removed`,
 `project.updated`, `project.removed`, `projection.rebuilt {scope, changed}`,
 `notification.created {userId}`, `notification.read {userId}`, `violation.updated
-{projectSlug, taskKey}`, `goal.updated {projectSlug, goalId}`. Inside
+{projectSlug, taskKey}`, `epic.updated {projectSlug, epicId}`. Inside
 `collectProjectionEvents` (the rebuild's transaction, and each single file's
 re-projection, ruling 457) they are buffered and re-emitted only after commit; a throw
 discards them. The publisher (`event-publisher.server.ts`)
@@ -236,7 +238,7 @@ an empty project slug and no route publishes nothing), and the org resource broa
 | `run.state-changed` | `projectSlug, taskKey, runId, threadId, state` | project + task |
 | `controller.updated` | `conversationId, userId` | the owner's `user` scope |
 | `controller.log-appended` | `conversationId, userId, runId, threadId, seq` | the owner's `user` scope |
-| `goal.updated` | `projectSlug, goalId` | project |
+| `epic.updated` | `projectSlug, epicId` | project |
 | `stream.open` | `headId` | control: the connection's first message |
 | `stream.resync` | `{}` | control: sent when replay cannot catch a reconnect up |
 

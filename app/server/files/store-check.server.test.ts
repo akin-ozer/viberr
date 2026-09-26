@@ -60,24 +60,24 @@ title: Truncated
 stage: impl
 `;
 
-function writeRawGoal(
+function writeRawEpic(
   dataRoot: string,
   slug: string,
-  goalId: string,
+  epicId: string,
   content: string,
 ): string {
-  const dir = path.join(dataRoot, "projects", slug, "goals");
+  const dir = path.join(dataRoot, "projects", slug, "epics");
   mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `${goalId}.md`);
+  const file = path.join(dir, `${epicId}.md`);
   writeFileSync(file, content, "utf8");
   return file;
 }
 
-/** A goal file whose required `title` was deleted by a hand edit: the schema
- *  rejects it outright, so the goal has no readable form at all. */
-const BROKEN_GOAL = `---
-id: goal-7
-status: active
+/** An epic file whose required `title` was deleted by a hand edit: the schema
+ *  rejects it outright, so the epic has no readable form at all. */
+const BROKEN_EPIC = `---
+id: epic-7
+status: in_progress
 createdBy: u_arda
 ---
 
@@ -87,25 +87,23 @@ Ship the release.
 
 ## Timeline
 
-- 2026-08-30T10:00:00.000Z · Goal created with 2 links by arda@viberr.dev.
+- 2026-09-26T10:00:00.000Z · Created by Arda.
 `;
 
-const HEALTHY_GOAL = `---
-id: goal-1
+const HEALTHY_EPIC = `---
+id: epic-1
 title: Ship the release
-status: active
+status: in_progress
+color: teal
+leadUserId: null
+startDate: null
+targetDate: 2026-10-15
 createdBy: u_arda
 createdByLabel: arda@viberr.dev
-onFailure: pause
-links:
-  - index: 1
-    title: Cut the branch
-    goal: Branch exists.
-    taskKey: null
-    status: pending
-    note: null
-createdAt: 2026-08-30T10:00:00.000Z
-updatedAt: 2026-08-30T10:00:00.000Z
+conversationId: null
+convertedFrom: null
+createdAt: 2026-09-26T10:00:00.000Z
+updatedAt: 2026-09-26T10:00:00.000Z
 ---
 
 ## Description
@@ -114,7 +112,7 @@ Ship the release.
 
 ## Timeline
 
-- 2026-08-30T10:00:00.000Z · Goal created with 1 link by arda@viberr.dev.
+- 2026-09-26T10:00:00.000Z · Created by Arda.
 `;
 
 describe("checkStore", () => {
@@ -169,30 +167,45 @@ describe("checkStore", () => {
   });
 
   /**
-   * Ruling 99 added a THIRD canonical file class. A rescan counts a broken
-   * goal file as an error (the parse returns null, unlike the tolerant task
-   * parser), so the human is told a number and — until the doctor walked
-   * goals — had nothing that named the file.
+   * Ruling 99 added a THIRD canonical file class, the goal; ruling 503
+   * replaced it with the epic. A rescan counts a broken epic file as an error
+   * (the parse returns null, unlike the tolerant task parser), so the human
+   * is told a number and, without the doctor walking epics, nothing names the
+   * file.
    */
-  it("names a broken goal file, the class the controller pass introduced", () => {
+  it("names a broken epic file, the class ruling 503 introduced", () => {
+    // CANARY: drop the epics walk from `checkStore`.
     const store = setupTestStore(ctx);
-    writeRawGoal(store.dataRoot, store.slug, "goal-7", BROKEN_GOAL);
+    writeRawEpic(store.dataRoot, store.slug, "epic-7", BROKEN_EPIC);
 
     const report = checkStore({ dataRoot: store.dataRoot });
-    const broken = report.untrusted.find((f) => f.kind === "goal");
+    const broken = report.untrusted.find((f) => f.kind === "epic");
     expect(broken).toBeDefined();
-    expect(broken!.path).toBe(`projects/${store.slug}/goals/goal-7.md`);
-    expect(broken!.blocking.length).toBeGreaterThan(0);
-    expect(report.text).toContain("goals/goal-7.md");
+    expect(broken!.path).toBe(`projects/${store.slug}/epics/epic-7.md`);
+    expect(broken!.blocking.map((d) => d.path)).toContain("title");
+    expect(report.text).toContain("epics/epic-7.md");
   });
 
-  it("trusts a well-formed goal file", () => {
+  it("names an epic file whose id is not its file name", () => {
+    // CANARY: stop passing the file's id to `diagnoseEpicFileContent`.
     const store = setupTestStore(ctx);
-    writeRawGoal(store.dataRoot, store.slug, "goal-1", HEALTHY_GOAL);
+    writeRawEpic(store.dataRoot, store.slug, "epic-2", HEALTHY_EPIC);
+
+    const report = checkStore({ dataRoot: store.dataRoot });
+    const broken = report.untrusted.find((f) => f.kind === "epic");
+    expect(broken?.blocking.map((d) => d.message)).toContain(
+      "id: the file is named epic-2 but says it is epic-1.",
+    );
+  });
+
+  it("trusts a well-formed epic file", () => {
+    const store = setupTestStore(ctx);
+    writeRawEpic(store.dataRoot, store.slug, "epic-1", HEALTHY_EPIC);
 
     const report = checkStore({ dataRoot: store.dataRoot });
     expect(report.untrusted).toEqual([]);
-    expect(report.files.some((f) => f.kind === "goal")).toBe(true);
+    expect(report.files.some((f) => f.kind === "epic")).toBe(true);
+    expect(report.text).toContain("Every project, task and epic file parsed cleanly.");
   });
 });
 

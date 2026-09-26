@@ -11,7 +11,7 @@ import { readTaskFile, type TaskFileRef } from "~/server/files/task-writer.serve
 import { storeRelativePath } from "~/server/files/file-store-root.server";
 import { getProject, listProjectTasks } from "~/server/projections/board-query.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
-import { listGoals } from "~/server/tasks/goal-actions.server";
+import { listEpics } from "~/server/projections/epic-query.server";
 import {
   listHomeProjectsForUser,
   type HomeProjectCard,
@@ -65,7 +65,7 @@ import {
 export const TASK_FILE_CONTEXT_CHARS = 24_000;
 export const BOARD_CONTEXT_TASKS = 40;
 const BOARD_CONTEXT_MEMBERS = 20;
-const BOARD_CONTEXT_GOALS = 20;
+const BOARD_CONTEXT_EPICS = 20;
 const BOARD_CONTEXT_CHARS = 12_000;
 const INSTANCE_CONTEXT_PROJECTS = 40;
 export const CONTEXT_BLOCK_CHARS = 32_000;
@@ -305,7 +305,7 @@ function taskContext(
     authority,
     `engaged agents: ${engaged.length ? engaged.join(", ") : "none"}${summary.operator ? " · operator assigned" : ""}`,
     `branch: ${summary.branch ?? "none"} · ${summary.pr ? `PR #${summary.pr.number} ${summary.pr.state}` : "no PR"}`,
-    `open packet: ${summary.packet ? `"${summary.packet.title}"` : "none"}${summary.goalRef ? ` · goal chain ${summary.goalRef.goalId} link ${summary.goalRef.linkIndex}` : ""}`,
+    `open packet: ${summary.packet ? `"${summary.packet.title}"` : "none"}${summary.epicId ? ` · epic ${summary.epicId}` : ""}`,
   ];
   // Ruling 131: what the task waits on, each entry with its live state, so
   // the controller never has to infer a hold from a packet that is not there.
@@ -393,21 +393,23 @@ function boardContext(
   if (listed < open.length) {
     lines.push(`- ... ${open.length - listed} more open tasks; list_tasks reads them`);
   }
-  const allGoals = listGoals(db, slug);
-  const goals = allGoals
-    .slice(0, BOARD_CONTEXT_GOALS)
+  // Ruling 503: the open epics, with how far each has got. A closed one
+  // (done, cancelled) is history the board no longer works in.
+  const allEpics = listEpics(db, slug).filter((e) => e.status !== "done" && e.status !== "cancelled");
+  const epics = allEpics
+    .slice(0, BOARD_CONTEXT_EPICS)
     .map(
-      (g) =>
-        `- ${g.id} · ${g.title} · ${g.status}${g.currentIndex ? ` · link ${g.currentIndex} of ${g.links.length}` : ""}`,
+      (e) =>
+        `- ${e.id} · ${e.title} · ${e.status} · ${e.progress.done} of ${e.progress.total} done${e.progress.held ? `, ${e.progress.held} held` : ""}`,
     );
-  if (allGoals.length > goals.length) {
-    goals.push(`- ... ${allGoals.length - goals.length} more chains; list_goals reads them`);
+  if (allEpics.length > epics.length) {
+    epics.push(`- ... ${allEpics.length - epics.length} more open epics; list_epics reads them`);
   }
   const description = project.description.trim();
   return (
     `## Board ${project.name} (slug ${slug})${project.archived ? " · ARCHIVED (read-only)" : ""}\n` +
-    // Ruling 292: the excerpt names its reader, exactly as the goal-chain line
-    // six lines above already does ("list_goals reads them"). `get_project`
+    // Ruling 292: the excerpt names its reader, exactly as the epics line
+    // above already does ("list_epics reads them"). `get_project`
     // carries the description whole (line ~1342); without the pointer this
     // ellipsis was a cut with nowhere to go, on the one text a board's owner
     // writes to explain what the board IS.
@@ -424,7 +426,7 @@ function boardContext(
     `boundaries: ${boundaries || "none declared"}\n` +
     `open tasks: ${open.length} (${waitingHuman} waiting on a human${waitingSchedule > 0 ? `, ${waitingSchedule} resuming on a schedule` : ""}${archived ? `, ${archived} archived` : ""})\n` +
     (lines.length ? `${lines.join("\n")}\n` : "") +
-    `goal chains: ${goals.length ? `\n${goals.join("\n")}` : "none"}`
+    `open epics: ${epics.length ? `\n${epics.join("\n")}` : "none"}`
   );
 }
 

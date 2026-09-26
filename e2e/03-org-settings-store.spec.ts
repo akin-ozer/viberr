@@ -62,7 +62,7 @@ test("the instance pages sit under the app header (ruling 145)", async ({ page }
     );
     // The four parts the workspace topbar carries, in the same order.
     await expect(
-      header.getByLabel("Search tasks, branches, agents, projects"),
+      header.getByLabel("Search tasks, epics, branches, agents, projects"),
     ).toBeVisible();
     await expect(header.getByLabel("Notifications")).toBeVisible();
     await expect(header.getByLabel("Account menu")).toBeVisible();

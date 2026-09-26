@@ -1,14 +1,15 @@
 # Canonical file formats (file-native store)
 
 The markdown files under `${VIBERR_DATA_ROOT}` that Viberr treats as canonical business truth,
-field by field: `project.md`, `task.md` (frontmatter, packet and timeline grammar), goal
+field by field: `project.md`, `task.md` (frontmatter, packet and timeline grammar), epic
 files, agent profile templates and the smaller files beside them. SQLite holds projections of
 them; [data-model.md](data-model.md) has the tables and the full data-root layout.
 Source of truth: `app/schemas/project-file.schema.ts`, `app/schemas/task-file.schema.ts`,
-`app/schemas/goal-file.schema.ts`, `app/server/files/agent-profile-file.server.ts` (schemas);
+`app/schemas/epic-file.schema.ts`, `app/server/files/agent-profile-file.server.ts` (schemas);
 `app/server/files/task-file.server.ts`, `frontmatter.server.ts`, `project-writer.server.ts`,
-`task-writer.server.ts`, `goal-writer.server.ts`, `actor-ref.server.ts` (parsers and writers).
-Verified against `main` @ `7d9fbf72` (2026-09-23).
+`task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers).
+Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 503
+(2026-09-26).
 
 Humans and agents may edit these files directly. The watcher (250 ms debounce) and the manual
 rescan reconcile them into projections. The UI always renders the REAL store-relative path
@@ -31,7 +32,10 @@ ${VIBERR_DATA_ROOT}/
                                              not watched, not projected; reclaimed for
                                              terminal-stage tasks at boot and on
                                              maintenance passes when no run is live
-  projects/<slug>/goals/<id>.md           ← chained-goal truth (ruling 99)
+  projects/<slug>/epics/<id>.md           ← epic truth (ruling 503)
+  projects/<slug>/goals/converted/        ← the retired chained-goal files, filed by the
+                                             one-time conversion to epics (ruling 503);
+                                             a record, not watched or projected
   projects/<slug>/.repo-mirror/           ← bare per-repo mirror (ruling 87); a cache
   agents/profiles/<id>.md                 ← org-level agent profile templates
   agents/definitions/{operator,controller}.md ← shipped doctrine files
@@ -59,7 +63,7 @@ General rules for the canonical files:
 
 - **Frontmatter** is YAML between `---` fences; UTF-8; timestamps are UTC ISO 8601 strings.
   A leading BOM is dropped and CRLF / lone CR line endings are read as LF. Unknown
-  frontmatter fields are ALWAYS preserved by the writers of `project.md`, `task.md` and goal
+  frontmatter fields are ALWAYS preserved by the writers of `project.md`, `task.md` and epic
   files (round-trip safe for future/foreign fields).
 - **YAML output** (`toYaml`) never folds lines, and double-quotes any string a YAML 1.1 reader
   would take for a boolean (`mode: "off"`, `"yes"`), so other tools read the same value.
@@ -71,13 +75,13 @@ General rules for the canonical files:
   throws and never drops a task or project.
   Diagnostics floor readiness (warning → `input_required`, error →
   `inconsistency_risk_detected`, hard stop → `blocked`) — see
-  `app/server/interpretation/diagnostics-policy.server.ts`. Goal files and agent profiles are
+  `app/server/interpretation/diagnostics-policy.server.ts`. Epic files and agent profiles are
   the stricter exceptions (§2b, §4).
 - **Write guard**: a hard stop means the file's own fields could not be read at all (no
   frontmatter, an unterminated fence, unparseable YAML, frontmatter that is not a mapping).
   The project and task writers refuse to rewrite such a file (409 `FILE_NOT_TRUSTED`), because
   a read-modify-write would serialize the defaults over it; `npm run store:check` names the
-  line. The goal writer likewise refuses to change a goal file it cannot parse.
+  line. The epic writer likewise refuses to change an epic file it cannot parse.
 - **Atomic writes**: writers stage to `<file>.<rand>.tmp` and rename; the watcher ignores
   dot-prefixed paths and `*.tmp`. All writer mutations run under a per-file in-process mutex.
 
@@ -94,7 +98,7 @@ slug: viberr-core                 # must match the directory; the directory name
 archived: true                    # optional; only an archived project carries the key
 repo: akin-ozer/viberr            # THE project's GitHub repo (one per project)
 defaultBranch: main
-taskPrefix: VIB                   # letters only; task keys: VIB-142. `GOAL` is reserved
+taskPrefix: VIB                   # letters only; task keys: VIB-142. `EPIC` is reserved
 nextTaskNumber: 169               # atomic per-project key counter
 stages:                           # per-project, ordered (ruling 15)
   - id: triage
@@ -425,17 +429,17 @@ priority: normal                  # low | normal | high | urgent (PRIORITY_VALUE
                                   # reads; never in the specialist prompt
 labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
 dueDate: null                     # R26-1: `YYYY-MM-DD` or null — advisory metadata
-blockedBy:                        # ruling 131: what this task WAITS ON, in exactly
-  - JC-6                          # two spellings (app/shared/dependencies.ts): a
-  - goal-1 link 3                 # task key, or `<goal-id> link <n>`. Non-empty
+blockedBy:                        # ruling 131: what this task WAITS ON, as task
+  - JC-6                          # keys (app/shared/dependencies.ts; ruling 503
+  - JC-9                          # retired `<goal-id> link <n>`). Non-empty
                                   # floors the derived readiness at `blocked`,
                                   # settles `waiting: none`, refuses the operator's
                                   # create/transition/scheduled triggers, and is
                                   # cleared by the release engine when every entry
                                   # is done. States are resolved at read time,
-                                  # never stored. Parsed per row. `GOAL` is a
-                                  # reserved taskPrefix: `GOAL-1` would read as
-                                  # a goal reference missing its link
+                                  # never stored. Parsed per row. `EPIC` is a
+                                  # reserved taskPrefix: `EPIC-1` would read as
+                                  # the epic `epic-1` wherever it is named
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
 gateRun:                          # optional; ruling 482 — the project's gates as VIBERR
   id: gate_Xk2…                   # last ran them, bound to a revision like a verdict.
@@ -462,7 +466,14 @@ headCheckWaiver:                  # optional; ruling 226 — a maintainer took a
   at: 2026-09-14T02:40:00.000Z    # head it was granted for and become a standing permission.
   byUserId: u_abc123
   byLabel: Arda
-goalRef: null                     # ruling 99: { goalId, linkIndex } for a chained-goal task
+epic: epic-3                      # ruling 503: the epic this task is in, or absent
+                                  # (null) for none. The task carries the membership
+                                  # (the project→task shape of `stage`), so a task is
+                                  # in at most one epic; written by `setTasksEpic`
+                                  # and `createTask`. The conversion removed the
+                                  # retired `goalRef` from every task that named a
+                                  # goal; a leftover `goalRef: null` is an unknown
+                                  # key, kept as written and read by nothing
 createdAt: 2026-07-03T06:00:00.000Z
 updatedAt: 2026-07-04T06:58:30.000Z
 boardRank: 300                    # sparse rank for drag-to-reorder; null falls
@@ -747,75 +758,66 @@ Packet notes:
   evidence row without three parts) are skipped with a warning diagnostic (readiness floors
   at `input_required`) — the task itself is never dropped.
 
-## 2b. `projects/<slug>/goals/<goal-id>.md` (chained goals — ruling 99)
+## 2b. `projects/<slug>/epics/<epic-id>.md` (epics — ruling 503)
 
-Frontmatter + `## Description` (the outcome, prose) + `## Timeline` (history
-bullets, newest first: `- <UTC ISO> · <text>`). Goal ids are `goal-<n>`, the next free number
-in the project's `goals/`.
+Frontmatter + `## Description` (what the body of work is for, markdown) + `## Timeline`
+(history bullets, newest first: `- <UTC ISO> · <text>`). Epic ids are `epic-<n>`, the next
+free number in the project's `epics/`, minted under the project's epics lock.
 
 ```markdown
 ---
-id: goal-1
-title: Ship the billing revamp
-status: active                    # active | paused | attention | completed | cancelled
-createdBy: u_abc123               # the authority chain advancement re-proves
+id: epic-3
+title: Checkout redesign          # 3..120 characters (EPIC_TITLE_MAX)
+status: in_progress               # planned | in_progress | paused | done | cancelled:
+                                  # a person's call, never derived from the tasks
+color: violet                     # one of the twenty stage presets (ruling 364); a
+                                  # new epic takes the next of a far-apart sequence
+leadUserId: u_def456              # a project member, or null: the person the epic's
+                                  # notices reach (its creator while null)
+startDate: 2026-09-28             # YYYY-MM-DD or null; planning facts only, nothing
+targetDate: 2026-10-16            # waits on them; the target may not precede the start
+createdBy: u_abc123
 createdByLabel: arda@viberr.dev
 conversationId: cnv_3fQk9x2LmP0a  # ruling 476(h): the controller conversation whose
-                                  # turn created the chain (null when none, or for a
-                                  # chain written before the key that boot could not
-                                  # match, ruling 476(j)); the project's Controller
-                                  # page links back to it
-onFailure: pause                  # pause (default) | continue
-links:
-  - index: 1                      # 1-based chain position
-    title: Extract billing interfaces
-    goal: Deliverable + done signal (becomes the created task's ## Goal)
-    taskKey: VIB-12               # null until the chain reaches this link
-    status: done                  # pending | active | done | failed | skipped
-    note: null                    # failure reason / redirect note
-    redeclared: false             # ruling 192(b): edit_link re-declared a FAILED
-                                  # link, so the retry builds from the link rather
-                                  # than the failed task; cleared by that retry
-    blockedBy: []                 # ruling 131(c): what this link's task waits on
-                                  # (task keys / `goal-2 link 1`); copied onto the
-                                  # task the chain creates for the link, validated
-                                  # then, so the task is born held. Ruling 155:
-                                  # once the link is active the TASK's list is the
-                                  # wait and this mirrors it on every change (a
-                                  # person, the controller, the operator, the
-                                  # release engine), so a retry is born on the
-                                  # list the record last held
-createdAt: 2026-08-30T10:00:00.000Z
-updatedAt: 2026-08-30T12:00:00.000Z
+                                  # turn created it, or null; the epic page links
+                                  # back to it for a viewer who may open it
+convertedFrom: null               # `goal-3` for an epic the boot conversion made
+                                  # from a chained goal, else null
+createdAt: 2026-09-26T10:00:00.000Z
+updatedAt: 2026-09-26T12:00:00.000Z
 ---
+## Description
+
+Rebuild the checkout flow on the new payment API.
+
+## Timeline
+
+- 2026-09-26T12:00:00.000Z · Arda added CO-4 and CO-5.
+- 2026-09-26T10:00:00.000Z · Created by Arda.
 ```
 
 Notes:
 
-- `links[].blockedBy` is the ONLY thing that holds a link back (ruling 398): the goal starts
-  every link whose wait is already satisfied, so a link with an empty list starts as soon as
-  the goal is written, whatever its position. The goal writer accepts `link 2` for a sibling
-  of the same goal and stores the absolute spelling (`goal-1 link 2`).
-- The chain file owns the ordered list; each member task carries the tolerant
-  back-reference `goalRef: {goalId, linkIndex}` in its own frontmatter (the
-  project→task shape: project.md owns stages, task.md carries `stage`).
-- Link statuses are the advance engine's claims; `goal_projections` re-derives
-  each linked task's real state from task rows on rebuild, so an out-of-band
-  task move cannot leave the chain lying.
-- Goal files are app-written and never deleted by the product; terminal chains
-  stay readable. `goals/*.md` is watched and projected like every canonical file.
-- `conversationId` is read from the file (`readGoalFileFacts`, the Controller page's one
-  read of each chain's file beside its history); `goal_projections` does not carry it. A
-  controller-made chain written before the key is given it at boot through `updateGoalFile`
-  (`backfillGoalConversations`, ruling 476(j)) when exactly one of its creator's
-  controller turns was running at its `goal.created` audit row; none or several leave it
-  null, and a chain that names one is never rewritten.
-- The goal parser is **strict**, unlike the task and project parsers: any schema failure makes
-  the file unreadable, and the store doctor reports every finding as a hard stop, so hand
-  edits must round-trip exactly. Unknown frontmatter keys are still preserved on write.
+- The epic file does not list its tasks. Membership lives on the task (`task.md`
+  `epic`, §2), the project→task shape: project.md owns stages, task.md carries `stage`.
+  `epic_projections` holds the file's fields; an epic's progress is counted from the task
+  rows that name it when it is read, never stored.
+- Epic files are app-written (`epic-writer.server.ts`) and never deleted by the product; a
+  done or cancelled epic stays readable, and a done one can be reopened. `epics/*.md` is
+  watched, rescanned and projected like every canonical file.
+- An absent key takes its default. The parser is otherwise **strict**, like the goal files
+  it replaced: a value the schema rejects makes the file unreadable, the store doctor reports
+  every finding as a hard stop (`diagnoseEpicFileContent`), and so does a frontmatter `id`
+  that differs from the file's name. The writer refuses to change a file it cannot parse.
+  Unknown frontmatter keys are preserved on write.
 - A `## Description` line starting `## ` (after optional whitespace) is written with one
   leading backslash, the same convention as task.md, so prose cannot close the description
-  early and forge history bullets.
+  early and forge history bullets. A history bullet is one line: the writer flattens
+  whitespace in its text.
+- Ruling 99's chained-goal files (`goals/goal-<n>.md`: `status`, `onFailure`, `links[]`
+  with `blockedBy` in `task key | goal-N link M`) are read once more, by the boot conversion
+  to epics, and filed under `goals/converted/`, where each stays as the record of its chain
+  ([controller-and-epics.md §7.6](../domain/controller-and-epics.md#76-the-conversion-from-chained-goals)).
 
 ## 3. Actor references (contracts §3.1)
 
@@ -825,7 +827,7 @@ Notes:
 | Agent | `agent:<backend>/<profileId>` e.g. `agent:codex/developer`, optionally with a role snapshot `agent:codex/developer (Implementation)` | `{ kind:"agent", backend, name, role }` — the second segment is the **profile id**, never a role slug; `name` is the deployed agent's own name, falling back to the backend label "Codex" or "Claude" (ruling 92) |
 | Operator | `operator` | `{ kind:"agent", name:"Operator" }` (NO backend, NO role) |
 | Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 99 — instance machinery, same backend-less shape) |
-| System | `system:<id>` e.g. `system:policy-engine`; `system:goal-chain` signs the creation events of a task a goal chain starts (ruling 477(b)) | `{ kind:"system", name:"Policy engine" }` |
+| System | `system:<id>` e.g. `system:policy-engine`; `system:epic-conversion` signs the creation events of a task the goal-to-epic conversion made for an unstarted link (ruling 503, keeping ruling 477(b)'s signature; older files carry the chain's own `system:goal-chain`) | `{ kind:"system", name:"Policy engine" }` |
 
 Any other string decodes as an unknown actor: it is re-encoded verbatim and renders as
 `{ kind:"system", name:"Unknown actor" }`, so an event is never dropped over its author. The

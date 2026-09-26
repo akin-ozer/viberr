@@ -187,12 +187,13 @@ CREATE TABLE task_projections (
   event_count INTEGER NOT NULL DEFAULT 0,
   comment_count INTEGER NOT NULL DEFAULT 0,
   diagnostic_count INTEGER NOT NULL DEFAULT 0,
-  -- Chained-goal back-reference (ruling 99): the goal this task is one link of,
-  -- and its 1-based link position, from task.md `goalRef`. NULL for the vast
-  -- majority of tasks. Projected so the board card chip and the goal-advance
-  -- hook resolve the goal without reading task files on a loader path.
-  goal_id TEXT,
-  goal_link_index INTEGER,
+  -- Ruling 503: the epic this task belongs to (`epic-3`), from task.md `epic`.
+  -- NULL when it is in none. Projected so the board's epic filter, an epic's
+  -- task list and its progress read it without opening task files on a
+  -- loader path. An upgraded root gains it at open (`ensureBaselineColumns`)
+  -- and keeps the retired `goal_id` / `goal_link_index` columns, which nothing
+  -- names any more.
+  epic_id TEXT,
   created_at TEXT,
   updated_at TEXT,
   source_path TEXT NOT NULL,
@@ -222,33 +223,35 @@ CREATE TABLE task_events (
   -- (JSON array). The directory stays the truth; these attribute producers.
   attachments_json TEXT
 );
--- Chained-goal projections (ruling 99): derived rows over the canonical
--- `projects/<slug>/goals/<id>.md` files, rebuilt by the same rebuilder that
--- owns task/project rows. Link statuses here are the RECONCILED view (the
--- goal file's stored status is a claim; the rebuilder derives each linked
--- task's real state from task_projections).
-CREATE TABLE goal_projections (
+-- Epic projections (ruling 503): derived rows over the canonical
+-- `projects/<slug>/epics/<id>.md` files, rebuilt by the same rebuilder that
+-- owns task/project rows. The epic's TASKS are not here: membership is each
+-- task's own `epic` (task_projections.epic_id), and an epic's progress is
+-- counted from those rows at read time, so it can never go stale. It replaced
+-- `goal_projections`, which an upgraded root keeps and nothing reads.
+CREATE TABLE epic_projections (
   project_slug TEXT NOT NULL,
-  goal_id TEXT NOT NULL,
+  epic_id TEXT NOT NULL,
+  -- The n of `epic-<n>`, so epic-10 sorts after epic-9.
+  epic_number INTEGER NOT NULL,
   title TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN
-    ('active', 'paused', 'attention', 'completed', 'cancelled')),
+  -- EPIC_STATUS_VALUES in app/schemas/epic-file.schema.ts; the boot integrity
+  -- check compares the live CHECK against it (`projectionCheckGaps`).
+  status TEXT NOT NULL CHECK (status IN ('planned', 'in_progress', 'paused', 'done', 'cancelled')),
+  color TEXT NOT NULL,
+  lead_user_id TEXT,
+  start_date TEXT,
+  target_date TEXT,
+  description TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL,
   created_by_label TEXT NOT NULL,
-  on_failure TEXT NOT NULL CHECK (on_failure IN ('pause', 'continue')),
-  links_json TEXT NOT NULL DEFAULT '[]',
-  description TEXT NOT NULL DEFAULT '',
-  -- 1-based index of the link currently being worked (first non-terminal
-  -- link), NULL when every link is settled.
-  current_index INTEGER,
-  links_total INTEGER NOT NULL DEFAULT 0,
-  links_done INTEGER NOT NULL DEFAULT 0,
+  conversation_id TEXT,
   created_at TEXT,
   updated_at TEXT,
   source_path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   parsed_at TEXT NOT NULL,
-  PRIMARY KEY (project_slug, goal_id)
+  PRIMARY KEY (project_slug, epic_id)
 );
 CREATE TABLE diagnostics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -274,8 +277,13 @@ CREATE TABLE provenance (
 CREATE TABLE notifications (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  -- 'controller' (ruling 99): a controller conversation reply or a chained-goal
-  -- progress note addressed to the conversation owner / goal creator.
+  -- 'controller' (ruling 99): chained-goal progress, addressed to the goal's
+  -- creator. Nothing writes one since ruling 503 retired the chains; the kind
+  -- stays so the rows an upgraded inbox holds still read. A controller
+  -- conversation reply is never a row.
+  -- 'epic' (ruling 503): a task joined or left an epic the reader leads, they
+  -- were made its lead, someone else closed or reopened it, or every task in
+  -- it is done.
   -- 'dependency' (ruling 131): the work a task waited on landed (or can never).
   -- 'ownership' (ruling 140): the reader's task-owner seat changed hands.
   -- 'question' (ruling 481): an agent's question only a person can answer.
@@ -283,7 +291,7 @@ CREATE TABLE notifications (
   -- and the boot integrity check compares the live CHECK against it, because a root
   -- that predates a kind would otherwise reject every INSERT of it silently. Boot
   -- widens a lagging CHECK in place (`widenNotificationKindCheck`, ruling 481).
-  kind TEXT NOT NULL CHECK (kind IN ('packet', 'question', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
+  kind TEXT NOT NULL CHECK (kind IN ('packet', 'question', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership', 'epic')),
   -- packet kind only: input | blocked (card tint + pill).
   ptype TEXT CHECK (ptype IN ('input', 'blocked')),
   title TEXT,
@@ -293,7 +301,7 @@ CREATE TABLE notifications (
   task_key TEXT,
   -- Ruling 497: where the row opens, written by the notifier that knows the exact
   -- thing it is about (a timeline event, the task's decision, a knowledge-base
-  -- proposal, the project's GitHub page, a goal chain). An app path inside the
+  -- proposal, the project's GitHub page, an epic). An app path inside the
   -- row's own project, with an optional #fragment. NULL opens the task, or the
   -- project's board (`notificationHref`). A root that predates it gains it at
   -- open (`ensureBaselineColumns`).
@@ -782,6 +790,9 @@ CREATE INDEX idx_audit_events__action ON audit_events (action);
 CREATE INDEX idx_audit_events__task_action ON audit_events (project_slug, task_key, action, occurred_at);
 CREATE INDEX idx_project_members__user_id ON project_members (user_id);
 CREATE INDEX idx_task_projections__stage ON task_projections (project_slug, stage);
+-- Ruling 503: an epic's tasks and its progress. Partial, so a read that names
+-- no epic keeps the plan (and the row order) it had before the column.
+CREATE INDEX idx_task_projections__epic ON task_projections (project_slug, epic_id) WHERE epic_id IS NOT NULL;
 CREATE INDEX idx_task_events__task ON task_events (project_slug, task_key, position);
 CREATE INDEX idx_task_events__occurred_at ON task_events (occurred_at);
 CREATE INDEX idx_diagnostics__source_path ON diagnostics (source_path);

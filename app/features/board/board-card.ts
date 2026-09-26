@@ -56,6 +56,10 @@ export interface BoardCard
   packet: Pick<NonNullable<TaskSummary["packet"]>, "type" | "title" | "acceptAnswersWith"> | null;
   /** Gap-10: gone quiet (resolved server-side, see `TaskActivitySummary`). */
   quiet: boolean;
+  /** Ruling 503: the epic the task belongs to, which the board's epic filter
+   *  reads. The card draws no chip for it: ruling 172 keeps the card to its
+   *  title, status and owner, and the task page names the epic. */
+  epicId: string | null;
 }
 
 /** The card a board ships for `task`: its read set and nothing else. */
@@ -89,6 +93,7 @@ export function toBoardCard(task: TaskSummary & { quiet: boolean }): BoardCard {
     operator: task.operator ? { name: task.operator.name } : null,
     packet: task.packet ? boardPacket(task.packet) : null,
     quiet: task.quiet,
+    epicId: task.epicId ?? null,
   };
 }
 

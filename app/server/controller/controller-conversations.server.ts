@@ -549,8 +549,8 @@ export function appendMessage(
  *
  * Released, not deleted: the transcript is the record of what somebody asked
  * and what the controller did, and this product does not destroy records
- * (ruling 17's posture, and `update_goal`'s "completed and cancelled chains
- * stay readable"). The conversation becomes instance-scoped, which is a real
+ * (ruling 17's posture, and an epic's: a done or cancelled epic stays
+ * readable, ruling 503). The conversation becomes instance-scoped, which is a real
  * scope, and carries a message saying why so its author is not left wondering
  * where the board went.
  */

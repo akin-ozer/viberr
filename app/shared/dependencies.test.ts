@@ -7,33 +7,35 @@ import {
 } from "./dependencies";
 
 /**
- * Ruling 131 (pass 34): `blockedBy` has exactly TWO spellings. Everything the
- * writers refuse by name starts here, so the grammar is pinned tightly.
+ * Ruling 131 (pass 34): `blockedBy` has one spelling, a task key. Everything
+ * the writers refuse by name starts here, so the grammar is pinned tightly.
+ * Ruling 503 retired the second spelling, `goal-1 link 3`, with the chains.
  *
- * Canary: widen `GOAL_LINK_RE` to `\s*link\s*` (or narrow its quantifier to
- * `\d`) and the "nothing else" / two-digit cases below fail.
+ * Canary: loosen `TASK_REF_RE` (drop its anchors, or narrow `\d+` to `\d`)
+ * and the "nothing else" / two-digit cases below fail.
  */
-describe("dependency references — the two spellings and nothing else", () => {
+describe("dependency references — the task key and nothing else", () => {
   it("parses a task key, canonicalizing the prefix", () => {
     expect(parseDependencyRef("JC-6")).toEqual({ kind: "task", task: "JC-6" });
     expect(parseDependencyRef(" jc-6 ")).toEqual({ kind: "task", task: "JC-6" });
     expect(parseDependencyRef("JC-06")).toEqual({ kind: "task", task: "JC-6" });
   });
 
-  it("parses a goal link, canonicalizing the goal id and the index", () => {
-    expect(parseDependencyRef("goal-1 link 3")).toEqual({ kind: "goal", goal: "goal-1", link: 3 });
-    expect(parseDependencyRef("Goal-1   Link 12")).toEqual({ kind: "goal", goal: "goal-1", link: 12 });
+  it("ruling 503: a goal link is no longer a spelling", () => {
+    // CANARY: bring `GOAL_LINK_RE` back into `parseDependencyRef`.
+    expect(parseDependencyRef("goal-1 link 3")).toBeNull();
+    expect(parseDependencyRef("Goal-1   Link 12")).toBeNull();
+    // A two-digit key parses whole.
+    expect(parseDependencyRef("JC-12")).toEqual({ kind: "task", task: "JC-12" });
   });
 
   it("refuses everything else", () => {
     for (const bad of [
       "",
       "   ",
-      "goal-1",
       "goal-1 link",
-      "goal-1 link 0",
       "goal-1 link three",
-      "goal-1 link 3 and JC-6",
+      "JC-6 and JC-7",
       "link 3",
       "#6",
       "JC 6",
@@ -45,7 +47,7 @@ describe("dependency references — the two spellings and nothing else", () => {
   });
 
   it("formats the canonical spelling and round-trips it", () => {
-    for (const text of ["JC-6", "goal-1 link 3"]) {
+    for (const text of ["JC-6", "AX-120"]) {
       const ref = parseDependencyRef(text)!;
       expect(formatDependencyRef(ref)).toBe(text);
       expect(canonicalDependencyRef(text)).toBe(text);
@@ -55,9 +57,9 @@ describe("dependency references — the two spellings and nothing else", () => {
   });
 
   it("splits the editor's free text on newlines and commas", () => {
-    expect(splitDependencyText("JC-6, goal-1 link 3\n\n JC-7 ,")).toEqual([
+    expect(splitDependencyText("JC-6, AX-12\n\n JC-7 ,")).toEqual([
       "JC-6",
-      "goal-1 link 3",
+      "AX-12",
       "JC-7",
     ]);
   });
@@ -74,16 +76,14 @@ const entry = (label: string, state: DependencyRender["state"]): DependencyRende
   ref: label,
   label,
   state,
-  // The resolver's shape: a goal link that has a task carries that task's key
-  // (and prints it in its label); a bare task ref is its own key.
-  taskKey: label.startsWith("goal-") ? (/\(([^)]+)\)$/.exec(label)?.[1] ?? null) : label,
-  goalId: label.startsWith("goal-") ? label.split(" ")[0]! : null,
+  // The resolver's shape: a task ref is its own key, and a missing one has none.
+  taskKey: state === "missing" ? null : label,
 });
 
 /**
  * Ruling 355 (pass 38, F38-9): the hold sentence promises a release only when
  * one can come. The release engine writes "can never complete … edit what it
- * waits on" for a failed, missing or cancelled entry, and this sentence stood
+ * waits on" for a failed or missing entry, and this sentence stood
  * beside it on the same task promising "Viberr releases it when every entry
  * is done" — structurally unreachable for such an entry.
  */
@@ -98,7 +98,7 @@ describe("ruling 355: holdRefusal names an entry that can never complete", () =>
     // CANARY: ignore the entries' states.
     const s = holdRefusal(
       "JC-9",
-      [entry("JC-3", "cancelled"), entry("goal-1 link 2", "open")],
+      [entry("JC-3", "failed"), entry("JC-8", "open")],
       "running an agent on it",
     );
     expect(s).toContain("running an agent on it is refused");
@@ -109,11 +109,11 @@ describe("ruling 355: holdRefusal names an entry that can never complete", () =>
 
   it("deadDependencyLabels reads the entries' states", () => {
     const entries = [
-      { ref: "JC-3", label: "JC-3", state: "cancelled" as const, taskKey: "JC-3", goalId: null },
-      { ref: "JC-4", label: "JC-4", state: "open" as const, taskKey: "JC-4", goalId: null },
-      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "missing" as const, taskKey: null, goalId: "goal-1" },
+      { ref: "JC-3", label: "JC-3", state: "failed" as const, taskKey: "JC-3" },
+      { ref: "JC-4", label: "JC-4", state: "open" as const, taskKey: "JC-4" },
+      { ref: "JC-40", label: "JC-40", state: "missing" as const, taskKey: null },
     ];
-    expect(deadDependencyLabels(entries)).toEqual(["JC-3", "goal-1 link 2"]);
+    expect(deadDependencyLabels(entries)).toEqual(["JC-3", "JC-40"]);
   });
 });
 
@@ -125,9 +125,7 @@ describe("ruling 355: holdRefusal names an entry that can never complete", () =>
  */
 describe("ruling 356: the hold sentence names a done entry as done, not as waited on", () => {
   it("lists an all-open hold as before", () => {
-    expect(holdEntriesSentence([entry("goal-1 link 2", "open"), entry("JC-3", "open")])).toBe(
-      "goal-1 link 2 and JC-3",
-    );
+    expect(holdEntriesSentence([entry("JC-2", "open"), entry("JC-3", "open")])).toBe("JC-2 and JC-3");
     expect(holdEntriesSentence([entry("JC-3", "open")])).toBe("JC-3");
   });
 
@@ -135,31 +133,30 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
     // CANARY: drop the `state === "done"` split.
     expect(
       holdEntriesSentence([
-        entry("goal-2 link 1 (BNB-2)", "done"),
-        entry("goal-2 link 4", "open"),
+        entry("BNB-2", "done"),
+        entry("BNB-4", "open"),
         entry("BNB-11", "done"),
       ]),
-    ).toBe("goal-2 link 4, goal-2 link 1 (BNB-2, done) and BNB-11 (done)");
-    expect(holdEntriesSentence([entry("goal-1 link 2", "open"), entry("JC-3", "done")])).toBe(
-      "goal-1 link 2 and JC-3 (done)",
-    );
+    ).toBe("BNB-4, BNB-2 (done) and BNB-11 (done)");
+    expect(holdEntriesSentence([entry("JC-2", "open"), entry("JC-3", "done")])).toBe("JC-2 and JC-3 (done)");
   });
 
   it("F39-44: a done entry's tag never reads as the pending entry before it", () => {
-    // Live on ax-clone's Goals rail: the trailing `(… is done)` group sat where a
-    // goal link prints its task, so "goal-1 link 2 (JC-3 is done)" said the
-    // PENDING link was done, and "goal-4 link 7 (AX-4, …" named AX-4 as its task.
+    // Live on ax-clone's Goals rail: the trailing `(… is done)` group read as
+    // the LAST pending entry's own parenthesis, so "goal-1 link 2 (JC-3 is
+    // done)" said the PENDING entry was done. The chains are gone (ruling 503);
+    // the rule stands for task keys.
     // CANARY: restore the trailing group, `${pending} (${done} are done)`.
     const s = holdEntriesSentence([
-      entry("goal-4 link 7", "open"),
+      entry("AX-7", "open"),
       entry("AX-4", "done"),
-      entry("goal-2 link 3 (AX-16)", "done"),
+      entry("AX-16", "done"),
     ]);
-    expect(s).toBe("goal-4 link 7, AX-4 (done) and goal-2 link 3 (AX-16, done)");
-    // No parenthesis opens straight after a pending entry that has no task.
-    expect(s).not.toMatch(/goal-4 link 7 \(/);
+    expect(s).toBe("AX-7, AX-4 (done) and AX-16 (done)");
+    // No parenthesis opens straight after the pending entry.
+    expect(s).not.toMatch(/AX-7 \(/);
     // Every entry that is done says so inside its own parenthesis.
-    for (const label of ["AX-4", "goal-2 link 3"]) {
+    for (const label of ["AX-4", "AX-16"]) {
       expect(s).toMatch(new RegExp(`${label} \\([^)]*done\\)`));
     }
   });
@@ -169,9 +166,9 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
   });
 
   it("the refusal reads the same split and keeps its release promise", () => {
-    const s = holdRefusal("BNB-3", [entry("goal-2 link 4", "open"), entry("BNB-11", "done")], "running an agent on it");
+    const s = holdRefusal("BNB-3", [entry("BNB-4", "open"), entry("BNB-11", "done")], "running an agent on it");
     expect(s).toContain(
-      "BNB-3 waits on goal-2 link 4 and BNB-11 (done) and Viberr is holding it, so running an agent on it is refused.",
+      "BNB-3 waits on BNB-4 and BNB-11 (done) and Viberr is holding it, so running an agent on it is refused.",
     );
     // The done entry is never listed as something still waited on.
     expect(s).not.toMatch(/BNB-11(?! \(done\))/);
@@ -179,8 +176,8 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
   });
 
   it("a dead entry still decides the tail", () => {
-    const s = holdRefusal("BNB-3", [entry("goal-2 link 4", "cancelled"), entry("BNB-11", "done")], "running an agent on it");
-    expect(s).toContain("waits on goal-2 link 4 and BNB-11 (done)");
-    expect(s).toContain("goal-2 link 4 can never complete");
+    const s = holdRefusal("BNB-3", [entry("BNB-4", "failed"), entry("BNB-11", "done")], "running an agent on it");
+    expect(s).toContain("waits on BNB-4 and BNB-11 (done)");
+    expect(s).toContain("BNB-4 can never complete");
   });
 });

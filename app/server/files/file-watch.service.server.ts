@@ -5,7 +5,7 @@ import { watch, type FSWatcher } from "chokidar";
 import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
-import { rebuildGoalFile, rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
+import { rebuildEpicFile, rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
 import { errnoSchema } from "./atomic-file.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
 import { toError } from "~/shared/errors";
@@ -38,7 +38,7 @@ const WATCH_DEBOUNCE_MS = 250;
  *  `task_projections.task_key` is TEXT NOT NULL, `projects.slug` is its
  *  TEXT primary key. */
 const taskKeyRowSchema = z.object({ task_key: z.string() });
-const goalIdRowSchema = z.object({ goal_id: z.string() });
+const epicIdRowSchema = z.object({ epic_id: z.string() });
 const projectSlugRowSchema = z.object({ slug: z.string() });
 
 const WATCHER_KEY = Symbol.for("viberr.fileWatcher");
@@ -297,17 +297,17 @@ export function startFileWatcher(
       }
       const slug = segments[0]!;
       if (segments.length === 1) return reconcileProject(slug);
-      if (segments[1] === "goals" && segments.length === 2) {
-        // Ruling 99: the goals dir vanished — prune its projected rows.
-        const goals = z.array(goalIdRowSchema).parse(
+      if (segments[1] === "epics" && segments.length === 2) {
+        // Ruling 503: the epics dir vanished — prune its projected rows.
+        const epics = z.array(epicIdRowSchema).parse(
           db
             .prepare(
-              `SELECT goal_id FROM goal_projections WHERE project_slug = ?`,
+              `SELECT epic_id FROM epic_projections WHERE project_slug = ?`,
             )
             .all(slug),
         );
-        for (const g of goals) {
-          rebuildGoalFile(db, slug, g.goal_id, { dataRoot: root });
+        for (const e of epics) {
+          rebuildEpicFile(db, slug, e.epic_id, { dataRoot: root });
         }
         return;
       }
@@ -336,12 +336,12 @@ export function startFileWatcher(
   const onFile = (eventPath: string) => {
     const absPath = path.resolve(watchedDir, eventPath);
     const base = path.basename(absPath);
-    // Ruling 99: `<slug>/goals/<id>.md` is the third canonical file kind.
-    const isGoalFile =
+    // Ruling 503: `<slug>/epics/<id>.md` is the third canonical file kind.
+    const isEpicFile =
       base.endsWith(".md") &&
-      path.basename(path.dirname(absPath)) === "goals" &&
+      path.basename(path.dirname(absPath)) === "epics" &&
       path.dirname(path.dirname(path.dirname(absPath))) === watchedDir;
-    if (base === "project.md" || base === "task.md" || isGoalFile) {
+    if (base === "project.md" || base === "task.md" || isEpicFile) {
       schedule(fileTimers, absPath, rebuildFile);
     }
   };

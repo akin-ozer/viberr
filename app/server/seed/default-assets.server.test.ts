@@ -248,11 +248,12 @@ describe("shipped-asset refresh (B-OP1)", () => {
    */
   it("ruling 492: the controller guide and the operator doctrine carry the done-signal rule, and their outgoing hashes are recorded", async () => {
     // Canaries: drop the rule from the guide's "Creating a task" section or
-    // its bullet from "Chained goals"; drop the rule or the create_task
-    // sentence from the doctrine; remove either outgoing hash. Review
-    // canaries: drop the merge check from the guide's read task or its
-    // chained example; drop the doctrine's wait for the answer; restore
-    // "Never hold this task back for that proof".
+    // its bullet from "Epics"; drop the rule or the create_task sentence from
+    // the doctrine; remove either outgoing hash. Review canaries: drop the
+    // merge check from the guide's read task or its epic example; drop the
+    // doctrine's wait for the answer; restore "Never hold this task back for
+    // that proof". Ruling 503 moved the guide's bullet from "Chained goals"
+    // to "Epics" and the doctrine's check from `goalChain` to the task's epic.
     const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
     const guideRel = path.join("skills", "controller-guide", "SKILL.md");
     expect(
@@ -283,16 +284,17 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(creating, "the guide's Creating a task section").toContain(
       "a goal that confirms the delivery task's change is merged and deployed before it reads",
     );
-    const chained = section("Chained goals");
-    expect(chained, "the guide's Chained goals section").toContain(
-      "it is something the link's task can show BEFORE acceptance",
+    const epics = section("Epics");
+    expect(epics, "the guide's Epics section").toContain(
+      "it is something the task can show BEFORE acceptance",
     );
-    expect(chained, "the guide's Chained goals section").toContain(
-      "split in two: the delivery link, and a read link whose `blockedBy` names it",
+    expect(epics, "the guide's Epics section").toContain(
+      "is two tasks in the epic: the delivery task, and a read task whose `blockedBy` names it",
     );
-    expect(chained, "the guide's Chained goals section").toContain(
+    expect(epics, "the guide's Epics section").toContain(
       "confirms the job is merged and deployed, then reads its first run on the deployed build",
     );
+    expect(section("Chained goals"), "ruling 503 retired the Chained goals section").toBe("");
     expect(doctrine, "the operator doctrine").toContain(DONE_SIGNAL_RULE);
     expect(doctrine, "the operator doctrine").toContain(
       "raise a `create_task` option for the read: its `newTask.blockedBy` names this task, its `newTask.goal` has the read confirm this task's change is merged and deployed before it reads",
@@ -302,8 +304,9 @@ describe("shipped-asset refresh (B-OP1)", () => {
     );
     expect(doctrine, "the operator doctrine").not.toContain("Never hold this task back");
     expect(doctrine, "the operator doctrine").toContain(
-      "no task owns that read (`read_board` lists none, and no link in `goalChain` plans one)",
+      "no task owns that read (`read_board` lists none, and no task in your `epic` is one)",
     );
+    expect(doctrine, "the operator doctrine").not.toContain("goalChain");
     for (const text of [guide, doctrine]) expect(text).not.toMatch(/[–—]/);
   });
 
@@ -802,7 +805,11 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(skill).toContain("an agent on Codex gets no board read");
   });
 
-  it("ruling 398: the controller's doctrine, guide and handbook start every link whose wait is satisfied", async () => {
+  it("ruling 503: the controller's doctrine, guide and handbook say an epic holds nothing back and order is each task's own wait", async () => {
+    // Ruling 398 taught these three that a chain started every link whose
+    // wait was met. Ruling 503 retired the chains: an epic is a group, and
+    // the one ordering is `blockedBy`. Canaries: bring back a chain sentence,
+    // a goal-chain tool, or the handbook's goals bullet.
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
@@ -815,13 +822,20 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(definition).not.toContain("You create only the first link's task up front");
     expect(skill).not.toContain("the first link's task is created immediately and later links wait");
     expect(handbook).not.toContain("as the previous link completes");
+    expect(handbook).not.toContain("Goals decompose one outcome into links");
     for (const text of [definition, skill]) {
-      // Ruling 398(d): a chain-created task is created once its wait is met.
       expect(text).not.toContain("born held");
-      expect(text).toContain("ruling 398");
-      expect(text).toContain("`link 2`");
+      expect(text).toContain("ruling 503");
+      expect(text).toMatch(/an epic starts, orders and holds nothing/i);
+      expect(text).toContain("`blockedBy`");
+      expect(text).toContain("`create_epic`");
+      expect(text).toContain("`update_epic`");
+      for (const retired of ["`get_goal`", "`list_goals`", "`create_goal`", "`update_goal`", "`link 2`"]) {
+        expect(text).not.toContain(retired);
+      }
     }
-    expect(handbook).toContain("holds nothing back");
+    expect(handbook).toContain("An epic holds nothing back");
+    expect(handbook).toContain("ruling 503");
   });
 
   it("a GitHub read needs membership, not maintainer", () => {
@@ -898,6 +912,27 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         "cbb114a5d3e41103ddf201f40f7e549739de05c659f40ed9b87b3c35372f3055",
       ],
     } satisfies Record<string, readonly string[]>;
+    // Ruling 503: the versions that still spoke of goal chains.
+    const beforeEpics = {
+      [path.join("agents", "definitions", "controller.md")]: [
+        "70e659083faffa3b93564e77c5f9d0034bb5e60b1393b0cf84e415227ee0ace7",
+      ],
+      [path.join("skills", "controller-guide", "SKILL.md")]: [
+        "b260db092146f736deaee68c5d328bf581e442c9368204c2725fcf466e7aee51",
+      ],
+      [path.join("agents", "definitions", "operator.md")]: [
+        "919af42febe8d3a50cdae2fdc52c873a5d63c435e5ed73ed53068e2dc4248f67",
+      ],
+      [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+        "c267649f85bac274e0be3299f01ad59f0758d9ff43285054af8a7f630a3cc2f6",
+      ],
+      [path.join("kb", "controller-handbook", "handbook.md")]: [
+        "2568ef5c92b776804b9beb20d40686071e04ea790fa78c9faef70e4708c9cdd5",
+      ],
+      [path.join("agents", "profiles", "controller.md")]: [
+        "8d89f1bedb4a339b7541961051b69647539c092bd72bb0ceb6e265162e233e55",
+      ],
+    } satisfies Record<string, readonly string[]>;
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
     // What this build ships, as the store's own manifest recorded it: that
@@ -905,7 +940,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const shipped = manifestSchema.parse(
       JSON.parse(readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8")),
     );
-    for (const [rel, hashes] of Object.entries(outgoing)) {
+    for (const [rel, hashes] of [...Object.entries(outgoing), ...Object.entries(beforeEpics)]) {
       expect(shipped[rel], rel).toBeDefined();
       for (const hash of hashes) {
         expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);

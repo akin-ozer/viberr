@@ -118,8 +118,9 @@ access share; `app/shared/rbac.test.ts` holds this table to it row by row:
 | `comment`: comment on tasks | ✓ | ✓ | ✓ | ✓ |
 | `create-task`: create tasks | ✓ | ✓ | ✓ | |
 | `own-task`: take or release your own ownership of a task | ✓ | ✓ | ✓ | |
-| `edit-task-meta`: priority, labels and due date, and what a task waits on, which releases it when cleared (rulings 131, 309(a)) | ✓ | ✓ | ✓ | |
+| `edit-task-meta`: priority, labels and due date, the epic a task is in (ruling 503), and what a task waits on, which releases it when cleared (rulings 131, 309(a)) | ✓ | ✓ | ✓ | |
 | `attach-file`: attach a file to a task (ruling 379) | ✓ | ✓ | ✓ | |
+| `manage-epics`: create and edit epics, their status, lead and dates; there is no delete (ruling 503) | ✓ | ✓ | ✓ | |
 | `approve-transition`: approve stage transitions | ✓ | ✓ | | |
 | `resolve-packet`: resolve decision packets | ✓ | ✓ | | |
 | `accept-completion`: accept completion into Done | ✓ | ✓ | | |
@@ -284,7 +285,7 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   naming its unlock variable and the restart. A save that leaves the resource granted
   answers the request, and each one has a Decline button (`controller-request-decline`).
   See
-  [controller-and-goals.md §6](controller-and-goals.md#6-configuring-the-controller-rulings-106-and-108).
+  [controller-and-epics.md §6](controller-and-epics.md#6-configuring-the-controller-rulings-106-and-108).
 - **Run concurrency**: `set-concurrency` writes `maxConcurrentRuns` (0 = unlimited,
   ceiling 64, `MAX_CONCURRENT_RUNS_CEILING`) and drains the queue. The control shows the
   cap, the live and queued counts, and under the field, for a positive cap, the lane
@@ -331,7 +332,9 @@ acceptance, recommendations, quality, schedules, review deadlocks, agent and ope
 actions, session compactions `task.agent.compaction`, knowledge-base corrections
 `task.kb_correction.merged` and their undo `task.kb_correction.undone`, ruling 498, and
 before it the proposals `task.kb_proposal.filed`, ruling 483), `org.kb.proposal_promoted`
-and `org.kb.proposal_dismissed` (ruling 483), `goal.*`, `github.*` (branches, PRs, delivery,
+and `org.kb.proposal_dismissed` (ruling 483), `epic.*` (`epic.created`, `epic.updated`, and
+the conversion's `epic.converted`) and `task.epic.changed` (ruling 503), the `goal.*` rows an
+upgraded store holds, `github.*` (branches, PRs, delivery,
 reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 `runtime.operator.plan_executed`, `run.recovery.*`, `run.completion.effects_lost`
 (ruling 207(a)), `controller.authority.denied`, the controller's audited reads

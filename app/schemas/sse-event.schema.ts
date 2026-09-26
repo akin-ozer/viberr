@@ -51,9 +51,9 @@ export const SSE_EVENT_NAMES = [
   // (`SSE_STREAM_EVENTS` in event-types.ts keeps it out of the surface-wide
   // revalidation every `user`-scoped page runs on the other names).
   "controller.log-appended",
-  // Ruling 99 — a chained goal changed (created, link advanced, redirected).
-  // Project-routed like task.updated; the goals panel revalidates.
-  "goal.updated",
+  // Ruling 503 — an epic changed (created, edited, a status set). Project-
+  // routed like task.updated; the Epics pages revalidate.
+  "epic.updated",
   "stream.open",
   "stream.resync",
 ] as const;
@@ -179,10 +179,10 @@ export const sseEventSchema = z.discriminatedUnion("type", [
     }),
   }),
   z.object({
-    type: z.literal("goal.updated"),
+    type: z.literal("epic.updated"),
     entityId,
     occurredAt,
-    data: z.object({ projectSlug: slug, goalId: z.string().min(1) }),
+    data: z.object({ projectSlug: slug, epicId: z.string().min(1) }),
   }),
   z.object({
     type: z.literal("resource.updated"),

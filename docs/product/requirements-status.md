@@ -13,7 +13,7 @@
 
 | Set | Total | Implemented | Partial | Not implemented |
 |---|---|---|---|---|
-| Functional (FR1–FR41) | 41 | 39 (10 as amended; FR23 by interpretation; FR19 judged against ruling 127; FR41 diverging from the PRD's sequencing) | 2 (FR6, FR8) | 0 |
+| Functional (FR1–FR41) | 41 | 39 (10 as amended; FR23 by interpretation; FR19 judged against ruling 127; FR41 judged against ruling 503) | 2 (FR6, FR8) | 0 |
 | Non-functional (NFR1–NFR18) | 18 | 16 (3 as amended, 1 bounded) | 2 (NFR6, NFR9) | 0 |
 
 The two PRD copies are identical. The PRD's last amendment is dated 2026-09-01 (ruling
@@ -35,7 +35,7 @@ the ruling and says so.
 | FR8 | Separate human RBAC and agent capability policy per project | **PARTIAL** | Agent policy is per project (`shared/capabilities.ts`, `features/agents/agent-profile-actions.server.ts`); human RBAC is role *assignment* from one fixed matrix, admins cannot redefine what a role may do per project (recorded in decisions.md ruling 2, unannotated in FR8) |
 | FR9 | Reusable agent profiles: stages, actions, resources, web reach incl. browser, backend | IMPLEMENTED | `server/org/gagents.server.ts`, `server/files/agent-profile-file.server.ts`, `server/tasks/specialist-browser-mcp.server.ts`, `server/tasks/specialist-mcp.server.ts` |
 | FR10 | File-native store, inspectable, reconciles direct edits | IMPLEMENTED | `server/files/file-store-root.server.ts`, `server/files/file-watch.service.server.ts`, tolerant schemas, `server/files/store-check.server.ts`, `server/projections/rescan.server.ts` |
-| FR11 | Humans create tasks; agents do not invent them; human-rooted exceptions | IMPLEMENTED as amended | `createTask` (`server/tasks/task-actions.server.ts`); the operator toolkit has no create tool; the controller's `create_task` under the asker's RBAC; goal advancement (`server/tasks/goal-actions.server.ts`); and a third human-rooted route the PRD does not name: a `create_task` packet option, which creates the task under the RESOLVING person's authority (ruling 269; §5 item 13) |
+| FR11 | Humans create tasks; agents do not invent them; human-rooted exceptions | IMPLEMENTED as amended | `createTask` (`server/tasks/task-actions.server.ts`); the operator toolkit has no create tool; the controller's `create_task` under the asker's RBAC; the one-time goal-to-epic conversion, which makes a task for each unstarted link of a running chain on that chain's creator's re-proven authority (`server/tasks/goal-epic-conversion.server.ts`, ruling 503); and a third human-rooted route the PRD does not name: a `create_task` packet option, which creates the task under the RESOLVING person's authority (ruling 269; §5 item 13) |
 | FR12 | Canonical operating record | IMPLEMENTED | `schemas/task-file.schema.ts`, `server/files/task-file.server.ts`; format in [../architecture/file-formats.md](../architecture/file-formats.md) |
 | FR13 | Tasks move through project-defined stages under governed rules | IMPLEMENTED | `transitionStage` (`server/tasks/task-actions.server.ts`), `shared/workflow/transitions.ts`; a manual backward move carries a reason (ruling 381) |
 | FR14 | Uniform `engagements[]`; required reviewers; dispatch writes engagements (ruling 98) | IMPLEMENTED as amended | `engagementSchema`, `deliveringEngagement`; required reviewers per review stage in `project.md` `requiredReviewers` (ruling 178), holding any delivered work (ruling 385); retired vocabulary pinned by `features/retired-vocabulary.test.tsx` and `features/copy-ban.test.ts` |
@@ -65,7 +65,7 @@ the ruling and says so.
 | FR38 | Contributor+ take/release ownership; admins release any | IMPLEMENTED | `shared/rbac.ts` `own-task`, `release-any-ownership` |
 | FR39 | Schedule a future run; server fires; canonical; never on terminal; no pinned backend | IMPLEMENTED as amended | `server/tasks/schedule.server.ts`, `features/task-detail/execution-profile.tsx`; a task resting on a schedule reads `waiting: schedule` (ruling 225) |
 | FR40 | One instance controller; per-tool live RBAC; no escalation, no deletes; admin-only config, deployment-locked resources | IMPLEMENTED as amended | `server/controller/*`; beyond the PRD: the dock on every surface with instance, board and task scopes and a per-turn context read (ruling 121), a grant request an admin sees (ruling 390), unseen-reply marks (ruling 448) |
-| FR41 | Chained goals | IMPLEMENTED (diverges from the PRD's sequencing, §5 item 15) | `server/tasks/goal-actions.server.ts` (`reconcileGoal`), `schemas/goal-file.schema.ts`, `features/controller/controller-page.tsx`; the goal starts every link nothing makes wait (ruling 398), and a pending link can adopt an existing task (ruling 243) |
+| FR41 | Chained goals | IMPLEMENTED (judged against ruling 503, §5 item 15) | `schemas/epic-file.schema.ts`, `server/tasks/epic-actions.server.ts`, `server/projections/epic-query.server.ts`, `features/epics/`; the chains became epics that tasks join and leave one at a time, and the order a chain gave its links is each task's own `blockedBy` (ruling 131) |
 
 ## 3. Non-functional requirements
 
@@ -123,7 +123,7 @@ the ruling and says so.
 8. **Success criteria** percentages are not measured anywhere; `/insights` measures runs,
    cost, tokens, outcomes and prompt-cache behaviour.
 9. **Phase 2 list** outrun by shipped work: analytics (`/insights`), audit exports, task
-   chaining (goals) and task dependencies, recovery tooling (continuity panel, backup CLI,
+   grouping (epics, which replaced goal chains) and task dependencies, recovery tooling (continuity panel, backup CLI,
    maintenance, transcript retention).
 10. **FR40** records ruling 108 only. Rulings 106 (controller settings at agent-editor
     parity), 107 (the built-in `viberr_ops` diagnostics MCP), 121 (the dock on every
@@ -145,11 +145,13 @@ the ruling and says so.
 14. **FR17 says "files an agent posts".** A person holding `attach-file` attaches files
     too (ruling 379), and a file a delivering run saved is delivered work a required
     reviewer must judge (rulings 385, 388).
-15. **FR41 says links are created one at a time.** "Its tasks are created lazily (the
-    first link at definition, each next link when the previous completes)" no longer
-    holds: a goal starts a task for every pending link whose declared `blockedBy` is
-    satisfied, so position in the list is presentation (ruling 398); a pending link can
-    adopt an existing task (ruling 243).
+15. **FR41 describes chained goals, which ruling 503 retired.** The owner replaced them
+    with epics (2026-09-26): a named body of work in a project that tasks join and leave
+    one at a time, as in Jira and Linear, with a manual status and a progress counted
+    from its tasks. Nothing creates a task lazily any more: planned work is created as
+    tasks, and what one waits on is its own `blockedBy`, which the release engine honours.
+    Every existing chain became the epic with its number at the upgrade. The row is
+    judged against the ruling.
 16. **FR19/FR21 and NFR8 predate the Codex sandbox removal.** Every Codex run is
     `danger-full-access` and gets a private `CODEX_HOME` (rulings 181, 185); capabilities
     the Codex runtime cannot enforce are labelled advisory there (rulings 109–116 began
@@ -174,7 +176,7 @@ the ruling and says so.
 | No mailer; one-time passwords handed over by admins | Yes | |
 | Org audit browse is minimal: newest 150 org-scoped rows, "no filtering or paging" | **Partly** | No paging, but the browse has a text filter and an "Org-scoped" toggle backed by its own query; the unscoped window shows 150 rows of every scope except the poller heartbeat (ruling 234) |
 | Retention windows are compile-time constants (run logs 30 days, audit 90 with export first, notifications 500 per user; boot, every 6 h, disk pressure) | Yes | `RUN_LOG_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`, `NOTIFICATION_MAX_PER_USER` in `server/db/retention.server.ts` |
-| Several tables have no retention (`provenance`, `session`, `agent_runs`, `goal_projections`, `controller_messages`, `scope_violations`, `model_availability`) | Yes | `staged_outcomes` is not among them: each insert prunes rows past its TTL (`server/tasks/agent-outcome.server.ts`) |
+| Several tables have no retention (`provenance`, `session`, `agent_runs`, an upgraded root's `goal_projections`, `controller_messages`, `scope_violations`, `model_availability`) | Yes | `staged_outcomes` is not among them: each insert prunes rows past its TTL (`server/tasks/agent-outcome.server.ts`) |
 | No cleartext-transport guard in the app itself | Yes | Boot warns when a production origin would issue insecure cookies |
 | Notifications page caps at newest 200 | Yes | `NOTIF_PAGE_LIMIT` in `routes/notifications.tsx` |
 | Fine-grained PAT validation partly assumed | Yes | `pull_request:write` reads "assumed" until first use unless `VIBERR_GITHUB_WRITE_PROBE` opts into the dry-run |

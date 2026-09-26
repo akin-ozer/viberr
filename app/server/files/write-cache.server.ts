@@ -3,7 +3,7 @@ import { logger } from "../logging/logger.server";
 
 /**
  * Read-your-own-writes repair for cached bind mounts — ONE implementation for
- * every canonical file writer (task.md, project.md, goals/*.md).
+ * every canonical file writer (task.md, project.md, epics/*.md).
  *
  * On Docker Desktop (VirtioFS), a read milliseconds after this process's own
  * atomic rename can return the PREVIOUS file content — observed live (VIB-1,
@@ -18,7 +18,7 @@ import { logger } from "../logging/logger.server";
  * C01-A2 (pass 32): the task and project writers each carried a private copy
  * of this and the goal writer had none — pass-31 gotcha 10 predicted that two
  * back-to-back link-status writes on VirtioFS could lose one. One module now,
- * three callers.
+ * three callers (the epic writer took the goal writer's place, ruling 503).
  */
 const lastWritten = new Map<string, { content: string; wroteAtMs: number }>();
 const LAST_WRITTEN_MAX_ENTRIES = 500;
@@ -58,7 +58,7 @@ export function freshestContent(
   }
   if (mtimeMs > remembered.wroteAtMs + MTIME_SLACK_MS) return diskContent;
   logger.warn(`stale ${describe.kind} read repaired from the in-process write cache`, {
-    [describe.kind === "task-file" ? "taskKey" : describe.kind === "project-file" ? "projectSlug" : "goalId"]:
+    [describe.kind === "task-file" ? "taskKey" : describe.kind === "project-file" ? "projectSlug" : "epicId"]:
       describe.id,
     absPath,
   });

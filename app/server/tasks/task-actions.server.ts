@@ -213,6 +213,8 @@ import {
   taskDir,
 } from "~/server/files/file-store-root.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
+import { readEpicFile } from "~/server/files/epic-writer.server";
+import { maybeNoteEpicComplete, noteTaskMadeInEpic, requireEpicForNewTask } from "./epic-actions.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
@@ -614,8 +616,17 @@ export interface CreateTaskInput {
   priority?: TaskPriority;
   labels?: string[];
   dueDate?: string | null;
-  /** Ruling 99: set only by goal-actions when this task is a chain link. */
-  goalRef?: { goalId: string; linkIndex: number } | null;
+  /** Ruling 503: the epic the new task joins (`epic-3`), checked BEFORE a
+   *  key is allocated like the wait below. Absent or null: in no epic. */
+  epic?: string | null;
+  /**
+   * Ruling 477(b) (F40-28): an automation creating the task on a person's
+   * authority signs the creation's events itself, so the Activity stream's
+   * Humans filter does not credit that person with a creation they never
+   * made. The seat, the `task.created` audit row and its actor are unchanged.
+   * Ruling 503's goal-to-epic conversion is the one caller.
+   */
+  signedBy?: { systemId: string; assignText: string };
   /** Ruling 131: what the new task waits on, validated BEFORE a key is
    *  allocated so a refusal burns no key; the task is born held
    *  (`waiting: "none"`, readiness floored at `blocked` by derivation). */
@@ -728,6 +739,8 @@ export async function createTask(
   const blockedBy = input.blockedBy?.length
     ? validateDependencyRefs(db, { projectSlug: input.projectSlug, self: null, entries: input.blockedBy })
     : [];
+  // Ruling 503: and the epic, for the same reason.
+  const epic = input.epic?.trim() ? requireEpicForNewTask(ctx, input.projectSlug, input.epic) : null;
 
   const projectRef = {
     projectSlug: input.projectSlug,
@@ -785,7 +798,7 @@ export async function createTask(
     branch: null,
     pr: null,
     github: null,
-    goalRef: input.goalRef ?? null,
+    epic,
     createdAt: now,
     updatedAt: now,
     boardRank: null,
@@ -795,35 +808,17 @@ export async function createTask(
     frontmatter,
     goal: input.goal?.trim() || DEFAULT_GOAL,
   };
-  // Ruling 477(b) (F40-28): a goal chain starting its link is the chain's act,
-  // done on a person's authority, not that person's own. Live, the Activity
-  // stream's Humans filter credited the owner with three "Took task ownership
-  // by creating the task" rows (and three "Waits on other work" notes) in the
-  // second WEB-1 was accepted, for WEB-2..4 the chain made. The creation's
-  // events are signed by the chain and name the person whose authority it ran
-  // on; the seat, the `task.created` audit row and its actor are unchanged.
-  const chainLink = input.goalRef ?? null;
-  const chain: FileActorRef | null = chainLink
-    ? { kind: "system", systemId: "goal-chain" }
-    : null;
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
   // Ruling 255: ONE creation is one instant. Every event this write puts on the
   // timeline carries the frontmatter's own `now`, so the file's order is the
   // deliberate arrangement and not a race between two `new Date()` calls.
-  if (creator && chain && chainLink) {
-    const authority = userName(db, creator.userId);
-    const owner = seat === "named" && namedOwner ? namedOwner.name : authority;
+  const signer: FileActorRef | null = input.signedBy
+    ? { kind: "system", systemId: input.signedBy.systemId }
+    : null;
+  if (creator && signer && input.signedBy) {
     createInput.timeline = [
-      {
-        ...ownerAssignEvent(
-          db,
-          creator,
-          `Started by **${chainLink.goalId}** as link ${chainLink.linkIndex}, on ${authority}'s authority, with ${owner} as owner. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
-          now,
-        ),
-        actor: chain,
-      },
+      { ...ownerAssignEvent(db, creator, input.signedBy.assignText, now), actor: signer },
     ];
   } else if (creator && seat === "named" && namedOwner) {
     createInput.timeline = [
@@ -850,17 +845,16 @@ export async function createTask(
     const waitNote: TaskFileEvent = {
       occurredAt: now,
       type: "note",
-      // Ruling 477(b): a chain's link declared this wait, so the chain signs it.
-      actor: chain ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
+      actor: signer ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
       title: "Waits on other work",
       // Ruling 356(b): the note names a done entry as done, like every other
       // hold sentence — 4 of 56 creation notes on the instance had named a task
       // that was already Done at creation (BNB-26: "waiting on BNB-5, BNB-22"
       // with BNB-22 closed 95 s earlier).
-      // F39-65: and a list that is ALL done holds nothing. Ruling 398(d)
-      // creates a chain task only once its waits are satisfied, so every
-      // chain link opened with "Held until every entry is done" over eight
-      // entries that were (AX-35), released in the same second.
+      // F39-65: and a list that is ALL done holds nothing. Chain links were
+      // created only once their waits were satisfied, so every one opened with
+      // "Held until every entry is done" over eight entries that were (AX-35),
+      // released in the same second.
       text: waitAllDone
         ? `Created after the work it waits on was done (${joinDependencyEntries(waitEntries.map((e) => e.label))}), so nothing holds it; Viberr releases the list at once.`
         : `Created waiting on ${holdEntriesSentence(waitEntries)}. Held until every entry is done; Viberr releases it then.`,
@@ -868,6 +862,22 @@ export async function createTask(
       evidence: null,
     };
     createInput.timeline = [waitNote, ...(createInput.timeline ?? [])];
+  }
+  if (epic) {
+    // Ruling 503: the same note `setTasksEpic` writes when a task joins later,
+    // so the timeline says where the task sits however it got there.
+    const epicTitle = readEpicFile({ projectSlug: input.projectSlug, epicId: epic, dataRoot: ctx.dataRoot })
+      ?.parsed.frontmatter.title;
+    const epicNote: TaskFileEvent = {
+      occurredAt: now,
+      type: "note",
+      actor: signer ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
+      title: "Epic",
+      text: `Added to **${epic}**${epicTitle ? ` (${epicTitle})` : ""}.`,
+      toAgent: false,
+      evidence: null,
+    };
+    createInput.timeline = [epicNote, ...(createInput.timeline ?? [])];
   }
   await createTaskFile(taskRef(ctx, input.projectSlug, key), createInput);
 
@@ -883,6 +893,7 @@ export async function createTask(
     ownerUserId: frontmatter.ownerUserId,
     seat,
   };
+  if (epic) createdDetails.epic = epic;
   if (seat === "named" && namedOwnerId && creator) {
     const seatNotified = notifyOwnerSeatChange(db, {
       projectSlug: input.projectSlug,
@@ -904,6 +915,11 @@ export async function createTask(
     taskKey: key,
     details: createdDetails,
   });
+  // Ruling 503(b): the epic's history and its lead hear of a task made in it.
+  // The conversion's own tasks are named by its line on the epic instead.
+  if (epic && !signer) {
+    await noteTaskMadeInEpic(db, { projectSlug: input.projectSlug, epicId: epic, taskKey: key }, actor, ctx);
+  }
 
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
   // it to pick up the new task. Fire-and-forget — it never blocks or fails the
@@ -7435,13 +7451,9 @@ export async function transitionStage(
     }
   }
 
-  // Ruling 99: a stage move can settle a goal-chain link (into the terminal
-  // stage, or back out of it). Fire-and-forget — the engine converges and a
-  // task outside any chain is a cheap projection read.
-  void (async () => {
-    const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
-    maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
-  })().catch(() => {});
+  // Ruling 503: a move into the terminal stage can be the last open task of
+  // its epic. Fire-and-forget — a task in no epic costs one file read.
+  maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
   // Ruling 131(e): a move into (or out of) the terminal stage can satisfy a
   // dependent's wait. Same fire-and-forget posture; the engine converges.
   maybeReleaseDependents(db, ctx, input.projectSlug);
@@ -9865,13 +9877,11 @@ export async function setTaskArchived(
     }
   }
 
-  // Ruling 99: archiving a goal-chain link fails it (the chain pauses or
-  // rides past, per the goal's own policy); a restore lets the reconciler
-  // re-derive the truth. Fire-and-forget; the engine converges.
-  void (async () => {
-    const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
-    maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
-  })().catch(() => {});
+  // Ruling 503: archiving the last OPEN task of an epic leaves every task in
+  // it done. Archiving a done task, or restoring one, completes nothing new.
+  if (input.archived && !isTerminalStage(existing.parsed.frontmatter.stage, project.stages)) {
+    maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
+  }
   // Ruling 131(e): a restore can satisfy a dependent's wait again.
   maybeReleaseDependents(db, ctx, input.projectSlug);
 
@@ -11067,7 +11077,7 @@ export async function resolvePacket(
       //
       // The list is written AFTER this write, through `setTaskDependencies` —
       // the same door the operator's own tool and the task page use, so the
-      // canonicalisation, the goal-link mirror and the "Dependencies updated"
+      // canonicalisation and the "Dependencies updated"
       // note are the ones every other caller gets (ruling 164: an option
       // performs the real action through the real door).
       const entries = (option.blockedBy ?? []).filter((e) => e.trim() !== "");
@@ -12232,6 +12242,13 @@ export async function resolvePacket(
       };
       if (spec.blockedBy?.length) createInput.blockedBy = [...spec.blockedBy];
       if (spec.labels?.length) createInput.labels = [...spec.labels];
+      // Ruling 503: work split out of a task belongs to the same body of work,
+      // so the new task joins the deciding task's epic.
+      const deciderEpic = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
+        .frontmatter.epic;
+      if (deciderEpic && readEpicFile({ projectSlug: input.projectSlug, epicId: deciderEpic, dataRoot: ctx.dataRoot })) {
+        createInput.epic = deciderEpic;
+      }
       const made = await createTask(db, createInput, actor, ctx);
       await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
         parsed.timeline.unshift({
@@ -14373,14 +14390,9 @@ export async function applyAcceptanceWrite(
     // And the notifications the packet door marks read for a settled decision.
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   }
-  // Ruling 99: an acceptance that closed a goal-chain link advances its chain
-  // (the next link's task is created under the goal creator's re-proven
-  // authority). Fire-and-forget; the engine converges.
   if (accepted) {
-    void (async () => {
-      const { maybeReconcileGoalForTask } = await import("./goal-actions.server");
-      maybeReconcileGoalForTask(db, ctx, input.projectSlug, input.taskKey);
-    })().catch(() => {});
+    // Ruling 503: an acceptance is the usual way an epic's last task is done.
+    maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
     // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
     maybeReleaseDependents(db, ctx, input.projectSlug);
   }
@@ -15450,8 +15462,8 @@ export async function updateTaskTitle(
   if (title.length > TASK_TITLE_MAX_CHARS) {
     // Ruling 288's rule, one field over: a contract Viberr will not write half
     // of. A title is the one string every board card, every review-queue row
-    // and every goal-chain link renders, so a silently cut one is wrong in more
-    // places than a cut goal.
+    // and every epic's task list renders, so a silently cut one is wrong in
+    // more places than a cut goal.
     throw AppError.validation(
       `A title is at most ${TASK_TITLE_MAX_CHARS} characters and this one is ${title.length}. ` +
         "Nothing was written. Shorten it: the detail belongs in the goal, which has room.",

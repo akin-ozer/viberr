@@ -60,7 +60,7 @@ import {
   defaultBranchPageNote,
   readProjectDefaultBranchFile,
 } from "~/server/tasks/operator-repo-read.server";
-import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
+import { EPIC_COLORS, EPIC_STATUS_VALUES, type EpicStatus } from "~/schemas/epic-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import {
@@ -174,13 +174,20 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { postAgentComment } from "~/server/tasks/agent-toolkit.server";
 import {
-  createGoal,
-  getGoalView,
-  listGoals,
-  updateGoal,
-  type CreateGoalInput,
-  type UpdateGoalOp,
-} from "~/server/tasks/goal-actions.server";
+  createEpic,
+  planTasksEpic,
+  setTasksEpic,
+  updateEpic,
+  type CreateEpicInput,
+  type UpdateEpicInput,
+} from "~/server/tasks/epic-actions.server";
+import {
+  epicTaskKeys,
+  getEpic,
+  getEpicDetail,
+  listEpics,
+  type EpicSummary,
+} from "~/server/projections/epic-query.server";
 import {
   acceptanceRefusalFor,
   createTask,
@@ -282,9 +289,9 @@ export interface ControllerToolkitDeps {
   /** Ruling 121: the conversation's anchored task, when it has one — every
    *  task tool's `taskKey` defaults to it. */
   taskKey?: string | null;
-  /** Ruling 476(h): the conversation this turn answers in. `create_goal`
-   *  records it on the chain, so the project's Controller page can link back
-   *  to where the chain was planned. */
+  /** Ruling 476(h): the conversation this turn answers in. `create_epic`
+   *  records it on the epic (ruling 503), so the epic's page can link back to
+   *  where it was planned. */
   conversationId?: string | null;
   /** Ruling 283: the knowledge bases this turn's prompt INDEXED. The pull tool
    *  is mounted over exactly these — `controllerKbNames` builds the list once
@@ -1858,7 +1865,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks) \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247) \u2014 and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), epics summary (ruling 503; list_epics and get_epic read them in full), and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks) \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247) \u2014 and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1995,13 +2002,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               ? { ...entry, autonomy: row.autonomy ?? "supervised" }
               : entry;
           }),
-          goals: listGoals(db, slug).map((g) => ({
-            id: g.id,
-            title: g.title,
-            status: g.status,
-            link: g.currentIndex,
-            links: g.links.length,
-          })),
+          // Ruling 503: each epic as `list_epics` reads it.
+          epics: listEpics(db, slug).map(epicRow),
         });
       }),
     ),
@@ -2011,19 +2013,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_tasks",
-      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, goal-chain chip, and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked.",
+      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 503), and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked.",
       {
         projectSlug: z.string().optional(),
         stageId: z.string().optional().describe("Filter to one stage."),
+        epicId: z
+          .string()
+          .optional()
+          .describe('Filter to one epic (epic-3), or "none" for the tasks in no epic.'),
         includeArchived: z.boolean().optional(),
       },
-      runWith((args: { projectSlug?: string; stageId?: string; includeArchived?: boolean }) => {
+      runWith((args: { projectSlug?: string; stageId?: string; epicId?: string; includeArchived?: boolean }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's tasks");
         const listOpts: NonNullable<Parameters<typeof listProjectTasks>[2]> = {
           dataRoot,
         };
         if (args.includeArchived) listOpts.includeArchived = true;
+        const epicFilter = args.epicId?.trim();
+        if (epicFilter) listOpts.epicId = epicFilter.toLowerCase() === "none" ? null : epicFilter;
         const rows = listProjectTasks(db, slug, listOpts).filter(
           (t) => !args.stageId || t.stage === args.stageId,
         );
@@ -2037,7 +2045,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             owner: t.owner?.name ?? null,
             priority: t.priority,
             archived: t.archived,
-            goal: t.goalRef ? { goalId: t.goalRef.goalId, link: t.goalRef.linkIndex } : null,
+            epic: t.epicId ?? null,
             // Ruling 131: what the task waits on, each entry with its live state.
             waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
           })),
@@ -2155,6 +2163,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 }
               : null,
           },
+          // Ruling 503: the epic the task is in, by name.
+          epic: summary.epicId
+            ? { id: summary.epicId, title: getEpic(db, slug, summary.epicId)?.title ?? null }
+            : null,
           schedules,
           // Ruling 302, extended to the sibling it was first written without.
           // It fixed the OPERATOR's window and left this one, which is the
@@ -2345,7 +2357,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("Ruling 131: what the new task waits on (task keys like JC-6, goal links like 'goal-1 link 3', in this project). The task is born held and released by Viberr when every entry is done."),
+          .describe("Ruling 131: what the new task waits on (task keys like JC-6, in this project). The task is born held and released by Viberr when every entry is done."),
+        epic: z
+          .string()
+          .optional()
+          .describe("Ruling 503: the epic the new task joins (epic-3, from list_epics). Omit for none."),
       },
       runWith(
         async (args: {
@@ -2357,6 +2373,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           owner?: string;
           dueDate?: string;
           blockedBy?: string[];
+          epic?: string;
         }) => {
           const slug = slugOf(args.projectSlug);
           // Visibility BEFORE the action gate. `createTask` refuses a
@@ -2374,6 +2391,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.labels) taskInput.labels = args.labels;
           if (args.dueDate !== undefined) taskInput.dueDate = args.dueDate.trim() || null;
           if (args.blockedBy?.length) taskInput.blockedBy = args.blockedBy;
+          if (args.epic?.trim()) taskInput.epic = args.epic.trim();
           // Ruling 140(a): the owner is resolved BEFORE the write and seated in
           // it, so the operator's `create` trigger already reads the right
           // principal. The release word the sibling `set_task_owner` accepts is
@@ -2396,7 +2414,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             : "";
           const seated =
             who !== "me" ? ` Owner: ${args.owner}, seated before the first operator run.` : "";
-          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.${seated}${wait}`;
+          const inEpic = created.task.epicId ? ` In ${created.task.epicId}.` : "";
+          return `[done] ${created.key} created in ${created.stageName}: ${created.task.title}.${seated}${inEpic}${wait}`;
         },
       ),
     ),
@@ -2552,7 +2571,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_task",
-      "Edit a task's goal text, its metadata (priority, labels, due date) and/or what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) — the same two writers the task page uses, behind the same gates: the goal needs maintainer or above, metadata needs the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 295: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
+      "Edit a task's goal text, its metadata (priority, labels, due date), what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) and/or the epic it is in (ruling 503) — the same writers the task page uses, behind the same gates: the goal needs maintainer or above; metadata, the wait and the epic need the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 295: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2572,7 +2591,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("The FULL list of what the task waits on (task keys like JC-6, goal links like 'goal-1 link 3'); [] clears it and releases the task."),
+          .describe("The FULL list of what the task waits on (task keys like JC-6); [] clears it and releases the task."),
+        epic: z
+          .string()
+          .optional()
+          .describe(
+            'Ruling 503: the epic the task belongs to (epic-3), or "" to take it out of its epic. A task is in at most one epic, so naming another moves it there.',
+          ),
       },
       runWith(
         async (args: {
@@ -2584,6 +2609,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           labels?: string[];
           dueDate?: string;
           blockedBy?: string[];
+          epic?: string;
         }) => {
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
@@ -2591,9 +2617,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const hasMeta =
             args.priority !== undefined || args.labels !== undefined || args.dueDate !== undefined;
           const hasWait = args.blockedBy !== undefined;
-          if (args.title === undefined && args.goal === undefined && !hasMeta && !hasWait) {
+          const hasEpic = args.epic !== undefined;
+          if (args.title === undefined && args.goal === undefined && !hasMeta && !hasWait && !hasEpic) {
             throw AppError.validation(
-              "Pass a title and/or a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy).",
+              "Pass a title and/or a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy, epic).",
             );
           }
           // Two writers, two gates. Each part reports on its own so a goal that
@@ -2696,6 +2723,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (!(error instanceof AppError)) throw error;
               firstError ??= error;
               refused.push(`blocked by: ${error.userMessage}`);
+            }
+          }
+          // Ruling 503: the epic is its own axis too, through the one writer of
+          // a task's `epic`.
+          if (hasEpic) {
+            const target = args.epic?.trim() || null;
+            try {
+              const moved = await setTasksEpic(
+                db,
+                { projectSlug: slug, taskKeys: [key], epicId: target },
+                actor,
+                { dataRoot },
+              );
+              if (moved.changed.length === 0) unchanged.push("epic");
+              else applied.push(target ? `epic (${target})` : "epic (taken out)");
+            } catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              firstError ??= error;
+              refused.push(`epic: ${error.userMessage}`);
             }
           }
           if (applied.length === 0 && firstError) throw firstError;
@@ -4033,271 +4079,243 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "list_decisions",
   );
 
-  // ================================================================ goals
+  // ================================================================ epics
+
+  /** Ruling 503: one epic as the list and the project read report it. */
+  function epicRow(e: EpicSummary) {
+    return {
+      id: e.id,
+      title: e.title,
+      status: e.status,
+      lead: e.leadName,
+      startDate: e.startDate,
+      targetDate: e.targetDate,
+      progress: {
+        done: e.progress.done,
+        total: e.progress.total,
+        started: e.progress.started,
+        notStarted: e.progress.notStarted,
+        held: e.progress.held,
+        archived: e.progress.archived,
+      },
+    };
+  }
+
+  /** An epic's lead as a tool names them: a member's email, or "me"; "none"
+   *  or "" is nobody. */
+  function leadOf(raw: string): string | null {
+    const who = raw.trim().toLowerCase();
+    if (who === "" || who === "none") return null;
+    if (who === "me") return user.id;
+    const id = listUsers(db).find((u) => u.email.toLowerCase() === who)?.id;
+    if (!id) throw AppError.notFound(`No Viberr user with the email ${raw}.`);
+    return id;
+  }
+
+  const epicStatusArg = z
+    .enum(EPIC_STATUS_VALUES)
+    .optional()
+    .describe(
+      "planned, in_progress, paused, done or cancelled. A person's call, never derived from the tasks: progress is shown beside it.",
+    );
+  const epicColorArg = z
+    .enum(EPIC_COLORS)
+    .optional()
+    .describe("Its colour: the dot on the Epics page and the chip on its tasks' pages. One is picked when omitted.");
 
   add(
     tool(
-      "create_goal",
-      "Define a goal: one outcome decomposed into links, each of which becomes a task with its own operator. Ruling 398: EVERY link whose declared wait is already satisfied gets its task NOW, so a link with no `blockedBy` starts immediately alongside link 1 \u2014 order in the list is not a dependency and does not hold anything back. Say what a link waits for or it starts at once. Within this goal, write `link 2` (the goal has no id until it is written); a wait on another goal is `goal-1 link 3`, and a wait on a task is its key. A link whose wait can never complete parks the goal for a human instead of sitting pending forever. Contributor or above (a goal is future task creation).",
+      "list_epics",
+      "The project's epics (ruling 503). An epic is a named body of work that tasks join and leave one at a time, like a Jira epic or a Linear project. Each with its status, lead, dates and progress counted from its tasks at read time: done of total, started, not started and held (archived tasks are counted apart and left out of the total). Membership gated.",
+      { projectSlug: z.string().optional() },
+      runWith((args: { projectSlug?: string }) => {
+        const slug = slugOf(args.projectSlug);
+        requireVisible(slug, "read this project's epics");
+        return json(listEpics(db, slug).map(epicRow));
+      }),
+    ),
+    "list_epics",
+  );
+
+  add(
+    tool(
+      "get_epic",
+      "One epic in full: what it is (description, status, lead, dates), its progress by stage, every task in it with its stage, readiness, owner and what it waits on, and the epic's own history, newest first. An epic starts, orders and holds nothing: the order of its work is what each task waits on (blockedBy). Membership gated.",
+      { projectSlug: z.string().optional(), epicId: z.string() },
+      runWith((args: { projectSlug?: string; epicId: string }) => {
+        const slug = slugOf(args.projectSlug);
+        requireVisible(slug, "read this project's epics");
+        const epic = getEpicDetail(db, slug, args.epicId.trim(), { dataRoot });
+        if (!epic) throw AppError.notFound(`No epic ${args.epicId} in ${slug}; list_epics names them.`);
+        const tasks = listProjectTasks(db, slug, { dataRoot, includeArchived: true, epicId: epic.id });
+        return json({
+          ...epicRow(epic),
+          description: epic.description,
+          color: epic.color,
+          createdBy: epic.createdByLabel || epic.createdBy,
+          byStage: epic.progress.byStage,
+          tasks: tasks.map((t) => ({
+            key: t.key,
+            title: t.title,
+            stage: t.stage,
+            readiness: t.readiness,
+            waiting: t.waiting,
+            owner: t.owner?.name ?? null,
+            archived: t.archived,
+            waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
+          })),
+          history: epic.history.map((h) => `${h.occurredAt} · ${h.text}`),
+        });
+      }),
+    ),
+    "get_epic",
+  );
+
+  add(
+    tool(
+      "create_epic",
+      "Create an epic (ruling 503): a named body of work in this project that tasks join and leave one at a time, like a Jira epic or a Linear project. It starts, orders and holds nothing, so say what each task waits on with its own blockedBy. `tasks` puts existing tasks in it as it is created; a task is in at most one epic, so one already in another moves. To plan new work in it, create the epic, then create_task with `epic`. Contributor or above; putting tasks in it needs the project's edit-task-meta grant as well.",
       {
         projectSlug: z.string().optional(),
-        title: z.string(),
-        description: z.string().optional().describe("The outcome, in prose."),
-        onFailure: z
-          .enum(GOAL_ON_FAILURE_VALUES)
+        title: z.string().describe("The epic's name, at most 120 characters."),
+        description: z.string().optional().describe("What the body of work is for, in prose."),
+        status: epicStatusArg.describe("Defaults to planned."),
+        color: epicColorArg,
+        lead: z
+          .string()
           .optional()
-          .describe("pause (default): a failed link parks the chain for humans · continue: skip past failures."),
-        links: z
-          .array(
-            z.strictObject({
-              title: z.string(),
-              goal: z
-                .string()
-                .describe("Self-standing task text: deliverable plus the done signal. " + DONE_SIGNAL_RULE),
-              blockedBy: z
-                .array(z.string())
-                .optional()
-                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. While the wait names work that is still open, the link stays pending with no task; it starts when that work lands."),
-            }),
-          )
-          .min(1)
-          .max(20),
+          .describe('The member who leads it, by email, or "me". Its notices reach them; with no lead they reach its creator.'),
+        startDate: z.string().optional().describe("YYYY-MM-DD, when the work is meant to start."),
+        targetDate: z.string().optional().describe("YYYY-MM-DD, when it is meant to land."),
+        tasks: z.array(z.string()).optional().describe("Existing task keys to put in it."),
       },
       runWith(
         async (args: {
           projectSlug?: string;
           title: string;
           description?: string;
-          onFailure?: "pause" | "continue";
-          links: { title: string; goal: string; blockedBy?: string[] }[];
+          status?: EpicStatus;
+          color?: (typeof EPIC_COLORS)[number];
+          lead?: string;
+          startDate?: string;
+          targetDate?: string;
+          tasks?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
-          // Same reason as `create_task`: the action gate below would refuse a
+          // Same reason as `create_task`: the action gate would refuse a
           // non-member in words that confirm the project exists.
-          requireVisible(slug, "define goals");
-          const goalInput: CreateGoalInput = {
-            projectSlug: slug,
-            title: args.title,
-            links: args.links.map((l) => {
-              const link: CreateGoalInput["links"][number] = { title: l.title, goal: prose(l.goal) };
-              if (l.blockedBy?.length) link.blockedBy = l.blockedBy;
-              return link;
-            }),
-          };
-          if (args.description) goalInput.description = prose(args.description);
-          if (args.onFailure) goalInput.onFailure = args.onFailure;
-          // Ruling 476(h): where the chain was planned, for its card's
-          // "Planned in" link on the project's Controller page.
-          if (deps.conversationId) goalInput.conversationId = deps.conversationId;
-          const result = await createGoal(db, goalInput, actor, { dataRoot });
+          requireVisible(slug, "create epics");
+          const input: CreateEpicInput = { projectSlug: slug, title: args.title };
+          if (args.description) input.description = prose(args.description);
+          if (args.status) input.status = args.status;
+          if (args.color) input.color = args.color;
+          if (args.lead !== undefined) input.leadUserId = leadOf(args.lead);
+          if (args.startDate !== undefined) input.startDate = args.startDate;
+          if (args.targetDate !== undefined) input.targetDate = args.targetDate;
+          if (args.tasks?.length) input.taskKeys = args.tasks;
+          // Where it was planned, for the epic page's "Planned in" link.
+          if (deps.conversationId) input.conversationId = deps.conversationId;
+          const result = await createEpic(db, input, actor, { dataRoot });
           return `[done] ${result.message}`;
         },
       ),
     ),
-    "create_goal",
+    "create_epic",
   );
 
   add(
     tool(
-      "list_goals",
-      "The project's goal chains with status and link progress. Membership gated.",
-      { projectSlug: z.string().optional() },
-      runWith((args: { projectSlug?: string }) => {
-        const slug = slugOf(args.projectSlug);
-        requireVisible(slug, "read this project's goals");
-        return json(
-          listGoals(db, slug).map((g) => ({
-            id: g.id,
-            title: g.title,
-            status: g.status,
-            createdBy: g.createdByLabel,
-            currentLink: g.currentIndex,
-            links: g.links.map((l) => ({
-              index: l.index,
-              title: l.title,
-              status: l.status,
-              taskKey: l.taskKey,
-              blockedBy: l.blockedBy,
-            })),
-          })),
-        );
-      }),
-    ),
-    "list_goals",
-  );
-
-  add(
-    tool(
-      "get_goal",
-      "One goal chain in full: description, every link with its task and status, and the chain's history. Ruling 335: a link's `goal` is ALWAYS the contract in force — for a link with a task that has moved past what the chain declared, it is that task's current goal, and the superseded declaration is kept beside it as `declaredGoal` (history, not instructions: never build to it). `title` is immutable and is always the chain's. Membership gated.",
-      { projectSlug: z.string().optional(), goalId: z.string() },
-      runWith((args: { projectSlug?: string; goalId: string }) => {
-        const slug = slugOf(args.projectSlug);
-        requireVisible(slug, "read this project's goals");
-        const goal = getGoalView(slug, args.goalId, { dataRoot });
-        if (!goal) throw AppError.notFound(`No goal ${args.goalId} in ${slug}.`);
-        return json(goal);
-      }),
-    ),
-    "get_goal",
-  );
-
-  add(
-    tool(
-      "update_goal",
-      "Redirect a goal chain: rename it (title and/or description), pause, resume, cancel, skip a link, retry a failed link (a fresh task, rebuilt from that task's own current text), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable and nothing is deleted; every op is refused on one EXCEPT rename, which corrects what a settled chain is called without changing what it did (ruling 267). RULING 411: clearing a pending link's wait STARTS that link in the same call, and the reply names the task Viberr just created for it (\"Link N started as KEY\"). The reply's closing \"is active on\" key is the chain's CURRENT link, usually a different one, so never read the new task from it. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it.",
+      "update_epic",
+      "Change an epic: its name, description, status, colour, lead, start and target dates, and which tasks are in it. `addTasks` puts tasks in (a task in another epic moves here); `removeTasks` takes tasks out of THIS epic, and they stay on the board in no epic. Editing what the epic is needs contributor or above; moving tasks needs the project's edit-task-meta grant. There is no delete: close an epic by setting it done or cancelled, and it stays readable.",
       {
         projectSlug: z.string().optional(),
-        goalId: z.string(),
-        op: z.enum([
-          "rename",
-          "pause",
-          "resume",
-          "cancel",
-          "skip_link",
-          "retry_link",
-          "edit_link",
-          "add_link",
-          "remove_pending_link",
-          "adopt_task",
-        ]),
-        index: z.number().int().min(1).optional().describe("The link the op targets."),
-        taskKey: z
-          .string()
-          .optional()
-          .describe(
-            "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain, and the LINK must still have none: a link starts the moment nothing makes it wait (ruling 398, in the unblocking call itself since ruling 411), so a link you just unblocked already has its own task and this is refused. Adopt a task that existed BEFORE the link could start, never one you made for it.",
-          ),
+        epicId: z.string(),
         title: z.string().optional(),
-        // Ruling 492: `add_link` and `edit_link` write a link's task text
-        // here, and the field used to carry no description at all.
-        goal: z
-          .string()
-          .optional()
-          .describe(
-            "edit_link / add_link: the link's self-standing task text, deliverable plus the done signal. " +
-              DONE_SIGNAL_RULE,
-          ),
-        description: z
-          .string()
-          .optional()
-          .describe("rename: the chain's description prose. `title` renames the chain itself."),
-        reason: z.string().optional(),
-        blockedBy: z
-          .array(z.string())
-          .optional()
-          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it. RULING 411: clearing a PENDING link's wait STARTS that link, in this same call: Viberr creates its task before the reply returns and names it there (\"Link N started as KEY\"), not in the closing \"is active on\" key, which is the chain's current link. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it."),
+        description: z.string().optional().describe('The full description; "" clears it.'),
+        status: epicStatusArg,
+        color: epicColorArg,
+        lead: z.string().optional().describe('A member\'s email, "me", or "none" to clear.'),
+        startDate: z.string().optional().describe('YYYY-MM-DD, or "" to clear.'),
+        targetDate: z.string().optional().describe('YYYY-MM-DD, or "" to clear.'),
+        addTasks: z.array(z.string()).optional(),
+        removeTasks: z.array(z.string()).optional(),
       },
       runWith(
         async (args: {
           projectSlug?: string;
-          goalId: string;
-          op:
-            | "rename"
-            | "pause"
-            | "resume"
-            | "cancel"
-            | "skip_link"
-            | "retry_link"
-            | "edit_link"
-            | "add_link"
-            | "remove_pending_link"
-            | "adopt_task";
-          index?: number;
-          /** adopt_task: the existing task the pending link should carry. */
-          taskKey?: string;
+          epicId: string;
           title?: string;
-          goal?: string;
           description?: string;
-          reason?: string;
-          blockedBy?: string[];
+          status?: EpicStatus;
+          color?: (typeof EPIC_COLORS)[number];
+          lead?: string;
+          startDate?: string;
+          targetDate?: string;
+          addTasks?: string[];
+          removeTasks?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
-          requireVisible(slug, "redirect this project's goals");
-          const needIndex = ["skip_link", "retry_link", "edit_link", "remove_pending_link", "adopt_task"];
-          if (needIndex.includes(args.op) && !args.index) {
-            throw AppError.validation(`${args.op} needs the link index.`);
+          requireVisible(slug, "edit this project's epics");
+          const epicId = args.epicId.trim();
+          if (!getEpic(db, slug, epicId)) {
+            throw AppError.notFound(`No epic ${args.epicId} in ${slug}; list_epics names them.`);
           }
-          let action: UpdateGoalOp;
-          switch (args.op) {
-            case "rename": {
-              // Ruling 192: a chain outlives the sentence it was created with.
-              // Built as a typed local rather than a conditional spread (the
-              // lint rule) so an omitted field stays omitted.
-              const renamed: Extract<UpdateGoalOp, { op: "rename" }> = { op: "rename" };
-              if (args.title !== undefined) renamed.title = args.title;
-              if (args.description !== undefined) renamed.description = prose(args.description);
-              action = renamed;
-              break;
-            }
-            case "pause":
-              action = { op: "pause" };
-              break;
-            case "resume":
-              action = { op: "resume" };
-              break;
-            case "cancel":
-              action = args.reason
-                ? { op: "cancel", reason: args.reason }
-                : { op: "cancel" };
-              break;
-            case "skip_link":
-              action = args.reason
-                ? { op: "skip_link", index: args.index!, reason: args.reason }
-                : { op: "skip_link", index: args.index! };
-              break;
-            case "retry_link":
-              action = { op: "retry_link", index: args.index! };
-              break;
-            case "edit_link": {
-              const edit: Extract<UpdateGoalOp, { op: "edit_link" }> = {
-                op: "edit_link",
-                index: args.index!,
-              };
-              if (args.title) edit.title = args.title;
-              if (args.goal) edit.goal = prose(args.goal);
-              // Ruling 131(c): absent leaves the link's wait; [] clears it.
-              // Ruling 155: on an active link the writer is the task's.
-              if (args.blockedBy !== undefined) edit.blockedBy = args.blockedBy;
-              action = edit;
-              break;
-            }
-            case "add_link": {
-              if (!args.title) throw AppError.validation("add_link needs a title.");
-              const added: Extract<UpdateGoalOp, { op: "add_link" }> = {
-                op: "add_link",
-                title: args.title,
-                goal: prose(args.goal ?? ""),
-              };
-              if (args.blockedBy !== undefined) added.blockedBy = args.blockedBy;
-              action = added;
-              break;
-            }
-            case "adopt_task": {
-              // Ruling 243: bind an EXISTING task to a pending link, so work
-              // created ahead of the chain is carried by it instead of
-              // duplicated when the chain advances.
-              if (!args.taskKey) {
-                return "[refused] adopt_task needs `taskKey`: the existing task the pending link should carry.";
-              }
-              action = { op: "adopt_task", index: args.index!, taskKey: args.taskKey };
-              break;
-            }
-            case "remove_pending_link":
-              action = { op: "remove_pending_link", index: args.index! };
-              break;
+          const input: UpdateEpicInput = { projectSlug: slug, epicId };
+          if (args.title !== undefined) input.title = args.title;
+          if (args.description !== undefined) input.description = prose(args.description);
+          if (args.status !== undefined) input.status = args.status;
+          if (args.color !== undefined) input.color = args.color;
+          if (args.lead !== undefined) input.leadUserId = leadOf(args.lead);
+          if (args.startDate !== undefined) input.startDate = args.startDate;
+          if (args.targetDate !== undefined) input.targetDate = args.targetDate;
+          const editsEpic = [
+            args.title,
+            args.description,
+            args.status,
+            args.color,
+            args.lead,
+            args.startDate,
+            args.targetDate,
+          ].some((v) => v !== undefined);
+          const adding = args.addTasks ?? [];
+          const removing = args.removeTasks ?? [];
+          if (!editsEpic && adding.length === 0 && removing.length === 0) {
+            throw AppError.validation(
+              "Pass a field to change (title, description, status, color, lead, startDate, targetDate) or tasks to add or remove.",
+            );
           }
-          const result = await updateGoal(
-            db,
-            { projectSlug: slug, goalId: args.goalId, action },
-            actor,
-            { dataRoot },
-          );
-          return `[done] ${result.message} Goal ${result.goalId} is ${result.status}${result.activeTaskKey ? ` on ${result.activeTaskKey}` : ""}.`;
+          // Only tasks in THIS epic can leave it, checked before anything is
+          // written so a wrong key changes nothing.
+          if (removing.length > 0) {
+            const inIt = new Set(epicTaskKeys(db, slug, epicId));
+            const stray = removing.filter((k) => !inIt.has(k.trim().toUpperCase()));
+            if (stray.length > 0) {
+              throw AppError.validation(
+                `${stray.join(", ")} ${stray.length === 1 ? "is" : "are"} not in ${epicId}; nothing was changed.`,
+              );
+            }
+          }
+          // Every other refusal the moves can meet (an unknown or archived
+          // task, a withheld edit-task-meta grant) is met here too, before
+          // the epic's own fields are written, so the call lands whole or not
+          // at all.
+          const addition = { projectSlug: slug, taskKeys: adding, epicId };
+          const removal = { projectSlug: slug, taskKeys: removing, epicId: null, fromEpicId: epicId };
+          if (adding.length > 0) planTasksEpic(db, addition, actor, { dataRoot });
+          if (removing.length > 0) planTasksEpic(db, removal, actor, { dataRoot });
+          const said: string[] = [];
+          if (editsEpic) said.push((await updateEpic(db, input, actor, { dataRoot })).message);
+          if (adding.length > 0) {
+            said.push((await setTasksEpic(db, addition, actor, { dataRoot })).message);
+          }
+          if (removing.length > 0) {
+            said.push((await setTasksEpic(db, removal, actor, { dataRoot })).message);
+          }
+          return `[done] ${said.join(" ")}`;
         },
       ),
     ),
-    "update_goal",
+    "update_epic",
   );
 
   const server = createSdkMcpServer({

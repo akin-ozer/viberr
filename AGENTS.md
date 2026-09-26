@@ -26,7 +26,7 @@ npm run deploy         # Docker deployment: stamp the build from git, build, up,
 
 ## Invariants you must not break
 
-- Files are truth. Write `task.md` / `project.md` / goal files only through the writers in
+- Files are truth. Write `task.md` / `project.md` / epic files only through the writers in
   `app/server/files/` (per-file mutex, atomic write, unknown keys preserved), then
   re-project what you wrote (`reprojectTask` / `rebuildPath`) before you audit and publish.
 - Every governed action records audit and, when user-visible, a typed timeline event.

@@ -6400,6 +6400,15 @@ a.card:active, .pj-new:active { transform: scale(.99); }
      review 2026-09-08). One selector more settles it, the `.dock .dock-panel`
      precedent in the 720px block. */
   .ctl-wrap .ctl-layout { grid-template-columns: minmax(0, 1fr); }
+  /* Ruling 503: the epic page's Details column goes under its main column,
+     the task page's way: side by side panels, then one per row. */
+  .epic-layout { grid-template-columns: minmax(0, 1fr); }
+  .epic-side { position: static; }
+  /* A row of the Epics list wraps: the name keeps line 1, the status,
+     progress and dates share line 2. */
+  .epic-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .epic-row-progress, .epic-row-meta { grid-column: 1 / -1; }
+  .epic-row-go { display: none; }
   /* Ruling 419(b): the transcript stays a capped scroller here too. Uncapped,
      a phone's page WAS the conversation (12,625px measured on ax-clone), so
      the composer, the goals and the thread list all sat below it. The cap
@@ -7094,9 +7103,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 
 /* ============================= Ruling 99 controller =============================
    The controller surfaces (/controller + /projects/:slug/controller): the
-   conversation transcript, its composer, the conversation list, and the Goals
-   panel. Existing tokens/scales only; wide content scrolls inside its own
-   containers. */
+   conversation transcript, its composer, the conversation list, and the
+   project's knowledge-base proposals. Existing tokens/scales only; wide
+   content scrolls inside its own containers. */
 /* Design pass 2026-09-08: inside a project the controller takes the frame
    every other workspace page has (`.policy-wrap`: fill the shell, scroll
    inside it, clear the dock), and its spacing sits on the sheet's scale — it
@@ -7342,11 +7351,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ctl-goals { display: flex; flex-direction: column; gap: .75rem; }
-.ctl-goals-count { margin-left: auto; }
 /* Ruling 483 (F40-59): the board's open knowledge-base proposals, each a card
-   in the goal chain's frame, with the document path wrapping rather than
-   widening the rail. */
+   in a hairline frame, with the document path wrapping rather than widening
+   the rail. */
 .ctl-proposals, .ctl-proposal-list, .ctl-proposal { display: flex; flex-direction: column; gap: .5rem; }
 .ctl-proposals-count, .ctl-proposal-acts .linkish { margin-left: auto; }
 .ctl-proposal-list { list-style: none; margin: 0; padding: 0; }
@@ -7364,161 +7371,26 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .ctl-proposal-evidence, .ctl-correction-side { white-space: pre-wrap; }
 .ctl-correction-side del { color: var(--muted); }
 .ctl-proposals-note { margin: 0; }
-/* Ruling 419(d): a chain is a <details>. Spacing is margins, not a flex gap:
-   a details element only became a flex container in recent engines. */
-.ctl-goal {
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-box);
-  padding: .5rem .75rem;
-}
-.ctl-goal > summary {
-  display: flex;
-  flex-direction: column;
-  gap: .25rem;
-  list-style: none;
-  cursor: pointer;
-  border-radius: var(--radius-small);
-}
-.ctl-goal > summary::-webkit-details-marker { display: none; }
-.ctl-goal-line {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  font-size: .75rem;
-}
-/* Ruling 476(g): the line can carry "· 3 waiting on you" too, so it wraps
-   between its parts and never inside one. */
-.ctl-goal-progress { margin-left: auto; min-width: 0; color: var(--muted); text-align: right; }
-.ctl-goal-progress > span { white-space: nowrap; }
-/* The chain head's caret is the shared disclosure chevron (`.disc-chev`,
-   ruling 459), in the head line's quiet colour. */
-.ctl-goal-line .disc-chev { color: var(--muted); }
-.ctl-goal-title { font-size: .88rem; line-height: 1.35; }
-.ctl-goal-id { color: var(--muted); font-size: .75rem; }
-.ctl-links {
-  list-style: none;
-  margin: .5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: .375rem;
-}
-.ctl-links li {
-  display: flex;
-  /* Ruling 425(c): a title that wraps beside its pill keeps the pill and key
-     on its FIRST line, not centred against the whole block. */
-  align-items: baseline;
-  gap: .5rem;
-  flex-wrap: wrap;
-  font-size: .88rem;
-  padding: .25rem .375rem;
-  border-radius: var(--radius-small);
-}
-.ctl-links li.on { background: var(--tint-well); }
-/* Ruling 476(b): the link's number, the name every other surface uses for it,
-   in a fixed cell so the pills still line up down the chain. */
-.ctl-link-n {
-  flex: 0 0 1.25rem;
-  text-align: right;
-  color: var(--muted);
-  font-size: .75rem;
-  font-variant-numeric: tabular-nums;
-}
-/* The row a `#goal-N-link-M` jump landed on (the chain chip, a wait entry). */
-.ctl-links li[data-targeted] { background: var(--blue-soft); box-shadow: inset 0 0 0 1px var(--blue); }
-/* Ruling 425(c): the title takes the rest of the row beside its pill and task,
-   and wraps inside it, instead of dropping under them whole (8rem: the rail
-   leaves about 172px beside a pill and a key at 1440px). */
-.ctl-link-title { flex: 1 1 8rem; min-width: 0; }
-.ctl-link-task { color: var(--blue-pressed); text-decoration: none; font-size: .75rem; }
-.ctl-link-task:hover { text-decoration: underline; }
-.ctl-link-acts { display: inline-flex; gap: .25rem; margin-left: auto; }
-.ctl-link-note { flex-basis: 100%; }
-.ctl-goal-acts { display: flex; gap: .5rem; margin-top: .5rem; }
-/* Ruling 419(h): what a chain is for and what has happened to it, folded under
-   the links: the same quiet disclosure the capability list uses. */
-.ctl-goal-more { margin-top: .5rem; font-size: .75rem; }
-/* Ruling 498: a correction's evidence folds the same way. */
-.ctl-goal-more > summary, .ctl-correction-evidence > summary {
+/* Ruling 498: a correction's evidence folds under it, in the quiet disclosure
+   the capability list uses. */
+.ctl-correction-evidence > summary {
   cursor: pointer; color: var(--muted); list-style: none;
   display: inline-flex; align-items: center; gap: .375rem;
   border-radius: var(--radius-small);
 }
-.ctl-goal-more > summary::-webkit-details-marker, .ctl-correction-evidence > summary::-webkit-details-marker { display: none; }
-.ctl-goal-more > summary:hover, .ctl-correction-evidence > summary:hover { color: var(--fg); }
-.ctl-goal-desc { margin: .375rem 0 0; font-size: .75rem; }
-/* Ruling 476(h): where a chain was planned, first under "About this chain",
-   and in the rail the threads that planned this board's chains. */
-.ctl-goal-planned { margin: .375rem 0 0; color: var(--muted); }
-.ctl-planned-head { margin: .75rem 0 .375rem; font-size: .75rem; font-weight: 600; color: var(--muted); }
-.ctl-goal-history {
-  list-style: none; margin: .5rem 0 .25rem; padding: 0;
-  display: flex; flex-direction: column; gap: .25rem;
-  color: var(--muted); line-height: 1.45;
-}
-.ctl-goal-history li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem; }
-.ctl-goal-history li > :first-child { color: var(--faint); white-space: nowrap; }
+.ctl-correction-evidence > summary::-webkit-details-marker { display: none; }
+.ctl-correction-evidence > summary:hover { color: var(--fg); }
 /* U39-10: ruling 127's sentence as a note over the composer's box. */
 .ctl-unavailable { margin-bottom: .375rem; }
-/* Ruling 425(b): what a link waits on, a count that opens to its entries, in
-   the chain disclosure's own quiet language. */
-.ctl-link-waits {
-  flex-basis: 100%; min-width: 0; font-size: .75rem; color: var(--muted);
-  container-type: inline-size;
-}
-.ctl-link-waits > summary {
-  cursor: pointer; list-style: none;
-  display: inline-flex; align-items: center; gap: .375rem;
-  border-radius: var(--radius-small);
-}
-.ctl-link-waits > summary::-webkit-details-marker { display: none; }
-.ctl-link-waits > summary:hover { color: var(--fg); }
-.ctl-wait-dead { color: var(--danger); }
-/* One grid for the list and a subgrid per row, so the keys and titles line up
-   down the list while each row stays a list item. */
-.ctl-link-waits ul {
-  list-style: none; margin: .25rem 0 .125rem; padding: 0;
-  display: grid; grid-template-columns: max-content max-content minmax(0, 1fr);
-  column-gap: .5rem; row-gap: .125rem;
-}
-.ctl-link-waits li {
-  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
-  align-items: baseline;
-}
-.ctl-link-waits li .mono { color: var(--blue-pressed); text-decoration: none; }
-.ctl-link-waits li a.mono:hover { text-decoration: underline; }
-.ctl-wait-state { color: var(--faint); white-space: nowrap; }
-.ctl-wait-title {
-  color: var(--fg); min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ctl-link-waits li[data-state="done"] .ctl-wait-title { color: var(--muted); }
-.ctl-link-waits li:is([data-state="failed"], [data-state="cancelled"], [data-state="missing"]) .ctl-wait-state {
-  color: var(--danger);
-}
-/* The rail is narrow at every width (258px of list on a 1440px screen), so
-   there an entry is two lines: its key and state, then its title across the
-   whole row, wrapping, rather than an ellipsis after four words. */
-@container (max-width: 30rem) {
-  .ctl-link-waits ul { grid-template-columns: max-content minmax(0, 1fr); row-gap: .375rem; }
-  .ctl-link-waits li > .mono { grid-column: 1; grid-row: 1; }
-  .ctl-link-waits li > .ctl-wait-state { grid-column: 2; grid-row: 1; }
-  .ctl-wait-title { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
-  .ctl-wait-title:empty { display: none; }
-}
-/* Ruling 419(c): the reason a cancel or a skip records, under its consequence. */
+/* Ruling 419(c): the reason a confirm records (an undo's), under its
+   consequence. */
 .ctl-confirm-reason { margin-top: 1rem; }
 /* Ruling 419(d): a touch screen has no key to name. */
 @media (pointer: coarse) {
   .kbd-hint { display: none; }
-  /* U39-27: a finger needs a target at least 24px tall (WCAG 2.5.8). On a
-     phone the goal chains' own controls were 15 to 16px: every "waits on"
-     summary, each entry's key, each link's task key and "Show all N entries".
-     Padding, not a new look: the hit area grows and the text stays put. */
-  .ctl-link-waits > summary,
-  .ctl-link-waits li > a.mono,
-  .ctl-links .ctl-link-task,
-  .ctl-goal-more .linkish,
+  /* U39-27: a finger needs a target at least 24px tall (WCAG 2.5.8). The
+     rail's small text links were 15 to 16px on a phone. Padding, not a new
+     look: the hit area grows and the text stays put. */
   .ctl-all-toggle .linkish { padding-block: .3rem; }
 }
 
@@ -7529,9 +7401,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .ctladm { display: flex; flex-direction: column; gap: 1rem; }
 .ctladm-foot { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 
-/* The task hero's goal-chain chip: a pill that is also a link. */
-.hero-goal-chip { text-decoration: none; }
-.hero-goal-chip:hover { text-decoration: underline; }
+/* The task hero's wait chips: pills that are also links. */
+.hero-wait-chip { text-decoration: none; }
+a.hero-wait-chip:hover { text-decoration: underline; }
 
 /* ============================= Ruling 121 controller dock =============================
    The floating Controller button and its docked, NON-MODAL panel, mounted once
@@ -8574,10 +8446,188 @@ button.chg-num:hover, button.chg-num[aria-expanded="true"] { color: var(--blue-p
 .label-chip.wait-chip { gap: .25rem; padding-left: .25rem; }
 .wait-chip .ico { width: 11px; height: 11px; flex: none; }
 .wait-chip[data-wait-state="done"] .ico { color: var(--success-dark); }
-.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"], [data-wait-state="cancelled"]) {
+.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"]) {
   color: var(--danger);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger), transparent 55%);
 }
 /* Ruling 241's note under the wait is a sentence: it takes the row's width. */
 .kv.props .kv-row.prop-note { flex-direction: column; align-items: flex-start; gap: .25rem; padding: .5rem .125rem; }
 .kv.props .kv-row.prop-note .v { display: block; font-size: .75rem; line-height: 1.5; color: var(--muted); }
+
+/* ---------- appended: ruling 503, epics ---------- */
+/* An epic named beside a task: its colour a dot, its title the text. Outlined,
+   because ruling 365 keeps ONE tinted chip on a card (the status, whose tint
+   is its meaning); an epic describes the work, it does not ask for anything.
+   The chip's own `data-stage-color` sets `--stage` for the dot. */
+.epic-chip {
+  display: inline-flex; align-items: center; gap: .3125rem;
+  max-width: 100%; min-width: 0; height: 22px;
+  padding: 0 .375rem 0 .3125rem;
+  border-radius: var(--radius-small);
+  font-size: .75rem; font-weight: 500; line-height: 18px; white-space: nowrap;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  text-decoration: none;
+}
+a.epic-chip { transition: color .14s ease, box-shadow .14s ease; }
+a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-control); }
+.epic-chip-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.epic-dot { width: .5rem; height: .5rem; flex: none; border-radius: 50%; background: var(--stage); }
+.epic-dot.lg { width: .75rem; height: .75rem; }
+/* The Epic menu on the task page: the dot leads, the title takes the row. */
+.epic-menu .menu-item .epic-dot { margin-inline: .1875rem; }
+.epic-menu-title { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The board's epic filter: the filter chips' outline around a native select
+   (its popup themes with `color-scheme`, as every select here does), filled
+   like an active chip while it narrows the board. */
+.board-epic-filter {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding-left: .375rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-small);
+  color: var(--muted);
+  transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+.board-epic-filter:hover { border-color: var(--border); color: var(--fg); }
+.board-epic-filter.on { background: var(--tint-press); color: var(--fg); border-color: var(--border-control); }
+.board-epic-filter .ico { width: 14px; height: 14px; flex: none; }
+.board-epic-filter select {
+  max-width: 14rem;
+  padding: .25rem .375rem .25rem 0;
+  border: 0; border-radius: var(--radius-small);
+  background: transparent; color: inherit;
+  font-weight: 500;
+}
+.board-epic-filter select:focus { box-shadow: none; }
+.board-epic-filter:focus-within { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* The Epics list: a page like the review queue's, one row per epic. The row
+   is the link (its page); name, status, progress, lead and target line up in
+   columns so a list of epics reads as a table without being one. */
+.epics-panel { padding: .375rem; }
+.epic-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.epic-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) 7rem minmax(9rem, 1fr) minmax(0, .9fr) 1rem;
+  align-items: center; gap: 1rem;
+  padding: .75rem;
+  border-radius: var(--radius-box);
+  color: inherit; text-decoration: none;
+  transition: background-color .14s ease;
+}
+.epic-row:hover { background: var(--tint-hover); }
+.epic-list > li + li .epic-row { box-shadow: 0 -1px 0 var(--hairline); }
+.epic-list > li + li .epic-row:hover { box-shadow: none; }
+.epic-row-name { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.epic-row-id { font-size: .75rem; color: var(--faint); flex: none; }
+.epic-row-title {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-display); font-weight: 700; font-size: 1rem;
+}
+.epic-row-status { display: inline-flex; }
+.epic-row-meta { display: flex; align-items: center; gap: .5rem; justify-content: flex-end; flex-wrap: wrap; min-width: 0; }
+.epic-row-lead {
+  display: inline-flex; align-items: center; gap: .25rem; min-width: 0;
+  font-size: .75rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.epic-row-lead .ico { width: 13px; height: 13px; flex: none; color: var(--faint); }
+.epic-row-go { width: 14px; height: 14px; color: var(--faint); transition: color .14s ease, transform .14s var(--ease-out); }
+.epic-row:hover .epic-row-go { color: var(--blue-pressed); transform: translateX(2px); }
+@media (prefers-reduced-motion: reduce) {
+  .epic-row-go { transition: color .14s ease; }
+  .epic-row:hover .epic-row-go { transform: none; }
+}
+
+/* Progress: the Home card's stage meter and the count beside it. */
+.epic-progress { display: flex; flex-direction: column; gap: .375rem; min-width: 0; }
+.epic-progress .pj-meter { width: 100%; }
+.epic-progress-line { font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+.epic-tasks > .epic-progress { margin-bottom: .75rem; }
+
+/* One epic's page: the head, then a main column and a Details column, the
+   task page's proportions (ruling 170's 340px side). */
+.epic-crumb { margin: 0 0 .25rem; }
+/* A three-line head (crumb, title, status line): its tools sit level with the
+   crumb, not centred against the block. */
+.epic-head { align-items: flex-start; }
+.epic-status { display: inline-flex; }
+.epic-title { display: flex; align-items: center; gap: .5rem; min-width: 0; overflow-wrap: anywhere; }
+.epic-sub { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.epic-status-select select { font-weight: 600; }
+.epic-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start; gap: 1rem;
+}
+.epic-main, .epic-side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.epic-side { position: sticky; top: 0; }
+.epic-desc { max-width: 70ch; }
+
+/* The epic's tasks: rows like the review queue's, with the stage, the board
+   card's status word, what the task waits on and its owner, then Remove. */
+.epic-task-tools { display: inline-flex; gap: .5rem; }
+.epic-task-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.epic-task {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .375rem .25rem .375rem .5rem;
+  border-radius: var(--radius-box);
+  transition: background-color .14s ease;
+}
+.epic-task:hover { background: var(--tint-hover); }
+.epic-task + .epic-task { box-shadow: 0 -1px 0 var(--hairline); }
+.epic-task:hover, .epic-task:hover + .epic-task { box-shadow: none; }
+.epic-task[aria-busy="true"] { opacity: .7; }
+.epic-task-link {
+  display: flex; align-items: baseline; gap: .75rem;
+  flex: 1; min-width: 0;
+  padding-block: .25rem;
+  color: inherit; text-decoration: none;
+}
+.epic-task-key { flex: none; width: 62px; font-size: .75rem; color: var(--faint); }
+.epic-task-title {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-display); font-weight: 700; font-size: .88rem;
+}
+.epic-task-link:hover .epic-task-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--faint); }
+.epic-task-props { display: flex; align-items: center; gap: .375rem; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; }
+.epic-task-stage { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; color: var(--muted); white-space: nowrap; }
+.epic-task-remove { display: inline-flex; flex: none; }
+.epic-archived { margin-top: .75rem; padding-top: .5rem; border-top: 1px solid var(--hairline); }
+.epic-archived > summary {
+  display: inline-flex; align-items: center; gap: .375rem;
+  cursor: pointer; list-style: none;
+  font-size: .75rem; font-weight: 600; color: var(--muted);
+  border-radius: var(--radius-small);
+}
+.epic-archived > summary::-webkit-details-marker { display: none; }
+.epic-archived > summary:hover { color: var(--fg); }
+.epic-archived > p { margin: .5rem 0; }
+.epic-archived .epic-task-title { color: var(--muted); }
+
+/* The epic's history: dated lines, newest first. */
+.epic-history { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.epic-history > li { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: .75rem; font-size: .88rem; line-height: 1.45; }
+.epic-history-at { padding-top: .0625rem; font-variant-numeric: tabular-nums; }
+
+/* The create/edit dialog's colour row, and the Add tasks picker. */
+.epic-swatches { display: flex; flex-wrap: wrap; gap: .5rem; padding: .25rem 0; }
+.epic-add-filter { flex: none; width: 100%; margin-bottom: .75rem; }
+.epic-add-list {
+  list-style: none; margin: 0; padding: 0;
+  max-height: min(22rem, 50dvh); overflow-y: auto; scrollbar-gutter: stable;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.epic-add-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .5rem;
+  border-radius: var(--radius-button);
+  cursor: pointer;
+}
+.epic-add-row:hover { background: var(--tint-hover); }
+.epic-add-row:has(input:checked) { background: var(--blue-soft); }
+.epic-add-row .epic-task-key { width: auto; }
+.epic-add-in { margin-left: auto; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The two epic dialogs are form-sized, the narrow modal's measure. */
+.modal-card.epic-dialog, .modal-card.epic-add-dialog { width: min(560px, calc(100vw - 2rem)); }

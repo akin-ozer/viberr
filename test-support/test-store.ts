@@ -142,7 +142,7 @@ export function baseTaskFrontmatter(
     stage: "triage",
     previousStageId: null,
     heldAtStage: null,
-    goalRef: null,
+    epic: null,
     readiness: "input_required",
     waiting: "human",
     ownerUserId: null,

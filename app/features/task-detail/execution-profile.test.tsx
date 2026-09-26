@@ -204,8 +204,8 @@ describe("ruling 131(d): the run control on a held task", () => {
     displayReadiness: "blocked" as const,
     waiting: "none" as const,
     blockedBy: [
-      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "open" as const, taskKey: null, goalId: "goal-1" },
-      { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3", goalId: null },
+      { ref: "JC-2", label: "JC-2", state: "open" as const, taskKey: "JC-2" },
+      { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3" },
     ],
   });
   const runButton = (root: HTMLElement) =>
@@ -217,7 +217,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     const note = container.querySelector("[data-hold-note]")!;
     expect(note.textContent).toBe(
       // Ruling 356: JC-3 is done in the fixture, and reads as done.
-      "Waiting on other work (goal-1 link 2 and JC-3 (done)). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
+      "Waiting on other work (JC-2 and JC-3 (done)). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
     );
     expect(note.className).toContain("sub");
     expect(runButton(container).disabled).toBe(false);
@@ -257,7 +257,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(btn!.disabled).toBe(true);
     // The server's own sentence, from the shared `holdRefusal`.
     expect(container.textContent).toContain(
-      "waits on goal-1 link 2 and JC-3 (done) and Viberr is holding it",
+      "waits on JC-2 and JC-3 (done) and Viberr is holding it",
     );
     expect(container.textContent).toContain("running an agent on it is refused");
   });
@@ -265,9 +265,10 @@ describe("ruling 131(d): the run control on a held task", () => {
   it("ruling 356: a done entry reads as done on the control, not as still waited on", () => {
     // CANARY: drop the done split from `holdEntriesSentence`. This test's
     // fixture always carried JC-3 as done; until ruling 356 the assertion
-    // above REQUIRED "waits on goal-1 link 2 and JC-3".
+    // above REQUIRED "waits on goal-1 link 2 and JC-3" (the entry that is now
+    // JC-2 was a goal link until ruling 503).
     const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
-    expect(container.textContent).toContain("waits on goal-1 link 2 and JC-3 (done) and Viberr is holding it");
+    expect(container.textContent).toContain("waits on JC-2 and JC-3 (done) and Viberr is holding it");
     // F39-44: JC-3 is never printed bare, so it can never read as waited on.
     expect(container.textContent).not.toMatch(/JC-3(?! \(done\))/);
   });
@@ -279,7 +280,7 @@ describe("ruling 131(d): the run control on a held task", () => {
       task: {
         ...held,
         blockedBy: [
-          { ref: "JC-3", label: "JC-3", state: "cancelled" as const, taskKey: "JC-3", goalId: null },
+          { ref: "JC-3", label: "JC-3", state: "failed" as const, taskKey: "JC-3" },
         ],
       },
       runPrincipal: connectedPrincipal(),

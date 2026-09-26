@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { VALIDATION_VALUES, WAITING_VALUES } from "~/schemas/task-file.schema";
+import { EPIC_STATUS_VALUES } from "~/schemas/epic-file.schema";
 import { NOTIFICATION_KINDS } from "~/shared/mapping/notification.server";
 import { runMigrations } from "./db/migration-runner.server";
 import { withTransaction } from "./db/transaction.server";
@@ -63,9 +64,9 @@ import {
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
-import { startGoalRunner } from "./tasks/goal-actions.server";
+import { startDependencyRunner } from "./tasks/dependencies.server";
+import { convertGoalsToEpics } from "./tasks/goal-epic-conversion.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
-import { backfillGoalConversations } from "./controller/goal-planning-backfill.server";
 import { backfillMcpGrantScopes } from "./org/mcp-oauth.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
 import { recoverProjectGates } from "./tasks/project-gates.server";
@@ -280,6 +281,11 @@ export function projectionCheckGaps(db: DatabaseSync): string[] {
       (value) => `task_projections.waiting: ${value}`,
     ),
     ...notificationKindGaps(db).map((value) => `notifications.kind: ${value}`),
+    // Ruling 503: an epic's status is the same shape, a CHECK over the enum
+    // the epic file schema declares, so it belongs here from its first day.
+    ...checkListGaps(db, "epic_projections", "status", EPIC_STATUS_VALUES).map(
+      (value) => `epic_projections.status: ${value}`,
+    ),
   ];
 }
 
@@ -876,14 +882,16 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // Ruling 476(j) (live verification 2026-09-25): a chain written before goals
-  // recorded their conversation learns it from the audit row of its creation
-  // and the controller turn around it, when exactly one conversation matches.
-  // After the rescan (goal rows exist to re-project) and before the watcher.
+  // Ruling 503: every chained goal becomes the epic with its number, its
+  // tasks join it, its unstarted links become held tasks, and every wait on a
+  // goal link is respelled by task key. Once: a converted goal file is filed
+  // under `goals/converted/`. After the rescan (task rows exist to validate
+  // waits against) and the agent backfill (a task it makes has its operator),
+  // and before the watcher (no concurrent writer).
   try {
-    await backfillGoalConversations(db);
+    await convertGoalsToEpics(db);
   } catch (error) {
-    logger.error("goal planning-conversation backfill failed", {
+    logger.error("goal-to-epic conversion failed", {
       err: toError(error),
     });
   }
@@ -960,11 +968,12 @@ export async function bootServer(): Promise<void> {
   // "Update status" button. Idempotent start; the timer is unref'd.
   startGithubReconcilePoller(db);
 
-  // Ruling 99: goal chains — catch up once at boot (a link that completed
-  // while the process was down still advances its chain), then reconcile on a
-  // one-minute interval; and give any conversation whose turn a restart
-  // orphaned an honest "interrupted" note instead of eternal silence.
-  startGoalRunner(db);
+  // Ruling 131(e): release every held task whose wait was satisfied while the
+  // process was down, then sweep on a one-minute interval (the goal runner's
+  // tick, kept when ruling 503 retired the chains); and give any conversation
+  // whose turn a restart orphaned an honest "interrupted" note instead of
+  // eternal silence.
+  startDependencyRunner(db);
   try {
     recoverControllerConversations(db);
   } catch (error) {

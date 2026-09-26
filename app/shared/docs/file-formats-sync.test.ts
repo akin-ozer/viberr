@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PACKET_OPTION_KINDS, TASK_FRONTMATTER_KEYS } from "~/schemas/task-file.schema";
+import { EPIC_FRONTMATTER_KEYS } from "~/schemas/epic-file.schema";
 import { AGENT_PROFILE_KNOWN_KEYS } from "~/server/files/agent-profile-file.server";
 
 /**
@@ -107,6 +108,13 @@ describe("C01-A13 (pass 32): file-formats.md documents every frontmatter key the
     const text = section("2. `projects/<slug>/tasks/<KEY>/task.md`");
     const missing = TASK_FRONTMATTER_KEYS.filter((key) => !documentsKey(text, key));
     expect(missing, `${DOC_REL} §2 does not document these task frontmatter keys`).toEqual([]);
+  });
+
+  it("ruling 503: epics/*.md — every EPIC_FRONTMATTER_KEYS entry appears in section 2b", () => {
+    // CANARY: add a key to the epic schema and not to the doc.
+    const text = section("2b. `projects/<slug>/epics/<epic-id>.md`");
+    const missing = EPIC_FRONTMATTER_KEYS.filter((key) => !documentsKey(text, key));
+    expect(missing, `${DOC_REL} §2b does not document these epic frontmatter keys`).toEqual([]);
   });
 
   it("agents/profiles — every AGENT_PROFILE_KNOWN_KEYS entry appears in section 4", () => {

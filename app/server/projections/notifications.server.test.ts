@@ -26,7 +26,7 @@ import {
   countUnreadNotifications,
   createNotification,
   type CreateNotificationInput,
-  goalLink,
+  epicLink,
   isTaskViewNavigation,
   listNotifications,
   markAllNotificationsRead,
@@ -641,7 +641,8 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
     row("recs", 7, taskRecommendationsLink(slug, "VIB-1"));
     row("proposal", 6, proposalLink(slug, "kp-0123456789"));
     row("github", 5, projectGithubLink(slug), { taskKey: null });
-    row("goal", 4, goalLink(slug, "goal-2-link-3"), { taskKey: null });
+    // Ruling 503: an epic's page, where the goal-chain anchor used to go.
+    row("epic", 4, epicLink(slug, "epic-2"), { kind: "epic", taskKey: null });
     row("foreign", 3, "/projects/other/tasks/OTH-1#decision");
     row("lookalike", 2, `/projects/${slug}x/tasks/VIB-1`);
     row("offsite", 1, "https://example.com/projects/x");
@@ -652,7 +653,7 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
       recs: `/projects/${slug}/tasks/VIB-1#recommendations`,
       proposal: `/projects/${slug}/controller#proposal-kp-0123456789`,
       github: `/projects/${slug}/github`,
-      goal: `/projects/${slug}/controller#goal-2-link-3`,
+      epic: `/projects/${slug}/epics/epic-2`,
       // Not inside the row's project: the task it names, as before.
       foreign: `/projects/${slug}/tasks/VIB-1`,
       lookalike: `/projects/${slug}/tasks/VIB-1`,

@@ -52,7 +52,7 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  * O39-d: a turn runs one to five minutes, and its answer reached only the
  * surfaces still open on it: a person who had moved on learned nothing until
  * they went back to look. Replies stay out of the bell by design
- * (controller-and-goals §8), so this is its own signal. Only threads whose
+ * (controller-and-epics §8), so this is its own signal. Only threads whose
  * project the viewer can still open are listed, so every link leads somewhere.
  */
 export async function loader({ request }: Route.LoaderArgs): Promise<DockStatus> {

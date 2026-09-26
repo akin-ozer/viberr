@@ -100,19 +100,28 @@ export function taskAttachmentsDir(
   return path.join(taskDir(slug, key, dataRoot), "attachments");
 }
 
-/** Ruling 99: a project's chained-goal files live beside its tasks. */
-export function goalsDir(slug: string, dataRoot?: string): string {
-  return path.join(projectDir(slug, dataRoot), "goals");
+/** Ruling 503: a project's epic files live beside its tasks. */
+export function epicsDir(slug: string, dataRoot?: string): string {
+  return path.join(projectDir(slug, dataRoot), "epics");
 }
 
-/** One goal file. The id arrives from routes and tool calls, so it passes the
+/** One epic file. The id arrives from routes and tool calls, so it passes the
  *  same traversal guard every other store segment does. */
-export function goalFilePath(
+export function epicFilePath(
   slug: string,
-  goalId: string,
+  epicId: string,
   dataRoot?: string,
 ): string {
-  return `${resolveStoreSegment(goalsDir(slug, dataRoot), goalId)}.md`;
+  return `${resolveStoreSegment(epicsDir(slug, dataRoot), epicId)}.md`;
+}
+
+/**
+ * Ruling 503: where the chained-goal files of ruling 99 lived. Nothing reads
+ * or writes a goal any more; the boot conversion (`goal-epic-migration`)
+ * turns each one into an epic and files the original under `converted/`.
+ */
+export function retiredGoalsDir(slug: string, dataRoot?: string): string {
+  return path.join(projectDir(slug, dataRoot), "goals");
 }
 
 export function agentProfilesDir(dataRoot?: string): string {

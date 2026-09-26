@@ -16,9 +16,9 @@ Viberr keeps **business truth in markdown files** under the data root and
 **app-management truth in SQLite**. The split is per table, not per file:
 
 - `projects/<slug>/project.md`, `projects/<slug>/tasks/<KEY>/task.md` and
-  `projects/<slug>/goals/<id>.md` are canonical. Humans and agents may edit them
+  `projects/<slug>/epics/<id>.md` are canonical. Humans and agents may edit them
   directly. The watcher reconciles them into projection rows for fast reads; project and
-  task files parse tolerantly, goal files strictly ([file-formats.md](file-formats.md)).
+  task files parse tolerantly, epic files strictly ([file-formats.md](file-formats.md)).
 - `agents/profiles/<id>.md`, `agents/definitions/<id>.md`, `agents/controller-requests.md`,
   `kb/` and `skills/` are file-store content too, but nothing projects them: they are read
   from disk when needed (the KB watcher only refreshes a knowledge base's index metadata).
@@ -38,7 +38,7 @@ backing for task or project state.
 
 ```
 ${VIBERR_DATA_ROOT}/
-  projects/                      canonical project + task + goal files
+  projects/                      canonical project + task + epic files
   agents/
     profiles/<id>.md             org-level agent profile templates (operator, controller, specialists)
   runtimes/
@@ -73,7 +73,10 @@ Created by the code that needs them:
                                                     lands in attachments/ as
                                                     `gate-<sha7>-<NN>-<name>-<stamp>.log`
   projects/<slug>/tasks/<KEY>/.operator-scratch/    the Codex operator's working directory
-  projects/<slug>/goals/<goal-id>.md                chained goals (ruling 99)
+  projects/<slug>/epics/<epic-id>.md                epics (ruling 503)
+  projects/<slug>/goals/converted/<goal-id>.md      ruling 99's chained goals, filed by the
+                                                    one-time conversion to epics; a record,
+                                                    not watched or projected
   projects/<slug>/.repo-mirror/<owner>__<repo>.git  the project's bare repository mirror (ruling 87);
                                                     built in a `.building` sidecar and renamed into place
   agents/definitions/operator.md, controller.md     shipped doctrine files (written at boot)
@@ -119,7 +122,7 @@ host dev server (no launcher) none of this is applied.
 
 There is deliberately no `cache/`, `auth/` or `logs/` directory. Application logs are
 structured JSON on stdout. The watcher (`file-watch.service.server.ts`) watches only
-`projects/`: `project.md`, `tasks/<KEY>/task.md` and `goals/<id>.md`, with a 250 ms debounce.
+`projects/`: `project.md`, `tasks/<KEY>/task.md` and `epics/<id>.md`, with a 250 ms debounce.
 Every dot-prefixed path segment and every `*.tmp` file is ignored, and so is anything deeper
 than `tasks/<KEY>/task.md`, which keeps `workspace/`, `attachments/`, `.repo-mirror/` and the
 scratch folders invisible to it. The KB watcher (`kb-watch.service.server.ts`) watches `kb/`
@@ -148,22 +151,22 @@ files) · **C** cache/operational (safe to lose).
 | `users` | P | Canonical app profile and org role: `id`, `email` (unique), `name`, `title`, `role` (`admin \| member`), `idp` (default `local`), `avatar_tone`, `pwreset_required`, `theme` (`light \| dark \| system`), `disabled`, `last_login_at`, `created_by`, `github_handle`, `created_at`, `updated_at`. Better-auth `user.id` equals `users.id`. |
 | `user` / `session` / `account` / `verification` | P | better-auth 1.6.25's own tables, its CLI output pasted into the baseline (singular names, quoted camelCase columns). `user`: `id`, `name`, `email`, `emailVerified`, `image`, `createdAt`, `updatedAt`, and Viberr's own `githubHandle` additional field. `session`: `id`, `expiresAt`, `token`, `createdAt`, `updatedAt`, `ipAddress`, `userAgent`, `userId`. `account`: `id`, `accountId`, `providerId`, `userId`, `accessToken`, `refreshToken`, `idToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `scope`, `password`, `createdAt`, `updatedAt`. `verification`: `id`, `identifier`, `value`, `expiresAt`, `createdAt`, `updatedAt`; it looks unused but holds the OAuth state of every social sign-in (inserted at `/sign-in/social`, read and deleted at the callback). There is no `organization` / `member` / `invitation` table; the org plugin is not in use. |
 | `audit_events` | P | Every governed action: `id`, `occurred_at`, `actor_user_id`, `actor_label` (a row written through the controller ends ` · via controller`), `action` (lowercase dot-separated), `subject_kind`, `subject_id`, `project_slug`, `task_key`, secret-free `details_json`. Retained 90 days (§5). |
-| `notifications` | P | One row per delivered notification: `id`, `user_id`, `kind` (the CHECK is `NOTIFICATION_KINDS`: `packet \| question \| approval \| mention \| quality \| policy \| controller \| dependency \| ownership`), `ptype` (`input \| blocked`, packet kind only), `title`, `text`, `actor_json`, `project_slug`, `task_key`, `href` (ruling 497: where the row opens, recorded by the notifier that knows: a timeline event `#event-<occurredAt>`, the task's `#decision` or `#recommendations`, a proposal's entry on the Controller page, the project's GitHub page, a goal chain; NULL opens the task or the board, and a link outside the row's own project is ignored; added at open on an older root by `ensureBaselineColumns`), `occurred_at`, `read_at`, `created_at`. A controller conversation reply is never a row; `controller` rows are chained-goal progress; `question` rows are an agent's question to a person (`ask_human`, or the Codex outcome envelope's question; ruling 481). Boot widens a live root whose `kind` CHECK predates a kind in place, rows and indexes kept (`widenNotificationKindCheck`, ruling 481). Newest 500 per user (§5). |
+| `notifications` | P | One row per delivered notification: `id`, `user_id`, `kind` (the CHECK is `NOTIFICATION_KINDS`: `packet \| question \| approval \| mention \| quality \| policy \| controller \| dependency \| ownership \| epic`), `ptype` (`input \| blocked`, packet kind only), `title`, `text`, `actor_json`, `project_slug`, `task_key`, `href` (ruling 497: where the row opens, recorded by the notifier that knows: a timeline event `#event-<occurredAt>`, the task's `#decision` or `#recommendations`, a proposal's entry on the Controller page, the project's GitHub page, an epic's page; NULL opens the task or the board, and a link outside the row's own project is ignored; added at open on an older root by `ensureBaselineColumns`), `occurred_at`, `read_at`, `created_at`. A controller conversation reply is never a row; `controller` rows are chained-goal progress, which nothing has written since ruling 503 (the conversion repointed the ones that opened a goal to its epic); `epic` rows are an epic's notices to its lead (ruling 503); `question` rows are an agent's question to a person (`ask_human`, or the Codex outcome envelope's question; ruling 481). Boot widens a live root whose `kind` CHECK predates a kind in place, rows and indexes kept (`widenNotificationKindCheck`, ruling 481). Newest 500 per user (§5). |
 | `user_prefs` | P | Per-user JSON preferences: (`user_id`, `key`) → `value_json`, `updated_at`. Keys in use: `home` (grid or list view and pinned projects), `notifs` (notification routing) and `tlDefault` (the task timeline's default filter). |
 | `instance_settings` | P | Instance-wide JSON key-value store (`key`, `value_json`, `updated_at`). Never a secret. Keys: `maxConcurrentRuns` (the run concurrency cap, 0 or absent = unlimited, at most 64), `maxRunSpendUsd` (the spending cap per Claude run in USD, absent when none is set, ruling 175), and the backend quota observations, each naming the account it billed (`credentialUserId`, `credentialLabel`): `backendRateLimit.<backend>` the latest reading, `backendQuotaExhausted.<backend>` the exhaustion (`resetsAt` unix seconds with `resetsAtPrecision` `exact` / `prose` / `clock`, the last for a UTC wall-clock time (ruling 130(d)) and for a time-only "try again at 6:18 PM" resolved in the process zone; `providerText`, `runId`, `observedAt`; also the dispatch hold's evidence, ruling 152(c)) and `backendCredentialRefused.<backend>` the credential refusal. `projection.derivationVersion` stamps the rule set the projections were derived under; a stamp behind `PROJECTION_DERIVATION_VERSION` (4) forces one full rebuild at boot. |
 | `oauth_providers` | P | In-app OAuth client per provider (`provider` `github \| google`, primary key): `client_id`, sealed `client_secret`, `enabled` (cannot be set before `verified_at`), `verified_at`, `verified_detail`, `created_at`, `updated_at`. Overrides the env pair. |
 | `google_domain_allowlist` | P | Domains whose Google sign-ins provision on first login: `id`, `domain` (unique, normalized `@company.dev`), `role` they join as, `created_at`. |
 | `s3_audit_config` | P | The single S3 audit-export target (`id` always `default`): `bucket`, `region`, `prefix`, `endpoint`, `access_key_id`, sealed `secret_box`, `updated_at`. |
 
-### Projects, tasks, goals (projections of the files)
+### Projects, tasks, epics (projections of the files)
 
 | Table | Kind | What it holds |
 |---|---|---|
 | `projects` | D | One row per `project.md`: `slug`, `name`, `archived`, `repo`, `default_branch`, `task_prefix`, `description`, JSON copies `stages_json`, `workflow_json`, `agent_policy_json`, `credential_policy_json`, `guardrails_json`, `required_reviewers_json` (ruling 178: the required-reviewer rules RESOLVED to stage and agent names at project-rebuild time, so the task walk prints the acceptance gate's sentence from the row), `gates_json` (ruling 482: the declared gates, `[]` when none, so the task walk's acceptance block says when the gates have not passed on the revision under review; a change cascades into every task like the reviewer rules), `source_path`, `content_hash`, `parsed_at`. |
 | `project_members` | D | `members[]` from `project.md`: (`project_slug`, `user_id`) → `role` (`admin \| maintainer \| contributor \| viewer`). |
-| `task_projections` | D | One row per `task.md`, keyed (`project_slug`, `task_key`): `title`, `stage`, **derived** `readiness` plus `stored_readiness`, `waiting` (CHECK mirrors `WAITING_VALUES`, including the projection-only `schedule`, ruling 225), `urgent`, `priority`, `labels_json`, `due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; entry states are resolved at read time, never stored), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), `owner_user_id`, the engagement snapshots `specialist_json` (the delivering engagement) / `reviewers_json` (the supporting engagements) / `operator_json` (the operator assignment), `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count` and `recommendation_kinds` (the distinct kinds of the pending recommendations, sorted and comma-joined), `schedules_json`, `event_count`, `comment_count`, `diagnostic_count`, `goal_id` / `goal_link_index`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`, `board_rank`. |
+| `task_projections` | D | One row per `task.md`, keyed (`project_slug`, `task_key`): `title`, `stage`, **derived** `readiness` plus `stored_readiness`, `waiting` (CHECK mirrors `WAITING_VALUES`, including the projection-only `schedule`, ruling 225), `urgent`, `priority`, `labels_json`, `due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; entry states are resolved at read time, never stored), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), `owner_user_id`, the engagement snapshots `specialist_json` (the delivering engagement) / `reviewers_json` (the supporting engagements) / `operator_json` (the operator assignment), `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count` and `recommendation_kinds` (the distinct kinds of the pending recommendations, sorted and comma-joined), `schedules_json`, `event_count`, `comment_count`, `diagnostic_count`, `epic_id` (ruling 503: the task's `epic`, indexed with the project; an upgraded root keeps the retired `goal_id` / `goal_link_index`, which nothing reads), `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`, `board_rank`. |
 | `task_events` | D | The task timeline, one row per entry: `id`, `project_slug`, `task_key`, `position` (0 = newest), `occurred_at`, `type`, `actor_kind` (`human \| agent \| operator \| controller \| system`; an unrecognized author projects as `system`), `actor_ref` (a user id, `agent/<profileId>`, `operator`, `controller`, or a system id), a denormalized `actor_json` snapshot, `title`, `text`, `to_agent`, `evidence_json`, `attachments_json`. A re-project keeps the rows of events that did not change (aligned from the oldest end; their `id` survives, their `position` shifts, changed content is updated in place) and deletes and inserts the rest (ruling 457), so an appended comment re-issues no existing id. |
-| `goal_projections` | D | One row per goal file, keyed (`project_slug`, `goal_id`): `title`, `status`, `created_by`, `created_by_label`, `on_failure`, `links_json` with link statuses **reconciled against live task rows**, `description`, `current_index`, `links_total`, `links_done`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`. |
+| `epic_projections` | D | One row per epic file (ruling 503), keyed (`project_slug`, `epic_id`): `epic_number`, `title`, `status` (CHECK mirrors `EPIC_STATUS_VALUES`, compared at boot by `projectionCheckGaps`), `color`, `lead_user_id`, `start_date`, `target_date`, `description`, `created_by`, `created_by_label`, `conversation_id`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`. The epic's tasks are not here: an epic's progress is counted from `task_projections.epic_id` at read time. An upgraded root gains the table at open and keeps ruling 99's `goal_projections`, which nothing reads. |
 | `diagnostics` | D | Parse findings per source path: `id`, `project_slug`, `task_key`, `source_path`, `severity` (`info \| warning \| error`), `code`, `path`, `message`, `hard_stop`, `observed_at`. |
 | `provenance` | C | Observational log of what the projector and reconciler saw: `id`, `source_path`, `content_hash`, `observed_at`, `action` (`projected \| removed \| error \| rescan`, `github.reconcile`, `github.merge`, `github.branch_delete`, `github.push`), `details_json`. A `github.reconcile` row names the branch head its compare read (`headSha`, ruling 494), and a `github.push` row the head a Viberr push published. No retention; prune by hand. |
 
@@ -364,7 +367,7 @@ start) regenerates user ids and destroys every primary row in the file. Both are
 `runtimes/<backend>/` transcripts, and empties `staged_outcomes`, `run_log_lines`,
 `agent_runs`, `notifications`, `provenance`, `diagnostics`, `scope_violations`, `user_prefs`,
 `task_events`, `task_projections`, `project_members` and `projects` (the full rescan that
-follows prunes the orphaned `goal_projections` rows). It keeps users and
+follows prunes the orphaned `epic_projections` rows). It keeps users and
 better-auth tables, GitHub and backend credentials, org resources, audit rows, controller
 transcripts and the per-person runtime homes. Revisit this convention at the first real
 deployment.
@@ -378,10 +381,10 @@ queued questions `qq_`, outcome keys `oc_`, PATs `pat_`, backend credentials `ub
 knowledge bases `kb_`, skills `sk_`, MCP servers `mcp_`, allowlisted domains `dom_`, scope
 violations `sv_`, controller conversations `cnv_` and messages `cmsg_`, controller resource
 requests `rq_`. Other ids: a GitHub connection's id is `slugify(owner)`, the S3 target's is
-`default`, a goal's is `goal-<n>` (the next free number in the project's `goals/`), and
+`default`, an epic's is `epic-<n>` (the next free number in the project's `epics/`), and
 session ids are better-auth's. Compare users by id everywhere; display names are render-only
 (ruling 6). Task keys are `<PREFIX>-<n>` allocated by `allocateTaskKey` from `project.md`
 `nextTaskNumber` under the project file mutex, with a directory max-scan rescuing a stale
-counter; `GOAL` is a reserved prefix. Actor references inside files use the codec in
+counter; `EPIC` is a reserved prefix (ruling 503; it was `GOAL` before). Actor references inside files use the codec in
 `app/server/files/actor-ref.server.ts` (`user:<id> (Name)`,
 `agent:<backend>/<profileId> (Role)`, `operator`, `controller`, `system:<id>`).

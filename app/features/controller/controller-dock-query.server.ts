@@ -116,7 +116,7 @@ export function describeDockScope(
       taskKey: null,
       projectName,
       label: projectName ?? "Board",
-      contextLine: `Knows the ${projectName} board: stages, members, open tasks, goal chains · ${acts}`,
+      contextLine: `Knows the ${projectName} board: stages, members, open tasks, epics · ${acts}`,
       pageHref: `/projects/${binding.projectSlug}/controller`,
     };
   }

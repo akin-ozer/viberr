@@ -40,8 +40,11 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // 76 before the layout built the task list once.
   // 64 before the layout stopped reading the bell's list (FL-4 / SRV-6) and
   // the board's decisions, live runs and repo probe (BOARD-6).
+  // Raised 49 to 50 by ruling 503: the task loader's one read of the
+  // project's epics, which the hero's Epic field and the Details panel's Epic
+  // menu draw from.
   "server-read:task-revalidation.sql": {
-    ceiling: 49,
+    ceiling: 50,
     unit: "count",
     journey: "server",
     fixture: TASK_REVALIDATION,
@@ -83,8 +86,10 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // 49 before the layout built the task list once (getBoardWithTasks feeds the review queue).
   // 37 before the bell's list left the layout (FL-4 / SRV-6); the board
   // route's own loader (BOARD-6) shares the layout's read of the project.
+  // Raised 29 to 30 by ruling 503: the board loader's one read of the
+  // project's epics, for the epic filter and the New task dialog's Epic select.
   "server-read:board-revalidation.sql": {
-    ceiling: 29,
+    ceiling: 30,
     unit: "count",
     journey: "server",
     fixture: BOARD_REVALIDATION,

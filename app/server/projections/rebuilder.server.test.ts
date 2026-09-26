@@ -1387,7 +1387,7 @@ describe("task dependencies projection (ruling 131)", () => {
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-7", {
           readiness: "ready",
-          blockedBy: ["goal-1 link 2", "goal-1 link 3", "goal-1 link 4"],
+          blockedBy: ["VIB-2", "VIB-3", "VIB-4"],
         }),
       });
       writeTask(store.dataRoot, store.slug, {
@@ -1405,7 +1405,7 @@ describe("task dependencies projection (ruling 131)", () => {
           task_key: "VIB-7",
           readiness: "blocked",
           stored_readiness: "ready",
-          blocked_by_json: JSON.stringify(["goal-1 link 2", "goal-1 link 3", "goal-1 link 4"]),
+          blocked_by_json: JSON.stringify(["VIB-2", "VIB-3", "VIB-4"]),
         },
         { task_key: "VIB-8", readiness: "ready", stored_readiness: "ready", blocked_by_json: "[]" },
       ]);

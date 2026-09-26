@@ -118,9 +118,8 @@ export type TaskProjectionRow = {
   /** Ruling 53/88: the delivered revision's head sha, NULL before delivery. */
   work_revision_sha: string | null;
   goal: string;
-  /** Ruling 99: chained-goal back-reference (NULL outside a chain). */
-  goal_id: string | null;
-  goal_link_index: number | null;
+  /** Ruling 503: the epic this task belongs to (NULL when in none). */
+  epic_id: string | null;
   packet_json: string | null;
   /** Pending operator recommendations on the task file (F7-NOTIF1). */
   recommendation_count: number;
@@ -379,10 +378,11 @@ export interface TaskSummary {
    */
   workRevisionSha?: string | null;
   goal: string;
-  /** Ruling 99: the chain this task is one link of, or null. Optional like
-   *  `acceptance` above: `mapTaskProjectionRow` always sets it, and an absent
-   *  value reads as "not in a chain". */
-  goalRef?: { goalId: string; linkIndex: number } | null;
+  /** Ruling 503: the epic this task belongs to (`epic-3`), or null. Optional
+   *  like `acceptance` above: `mapTaskProjectionRow` always sets it, and an
+   *  absent value reads as "in no epic". The epic's title and colour are read
+   *  from the project's epics where a surface draws them (`listEpics`). */
+  epicId?: string | null;
   packet: PacketRender | null;
   eventCount: number;
   commentCount: number;
@@ -876,10 +876,7 @@ export function mapTaskProjectionRow(
     foreignHead: github?.foreignHead ?? null,
     workRevisionSha: row.work_revision_sha,
     goal: row.goal,
-    goalRef:
-      row.goal_id && row.goal_link_index
-        ? { goalId: row.goal_id, linkIndex: row.goal_link_index }
-        : null,
+    epicId: row.epic_id,
     packet: mapPacket(columns.packet),
     eventCount: row.event_count,
     commentCount: row.comment_count,

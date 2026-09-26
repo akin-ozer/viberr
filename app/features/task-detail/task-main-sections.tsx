@@ -6,8 +6,9 @@ import type {
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { TaskLinks } from "~/shared/task-key-links";
-import { dependencyAnchor, goalLinkAnchor } from "~/shared/goal-anchor";
+import { epicHref } from "~/shared/epic-href";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { EpicChip, type EpicChipView } from "~/ui/epic-chip";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
 import { Pill, ReadinessPill, ValidationPill, validationQuiet } from "~/ui/pill";
@@ -99,6 +100,7 @@ export function TaskHero({
   editGoalDraft = null,
   pendingGoalDraft = null,
   taskLinks,
+  epic = null,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
@@ -122,6 +124,8 @@ export function TaskHero({
   pendingGoalDraft?: string | null;
   /** U39-31: the other tasks the goal names, key to path. */
   taskLinks?: TaskLinks;
+  /** Ruling 503: the epic the task belongs to, when it is in one. */
+  epic?: EpicChipView | null;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
@@ -259,41 +263,44 @@ export function TaskHero({
         {!terminal && !validationQuiet(task.validation) && (
           <ValidationPill value={task.validation} />
         )}
-        {/* Ruling 99: this task is one link of a goal chain — the chip names
-            the chain and links to the project Controller surface, where the
-            whole chain is read and redirected. */}
-        {task.goalRef && (
-          <Link
-            className="pill agent sm hero-goal-chip"
-            // Ruling 419(h): straight to THIS chain, opened, on the rail;
-            // ruling 476(b): to this task's own link row in it.
-            to={`/projects/${task.projectSlug}/controller#${goalLinkAnchor(task.goalRef.goalId, task.goalRef.linkIndex)}`}
-          >
-            <Icon name="flag" />
-            {task.goalRef.goalId} · link {task.goalRef.linkIndex}
-          </Link>
+        {/* Ruling 503: the epic is a FIELD, like the stage beside it: the
+            body of work this task belongs to, opening the epic's page, where
+            its other tasks and its progress are. It replaced ruling 99's goal
+            chip, which named one link of a chain. */}
+        {epic && (
+          <span className="hero-field">
+            <span className="hero-field-lbl">Epic</span>
+            <EpicChip epic={epic} to={epicHref(task.projectSlug, epic.id)} />
+          </span>
         )}
-        {/* Ruling 131(a): what this task waits on, each entry a link (the
-            task page, or the project Controller page for a goal link) with
-            its resolved state when it is not simply open. */}
-        {task.blockedBy.map((entry) => (
-          <Link
-            key={entry.ref}
-            className="pill neutral sm hero-goal-chip"
-            data-wait-state={entry.state}
-            to={
-              entry.taskKey
-                ? `/projects/${task.projectSlug}/tasks/${entry.taskKey}`
-                : // Ruling 476(b): a goal link opens its own row on the rail.
-                  `/projects/${task.projectSlug}/controller${dependencyAnchor(entry) ? `#${dependencyAnchor(entry)}` : ""}`
-            }
-            title={`Waits on ${entry.label} (${entry.state})`}
-          >
-            <Icon name="lock" />
-            {entry.label}
-            {entry.state !== "open" ? ` · ${entry.state === "failed" ? "archived" : entry.state}` : ""}
-          </Link>
-        ))}
+        {/* Ruling 131(a): what this task waits on, each entry a link to the
+            task it names, with its resolved state when it is not simply open.
+            A key the project does not answer to links nowhere. */}
+        {task.blockedBy.map((entry) =>
+          entry.taskKey ? (
+            <Link
+              key={entry.ref}
+              className="pill neutral sm hero-wait-chip"
+              data-wait-state={entry.state}
+              to={`/projects/${task.projectSlug}/tasks/${entry.taskKey}`}
+              title={`Waits on ${entry.label} (${entry.state})`}
+            >
+              <Icon name="lock" />
+              {entry.label}
+              {entry.state !== "open" ? ` · ${entry.state === "failed" ? "archived" : entry.state}` : ""}
+            </Link>
+          ) : (
+            <span
+              key={entry.ref}
+              className="pill neutral sm hero-wait-chip"
+              data-wait-state={entry.state}
+              title={`Waits on ${entry.label} (${entry.state})`}
+            >
+              <Icon name="lock" />
+              {entry.label} · {entry.state}
+            </span>
+          ),
+        )}
         <span className="hero-file">
           <Icon name="file" />
           <span>{task.filePath}</span>

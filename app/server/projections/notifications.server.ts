@@ -24,6 +24,7 @@ import {
   TASK_RECOMMENDATIONS_ANCHOR,
   timelineEventAnchor,
 } from "~/shared/page-anchors";
+import { epicHref } from "~/shared/epic-href";
 
 /**
  * Per-user notification rows (orchestrator ruling 9): SQLite-owned,
@@ -150,10 +151,9 @@ export function projectGithubLink(projectSlug: string): string {
   return `${projectPath(projectSlug)}/github`;
 }
 
-/** A goal chain on the project Controller page (ruling 419(h)); `anchor` is the
- *  goal's id, or one of its links (`goalLinkAnchor`). */
-export function goalLink(projectSlug: string, anchor: string): string {
-  return `${projectPath(projectSlug)}/controller#${anchor}`;
+/** An epic's own page (ruling 503). */
+export function epicLink(projectSlug: string, epicId: string): string {
+  return epicHref(projectSlug, epicId);
 }
 
 /**

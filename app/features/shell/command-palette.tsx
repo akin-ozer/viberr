@@ -18,6 +18,7 @@ import { useDialog } from "~/ui/use-dialog";
 
 const GROUP_LABEL = {
   project: "Projects",
+  epic: "Epics",
   task: "Tasks",
   branch: "Branches",
   agent: "Agents",
@@ -25,6 +26,7 @@ const GROUP_LABEL = {
 
 const GROUP_ICON = {
   project: "board",
+  epic: "epic",
   task: "check",
   branch: "branch",
   agent: "agents",
@@ -49,9 +51,9 @@ interface HitGroup {
   rows: { hit: CommandHit; index: number }[];
 }
 
-/** Runs of same-kind hits, in server order (projects → tasks → branches →
- *  agents). Grouping by RUN rather than by kind keeps the rendered order and
- *  the flat `active` index in lockstep. */
+/** Runs of same-kind hits, in server order (projects → epics → tasks →
+ *  branches → agents). Grouping by RUN rather than by kind keeps the rendered
+ *  order and the flat `active` index in lockstep. */
 function groupHits(hits: CommandHit[]): HitGroup[] {
   const groups: HitGroup[] = [];
   hits.forEach((hit, index) => {
@@ -154,8 +156,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           aria-controls={expanded ? LISTBOX_ID : undefined}
           aria-activedescendant={expanded ? optionId(active) : undefined}
           aria-autocomplete="list"
-          placeholder="Search tasks, branches, agents, projects…"
-          aria-label="Search tasks, branches, agents, projects"
+          placeholder="Search tasks, epics, branches, agents, projects…"
+          aria-label="Search tasks, epics, branches, agents, projects"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
@@ -165,8 +167,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       <div className="cmdk-list" ref={listRef}>
         {!typed ? (
           <p className="cmdk-empty">
-            Type to jump to a task, a branch, an agent or a project, across
-            every project you can open.
+            Type to jump to a task, an epic, a branch, an agent or a project,
+            across every project you can open.
           </p>
         ) : hits.length === 0 ? (
           // The one thing a combobox cannot say through aria-activedescendant

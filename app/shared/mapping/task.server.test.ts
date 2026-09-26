@@ -22,8 +22,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
   return {
     project_slug: "viberr-core",
     task_key: "VIB-1",
-    goal_id: null,
-    goal_link_index: null,
+    epic_id: null,
     title: "A task",
     stage: "review",
     readiness: "ready",
@@ -95,14 +94,14 @@ function summarize(
 }
 
 const WAITS_ON_VIB_2: DependencyRender[] = [
-  { ref: "VIB-2", label: "VIB-2", state: "open", taskKey: "VIB-2", goalId: null },
+  { ref: "VIB-2", label: "VIB-2", state: "open", taskKey: "VIB-2" },
 ];
 
 describe("ruling 131: the summary carries the caller's resolved dependency list", () => {
   it("passes the resolved entries through verbatim (the mapper resolves nothing itself)", () => {
     // Canary: omit `blockedBy` from the mapper's return object.
     const entries = [
-      { ref: "VIB-2", label: "VIB-2", state: "open" as const, taskKey: "VIB-2", goalId: null },
+      { ref: "VIB-2", label: "VIB-2", state: "open" as const, taskKey: "VIB-2" },
     ];
     const summary = mapTaskProjectionRow(row({ blocked_by_json: '["VIB-2"]' }), {
       stages: STAGES,
@@ -113,6 +112,14 @@ describe("ruling 131: the summary carries the caller's resolved dependency list"
     });
     expect(summary.blockedBy).toBe(entries);
     expect(summarize(row(), false).blockedBy).toEqual([]);
+  });
+});
+
+describe("ruling 503: the summary names the task's epic from the projection", () => {
+  it("carries epic_id as epicId, and null for a task in no epic", () => {
+    // CANARY: drop `epicId` from the mapper's return object.
+    expect(summarize(row({ epic_id: "epic-2" }), false).epicId).toBe("epic-2");
+    expect(summarize(row(), false).epicId).toBeNull();
   });
 });
 

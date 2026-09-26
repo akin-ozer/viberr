@@ -305,14 +305,20 @@ const AUDIT_ACTION_KINDS = {
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
-  // Ruling 477(b) (F40-28): a goal chain is the automation that starts, strands
-  // and closes a project's work, and the page promises "human decisions … and
-  // policy changes". Defining a chain and redirecting it (pause, resume,
-  // cancel, skip, retry, edit, add, remove, adopt, rename) are a person's
-  // decisions; the runner closing one is its own record.
+  // Ruling 477(b) (F40-28): a goal chain was the automation that started,
+  // stranded and closed a project's work. Ruling 503 turned the chains into
+  // epics and nothing writes these any more; a project's history keeps the
+  // rows it has, and they still read as sentences.
   "goal.created": "change",
   "goal.updated": "change",
   "goal.completed": "audit",
+  // Ruling 503: an epic is a person's plan. Creating one, changing what it
+  // is, and putting a task in one or taking it out are their decisions; the
+  // one-time conversion of a goal chain into an epic is Viberr's own record.
+  "epic.created": "change",
+  "epic.updated": "change",
+  "task.epic.changed": "change",
+  "epic.converted": "audit",
 } satisfies Record<string, AuditLogKind>;
 
 /** The whitelist above as the lookup `listAuditLog` reads: `action` arrives as
@@ -398,12 +404,15 @@ const auditDetailsSchema = z.object({
   private: z.boolean().optional().catch(undefined),
   // Ruling 477(b): a goal row's chain title, its link count at creation, the
   // op a redirect ran, the link it touched, the reason given, and whether it
-  // changed nothing (`from`/`to` above carry a rename's two titles).
+  // changed nothing (`from`/`to` above carry a rename's two titles). Ruling
+  // 503's epic rows reuse `title`, `from`, `to`, `status` and `total`.
   title: detailText,
   links: z.number().optional().catch(undefined),
   index: z.number().optional().catch(undefined),
   reason: detailText,
   unchanged: z.boolean().optional().catch(undefined),
+  // Ruling 503: what an epic edit changed, as the epic's own history words it.
+  summary: detailText,
 
   // Ruling 482: the gate list as written, and one gate run's outcome.
   gates: z.array(z.object({ name: z.string().catch("?") })).catch([]),
@@ -636,6 +645,24 @@ function auditText(
     case "goal.completed":
       // The runner's own record names no actor, like the policy engine's rows.
       return `Goal ${goalLabel(row, d)} completed: every link is settled.`;
+    // Ruling 503: the epic rows. A task's move reads on its task chip.
+    case "epic.created":
+      return d.total
+        ? `${actor} created epic ${goalLabel(row, d)} with ${countLabel(d.total, "task")}.`
+        : `${actor} created epic ${goalLabel(row, d)}.`;
+    case "epic.updated":
+      return d.summary
+        ? `${actor} changed epic ${goalLabel(row, d)}: ${d.summary}.`
+        : `${actor} changed epic ${goalLabel(row, d)}.`;
+    case "epic.converted":
+      // The conversion's own record, once per goal, like the runner's rows.
+      return `Goal **${d.from ?? "?"}** became epic ${goalLabel(row, d)} with ${countLabel(d.total ?? 0, "task")}.`;
+    case "task.epic.changed": {
+      const titled = d.title ? ` (${d.title})` : "";
+      if (d.from && d.to) return `${actor} moved the epic from **${d.from}** to **${d.to}**${titled} on`;
+      if (d.to) return `${actor} set the epic to **${d.to}**${titled} on`;
+      return `${actor} cleared the epic **${d.from ?? "?"}**${titled} on`;
+    }
     // P13-D-8: a refused attempt. Reads as a blocked action, like the merge
     // refusal above.
     case "project.authority.denied": {
@@ -654,7 +681,8 @@ function auditText(
 }
 
 /** Ruling 477(b): a goal row names its chain by id, with the title the row
- *  recorded (a row written before the writer recorded one has none). */
+ *  recorded (a row written before the writer recorded one has none). Ruling
+ *  503's epic rows name their epic the same way. */
 function goalLabel(row: AuditRow, d: AuditDetailsRead): string {
   return `**${row.subject_id ?? "?"}**${d.title ? ` (${d.title})` : ""}`;
 }

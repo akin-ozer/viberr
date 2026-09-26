@@ -4,7 +4,7 @@ import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRoutesStub, useLocation, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { ControllerPage, goalsCountLine, linksStrandedByCancel, surfaceLabel } from "./controller-page";
+import { ControllerPage, surfaceLabel } from "./controller-page";
 import { readableStep } from "./turn-step";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import type { RunView } from "~/features/runtime/runtime-types";
@@ -36,7 +36,6 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     available: true,
     controllerName: "Controller",
     projectName: "Viberr Core",
-    viewerId: "u_arda",
     conversations: [
       { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false },
       { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false },
@@ -47,7 +46,6 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
     runtime: [],
     canInterruptTurn: false,
-    goals: [],
     proposals: [],
     corrections: { shown: [], total: 0 },
     viewerOwnsActive: false,
@@ -78,256 +76,12 @@ describe("the page marks a reply the viewer has not seen (O39-d)", () => {
   });
 });
 
-describe("ruling 131(c): the Goals panel names what a link waits on", () => {
-  it("renders 'waits on …' under a link with a declared wait, and nothing under one without", async () => {
-    // Canary: remove the `data-link-wait` span.
-    const goal: NonNullable<ControllerSurfaceView["goals"]>[number] = {
-      id: "goal-2",
-      title: "Dependent chain",
-      status: "active",
-      createdBy: "u_arda",
-      createdByLabel: "Arda",
-      onFailure: "pause",
-      description: "",
-      links: [
-        { index: 1, title: "Needs base B", goal: "C.", taskKey: "JC-9", status: "active", note: null, redeclared: false, blockedBy: ["goal-1 link 2", "JC-6"] },
-        { index: 2, title: "Free", goal: "D.", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
-      ],
-      currentIndex: 1,
-      createdAt: null,
-      updatedAt: null,
-      history: [],
-    };
-    const { container } = renderPage(view({ goals: [goal] }));
-    // The stub's root loader is async: the page renders after it resolves.
-    await screen.findByText("waits on goal-1 link 2 and JC-6");
-    const waits = [...container.querySelectorAll("[data-link-wait]")].map((n) => n.textContent);
-    expect(waits).toEqual(["waits on goal-1 link 2 and JC-6"]);
-  });
-
-  it("ruling 359: with the entries' states resolved, a done entry reads as done, not as still waited on", async () => {
-    // Canary: print `l.blockedBy` instead of the resolved `waits`.
-    const goal: NonNullable<ControllerSurfaceView["goals"]>[number] = {
-      id: "goal-2",
-      title: "Dependent chain",
-      status: "active",
-      createdBy: "u_arda",
-      createdByLabel: "Arda",
-      onFailure: "pause",
-      description: "",
-      links: [
-        {
-          index: 1,
-          title: "Needs base B",
-          goal: "C.",
-          taskKey: "JC-9",
-          status: "active",
-          note: null,
-          redeclared: false,
-          blockedBy: ["goal-1 link 2", "JC-6"],
-          waits: [
-            { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-4)", state: "open", taskKey: "JC-4", goalId: "goal-1" },
-            { ref: "JC-6", label: "JC-6", state: "done", taskKey: "JC-6", goalId: null },
-          ],
-        },
-      ],
-      currentIndex: 1,
-      createdAt: null,
-      updatedAt: null,
-      history: [],
-    };
-    const { container } = renderPage(view({ goals: [goal] }));
-    // Ruling 425(b): the states now read as a count and a list, never as a
-    // flat list of addresses in which JC-6 looks as waited-on as JC-4.
-    await screen.findByText("waits on 1 open · 1 done");
-    const rows = [...container.querySelectorAll("[data-link-wait] li")].map((li) => [
-      li.getAttribute("data-state"),
-      li.querySelector(".ctl-wait-state")?.textContent,
-      li.querySelector(".mono")?.textContent,
-    ]);
-    expect(rows).toEqual([
-      ["open", "open", "JC-4"],
-      ["done", "done", "JC-6"],
-    ]);
-    expect(container.textContent).not.toContain("waits on goal-1 link 2, JC-6");
-  });
-
-  /**
-   * Ruling 425 (pass 39, the controller page for end users). Live on ax-clone:
-   * goal-6 link 1 read "active" over AX-6, which sat in Triage held by ten
-   * other links; goal-6 link 5 printed thirteen entries as one sentence of
-   * addresses ("goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5) …"); and
-   * goal-4 link 5 read "waits on AX-20 AX-21", AX-21 being its own task.
-   */
-  describe("ruling 425: a chain link says what holds it in words a person can follow", () => {
-    function chains(): NonNullable<ControllerSurfaceView["goals"]> {
-      const base = {
-        status: "active" as const,
-        createdBy: "u_arda",
-        createdByLabel: "Arda",
-        onFailure: "pause" as const,
-        description: "",
-        createdAt: null,
-        updatedAt: null,
-        history: [],
-      };
-      return [
-        {
-          ...base,
-          id: "goal-4",
-          title: "Cycle 4",
-          currentIndex: 5,
-          links: [
-            { index: 5, title: "ax logs: the server route and the command", goal: "L.", taskKey: "AX-21", status: "active", note: null, redeclared: false, blockedBy: ["AX-20"], waits: [{ ref: "AX-20", label: "AX-20", state: "open", taskKey: "AX-20", goalId: null }] },
-            { index: 6, title: "ax delete, and the deletion cascade rule", goal: "D.", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
-          ],
-        },
-        {
-          ...base,
-          id: "goal-6",
-          title: "Cycle 6",
-          currentIndex: 1,
-          links: [
-            {
-              index: 1,
-              title: "End-to-end test harness",
-              goal: "E.",
-              taskKey: "AX-6",
-              status: "active",
-              note: null,
-              redeclared: false,
-              blockedBy: ["goal-4 link 5", "goal-4 link 6", "AX-24", "goal-9 link 1"],
-              waits: [
-                { ref: "goal-4 link 5", label: "goal-4 link 5 (AX-21)", state: "open", taskKey: "AX-21", goalId: "goal-4" },
-                { ref: "goal-4 link 6", label: "goal-4 link 6", state: "open", taskKey: null, goalId: "goal-4" },
-                { ref: "AX-24", label: "AX-24", state: "done", taskKey: "AX-24", goalId: null },
-                { ref: "goal-9 link 1", label: "goal-9 link 1", state: "cancelled", taskKey: null, goalId: "goal-9" },
-              ],
-            },
-            {
-              index: 2,
-              title: "Released once its waits are done",
-              goal: "R.",
-              taskKey: "AX-7",
-              status: "active",
-              note: null,
-              redeclared: false,
-              blockedBy: ["AX-24"],
-              waits: [{ ref: "AX-24", label: "AX-24", state: "done", taskKey: "AX-24", goalId: null }],
-            },
-          ],
-        },
-      ];
-    }
-
-    it("(a) a link whose task is still held reads blocked, as its board card does, and one whose waits are all done reads active", async () => {
-      // CANARY: drop `held` and use LINK_PILL[l.status] alone.
-      const { container } = renderPage(view({ goals: chains() }));
-      await screen.findByText("End-to-end test harness");
-      const pillOf = (title: string) =>
-        [...container.querySelectorAll(".ctl-links li")]
-          .find((li) => li.querySelector(".ctl-link-title")?.textContent === title)
-          ?.querySelector(".pill")?.textContent;
-      // The board's word for the same task (card-status `blocked`).
-      expect(pillOf("End-to-end test harness")).toBe("blocked");
-      expect(pillOf("ax logs: the server route and the command")).toBe("blocked");
-      expect(pillOf("Released once its waits are done")).toBe("active");
-      expect(pillOf("ax delete, and the deletion cascade rule")).toBe("pending");
-    });
-
-    it("(b) the wait list is a count that opens to each entry's state, link and title", async () => {
-      // CANARY: render the old one-sentence `holdEntriesSentence` instead of `LinkWaits`.
-      const { container } = renderPage(view({ goals: chains() }));
-      await screen.findByText("End-to-end test harness");
-      const waits = [...container.querySelectorAll("details[data-link-wait]")];
-      const harness = waits.find((d) => d.closest("li")?.querySelector(".ctl-link-title")?.textContent === "End-to-end test harness")!;
-      expect(harness.querySelector("summary")?.textContent).toBe("waits on 3 open · 1 done · 1 can never finish");
-      const rows = [...harness.querySelectorAll("li")].map((li) => ({
-        state: li.querySelector(".ctl-wait-state")?.textContent,
-        ref: li.querySelector(".mono")?.textContent,
-        href: li.querySelector("a.mono")?.getAttribute("href") ?? null,
-        title: li.querySelector(".ctl-wait-title")?.textContent || null,
-      }));
-      expect(rows).toEqual([
-        // A goal link with a task names the task, and the link's title.
-        { state: "open", ref: "AX-21", href: "/projects/viberr-core/tasks/AX-21", title: "ax logs: the server route and the command" },
-        // A goal link the chain has not started names the link, and opens its own row in that chain (ruling 476(b)).
-        { state: "not started", ref: "goal-4 link 6", href: "/projects/viberr-core/controller#goal-4-link-6", title: "ax delete, and the deletion cascade rule" },
-        // A wait on a cancelled chain's link is marked, and nothing on the page names it.
-        { state: "cancelled", ref: "goal-9 link 1", href: "/projects/viberr-core/controller#goal-9-link-1", title: null },
-        // Done entries come last.
-        { state: "done", ref: "AX-24", href: "/projects/viberr-core/tasks/AX-24", title: null },
-      ]);
-      const released = waits.find((d) => d.closest("li")?.querySelector(".ctl-link-title")?.textContent === "Released once its waits are done")!;
-      expect(released.querySelector("summary")?.textContent).toBe("waited on one entry, all done");
-    });
-
-    it("(c) a link's own task sits before its title, never after what it waits on", async () => {
-      // CANARY: move the `ctl-link-task` link back after the waits.
-      const { container } = renderPage(view({ goals: chains() }));
-      await screen.findByText("End-to-end test harness");
-      const li = [...container.querySelectorAll(".ctl-links > li")].find(
-        (n) => n.querySelector(".ctl-link-title")?.textContent === "ax logs: the server route and the command",
-      )!;
-      const order = [...li.children].map((c) => c.className.split(" ").find((k) => k.startsWith("ctl-") || k === "pill") ?? c.tagName);
-      expect(order.indexOf("ctl-link-task")).toBeLessThan(order.indexOf("ctl-link-title"));
-      expect(order.indexOf("ctl-link-title")).toBeLessThan(order.indexOf("ctl-link-waits"));
-    });
-  });
-
-  /**
-   * Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION.
-   *
-   * `requireGoalAuthority` allows the chain's CREATOR or anyone with
-   * `run-agents`. The page computed one boolean from the viewer's project ROLE
-   * and handed it to every card, so the creator arm was never evaluated —
-   * and a contributor can create a chain (`create-task` is A/M/C) but is not
-   * `run-agents` (A/M). The repo's own toolkit test proves the server answers
-   * yes: a contributor creates goal-1, then pauses it, and both return [done].
-   * This panel is the ONLY goal-redirect UI in the product, so the person who
-   * started the chain had no Pause, Resume, Cancel, Retry or Skip anywhere.
-   */
-  it("ruling 260: a chain's own creator gets its controls even below the run-agents tier", async () => {
-    const mine: NonNullable<ControllerSurfaceView["goals"]>[number] = {
-      id: "goal-7",
-      title: "My own chain",
-      status: "active",
-      createdBy: "u_noor",
-      createdByLabel: "Noor",
-      onFailure: "pause",
-      description: "",
-      links: [
-        { index: 1, title: "First", goal: "A.", taskKey: "JC-1", status: "failed", note: null, redeclared: false, blockedBy: [] },
-      ],
-      currentIndex: 1,
-      createdAt: null,
-      updatedAt: null,
-      history: [],
-    };
-    const theirs = { ...mine, id: "goal-8", title: "Someone else's chain", createdBy: "u_other" };
-
-    // A viewer below the run-agents tier (canRedirectGoals=false in the stub),
-    // looking at one chain they created and one they did not.
-    renderPage(view({ goals: [mine, theirs], viewerId: "u_noor" }));
-    await screen.findByText("My own chain");
-
-    // CANARY: drop `|| g.createdBy === viewerId` and BOTH counts are 0 — the
-    // creator is shown their own chain with no way to redirect it.
-    expect(screen.getAllByRole("button", { name: /Pause/ })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: /Cancel goal/ })).toHaveLength(1);
-    // …and the chain they did not create still offers nothing, so the fix did
-    // not simply open the controls to everybody.
-    const cards = document.querySelectorAll("[data-goal-id]");
-    expect(cards.length === 0 || cards.length === 2).toBe(true);
-  });
-});
-
 function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFunction) {
   const page: Parameters<typeof createRoutesStub>[0][number] = {
     path: "projects/:slug/controller",
     Component: () => (
       <ToastProvider>
-        <ControllerPage view={v} projectSlug="viberr-core" canRedirectGoals={false} />
+        <ControllerPage view={v} projectSlug="viberr-core" />
       </ToastProvider>
     ),
   };
@@ -350,7 +104,7 @@ function renderInstancePage(v: ControllerSurfaceView, action?: ActionFunction) {
       path: "controller",
       Component: () => (
         <ToastProvider>
-          <ControllerPage view={v} projectSlug={null} canRedirectGoals={false} />
+          <ControllerPage view={v} projectSlug={null} />
         </ToastProvider>
       ),
     },
@@ -483,7 +237,7 @@ describe("surfaceLabel", () => {
 describe("controller page: the Claude-not-connected state (ruling 127)", () => {
   it("names the viewer's own account and where they connect it", async () => {
     const { container } = renderInstancePage(
-      view({ available: false, projectName: null, conversations: [], goals: null }),
+      view({ available: false, projectName: null, conversations: [] }),
     );
     await screen.findByText("Managing this instance with your own permissions.");
     const box = composer(container);
@@ -507,7 +261,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
 
   it("says nothing of the sort to a viewer who HAS connected Claude", async () => {
     const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [], goals: null }),
+      view({ available: true, projectName: null, conversations: [] }),
     );
     await screen.findByText("Managing this instance with your own permissions.");
     const box = composer(container);
@@ -525,7 +279,6 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
         available: true,
         projectName: null,
         conversations: [],
-        goals: null,
         viewerOwnsActive: false,
         conversation: {
           id: "cv_1",
@@ -562,7 +315,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
   it("ruling 259: a failed send leaves the typed message in the box", async () => {
     const typed = "A long ask I do not want to retype. ".repeat(20);
     const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [], goals: null }),
+      view({ available: true, projectName: null, conversations: [] }),
       // The CSRF arm: refused before the controller engine is ever reached.
       () => ({ ok: false, error: "That request expired. Reload the page and try again." }),
     );
@@ -583,7 +336,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
   it("ruling 259: a successful send clears it", async () => {
     const posted: Record<string, string>[] = [];
     const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [], goals: null }),
+      view({ available: true, projectName: null, conversations: [] }),
       async ({ request }) => {
         const form = await request.formData();
         posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
@@ -628,7 +381,7 @@ describe("ruling 259: the box is compared with what went out, trimmed", () => {
 
   async function sendTyped(action: ActionFunction) {
     const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [], goals: null }),
+      view({ available: true, projectName: null, conversations: [] }),
       action,
     );
     await screen.findByText("Managing this instance with your own permissions.");
@@ -777,8 +530,8 @@ describe("the open conversation's execution", () => {
     );
     expect(readableStep('mcp__viberr_ops__read_run_log · {"runId":"run_x","tail":40}')).toBe("read run log · run_x, 40");
     // A payload the 120-character cap cut short is not JSON, so it stays as stored.
-    expect(readableStep('mcp__viberr_controller__update_goal · {"goalId":"goal-6","links…')).toBe(
-      'update goal · {"goalId":"goal-6","links…',
+    expect(readableStep('mcp__viberr_controller__update_epic · {"epicId":"epic-6","addTasks…')).toBe(
+      'update epic · {"epicId":"epic-6","addTasks…',
     );
     // Built-in tools and their inputs are already words.
     expect(readableStep("Bash · npm test")).toBe("Bash · npm test");
@@ -973,38 +726,6 @@ describe("the open conversation's execution", () => {
   });
 });
 
-type Goal = NonNullable<ControllerSurfaceView["goals"]>[number];
-type GoalLink = Goal["links"][number];
-
-function goalOf(over: Partial<Goal> & Pick<Goal, "id" | "links">): Goal {
-  return {
-    title: `Chain ${over.id}`,
-    status: "active",
-    createdBy: "u_arda",
-    createdByLabel: "Arda",
-    onFailure: "pause",
-    description: "",
-    currentIndex: null,
-    createdAt: null,
-    updatedAt: null,
-    history: [],
-    ...over,
-  };
-}
-
-function linkOf(over: Partial<GoalLink> & Pick<GoalLink, "index">): GoalLink {
-  return {
-    title: `Link ${over.index}`,
-    goal: "Do it.",
-    taskKey: null,
-    status: "pending",
-    note: null,
-    redeclared: false,
-    blockedBy: [],
-    ...over,
-  };
-}
-
 /**
  * Ruling 419: the controller page for the person using it.
  *
@@ -1016,19 +737,17 @@ function linkOf(over: Partial<GoalLink> & Pick<GoalLink, "index">): GoalLink {
  * chain for good; and a completed chain took 479px to say it was done.
  */
 describe("ruling 419(a): the page's navigation is at its top", () => {
-  it("puts the conversations first in the rail, ahead of the goal chains", async () => {
-    // CANARY: render <GoalsPanel> before <ConversationList> in the aside.
-    const { container } = renderPage(
-      view({ goals: [goalOf({ id: "goal-1", links: [linkOf({ index: 1 })] })] }),
-    );
-    await screen.findByText("Chain goal-1");
+  it("puts the conversations first in the rail, ahead of the knowledge base", async () => {
+    // CANARY: render <KnowledgePanel> before <ConversationList> in the aside.
+    const { container } = renderPage(view());
+    await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
     const rail = container.querySelector("aside.ctl-side")!;
-    // Ruling 483: the board's open proposals sit between the two, before the
-    // chains, because they are what the owner is asked to decide.
+    // Ruling 483 put the board's knowledge-base panel under the list. The goal
+    // chains that followed it left the rail with ruling 503: an epic has its
+    // own pages.
     expect([...rail.children].map((c) => c.className)).toEqual([
       "panel ctl-convs",
       "panel ctl-proposals",
-      "panel ctl-goals",
     ]);
   });
 
@@ -1071,7 +790,7 @@ describe("ruling 419(a): the page's navigation is at its top", () => {
                 <ControllerPage
                   view={view({ conversation: open, viewerOwnsActive: true })}
                   projectSlug="viberr-core"
-                  canRedirectGoals={false}
+                 
                 />
                 <Probe />
               </ToastProvider>
@@ -1142,145 +861,6 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
   });
 });
 
-describe("ruling 419(c): cancelling a chain is confirmed, and says what it strands", () => {
-  const target = goalOf({
-    id: "goal-4",
-    title: "CLI",
-    links: [
-      linkOf({ index: 1, taskKey: "AX-4", status: "done" }),
-      linkOf({ index: 2, taskKey: "AX-24", status: "active" }),
-      linkOf({ index: 6 }),
-      linkOf({ index: 7 }),
-    ],
-  });
-  const other = goalOf({
-    id: "goal-6",
-    title: "Release",
-    links: [
-      // Waits on an unstarted link of goal-4: stranded by the cancel.
-      linkOf({ index: 1, blockedBy: ["goal-4 link 6", "goal-5 link 1"] }),
-      // Waits only on a link that already has its task: not stranded.
-      linkOf({ index: 2, blockedBy: ["goal-4 link 2"] }),
-      // Waits on goal-4 link 7 but is already done: nothing left to strand.
-      linkOf({ index: 3, status: "done", taskKey: "AX-30", blockedBy: ["goal-4 link 7"] }),
-    ],
-  });
-  const settledChain = goalOf({
-    id: "goal-9",
-    status: "completed",
-    links: [linkOf({ index: 1, status: "done", taskKey: "AX-1", blockedBy: ["goal-4 link 7"] })],
-  });
-
-  it("linksStrandedByCancel names only live links waiting on a link that can never start", () => {
-    // CANARY: drop the `!l.taskKey` filter and goal-6 link 2 is named too.
-    expect(linksStrandedByCancel(target, [target, other, settledChain])).toEqual(["goal-6 link 1"]);
-    expect(linksStrandedByCancel(other, [target, other, settledChain])).toEqual([]);
-  });
-
-  it("Cancel goal posts nothing until confirmed, then posts the reason typed", async () => {
-    // CANARY: make the button call `act({ op: "cancel" })` directly.
-    const posted: Record<string, string>[] = [];
-    renderPage(view({ goals: [target, other] }), "", async ({ request }) => {
-      const form = await request.formData();
-      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
-      return { ok: true, toast: "Goal goal-4 cancelled. Its record stays readable." };
-    });
-    await screen.findByText("CLI");
-    const card = document.querySelector<HTMLElement>('[data-goal="goal-4"]')!;
-    const trigger = within(card).getByRole("button", { name: "Cancel goal" });
-    // Ruling 149's destructive face on the trigger.
-    expect(trigger.className).toBe("btn ghost sm danger");
-    fireEvent.click(trigger);
-    expect(posted).toEqual([]);
-    const dialog = await screen.findByRole("alertdialog", { name: "Cancel goal-4?" });
-    expect(dialog.getAttribute("data-screen-label")).toBe("Cancel goal dialog");
-    expect(dialog.textContent).toContain("A cancelled chain cannot be resumed, and none of its 2 unstarted links will ever start.");
-    expect(dialog.textContent).toContain(
-      "goal-6 link 1 waits on those unstarted links and would wait forever unless its wait is changed.",
-    );
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Scope moved to goal-7" } });
-    await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel goal" }));
-    });
-    await screen.findByText("Goal goal-4 cancelled. Its record stays readable.");
-    expect(posted).toEqual([
-      { _csrf: "tok", intent: "goal-op", goalId: "goal-4", op: "cancel", reason: "Scope moved to goal-7" },
-    ]);
-  });
-
-  it("Keep it running closes the dialog and posts nothing", async () => {
-    const posted: string[] = [];
-    renderPage(view({ goals: [target] }), "", async () => {
-      posted.push("x");
-      return { ok: true };
-    });
-    await screen.findByText("CLI");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel goal" }));
-    await screen.findByRole("alertdialog", { name: "Cancel goal-4?" });
-    fireEvent.click(screen.getByRole("button", { name: "Keep it running" }));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    expect(posted).toEqual([]);
-  });
-
-  it("Skip on a failed link confirms first and says the skip releases its waiters", async () => {
-    // CANARY: make Skip call `act({ op: "skip_link", ... })` directly.
-    const failing = goalOf({
-      id: "goal-5",
-      title: "Ops",
-      links: [linkOf({ index: 3, title: "Gateway data path", taskKey: "AX-22", status: "failed" })],
-    });
-    const posted: Record<string, string>[] = [];
-    renderPage(view({ goals: [failing] }), "", async ({ request }) => {
-      const form = await request.formData();
-      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
-      return { ok: true, toast: "Link 3 skipped." };
-    });
-    await screen.findByText("Ops");
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-    expect(posted).toEqual([]);
-    const dialog = await screen.findByRole("alertdialog", { name: "Skip link 3?" });
-    expect(dialog.textContent).toContain('"Gateway data path" will never run, and a skipped link cannot be retried.');
-    expect(dialog.textContent).toContain("released as if it were done");
-    await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Skip link" }));
-    });
-    await screen.findByText("Link 3 skipped.");
-    expect(posted).toEqual([{ _csrf: "tok", intent: "goal-op", goalId: "goal-5", op: "skip_link", index: "3" }]);
-  });
-});
-
-describe("ruling 419(d): a chain states its progress, and a settled one folds", () => {
-  it("opens running chains, folds settled ones, and counts what is done", async () => {
-    // CANARY: render `<details open>` for every chain.
-    const running = goalOf({
-      id: "goal-2",
-      title: "Control plane",
-      links: [
-        linkOf({ index: 1, status: "done", taskKey: "AX-2" }),
-        linkOf({ index: 2, status: "skipped" }),
-        linkOf({ index: 3, status: "active", taskKey: "AX-3" }),
-        linkOf({ index: 4 }),
-      ],
-    });
-    const completed = goalOf({
-      id: "goal-1",
-      title: "Foundation",
-      status: "completed",
-      links: [linkOf({ index: 1, status: "done", taskKey: "AX-1" }), linkOf({ index: 2, status: "done", taskKey: "AX-7" })],
-    });
-    const { container } = renderPage(view({ goals: [running, completed] }));
-    await screen.findByText("Control plane");
-    const card = (id: string) => container.querySelector<HTMLDetailsElement>(`details[data-goal="${id}"]`)!;
-    expect(card("goal-2").open).toBe(true);
-    expect(card("goal-1").open).toBe(false);
-    expect(card("goal-2").querySelector("[data-goal-progress]")!.textContent).toBe("1 of 4 done · 1 skipped");
-    expect(card("goal-1").querySelector("[data-goal-progress]")!.textContent).toBe("2 of 2 done");
-    // The folded chain still names itself in its summary line.
-    expect(card("goal-1").querySelector("summary")!.textContent).toContain("Foundation");
-    expect(container.querySelector(".ctl-goals-count")!.textContent).toBe("1 active · 1 settled");
-  });
-});
-
 describe("ruling 419(d): the send hint names the key this keyboard has", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -1329,67 +909,6 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
   });
 });
 
-describe("U39-21 on the rail: a chain's history renders its inline code", () => {
-  it("renders `code` in a history entry instead of printing the backticks", async () => {
-    // CANARY: render `entry.text` as plain text again.
-    const goal = goalOf({
-      id: "goal-4",
-      title: "CLI",
-      description: "",
-      history: [{ occurredAt: "2026-09-22T20:00:00.000Z", text: "Link 2 renamed to `ax apply -f` by Arda Kaya." }],
-      links: [linkOf({ index: 1 })],
-    });
-    const { container } = renderPage(view({ goals: [goal] }));
-    await screen.findByText("CLI");
-    const entry = container.querySelector(".ctl-goal-history li")!;
-    expect(entry.querySelector("code.mono")?.textContent).toBe("ax apply -f");
-    expect(entry.textContent).not.toContain("`");
-  });
-});
-
-describe("ruling 419(h): a chain says what it is for and what has happened to it", () => {
-  const history = Array.from({ length: 8 }, (_, i) => ({
-    occurredAt: `2026-09-22T2${i}:00:00.000Z`,
-    text: `Entry ${8 - i}`,
-  }));
-
-  it("folds the description and the newest history under 'About this chain', six at a time", async () => {
-    // CANARY: drop the `ctl-goal-more` disclosure.
-    const goal = goalOf({
-      id: "goal-4",
-      title: "CLI",
-      description: "Give the runtime a face.",
-      history,
-      links: [linkOf({ index: 1 })],
-    });
-    const { container } = renderPage(view({ goals: [goal] }));
-    await screen.findByText("CLI");
-    const more = container.querySelector<HTMLDetailsElement>('details[data-goal="goal-4"] details.ctl-goal-more')!;
-    expect(more.querySelector("summary")!.textContent).toBe("About this chain");
-    expect(more.textContent).toContain("Give the runtime a face.");
-    const shown = () => [...more.querySelectorAll(".ctl-goal-history li")].map((li) => li.textContent);
-    expect(shown()).toHaveLength(6);
-    expect(shown()[0]).toContain("Entry 8");
-    fireEvent.click(within(more).getByRole("button", { name: "Show all 8 entries" }));
-    expect(shown()).toHaveLength(8);
-  });
-
-  it("opens the chain a link pointed at, even a settled one", async () => {
-    // CANARY: drop `useTargetedGoal()` from the Goals panel.
-    const done = goalOf({
-      id: "goal-1",
-      title: "Foundation",
-      status: "completed",
-      links: [linkOf({ index: 1, status: "done", taskKey: "AX-1" })],
-    });
-    const { container } = renderPage(view({ goals: [done] }), "#goal-1");
-    await screen.findByText("Foundation");
-    await waitFor(() =>
-      expect(container.querySelector<HTMLDetailsElement>("details#goal-1")!.open).toBe(true),
-    );
-  });
-});
-
 /**
  * Ruling 451 (motion from transitions.dev, owner 2026-09-23): the page's
  * conversation moves as the dock's does. A reply that lands while the
@@ -1429,7 +948,7 @@ describe("ruling 451: the page's conversation motion", () => {
       setView = set;
       return (
         <ToastProvider>
-          <ControllerPage view={v} projectSlug="viberr-core" canRedirectGoals={false} />
+          <ControllerPage view={v} projectSlug="viberr-core" />
         </ToastProvider>
       );
     }
@@ -1499,10 +1018,9 @@ describe("ruling 451: the page's conversation motion", () => {
 
 /**
  * Ruling 368: a controller request shows itself on the button that sent it.
- * Send named its work but went to the .45 refused step with no busy mark; the
- * goal controls share one fetcher, so every one of them dimmed to the refused
- * step with its resting label, the pressed one included.
- * Canary: drop the `opInFlight === "pause"` label in controller-page.tsx.
+ * Send named its work but went to the .45 refused step with no busy mark. (The
+ * goal controls this ruling also named left with the chains, ruling 503.)
+ * Canary: render Send's resting label while `busy` in controller-page.tsx.
  */
 describe("ruling 368: the controller's requests in flight", () => {
   // Never answers: each test reads the wait itself.
@@ -1510,7 +1028,7 @@ describe("ruling 368: the controller's requests in flight", () => {
 
   it("Send reads Sending…, busy, the loader spinning", async () => {
     const { container } = renderInstancePage(
-      view({ available: true, projectName: null, conversations: [], goals: null }),
+      view({ available: true, projectName: null, conversations: [] }),
       never,
     );
     await screen.findByText("Managing this instance with your own permissions.");
@@ -1519,53 +1037,6 @@ describe("ruling 368: the controller's requests in flight", () => {
     const sending = await screen.findByRole("button", { name: "Sending…" });
     expect(sending.getAttribute("aria-busy")).toBe("true");
     expect(sending.querySelector("svg.ico.spin")).not.toBeNull();
-  });
-
-  it("Pause reads Pausing…, and Cancel goal only waits", async () => {
-    renderPage(
-      view({
-        goals: [
-          goalOf({
-            id: "goal-4",
-            title: "CLI",
-            links: [linkOf({ index: 1, taskKey: "AX-4", status: "active" })],
-          }),
-        ],
-      }),
-      "",
-      never,
-    );
-    await screen.findByText("CLI");
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    const pausing = await screen.findByRole("button", { name: "Pausing…" });
-    expect(pausing.getAttribute("aria-busy")).toBe("true");
-    expect(pausing.querySelector("svg.ico.spin")).not.toBeNull();
-    const cancel = screen.getByRole("button", { name: "Cancel goal" });
-    expect(cancel.hasAttribute("disabled")).toBe(true);
-    expect(cancel.hasAttribute("aria-busy")).toBe(false);
-  });
-
-  it("Retry on a failed link reads Retrying…, and Skip only waits", async () => {
-    renderPage(
-      view({
-        goals: [
-          goalOf({
-            id: "goal-5",
-            title: "Ops",
-            links: [linkOf({ index: 3, title: "Gateway data path", taskKey: "AX-22", status: "failed" })],
-          }),
-        ],
-      }),
-      "",
-      never,
-    );
-    await screen.findByText("Ops");
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    const retrying = await screen.findByRole("button", { name: "Retrying…" });
-    expect(retrying.getAttribute("aria-busy")).toBe("true");
-    const skip = screen.getByRole("button", { name: "Skip" });
-    expect(skip.hasAttribute("disabled")).toBe(true);
-    expect(skip.hasAttribute("aria-busy")).toBe(false);
   });
 });
 
@@ -1664,13 +1135,13 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
 /**
  * Ruling 476 (pass 40, the controller page, dock and goals rail). Measured
  * live on the owner's akinozer.com instance: a thread whose source URLs ran
- * past the transcript, a rail that named no link by number, replies opened at
- * their tail, replies no screen reader heard, a 97px thread switcher, a head
- * that counted a paused chain as running, links waiting on the owner drawn as
- * agents at work, and a chain with no way back to the conversation that
- * planned it.
+ * past the transcript, replies opened at their tail, replies no screen reader
+ * heard, and a 97px thread switcher. Its findings on the goals rail (a link's
+ * number, the head's count, a link's status word, the planning conversation)
+ * moved with the chains to the epic pages (ruling 503), whose tests carry
+ * (g) and (h).
  */
-describe("ruling 476: the controller page and its goals rail", () => {
+describe("ruling 476: the controller page", () => {
   const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
     id: "cnv_b",
     userId: "u1",
@@ -1707,7 +1178,7 @@ describe("ruling 476: the controller page and its goals rail", () => {
       setView = set;
       return (
         <ToastProvider>
-          <ControllerPage view={v} projectSlug="viberr-core" canRedirectGoals={false} />
+          <ControllerPage view={v} projectSlug="viberr-core" />
         </ToastProvider>
       );
     }
@@ -1839,134 +1310,6 @@ describe("ruling 476: the controller page and its goals rail", () => {
       await screen.findByText(/removed the sentence/, { selector: ".md-body p" });
       expect(screen.getByRole("status")).toBe(region);
       expect(region.textContent).toBe("Controller replied: I've removed the sentence from WEB-1's goal.");
-    });
-  });
-
-  describe("(b) F40-22: a link is named by its number, and a reference lands on it", () => {
-    const chain = () =>
-      goalOf({
-        id: "goal-1",
-        title: "Launch",
-        links: [
-          linkOf({ index: 1, status: "done", taskKey: "WEB-1" }),
-          linkOf({ index: 2, status: "active", taskKey: "WEB-2" }),
-          linkOf({
-            index: 3,
-            title: "Go-live",
-            blockedBy: ["goal-1 link 2"],
-            waits: [{ ref: "goal-1 link 2", label: "goal-1 link 2", state: "open", taskKey: null, goalId: "goal-1" }],
-          }),
-        ],
-      });
-
-    it("prints each link's number in its row and gives the row an address", async () => {
-      // CANARY: drop the `ctl-link-n` cell and the row's id.
-      const { container } = renderPage(view({ goals: [chain()] }));
-      await screen.findByText("Go-live");
-      const rows = [...container.querySelectorAll<HTMLElement>(".ctl-links > li")];
-      expect(rows.map((li) => [li.id, li.querySelector(".ctl-link-n")?.textContent])).toEqual([
-        ["goal-1-link-1", "Link 1"],
-        ["goal-1-link-2", "Link 2"],
-        ["goal-1-link-3", "Link 3"],
-      ]);
-      // "Link 3" to a screen reader, "3" on screen.
-      expect(rows[2]!.querySelector(".ctl-link-n .vh")?.textContent).toBe("Link ");
-      // The wait's count cannot read as a link number, and its entry opens the link's row.
-      const waits = rows[2]!.querySelector("details[data-link-wait]")!;
-      expect(waits.querySelector("summary")?.textContent).toBe("waits on 1 open");
-      expect(waits.querySelector("a.mono")?.getAttribute("href")).toBe("/projects/viberr-core/controller#goal-1-link-2");
-    });
-
-    it("a jump to a link's row opens its chain, focuses the row and marks it", async () => {
-      // CANARY: have `useTargetedGoal` accept only a chain's own card again.
-      const settled = { ...chain(), status: "completed" as const };
-      const { container } = renderPage(view({ goals: [settled] }), "#goal-1-link-3");
-      await screen.findByText("Go-live");
-      const row = container.querySelector<HTMLElement>("#goal-1-link-3")!;
-      await waitFor(() => expect(document.activeElement).toBe(row));
-      expect(container.querySelector<HTMLDetailsElement>("details#goal-1")!.open).toBe(true);
-      expect(row.getAttribute("data-targeted")).toBe("true");
-      expect(container.querySelectorAll("[data-targeted]")).toHaveLength(1);
-    });
-  });
-
-  it("(f) F40-26: the Goals head counts chains by what they are doing", async () => {
-    // CANARY: count every unsettled chain as "running" again.
-    const goals = [
-      goalOf({ id: "goal-1", status: "active", links: [linkOf({ index: 1 })] }),
-      goalOf({ id: "goal-2", status: "paused", links: [linkOf({ index: 1 })] }),
-      goalOf({ id: "goal-3", status: "attention", links: [linkOf({ index: 1, status: "failed" })] }),
-      goalOf({ id: "goal-4", status: "attention", links: [linkOf({ index: 1, status: "failed" })] }),
-      goalOf({ id: "goal-5", status: "completed", links: [linkOf({ index: 1, status: "done" })] }),
-      goalOf({ id: "goal-6", status: "cancelled", links: [linkOf({ index: 1 })] }),
-    ];
-    const { container } = renderPage(view({ goals }));
-    await screen.findByText("Chain goal-1");
-    expect(container.querySelector(".ctl-goals-count")!.textContent).toBe(
-      "1 active · 1 paused · 2 need attention · 2 settled",
-    );
-    expect(goalsCountLine([goals[2]!])).toBe("1 needs attention");
-  });
-
-  it("(g) F40-56: a started link says what the board's card for its task says, and the chain counts who it waits on", async () => {
-    // CANARY: drop the `taskStatus` branch of `linkPill` and every one of
-    // these reads "active" in the agent colour, as goal-1's did live.
-    const goal = goalOf({
-      id: "goal-1",
-      title: "Launch",
-      links: [
-        linkOf({ index: 1, status: "done", taskKey: "WEB-1" }),
-        linkOf({ index: 2, status: "active", taskKey: "WEB-2", taskStatus: { kind: "you", label: "waiting on you", resumesAt: null } }),
-        linkOf({ index: 3, status: "active", taskKey: "WEB-3", taskStatus: { kind: "you", label: "waiting on you", resumesAt: null } }),
-        linkOf({ index: 4, status: "active", taskKey: "WEB-4", taskStatus: { kind: "agent", label: "agent working", resumesAt: null } }),
-        linkOf({ index: 5, status: "active", taskKey: "WEB-5", taskStatus: { kind: "human", label: "waiting on a human", resumesAt: null } }),
-        linkOf({ index: 6, status: "active", taskKey: "WEB-6", taskStatus: { kind: "input", label: "input required", resumesAt: null } }),
-        linkOf({ index: 7 }),
-      ],
-    });
-    const { container } = renderPage(view({ goals: [goal] }));
-    await screen.findByText("Link 7", { selector: ".ctl-link-title" });
-    const pills = [...container.querySelectorAll(".ctl-links > li > .pill")].map((p) => [p.textContent, p.className]);
-    expect(pills).toEqual([
-      ["done", "pill done sm"],
-      ["waiting on you", "pill info sm"],
-      ["waiting on you", "pill info sm"],
-      ["agent working", "pill agent sm"],
-      ["waiting on a human", "pill neutral sm"],
-      ["input required", "pill input sm"],
-      ["pending", "pill neutral sm"],
-    ]);
-    expect(container.querySelector("[data-goal-progress]")!.textContent).toBe(
-      "1 of 7 done · 2 waiting on you · 1 waiting on a human",
-    );
-  });
-
-  describe("(h) F40-61: a chain links back to the conversation that planned it", () => {
-    const planned = { id: "cnv_plan", title: "Hi. I'm starting a new project", href: "/controller?c=cnv_plan", scopeLabel: "Instance" };
-
-    it("says where the chain was planned under 'About this chain', as a link", async () => {
-      // CANARY: drop the `ctl-goal-planned` line.
-      const goal = { ...goalOf({ id: "goal-1", title: "Launch", links: [linkOf({ index: 1 })] }), plannedIn: planned };
-      const { container } = renderPage(view({ goals: [goal] }));
-      await screen.findByText("Launch");
-      const more = container.querySelector('details[data-goal="goal-1"] details.ctl-goal-more')!;
-      const line = more.querySelector("[data-goal-planned]")!;
-      expect(line.textContent).toBe("Planned in Hi. I'm starting a new project · Instance");
-      expect(line.querySelector("a")?.getAttribute("href")).toBe("/controller?c=cnv_plan");
-    });
-
-    it("lists the threads that planned this board's chains in the rail, beside 'No conversations on this board yet'", async () => {
-      // CANARY: drop the rail's planned list.
-      const { container } = renderPage(
-        view({ conversations: [], goals: [], plannedElsewhere: [{ ...planned, goalIds: ["goal-1", "goal-2"] }] }),
-      );
-      await screen.findByText("Where this board's chains were planned");
-      expect(container.querySelector(".ctl-convs .empty")?.textContent).toBe(
-        "No conversations on this board yet. Say something below.",
-      );
-      const link = within(container.querySelector<HTMLElement>("[data-planned-elsewhere]")!).getByRole("link");
-      expect(link.getAttribute("href")).toBe("/controller?c=cnv_plan");
-      expect(link.textContent).toBe("Hi. I'm starting a new projectInstance · planned goal-1, goal-2");
     });
   });
 });

@@ -1,8 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { holdRefusal, isDeadDependencyState } from "~/shared/dependencies";
 import {
   formatDependencyRef,
+  holdRefusal,
+  isDeadDependencyState,
   parseDependencyRef,
   type DependencyRender,
   type DependencyState,
@@ -16,21 +17,11 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
  * hand-moved or archived task cannot leave a dependent lying.
  *
  * Terminality is derived through `isTerminalStage` over the project's stage
- * list, never a positional "last stage id" guess. A goal-link entry whose link
- * names a `taskKey` takes that task's own state (and renders the key); a link
- * without a task yet is `open` until the chain creates it, `done` when the
- * link was completed or skipped, `failed` when the link failed. An archived
- * task is `failed`: a wait that can never complete without a person editing
- * the list (ruling 131(e)).
+ * list, never a positional "last stage id" guess. An archived task is
+ * `failed`: a wait that can never complete without a person editing the list
+ * (ruling 131(e)). Every entry names a task (ruling 503 retired the goal-link
+ * spelling with the goal chains).
  */
-
-const goalLinkRowSchema = z
-  .object({
-    index: z.number().int(),
-    taskKey: z.string().nullable().default(null),
-    status: z.string().default("pending"),
-  })
-  .loose();
 
 interface TaskStateRow {
   stage: string;
@@ -100,80 +91,17 @@ function resolveWithStages(
   refs: readonly string[],
   stages: { id: string }[],
 ): DependencyRender[] {
-  const out: DependencyRender[] = [];
-  for (const raw of refs) {
+  return refs.map((raw) => {
     const ref = parseDependencyRef(raw);
-    if (!ref) {
-      out.push({ ref: raw, label: raw, state: "missing", taskKey: null, goalId: null });
-      continue;
-    }
+    if (!ref) return { ref: raw, label: raw, state: "missing", taskKey: null };
     const canonical = formatDependencyRef(ref);
-    if (ref.kind === "task") {
-      out.push({
-        ref: canonical,
-        label: ref.task,
-        state: taskState(db, slug, ref.task, stages),
-        taskKey: ref.task,
-        goalId: null,
-      });
-      continue;
-    }
-    // SAFETY: `links_json` is TEXT NOT NULL DEFAULT '[]' and `status` TEXT NOT
-    // NULL on `goal_projections`.
-    const goal = db
-      .prepare(
-        `SELECT links_json, status FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
-      )
-      .get(slug, ref.goal) as { links_json: string; status: string } | undefined;
-    const links = goal
-      ? z.array(goalLinkRowSchema).catch([]).parse(JSON.parse(goal.links_json))
-      : null;
-    const link = links?.find((l) => l.index === ref.link) ?? null;
-    if (!link) {
-      out.push({ ref: canonical, label: canonical, state: "missing", taskKey: null, goalId: ref.goal });
-      continue;
-    }
-    if (link.taskKey) {
-      // Ruling 398(b): the LINK's own settlement outranks what later happened
-      // to its task. `done` and `skipped` are the chain's decisions that it has
-      // moved past this link, and `reconcileGoal` already refuses to undo them
-      // on an archive ("archiving a COMPLETED link's task does not
-      // retroactively fail the link"). This reader did undo them: it went
-      // straight to the task's state, so archiving a finished link's task — or
-      // the archive that CAUSED a ride-through skip under onFailure=continue —
-      // turned every wait declared on that link into a dead one, parking the
-      // chains behind it in the name of work that was already settled.
-      const settled = link.status === "done" || link.status === "skipped";
-      out.push({
-        ref: canonical,
-        label: `${canonical} (${link.taskKey})`,
-        state: settled ? "done" : taskState(db, slug, link.taskKey, stages),
-        taskKey: link.taskKey,
-        goalId: ref.goal,
-      });
-      continue;
-    }
-    // F37-63: a link with no task, on a goal that has reached a terminal status,
-    // can NEVER acquire one — `reconcileGoal` early-returns on a terminal chain,
-    // and every goal-side remedy (`skip_link`, `edit_link`, `retry_link`,
-    // `remove_pending_link`) refuses with "Goal X is cancelled". Before this it
-    // resolved to `open`, indistinguishable from a live wait, so
-    // `deadDependencies` never saw it and ruling 131(e)'s note and notification
-    // never fired — while `releaseDependents`' own comment claimed the sweep
-    // "notices a wait that can NEVER complete, whatever killed it … a cancelled
-    // goal, a removed link or a lost task". It did not notice this one.
-    const goalTerminal = goal?.status === "cancelled" || goal?.status === "completed";
-    const state: DependencyState =
-      link.status === "done" || link.status === "skipped"
-        ? "done"
-        : link.status === "failed"
-          ? "failed"
-          : goalTerminal
-            ? "cancelled"
-            : "open";
-    out.push({ ref: canonical, label: canonical, state, taskKey: null, goalId: ref.goal });
-  }
-  return out;
+    return {
+      ref: canonical,
+      label: ref.task,
+      state: taskState(db, slug, ref.task, stages),
+      taskKey: ref.task,
+    };
+  });
 }
 
 /** Every entry is done (an empty list is trivially satisfied, which is what
@@ -234,10 +162,9 @@ export function listHeldTasks(
  * the ordering depends on whoever happens to have walked the graph recently."
  *
  * A wait that can NEVER clear is not counted. A task blocked on an archived
- * task, a cancelled goal or a reference nothing answers to is not waiting on
- * this decision, and counting it would inflate the one number a person is meant
- * to order their queue by. The same goes for an open goal link with no task
- * yet: it is a real wait, and no task key completing satisfies it.
+ * task or a reference nothing answers to is not waiting on this decision, and
+ * counting it would inflate the one number a person is meant to order their
+ * queue by.
  */
 /**
  * Ruling 336: what comes unblocked, split by WHEN.
@@ -261,8 +188,7 @@ export function listHeldTasks(
  * after another human decision" is wrong for the one job it has.
  */
 /**
- * Ruling 426: every open task that still WAITS on `taskKey`, directly or
- * through a goal link that task answers, in key order.
+ * Ruling 426: every open task that still WAITS on `taskKey`, in key order.
  *
  * Not `tasksReleasedBy`: that counts only the tasks whose LAST wait this is,
  * which is a release count. This is the question a lease asks before it holds
@@ -295,11 +221,7 @@ export function tasksReleasedBy(
   for (const held of listHeldTasks(db, slug)) {
     const entries = resolveDependencies(db, slug, held.blockedBy);
     if (entries.some((e) => e.state !== "open" && e.state !== "done")) continue;
-    const unmet = entries
-      .filter((e) => e.state === "open")
-      // A goal link with no task yet keeps its own spelling, which no task key
-      // can equal, so the wait stands rather than silently clearing.
-      .map((e) => e.taskKey ?? e.ref);
+    const unmet = entries.filter((e) => e.state === "open").map((e) => e.taskKey ?? e.ref);
     if (unmet.length > 0) waiting.set(held.taskKey, new Set(unmet));
   }
 

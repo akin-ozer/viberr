@@ -8,6 +8,7 @@ import { readWorkspace } from "./project-workspace.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { readRepoHealth } from "~/server/github/repo-health.server";
+import { listEpicChips } from "~/server/projections/epic-query.server";
 import { waitingOnViewer } from "~/server/projections/decisions.server";
 import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
@@ -35,7 +36,8 @@ import { BoardPage } from "~/features/board/board-page";
  * shipped them); the rail counts stay in the layout, and both read the project
  * through `readWorkspace`, so one query per request still feeds the rail counts
  * AND the columns, and every action here revalidates both. Actions:
- * create-task (phase-3 createTask, RBAC inside), rescan (reconcile file store
+ * create-task (phase-3 createTask, RBAC inside; ruling 503: optionally in an
+ * epic), rescan (reconcile file store
  * ↔ projections). No optimistic UI for governed state — revalidation shows the
  * new card.
  */
@@ -112,6 +114,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // row is written where the answer was already known (project creation and
     // the GitHub page's cached probe); null means nothing has ever looked.
     repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
+    // Ruling 503: the project's epics once (one statement), for the epic
+    // filter and the New-task Epic pick; a card carries only its epic's id,
+    // which the filter reads (ruling 172 keeps the chip off the card).
+    epics: listEpicChips(db, params.slug),
   };
 }
 
@@ -150,6 +156,9 @@ export async function action({ request, params }: Route.ActionArgs) {
       // Due date is validated in `createTask` (blank ⇒ no due date).
       const dueDate = String(formData.get("dueDate") ?? "").trim();
       if (dueDate) createInput.dueDate = dueDate;
+      // Ruling 503: the epic it starts in; `createTask` checks it exists.
+      const epic = String(formData.get("epic") ?? "").trim();
+      if (epic) createInput.epic = epic;
       const result = await createTask(db, createInput, actor);
       return {
         ok: true as const,
@@ -247,6 +256,7 @@ export default function Board({ loaderData }: Route.ComponentProps) {
       // repository GitHub will not serve says so where the work happens instead
       // of only on its GitHub page.
       repoAccess={loaderData.repoAccess ?? undefined}
+      epics={loaderData.epics}
     />
   );
 }

@@ -192,6 +192,9 @@ export function listProjectTasks(
     /** Data root for the live-backend overlay — tests only (production
      *  defaults to the env root, same as every file accessor). */
     dataRoot?: string;
+    /** Ruling 503: only the tasks in this epic; `null` for the tasks in
+     *  none. Absent: every task. */
+    epicId?: string | null;
   } = {},
 ): TaskActivitySummary[] {
   return mapProjectTasks(
@@ -223,6 +226,9 @@ function mapProjectTasks(
   // (pass-4 WI-8, the hottest loader path). Output is identical — a shared
   // cache changes only the cost, not the resolved render.
   const resolveActor = createActorResolver(db, { projectMemberIds: memberIds });
+  const epicClause =
+    opts.epicId === undefined ? "" : opts.epicId === null ? "AND epic_id IS NULL" : "AND epic_id = ?";
+  const params = opts.epicId ? [slug, opts.epicId] : [slug];
   // SAFETY: every member of TaskProjectionRow is a `task_projections` column
   // 0001_baseline declares, so `SELECT *` covers all of them (it also returns
   // `schedules_json`, which this read model has no member for and never reads).
@@ -230,9 +236,10 @@ function mapProjectTasks(
     .prepare(
       `SELECT * FROM task_projections WHERE project_slug = ?
          ${opts.includeArchived ? "" : "AND archived = 0"}
+         ${epicClause}
        ORDER BY CAST(substr(task_key, instr(task_key, '-') + 1) AS INTEGER) ASC`,
     )
-    .all(slug) as TaskProjectionRow[];
+    .all(...params) as TaskProjectionRow[];
   // Gap-10: two aggregate queries for the whole project, not one per row — the
   // same shape as the shared actor resolver above, and for the same reason
   // (this is the hottest loader path in the app).

@@ -225,6 +225,8 @@ describe("the matrix is a policy decision, pinned by hand", () => {
     "create-task": "contributor",
     "own-task": "contributor",
     "edit-task-meta": "contributor",
+    // Ruling 503: an epic is planning, like a task's own metadata.
+    "manage-epics": "contributor",
     "attach-file": "contributor",
     // Governance of a task's movement, its acceptance contract, its agents and
     // the project's GitHub binding.

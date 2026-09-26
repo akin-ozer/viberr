@@ -37,6 +37,7 @@ function task(patch: Partial<BoardCard> = {}): BoardCard {
     packet: null,
     continuity: null,
     quiet: false,
+    epicId: null,
     ...patch,
   };
 }

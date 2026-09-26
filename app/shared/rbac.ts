@@ -77,7 +77,9 @@ export const RBAC_DEFINITIONS = [
   {
     id: "edit-task-meta",
     label: "Edit task priority, labels & due date",
-    covers: "and what a task waits on, which releases it when cleared",
+    // Ruling 503: and which epic the task is in, which is planning metadata
+    // exactly like a label.
+    covers: "the epic a task is in, and what it waits on, which releases it when cleared",
     roles: [A, M, C],
   },
   // F39-6 (pass 39): attaching a file to a task. Same tier as the metadata a
@@ -88,6 +90,16 @@ export const RBAC_DEFINITIONS = [
   // fixture?" nowhere — which is the mistake ruling 309(a) corrected for
   // dependencies.
   { id: "attach-file", label: "Attach a file to a task", roles: [A, M, C] },
+  // Ruling 503: an epic is planning, held by every role that can create the
+  // tasks it groups. Putting a task in one or taking it out is the task's own
+  // metadata (`edit-task-meta` above), so this row is the epic itself: its
+  // name, description, status, colour, lead and dates. There is no delete.
+  {
+    id: "manage-epics",
+    label: "Create & edit epics",
+    covers: "their status, lead and dates",
+    roles: [A, M, C],
+  },
   { id: "approve-transition", label: "Approve stage transitions", roles: [A, M] },
   { id: "resolve-packet", label: "Resolve decision packets", roles: [A, M] },
   { id: "accept-completion", label: "Accept completion → Done", roles: [A, M] },

@@ -3665,15 +3665,15 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(cancel.classList.contains("danger")).toBe(true);
   });
 
-  it("ruling 131: the hero links each wait entry (task page, or the Controller page for a goal link) with its state when not open", () => {
+  it("ruling 131: the hero links each wait entry to its task page, with its state when not open", () => {
     // Canary: drop the `Link` wrapper (no anchors) or the state suffix.
     const { container } = renderWithRouter(
       <TaskHero
         task={heroTask({
           blockedBy: [
-            { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3", goalId: null },
-            { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
-            { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+            { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3" },
+            { ref: "JC-4", label: "JC-4", state: "open", taskKey: "JC-4" },
+            { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6" },
           ],
         })}
         stage={undefined}
@@ -3683,26 +3683,33 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const chips = [...container.querySelectorAll<HTMLAnchorElement>("a[data-wait-state]")];
     expect(chips.map((a) => [a.textContent, a.getAttribute("href"), a.dataset.waitState])).toEqual([
       ["JC-3 · done", "/projects/viberr-core/tasks/JC-3", "done"],
-      // Ruling 419(h) and 476(b): a goal link lands on its own row, its chain opened on the rail.
-      ["goal-1 link 3", "/projects/viberr-core/controller#goal-1-link-3", "open"],
+      ["JC-4", "/projects/viberr-core/tasks/JC-4", "open"],
       ["JC-6 · archived", "/projects/viberr-core/tasks/JC-6", "failed"],
     ]);
     for (const a of chips) expect(a.className).toContain("neutral");
   });
 
-  it("ruling 419(h) and 476(b): the chain chip lands on THIS link of its chain on the Controller page", () => {
-    // CANARY: link the chip to the bare Controller page, or to the chain's head (ruling 476(b)).
+  it("ruling 503(e): the hero names the task's epic as a field, a chip linking to the epic's page", () => {
+    // CANARY: drop the hero's Epic field, or render the chip without `to`.
     const { container } = renderWithRouter(
       <TaskHero
-        task={heroTask({ goalRef: { goalId: "goal-2", linkIndex: 3 } })}
+        task={heroTask({ epicId: "epic-2" })}
+        epic={{ id: "epic-2", title: "Checkout revamp", color: "teal" }}
         stage={undefined}
         canEditGoal
       />,
     );
-    const chip = [...container.querySelectorAll<HTMLAnchorElement>("a.hero-goal-chip")].find((a) =>
-      a.textContent?.includes("goal-2 · link 3"),
+    const field = [...container.querySelectorAll<HTMLElement>(".hero-field")].find(
+      (f) => f.querySelector(".hero-field-lbl")?.textContent === "Epic",
     );
-    expect(chip?.getAttribute("href")).toBe("/projects/viberr-core/controller#goal-2-link-3");
+    const chip = field?.querySelector<HTMLAnchorElement>("a.epic-chip");
+    expect(chip?.getAttribute("href")).toBe("/projects/viberr-core/epics/epic-2");
+    expect(chip?.textContent).toBe("Epic Checkout revamp");
+    expect(chip?.dataset.stageColor).toBe("teal");
+    expect(chip?.getAttribute("title")).toBe("epic-2 · Checkout revamp");
+    // A task in no epic draws no field at all.
+    const bare = renderWithRouter(<TaskHero task={heroTask()} stage={undefined} canEditGoal />);
+    expect(bare.container.querySelector("a.epic-chip")).toBeNull();
   });
 
   it("makes Save goal a primary CTA, visually distinct from Cancel", () => {

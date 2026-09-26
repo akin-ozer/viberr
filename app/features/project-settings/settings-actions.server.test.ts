@@ -867,17 +867,18 @@ describe("inviteMember", () => {
 
 
 /**
- * Pass 34 review: `GOAL` is the one prefix a project cannot take. The
- * dependency grammar (ruling 131) reads `GOAL-1` as a goal chain's reference
- * missing its link, so tasks keyed that way could never be waited on.
+ * Pass 34 review: one prefix a project cannot take. It was `GOAL`, because the
+ * dependency grammar (ruling 131) read `GOAL-1` as a goal chain's reference
+ * missing its link; since ruling 503 it is `EPIC`, because an epic's id is
+ * `epic-1` and tasks keyed EPIC-1 would read as epics wherever they are named.
  */
 describe("the reserved task prefix", () => {
-  it("refuses GOAL, in any casing, and leaves the stored prefix alone", async () => {
+  it("refuses EPIC, in any casing, and leaves the stored prefix alone", async () => {
     // Canary: drop the isReservedTaskPrefix guard in updateProjectIdentity —
-    // the project takes the prefix and its tasks become unwaitable.
+    // the project takes the prefix and its task keys read as epic ids.
     const store = setupProjectedStore(ctx);
     const fileCtx = { dataRoot: store.dataRoot };
-    for (const typed of ["GOAL", "goal", "Goal"]) {
+    for (const typed of ["EPIC", "epic", "Epic"]) {
       await expect(
         updateProjectIdentity(
           store.db,
@@ -888,15 +889,15 @@ describe("the reserved task prefix", () => {
       ).rejects.toThrow(/not available as a task prefix/i);
     }
     expect(prefixOf(store)).toBe("VIB");
-    // A neighbouring four-letter prefix is still fine.
+    // The prefix ruling 503 freed is fine now: `GOAL-1` is a task key again.
     const ok = await updateProjectIdentity(
       store.db,
-      { projectSlug: store.slug, name: "Viberr Core", prefix: "GOAT", description: "" },
+      { projectSlug: store.slug, name: "Viberr Core", prefix: "GOAL", description: "" },
       admin(store),
       fileCtx,
     );
     expect(ok.changed).toBe(true);
-    expect(prefixOf(store)).toBe("GOAT");
+    expect(prefixOf(store)).toBe("GOAL");
   });
 });
 

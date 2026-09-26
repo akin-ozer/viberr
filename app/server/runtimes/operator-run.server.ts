@@ -76,6 +76,7 @@ import {
   operatorPostComment,
   operatorRelayToTask,
   operatorSetDependencies,
+  operatorSetEpic,
   operatorSetGoal,
   operatorFlagContextConflict,
   operatorCorrectKnowledgeDoc,
@@ -2213,9 +2214,12 @@ const OPERATOR_PLAN_TOOLS = [
   // comment. `kbSource`/`repoSource` name the two sides; `text` is the detail.
   "flag_context_conflict",
   // Ruling 131(b) (pass 34): record what the task WAITS ON (the full list of
-  // task keys and goal links; `blockedBy: []` clears it) instead of opening a
-  // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
+  // task keys; `blockedBy: []` clears it) instead of opening a hold packet.
+  // The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
+  // Ruling 503: put this task in an epic, move it, or take it out (`epicId`,
+  // "" for none). The plan mirror of the Claude toolkit's `set_epic`.
+  "set_epic",
   // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`, generalized by
   // ruling 483 into `propose_kb_correction` and made a write by ruling 498 as
   // `correct_knowledge_doc`. Every agent on the pass-39 instance ran on Codex,
@@ -2271,6 +2275,9 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // Ruling 131(b): the wait is the hold packet's replacement, so it rides the
   // packet's own grant.
   set_dependencies: ["generate-packets"],
+  // Ruling 503: the same grant as `set_goal`, the operator's other planning
+  // edit on its own task.
+  set_epic: ["append-typed-events"],
   // F39-1/F39-7: same gate as `flag_context_conflict`, the typed event it
   // posts. Ruling 498 made the correction a write; a person undoes one from
   // the Controller page rather than gating each (owner, 2026-09-26).
@@ -2384,7 +2391,12 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           blockedBy: {
             type: ["array", "null"],
             items: { type: "string" },
-            description: "For set_dependencies ONLY: the FULL list of what this task waits on, as task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty array clears the wait. Null for every other tool.",
+            description: "For set_dependencies ONLY: the FULL list of what this task waits on, as task keys (`JC-6`) in this project; an empty array clears the wait. Null for every other tool.",
+          },
+          // Ruling 503: the epic set_epic puts this task in.
+          epicId: {
+            type: ["string", "null"],
+            description: "For set_epic ONLY (ruling 503): the epic to put THIS task in (`epic-3`, from the snapshot's `openEpics`), or \"\" to take it out of its epic. A task is in at most one epic, and membership holds and orders nothing: what it waits on is set_dependencies. Null for every other tool.",
           },
           paths: {
             type: ["array", "null"],
@@ -2481,7 +2493,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   type: ["array", "null"],
                   items: { type: "string" },
                   description:
-                    "block_on_dependencies only (ruling 230): what THIS task waits on, as task keys or `goal-N link M`. Required on that kind, since an option that names nothing to wait on resolves into a hold that releases on nothing. Null on every other kind. Not the action-level blockedBy, which is set_dependencies'.",
+                    "block_on_dependencies only (ruling 230): what THIS task waits on, as task keys. Required on that kind, since an option that names nothing to wait on resolves into a hold that releases on nothing. Null on every other kind. Not the action-level blockedBy, which is set_dependencies'.",
                 },
                 dueAt: {
                   type: ["string", "null"],
@@ -2506,7 +2518,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                     blockedBy: {
                       type: ["array", "null"],
                       items: { type: "string" },
-                      description: "What the NEW task waits on (task keys, or `goal-N link M`), not what this task waits on. Null for nothing.",
+                      description: "What the NEW task waits on (task keys), not what this task waits on. Null for nothing.",
                     },
                     blocks: {
                       type: ["array", "null"],
@@ -2523,7 +2535,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "paths", "completeness", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "completeness", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
       },
     },
   },
@@ -2552,6 +2564,8 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 131: set_dependencies — the FULL list; `.optional()` so plans
   // persisted before the field existed still replay across a restart-resume.
   blockedBy: z.array(z.string()).nullable().optional(),
+  // Ruling 503: set_epic's epic — `.optional()` for the same replay reason.
+  epicId: z.string().nullable().optional(),
   // Ruling 417: lease_files — `.optional()` so plans persisted before the
   // field existed still replay across a restart-resume.
   paths: z.array(z.string()).nullable().optional(),
@@ -3217,6 +3231,19 @@ async function executeCodexPlan(
             if (a.reason) wait.reason = a.reason;
             record(a.tool, await operatorSetDependencies(db, ctx, wait, authority));
           } else skippedMalformed(a.tool, "the list of what the task waits on");
+          break;
+        }
+        case "set_epic": {
+          // Ruling 503: the plan mirror of the Claude tool. "" takes the task
+          // out of its epic; a null epic is a malformed step.
+          if (a.epicId != null) {
+            const move: Parameters<typeof operatorSetEpic>[2] = {
+              ...base,
+              epicId: a.epicId.trim() || null,
+            };
+            if (a.reason) move.reason = a.reason;
+            record(a.tool, await operatorSetEpic(db, ctx, move, authority));
+          } else skippedMalformed(a.tool, "the epic");
           break;
         }
         case "run_agent":

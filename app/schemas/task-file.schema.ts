@@ -10,6 +10,7 @@ import {
   type TolerantListField,
 } from "./file-diagnostics";
 import { canonicalDependencyRef } from "~/shared/dependencies";
+import { EPIC_ID_RE } from "./epic-file.schema";
 import { headCarriesRevision, type RefreshLink } from "~/shared/revision-drift";
 
 /**
@@ -220,7 +221,7 @@ export const PACKET_OPTION_KINDS = [
   // moved afterwards.
   "accept_unverified_head",
   // Ruling 230 (pass 37, F37-50): "hold this until those land". Payload:
-  // `blockedBy`, the tasks or goal links this one waits on. Resolution writes
+  // `blockedBy`, the tasks this one waits on. Resolution writes
   // ruling 131's dependency list, which the board renders, the schedule runner
   // refuses on, and the dependency release re-triggers automatically when the
   // last entry finishes. The mechanism was already there and good; the only
@@ -961,8 +962,8 @@ export type PacketObservation = z.infer<typeof packetObservationSchema>;
 
 /**
  * Ruling 131: one `blockedBy` entry as stored — a spelling
- * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (a task
- * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
+ * `app/shared/dependencies.ts` parses, CANONICALIZED on the way in (the task
+ * prefix upper-cased, whitespace collapsed) so the file
  * carries exactly what the surfaces print and the resolver looks up.
  */
 const dependencyRefTextSchema = z
@@ -972,7 +973,7 @@ const dependencyRefTextSchema = z
     if (canonical === null) {
       ctx.addIssue({
         code: "custom",
-        message: `not a task key or a goal link (\`${value}\`)`,
+        message: `not a task key (\`${value}\`)`,
       });
       return z.NEVER;
     }
@@ -1019,7 +1020,7 @@ export const packetOptionSchema = z
      *  other. */
     dueAt: z.string().optional(),
     /** Ruling 230: `block_on_dependencies` — what this task waits on, in the
-     *  same spellings `blockedBy` stores (a task key, or a goal link). */
+     *  same spelling `blockedBy` stores (a task key). */
     blockedBy: z.array(dependencyRefTextSchema).optional(),
     /** create_task — ruling 269: the task the resolution creates. `title` and
      *  `goal` are required on the kind (authoring refuses one without them)
@@ -1386,9 +1387,9 @@ const taskFrontmatterFields = {
   /** Optional due date, an ISO date string `YYYY-MM-DD` (pass-25). Board shows
    *  it and flags overdue; null = none. */
   dueDate: z.string().nullable().default(null),
-  /** Ruling 131 (pass 34, Q34-11): what this task WAITS ON — task keys and
-   *  goal links in the same project, in the canonical spellings of
-   *  `app/shared/dependencies.ts` (`JC-6`, `goal-1 link 3`). Planning metadata
+  /** Ruling 131 (pass 34, Q34-11): what this task WAITS ON — task keys in the
+   *  same project, in the canonical spelling of `app/shared/dependencies.ts`
+   *  (`JC-6`; ruling 503 retired `goal-1 link 3` with the chains). Planning metadata
    *  with one difference from priority, labels and due date: while the list
    *  is non-empty the derived readiness is floored at `blocked`, the task owes
    *  nobody anything (`waiting: none` unless a packet or recommendation is
@@ -1492,20 +1493,13 @@ const taskFrontmatterFields = {
    *  (absent until a run is first asked for). */
   gateRun: gateRunSchema.optional(),
   github: githubCacheSchema.nullable(),
-  /** Chained-goal back-reference (ruling 99): this task is one LINK of a goal
-   *  chain. The chain itself is canonical in
-   *  `projects/<slug>/goals/<goalId>.md`; this points back at it, the same
-   *  project→task shape as `stage` (project.md owns the stage list, the task
-   *  carries its position). Null for every task outside a chain. Written by
-   *  goal-actions at link-task creation; never hand-set expecting the chain to
-   *  adopt the task — the goal file's own `links[].taskKey` is what binds. */
-  goalRef: z
-    .object({
-      goalId: z.string().min(1),
-      linkIndex: z.number().int().min(1),
-    })
-    .nullable()
-    .default(null),
+  /** Ruling 503: the epic this task belongs to (`epic-3`), or null. The epic
+   *  itself is canonical in `projects/<slug>/epics/<epicId>.md`; the task
+   *  carries its membership, the same project→task shape as `stage`, so a task
+   *  joins and leaves an epic by this one field and belongs to at most one.
+   *  Written by `setTasksEpic` (epic-actions) and by `createTask`. A hand edit
+   *  is honoured: the projection reads it like any other field. */
+  epic: z.string().regex(EPIC_ID_RE).nullable().default(null),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
   /** Board position within a stage — a sparse rank for drag-to-reorder. Null
@@ -1883,7 +1877,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // Ruling 482: the server's own gate evidence.
   "gateRun",
   "github",
-  "goalRef",
+  "epic",
   "createdAt",
   "updatedAt",
   "boardRank",
@@ -2321,12 +2315,12 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.github,
       null,
     ),
-    // Ruling 99: absent means "not part of a goal chain" — never a diagnostic.
-    goalRef: tolerant(
+    // Ruling 503: absent means "in no epic" — never a diagnostic.
+    epic: tolerant(
       diagnostics,
       data,
-      "goalRef",
-      taskFrontmatterFields.goalRef,
+      "epic",
+      taskFrontmatterFields.epic,
       null,
     ),
     createdAt: tolerant(

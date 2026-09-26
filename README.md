@@ -11,9 +11,10 @@ operator agent manages each active task, specialist agent threads do the stage w
 humans govern through policy, comments, decisions, and explicit acceptance of completion.
 Above the per-task operators sits one instance-wide CONTROLLER: a conversational agent
 (`/controller`, and per project) that answers questions and performs governed actions
-strictly within each asking user's own permission level, and that defines and advances
-chained goals (one outcome decomposed into an ordered chain of tasks the server carries
-forward as each link completes).
+strictly within each asking user's own permission level. Work is grouped into epics, the
+way Jira and Linear group it: a named body of work in a project that tasks join and leave
+one at a time, with its status, lead, dates and progress counted from its tasks. People,
+the operator and the controller can all put tasks in an epic and take them out.
 
 What makes it different: Viberr is agent-native in both action and responsibility. In
 Jira-like tools humans are the default workers and AI helps at the edges; in Viberr agents
@@ -284,7 +285,7 @@ app/
                    # db, errors, events, files, github, insights, interpretation,
                    # logging, ops, org, prefs, projections, provenance, runtimes,
                    # secrets, seed, settings, tasks, theme + boot.server.ts
-  schemas/         # shared Zod schemas (task file, project file, goal file, SSE events…)
+  schemas/         # shared Zod schemas (task file, project file, epic file, SSE events…)
   shared/          # cross-surface helpers (auth, capabilities, dates, docs,
                    # freshness, ids, mapping, rbac, text, workflow, …)
   app.css          # the ported viberr.css design system + marked additions
@@ -301,7 +302,7 @@ planning/          # PRD, original architecture and UX canon + pass ledgers
 design/            # HTML mock, design system, PRD mirror (pinned by test)
 qa/, test-artifacts/   # notes and captured evidence from live QA passes
 data/ | docker-data/   # runtime data root (gitignored): projects/<slug>/tasks/<KEY>/task.md,
-                   # projects/<slug>/goals/<id>.md, agents/, runtimes/ (incl.
+                   # projects/<slug>/epics/<id>.md, agents/, runtimes/ (incl.
                    # runtimes/users/<userId>/ per-person agent homes), kb/, skills/,
                    # audit-exports/, state/projection.sqlite
 ```
@@ -353,7 +354,7 @@ Deliberate scope boundaries, documented rather than half-built (verified against
   (`VIBERR_TRANSCRIPT_RETENTION_DAYS`, `VIBERR_SESSION_HOME_RETENTION_DAYS`) are
   env-configurable.
 - **Several tables have no retention.** `provenance` grows fastest; `session`,
-  `agent_runs`, `goal_projections`, `controller_messages`, `scope_violations` and
+  `agent_runs`, an upgraded root's `goal_projections`, `controller_messages`, `scope_violations` and
   `model_availability` are also never pruned. See the runbook for pruning by hand.
 - **No cleartext-transport guard in the app itself.** The Node process serves plain HTTP
   and ships no proxy; encryption in transit (NFR6) is the deployment's job. Boot warns

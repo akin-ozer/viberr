@@ -393,7 +393,7 @@ at `/data` (ruling 460; `./docker-data` before it). Both SDKs keep their resumab
 under `runtimes/`:
 
 ```
-projects/       canonical project.md, task.md, goals/*.md (the source of truth — editable);
+projects/       canonical project.md, task.md, epics/*.md (the source of truth — editable);
                 per task: workspace/ (git clones, a cache) and attachments/ (evidence files);
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files

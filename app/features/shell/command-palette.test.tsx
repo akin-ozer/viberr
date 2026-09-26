@@ -76,7 +76,7 @@ describe("CommandPalette", () => {
     try {
       const { getByLabelText, getByText } = renderPalette();
       fireEvent.change(
-        getByLabelText("Search tasks, branches, agents, projects"),
+        getByLabelText("Search tasks, epics, branches, agents, projects"),
         { target: { value: "vib" } },
       );
       await vi.advanceTimersByTimeAsync(200);
@@ -93,7 +93,7 @@ describe("CommandPalette", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const { getByLabelText, container, landed } = renderPalette();
-      const input = getByLabelText("Search tasks, branches, agents, projects");
+      const input = getByLabelText("Search tasks, epics, branches, agents, projects");
       fireEvent.change(input, { target: { value: "vib" } });
       await vi.advanceTimersByTimeAsync(200);
       await waitFor(() =>
@@ -116,12 +116,37 @@ describe("CommandPalette", () => {
     }
   });
 
+  it("ruling 503: an epic hit sits in its own group after the projects and opens the epic", async () => {
+    // CANARY: drop `epic` from GROUP_LABEL, and the run renders with no heading.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const epic: CommandHit = {
+        kind: "epic",
+        id: "epic:viberr-core/epic-2",
+        label: "Checkout revamp",
+        sub: "epic-2 · Viberr Core",
+        href: "/projects/viberr-core/epics/epic-2",
+      };
+      const { getByLabelText, getByRole, container } = renderPalette([HITS[0]!, epic, HITS[1]!]);
+      fireEvent.change(getByLabelText("Search tasks, epics, branches, agents, projects"), {
+        target: { value: "check" },
+      });
+      await vi.advanceTimersByTimeAsync(200);
+      await waitFor(() => expect(getByRole("group", { name: "Epics" })).toBeTruthy());
+      const rows = [...container.querySelectorAll(".cmdk-row")].map((row) => row.textContent);
+      expect(rows[1]).toContain("Checkout revamp");
+      expect(rows[1]).toContain("epic-2 · Viberr Core");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports an empty result instead of an empty box", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const { getByLabelText, getByText } = renderPalette([]);
       fireEvent.change(
-        getByLabelText("Search tasks, branches, agents, projects"),
+        getByLabelText("Search tasks, epics, branches, agents, projects"),
         { target: { value: "zzzz" } },
       );
       await vi.advanceTimersByTimeAsync(200);
@@ -149,7 +174,7 @@ describe("CommandPalette: the combobox/listbox contract", () => {
   async function openWithHits() {
     const utils = renderPalette();
     const input = utils.getByLabelText(
-      "Search tasks, branches, agents, projects",
+      "Search tasks, epics, branches, agents, projects",
     );
     fireEvent.change(input, { target: { value: "vib" } });
     await vi.advanceTimersByTimeAsync(200);
@@ -166,7 +191,7 @@ describe("CommandPalette: the combobox/listbox contract", () => {
 
   it("declares the input a combobox and closes it when there is nothing to show", () => {
     const { getByLabelText, container } = renderPalette();
-    const input = getByLabelText("Search tasks, branches, agents, projects");
+    const input = getByLabelText("Search tasks, epics, branches, agents, projects");
     expect(input.getAttribute("role")).toBe("combobox");
     expect(input.getAttribute("aria-autocomplete")).toBe("list");
     expect(input.getAttribute("aria-expanded")).toBe("false");
@@ -257,7 +282,7 @@ describe("CommandPalette: the combobox/listbox contract", () => {
     try {
       const { getByLabelText, getByText } = renderPalette([]);
       fireEvent.change(
-        getByLabelText("Search tasks, branches, agents, projects"),
+        getByLabelText("Search tasks, epics, branches, agents, projects"),
         { target: { value: "zzzz" } },
       );
       await vi.advanceTimersByTimeAsync(200);

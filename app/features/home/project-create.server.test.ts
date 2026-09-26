@@ -423,22 +423,22 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).rejects.toThrow(/GitHub repository is required/i);
   });
 
-  it("refuses the reserved GOAL prefix before it creates anything", async () => {
+  it("refuses the reserved EPIC prefix before it creates anything", async () => {
     // Canary: drop the isReservedTaskPrefix guard in createProject — the
-    // project is created and every task it keys becomes unwaitable.
+    // project is created and its task keys read as epic ids (ruling 503).
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
     await expect(
       createProject(
         store.db,
-        { name: "Goal Keeper", key: "goal", owner: "akin-ozer", repoName: "goal-keeper", policy: "balanced" },
+        { name: "Epic Keeper", key: "epic", owner: "akin-ozer", repoName: "epic-keeper", policy: "balanced" },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/not available as a task prefix/i);
     // Nothing was created, and no repo call was attempted.
-    expect(existsSync(join(store.dataRoot, "projects", "goal-keeper"))).toBe(false);
+    expect(existsSync(join(store.dataRoot, "projects", "epic-keeper"))).toBe(false);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 

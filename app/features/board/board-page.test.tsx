@@ -7,6 +7,7 @@ import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { BoardPage, StageBoard, type BoardColumnData, type BoardTask } from "./board-page";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
+import type { EpicOption } from "~/ui/epic-chip";
 
 /**
  * UI-26: `board-page.tsx` (1000+ lines) had no component test at all — only the
@@ -58,6 +59,8 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     quiet: false,
     // D4: projected runtime-continuity fact (null = healthy).
     continuity: null,
+    // Ruling 503: in no epic.
+    epicId: null,
     ...patch,
   };
 }
@@ -83,6 +86,8 @@ function renderBoard(
     /** U33-2: GitHub's answer for the project's repository, when a caller has
      *  one. Absent (the default) is the state every loader is in today. */
     repoAccess?: RepoAccessResult;
+    /** Ruling 503: the project's epics, for the epic filter. */
+    epics?: readonly EpicOption[];
     /** Server result for the board's own fetchers (reorder / rescan). The
      *  request is handed through so a case can read what the board actually
      *  POSTed (ruling 88's acknowledgment fields). */
@@ -106,6 +111,7 @@ function renderBoard(
           canRescan
           {...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {})}
           repoAccess={opts.repoAccess}
+          epics={opts.epics}
         />
       </ToastProvider>
     ),
@@ -570,7 +576,7 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
       { search: "filter=risk&q=zzz" },
     );
     const clear = getByTitle(
-      "Show every task again. Clears the board filter, the label filter and the search",
+      "Show every task again. Clears the board filter, the label and epic filters and the search",
     );
     fireEvent.click(clear);
     // Both hiding mechanisms are gone: the card is back and the chip retires.
@@ -583,6 +589,59 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
   it("hides the Clear chip when nothing is filtered", () => {
     const { queryByText } = renderBoard([task({ key: "VIB-1" })]);
     expect(queryByText("Clear")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 503(e): the board filters to one epic's tasks (`?epic=epic-1`), or to
+ * the tasks in none (`?epic=none`). The card itself names no epic (ruling 172).
+ */
+describe("ruling 503(e): the board's epic filter", () => {
+  const EPICS: EpicOption[] = [
+    { id: "epic-1", title: "Checkout revamp", color: "teal", status: "in_progress" },
+    { id: "epic-2", title: "Search", color: "violet", status: "done" },
+  ];
+  const three = () => [
+    task({ key: "VIB-1", stage: "impl", epicId: "epic-1" }),
+    task({ key: "VIB-2", stage: "impl", epicId: "epic-2" }),
+    task({ key: "VIB-3", stage: "impl", epicId: null }),
+  ];
+
+  it("shows one epic's tasks, and names the epic when it hides them all", () => {
+    // CANARY: drop `matchesEpicFilter` from the board's visible-task filter.
+    const { container } = renderBoard(three(), { search: "epic=epic-1", epics: EPICS });
+    expect(subtitle(container)).toBe("1 of 3 tasks · 0 waiting on a human in this project");
+    const select = container.querySelector<HTMLSelectElement>(".board-epic-filter select")!;
+    expect(select.value).toBe("epic-1");
+    // A closed epic stays pickable, and says it is closed.
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "All epics",
+      "No epic",
+      "Checkout revamp",
+      "Search (Done)",
+    ]);
+    // An epic with no task on this stage hides the rest, and the copy says why.
+    const empty = renderBoard([task({ key: "VIB-9", stage: "impl", epicId: "epic-2" })], {
+      search: "epic=epic-1",
+      epics: EPICS,
+    });
+    expect([...empty.container.querySelectorAll(".empty")].map((e) => e.textContent)).toContain(
+      "The 1 task here is hidden by the “Epic: Checkout revamp” filter.",
+    );
+  });
+
+  it("`none` shows the tasks in no epic, and Clear resets it", () => {
+    const { container, getByTitle } = renderBoard(three(), { search: "epic=none", epics: EPICS });
+    expect(subtitle(container)).toBe("1 of 3 tasks · 0 waiting on a human in this project");
+    fireEvent.click(
+      getByTitle("Show every task again. Clears the board filter, the label and epic filters and the search"),
+    );
+    expect(subtitle(container)).toBe("3 tasks · 0 waiting on a human in this project");
+  });
+
+  it("offers no epic filter on a project with no epics", () => {
+    const { container } = renderBoard(three());
+    expect(container.querySelector(".board-epic-filter")).toBeNull();
   });
 });
 

@@ -2,7 +2,8 @@
  * Ruling 497: the places inside a page that a notification opens, in one home.
  * The page that renders an element takes its id from here, and so does the
  * notifier that links to it, so the two can never disagree about a spelling.
- * (A goal chain's anchor is its id, and a goal link's is `goalLinkAnchor`.)
+ * (An epic has a page of its own, ruling 503, so a notice about one opens it
+ * with no anchor.)
  */
 
 const EVENT_PREFIX = "event-";

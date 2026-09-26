@@ -13,7 +13,7 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
  * costs the project controller page while nothing but its step moves. The page
  * used to revalidate every 5 s of a turn (plus the F22 20 s safety tick), and
  * every revalidation re-ran root, the workspace layout and the page loader,
- * whose payload carries the transcript, the goals and the console window. It
+ * whose payload carries the transcript and the console window. It
  * now reads the turn's tail every 5 s, which also moves the working row's
  * step (ruling 250), and revalidates once the tail says the run ended.
  *
@@ -77,7 +77,6 @@ const VIEW: ControllerSurfaceView = {
   available: true,
   controllerName: "Controller",
   projectName: "Viberr Core",
-  viewerId: "u1",
   conversations: [
     { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-24T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false },
   ],
@@ -97,7 +96,6 @@ const VIEW: ControllerSurfaceView = {
   turn: { working: true, runId: "run_ctl", phase: null, step: "viberr_controller · list_tasks", answering: null, queued: [] },
   runtime: [run],
   canInterruptTurn: true,
-  goals: [],
   proposals: [],
   corrections: { shown: [], total: 0 },
   viewerOwnsActive: true,
@@ -209,7 +207,7 @@ function mount() {
           },
           Component: () => (
             <ToastProvider>
-              <ControllerPage view={VIEW} projectSlug="viberr-core" canRedirectGoals={false} />
+              <ControllerPage view={VIEW} projectSlug="viberr-core" />
             </ToastProvider>
           ),
         },

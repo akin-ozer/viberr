@@ -85,8 +85,9 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
 
       // F37-71: a task projection from before the recommendation-kinds column.
       // The rebuilder names it on EVERY task write, so a root without it could
-      // not project a single task. CANARY: drop the `task_projections` entry
-      // from BASELINE_COLUMNS and this reads two columns, not three.
+      // not project a single task. Ruling 503's `epic_id` is the same shape.
+      // CANARY: drop the `task_projections` entry from BASELINE_COLUMNS and
+      // this reads two columns, not four.
       db.exec(
         `CREATE TABLE task_projections (project_slug TEXT NOT NULL, task_key TEXT NOT NULL)`,
       );
@@ -99,6 +100,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "project_slug",
         "task_key",
         "recommendation_kinds",
+        "epic_id",
       ]);
 
       // Ruling 176: an org MCP registry from before the write-tool columns.

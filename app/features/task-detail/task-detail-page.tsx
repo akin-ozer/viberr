@@ -53,6 +53,7 @@ import {
 } from "./task-detail-hooks";
 import { CurrentStatePanel, GithubTrace } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
+import type { EpicOption } from "~/ui/epic-chip";
 import {
   DiagnosticsPanel,
   ExecutionSection,
@@ -123,6 +124,7 @@ function isTaskRegionAnchor(id: string): boolean {
 export function TaskDetailPage({
   task,
   labelSuggestions = [],
+  epics = [],
   attachments = [],
   attachmentsTotal,
   attachmentProducers = {},
@@ -167,6 +169,9 @@ export function TaskDetailPage({
   /** The project's existing label vocabulary, for the Details panel's label
    *  autocomplete. */
   labelSuggestions?: string[];
+  /** Ruling 503: the project's epics, for the hero's Epic field and the
+   *  Details panel's Epic menu. Empty in a project with none. */
+  epics?: EpicOption[];
   /** R19-19: browser-produced files (loader; `[]` for non-members — the same
    *  visibility bar as the run console). */
   attachments?: TaskAttachmentEntry[];
@@ -265,6 +270,9 @@ export function TaskDetailPage({
   // the memoised run card and console alone.
   const runtime = useStableRows(loadedRuntime, runThreadKey);
   const stage = task.stages.find((s) => s.id === task.stage);
+  // Ruling 503: the task's epic, read from the project's list the loader
+  // ships (one statement); a stale id no epic answers to draws no field.
+  const epic = task.epicId ? (epics.find((e) => e.id === task.epicId) ?? null) : null;
   const [releasing, setReleasing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [ask, setAsk] = useState(0);
@@ -826,6 +834,7 @@ export function TaskDetailPage({
           // field), not the goal the decision asked to replace.
           pendingGoalDraft={task.packet?.goalDraft ?? null}
           taskLinks={taskLinks}
+          epic={epic}
         />
       </div>
 
@@ -939,6 +948,7 @@ export function TaskDetailPage({
           task={task}
           canEdit={canEditMeta}
           labelSuggestions={labelSuggestions}
+          epics={epics}
         />
       </div>
 
