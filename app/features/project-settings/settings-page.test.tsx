@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
@@ -16,28 +17,9 @@ import {
   StagesPanel,
   resolveStageOrder,
   stageMoveOptions,
-  type ProjectActionGate,
 } from "./settings-page";
-import { roleCan, type ProjectRole, type RbacAction } from "~/shared/rbac";
+import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
-
-/**
- * E3: `edit-policy`, `manage-members` and `grant-github-scope` are three
- * DIFFERENT server guards that happen to overlap in tier today (the first two
- * are both admin-only). A test that asserts "admin sees it, viewer doesn't"
- * therefore passes with the wrong action id wired in — the exact reason the
- * page carried a `myRole === "admin"` literal for so long.
- *
- * `grantOnly` builds a real `ProjectActionGate` that answers true for exactly
- * ONE action id, handed to the page through its own `gate` prop. That is the
- * seam the page ships (default: the shared `roleCan`), so no module is replaced
- * and every other test in this file still sees production behaviour without
- * having to reset anything.
- */
-const grantOnly =
-  (granted: RbacAction): ProjectActionGate =>
-  (_role, action) =>
-    action === granted;
 
 afterEach(cleanup);
 
@@ -974,30 +956,39 @@ describe("settings panels take count + note styling from the sheet (F19-33)", ()
   });
 });
 
+/** RepoPanel as an admin's page mounts it, idle, over a bound credential; a
+ *  case passes only the props it varies. */
+function repoPanel(overrides: Partial<ComponentProps<typeof RepoPanel>> = {}) {
+  return (
+    <RepoPanel
+      canRepair
+      branchCleanup
+      onSetBranchCleanup={() => {}}
+      footprintTasks={0}
+      repairBusy={false}
+      repairResult={undefined}
+      onRepair={() => {}}
+      repo="akin-ozer/viberr"
+      credential={CREDENTIAL}
+      canGrant
+      inFlight={null}
+      credInFlight={null}
+      onGrantScope={() => {}}
+      onSetCredential={() => {}}
+      onClearCredential={() => {}}
+      onOpenTask={() => {}}
+      {...overrides}
+    />
+  );
+}
+
 describe("RepoPanel", () => {
   it("renders repo facts and the shared CredentialCard with Re-check scopes", () => {
     const onGrant = vi.fn();
     const onSet = vi.fn();
     const onOpenTask = vi.fn();
     const { container, getByText, queryByText } = render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={() => {}}
-        footprintTasks={0}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={CREDENTIAL}
-        canGrant
-        inFlight={null}
-        credInFlight={null}
-        onGrantScope={onGrant}
-        onSetCredential={onSet}
-        onClearCredential={() => {}}
-        onOpenTask={onOpenTask}
-      />,
+      repoPanel({ onGrantScope: onGrant, onSetCredential: onSet, onOpenTask }),
     );
     expect(getByText("akin-ozer/viberr")).toBeTruthy();
     // P13-D-5: honest copy — the "Task-level override" toggle claiming "tasks
@@ -1025,24 +1016,7 @@ describe("RepoPanel", () => {
   it("unconfigured project (policy but no bound PAT) → honest connect card, no chips (honest empty slate)", () => {
     const onSet = vi.fn();
     const { container, getByText } = render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={() => {}}
-        footprintTasks={0}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={NO_CREDENTIAL}
-        canGrant
-        inFlight={null}
-        credInFlight={null}
-        onGrantScope={() => {}}
-        onSetCredential={onSet}
-        onClearCredential={() => {}}
-        onOpenTask={() => {}}
-      />,
+      repoPanel({ credential: NO_CREDENTIAL, onSetCredential: onSet }),
     );
     // No fabricated scope chips and no green "granted" affirmation.
     expect(container.querySelector(".scope-chips")).toBeNull();
@@ -1063,26 +1037,7 @@ describe("RepoPanel", () => {
    */
   it("R15-6: the after-merge branch-cleanup toggle reflects and submits the policy", () => {
     const onSetBranchCleanup = vi.fn();
-    const { container, getByText } = render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={onSetBranchCleanup}
-        footprintTasks={0}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={CREDENTIAL}
-        canGrant
-        inFlight={null}
-        credInFlight={null}
-        onGrantScope={() => {}}
-        onSetCredential={() => {}}
-        onClearCredential={() => {}}
-        onOpenTask={() => {}}
-      />,
-    );
+    const { container, getByText } = render(repoPanel({ onSetBranchCleanup }));
     // Fails on main: no such control existed anywhere in project settings.
     expect(getByText("After merge")).toBeTruthy();
     const box = container.querySelector<HTMLInputElement>(
@@ -1096,24 +1051,12 @@ describe("RepoPanel", () => {
   it("R15-6: a non-admin sees the policy but cannot change it", () => {
     const onSetBranchCleanup = vi.fn();
     const { container } = render(
-      <RepoPanel
-        canRepair={false}
-        branchCleanup={false}
-        onSetBranchCleanup={onSetBranchCleanup}
-        footprintTasks={0}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={CREDENTIAL}
-        canGrant={false}
-        inFlight={null}
-        credInFlight={null}
-        onGrantScope={() => {}}
-        onSetCredential={() => {}}
-        onClearCredential={() => {}}
-        onOpenTask={() => {}}
-      />,
+      repoPanel({
+        canRepair: false,
+        branchCleanup: false,
+        onSetBranchCleanup,
+        canGrant: false,
+      }),
     );
     const box = container.querySelector<HTMLInputElement>(
       'input[type="checkbox"]',
@@ -1132,24 +1075,7 @@ describe("RepoPanel", () => {
       scopes: CREDENTIAL.scopes.map((s) => ({ ...s, ok: true })),
     };
     const { container, getByText, queryByText } = render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={() => {}}
-        footprintTasks={0}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={bound}
-        canGrant
-        inFlight={null}
-        credInFlight={null}
-        onGrantScope={() => {}}
-        onSetCredential={onSet}
-        onClearCredential={onClear}
-        onOpenTask={() => {}}
-      />,
+      repoPanel({ credential: bound, onSetCredential: onSet, onClearCredential: onClear }),
     );
     expect(queryByText("Attach credential")).toBeNull();
     fireEvent.click(getByText("Re-attach connection"));
@@ -1182,27 +1108,7 @@ describe("RepoPanel", () => {
       ...CREDENTIAL,
       scopes: CREDENTIAL.scopes.map((s) => ({ ...s, ok: true })),
     };
-    const panel = (canGrant: boolean) =>
-      render(
-        <RepoPanel
-          canRepair
-          branchCleanup
-          onSetBranchCleanup={() => {}}
-          footprintTasks={0}
-          repairBusy={false}
-          repairResult={undefined}
-          onRepair={() => {}}
-          repo="akin-ozer/viberr"
-          credential={allOk}
-          canGrant={canGrant}
-          inFlight={null}
-          credInFlight={null}
-          onGrantScope={() => {}}
-          onSetCredential={() => {}}
-          onClearCredential={() => {}}
-          onOpenTask={() => {}}
-        />,
-      );
+    const panel = (canGrant: boolean) => render(repoPanel({ credential: allOk, canGrant }));
 
     // With the grant: the card, its all-scopes-proven footer and the manage row.
     const granted = panel(true);
@@ -1231,7 +1137,6 @@ describe("DangerZone", () => {
     const { container, getByPlaceholderText } = render(
       <DangerZone
         projectName="Viberr Core"
-        myRole="admin"
         archived={false}
         busy={false}
         onArchive={() => {}}
@@ -1264,7 +1169,6 @@ describe("DangerZone", () => {
     const live = render(
       <DangerZone
         projectName="Viberr Core"
-        myRole="admin"
         archived={false}
         busy={false}
         onArchive={() => {}}
@@ -1285,7 +1189,6 @@ describe("DangerZone", () => {
     const archivedPanel = render(
       <DangerZone
         projectName="Viberr Core"
-        myRole="admin"
         archived
         busy={false}
         onArchive={() => {}}
@@ -1301,248 +1204,33 @@ describe("DangerZone", () => {
       "restoring is a recovery, not a destruction",
     ).not.toContain("danger");
   });
-
-  it("non-admins only get the deny toast path (no dialog)", () => {
-    const { container } = render(
-      <DangerZone
-        projectName="Viberr Core"
-        myRole="maintainer"
-        archived={false}
-        busy={false}
-        onArchive={() => {}}
-        onDelete={() => {}}
-      />,
-    );
-    fireEvent.click(container.querySelector(".dz-row .btn.danger:not(.ghost)")!);
-    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
-  });
-
-  // F10-34: destructive project actions are admin-only. Greying the buttons is
-  // not enough — a viewer who can still press them gets a control that looks
-  // actionable and then silently does nothing (or leans on the server to say
-  // no). Both Archive and Delete must be genuinely `disabled`.
-  it("a viewer gets both danger-zone controls truly disabled; an admin gets them enabled", () => {
-    const dz = (myRole: string) =>
-      render(
-        <DangerZone
-          projectName="Viberr Core"
-          myRole={myRole}
-          archived={false}
-          busy={false}
-          onArchive={() => {}}
-          onDelete={() => {}}
-        />,
-      ).container;
-
-    const viewer = dz("viewer");
-    const viewerArchive = viewer.querySelector<HTMLButtonElement>(
-      ".dz-row .btn.ghost",
-    )!;
-    const viewerDelete = viewer.querySelector<HTMLButtonElement>(
-      ".dz-row .btn.danger:not(.ghost)",
-    )!;
-    expect(viewerArchive.disabled).toBe(true);
-    expect(viewerDelete.disabled).toBe(true);
-    // The denial is explained rather than left as unexplained dimming.
-    expect(viewerArchive.title).toContain("project admin");
-    expect(viewerDelete.title).toContain("project admin");
-
-    cleanup();
-
-    const admin = dz("admin");
-    expect(
-      admin.querySelector<HTMLButtonElement>(".dz-row .btn.ghost")!.disabled,
-    ).toBe(false);
-    expect(
-      admin.querySelector<HTMLButtonElement>(".dz-row .btn.danger:not(.ghost)")!.disabled,
-    ).toBe(false);
-  });
-
-  // RU-3: the danger-zone gate must track the SAME ACTION_ROLES entry the server
-  // enforces (`edit-policy`, via requireProjectAction in settings-actions.server),
-  // not a parallel `=== "admin"` literal that can silently drift from it. Driving
-  // the expectation off `roleCan` fails if the gate is ever re-hardcoded or if
-  // `edit-policy`'s role set changes without the control following.
-  it("gates both danger-zone controls on roleCan(edit-policy), the server's action", () => {
-    const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
-    for (const role of roles) {
-      const { container } = render(
-        <DangerZone
-          projectName="Viberr Core"
-          myRole={role}
-          archived={false}
-          busy={false}
-          onArchive={() => {}}
-          onDelete={() => {}}
-        />,
-      );
-      const expectedEnabled = roleCan(role, "edit-policy");
-      const archive = container.querySelector<HTMLButtonElement>(
-        ".dz-row .btn.ghost",
-      )!;
-      const del = container.querySelector<HTMLButtonElement>(
-        ".dz-row .btn.danger:not(.ghost)",
-      )!;
-      expect(archive.disabled).toBe(!expectedEnabled);
-      expect(del.disabled).toBe(!expectedEnabled);
-      cleanup();
-    }
-  });
 });
 
-// E3: the page's panel gates must name the action ids the SERVER guards name —
-// `edit-policy` for project identity / stages / repo repair + branch cleanup
-// (settings-actions.server.ts `requireProjectAction`), `manage-members` for
-// invite + remove (same file), `grant-github-scope` for the credential row
-// (routes/project.github.tsx). Two of the three resolve to admin-only today, so
-// these drive `roleCan` one action at a time: a panel wired to the wrong id
-// goes dark while its neighbour lights up, which no role-tier assertion could
-// ever catch.
-describe("SettingsPage — each panel gates on the action its own server guard checks", () => {
-  const DATA: SettingsViewData = {
-    project: PROJECT,
-    stages: STAGES,
-    stageCounts: { triage: 2, review: 2 },
-    members: MEMBERS,
-    credential: CREDENTIAL,
-    repoFootprintTasks: 0,
-    branchCleanupOnMerge: true,
-    requiredReviewers: [],
-    fileLeases: [],
-    leaseCandidates: [],
-    reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
-    gates: [],
-  };
+const PAGE_DATA: SettingsViewData = {
+  project: PROJECT,
+  stages: STAGES,
+  stageCounts: { triage: 2, review: 2 },
+  members: MEMBERS,
+  credential: CREDENTIAL,
+  repoFootprintTasks: 0,
+  branchCleanupOnMerge: true,
+  requiredReviewers: [],
+  fileLeases: [],
+  leaseCandidates: [],
+  reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
+  gates: [],
+};
 
-  /** Always an admin — the ROLE is held constant on purpose, so what the page
-   *  renders can only be explained by the ACTION id each panel asks the gate
-   *  for. */
-  function renderPage(gate: ProjectActionGate) {
-    const Stub = createRoutesStub([
-      {
-        path: "/",
-        Component: () => (
-          <SettingsPage data={DATA} meId="u_arda" myRole="admin" gate={gate} />
-        ),
-      },
-    ]);
-    return render(<Stub initialEntries={["/"]} />);
-  }
-
-  /** What each panel offers a manager, keyed off DOM the panels own alone. */
-  function affordances(container: HTMLElement) {
-    return {
-      // ProjectPanel: identity inputs are present either way, enabled only for
-      // a manager — so read the property, not presence.
-      identity: !container.querySelector<HTMLInputElement>("#set-project-name")!
-        .disabled,
-      stages: Boolean(
-        Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Add stage",
-        ),
-      ),
-      // Ruling 148(b): the invite form lives behind "Add member" in the panel
-      // head now, so the head button is the affordance to read.
-      members: Boolean(
-        Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Add member",
-        ),
-      ),
-      repoRepair: Boolean(
-        Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Repair…",
-        ),
-      ),
-      credential: Boolean(
-        Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Re-check scopes",
-        ),
-      ),
-      // Ruling 178: the required-reviewer table rides `edit-policy`
-      // (setRequiredReviewers checks it) — its Add rule button is the affordance.
-      requiredReviewers: Boolean(
-        Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Add rule",
-        ),
-      ),
-    };
-  }
-
-  /**
-   * Q-V1 (owner ruling, pass 18) shipped with no test — the one gap pass 19's
-   * doc verification called out. A read-only member must not see the Danger
-   * zone AT ALL: it used to render for every member with the buttons disabled,
-   * which showed a stakeholder a destructive surface they can never use and
-   * named archive/delete as if they were on the table. The gate is
-   * `edit-policy` — the same id the archive/delete server guards check — so
-   * drive it with a `grantOnly` gate like every other panel gate here.
-   */
-  it("Q-V1: the Danger zone renders only under edit-policy — any other grant hides it entirely", () => {
-    const withoutGrant = renderPage(grantOnly("manage-members"));
-    expect(withoutGrant.container.textContent).not.toContain("Danger zone");
-    cleanup();
-
-    const withGrant = renderPage(grantOnly("edit-policy"));
-    expect(withGrant.container.textContent).toContain("Danger zone");
-  });
-
-  it("grants ONLY edit-policy → identity, stages and repo repair; members and credentials stay shut", () => {
-    const { container } = renderPage(grantOnly("edit-policy"));
-    expect(affordances(container)).toEqual({
-      identity: true,
-      stages: true,
-      members: false,
-      repoRepair: true,
-      credential: false,
-      requiredReviewers: true,
-    });
-  });
-
-  it("grants ONLY manage-members → the members panel, and nothing else", () => {
-    const { container } = renderPage(grantOnly("manage-members"));
-    expect(affordances(container)).toEqual({
-      identity: false,
-      stages: false,
-      members: true,
-      repoRepair: false,
-      credential: false,
-      requiredReviewers: false,
-    });
-  });
-
-  it("grants ONLY grant-github-scope → the credential row, and nothing else", () => {
-    const { container } = renderPage(grantOnly("grant-github-scope"));
-    expect(affordances(container)).toEqual({
-      identity: false,
-      stages: false,
-      members: false,
-      repoRepair: false,
-      credential: true,
-      requiredReviewers: false,
-    });
-  });
-
-  // The branch-cleanup toggle rides `edit-policy` too (setBranchCleanup checks
-  // it), and it is the one repo control that renders for everybody — so its
-  // reason to be disabled has to track the same id, not the repair button's
-  // mere presence.
-  it("the after-merge branch-cleanup toggle follows edit-policy, not manage-members", () => {
-    const shut = renderPage(
-      grantOnly("manage-members"),
-    ).container.querySelector<HTMLInputElement>(
-      '.kv-row input[type="checkbox"]',
-    )!;
-    expect(shut.disabled).toBe(true);
-    cleanup();
-
-    const open = renderPage(
-      grantOnly("edit-policy"),
-    ).container.querySelector<HTMLInputElement>(
-      '.kv-row input[type="checkbox"]',
-    )!;
-    expect(open.disabled).toBe(false);
-  });
-});
+/** The REAL page, gated by `roleCan` as the route renders it, for one role. */
+function renderPageAs(myRole: ProjectRole) {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => <SettingsPage data={PAGE_DATA} meId="u_arda" myRole={myRole} />,
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />).container;
+}
 
 // N19-5 / owner ruling Q-V1: a read-only viewer — and any member without the
 // lifecycle grant — must not SEE the Danger zone at all, not merely find its
@@ -1550,39 +1238,13 @@ describe("SettingsPage — each panel gates on the action its own server guard c
 // use names archive/delete as if they were on the table.
 //
 // The gate that implements the ruling lives on the PAGE
-// (`{canEditPolicy && <DangerZone …>}` in SettingsPage), which is exactly why
-// the two `DangerZone` tests above cannot defend it: they mount the panel
-// directly, i.e. past the gate, so they keep passing with the gate deleted. The
-// only other full-page render in this file hardcodes `myRole="admin"`, the one
-// role for which the gate is a no-op. So these render the REAL page per role.
-// The admin case is what makes the absences mean something: it proves the panel
-// exists and is reachable, so "not rendered" is a gate and not a dead feature.
+// (`{canEditPolicy && <DangerZone …>}` in SettingsPage); `DangerZone` has no
+// role gate of its own, so the `DangerZone` tests above mount it past the gate
+// and keep passing with the gate deleted. So these render the REAL page per
+// role. The admin case is what makes the absences mean something: it proves
+// the panel exists and is reachable, so "not rendered" is a gate and not a
+// dead feature.
 describe("SettingsPage — the Danger zone is withheld from members who cannot act on it", () => {
-  const DATA: SettingsViewData = {
-    project: PROJECT,
-    stages: STAGES,
-    stageCounts: { triage: 2, review: 2 },
-    members: MEMBERS,
-    credential: CREDENTIAL,
-    repoFootprintTasks: 0,
-    branchCleanupOnMerge: true,
-    requiredReviewers: [],
-    fileLeases: [],
-    leaseCandidates: [],
-    reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
-    gates: [],
-  };
-
-  function renderPageAs(myRole: ProjectRole) {
-    const Stub = createRoutesStub([
-      {
-        path: "/",
-        Component: () => <SettingsPage data={DATA} meId="u_arda" myRole={myRole} />,
-      },
-    ]);
-    return render(<Stub initialEntries={["/"]} />).container;
-  }
-
   /** The panel's own heading — the thing a member either sees or doesn't. */
   const dangerHeading = (container: HTMLElement) =>
     Array.from(container.querySelectorAll("h2")).find(
@@ -1652,9 +1314,10 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(del.disabled).toBe(false);
   });
 
-  // The gate and the panel's own control gate must ask the SAME question. If
+  // The render gate asks the question archive and delete ask the server. If
   // `edit-policy`'s role set ever changes, the render gate has to follow it —
-  // a role that renders the panel but finds it dead is the pre-ruling state.
+  // a role shown the panel and then refused by the server is the pre-ruling
+  // state.
   it("rendering tracks roleCan(edit-policy) for every project role", () => {
     const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
     for (const role of roles) {
@@ -1668,6 +1331,85 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
   });
 });
 
+// E3: each panel asks for the action id its OWN server mutation checks —
+// `edit-policy` for project identity, stages, repo repair, branch cleanup and
+// required reviewers (settings-actions.server.ts `requireProjectAction`),
+// `manage-members` for invite + remove (same file), `grant-github-scope` for
+// the credential row (routes/project.settings.tsx, as on the GitHub page). A
+// maintainer holds the third and neither of the others, so its render tells
+// the credential gate apart from the admin-only ones. `edit-policy` and `manage-members` share the admin tier
+// today, so no role separates those two; the server guards stay authoritative.
+describe("SettingsPage — each panel follows the grant its own server guard checks", () => {
+  /** What each panel offers a manager, keyed off DOM the panels own alone. */
+  function affordances(container: HTMLElement) {
+    return {
+      // ProjectPanel: identity inputs are present either way, enabled only for
+      // a manager — so read the property, not presence.
+      identity: !container.querySelector<HTMLInputElement>("#set-project-name")!
+        .disabled,
+      stages: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add stage",
+        ),
+      ),
+      // Ruling 148(b): the invite form lives behind "Add member" in the panel
+      // head now, so the head button is the affordance to read.
+      members: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add member",
+        ),
+      ),
+      repoRepair: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Repair…",
+        ),
+      ),
+      // The one repo control that renders for everybody, so its reason to be
+      // disabled has to track the grant, not the repair button's presence.
+      branchCleanup: !container.querySelector<HTMLInputElement>(
+        '.kv-row input[type="checkbox"]',
+      )!.disabled,
+      credential: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Re-check scopes",
+        ),
+      ),
+      // Ruling 178: the required-reviewer table rides `edit-policy`
+      // (setRequiredReviewers checks it) — its Add rule button is the affordance.
+      requiredReviewers: Boolean(
+        Array.from(container.querySelectorAll("button")).find(
+          (b) => b.textContent?.trim() === "Add rule",
+        ),
+      ),
+    };
+  }
+
+  it("a maintainer gets the credential row and nothing else (an admin gets every panel)", () => {
+    // The admin render is what makes the maintainer's absences mean something:
+    // every affordance read below exists on this page.
+    expect(affordances(renderPageAs("admin"))).toEqual({
+      identity: true,
+      stages: true,
+      members: true,
+      repoRepair: true,
+      branchCleanup: true,
+      credential: true,
+      requiredReviewers: true,
+    });
+    cleanup();
+
+    expect(affordances(renderPageAs("maintainer"))).toEqual({
+      identity: false,
+      stages: false,
+      members: false,
+      repoRepair: false,
+      branchCleanup: false,
+      credential: true,
+      requiredReviewers: false,
+    });
+  });
+});
+
 /**
  * Ruling 147: the repair dialog's primary stays enabled; a refused submit
  * names what is missing, marks it and moves focus there.
@@ -1675,26 +1417,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
 describe("RepairRepoDialog refuses instead of disabling", () => {
   const openDialog = (footprintTasks: number) => {
     const onRepair = vi.fn();
-    const utils = render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={() => {}}
-        footprintTasks={footprintTasks}
-        repairBusy={false}
-        repairResult={undefined}
-        onRepair={onRepair}
-        repo="akin-ozer/viberr"
-        credential={CREDENTIAL}
-        canGrant
-        inFlight={null}
-        credInFlight={null}
-        onGrantScope={() => {}}
-        onSetCredential={() => {}}
-        onClearCredential={() => {}}
-        onOpenTask={() => {}}
-      />,
-    );
+    const utils = render(repoPanel({ footprintTasks, onRepair }));
     fireEvent.click(utils.getByText("Repair…"));
     const primary = [...document.querySelectorAll("button")].find(
       (b) => b.textContent!.trim() === "Repair repository",
@@ -1980,30 +1703,11 @@ describe("FileLeasesPanel (ruling 396)", () => {
  * Re-check scopes instead).
  */
 describe("ruling 368: Settings' requests in flight", () => {
-  const repoPanel = (inFlight: string | null, credInFlight: string | null) =>
-    render(
-      <RepoPanel
-        canRepair
-        branchCleanup
-        onSetBranchCleanup={() => {}}
-        footprintTasks={0}
-        repairBusy={inFlight !== null}
-        repairResult={undefined}
-        onRepair={() => {}}
-        repo="akin-ozer/viberr"
-        credential={CREDENTIAL}
-        canGrant
-        inFlight={inFlight}
-        credInFlight={credInFlight}
-        onGrantScope={() => {}}
-        onSetCredential={() => {}}
-        onClearCredential={() => {}}
-        onOpenTask={() => {}}
-      />,
-    );
+  const renderInFlight = (inFlight: string | null, credInFlight: string | null) =>
+    render(repoPanel({ repairBusy: inFlight !== null, inFlight, credInFlight }));
 
   it("a scope re-check in flight reads Checking…, busy, the loader spinning", () => {
-    const { getByText } = repoPanel("grant-scope", null);
+    const { getByText } = renderInFlight("grant-scope", null);
     const b = getByText("Checking…").closest("button")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
@@ -2011,14 +1715,14 @@ describe("ruling 368: Settings' requests in flight", () => {
   });
 
   it("a branch-cleanup write in flight leaves Re-check waiting, claiming nothing", () => {
-    const { getByText } = repoPanel("set-branch-cleanup", null);
+    const { getByText } = renderInFlight("set-branch-cleanup", null);
     const b = getByText("Re-check scopes").closest("button")!;
     expect(b.disabled).toBe(true);
     expect(b.hasAttribute("aria-busy")).toBe(false);
   });
 
   it("a re-attach in flight reads Re-attaching… on the credential row", () => {
-    const { getByText } = repoPanel(null, "set-credential");
+    const { getByText } = renderInFlight(null, "set-credential");
     const b = getByText("Re-attaching…").closest("button")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
     // Re-check rides the other fetcher and is untouched by this one.
@@ -2029,7 +1733,6 @@ describe("ruling 368: Settings' requests in flight", () => {
     const { container } = render(
       <DangerZone
         projectName="Viberr Core"
-        myRole="admin"
         archived={false}
         busy
         inFlight="archive-project"

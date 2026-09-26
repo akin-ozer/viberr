@@ -12,14 +12,14 @@ import type {
   action as policyAction,
 } from "~/routes/project.policy";
 import { RBAC_ROWS } from "./policy-data";
-import { PROJECT_ROLES } from "~/shared/rbac";
+import { PROJECT_ROLES, RBAC_DEFINITIONS, roleCan } from "~/shared/rbac";
 
 /**
  * Route-level tests for /projects/:slug/policy: loader read model from the
- * seeded store, the 9-row RBAC grant table (contracts §3.2 verbatim), role
+ * seeded store, the RBAC grant table (each cell the guards' own answer), role
  * change round trip (project.md + project_members + audit), the last-admin
- * guard, boundary changes with the review→done human lock, and RBAC
- * denials for non-admins.
+ * guard, boundary changes (the review→done lock itself is
+ * policy-rbac.server.test.ts's), and RBAC denials for non-admins.
  */
 
 let app: AppTestContext;
@@ -93,56 +93,25 @@ async function postAction(
   return action({ request, params: { slug: "viberr-core" }, context: {} } as never);
 }
 
-describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
-  it("carries the canonical rows in broadest→narrowest order", () => {
-    expect(RBAC_ROWS.map((r) => r.action)).toEqual([
-      "View board, tasks & timelines",
-      "Comment on tasks",
-      "Create tasks",
-      "Take / release own task ownership",
-      "Edit task priority, labels & due date",
-      "Attach a file to a task",
-      "Create & edit epics",
-      "Approve stage transitions",
-      "Resolve decision packets",
-      "Accept completion → Done",
-      "Edit the task goal",
-      "Run agents",
-      "Reorder the board",
-      "Reconcile GitHub state",
-      "Manage the GitHub credential",
-      "Re-scan project files & projections",
-      "Release any task owner",
-      "Manage members & roles",
-      "Manage agent profiles",
-      "Edit workflow & policy",
-      "Force-accept past the review gate",
-    ]);
+describe("RBAC grant table (derived from RBAC_DEFINITIONS)", () => {
+  /**
+   * policy-data.ts's claim: the table the Policy page renders IS the matrix
+   * the guards read — one row per definition, in the module's order, each cell
+   * the answer `roleCan` gives. The tiers themselves are pinned by hand in
+   * app/shared/rbac.test.ts; this binds the display to them, `grantByRole`'s
+   * hand-written role → column mapping included.
+   */
+  it("renders every definition in order, each cell the answer roleCan gives", () => {
     expect(PROJECT_ROLES).toEqual(["admin", "maintainer", "contributor", "viewer"]);
-    // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
-    // comment; the contributor tier adds "Create tasks" AND task ownership.
-    // R8-4: reconcile-github is now maintainer+ (was contributor+).
-    expect(RBAC_ROWS.every((r) => r.grant.admin === 1)).toBe(true);
-    // E1: view/comment are held by every ROLE and by no non-member — there is no
-    // "app-wide" row shape any more, so every row carries four role grants and
-    // nothing in this table can render as membership-free.
-    expect(RBAC_ROWS.every((r) => Object.keys(r.grant).length === 4)).toBe(true);
-    expect(
-      RBAC_ROWS.filter((r) => PROJECT_ROLES.every((role) => r.grant[role] === 1)).map(
-        (r) => r.action,
-      ),
-    ).toEqual(["View board, tasks & timelines", "Comment on tasks"]);
-    expect(RBAC_ROWS.map((r) => r.grant.viewer)).toEqual([
-      1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ]);
-    // edit-task-meta is the 5th row (index 4), attach-file the 6th (F39-6) and
-    // manage-epics the 7th (ruling 503); contributor+ holds all three.
-    expect(RBAC_ROWS.map((r) => r.grant.contributor)).toEqual([
-      1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ]);
-    expect(RBAC_ROWS.map((r) => r.grant.maintainer)).toEqual([
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
-    ]);
+    expect(RBAC_ROWS).toHaveLength(RBAC_DEFINITIONS.length);
+    RBAC_DEFINITIONS.forEach((def, i) => {
+      expect(RBAC_ROWS[i]!.action).toBe(def.label);
+      for (const role of PROJECT_ROLES) {
+        expect(RBAC_ROWS[i]!.grant[role], `${def.id}/${role}`).toBe(
+          roleCan(role, def.id) ? 1 : 0,
+        );
+      }
+    });
   });
 });
 
@@ -549,25 +518,6 @@ describe("set-boundary", () => {
     });
   });
 
-  it("review→done stays LOCKED human — server hard-reject", async () => {
-    // SAFETY: the locked-boundary guard raises an AppError even for an admin,
-    // which the action answers through `appErrorResponse`.
-    const result = (await postAction(ids.arda, {
-      intent: "set-boundary",
-      from: "review",
-      to: "done",
-      boundary: "auto",
-    })) as PolicyRefusal;
-    expect(result.init?.status).toBe(403);
-    expect(result.data?.error).toBe(
-      "Completion is human-authorized in V1, so this boundary can't be delegated",
-    );
-    const { view } = await runLoader(ids.arda);
-    expect(
-      view.transitions.find((t) => t.from === "review" && t.to === "done")!
-        .boundary,
-    ).toBe("human");
-  });
 });
 
 /** Ruling 178: the Policy loader reads the required-reviewer rules from

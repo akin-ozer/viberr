@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, getNodeText, render, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import { z } from "zod";
@@ -414,12 +414,20 @@ describe("UsersPanel", () => {
     const myRow = getByText("arda@viberr.dev").closest(".member-row")!;
     fireEvent.click(myRow.querySelector(".mini-seg button:not(.on)")!);
     await waitFor(() => expect(getByText("You can't demote yourself")).toBeTruthy());
+    // P13-D-10 (UX-5): a refusal is the only feedback these actions produce, so
+    // it must not arrive wearing the success toast's green tick.
+    expect(
+      getByText("You can't demote yourself").closest(".toast")!.getAttribute("data-kind"),
+    ).toBe("error");
     expect(lastForm).toBeNull();
 
     fireEvent.click(getByLabelText("Remove Arda Kaya"));
     await waitFor(() =>
       expect(getByText("You can't remove your own account")).toBeTruthy(),
     );
+    expect(
+      getByText("You can't remove your own account").closest(".toast")!.getAttribute("data-kind"),
+    ).toBe("error");
     expect(lastForm).toBeNull();
     expect(getAllByText("Admin").length).toBeGreaterThan(0);
   });
@@ -452,6 +460,9 @@ describe("UsersPanel", () => {
     await waitFor(() =>
       expect(getByText("You can't disable your own account")).toBeTruthy(),
     );
+    expect(
+      getByText("You can't disable your own account").closest(".toast")!.getAttribute("data-kind"),
+    ).toBe("error");
     expect(queryByRole("alertdialog")).toBeNull();
     expect(lastForm).toBeNull();
 
@@ -1391,6 +1402,44 @@ const STORAGE: OrgSettingsView["storage"] = {
   },
 };
 
+/** The loader's view over the fixtures above. */
+const BASE_VIEW: OrgSettingsView = {
+  connections: CONNECTIONS,
+  users: [ME],
+  domains: DOMAINS,
+  kbs: KBS,
+  mcps: MCPS,
+  skills: SKILLS,
+  gagents: GAGENTS,
+  projectGrants: { kbs: {}, mcps: {}, skills: {} },
+  templateGrants: { kbs: {}, mcps: {}, skills: {} },
+  stages: STAGES,
+  providers: { github: false, google: false },
+  authProviders: AUTH_PROVIDERS,
+  storage: STORAGE,
+};
+
+/** The whole page as the route renders it for ME; a case passes only the props
+ *  it varies. */
+function orgPage(overrides: Partial<ComponentProps<typeof OrgSettingsPage>> = {}) {
+  return (
+    <OrgSettingsPage
+      view={BASE_VIEW}
+      meId={ME.id}
+      callbackOrigin="http://localhost:5173"
+      runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
+      runSpendCapUsd={null}
+      s3Audit={null}
+      controllerConfig={CONTROLLER_CONFIG}
+      controllerLocks={CONTROLLER_LOCKS}
+      controllerRequests={[]}
+      auditEvents={[]}
+      auditEventsOrgScoped={[]}
+      {...overrides}
+    />
+  );
+}
+
 describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
   it("opens a user-scoped EventSource on mount, so a KB re-index (resource.updated) revalidates the page", () => {
     // Live: a host-side file drop re-indexed the KB (log: docCount 1) while the
@@ -1414,35 +1463,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
     }
     vi.stubGlobal("EventSource", FakeEventSource);
     try {
-      renderPanel(
-        <OrgSettingsPage
-          view={{
-            connections: CONNECTIONS,
-            users: [ME],
-            domains: DOMAINS,
-            kbs: KBS,
-            mcps: MCPS,
-            skills: SKILLS,
-            gagents: GAGENTS,
-            projectGrants: { kbs: {}, mcps: {}, skills: {} },
-            templateGrants: { kbs: {}, mcps: {}, skills: {} },
-            stages: STAGES,
-            providers: { github: false, google: false },
-            authProviders: AUTH_PROVIDERS,
-            storage: STORAGE,
-          }}
-          meId={ME.id}
-          callbackOrigin="http://localhost:5173"
-          runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-          runSpendCapUsd={null}
-          s3Audit={null}
-          controllerConfig={CONTROLLER_CONFIG}
-          controllerLocks={CONTROLLER_LOCKS}
-          controllerRequests={[]}
-          auditEvents={[]}
-          auditEventsOrgScoped={[]}
-        />,
-      );
+      renderPanel(orgPage());
       expect(opened).toHaveLength(1);
       expect(opened[0]).toContain("/resources/events");
       expect(opened[0]).toContain("scope=user");
@@ -1454,35 +1475,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
 
 describe("resources tab badge counts resources, not resources+templates", () => {
   it("shows the resource count and discloses profiles in the tooltip", () => {
-    const { getByRole } = renderPanel(
-      <OrgSettingsPage
-        view={{
-          connections: CONNECTIONS,
-          users: [ME],
-          domains: DOMAINS,
-          kbs: KBS,
-          mcps: MCPS,
-          skills: SKILLS,
-          gagents: GAGENTS,
-          projectGrants: { kbs: {}, mcps: {}, skills: {} },
-          templateGrants: { kbs: {}, mcps: {}, skills: {} },
-          stages: STAGES,
-          providers: { github: false, google: false },
-          authProviders: AUTH_PROVIDERS,
-          storage: STORAGE,
-        }}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
-    );
+    const { getByRole } = renderPanel(orgPage());
     // 1 KB + 2 MCP + 1 skill = 4. It used to add the 2 agent templates and
     // read 6 — a number the Home tile presents as a separate concept.
     const tab = getByRole("button", { name: /Agent resources/ });
@@ -1494,25 +1487,14 @@ describe("resources tab badge counts resources, not resources+templates", () => 
 
 describe("C9: instance storage line", () => {
   const viewWith = (storage: OrgSettingsView["storage"]): OrgSettingsView => ({
-    connections: CONNECTIONS,
-    users: [ME],
-    domains: DOMAINS,
-    kbs: KBS,
-    mcps: MCPS,
-    skills: SKILLS,
-    gagents: GAGENTS,
-    projectGrants: { kbs: {}, mcps: {}, skills: {} },
-    templateGrants: { kbs: {}, mcps: {}, skills: {} },
-    stages: STAGES,
-    providers: { github: false, google: false },
-    authProviders: AUTH_PROVIDERS,
+    ...BASE_VIEW,
     storage,
   });
 
   it("shows free space, usage, and the automatic-cleanup cadence; flags a low disk", () => {
     const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewWith({
+      orgPage({
+        view: viewWith({
           disk: {
             freeBytes: 900_000_000,
             totalBytes: 20_000_000_000,
@@ -1529,18 +1511,8 @@ describe("C9: instance storage line", () => {
             lastFreedBytes: 45_000_000,
             scheduled: true,
           },
-        })}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
+        }),
+      }),
     );
     // Free-of-total with the usage percent, the low flag, and the cleanup cadence.
     expect(getByText(/free of 20\.0 GB on the data volume \(95\.5% used\)/)).toBeTruthy();
@@ -1551,8 +1523,8 @@ describe("C9: instance storage line", () => {
 
   it("says cleanup is not scheduled when the maintenance timer is not live", () => {
     const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewWith({
+      orgPage({
+        view: viewWith({
           disk: null,
           maintenance: {
             intervalMs: 6 * 3_600_000,
@@ -1562,55 +1534,17 @@ describe("C9: instance storage line", () => {
             lastFreedBytes: 0,
             scheduled: false,
           },
-        })}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
+        }),
+      }),
     );
     expect(getByText(/Automatic cleanup is not scheduled/)).toBeTruthy();
   });
 });
 
 describe("run concurrency control", () => {
-  const viewBase: OrgSettingsView = {
-    connections: CONNECTIONS,
-    users: [ME],
-    domains: DOMAINS,
-    kbs: KBS,
-    mcps: MCPS,
-    skills: SKILLS,
-    gagents: GAGENTS,
-    projectGrants: { kbs: {}, mcps: {}, skills: {} },
-    templateGrants: { kbs: {}, mcps: {}, skills: {} },
-    stages: STAGES,
-    providers: { github: false, google: false },
-    authProviders: AUTH_PROVIDERS,
-    storage: STORAGE,
-  };
-
   it("shows the cap and the live/queued counts", () => {
     const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, lane: 1, live: 2, queued: 1 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
+      orgPage({ runConcurrency: { cap: 2, lane: 1, live: 2, queued: 1 } }),
     );
     expect(getByText(/Capped at 2/)).toBeTruthy();
     expect(getByText(/2 runs live, 1 queued/)).toBeTruthy();
@@ -1623,19 +1557,7 @@ describe("run concurrency control", () => {
     // Canary: drop the `.conc-lane` sentence from RunConcurrencyControl and
     // the first assertion fails.
     const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, lane: 1, live: 3, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
+      orgPage({ runConcurrency: { cap: 2, lane: 1, live: 3, queued: 0 } }),
     );
     const sentence = getByText(/Cap 2: up to 2 agent runs at once,/);
     expect(sentence.textContent).toContain(
@@ -1651,19 +1573,7 @@ describe("run concurrency control", () => {
     // Canary: render the words "one extra slot per four" again (or `cap` in
     // place of `countLabel`) and both assertions fail.
     const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 5, lane: 2, live: 5, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
+      orgPage({ runConcurrency: { cap: 5, lane: 2, live: 5, queued: 0 } }),
     );
     expect(
       getByText(/Cap 5: up to 5 agent runs at once, plus 2 slots for/).textContent,
@@ -1672,61 +1582,17 @@ describe("run concurrency control", () => {
 
   it("ruling 152: a cap of 1 counts one agent run and one slot", () => {
     const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 1, lane: 1, live: 1, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
+      orgPage({ runConcurrency: { cap: 1, lane: 1, live: 1, queued: 0 } }),
     );
     expect(getByText(/Cap 1: up to 1 agent run at once, plus 1 slot for/)).toBeTruthy();
   });
 
-  it("ruling 152: an unlimited cap has no lane sentence", () => {
-    const { queryByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
-    );
-    expect(queryByText(/for operator and controller turns/)).toBeNull();
-  });
-
-  it("says unlimited when the cap is 0", () => {
-    const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
-    );
+  it("says unlimited when the cap is 0, with no lane sentence (ruling 152)", () => {
+    const { getByText, queryByText } = renderPanel(orgPage());
     // The reading says "Unlimited · 0 runs live" — distinct from the "0 =
     // unlimited" field hint.
     expect(getByText(/Unlimited · 0 runs live/)).toBeTruthy();
+    expect(queryByText(/for operator and controller turns/)).toBeNull();
   });
 
   // Design pass 2026-09-08: the control was a `.pol-note` — fine print with
@@ -1734,21 +1600,7 @@ describe("run concurrency control", () => {
   // It is a guard row (Policy's numeric-guardrail shape) on a well now, and
   // the field sits under `.guard-ctl` so it is boxed by that one rule.
   it("is a guard row on a well, not a footnote", () => {
-    const { getByLabelText, getByRole } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
-    );
+    const { getByLabelText, getByRole } = renderPanel(orgPage());
     const input = getByLabelText(/Maximum concurrent agent runs/);
     expect(input.closest(".guard-ctl")).not.toBeNull();
     const row = input.closest(".guard-row")!;
@@ -1766,22 +1618,13 @@ describe("run concurrency control", () => {
   // events the project Activity page cannot show.
   it("browses recent audit events; the Org-scoped toggle swaps to its own window (ruling 234)", () => {
     const { getByText, queryByText } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      // Ruling 234: the two windows are fetched SEPARATELY, so the unscoped
+      orgPage({
+        // Ruling 234: the two windows are fetched SEPARATELY, so the unscoped
         // list here deliberately does NOT contain the PAT row. That is the live
         // shape the ruling fixes: on a busy instance the org-scoped events fall
         // out of the unscoped window entirely (measured at 2 visible against 96
         // on file), and a client-side filter of this list could never find them.
-        auditEvents={[
+        auditEvents: [
           {
             id: "a2",
             occurredAt: "2026-08-21T10:00:00.000Z",
@@ -1791,8 +1634,8 @@ describe("run concurrency control", () => {
             subjectId: "VIB-1",
             projectSlug: "viberr-core", // project-scoped
           },
-        ]}
-        auditEventsOrgScoped={[
+        ],
+        auditEventsOrgScoped: [
           {
             id: "a1",
             occurredAt: "2026-08-22T10:00:00.000Z",
@@ -1802,8 +1645,8 @@ describe("run concurrency control", () => {
             subjectId: "pat_1",
             projectSlug: null, // org-scoped
           },
-        ]}
-      />,
+        ],
+      }),
     );
     // The default view is the unscoped window, and the PAT row is not in it.
     expect(getByText("task.metadata.updated")).toBeTruthy();
@@ -1823,21 +1666,7 @@ describe("run concurrency control", () => {
   });
 
   it("submits set-concurrency with the new value", async () => {
-    const { getByLabelText, getByRole } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
-    );
+    const { getByLabelText, getByRole } = renderPanel(orgPage());
     const input = getByLabelText(/Maximum concurrent agent runs/);
     fireEvent.change(input, { target: { value: "3" } });
     fireEvent.click(getByRole("button", { name: "Save" }));
@@ -1852,19 +1681,7 @@ describe("run concurrency control", () => {
   // value that left Save dead with nothing said.
   it("ruling 147: an unusable cap is refused on the click, not by a dead Save", async () => {
     const { getByLabelText, getByRole, queryByRole } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
+      orgPage({ runConcurrency: { cap: 2, lane: 1, live: 0, queued: 0 } }),
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
     const save = getByRole("button", { name: "Save" });
@@ -1899,19 +1716,7 @@ describe("run concurrency control", () => {
   // value and silently set the cap to unlimited.
   it("ruling 147: an emptied cap field is refused, never submitted as unlimited", () => {
     const { getByLabelText, getByRole, queryByRole } = renderPanel(
-      <OrgSettingsPage
-        view={viewBase}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 2, lane: 1, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
+      orgPage({ runConcurrency: { cap: 2, lane: 1, live: 0, queued: 0 } }),
     );
     const input = getByLabelText(/Maximum concurrent agent runs/);
     fireEvent.change(input, { target: { value: "" } });
@@ -1933,36 +1738,7 @@ describe("run concurrency control", () => {
  * and the row says plainly that Codex has no budget option.
  */
 describe("spending cap control (ruling 175)", () => {
-  const view: OrgSettingsView = {
-    connections: CONNECTIONS,
-    users: [ME],
-    domains: DOMAINS,
-    kbs: KBS,
-    mcps: MCPS,
-    skills: SKILLS,
-    gagents: GAGENTS,
-    projectGrants: { kbs: {}, mcps: {}, skills: {} },
-    templateGrants: { kbs: {}, mcps: {}, skills: {} },
-    stages: STAGES,
-    providers: { github: false, google: false },
-    authProviders: AUTH_PROVIDERS,
-    storage: STORAGE,
-  };
-  const page = (runSpendCapUsd: number | null) => (
-    <OrgSettingsPage
-      view={view}
-      meId={ME.id}
-      callbackOrigin="http://localhost:5173"
-      runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-      runSpendCapUsd={runSpendCapUsd}
-      s3Audit={null}
-      controllerConfig={CONTROLLER_CONFIG}
-      controllerLocks={CONTROLLER_LOCKS}
-      controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-    />
-  );
+  const page = (runSpendCapUsd: number | null) => orgPage({ runSpendCapUsd });
 
   it("is its own row in the same well as run concurrency, and says Codex has no budget option", () => {
     const { getByRole, getByText, getByLabelText } = renderPanel(page(null));
@@ -2027,35 +1803,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     accessKeyId: "AKIAEXAMPLE",
     hasSecret: true,
   };
-  const page = (s3Audit: typeof S3 | null) => (
-    <OrgSettingsPage
-      view={{
-        connections: CONNECTIONS,
-        users: [ME],
-        domains: DOMAINS,
-        kbs: KBS,
-        mcps: MCPS,
-        skills: SKILLS,
-        gagents: GAGENTS,
-        projectGrants: { kbs: {}, mcps: {}, skills: {} },
-        templateGrants: { kbs: {}, mcps: {}, skills: {} },
-        stages: STAGES,
-        providers: { github: false, google: false },
-        authProviders: AUTH_PROVIDERS,
-        storage: STORAGE,
-      }}
-      meId={ME.id}
-      callbackOrigin="http://localhost:5173"
-      runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-      runSpendCapUsd={null}
-      s3Audit={s3Audit}
-      controllerConfig={CONTROLLER_CONFIG}
-      controllerLocks={CONTROLLER_LOCKS}
-      controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-    />
-  );
+  const page = (s3Audit: typeof S3 | null) => orgPage({ s3Audit });
 
   it("ruling 148(b): unconfigured, the six fields sit behind a Set up button", () => {
     const { getByText, container } = renderPanel(page(null));
@@ -2199,35 +1947,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
 
 describe("FR33: the audit card discloses the export-before-purge record", () => {
   it("names the folder, the shape, and that the write precedes the delete", () => {
-    const { getByText } = renderPanel(
-      <OrgSettingsPage
-        view={{
-          connections: CONNECTIONS,
-          users: [ME],
-          domains: DOMAINS,
-          kbs: KBS,
-          mcps: MCPS,
-          skills: SKILLS,
-          gagents: GAGENTS,
-          projectGrants: { kbs: {}, mcps: {}, skills: {} },
-          templateGrants: { kbs: {}, mcps: {}, skills: {} },
-          stages: STAGES,
-          providers: { github: false, google: false },
-          authProviders: AUTH_PROVIDERS,
-          storage: STORAGE,
-        }}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-        auditEvents={[]}
-        auditEventsOrgScoped={[]}
-      />,
-    );
+    const { getByText } = renderPanel(orgPage());
     const copy = getByText(/Download the audit log/).textContent ?? "";
     expect(copy).toContain("audit-exports/ in the instance data root");
     expect(copy).toContain("one JSON object per line");
@@ -2248,35 +1968,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
     // project's own settings page said only "Settings". Both now answer
     // "settings for what?" on their own, like every other heading in the app.
     // Canary: put "Viberr settings" back and both halves fail.
-    const { container } = renderPanel(
-      <OrgSettingsPage
-        view={{
-          connections: CONNECTIONS,
-          users: [ME],
-          domains: DOMAINS,
-          kbs: KBS,
-          mcps: MCPS,
-          skills: SKILLS,
-          gagents: GAGENTS,
-          projectGrants: { kbs: {}, mcps: {}, skills: {} },
-          templateGrants: { kbs: {}, mcps: {}, skills: {} },
-          stages: STAGES,
-          providers: { github: false, google: false },
-          authProviders: AUTH_PROVIDERS,
-          storage: STORAGE,
-        }}
-        meId={ME.id}
-        callbackOrigin="http://localhost:5173"
-        runConcurrency={{ cap: 0, lane: 0, live: 0, queued: 0 }}
-        runSpendCapUsd={null}
-        s3Audit={null}
-        controllerConfig={CONTROLLER_CONFIG}
-        controllerLocks={CONTROLLER_LOCKS}
-        controllerRequests={[]}
-      auditEvents={[]}
-      auditEventsOrgScoped={[]}
-      />,
-    );
+    const { container } = renderPanel(orgPage());
     const h1s = container.querySelectorAll("h1");
     expect(h1s).toHaveLength(1);
     expect(h1s[0]!.textContent).toBe("Instance settings");

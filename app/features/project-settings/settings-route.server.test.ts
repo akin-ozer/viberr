@@ -86,16 +86,11 @@ async function postAction(
 }
 
 /**
- * `.get()` hands back untyped SQLite cells, and a guard refuses an action by
- * THROWING React Router's `data(message, { status })` — both arrive as values
- * TypeScript knows nothing about, so both are parsed where they enter.
+ * `.get()` hands back untyped SQLite cells — values TypeScript knows nothing
+ * about — so they are parsed where they enter.
  */
 const stagesJsonRowSchema = z.object({ stages_json: z.string() });
 const archivedRowSchema = z.object({ archived: z.number() });
-const thrownRefusalSchema = z.object({
-  init: z.object({ status: z.number() }).nullish(),
-  data: z.unknown(),
-});
 
 type SettingsActionResult = Awaited<
   ReturnType<typeof import("~/routes/project.settings").action>
@@ -516,21 +511,6 @@ describe("danger zone", () => {
     );
   });
 
-  it("a NON-MEMBER gets the unknown-slug 404, not a 403 (E2)", async () => {
-    // Murat is not a member of deploy-pipeline at all, so the project is
-    // invisible to him (R15-4) — this used to answer 403, which confirmed the
-    // project exists. Admin-only-ness for actual members is covered by the
-    // archive-project case below, where Murat IS a member and is told plainly.
-    const thrown = thrownRefusalSchema.parse(
-      await postAction(
-        ids.murat,
-        { intent: "delete-project", confirmName: "Deploy Pipeline" },
-        "deploy-pipeline",
-      ).catch((e) => e),
-    );
-    expect(thrown.init?.status).toBe(404);
-    expect(String(thrown.data)).toBe("No project at projects/deploy-pipeline.");
-  });
 });
 
 describe("archive-project", () => {

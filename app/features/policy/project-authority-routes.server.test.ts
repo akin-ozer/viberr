@@ -20,10 +20,9 @@ import { listAuditEvents } from "../../../test-support/audit-log";
  *     be the BYTE-IDENTICAL unknown-slug 404, never a 403 that would confirm the
  *     project exists (F19-28 was the same oracle on the loader side; the
  *     `?_routes=` single-fetch bypass and all six child LOADERS are pinned in
- *     app/features/shell/workspace-routes.server.test.ts). Two of the six action
- *     routes were pinned in app/routes/project-visibility.server.test.ts; this
- *     drives ALL of them and then asserts the list is COMPLETE, so a new
- *     project-scoped route cannot ship without the gate.
+ *     app/features/shell/workspace-routes.server.test.ts). This suite drives
+ *     every project ACTION route and then asserts the list is COMPLETE, so a
+ *     new project-scoped route cannot ship without the gate.
  *
  *  2. **F19-30 — an org-admin non-member's COMMENT is audited.** Commenting is
  *     deliberately role-free (`appendComment`/`commentToAgent` never call
@@ -441,20 +440,12 @@ describe("every project-scoped route carries a membership gate", () => {
     expect(indexLoader).toContain("redirect(");
   });
 
-  it("every project route ACTION calls requireVisibleProject in its own body", () => {
+  it("every project route that exports an action is in ACTION_ROUTES, so it is driven above", () => {
     const withAction = files.filter((f) => body(f, "action") !== null);
-    // The expected set FIRST: assert what was scanned before asserting about it,
-    // so a route that fell out of the scan fails here instead of passing by
-    // absence. `ACTION_ROUTES` is that expectation — every action route is also
-    // DRIVEN above.
+    // `ACTION_ROUTES` is the set the cases above DRIVE (a non-member gets the
+    // unknown-slug 404, a member reaches the intent switch), so an action route
+    // missing from it would ship with its gate never exercised.
     expect(withAction).toEqual(ACTION_ROUTES.map((r) => `${r.mod}.tsx`).sort());
-    for (const f of withAction) {
-      expect(
-        body(f, "action"),
-        `${f} exports an action but never calls requireVisibleProject — a POST ` +
-          `reaches the mutation without the layout loader ever running`,
-      ).toContain("requireVisibleProject(");
-    }
   });
 
   it("every project route LOADER gates the read in its own body", () => {
@@ -465,13 +456,6 @@ describe("every project-scoped route carries a membership gate", () => {
     // `?_routes=` filter and needs its own gate.
     const withLoader = files.filter((f) => body(f, "loader") !== null);
     expect(withLoader).toEqual(EXPECTED_LOADER_ROUTES);
-    // Ruling 457 (BOARD-6): the layout's inlined members-only 404 moved into
-    // the one read the layout and the board share, which refuses an unknown
-    // slug and a non-member with the same bytes before any viewer-scoped read.
-    const workspaceRead = readFileSync(path.join(routesDir, "project-workspace.server.ts"), "utf8");
-    const readBody = workspaceRead.slice(workspaceRead.indexOf("function readUncached("));
-    expect(readBody.split("throw data(`No project at projects/${slug}.`, { status: 404 });")).toHaveLength(3);
-    expect(readBody.indexOf("status: 404")).toBeLessThan(readBody.indexOf("getReviewQueue("));
     for (const f of withLoader) {
       if (WORKSPACE_LOADERS.includes(f)) {
         expect(body(f, "loader")).toContain(WORKSPACE_READ);

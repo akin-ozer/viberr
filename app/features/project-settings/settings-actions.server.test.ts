@@ -774,7 +774,7 @@ describe("setBranchCleanup (R15-6)", () => {
         { userId: store.users.murat.id, label: store.users.murat.email },
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ status: 403 });
   });
 });
 

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { ORG_SETTINGS_ACTION, useOrgAction } from "./use-org-action";
+import { useOrgAction } from "./use-org-action";
 
 /**
  * P13-D-10 (UX-5): the second shared toast helper. Every org-settings row
@@ -47,7 +47,7 @@ function renderHarness() {
       },
     },
   ]);
-  return render(<Stub initialEntries={[ORG_SETTINGS_ACTION]} />);
+  return render(<Stub initialEntries={["/org/settings"]} />);
 }
 
 describe("useOrgAction", () => {

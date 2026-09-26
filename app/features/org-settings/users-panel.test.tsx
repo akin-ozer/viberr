@@ -8,10 +8,10 @@ import { ToastProvider } from "~/ui/toast";
 import { UsersPanel } from "./users-panel";
 
 /**
- * P13-D-10 (UX-5): the panel's three client-side refusals ("you can't demote /
- * disable / remove yourself") are the only feedback those actions ever produce
- * — no dialog opens, nothing is posted. They pushed through `push`'s default
- * `"success"` kind, so a refusal arrived wearing the green tick.
+ * UsersPanel on its own: the Allow-access, Edit-user, invite and temp-password
+ * modals and the row treatments, one describe per finding or ruling. The
+ * self-guard toasts are pinned with the panel's other flows in
+ * org-settings-page.test.tsx.
  */
 
 afterEach(cleanup);
@@ -31,63 +31,34 @@ const ME: OrgUserView = {
 };
 const DOMAINS: DomainRecord[] = [];
 
-function renderPanel(
-  providers: { github: boolean; google: boolean } = { github: false, google: false },
-) {
+type StubRoute = Parameters<typeof createRoutesStub>[0][number];
+
+/** The panel on a stubbed /org/settings, signed in as ME. `action` stands in
+ *  for the route's and answers a plain success unless a case says otherwise. */
+function renderUsers({
+  users = [ME],
+  domains = DOMAINS,
+  providers = { github: false, google: false },
+  action = async () => ({ ok: true, toast: "stub done" }),
+}: {
+  users?: OrgUserView[];
+  domains?: DomainRecord[];
+  providers?: { github: boolean; google: boolean };
+  action?: StubRoute["action"];
+} = {}) {
   const Stub = createRoutesStub([
     {
       path: "/org/settings",
       Component: () => (
         <ToastProvider>
-          <UsersPanel users={[ME]} domains={DOMAINS} meId="u_arda" providers={providers} />
+          <UsersPanel users={users} domains={domains} meId="u_arda" providers={providers} />
         </ToastProvider>
       ),
-      action: async () => ({ ok: true, toast: "stub done" }),
+      action,
     },
   ]);
   return render(<Stub initialEntries={["/org/settings"]} />);
 }
-
-async function kindOf(
-  container: HTMLElement,
-  text: string,
-): Promise<string | null> {
-  await waitFor(() =>
-    expect(
-      [...container.querySelectorAll(".toast")].some((t) =>
-        t.textContent!.includes(text),
-      ),
-    ).toBe(true),
-  );
-  return [...container.querySelectorAll(".toast")]
-    .find((t) => t.textContent!.includes(text))!
-    .getAttribute("data-kind");
-}
-
-describe("P13-D-10: the self-guard toasts are failures", () => {
-  it("marks a refused self-demotion as an error", async () => {
-    const { container, getByText } = renderPanel();
-    const myRow = getByText("arda@viberr.dev").closest(".member-row")!;
-    fireEvent.click(myRow.querySelector(".mini-seg button:not(.on)")!);
-    expect(await kindOf(container, "You can't demote yourself")).toBe("error");
-  });
-
-  it("marks a refused self-disable as an error", async () => {
-    const { container, getByLabelText } = renderPanel();
-    fireEvent.click(getByLabelText("Disable Arda Kaya"));
-    expect(
-      await kindOf(container, "You can't disable your own account"),
-    ).toBe("error");
-  });
-
-  it("marks a refused self-removal as an error", async () => {
-    const { container, getByLabelText } = renderPanel();
-    fireEvent.click(getByLabelText("Remove Arda Kaya"));
-    expect(await kindOf(container, "You can't remove your own account")).toBe(
-      "error",
-    );
-  });
-});
 
 describe("F18-3: the Allow-access modal keys its method off configured providers", () => {
   const openModal = (container: HTMLElement, getByText: (t: string) => HTMLElement) => {
@@ -96,7 +67,7 @@ describe("F18-3: the Allow-access modal keys its method off configured providers
   };
 
   it("with NO OAuth provider: defaults to Local; GitHub + Google are disabled and marked off", () => {
-    const { container, getByText } = renderPanel({ github: false, google: false });
+    const { container, getByText } = renderUsers({ providers: { github: false, google: false } });
     const opts = openModal(container, getByText);
     const [github, google, local] = opts;
     expect(github!.disabled).toBe(true);
@@ -110,7 +81,7 @@ describe("F18-3: the Allow-access modal keys its method off configured providers
   });
 
   it("with GitHub configured: GitHub leads and is enabled", () => {
-    const { container, getByText } = renderPanel({ github: true, google: false });
+    const { container, getByText } = renderUsers({ providers: { github: true, google: false } });
     const opts = openModal(container, getByText);
     const [github, google] = opts;
     expect(github!.disabled).toBe(false);
@@ -141,25 +112,7 @@ describe("LV-F1: a pending reset never hides the re-issue action", () => {
     ...over,
   });
 
-  function renderWith(user: OrgUserView) {
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME, user]}
-              domains={DOMAINS}
-              meId="u_arda"
-              providers={{ github: false, google: false }}
-            />
-          </ToastProvider>
-        ),
-        action: async () => ({ ok: true, toast: "stub done" }),
-      },
-    ]);
-    return render(<Stub initialEntries={["/org/settings"]} />);
-  }
+  const renderWith = (user: OrgUserView) => renderUsers({ users: [ME, user] });
 
   const openEdit = (getByLabelText: (t: string) => HTMLElement) =>
     fireEvent.click(getByLabelText("Edit Test Contributor"));
@@ -205,28 +158,15 @@ describe("ruling 154: the Edit-user modal links a GitHub handle", () => {
 
   function renderEditing(user: OrgUserView) {
     let submitted: Record<string, string> | null = null;
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME, user]}
-              domains={DOMAINS}
-              meId="u_arda"
-              providers={{ github: false, google: false }}
-            />
-          </ToastProvider>
-        ),
-        action: async ({ request }) => {
-          submitted = Object.fromEntries(
-            [...(await request.formData()).entries()].map(([k, v]) => [k, String(v)]),
-          );
-          return { ok: true, toast: "stub done" };
-        },
+    const rendered = renderUsers({
+      users: [ME, user],
+      action: async ({ request }) => {
+        submitted = Object.fromEntries(
+          [...(await request.formData()).entries()].map(([k, v]) => [k, String(v)]),
+        );
+        return { ok: true, toast: "stub done" };
       },
-    ]);
-    const rendered = render(<Stub initialEntries={["/org/settings"]} />);
+    });
     fireEvent.click(rendered.getByLabelText("Edit Maya Lin"));
     return { ...rendered, submitted: () => submitted };
   }
@@ -294,25 +234,8 @@ describe("#20: a server refusal inside these modals is announced", () => {
     role: "member",
   };
 
-  function renderRefusing(error: string) {
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME, OTHER]}
-              domains={DOMAINS}
-              meId="u_arda"
-              providers={{ github: false, google: false }}
-            />
-          </ToastProvider>
-        ),
-        action: async () => ({ ok: false, error }),
-      },
-    ]);
-    return render(<Stub initialEntries={["/org/settings"]} />);
-  }
+  const renderRefusing = (error: string) =>
+    renderUsers({ users: [ME, OTHER], action: async () => ({ ok: false, error }) });
 
   // Interface review 2026-09-06: a server refusal is an ERROR, so it wears the
   // app's one inline-error box (`.form-err`) rather than the amber warning box
@@ -358,30 +281,15 @@ describe("#20: a server refusal inside these modals is announced", () => {
  * meets. It takes the shared close control now, at notice scale.
  */
 describe("the temp-password notice dismisses on the shared close control", () => {
-  function renderCreating() {
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME]}
-              domains={DOMAINS}
-              meId="u_arda"
-              providers={{ github: false, google: false }}
-            />
-          </ToastProvider>
-        ),
-        action: async () => ({
-          ok: true,
-          toast: "Account created",
-          email: "yeni@viberr.dev",
-          tempPassword: "T3mp-pass-9",
-        }),
-      },
-    ]);
-    return render(<Stub initialEntries={["/org/settings"]} />);
-  }
+  const renderCreating = () =>
+    renderUsers({
+      action: async () => ({
+        ok: true,
+        toast: "Account created",
+        email: "yeni@viberr.dev",
+        tempPassword: "T3mp-pass-9",
+      }),
+    });
 
   it("shows the once-only password and closes on the shared ✕", async () => {
     const { container, getByText, getByPlaceholderText, getByLabelText } =
@@ -432,25 +340,7 @@ describe("ruling 149: Disable takes the destructive row treatment", () => {
     role: "member",
   };
 
-  function renderTwo() {
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME, OTHER]}
-              domains={DOMAINS}
-              meId="u_arda"
-              providers={{ github: false, google: false }}
-            />
-          </ToastProvider>
-        ),
-        action: async () => ({ ok: true, toast: "stub done" }),
-      },
-    ]);
-    return render(<Stub initialEntries={["/org/settings"]} />);
-  }
+  const renderTwo = () => renderUsers({ users: [ME, OTHER] });
 
   it("names Disable destructive, leaves Remove on its position, and keeps the self copy off", () => {
     const { getByLabelText } = renderTwo();
@@ -488,22 +378,11 @@ describe("ruling 459: the Google mark is the icon set's glyph", () => {
     const domains: DomainRecord[] = [
       { id: "d_acme", domain: "acme.dev", role: "member", createdAt: "2026-09-01T00:00:00Z" },
     ];
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME, googleUser]}
-              domains={domains}
-              meId="u_arda"
-              providers={{ github: false, google: true }}
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    const { container, getByText } = render(<Stub initialEntries={["/org/settings"]} />);
+    const { container, getByText } = renderUsers({
+      users: [ME, googleUser],
+      domains,
+      providers: { github: false, google: true },
+    });
     const mark = (() => {
       const probe = render(<Icon name="google" />);
       const inner = probe.container.querySelector("svg")!.innerHTML;
@@ -543,24 +422,11 @@ describe("ruling 368: the reset in flight", () => {
       email: "contributor@viberr.dev",
       role: "member",
     };
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <UsersPanel
-              users={[ME, user]}
-              domains={DOMAINS}
-              meId="u_arda"
-              providers={{ github: false, google: false }}
-            />
-          </ToastProvider>
-        ),
-        // Never answers: the test reads the wait itself.
-        action: () => new Promise(() => {}),
-      },
-    ]);
-    const { getByLabelText, getByText } = render(<Stub initialEntries={["/org/settings"]} />);
+    const { getByLabelText, getByText } = renderUsers({
+      users: [ME, user],
+      // Never answers: the test reads the wait itself.
+      action: () => new Promise(() => {}),
+    });
     fireEvent.click(getByLabelText("Edit Test Contributor"));
     const reset = getByText("Reset password").closest("button")!;
     fireEvent.click(reset);
