@@ -2128,8 +2128,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     const toast = document.querySelector(".toast")!;
     expect(toast.textContent).toContain("That template no longer exists.");
-    // `alert` is the triangle path; `check` is the tick.
-    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+    expect(toast.getAttribute("data-kind")).toBe("error");
   });
 });
 

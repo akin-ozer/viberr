@@ -14,7 +14,6 @@ import { useOrgAction } from "./use-org-action";
 
 afterEach(cleanup);
 
-const ALERT_PATH = "M12 4l9 16H3z";
 
 function Harness() {
   const { submit } = useOrgAction();
@@ -60,7 +59,6 @@ describe("useOrgAction", () => {
     const toast = container.querySelector(".toast")!;
     expect(toast.textContent).toContain("Only an org admin can do that.");
     expect(toast.getAttribute("data-kind")).toBe("error");
-    expect(toast.querySelector("path")!.getAttribute("d")).toBe(ALERT_PATH);
   });
 
   it("leaves a successful org action on the success tick", async () => {

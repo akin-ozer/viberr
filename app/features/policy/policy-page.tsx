@@ -559,8 +559,8 @@ export function WorkflowRules({
       {/* E4: the boundary radios were `disabled` for a non-manager with no
           reason anywhere — the `locked` case gets its own chip on the row, but
           "you may not change this" was silent (a `title` on a disabled button
-          never opens). Same `.deny-note` treatment the danger zone uses:
-          the authority stated once, visibly, above the rows it governs. */}
+          never opens). The authority is stated once, visibly, above the rows
+          it governs (`.deny-note`). */}
       {!canManage && (
         <p className="deny-note before">
           <Icon name="lock" />
