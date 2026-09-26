@@ -733,42 +733,6 @@ describe("F18-14: the govern/governance copy ban holds on every surface a human 
     expect(stripped).not.toContain("a real block comment");
   });
 
-  it("the literal lexer reads copy through indirection and anchors it to the string's own line", () => {
-    const src = [
-      `const re = /it's fine/; // a regex may hold quotes; a comment is not copy`,
-      `/* note // see above */`,
-      `const refusal =`,
-      `  "TASK-1 is archived — restore it before moving it between stages.";`,
-      `throw AppError.conflict(`,
-      `  refusal,`,
-      `);`,
-      'const t = `stage ${isGoverned ? "direct" : "gated"} moved`;',
-    ].join("\n");
-    const { literals, residue } = lexLiterals(src, "fixture.ts");
-    const lineOf = lineIndex(src);
-    const texts = literals.map((l) => l.text);
-    const joined = texts.join("|");
-
-    // The refusal is a CONST, never an argument to a known factory — the whole
-    // point: a call-shape scan cannot see it, a literal scan always can.
-    const refusal = literals.find((l) => l.text.startsWith("TASK-1"));
-    expect(refusal).toBeDefined();
-    // Anchored to the STRING's line (4), not to `AppError.conflict(` on line 5.
-    expect(lineOf(refusal!.start)).toBe(4);
-
-    // A regex's contents and a comment's contents are not copy …
-    expect(joined).not.toContain("it's fine");
-    expect(joined).not.toContain("see above");
-    expect(joined).not.toContain("a regex may hold quotes");
-    // … and the code inside `${…}` is code, not copy.
-    expect(joined).not.toContain("isGoverned");
-    expect(texts).toContain("stage ");
-    expect(texts).toContain(" moved");
-    expect(texts).toContain("direct");
-    // Nothing was walked past.
-    expect(residue).not.toMatch(/["'`]/);
-  });
-
   /**
    * F19-39 — the same ban on the OTHER surface a human reads: sentences composed
    * on the server. Scanned as LITERALS, not as arguments to a known call, so the

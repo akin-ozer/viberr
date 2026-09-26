@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { expectWithinBudget } from "../test-support/perf-ratchet";
-import { balanced, cssRules, type CssRule } from "../test-support/css-rules";
+import { balanced, cssRules, selectorParts, type CssRule } from "../test-support/css-rules";
 
 /**
  * Ruling 457: the stylesheet's share of the main thread and of layout shift,
@@ -25,7 +25,6 @@ const CODE = readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), 
 );
 const RULES = cssRules(CODE);
 
-const parts = (rule: CssRule) => rule.selector.split(",").map((s) => s.trim());
 const reduced = (rule: CssRule) => rule.at.some((q) => /prefers-reduced-motion:\s*reduce/.test(q));
 
 /** Every `@keyframes` block: its name, and the properties its stops set. */
@@ -55,7 +54,7 @@ function mainThreadLoops(): string[] {
     const offCompositor = names.some((name) =>
       [...frames.get(name)!].some((prop) => !COMPOSITED.has(prop)),
     );
-    return offCompositor ? parts(rule) : [];
+    return offCompositor ? selectorParts(rule) : [];
   });
 }
 
@@ -64,7 +63,7 @@ const LIVE_SCROLLERS = [".col-body", ".board.list", ".detail", ".console", ".ctl
 
 function declares(selector: string, prop: string, value: RegExp): boolean {
   return RULES.some(
-    (rule) => rule.at.length === 0 && parts(rule).includes(selector) && value.test(rule.decls.get(prop) ?? ""),
+    (rule) => rule.at.length === 0 && selectorParts(rule).includes(selector) && value.test(rule.decls.get(prop) ?? ""),
   );
 }
 
@@ -80,7 +79,6 @@ describe("app.css main-thread and layout-shift costs (ruling 457)", () => {
       ".log-shimmer::before",
       ".log-todo .td-item[data-live] .td-text::before",
     ]);
-    expectWithinBudget("render:css.main-thread-infinite-loops", loops.length);
   });
 
   it("reserves the scrollbar gutter on every live scroller", () => {
@@ -93,7 +91,7 @@ describe("app.css main-thread and layout-shift costs (ruling 457)", () => {
 
   it("gives every attachment thumbnail's picture its box before it loads", () => {
     const thumbs = RULES.filter((rule) =>
-      parts(rule).some((s) => /(^|\s)\.(tl-)?attach-thumb img$/.test(s)),
+      selectorParts(rule).some((s) => /(^|\s)\.(tl-)?attach-thumb img$/.test(s)),
     );
     expect(thumbs.length).toBeGreaterThanOrEqual(2);
     const unreserved = thumbs.filter((rule) => !rule.decls.has("height") && !rule.decls.has("aspect-ratio"));

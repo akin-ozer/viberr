@@ -27,8 +27,10 @@ export default defineConfig({
     // P32-T20 (pass 32): the fs-heavy suites (self-heal, store-check, the
     // route harnesses that seed a whole data root) ran within the 5 s default
     // on a warm laptop and flaked on CI's cold disks. One budget, stated here,
-    // locked by app/shared/docs/vitest-config.test.ts — raise it here, never
-    // per-test.
+    // for tests and hooks alike: the harnesses seed that data root in a
+    // `beforeAll`/`beforeEach`, and a hook left on the runner's 10 s default
+    // times out whole files under load. Raise it here, never per test.
     testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });

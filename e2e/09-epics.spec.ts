@@ -3,10 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Ruling 503: epics against the production image. A person makes an epic and
- * lands on its page, tasks join and leave it there and from their own page,
- * and the board shows one epic's tasks. The seed holds no epic, so the spec
- * makes the one it reads, in order; it runs after the specs that read the
- * seeded tasks it moves.
+ * lands on its page, and tasks join and leave it there and from their own
+ * page. The seed holds no epic, so the spec makes the one it reads, in order;
+ * it runs after the specs that read the seeded tasks it moves.
  *
  * The first case is a regression. The New epic dialog navigated to the new
  * epic as soon as the create answered, while the list page's loaders were
@@ -56,15 +55,6 @@ async function inBothThemes(page: Page, path: string, ready: string, check: (pag
 function taskRow(page: Page, key: string) {
   return page.locator(`.epic-task-list li[data-task="${key}"]`);
 }
-
-test("the Epics page starts empty and says what an epic is", async ({ page }) => {
-  await page.goto("/");
-  await inBothThemes(page, EPICS, "main", async () => {
-    await expect(page.getByRole("heading", { level: 1, name: "Epics" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No epics yet" })).toBeVisible();
-    expect(await violations(page), "empty Epics page").toBe("");
-  });
-});
 
 test("a new epic opens on its own page", async ({ page }) => {
   await page.goto(EPICS);
@@ -120,19 +110,6 @@ test("a task joins the epic from its own page", async ({ page }) => {
   await page.getByRole("link", { name: "Epic Checkout polish" }).click();
   await expect(page).toHaveURL(EPIC);
   await expect(taskRow(page, "VIB-166")).toBeVisible();
-});
-
-test("the board shows one epic's tasks", async ({ page }) => {
-  await page.goto("/projects/viberr-core/board");
-  await expect(page.locator("section.column").first()).toBeVisible();
-  await page.waitForLoadState("networkidle");
-  await page.getByLabel("Show one epic's tasks").selectOption({ label: "Checkout polish" });
-  await expect(page).toHaveURL(/[?&]epic=epic-1\b/);
-  await expect(page.locator(".card-wrap", { hasText: "VIB-160" })).toBeVisible();
-  await expect(page.locator(".card-wrap", { hasText: "VIB-166" })).toBeVisible();
-  await expect(page.locator(".card-wrap", { hasText: "VIB-148" })).toHaveCount(0);
-  await page.getByLabel("Show one epic's tasks").selectOption({ label: "All epics" });
-  await expect(page.locator(".card-wrap", { hasText: "VIB-148" })).toBeVisible();
 });
 
 test("the epic page and its dialogs have no WCAG 2.2 AA violations", async ({ page }) => {

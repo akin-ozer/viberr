@@ -1,13 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
-import { createTestDbContext } from "../../test-support/test-db";
-import { kbDirPath } from "~/server/files/file-store-root.server";
-import { seedOrgResources } from "~/server/org/org-seed.server";
-import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
-import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { AgentStats, LiveRoster, ProfileDetail } from "./agents/agents-page";
 import { CapabilityMatrixModal } from "./agents/capability-matrix-modal";
 import type { AgentProfileView, MatrixProfile } from "./agents/agent-types";
@@ -25,33 +20,21 @@ import {
  * delivering agent" menu, the GitHub panel's deliver button and the operator's
  * own recommendation text. F19-12 landed the four RENDERED sites and stopped
  * there, which left the term alive in the places nothing renders and nothing
- * scanned:
+ * scanned: the developer SKILL doc mounted into every developer run (it TEACHES
+ * the retired model to the agent that then speaks it back into the timeline),
+ * the seeded "Task contract" KB doc, the workflow template's `ready → impl`
+ * rationale, and the operator-recommendation chip.
  *
- *  - the developer SKILL doc, mounted natively into every developer run — the
- *    substantive one, because it TEACHES the retired model to the agent that
- *    then speaks it back into the timeline;
- *  - the seeded "Task contract" KB doc, read by agents and by humans in the org
- *    resources panel;
- *  - the workflow template's `ready → impl` rationale, which is rendered on the
- *    Policy page AND persisted verbatim into every new `project.md`;
- *  - the operator-recommendation chip, sitting one row below the chip that
- *    already said "Delivering agent" for the same actor.
- *
- * Each case asserts the SHIPPED artifact — the seeded file on disk, the exported
- * constant, the rendered HTML — not the source line, so a fix that never reaches
- * a run, a store, or a screen cannot pass. Every case also pins the surrounding
- * copy, so "the sentence was deleted" and "the sentence was fixed" are not the
- * same green.
- *
- * `app/features/copy-ban.test.ts` is the sibling gate for the OTHER banned
- * vocabulary ("govern*"); this file is deliberately separate because the two
- * bans have different scopes — "govern*" is exempt in agent prompt text, and
- * "primary specialist" is at its WORST there.
+ * The KB doc and the template are string literals under `app/server` and
+ * `app/shared`, which `app/features/copy-ban.test.ts`'s F19-12 scan reads line
+ * by line. This file covers what that scan cannot see: the seeded `.md` assets,
+ * which runs mount verbatim, and the chip's rendered HTML. copy-ban is also
+ * the gate for the OTHER banned vocabulary ("govern*"); the two bans have
+ * different scopes — "govern*" is exempt in agent prompt text, and "primary
+ * specialist" is at its WORST there.
  */
 
 const RETIRED = /primary specialist/i;
-const ctx = createTestDbContext();
-afterEach(ctx.cleanup);
 
 describe("F19-12 residuals: the retired 'primary specialist' vocabulary", () => {
   const ASSETS = path.join(
@@ -77,56 +60,6 @@ describe("F19-12 residuals: the retired 'primary specialist' vocabulary", () => 
         `files are mounted into real runs, so the agent learns it and speaks it ` +
         `back into the timeline`,
     ).toEqual([]);
-  });
-
-  it("the developer skill MOUNTED into a run names the delivering agent", () => {
-    // The asset sweep above proves the source is clean; this proves the copy
-    // that actually reaches the run is the fixed one.
-    const dataRoot = ctx.makeTempDir();
-    seedDefaultAgentAssets(dataRoot);
-    const skill = readFileSync(
-      path.join(dataRoot, "skills", "developer-expertise", "SKILL.md"),
-      "utf8",
-    );
-    expect(skill).toContain(
-      "You are the **delivering agent** for the task while you hold it",
-    );
-    expect(skill).not.toMatch(RETIRED);
-  });
-
-  it("the seeded Task-contract KB doc names the delivering agent", () => {
-    const db = ctx.makeDb();
-    const dataRoot = ctx.makeTempDir();
-    seedOrgResources(db, { dataRoot });
-    const doc = readFileSync(
-      path.join(kbDirPath("api-contracts", dataRoot), "schemas", "task-contract.md"),
-      "utf8",
-    );
-    // Non-vacuity: the doc really is the task contract, and it really does
-    // enumerate the task's actors — so "no match" means fixed, not missing.
-    expect(doc).toContain("# Task contract");
-    expect(doc).toContain("one human owner, one delivering agent, 0..n reviewers");
-    expect(doc).not.toMatch(RETIRED);
-  });
-
-  it("the workflow template persisted into every new project.md names the delivering agent", () => {
-    // `GOVERNED_TEMPLATE.workflow[].by` is BOTH rendered (the Policy page's
-    // transition table) and written verbatim into `project.md` at create time,
-    // so this string ships twice over.
-    const by = GOVERNED_TEMPLATE.workflow.map((w) => w.by);
-    expect(by.length, "the template must still declare its transitions").toBe(4);
-    for (const b of by) expect(b.length).toBeGreaterThan(10);
-    const readyToImpl = GOVERNED_TEMPLATE.workflow.find(
-      (w) => w.from === "ready" && w.to === "impl",
-    )!;
-    expect(readyToImpl.by).toMatch(/delivering agent/);
-    expect(
-      by.filter((b) => RETIRED.test(b)),
-      "a new project's stored workflow rationale must not ship retired vocabulary",
-    ).toEqual([]);
-    // Stage names and the preset label travel with it onto the same page.
-    expect(GOVERNED_TEMPLATE.label).not.toMatch(RETIRED);
-    for (const s of GOVERNED_TEMPLATE.stages) expect(s.name).not.toMatch(RETIRED);
   });
 
   it("no operator-recommendation chip renders 'specialist' at all", () => {

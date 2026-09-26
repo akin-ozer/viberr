@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { Rolldown } from "vite";
 import { describe, expect, it } from "vitest";
 import config, { inlineAsset, shellChunkOf } from "../../../vite.config";
 
@@ -53,14 +54,12 @@ describe("the shell chunks (ruling 457)", () => {
     [app("features/board/board-page.tsx"), [npm("@dnd-kit/react/index.js")]],
     [npm("@dnd-kit/react/index.js"), []],
   ]);
+  const getModuleInfo = (next: string) => {
+    const importedIds = graph.get(next);
+    return importedIds ? { importedIds } : null;
+  };
   const classify = shellChunkOf();
-  const chunkOf = (id: string) =>
-    classify(id, {
-      getModuleInfo: (next) => {
-        const importedIds = graph.get(next);
-        return importedIds ? { importedIds } : null;
-      },
-    });
+  const chunkOf = (id: string) => classify(id, { getModuleInfo });
 
   it("puts npm code every page loads in vendor and app code in shell", () => {
     expect(chunkOf(npm("react/index.js"))).toBe("vendor");
@@ -77,7 +76,18 @@ describe("the shell chunks (ruling 457)", () => {
   });
 
   it("is what the client build uses", () => {
-    const groups = config.environments?.client?.build?.rolldownOptions?.output;
-    expect(JSON.stringify(groups)).toContain("codeSplitting");
+    const output = config.environments?.client?.build?.rolldownOptions?.output;
+    const splitting = Array.isArray(output) ? undefined : output?.codeSplitting;
+    const groups = splitting instanceof Object ? (splitting.groups ?? []) : [];
+    // SAFETY: the build's chunk namers read only `importedIds` off a module's
+    // info (shellChunkOf's walk), which is all this graph holds.
+    const ctx = { getModuleInfo } as Rolldown.ChunkingContext;
+    const chunksOf = (id: string) =>
+      groups.flatMap((group) =>
+        (group.name instanceof Function ? group.name(id, ctx) : group.name) ?? [],
+      );
+    expect(chunksOf(npm("react/index.js"))).toEqual(["vendor"]);
+    expect(chunksOf(app("ui/icon.tsx"))).toEqual(["shell"]);
+    expect(chunksOf(app("features/board/board-page.tsx"))).toEqual([]);
   });
 });

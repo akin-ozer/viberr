@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
+import { onTestFinished } from "vitest";
 
 /**
  * Ruling 457: deterministic counters for the perf tests (the one home for
@@ -10,6 +11,11 @@ import { DatabaseSync, StatementSync } from "node:sqlite";
  * between `start` and `stop`, so every module (including ones that prepared
  * their statements before the probe started) is counted. A test holds one
  * database, so the process-wide scope is the database under test.
+ *
+ * Start a probe inside a test: it also stops when that test finishes, so a
+ * throw inside the window cannot leave the prototypes or `fs` wrapped for the
+ * rest of the file (the next probe would capture the wrapper as its original,
+ * and a leaked `countSql(db)` would read a database the cleanup has closed).
  */
 
 export interface SqlTally {
@@ -62,6 +68,24 @@ export function countSql(db?: DatabaseSync): SqlProbe {
     exec: DatabaseSync.prototype.exec,
     prepare: DatabaseSync.prototype.prepare,
   };
+  let stopped = false;
+  const stop = (): SqlTally => {
+    if (!stopped) {
+      stopped = true;
+      proto.run = originals.run;
+      proto.get = originals.get;
+      proto.all = originals.all;
+      proto.iterate = originals.iterate;
+      DatabaseSync.prototype.exec = originals.exec;
+      DatabaseSync.prototype.prepare = originals.prepare;
+    }
+    return tally;
+  };
+  // Registered before anything is wrapped: outside a test this throws with
+  // nothing to undo.
+  onTestFinished(() => {
+    stop();
+  });
   // Recorded BEFORE the call, so a write's autocommit is judged by the
   // transaction state it ran in. Installed with defineProperty: the methods are
   // overloaded, and each wrapper forwards whatever arguments it was given.
@@ -112,22 +136,7 @@ export function countSql(db?: DatabaseSync): SqlProbe {
     tally.prepares += 1;
     return originals.prepare.apply(this, args);
   };
-  let stopped = false;
-  return {
-    tally,
-    stop() {
-      if (!stopped) {
-        stopped = true;
-        proto.run = originals.run;
-        proto.get = originals.get;
-        proto.all = originals.all;
-        proto.iterate = originals.iterate;
-        DatabaseSync.prototype.exec = originals.exec;
-        DatabaseSync.prototype.prepare = originals.prepare;
-      }
-      return tally;
-    },
-  };
+  return { tally, stop };
 }
 
 export interface FileReadProbe {
@@ -145,6 +154,18 @@ export interface FileReadProbe {
 export function countFileReads(root: string): FileReadProbe {
   const reads: string[] = [];
   const original = fs.readFileSync;
+  let stopped = false;
+  const stop = (): string[] => {
+    if (!stopped) {
+      stopped = true;
+      fs.readFileSync = original;
+      syncBuiltinESMExports();
+    }
+    return reads;
+  };
+  onTestFinished(() => {
+    stop();
+  });
   const resolvedRoot = path.resolve(root);
   const wrapped = function readFileSync(...args: Parameters<typeof fs.readFileSync>) {
     // Every data-root read in the app passes a path string; a descriptor or a
@@ -157,18 +178,7 @@ export function countFileReads(root: string): FileReadProbe {
   // original is overloaded and the wrapper forwards its arguments unchanged.
   Object.defineProperty(fs, "readFileSync", { value: wrapped, configurable: true, writable: true });
   syncBuiltinESMExports();
-  let stopped = false;
-  return {
-    reads,
-    stop() {
-      if (!stopped) {
-        stopped = true;
-        fs.readFileSync = original;
-        syncBuiltinESMExports();
-      }
-      return reads;
-    },
-  };
+  return { reads, stop };
 }
 
 export interface FileWrites {
@@ -195,6 +205,19 @@ export function countFileWrites(root: string): FileWriteProbe {
   };
   const originalMkdir = fs.mkdirSync;
   const originalAppend = fs.appendFileSync;
+  let stopped = false;
+  const stop = (): FileWrites => {
+    if (!stopped) {
+      stopped = true;
+      fs.mkdirSync = originalMkdir;
+      fs.appendFileSync = originalAppend;
+      syncBuiltinESMExports();
+    }
+    return writes;
+  };
+  onTestFinished(() => {
+    stop();
+  });
   Object.defineProperty(fs, "mkdirSync", {
     configurable: true,
     writable: true,
@@ -214,19 +237,7 @@ export function countFileWrites(root: string): FileWriteProbe {
     },
   });
   syncBuiltinESMExports();
-  let stopped = false;
-  return {
-    writes,
-    stop() {
-      if (!stopped) {
-        stopped = true;
-        fs.mkdirSync = originalMkdir;
-        fs.appendFileSync = originalAppend;
-        syncBuiltinESMExports();
-      }
-      return writes;
-    },
-  };
+  return { writes, stop };
 }
 
 export interface StatementRecord {
