@@ -577,8 +577,9 @@ title: Completion report
 Implemented repo attach, branch creation, and PR-sync projection.
 
 evidence:
-- unit/policy_gate_test · +14 · 0
-- integration/pr_sync_test · +38 · −4
+- [pass] unit/policy_gate_test · 6 passed
+- [pass] integration/pr_sync_test · 11 passed
+- [info] 9 files changed on `vib-142-attach-workspace` · +412 −87
 
 attachments:
 - pr-sync-panel.png
@@ -760,8 +761,14 @@ Packet notes:
   readiness at `input_required`).
 - Optional evidence block on outcome events (a completion, a reviewer's verdict, an agent's
   report — P13-D-26): a line containing exactly `evidence:` followed by
-  `- <label> · <add> · <del>` rows; add/del are the signed display strings (`+14`, `0`, `−4`
-  with U+2212). An optional `attachments:` block follows the same way, one `- <file name>`
+  `- [<status>] <label> · <result>` rows (ruling 526). The status is `pass`, `fail`, or `info`
+  for a reference that is neither; the result says in a few words how it came out
+  (`102 passed, 0 failed`, `+412 −87` with U+2212), and `—` stands for none. A label may
+  itself hold ` · `: the result is the last segment, and a writer strips the separator from a
+  result. A row written before ruling 526, `- <label> · <add> · <del>`, still reads, as an
+  `info` row whose result is its two cells (signed counts spaced, words joined by a comma,
+  `—` dropped); the next write of the file puts it in the new form. At most 8 rows (label 200
+  characters, result 40). An optional `attachments:` block follows the same way, one `- <file name>`
   per file the event's run saved under `tasks/<KEY>/attachments/` (ruling 96); the directory
   stays the truth.
 - **Compaction**: when the project's `compression-threshold` guardrail is on and a timeline
@@ -772,7 +779,7 @@ Packet notes:
   comment, a `to: agent` hand-off, a comment titled `Compacted` or `Review verdict`, a comment
   with `notified`, `evidence` or `attachments`, or the newest agent reply in the older region.
 - Malformed entries (a heading without both separators, an unparseable timestamp, an
-  evidence row without three parts) are skipped with a warning diagnostic (readiness floors
+  evidence row in neither form above) are skipped with a warning diagnostic (readiness floors
   at `input_required`) — the task itself is never dropped.
 
 ## 2b. `projects/<slug>/epics/<epic-id>.md` (epics — ruling 503)

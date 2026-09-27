@@ -237,6 +237,10 @@ describe("the gate run (ruling 482)", () => {
     });
     expect(note.text).toContain(`Gates on ${revisionSha.slice(0, 7)}: 1/2 exit 0 (run by Viberr)`);
     expect(note.attachments).toEqual(record.results.map((r) => r.log));
+    // Ruling 526: each row carries its gate's ending into task.md, where an
+    // agent reads it, and into the review PR's evidence lines. CANARY: mark
+    // every row `info` in `gateRunEvent`.
+    expect(note.evidence?.map((row) => row.status)).toEqual(["pass", "fail"]);
     // Ruling 493: the timeline reads the projected note back into this run,
     // each row with its own log. CANARY: print the evidence label another way
     // in `gateRunEvent` and the note renders as prose again.

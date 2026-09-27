@@ -464,6 +464,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // `Verdict:` line to the outcome channel, the Reviewer stopped authoring
     // the suite (no repo-write grant), and raw output left the evidence rows.
     "eb2e5ebd17f890a65377d8ce016ddc6e105d92a260d7ee4f9d1ef0262be18774",
+    // Ruling 526: before an evidence row carried its result and a pass, fail
+    // or info mark, which the timeline draws as the verdict's checklist.
+    "0fea5d36f4a35643d4352cccfc35183018a76907bc9387c4c2b34bb9abbbb57a",
   ],
   // Seeded-prompt sweep (2026-09-23): the first recorded versions of three
   // assets the sweep rewrote. The handbook said each next goal task is created

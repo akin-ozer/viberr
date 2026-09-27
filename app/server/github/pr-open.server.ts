@@ -3,7 +3,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   activeWorkRevision,
-  EVIDENCE_EMPTY_COLUMN,
   type PrBodyWritten,
   type PrRef,
   type TaskFileEvent,
@@ -96,21 +95,24 @@ export function composePrBody(input: {
   return lines.join("\n");
 }
 
+/** Ruling 526: a PR-body row names a check's ending in words; a reference
+ *  that is neither goes unmarked. */
+const EVIDENCE_LINE_LEAD = { pass: "**Passed:** ", fail: "**Failed:** ", info: "" } as const;
+
 /**
  * P13-D-26 — the newest event's `evidence:` rows, as PR-body bullet lines
- * (`<label> · <add> · <del>`, empty columns dropped). Newest-first timeline, so
- * the first event carrying evidence is the latest outcome. Returns null when
- * the task has none, which keeps the "## Evidence" section out of the body.
+ * (`<label> · <result>`, an empty result dropped, a pass or a failure led by
+ * its word). Newest-first timeline, so the first event carrying evidence is
+ * the latest outcome. Returns null when the task has none, which keeps the
+ * "## Evidence" section out of the body.
  */
 function latestEvidenceLines(
   timeline: readonly TaskFileEvent[],
 ): string[] | null {
   const withEvidence = timeline.find((e) => e.evidence && e.evidence.length > 0);
   if (!withEvidence?.evidence) return null;
-  return withEvidence.evidence.map((row) =>
-    [row.label, row.add, row.del]
-      .filter((part) => part.trim() !== "" && part.trim() !== EVIDENCE_EMPTY_COLUMN)
-      .join(" · "),
+  return withEvidence.evidence.map(
+    (row) => EVIDENCE_LINE_LEAD[row.status] + (row.result ? `${row.label} · ${row.result}` : row.label),
   );
 }
 

@@ -79,8 +79,10 @@ const FULL: ParsedTaskFile = {
     { occurredAt: "2026-07-04T06:41:00.000Z", type: "completion", actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Developer" }, title: "Completion report", toAgent: false,
       text: "Implemented repo attach, branch creation, and PR-sync projection.",
       evidence: [
-        { label: "unit/policy_gate_test", add: "+14", del: "0" },
-        { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+        { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+        { label: "integration/pr_sync_test", result: "1 failed", status: "fail" },
+        { label: "9 files changed on `vib-142` · the delivered diff", result: "+412 −87", status: "info" },
+        { label: "PR #318", result: "", status: "info" },
       ] },
     { occurredAt: "2026-07-04T06:39:00.000Z", type: "github", actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Developer" }, title: null, toAgent: false, evidence: null,
       text: "Opened **PR #318** from `vib-142-attach-workspace` into `main`." },
@@ -557,6 +559,43 @@ describe("task.md tolerant parsing", () => {
     expect(diagnostics.some((d) => d.hardStop)).toBe(true);
   });
 
+  /**
+   * Ruling 526: a row is `[status] label · result`, and a task.md written
+   * before it holds `label · add · del`. Those rows still read, as references
+   * with their two cells as the result (a diff's signed counts spaced, words
+   * joined by a comma, the placeholder dropped), and the next write puts them
+   * in the new form. A line in neither form is dropped with a diagnostic.
+   * CANARY: drop the two-column branch of `parseEvidenceRow` and every verdict
+   * written before 526 loses its rows.
+   */
+  it("ruling 526: reads a row in its status form and in the two-column form it replaced", () => {
+    const completion = { ...FULL.timeline[1]!, evidence: [{ label: "placeholder", result: "", status: "info" as const }] };
+    const text = serializeTaskFile({ ...FULL, packet: null, extraSections: [], timeline: [completion] }).replace(
+      "- [info] placeholder · —",
+      [
+        "- [fail] `pnpm validate` · on 77 cases · 75 of 77 right",
+        "- [pass] HEAD is a91f7c2 · —",
+        "- fresh clone: install, test · 102 passed · 0 failed",
+        "- 9 files changed on `vib-142` · +412 · −87",
+        "- [e2e] smoke · +3 · —",
+        "- README.md:23 against the Output contract · — · —",
+        "- a line in neither form",
+      ].join("\n"),
+    );
+    const { parsed, diagnostics } = parseTaskFileContent(text, { fallbackKey: "VIB-142" });
+    expect(parsed.timeline[0]!.evidence).toEqual([
+      { label: "`pnpm validate` · on 77 cases", result: "75 of 77 right", status: "fail" },
+      { label: "HEAD is a91f7c2", result: "", status: "pass" },
+      { label: "fresh clone: install, test", result: "102 passed, 0 failed", status: "info" },
+      { label: "9 files changed on `vib-142`", result: "+412 −87", status: "info" },
+      // An unknown mark is no status: the row reads in the older form.
+      { label: "[e2e] smoke", result: "+3", status: "info" },
+      { label: "README.md:23 against the Output contract", result: "", status: "info" },
+    ]);
+    expect(diagnostics.map((d) => d.code)).toEqual(["timeline.malformed_evidence"]);
+    expect(serializeTaskFile(parsed)).toContain("\n- [info] fresh clone: install, test · 102 passed, 0 failed\n");
+  });
+
   it("F28-D2: a CRLF-encoded file parses identically to LF (no frontmatter loss)", () => {
     // A file saved by a Windows editor or `git core.autocrlf` — the data root
     // is outside git, so nothing re-normalizes it: every LF became a CRLF.
@@ -686,7 +725,7 @@ describe("task.md event attachments (P21 — the producing message names its fil
           },
           title: "Review passed",
           toAgent: false,
-          evidence: [{ label: "e2e smoke", add: "+3", del: "—" }],
+          evidence: [{ label: "e2e smoke", result: "3 passed", status: "pass" }],
           text: "**Validation:** healthy. Reviewer approved the work.",
           attachments: ["verdict-screenshot.png"],
         },
@@ -700,7 +739,7 @@ describe("task.md event attachments (P21 — the producing message names its fil
     });
     expect(diagnostics).toEqual([]);
     expect(parsed.timeline[0]?.evidence).toEqual([
-      { label: "e2e smoke", add: "+3", del: "—" },
+      { label: "e2e smoke", result: "3 passed", status: "pass" },
     ]);
     expect(parsed.timeline[0]?.attachments).toEqual(["verdict-screenshot.png"]);
   });

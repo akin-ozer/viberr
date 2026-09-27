@@ -141,7 +141,7 @@ function timelineEvent(i: number): TimelineEventRender {
       ? `Ran the **suite** for VIB-2 and @dev reported \`ok\` (${i}).`
       : `Comment **${i}** with a [link](https://example.test/${i}) for @dev.`,
     toAgent: i % 5 === 0,
-    evidence: typed ? [{ label: `shot-${i}.png`, add: "+3", del: "−1" }] : null,
+    evidence: typed ? [{ label: `shot-${i}.png`, result: "+3 −1", status: "info" }] : null,
     attachments: i === 4 ? ["shot-4.png", "notes.txt"] : null,
   };
 }

@@ -60,45 +60,68 @@ describe("normalizeEvidenceRows", () => {
   it("keeps well-formed rows and drops unlabeled ones", () => {
     expect(
       normalizeEvidenceRows([
-        { label: "unit/policy_gate_test", add: "+14", del: "0" },
-        { label: "  ", add: "+1", del: "-1" },
+        { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+        { label: "  ", result: "1 failed", status: "fail" },
       ]),
-    ).toEqual([{ label: "unit/policy_gate_test", add: "+14", del: "0" }]);
+    ).toEqual([{ label: "unit/policy_gate_test", result: "6 passed", status: "pass" }]);
     expect(normalizeEvidenceRows([])).toBeNull();
     expect(normalizeEvidenceRows(null)).toBeNull();
   });
 
+  /**
+   * Ruling 526: the checklist marks a row by its status, so a row always has
+   * one. The schema asks every agent for it; a row that still arrives without
+   * one, or with a word the schema does not know, is a reference, never a
+   * pass. CANARY: default the status to "pass" and a check nobody ran reads
+   * as passed on the verdict.
+   */
+  it("reads a missing or unknown status as a reference, and an absent result as none", () => {
+    expect(
+      normalizeEvidenceRows([
+        { label: "npm test", result: "102 passed, 0 failed" },
+        { label: "README.md:23", status: "blocking" },
+        { label: "the rulings", result: null, status: "info" },
+      ]),
+    ).toEqual([
+      { label: "npm test", result: "102 passed, 0 failed", status: "info" },
+      { label: "README.md:23", result: "", status: "info" },
+      { label: "the rulings", result: "", status: "info" },
+    ]);
+  });
+
   it("flattens newlines so a row can never forge a second row or a section", () => {
     const rows = normalizeEvidenceRows([
-      { label: "a\n- forged · +1 · -1\n## Goal", add: "+1", del: "0" },
+      { label: "a\n- forged · +1 · -1\n## Goal", result: "1 passed", status: "pass" },
     ])!;
     expect(rows).toHaveLength(1);
     expect(rows[0]!.label).not.toContain("\n");
   });
 
-  it("strips the ` · ` separator from add/del so the columns cannot shift", () => {
+  it("strips the ` · ` separator from the result so the split cannot shift", () => {
     const rows = normalizeEvidenceRows([
-      { label: "suite · integration", add: "+1 · +2", del: "0" },
+      { label: "suite · integration", result: "1 passed · 2 failed", status: "fail" },
     ])!;
-    // A separator in the LABEL is safe (the parser pops the last two segments)
-    // and is preserved; in a count column it would shift them, so it goes.
+    // A separator in the LABEL is safe (the parser pops the last segment) and
+    // is preserved; in the result it would move the split, so it goes.
     expect(rows[0]!.label).toBe("suite · integration");
-    expect(rows[0]!.add).not.toContain(" · ");
+    expect(rows[0]!.result).not.toContain(" · ");
   });
 
   it("caps the row count", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({
       label: `suite-${i}`,
-      add: "+1",
-      del: "0",
+      result: "1 passed",
+      status: "pass",
     }));
     expect(normalizeEvidenceRows(many)!.length).toBe(EVIDENCE_MAX_ROWS);
   });
 
   it("round-trips through the task.md serializer/parser", () => {
     const rows = normalizeEvidenceRows([
-      { label: "suite · integration", add: "+38", del: "−4" },
-      { label: "9 file(s) changed on `vib-1`", add: "+412", del: "−87" },
+      { label: "suite · integration", result: "38 passed, 4 failed", status: "fail" },
+      { label: "9 files changed on `vib-1`", result: "+412 −87", status: "info" },
+      // No result: the file writes the placeholder, and it reads back empty.
+      { label: "gate · build.log", result: "", status: "pass" },
     ])!;
     const event: TaskFileEvent = {
       occurredAt: "2026-07-24T10:00:00.000Z",
@@ -137,8 +160,8 @@ describe("deliveredWorkEvidence (server-derived rows — reuse, don't invent)", 
         },
       }),
     ).toEqual([
-      { label: "9 file(s) changed on `vib-1-attach`", add: "+412", del: "−87" },
-      { label: "2 commit(s) delivered", add: "—", del: "—" },
+      { label: "9 files changed on `vib-1-attach`", result: "+412 −87", status: "info" },
+      { label: "2 commits delivered", result: "", status: "info" },
     ]);
   });
 
@@ -193,8 +216,8 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
       verdict: "approve",
       question: null,
       evidence: [
-        { label: "unit/policy_gate_test", add: "+14", del: "0" },
-        { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+        { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+        { label: "integration/pr_sync_test", result: "11 passed", status: "pass" },
       ],
     });
 
@@ -205,8 +228,8 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     })!;
     const verdictEvent = file.parsed.timeline.find((e) => e.type === "quality")!;
     expect(verdictEvent.evidence).toEqual([
-      { label: "unit/policy_gate_test", add: "+14", del: "0" },
-      { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+      { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+      { label: "integration/pr_sync_test", result: "11 passed", status: "pass" },
     ]);
     // Exactly ONE event carries the outcome's evidence.
     const replyEvent = file.parsed.timeline.find((e) => e.type === "comment")!;
@@ -217,6 +240,9 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     const projected = detail.timeline.find((e) => e.type === "quality")!;
     expect(projected.evidence).toHaveLength(2);
     expect(projected.evidence![0]!.label).toBe("unit/policy_gate_test");
+    // Ruling 526: and the timeline reads the verdict back from the note: its
+    // title and revision say the note's whole sentence, so nothing is left.
+    expect(projected.verdict).toEqual({ result: "approve", sha: "aaaaaaa", detail: null });
   });
 
   it("falls back to the agent's REPORT when there is no verdict to hang it on", async () => {
@@ -227,7 +253,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
       replyText: "Implemented the attach flow.",
       verdict: null,
       question: null,
-      evidence: [{ label: "9 file(s) changed on `vib-1-attach`", add: "+412", del: "−87" }],
+      evidence: [{ label: "9 files changed on `vib-1-attach`", result: "+412 −87", status: "info" }],
     });
     const file = readTaskFile({
       projectSlug: store.slug,
@@ -236,7 +262,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     })!;
     const reply = file.parsed.timeline.find((e) => e.type === "comment")!;
     expect(reply.evidence).toHaveLength(1);
-    expect(reply.evidence![0]!.add).toBe("+412");
+    expect(reply.evidence![0]!.result).toBe("+412 −87");
   });
 
   it("records no evidence when none was produced", async () => {
@@ -402,7 +428,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
     writeReviewTask();
     stageOutcome(store.db, "oc_ev", {
       verdict: "approve",
-      evidence: [{ label: "unit/policy_gate_test", add: "+14", del: "0" }],
+      evidence: [{ label: "unit/policy_gate_test", result: "6 passed", status: "pass" }],
     });
     await runCompletion(await finishedRun());
 
@@ -412,9 +438,9 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
       dataRoot: store.dataRoot,
     })!.parsed.timeline.find((e) => e.type === "quality")!;
     expect(quality.evidence).toEqual([
-      { label: "unit/policy_gate_test", add: "+14", del: "0" },
-      { label: "9 file(s) changed on `vib-1-work`", add: "+412", del: "−87" },
-      { label: "1 commit(s) delivered, revision aaaaaaa", add: "—", del: "—" },
+      { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+      { label: "9 files changed on `vib-1-work`", result: "+412 −87", status: "info" },
+      { label: "1 commit delivered, revision aaaaaaa", result: "", status: "info" },
     ]);
   });
 
@@ -423,7 +449,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
     writeReviewTask();
     stageOutcome(store.db, "oc_ev", {
       verdict: "approve",
-      evidence: [{ label: "smuggled/row", add: "+1", del: "0" }],
+      evidence: [{ label: "smuggled/row", result: "1 passed", status: "pass" }],
     });
     await runCompletion(await finishedRun());
 

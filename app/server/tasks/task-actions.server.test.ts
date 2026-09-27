@@ -1166,7 +1166,7 @@ describe("appendComment", () => {
       replyText: finding,
       verdict: null,
       question: null,
-      evidence: [{ label: "compare fix", add: "5", del: "1" }],
+      evidence: [{ label: "compare fix", result: "5 of 6 right", status: "fail" }],
     });
 
     const timeline = readTaskFile({
@@ -1878,6 +1878,16 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     expect(quality?.text).toContain("Validation:** changed");
     expect(quality?.text).toContain("Review & validation has not reviewed it yet");
     expect(`${quality?.title} ${quality?.text}`).not.toMatch(/rework/i);
+    // Ruling 526: the timeline's card reads the note back, the revision for
+    // its head and only what the sentence says beyond "… approved on `sha`.".
+    // CANARY: reword the note's opening ("signed off on" for "approved on")
+    // and the card says it twice.
+    const view = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.find((e) => e.type === "quality")!.verdict;
+    expect(view).toEqual({
+      result: "approve",
+      sha: "aaaaaaa",
+      detail: "Review & validation has not reviewed it yet, and acceptance waits for every required reviewer.",
+    });
     // The bell carries the same title, so it is true there too.
     const bell = store.db
       .prepare("SELECT title FROM notifications WHERE task_key = 'VIB-1' AND kind = 'quality'")

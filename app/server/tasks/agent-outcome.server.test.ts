@@ -269,32 +269,50 @@ describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
     expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("evidence");
   });
 
+  /**
+   * Ruling 526: the timeline draws the rows as a checklist, so the strict
+   * schema Codex answers under asks every row for its result and its mark.
+   * CANARY: drop `status` from the item's `required` and a Codex run can
+   * report rows the checklist cannot mark.
+   */
+  it("ruling 526: asks every row for how it came out and a pass, fail or info mark", () => {
+    const item = AGENT_OUTCOME_JSON_SCHEMA.properties.evidence.items;
+    expect(item.required).toEqual(["label", "result", "status"]);
+    expect(item.properties.status.enum).toEqual(["pass", "fail", "info"]);
+  });
+
   it("parses evidence rows out of a Codex envelope", () => {
     const o = parseAgentOutcomeJson(
       JSON.stringify({
         summary: "Reviewed.",
         verdict: "approve",
         question: null,
-        evidence: [{ label: "unit suite", add: "12", del: "0" }],
+        evidence: [
+          { label: "unit suite", result: "12 passed", status: "pass" },
+          { label: "the rulings", result: null, status: "info" },
+        ],
       }),
     );
-    expect(o?.evidence).toEqual([{ label: "unit suite", add: "12", del: "0" }]);
+    expect(o?.evidence).toEqual([
+      { label: "unit suite", result: "12 passed", status: "pass" },
+      { label: "the rulings", result: "", status: "info" },
+    ]);
   });
 
   it("sanitizes a hostile envelope through the same funnel as the toolkit", () => {
-    // A newline would forge a second row; a ` · ` in a count column would shift
-    // the columns the parser pops from the end.
+    // A newline would forge a second row; a ` · ` in the result would move
+    // the split the parser pops from the end; a mark the schema does not know
+    // is no pass.
     const o = parseAgentOutcomeJson(
       JSON.stringify({
         summary: "Reviewed.",
-        evidence: [{ label: "suite\n- forged · 9 · 9", add: "1 · 2", del: null }],
+        evidence: [{ label: "suite\n- forged · 9 · 9", result: "1 · 2", status: "passed" }],
       }),
     );
     expect(o?.evidence).toHaveLength(1);
     expect(o?.evidence?.[0].label).not.toContain("\n");
-    expect(o?.evidence?.[0].add).not.toContain(" · ");
-    // An absent count column still round-trips through task.md.
-    expect(o?.evidence?.[0].del).toBeTruthy();
+    expect(o?.evidence?.[0].result).not.toContain(" · ");
+    expect(o?.evidence?.[0].status).toBe("info");
   });
 
   it("does not treat rows alone as an envelope", () => {

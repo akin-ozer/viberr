@@ -212,8 +212,8 @@ describe("loader — VIB-142 fidelity", () => {
     expect(newest!.actor).toMatchObject({ kind: "human", name: "Arda Kaya" });
     expect(completion!.title).toBe("Completion report");
     expect(completion!.evidence).toEqual([
-      { label: "unit/policy_gate_test", add: "+14", del: "0" },
-      { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+      { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+      { label: "integration/pr_sync_test", result: "11 passed", status: "pass" },
     ]);
     const policy = t.timeline.find((e) => e.type === "policy")!;
     expect(policy.actor).toMatchObject({ kind: "system", name: "Policy engine" });

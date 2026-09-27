@@ -23,8 +23,8 @@ function row(over: Partial<TaskEventRow> = {}): TaskEventRow {
     text: "**Gates on a95c337: 1/2 exit 0 (run by Viberr).** `build` exit 1. Each gate's log is attached.",
     to_agent: 0,
     evidence_json: JSON.stringify([
-      { label: `install: exit 0 in 2 s · ${LOG_1}`, add: "—", del: "—" },
-      { label: `build: exit 1 in 4 s · ${LOG_2}`, add: "—", del: "—" },
+      { label: `install: exit 0 in 2 s · ${LOG_1}`, result: "", status: "pass" },
+      { label: `build: exit 1 in 4 s · ${LOG_2}`, result: "", status: "fail" },
     ]),
     attachments_json: JSON.stringify([LOG_1, LOG_2]),
     ...over,

@@ -2046,7 +2046,7 @@ async function dispatchAgentRun(
       collabNotes.push(
         "- `report_outcome` — REQUIRED at the end of your review: report `approve` or `request_changes` with a one-paragraph justification" +
           (collab.evidence
-            ? ", plus `evidence` — short REFERENCES to what you checked (a suite, a file, a check), never raw output"
+            ? ", plus `evidence` — short REFERENCES to what you checked (a suite, a file and line, a check), each with how it came out and marked pass, fail or info, never raw output"
             : "") +
           ", then finish with your full findings.\n" +
           // Ruling 210 (owner): the round count is the expensive thing, and the
@@ -2070,7 +2070,7 @@ async function dispatchAgentRun(
       // `report_outcome`, so the prompt has to name the channel — an unannounced
       // tool is the same silent-resource class as an unmounted grant.
       collabNotes.push(
-        "- `report_outcome` — at the end of your work, report `evidence`: short REFERENCES to what you checked or produced (a suite, a file, a check), never raw output, with a one-paragraph summary. You do NOT judge the work; there is no verdict on this tool for you.",
+        "- `report_outcome` — at the end of your work, report `evidence`: short REFERENCES to what you checked or produced (a suite, a file and line, a check), each with how it came out and marked pass, fail or info, never raw output, with a one-paragraph summary. You do NOT judge the work; there is no verdict on this tool for you.",
       );
     }
     // Ruling 488 (F40-67): the relay rides whichever `report_outcome` mounted.
@@ -2090,7 +2090,7 @@ async function dispatchAgentRun(
         (collab.verdict ? ', "verdict": "approve" | "request_changes" (required when you judged the work)' : "") +
         (collab.ask ? ', "question": {"title", "body", "options"} (only when blocked on a human decision)' : "") +
         (collab.evidence
-          ? ', "evidence": [{"label", "add", "del"}] (short REFERENCES to what you checked — a suite, a file, a check — never raw output)'
+          ? ', "evidence": [{"label", "result", "status"}] (short REFERENCES to what you checked — a suite, a file and line, a check — each with how it came out and pass, fail or info; never raw output)'
           : "") +
         // Ruling 488: every envelope carries the relay field.
         ', "relay": [{"taskKey", "text"}] (only when you must post something on another task)' +

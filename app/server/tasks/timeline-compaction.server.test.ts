@@ -230,7 +230,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   it("ruling 209: never folds a comment that carries an evidence reference", () => {
     const withEvidence = (i: number): TaskFileEvent => ({
       ...agent(i),
-      evidence: [{ label: "Timed lifecycle log", add: "1 attachment: SHOP-15-run.log", del: "—" }],
+      evidence: [{ label: "Timed lifecycle log", result: "1 attachment: SHOP-15-run.log", status: "info" }],
     });
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
@@ -244,7 +244,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect(out.length).toBeLessThan(events.length); // the rest still folds
     const kept = out.find((e) => (e.evidence?.length ?? 0) > 0);
     expect(kept, "the evidence-bearing reply must survive verbatim").toBeTruthy();
-    expect(kept!.evidence![0]!.add).toContain("1 attachment");
+    expect(kept!.evidence![0]!.result).toContain("1 attachment");
   });
 
   /**

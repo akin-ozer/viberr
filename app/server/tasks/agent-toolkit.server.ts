@@ -10,7 +10,9 @@ import {
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import {
+  EVIDENCE_STATUSES,
   normalizeEvidenceRows,
+  type EvidenceStatus,
   type FileActorRef,
 } from "~/schemas/task-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
@@ -130,7 +132,7 @@ const REPORT_EVIDENCE_ONLY_DESCRIPTION =
 interface ReportedOutcome {
   verdict?: "approve" | "request_changes";
   summary?: string;
-  evidence?: { label: string; add?: string; del?: string }[];
+  evidence?: { label: string; result?: string; status: EvidenceStatus }[];
   /** Ruling 488: declared on every variant of the tool. */
   relay?: RelayEntry[];
 }
@@ -511,27 +513,33 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     // so the `evidence:` block had 42 `null` writers and zero real ones. Gated
     // exactly like its siblings: the field is only DECLARED when the profile
     // holds the grant, so an agent without it cannot see or use it.
+    // Ruling 526: a row is what was checked, how it came out and whether that
+    // passed. It carried two diff-count cells, which a reviewer filled with
+    // "102 passed" and "0 failed" and the timeline painted green and red.
     const evidenceField = z
       .array(
         z.strictObject({
           label: z
             .string()
             .describe(
-              "What this cites: a suite, a file, a check — e.g. 'unit/policy_gate_test' or 'app/server/tasks/task-actions.server.ts'.",
+              "What you checked or cite, in a short phrase: a suite, a file and line, a check, a source, e.g. 'npm test (vitest)' or 'README.md:23 against the Output contract'.",
             ),
-          add: z
+          result: z
             .string()
             .optional()
-            .describe("Short signed count, e.g. '+14' or '3 passed'."),
-          del: z
-            .string()
-            .optional()
-            .describe("Short signed count, e.g. '−4' or '0 failed'."),
+            .describe(
+              "How it came out, in a few words: '102 passed, 0 failed', '75 of 77 right', 'exit 0'. Omit it when the label says it all.",
+            ),
+          status: z
+            .enum(EVIDENCE_STATUSES)
+            .describe(
+              "'pass' for a check that passed, 'fail' for a check that failed or a finding that blocks, 'info' for a reference that is neither (a source you read, a file you attached).",
+            ),
         }),
       )
       .optional()
       .describe(
-        "Up to 8 evidence REFERENCES for what you checked or produced — short citations, never raw output (that stays in the run logs). They render as rows on your outcome event and carry into the review PR body.",
+        "Up to 8 evidence REFERENCES for what you checked or produced — short citations, never raw output (that stays in the run logs). They render as the checklist on your outcome, failures first, and carry into the review PR body.",
       );
     const report = async (args: ReportedOutcome) => {
       const evidence = collab.evidence ? normalizeEvidenceRows(args.evidence) : null;

@@ -411,8 +411,8 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         { occurredAt: todayAt(9, 41), type: "completion", actor: codexRef("developer"), title: "Completion report", toAgent: false,
           text: "Implemented repo attach, branch creation, and PR-sync projection. Validation green except one snapshot intentionally updated.",
           evidence: [
-            { label: "unit/policy_gate_test", add: "+14", del: "0" },
-            { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+            { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+            { label: "integration/pr_sync_test", result: "11 passed", status: "pass" },
           ] },
         { occurredAt: todayAt(9, 39), type: "github", actor: codexRef("developer"), title: null, toAgent: false, evidence: null,
           text: "Opened **PR #318** from `vib-142-attach-workspace` into `main`." },

@@ -26,8 +26,12 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // view (`completion`, 234 bytes on VIB-142: its one required reviewer, no
   // verdict yet on a91f7c2, and the change's size), which the decision that
   // offers acceptance draws; the payload had come down 12 bytes since 475.
+  // Raised 13395 to 13421 by ruling 526: VIB-142's completion carries its two
+  // evidence rows as a result and a mark (`"result":"6 passed","status":"pass"`)
+  // in place of a diff's `add` and `del` (26 bytes), which the timeline draws
+  // as a checklist.
   "console:task-data.json-bytes": {
-    ceiling: 13395,
+    ceiling: 13421,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request`,
@@ -47,9 +51,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // ruling 471: the packet render's two answer fields (79 bytes, as above).
   // Raised 136725 to 136746 by ruling 475(c): `"mergeCollisions":[],` (21
   // bytes, as above). Raised 136746 to 136968 by ruling 521: `completion`
-  // (234 bytes, as above, less the same 12).
+  // (234 bytes, as above, less the same 12). Raised 136968 to 136994 by
+  // ruling 526: the two rows' result and mark (26 bytes, as above).
   "console:task-document.json-bytes": {
-    ceiling: 136968,
+    ceiling: 136994,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a document request`,

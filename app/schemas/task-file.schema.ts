@@ -2462,19 +2462,37 @@ export type FileActorRef =
 // -------------------------------------------------- timeline events
 
 /**
- * P13-D-26 — one `evidence:` row on a completion/verdict event.
+ * Ruling 526: how one evidence row came out. `pass` and `fail` are a check's
+ * two endings (a finding that blocks is a `fail`); `info` is a reference that
+ * is neither, such as a source read, a file attached or the change's size.
+ */
+export const EVIDENCE_STATUSES = ["pass", "fail", "info"] as const;
+export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
+
+/**
+ * P13-D-26 — one `evidence:` row on an outcome event (a completion, a
+ * reviewer's verdict, an agent's report).
  *
- * A REFERENCE, never a dump: `label` names what was produced or checked
- * (a suite, a changed-file summary, a revision), `add`/`del` are short signed
- * display strings ("+14", "−4"). This deliberately complements the
- * `evidence-separation` guardrail (comment-guardrails.server.ts), which trims
- * raw fenced output out of the prose and points at the run logs — the rows
- * carry the citation the guardrail leaves behind, not the noise it removed.
+ * A REFERENCE, never a dump: `label` names what was checked or produced (a
+ * suite, a file and line, a source, the changed files), `result` says how it
+ * came out in a few words ("102 passed, 0 failed", "+412 −87") and `status`
+ * whether that is a pass, a failure or neither. This deliberately complements
+ * the `evidence-separation` guardrail (comment-guardrails.server.ts), which
+ * trims raw fenced output out of the prose and points at the run logs — the
+ * rows carry the citation the guardrail leaves behind, not the noise it
+ * removed.
+ *
+ * Ruling 526: a row was a label and two diff-count cells, `add` and `del`. A
+ * reviewer filled them with "102 passed" and "0 failed" and the timeline
+ * painted the first green and the second red whatever they said, while a row
+ * that was a failure looked like every other. A row written in that shape
+ * reads back as an `info` row whose result is its two cells (`task-file.server.ts`).
  */
 export interface EvidenceRow {
   label: string;
-  add: string;
-  del: string;
+  /** Empty when the label says it all. */
+  result: string;
+  status: EvidenceStatus;
 }
 
 /** Row/field caps. The rows are serialized into task.md and re-read into every
@@ -2486,15 +2504,16 @@ export const EVIDENCE_MAX_ROWS = 8;
  *  no surface could recover it. Rows re-enter every agent prompt, so the
  *  ceiling stays bounded — 8 rows x 200 is the worst case. */
 const EVIDENCE_LABEL_MAX_CHARS = 200;
-const EVIDENCE_COUNT_MAX_CHARS = 16;
+/** A result is a few words ("75 of 77 right"); the two count cells it
+ *  replaced held 16 characters each. */
+const EVIDENCE_RESULT_MAX_CHARS = 40;
 
 /**
- * Placeholder for a count column with nothing to report. A row serializes as
- * ONE line, `- <label> · <add> · <del>`, and the parser trims the line before
- * splitting — so a trailing EMPTY column is not just blank on the way back, it
- * collapses the row to two segments and the parser drops it as malformed. Every
- * column therefore carries at least this glyph. (Caught by the round-trip test,
- * not by inspection.)
+ * What a row's file line holds for an empty result. A row serializes as ONE
+ * line, `- [<status>] <label> · <result>`, and a label may carry the separator
+ * itself (a gate's row names its log after one, `gateEvidenceLabel`), so the
+ * parser takes the LAST segment as the result: a row with no result still
+ * writes this glyph there, or its label's tail would be read back as one.
  */
 export const EVIDENCE_EMPTY_COLUMN = "—";
 
@@ -2508,13 +2527,13 @@ const evidenceCellSchema = z
 /**
  * Sanitize agent- or server-supplied evidence into rows that round-trip through
  * the task.md serializer. Each row is ONE line of the form
- * `- <label> · <add> · <del>`, so a newline anywhere would forge a row and a
- * ` · ` inside `add`/`del` would shift the columns (the parser pops the LAST
- * two segments, so a separator in the label is harmless and is kept).
+ * `- [<status>] <label> · <result>`, so a newline anywhere would forge a row
+ * and a ` · ` inside the result would move the column (the parser pops the
+ * LAST segment, so a separator in the label is harmless and is kept).
  * Returns null when nothing usable survives — the caller writes `evidence: null`.
  */
 export function normalizeEvidenceRows(
-  rows: readonly { label?: unknown; add?: unknown; del?: unknown }[] | null | undefined,
+  rows: readonly { label?: unknown; result?: unknown; status?: unknown }[] | null | undefined,
 ): EvidenceRow[] | null {
   if (!rows || rows.length === 0) return null;
   const flat = (text: string, max: number, stripSeparator: boolean): string => {
@@ -2530,12 +2549,15 @@ export function normalizeEvidenceRows(
       false,
     );
     if (!label) continue; // an unlabeled row cites nothing
-    const column = (cell: string) =>
-      flat(cell, EVIDENCE_COUNT_MAX_CHARS, true) || EVIDENCE_EMPTY_COLUMN;
+    const result = flat(evidenceCellSchema.parse(row.result), EVIDENCE_RESULT_MAX_CHARS, true);
     out.push({
       label,
-      add: column(evidenceCellSchema.parse(row.add)),
-      del: column(evidenceCellSchema.parse(row.del)),
+      // The placeholder is the file's, never a result.
+      result: result === EVIDENCE_EMPTY_COLUMN ? "" : result,
+      // Anything but the three words claims neither a pass nor a failure. A
+      // lookup, not a module-level schema: this module rides every route's
+      // client chunk, where an unused function costs nothing (ruling 457).
+      status: EVIDENCE_STATUSES.find((status) => status === row.status) ?? "info",
     });
     if (out.length >= EVIDENCE_MAX_ROWS) break;
   }
@@ -2607,7 +2629,8 @@ export interface TaskFileEvent {
   text: string;
   /** Comments only — routed to the operator/agent (toagent card tint). */
   toAgent: boolean;
-  /** Completion/verdict events only. add/del are signed display strings ("+14"). */
+  /** Outcome events only: what was checked, how it came out and its mark
+   *  (ruling 526). */
   evidence: EvidenceRow[] | null;
   /** Files this event's run saved into the task's `attachments/` dir (browser
    *  captures). Optional: most writers never produce files, and an absent field
