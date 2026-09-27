@@ -1,8 +1,8 @@
 # The operator
 
-> The per-task coordination agent: what wakes it, what it may do, how its authority is
-> gated, what it reads, the packets it opens, and the backstops that keep a task from
-> stopping silently.
+> The Operator, the one agent that drives every task: what wakes it, what it may do, how
+> its authority is gated, what it reads, the packets it opens, and the backstops that keep
+> a task from stopping silently.
 > Source of truth: `app/server/runtimes/operator-run.server.ts`,
 > `app/server/tasks/operator-actions.server.ts`, `app/server/tasks/operator-toolkit.server.ts`,
 > `app/server/tasks/operator-repo-read.server.ts`,
@@ -23,6 +23,14 @@ deployed agents, opens decision packets, recommends or performs stage transition
 decides delivery (the server pushes), leases shared files to its own task, schedules
 its own task's later runs (ruling 487), proposes changes to the project's rulings, and,
 under full autonomy with an explicit grant, accepts completion.
+
+It is one agent, called Operator, with no role (ruling 518). Every surface shows it as
+"Operator" over "Built in · runs on every task" (`OPERATOR_NAME`, `OPERATOR_SCOPE`);
+no template or deployment renames it, gives it a role or rewords that line
+(`OPERATOR_FIXED_FIELDS`, dropped when a deployment resolves). Its editor on Agents has no
+Name or Role field and edits the rest: backend, model, effort, autonomy, stages,
+description, persona, capabilities and grants. Boot removes the name, role and scope a
+save stored on the deployment before the ruling.
 
 Its persona is the doctrine file `agents/definitions/operator.md` plus the
 `viberr-app-expertise` skill; both ship from `app/server/seed/assets/` and are

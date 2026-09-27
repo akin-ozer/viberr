@@ -112,14 +112,9 @@ export interface OperatorAutonomyState {
    *  autonomy that ALSO holds `completion-for-acceptance: direct`. Anything
    *  short of that combination leaves the exception configured-off. */
   directDoneLive: boolean;
-  /** Operator display name for the sentence (null when none deployed). */
-  operatorName: string | null;
 }
 
-type RosterProfile = Pick<
-  AgentProfileView,
-  "kind" | "name" | "autonomy" | "capabilities"
->;
+type RosterProfile = Pick<AgentProfileView, "kind" | "autonomy" | "capabilities">;
 
 /**
  * F20-19: derive the project's configured operator autonomy from the shared
@@ -134,12 +129,7 @@ export function operatorAutonomyState(
 ): OperatorAutonomyState {
   const operators = profiles.filter((p) => p.kind === "operator");
   if (operators.length === 0) {
-    return {
-      present: false,
-      autonomy: null,
-      directDoneLive: false,
-      operatorName: null,
-    };
+    return { present: false, autonomy: null, directDoneLive: false };
   }
   const live = operators.find(
     (p) =>
@@ -154,6 +144,5 @@ export function operatorAutonomyState(
     present: true,
     autonomy: chosen.autonomy ?? "supervised",
     directDoneLive: Boolean(live),
-    operatorName: chosen.name,
   };
 }

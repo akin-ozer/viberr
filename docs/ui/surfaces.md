@@ -470,6 +470,13 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   operator-recommendation chip renders "specialist"; the Agents
   page's live-roster empty state, run-in-flight stat, capability matrix modal and
   role-less profile card say "agent profile" / "agent threads", not "specialist".
+- **One Operator, with no role** (ruling 518; `app/features/copy-ban.test.ts`,
+  `agents-page.test.tsx`): nothing a person or an agent reads calls the operator a
+  coordinator, in code or in a seeded asset. Its rows on Agents and Policy, its hero and
+  its glyph's tooltip give the name alone, with no role pill, no "Orchestration" group
+  label and "Built in · runs on every task" under it; its editor has no Name or Role
+  field; the task page's OPERATOR cell shows the since line and what it does, with no
+  second name.
 - Queue rows say "Review", not "Accept" (ruling 30). The board's attention chip is
   "Blocked or waiting" and excludes `input_required` while an agent is working or the
   task rests on a clock (rulings 36, 91, 225). It selects a task holding an open decision

@@ -494,7 +494,8 @@ export function resolveMentionedAgent(
       return {
         profileId: "operator",
         name: authority.name,
-        role: "coordinator",
+        // Ruling 518: the Operator has no role.
+        role: "",
         backend: authority.backend,
         model: authority.model,
         effort: authority.effort,

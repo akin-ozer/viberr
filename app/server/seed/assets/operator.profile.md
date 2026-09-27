@@ -2,13 +2,12 @@
 id: operator
 kind: operator
 name: Operator
-role: Task coordinator
 icon: shield
 backends:
   - claude
   - codex
 model: orchestration runtime
-scope: System role · one per active task
+scope: Built in · runs on every task
 stages:
   - triage
   - ready

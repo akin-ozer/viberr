@@ -933,6 +933,13 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         "8d89f1bedb4a339b7541961051b69647539c092bd72bb0ceb6e265162e233e55",
       ],
     } satisfies Record<string, readonly string[]>;
+    // Ruling 518: the operator's template while it still had a role ("Task
+    // coordinator") and a "System role" scope line.
+    const beforeOneOperator = {
+      [path.join("agents", "profiles", "operator.md")]: [
+        "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
+      ],
+    } satisfies Record<string, readonly string[]>;
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
     // What this build ships, as the store's own manifest recorded it: that
@@ -940,7 +947,11 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const shipped = manifestSchema.parse(
       JSON.parse(readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8")),
     );
-    for (const [rel, hashes] of [...Object.entries(outgoing), ...Object.entries(beforeEpics)]) {
+    for (const [rel, hashes] of [
+      ...Object.entries(outgoing),
+      ...Object.entries(beforeEpics),
+      ...Object.entries(beforeOneOperator),
+    ]) {
       expect(shipped[rel], rel).toBeDefined();
       for (const hash of hashes) {
         expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);

@@ -3446,7 +3446,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
     prompt +=
       `\n\n## Reporting back\n` +
       `This run was dispatched by ${trig}. Close your final report by tagging ` +
-      `"@${trig}" (so they are notified) and "@operator" (so the coordinator ` +
+      `"@${trig}" (so they are notified) and "@operator" (so the operator ` +
       `picks your results up).`;
   }
   // Prompt-injection guardrail (R-C): applies to BOTH backends. Codex has no

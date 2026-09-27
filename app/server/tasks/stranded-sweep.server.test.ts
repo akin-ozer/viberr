@@ -83,8 +83,6 @@ function deployOperator(store: TestStore): void {
         extras: [],
         definition: {
           kind: "operator",
-          name: "Operator",
-          role: "Task coordinator",
           backends: ["claude"],
           model: "sonnet",
           autonomy: "supervised",

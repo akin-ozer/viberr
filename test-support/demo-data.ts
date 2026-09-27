@@ -96,7 +96,6 @@ export type SeedUserIds = Record<SeedPerson["handle"], string>;
 // Seed profile roles — the ONE place a seeded ref's role snapshot comes from
 // (mismatched hand-written snapshots shielded the VIB-12 codec bug).
 const SEED_PROFILE_ROLES = new Map<string, string>([
-  ["operator", "Task coordinator"],
   ["developer", "Implementation"],
   ["reviewer", "Review & validation"],
 ]);

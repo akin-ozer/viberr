@@ -71,8 +71,6 @@ const OPERATOR: Deployment = {
   extras: [],
   definition: {
     kind: "operator",
-    name: "Operator",
-    role: "Task coordinator",
     backends: ["claude"],
     model: "sonnet",
     autonomy: "supervised",
