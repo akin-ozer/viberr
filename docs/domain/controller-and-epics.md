@@ -355,8 +355,9 @@ starter's runtime home, with the folder Claude keeps beside it, removed as the s
 step cleared, as the record of what was spent: Insights still counts them, and nothing
 opens them (`canReadControllerRunLog` finds no conversation). A turn still working is
 stopped first as the deleter (`interruptRunOnConversationDeletion`, audited
-`runtime.run.interrupted` with `reason: "conversation-deleted"`), the queue behind it goes
-with the lease, and it writes nothing back: its settle purges the lines it wrote on its way
+`runtime.run.interrupted` with `reason: "conversation-deleted"`), the messages waiting on
+it (queued behind it, or sent to steer it, ruling 527) go with the lease, and it writes
+nothing back: its settle purges the lines it wrote on its way
 out, and boot finishes that purge for a turn a restart cut off
 (`purgeOrphanedConversationLogs`). It is permanent. The audit row,
 `controller.conversation.deleted`, names the starter, how the actor held the delete
