@@ -820,7 +820,7 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
       return { ok: true, conversationId: "cnv_new" };
     });
     const example = await screen.findByRole("button", {
-      name: "What is waiting on me right now, and what is waiting on an agent?",
+      name: "What's waiting on me, and what's waiting on an agent?",
     });
     expect(screen.getAllByRole("button").filter((b) => b.className === "ctl-example")).toHaveLength(3);
     await act(async () => {
@@ -830,7 +830,7 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
     expect(posted[0]).toMatchObject({
       _csrf: "tok",
       intent: "send",
-      text: "What is waiting on me right now, and what is waiting on an agent?",
+      text: "What's waiting on me, and what's waiting on an agent?",
     });
     expect(posted[0]!.conversationId).toBeUndefined();
   });

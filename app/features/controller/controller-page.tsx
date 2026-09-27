@@ -42,7 +42,7 @@ import { namedTurnPhase, type RunView } from "~/features/runtime/runtime-types";
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
-import { controllerExamples } from "./controller-examples";
+import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
 import { KnowledgePanel } from "./knowledge-panel";
@@ -541,7 +541,7 @@ function Transcript({
 }: {
   view: ControllerSurfaceView;
   /** Ruling 419(g): ruling 314's examples, on the blank transcript only. */
-  examples?: string[];
+  examples?: ControllerExample[];
   examplesDisabled?: boolean;
   onExample?: (text: string) => void;
 }) {
@@ -595,20 +595,7 @@ function Transcript({
           </p>
           {/* Ruling 314 as the dock has it: clicking one SENDS it. */}
           {examples.length > 0 && onExample && (
-            <ul className="ctl-examples">
-              {examples.map((example) => (
-                <li key={example}>
-                  <button
-                    type="button"
-                    className="ctl-example"
-                    onClick={() => onExample(example)}
-                    disabled={examplesDisabled}
-                  >
-                    {example}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ControllerExampleList examples={examples} disabled={examplesDisabled} onSend={onExample} />
           )}
         </div>
       </section>

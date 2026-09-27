@@ -237,11 +237,13 @@ describe("the controller dock (ruling 121)", () => {
     await screen.findByText(/Ask about VIB-1 or say what to do with it/);
 
     // Scoped to the task, and naming it — a generic example would not show that
-    // the controller already knows where it is standing.
-    const first = await screen.findByRole("button", { name: "What is blocking VIB-1?" });
+    // the controller already knows where it is standing. Ruling 516: the row's
+    // glyph and arrow are drawn, never read, so its name is the sentence alone
+    // (CANARY: give the glyph a text alternative and this finds nothing).
+    const first = await screen.findByRole("button", { name: "What's blocking VIB-1?" });
     expect(
       screen.getByRole("button", {
-        name: "Draft a directive for the agent on this task, but do not send it.",
+        name: "Draft a directive for this task's agent, but don't send it.",
       }),
     ).toBeTruthy();
 
@@ -254,7 +256,7 @@ describe("the controller dock (ruling 121)", () => {
      * prevent for typed messages, which is why the value is a parameter.
      */
     await waitFor(() => expect(sends.length).toBe(1));
-    expect(sends[0]!.get("text")).toBe("What is blocking VIB-1?");
+    expect(sends[0]!.get("text")).toBe("What's blocking VIB-1?");
     expect(sends[0]!.get("intent")).toBe("send");
     expect(sends[0]!.get("task")).toBe("VIB-1");
   });
@@ -280,9 +282,9 @@ describe("the controller dock (ruling 121)", () => {
     await restored();
     fireEvent.click(await screen.findByRole("button", { name: "Controller · viberr" }));
     await screen.findByRole("button", {
-      name: "What is waiting on me right now, and what is waiting on an agent?",
+      name: "What's waiting on me, and what's waiting on an agent?",
     });
-    expect(screen.queryByRole("button", { name: /What is blocking VIB-1/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /What's blocking VIB-1/ })).toBeNull();
   });
 
   it("keeps an open the person clicked before the restore had read storage", async () => {

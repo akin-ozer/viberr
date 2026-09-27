@@ -84,8 +84,10 @@ the rail lists the conversations, is `position: sticky` and scrolls
 itself, and below the two-column breakpoint the head carries a native thread picker
 (`ConversationPicker`); the transcript is a capped scroller that never moves the page
 (ruling 419). A blank transcript offers three example asks per scope that send on click
-(`controller-examples.ts`, shared with the dock; ruling 314). A working turn shows the run's
-`phase` and last tool `step` on the row that says it is working (ruling 250). Below the
+(`controller-examples.tsx`, shared with the dock; ruling 314), drawn as one framed list of
+rows: the glyph of what each is about, the sentence, and an arrow (ruling 516). A working
+turn shows the run's `phase` and last tool `step` on the row that says it is working
+(ruling 250). Below the
 two-column breakpoint the thread picker takes a row of its own in the head, with New and
 Home on the row under it (ruling 476(e)). A link in a message, and any other long token in
 its prose (a word joined by slashes), wraps inside the transcript rather than scrolling it
@@ -161,7 +163,9 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   page control the panel covers also closes it and leaves focus on that control (with no
   focus trap, Tab reaches controls under the panel; ruling 455(d)). Any other Escape (the
   palette, a confirm dialog, a stage menu or its trigger, focus on nothing) leaves the dock
-  alone, and an outside press never closes it. An empty thread offers the scope's three examples, which send on click.
+  alone, and an outside press never closes it. An empty thread offers the scope's three
+  examples, which send on click: its sentence sits in the middle of the transcript and the
+  examples at its foot, over the composer (ruling 516).
   The transcript meets a reply as the page's does (ruling 476(c) and (d), below in §2): it
   opens on the newest reply's first line and scrolls a reply that lands to its first line,
   and the panel's own visually hidden `role="status"` region says "<name> replied: <first
