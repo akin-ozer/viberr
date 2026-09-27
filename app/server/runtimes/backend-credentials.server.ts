@@ -1184,11 +1184,17 @@ export function backendAccountHealth(
   if (pathExists(vendorLoginCredentialPath(row.backend, home))) {
     return { ...base, available: true, verification: "file", detail: null };
   }
-  if ((env.platform ?? process.platform) === "darwin" && pathExists(home)) {
-    // On macOS the vendor client keeps its sign-in in the login Keychain, which
+  if (
+    row.backend === "claude" &&
+    (env.platform ?? process.platform) === "darwin" &&
+    pathExists(home)
+  ) {
+    // On macOS the Claude client keeps its sign-in in the login Keychain, which
     // a server-side probe cannot read without popping an unlock dialog. The
     // home exists, so the binary HAS run here: honour the sign-in and report
-    // the weaker verification rather than hiding it.
+    // the weaker verification rather than hiding it. Codex signs in to its
+    // `auth.json` alone, and a run copies only that file into its home, so a
+    // Codex home without it cannot run on any platform.
     return { ...base, available: true, verification: "presence", detail: null };
   }
   return {

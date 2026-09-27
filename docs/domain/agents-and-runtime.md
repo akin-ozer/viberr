@@ -68,7 +68,7 @@ answer every surface reads: the health of the person's ACTIVE account on that ba
 |---|---|---|
 | `api_key` / `access_token` | always (the sealed box is the credential) | `credential` |
 | `login` | the vendor's own file is in that ACCOUNT's home (`claude-home/accounts/<id>/.credentials.json`, `codex-home/accounts/<id>/auth.json`; for an account connected before ruling 507, the backend home itself) | `file` |
-| `login` on darwin | the account's home exists but holds no file (the Claude binary uses the Keychain) | `presence` |
+| Claude `login` on darwin | the account's home exists but holds no file (the Claude binary uses the Keychain; Codex signs in to its `auth.json` alone, the one file a run copies, so a Codex home without it is `none` on every platform) | `presence` |
 | none, or a `login` whose file is gone | never — `detail` says which, addressed to the person, and adds that another of their accounts on the backend works when one does ("switching to it needs no sign-in") | `none` |
 
 `/resources/health` reports the instance-level number that remains: `backends: { claude:

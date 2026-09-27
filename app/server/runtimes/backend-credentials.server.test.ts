@@ -215,8 +215,10 @@ interface SignedInAccount {
 /**
  * What a confirmed hosted sign-in leaves (ruling 507): the account the driver
  * minted before the vendor ran, recorded as a `login` row, and — unless
- * `file` is false, the state a wiped volume leaves — the vendor's own sign-in
- * file in that account's home, where the binary wrote it.
+ * `file` is false — the vendor's own sign-in file in that account's home,
+ * where the binary wrote it. `file: false` keeps the home: that reads as a
+ * wiped volume everywhere except a Claude home on macOS, which is a Keychain
+ * sign-in, so a Claude test of the wiped volume removes the home as well.
  */
 function signIn(
   backend: RealBackend,
@@ -886,7 +888,7 @@ describe("userBackendHealth", () => {
     );
   });
 
-  it("honours a macOS Keychain login as presence — but only when the account's home exists", () => {
+  it("honours a macOS Keychain login as presence — only Claude's, and only when its home exists", () => {
     const target = loginTargetFor(db, actor.userId, "claude");
     recordBackendLogin(db, actor, "claude", "claudeai", {}, target);
     const noHome = userBackendHealth(db, actor.userId, "claude", {
@@ -903,6 +905,13 @@ describe("userBackendHealth", () => {
     expect(withHome.available).toBe(true);
     expect(withHome.verification).toBe("presence");
     expect(withHome.detail).toBeNull();
+
+    // Codex signs in to its auth.json alone, and a run copies only that file:
+    // its home without the file is no sign-in, on macOS too.
+    signIn("codex", "device", {}, { file: false });
+    const codex = userBackendHealth(db, actor.userId, "codex", { dataRoot, platform: "darwin" });
+    expect(codex.available).toBe(false);
+    expect(codex.verification).toBe("none");
   });
 
   it("refuses to probe a home for an id that is not path-safe", () => {
@@ -1030,8 +1039,7 @@ describe("runCredentialFor", () => {
   });
 
   it("refuses a sign-in whose file is gone, naming the wiped volume", () => {
-    const wiped = signIn("codex", "device", {}, { file: false });
-    rmSync(wiped.home, { recursive: true, force: true });
+    signIn("codex", "device", {}, { file: false });
     const error = thrownFrom(() => runCredentialFor(db, actor.userId, "codex", dataRoot));
     expect(error?.code).toBe(ERROR_CODES.RUN_UNAVAILABLE);
     expect(error?.userMessage).toContain("sign-in file is missing");
