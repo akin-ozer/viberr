@@ -6,17 +6,19 @@ import { expect, test } from "@playwright/test";
  */
 
 test("org settings tabs render", async ({ page }) => {
-  await page.goto("/org/settings");
+  // Each tab's panel, by its screen label: the tab bar prints every tab's name
+  // on every tab, so those names prove nothing about which panel is up.
+  const panel = (label: string) => page.locator(`[data-screen-label="Settings · ${label}"]`);
 
-  // Connections tab (default).
-  await expect(page.getByText("GitHub connections").first()).toBeVisible();
+  await page.goto("/org/settings");
+  await expect(panel("GitHub connections")).toBeVisible();
 
   await page.goto("/org/settings?tab=users");
-  await expect(page.getByText("Users & access").first()).toBeVisible();
+  await expect(panel("Users & access")).toBeVisible();
   await expect(page.getByText("arda@viberr.dev").first()).toBeVisible();
 
   await page.goto("/org/settings?tab=resources");
-  await expect(page.getByText("Agent resources").first()).toBeVisible();
+  await expect(panel("Agent resources")).toBeVisible();
 });
 
 /**
