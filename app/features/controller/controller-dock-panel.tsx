@@ -177,9 +177,20 @@ export function DockPanelBody({
       {unavailable ? (
         <section className="dock-body" aria-label="Controller unavailable here">
           <p className="empty sm">
-            The controller has nothing to work with here: this project or
-            task is not open to you, or it no longer exists. Everything else
-            on the page still works.
+            {current?.signedOut ? (
+              // Ruling 457: the dock's loads answer a signed-out tab 401, never
+              // a login redirect; the page's own navigation asks for the sign-in.
+              <>
+                You're signed out, so the controller can't answer here. Reload
+                the page to sign in again.
+              </>
+            ) : (
+              <>
+                The controller has nothing to work with here: this project or
+                task is not open to you, or it no longer exists. Everything else
+                on the page still works.
+              </>
+            )}
           </p>
         </section>
       ) : threadsOpen ? (
@@ -282,7 +293,7 @@ export function DockPanelBody({
       )}
       <div className="dock-composer">
         <div className="ctl-composer">
-          {current && !current.available && <NotConnectedNote />}
+          {current && !current.available && !current.signedOut && <NotConnectedNote />}
           <textarea
             ref={composerRef}
             value={text}
@@ -298,11 +309,13 @@ export function DockPanelBody({
               !current
                 ? "Loading…"
                 : disabled
-                  ? current.available
-                    ? "Read-only: only the thread's owner can talk in it."
-                    : // Ruling 127: the dock bills the person reading it,
-                      // and says so in the note above the box (U39-10).
-                      CONNECT_TO_SEND
+                  ? current.signedOut
+                    ? "Sign in again to send a message."
+                    : current.available
+                      ? "Read-only: only the thread's owner can talk in it."
+                      : // Ruling 127: the dock bills the person reading it,
+                        // and says so in the note above the box (U39-10).
+                        CONNECT_TO_SEND
                   : "Ask the controller, or tell it what to do here…"
             }
             disabled={disabled}

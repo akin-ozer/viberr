@@ -50,10 +50,10 @@ const loaderView = z.object({
   }),
 });
 
-async function get(userId: string, query: string) {
+/** One GET, signed in with `cookie` or with no session at all. */
+async function load(query: string, cookie?: string) {
   const { loader } = await import("~/routes/resources.controller");
-  const { cookie } = await app.cookieFor(userId);
-  const request = app.request(`/resources/controller${query}`, { cookie });
+  const request = app.request(`/resources/controller${query}`, cookie ? { cookie } : {});
   return loader({
     request,
     url: new URL(request.url),
@@ -63,13 +63,29 @@ async function get(userId: string, query: string) {
   });
 }
 
-async function post(userId: string, fields: Record<string, string>, csrf?: string) {
+async function get(userId: string, query: string) {
+  return load(query, (await app.cookieFor(userId)).cookie);
+}
+
+/** Runs `body` with a forced password reset pending for `userId`. */
+async function withPendingReset<T>(userId: string, body: () => Promise<T>): Promise<T> {
+  const { updateUserFields } = await import("~/server/auth/user-store.server");
+  updateUserFields(app.db, userId, { pwresetRequired: true });
+  try {
+    return await body();
+  } finally {
+    updateUserFields(app.db, userId, { pwresetRequired: false });
+  }
+}
+
+/** One POST, signed in with `cookie` or with no session at all. */
+async function submit(fields: Record<string, string>, cookie?: string) {
   const { action } = await import("~/routes/resources.controller");
-  const { cookie, sessionId } = await app.cookieFor(userId);
   const body = new FormData();
-  body.set("_csrf", csrf ?? (await app.csrfFor(sessionId)));
   for (const [k, v] of Object.entries(fields)) body.set(k, v);
-  const request = app.request("/resources/controller", { method: "POST", body, cookie });
+  const init: RequestInit & { cookie?: string } = { method: "POST", body };
+  if (cookie) init.cookie = cookie;
+  const request = app.request("/resources/controller", init);
   return action({
     request,
     url: new URL(request.url),
@@ -77,6 +93,11 @@ async function post(userId: string, fields: Record<string, string>, csrf?: strin
     pattern: "/resources/controller",
     context: new RouterContextProvider(),
   });
+}
+
+async function post(userId: string, fields: Record<string, string>, csrf?: string) {
+  const { cookie, sessionId } = await app.cookieFor(userId);
+  return submit({ _csrf: csrf ?? (await app.csrfFor(sessionId)), ...fields }, cookie);
 }
 
 describe("GET /resources/controller", () => {
@@ -116,6 +137,50 @@ describe("GET /resources/controller", () => {
     expect(nonMember.view.scope.projectName).toBeNull();
     expect(nonMember.view.scope.label).toBe("Not available here");
     expect(JSON.stringify(nonMember.view)).not.toContain("Viberr Core");
+  });
+
+  /**
+   * Ruling 457, test audit L14-29. The open dock loads this through a
+   * root-owned fetcher, and `requireAuth` answered a missing session with a
+   * login redirect whose returnTo was this route and the scope's query: a
+   * stale tab's open went to /login and, once signed in, to a page of raw
+   * JSON. No session, or a forced password reset pending, answers 401 with a
+   * view that says so, returned (a thrown response replaces the page), built
+   * from the scope the page asked about with nothing read for a caller who
+   * is not signed in.
+   */
+  it("answers a signed-out load 401 with the signed-out view, never a login redirect", async () => {
+    const query = `?project=${SLUG}&task=VIB-142&seen=1`;
+    const { cookie } = await app.cookieFor(arda);
+    const answers = [await load(query), await withPendingReset(arda, () => load(query, cookie))];
+    for (const answer of answers) {
+      // CANARY: guard with `requireAuth` again and both loads reject with its
+      // 302 to /login?returnTo=%2Fresources%2Fcontroller%3Fproject%3D….
+      expect(answer).toMatchObject({
+        init: { status: 401 },
+        data: {
+          view: {
+            signedOut: true,
+            unavailable: true,
+            available: false,
+            conversation: null,
+            messages: [],
+            threads: [],
+            scope: {
+              kind: "task",
+              projectSlug: SLUG,
+              taskKey: "VIB-142",
+              projectName: null,
+              label: "Signed out",
+              contextLine: "Signed out: sign in again to talk to the controller.",
+              pageHref: `/projects/${SLUG}/controller`,
+            },
+          },
+        },
+      });
+      // Arda's project is not named to a caller nobody signed in as.
+      expect(JSON.stringify(answer)).not.toContain("Viberr Core");
+    }
   });
 
   it("answers the task scope, newest thread first, and refuses a thread from another scope", async () => {
@@ -190,6 +255,31 @@ describe("POST /resources/controller", () => {
     const reply = returnedRefusal.parse(await post(arda, { intent: "send", text: "hi" }, "stale-token"));
     expect(reply.init?.status).toBe(403);
     expect(reply.data.error).toMatch(/expired/);
+  });
+
+  /**
+   * Ruling 457, test audit L14-29. The dock's send is a fetcher submit, and
+   * `requireAuth` answered a missing session with a login redirect naming this
+   * route, so signing in again opened a page of raw JSON. No session, or a
+   * forced password reset pending, answers 401 with the sentence the dock
+   * toasts; the message stays in its composer (ruling 259).
+   */
+  it("answers a signed-out send 401 with a sentence, never a login redirect", async () => {
+    const { cookie, sessionId } = await app.cookieFor(deniz);
+    const fields = { _csrf: await app.csrfFor(sessionId), intent: "send", text: "Where are we?" };
+    const replies = [
+      await submit(fields),
+      await withPendingReset(deniz, () => submit(fields, cookie)),
+    ];
+    for (const reply of replies) {
+      // CANARY: guard with `requireAuth` again and both sends reject with its
+      // 302 to /login?returnTo=%2Fresources%2Fcontroller.
+      const refused = returnedRefusal.parse(reply);
+      expect(refused.init?.status).toBe(401);
+      expect(refused.data.error).toBe(
+        "You're signed out, so this wasn't sent. Copy it, then reload the page to sign in again.",
+      );
+    }
   });
 
   /**

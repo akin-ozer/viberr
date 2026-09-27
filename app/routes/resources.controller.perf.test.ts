@@ -63,6 +63,9 @@ describe("controller dock routes (ruling 457)", () => {
       loader(args(app.request("/resources/controller-unseen", { cookie }), "/resources/controller-unseen"));
     await call();
     const { result, tally } = await tallyServerReads(app.dataRoot, call);
+    // Every call here is signed in, so each loader answers its own data; only
+    // a caller who is not gets the 401 `data()` wraps (ruling 457).
+    if (!("unseen" in result)) throw new Error(`expected the status, got ${JSON.stringify(result)}`);
     expect(result.unseen).toHaveLength(UNSEEN_REPLIES);
     expectWithinBudget("server-read:controller-unseen.store-reads", tally.storeReads.length);
     expectWithinBudget("server-read:controller-unseen.sql", tally.statements.length);
@@ -76,6 +79,7 @@ describe("controller dock routes (ruling 457)", () => {
       loader(args(app.request(`/resources/controller${query}`, { cookie }), "/resources/controller"));
     await call();
     const { result, tally } = await tallyServerReads(app.dataRoot, call);
+    if (!("view" in result)) throw new Error(`expected the view, got ${JSON.stringify(result)}`);
     expect(result.view.unavailable).toBe(false);
     expect(result.view.scope.kind).toBe("task");
     expect(result.view.controllerName).toBe("Controller");
@@ -91,15 +95,17 @@ describe("controller dock routes (ruling 457)", () => {
     writeFileSync(file, readFileSync(file, "utf8").replace("name: Controller", "name: Switchboard"));
     const { loader } = await import("~/routes/resources.controller");
     const { cookie } = await app.cookieFor(arda);
-    const { view } = await loader(
+    const named = await loader(
       args(app.request(`/resources/controller?project=${SLUG}&task=VIB-142`, { cookie }), "/resources/controller"),
     );
-    expect(view.controllerName).toBe("Switchboard");
+    if (!("view" in named)) throw new Error(`expected the view, got ${JSON.stringify(named)}`);
+    expect(named.view.controllerName).toBe("Switchboard");
     expect(resolveControllerConfig(app.dataRoot).name).toBe("Switchboard");
     // A task that does not exist is still out of scope.
     const missing = await loader(
       args(app.request(`/resources/controller?project=${SLUG}&task=VIB-9999`, { cookie }), "/resources/controller"),
     );
+    if (!("view" in missing)) throw new Error(`expected the view, got ${JSON.stringify(missing)}`);
     expect(missing.view.unavailable).toBe(true);
   });
 });

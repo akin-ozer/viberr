@@ -1,6 +1,6 @@
 import type { Route } from "./+types/resources.run-log";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import { requireUser } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
@@ -54,7 +54,25 @@ import { runLogWindowFor } from "~/server/runtimes/run-projection.server";
  * lines: [{ seq, occurredAt, raw, display }] } }`.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // redirect. The run console reads this in the background with a plain
+  // `fetch`, which follows a redirect without a word: every tail read from a
+  // signed-out tab rendered /login on the server, failed to parse as the log,
+  // and was retried in silence. The console now says its tail stopped, and the
+  // page's next real navigation asks for the sign-in.
+  const ctx = await authenticate(request);
+  if (!ctx || ctx.pwresetRequired) {
+    return Response.json(
+      {
+        error: {
+          code: ERROR_CODES.UNAUTHORIZED,
+          message: "Sign in to read this run's log.",
+        },
+      },
+      { status: 401 },
+    );
+  }
+  const { user } = ctx;
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId");
   if (!runId) {

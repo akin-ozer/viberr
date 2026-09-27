@@ -2,6 +2,7 @@ import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { RunLog } from "~/server/runtimes/run-service.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 
 /**
  * P13-D-11 — the wire contract for `/resources/run-log`.
@@ -59,19 +60,24 @@ interface RunLogBody {
   data: RunLog;
 }
 
-async function get(query: string): Promise<RunLog> {
+/** One read of the fixture run, signed in with `cookie` or with no session. */
+async function load(query: string, cookie?: string): Promise<Response> {
   const { loader } = await import("~/routes/resources.run-log");
-  const { cookie } = await app.cookieFor(ardaId);
-  const request = app.request(`/resources/run-log?runId=${RUN_ID}&${query}`, {
-    cookie,
-  });
-  const res = await loader({
+  const request = app.request(
+    `/resources/run-log?runId=${RUN_ID}&${query}`,
+    cookie ? { cookie } : {},
+  );
+  return loader({
     request,
     url: new URL(request.url),
     params: {},
     pattern: "/resources/run-log",
     context: new RouterContextProvider(),
   });
+}
+
+async function get(query: string): Promise<RunLog> {
+  const res = await load(query, (await app.cookieFor(ardaId)).cookie);
   // A 200 rules out the route's two error branches, so the body is the
   // success payload the route builds from `getRunLog`.
   expect(res.status).toBe(200);
@@ -164,5 +170,36 @@ describe("GET /resources/run-log for the console (ruling 457)", () => {
     expect(body.data.lineKeys.at(-1)).toBe(`0:${LINES - 1}`);
     expect(body.data.logWindow.headSeq).toBe(LINES - 1);
     expect(JSON.stringify(body)).not.toContain('"raw"');
+  });
+});
+
+/**
+ * Ruling 457, test audit L14-29. The run console reads this in the background
+ * with a plain `fetch`, which follows a redirect without a word: behind
+ * `requireUser`'s login redirect, every tail read from a signed-out tab
+ * rendered /login on the server, failed to parse as the log, and was retried
+ * in silence. No session, or a forced password reset pending, answers 401 in
+ * the conventions' JSON error shape, which the console reports as a stopped
+ * tail.
+ */
+describe("GET /resources/run-log signed out (ruling 457)", () => {
+  it("answers 401 in the conventions' error shape, never a login redirect", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, ardaId, { pwresetRequired: true });
+    try {
+      // CANARY: guard with `requireUser` again and both reads reject with its
+      // 302 to /login?returnTo=%2Fresources%2Frun-log%3FrunId%3D….
+      for (const res of [await load("since=-1"), await load("since=-1", cookie)]) {
+        expect({ status: res.status, body: await res.json() }).toEqual({
+          status: 401,
+          body: {
+            error: { code: ERROR_CODES.UNAUTHORIZED, message: "Sign in to read this run's log." },
+          },
+        });
+      }
+    } finally {
+      updateUserFields(app.db, ardaId, { pwresetRequired: false });
+    }
   });
 });

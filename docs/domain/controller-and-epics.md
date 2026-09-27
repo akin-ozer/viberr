@@ -69,8 +69,8 @@ Identity facts:
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
-| `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
-| `/resources/controller-unseen` | any signed-in user | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 448), and the viewer's turns working right now with their scope, phase and step (ruling 457). |
+| `/resources/controller` | any signed-in user; project and task scopes require membership; a signed-out request gets a 401, never a login redirect | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
+| `/resources/controller-unseen` | any signed-in user; a signed-out request gets a 401 with an empty status, never a login redirect | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 448), and the viewer's turns working right now with their scope, phase and step (ruling 457). |
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
 project exists) and the org-settings tab's "Open the controller". There is no
@@ -213,11 +213,33 @@ a `showModal()` overlay, which would leave the dock inert behind it.
 - **Never the root error page**: the view's route answers a benign empty view for a
   scope the person cannot reach and falls back to this scope's newest thread for a
   selection it cannot honour (reporting `staleSelection`, which the dock uses to forget
-  the stored id). A thrown response from a root-owned fetcher would replace the whole
-  page, which is the hazard ruling 121(f) named for CSRF. The unavailable view names
+  the stored id). A thrown response from a root-owned fetcher replaced the whole page,
+  which is the hazard ruling 121(f) named for CSRF. The unavailable view names
   nothing but what was typed (F35-4): `projectName` is null, the label reads "Not
   available here", and the projection is never read for it, so a non-member cannot learn
-  a project's display name from a guessed slug.
+  a project's display name from a guessed slug. A request the server never answers (a
+  restart, a 5xx, a dead network) keeps the page too (ruling 457). Both routes have a
+  `clientLoader` that answers a failed load with null, which the dock reads as not
+  loaded yet: no dot and no working poll, and the open panel's loading lines over a held
+  composer that keeps what was typed, until a load answers (the next
+  `controller.updated`, which a `stream.resync` after a restart hands it, a thread pick,
+  or opening the panel again). The view's route has a `clientAction` that answers a
+  failed send with `{ ok:false }`, which the dock toasts ("The controller could not take
+  that. Try again.") while the message stays in its composer. Neither says why, so the
+  handlers still answer rather than throw.
+- **Never a login redirect** (ruling 457, test audit L14-29): both routes answer a
+  request with no session, or with a forced password reset pending, with a 401, returned
+  like every other answer. `requireAuth`'s login redirect named the route and the scope's
+  query as the returnTo, and a fetcher follows a redirect as a navigation, so a stale
+  tab's dock went to `/login` and, once signed in, to a page of raw JSON. The status
+  answers an empty status, so the button shows no dot and the working poll stops. The
+  view answers the `signedOut` view (`signedOutDockView`): the unavailable view's shape
+  with the label "Signed out", built from the scope asked about with nothing read, not
+  even the controller's configured name, and its panel says "You're signed out, so the
+  controller can't answer here. Reload the page to sign in again." over a disabled
+  composer. A send answers `{ ok:false, error }`, which the dock toasts while the message
+  stays in its composer. The page's next real navigation asks for the sign-in, with its
+  own path as the returnTo.
 - **The send door says no where the composer does** (U35-4): `POST intent=send` for a
   person with no Claude connected answers `409 { ok:false, error }` with the refusal
   sentence and creates no thread for a new conversation; a refused turn on an existing

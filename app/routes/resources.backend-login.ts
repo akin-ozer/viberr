@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Route } from "./+types/resources.backend-login";
-import { requireUser } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import {
@@ -59,8 +59,38 @@ export interface BackendLoginPollData {
   health: BackendHealthView;
 }
 
+/** A refusal, in the conventions' JSON error shape: a 400 for an unknown
+ *  backend, a 401 for a caller who is not signed in. It carries no sign-in
+ *  and no health. */
+export interface BackendLoginRefusal {
+  error: { code: string; message: string };
+  login?: undefined;
+  health?: undefined;
+}
+
+/** Everything the poll can hand the Profile card. */
+export type BackendLoginPollAnswer = BackendLoginPollData | BackendLoginRefusal;
+
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // redirect, which named THIS route as the returnTo. The card polls it
+  // through a fetcher, and a fetcher follows a redirect as a navigation: a
+  // stale tab went to /login and, once signed in, to a page of raw JSON. The
+  // card keeps what its page drew, and the page's next real navigation asks
+  // for the sign-in.
+  const ctx = await authenticate(request);
+  if (!ctx || ctx.pwresetRequired) {
+    return Response.json(
+      {
+        error: {
+          code: ERROR_CODES.UNAUTHORIZED,
+          message: "Sign in to see your agent accounts.",
+        },
+      } satisfies BackendLoginRefusal,
+      { status: 401 },
+    );
+  }
+  const { user } = ctx;
   const backend = backendParam.safeParse(
     new URL(request.url).searchParams.get("backend"),
   );
@@ -74,7 +104,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           code: ERROR_CODES.VALIDATION_FAILED,
           message: "Unknown backend.",
         },
-      },
+      } satisfies BackendLoginRefusal,
       { status: 400 },
     );
   }
@@ -93,4 +123,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     },
   };
   return Response.json(body);
+}
+
+/**
+ * Ruling 457: a failed poll is the card's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, so a restart, a 5xx or a dead network during a sign-in replaced the
+ * Profile page with its error page. Any failure answers null, which names no
+ * session: the card keeps the sign-in its page drew, and the next poll asks
+ * again 2 s later.
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
 }

@@ -31,6 +31,7 @@ only in `users.role`.
 | Forced reset | `users.pwreset_required` is set by the boot-generated bootstrap password, by admin-created temp passwords and by admin resets. `requireAuth` redirects to `/login` until `intent=set-password` completes it (audit `auth.password.forced_reset_completed`; other sessions are deliberately left alive). There is no self-service "forgot password". |
 | Bootstrap admin | `seedInitialAdmin` runs only while `users` is empty: boot uses `VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` or `admin@viberr.dev` with a random one-time password logged once as `VIBERR BOOTSTRAP ADMIN` (reset forced); the seed CLI uses the known dev default. Audit `org.user.created {bootstrap: true}`. |
 | Disabled users | The auth guard deletes the session of a disabled or vanished user and treats the request as signed out; `isOrgAdmin` requires `disabled = 0`. |
+| Background loads | Every route a page loads in the background answers a request with no session, or with a forced reset pending, with a 401 (`authenticate`, then the route's own refusal), never `requireUser`'s login redirect: the dock's two (`/resources/controller`, `/resources/controller-unseen`), the bell's list (`/resources/notifications`), the attention watcher's read (`/resources/attention`), the SSE stream (`/resources/events`), the Agent accounts poll (`/resources/backend-login`), the palette's search (`/resources/search`), the model catalog (`/resources/model-catalog`), the run console's log reads (`/resources/run-log`) and the task page's Changes read. A fetcher follows a redirect as a navigation, and the redirect's returnTo named the resource, so signing in again opened a page of raw JSON; a plain `fetch` follows it silently and got the login page instead of its answer (ruling 457; test audit L14-29 found the last six). Each answer is one the page can hold, so the tab stays where it is; its next real navigation asks for the sign-in with the page's own path as the returnTo. |
 | Logout | `POST /logout` with CSRF, audit `auth.logout`, better-auth `signOut`, redirect to `/login`. |
 
 ### CSRF for app routes
@@ -566,7 +567,11 @@ Two routes in, both the vendor's own:
   asks the SAME binary (`claude auth status`, `codex login status`) whether it is really
   signed in, and only that answer writes the row. The session is polled from the browser
   through `/resources/backend-login` every 2 s while it is live; the success toast
-  settles on that result, never on the submit. The card renders the flow as two numbered
+  settles on that result, never on the submit. A tab signed out meanwhile gets a 401
+  refusal from the poll, never a login redirect (ruling 457), and the card keeps what its
+  page drew; so it does for a poll the server never answers (a restart, a 5xx, a dead
+  network), which the route's `clientLoader` answers with null instead of the Profile
+  page's error boundary. The card renders the flow as two numbered
   steps: the vendor's link is an "Open sign-in page" button that names its host and is
   never printed in full, with a "Copy link" button beside it on both backends (ruling
   294: the browser holding the vendor session is often not the one reading this page);

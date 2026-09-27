@@ -1,5 +1,6 @@
+import { data } from "react-router";
 import type { Route } from "./+types/resources.controller-unseen";
-import { requireAuth } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
@@ -55,8 +56,18 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  * (controller-and-epics §8), so this is its own signal. Only threads whose
  * project the viewer can still open are listed, so every link leads somewhere.
  */
-export async function loader({ request }: Route.LoaderArgs): Promise<DockStatus> {
-  const auth = await requireAuth(request);
+export async function loader({ request }: Route.LoaderArgs) {
+  // Ruling 457 (test audit L14-29): a 401, never `requireAuth`'s login
+  // redirect, which named THIS route as the returnTo. The dock loads it on
+  // every page, on each `controller.updated` and every 5 s while a turn works,
+  // all through a root-owned fetcher, and a fetcher follows a redirect as a
+  // navigation: a stale tab went to /login and, once signed in, to a page of
+  // raw JSON. It answers an empty status, so the button shows nothing and the
+  // working poll stops. The page's next real navigation asks for the sign-in.
+  const auth = await authenticate(request);
+  if (!auth || auth.pwresetRequired) {
+    return data<DockStatus>({ unseen: [], working: [] }, { status: 401 });
+  }
   const db = getDb();
   const actor = { userId: auth.user.id, label: auth.user.email };
   // Once per project: six unseen threads on one board read its project file
@@ -99,5 +110,24 @@ export async function loader({ request }: Route.LoaderArgs): Promise<DockStatus>
       step: turn.step,
     });
   }
-  return { unseen, working };
+  return { unseen, working } satisfies DockStatus;
+}
+
+/**
+ * Ruling 457: a failed load is the dock's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, and root owns the dock's, so a restart, a 5xx or a dead network
+ * under a `controller.updated` or the working poll replaced the whole page
+ * with root's error page. Any failure answers null, which the dock reads as it
+ * reads the time before its first answer: no reply waiting and no turn
+ * working, so the working poll stops. The next status that answers puts them
+ * back: a panel open or close, or the next `controller.updated` (the stream
+ * hands the dock one when it resyncs after a restart).
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
 }

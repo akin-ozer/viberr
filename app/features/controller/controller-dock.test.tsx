@@ -79,15 +79,16 @@ async function restored(expected: "0" | "1" = "0") {
  * surfaces still open on it, and a person who moved to another page had no
  * signal anywhere that it had landed.
  */
-describe("the dock tells a person a reply is waiting (O39-d)", () => {
-  const BOARD_REPLY: UnseenReplyView = {
-    id: "cnv_board",
-    title: "Plan the release",
-    projectSlug: "viberr",
-    taskKey: null,
-    href: "/projects/viberr/controller?c=cnv_board",
-  };
+/** A reply waiting in a board conversation, not the task's (O39-d). */
+const BOARD_REPLY: UnseenReplyView = {
+  id: "cnv_board",
+  title: "Plan the release",
+  projectSlug: "viberr",
+  taskKey: null,
+  href: "/projects/viberr/controller?c=cnv_board",
+};
 
+describe("the dock tells a person a reply is waiting (O39-d)", () => {
   it("marks the button, says so to a screen reader, and links to the reply from the panel", async () => {
     mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView(), unseen: () => [BOARD_REPLY] });
     // CANARY: drop the unseen dot from the button and nothing on this page
@@ -475,6 +476,45 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.getByText("task page")).toBeTruthy();
   });
 
+  /**
+   * Ruling 457, test audit L14-29: a signed-out tab's dock loads used to
+   * navigate it to /login. They now answer 401 with an empty status and the
+   * signed-out view (returned, not thrown, so the view reaches the panel
+   * rather than the `clientLoader`'s failure answer), and the panel says what
+   * happened and what to do, blaming neither the scope nor a missing Claude
+   * account.
+   */
+  it("says the person is signed out, and offers no composer, on a signed-out tab", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          signedOut: true,
+          unavailable: true,
+          available: false,
+          scope: {
+            ...taskView().scope,
+            projectName: null,
+            label: "Signed out",
+            contextLine: "Signed out: sign in again to talk to the controller.",
+          },
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+    // CANARY: drop the panel's `signedOut` branches and it says the task is
+    // not open to the person, and that their Claude account isn't connected.
+    await screen.findByText(
+      "You're signed out, so the controller can't answer here. Reload the page to sign in again.",
+    );
+    expect(screen.queryByText(/nothing to work with here/)).toBeNull();
+    expect(panel.querySelector("[data-not-connected]")).toBeNull();
+    const composer = await screen.findByLabelText("Message to the controller");
+    expect(composer.hasAttribute("disabled")).toBe(true);
+    expect(composer.getAttribute("placeholder")).toBe("Sign in again to send a message.");
+    expect(screen.getByText("task page")).toBeTruthy();
+  });
+
   it("sends into the thread the person picked, not the one still on screen (finding 15)", async () => {
     const { sends } = mount({
       path: "/projects/viberr/tasks/VIB-1",
@@ -824,6 +864,47 @@ describe("the controller dock (ruling 121)", () => {
     // SAFETY: `findByLabelText("Message to the controller")` resolves the
     // composer, which the dock renders as a `<textarea>`.
     expect((composer as HTMLTextAreaElement).value).toBe("hello");
+  });
+
+  /**
+   * Ruling 457: a request the server never answers (a restart, a 5xx, a dead
+   * network) is the dock's, never the page's. React Router sends a fetcher's
+   * failure to the error boundary of the route that owns the fetcher, and
+   * root owns all three of the dock's, so a failed send, reload or working
+   * poll replaced the whole page with root's error page. The send's
+   * `clientAction` answers a failure as a refused send: the toast, and the
+   * message kept. Each load's `clientLoader` answers null, which the dock
+   * reads as it reads the time before its first answer: no reply waiting,
+   * and the panel's loading lines, until the next load answers.
+   */
+  it("keeps the page when the server can't answer: a failed send toasts, a failed load reads as not loaded", async () => {
+    let up = true;
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+      unseen: () => [BOARD_REPLY],
+      reachable: () => up,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /a new reply/ }));
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message to the controller");
+    await waitFor(() => expect(composer.hasAttribute("disabled")).toBe(false));
+    expect(screen.queryByText("Reading where you are…")).toBeNull();
+    fireEvent.change(composer, { target: { value: "hello" } });
+    up = false;
+    // CANARY: delete `resources.controller.ts`'s `clientAction` and the send
+    // takes the page down with it.
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText("The controller could not take that. Try again.");
+    expect(composer.value).toBe("hello");
+    // A conversation changed somewhere: the status and the open view reload.
+    // CANARY: delete either route's `clientLoader` and this takes the page
+    // down instead.
+    act(() => {
+      window.dispatchEvent(new Event(CONTROLLER_UPDATED_EVENT));
+    });
+    await screen.findByText("Reading where you are…");
+    await waitFor(() => expect(screen.queryByRole("button", { name: /a new reply/ })).toBeNull());
+    expect(screen.getByText("task page")).toBeTruthy();
   });
 
   it("renders the transcript and the working state, and shows the dot on the trigger", async () => {

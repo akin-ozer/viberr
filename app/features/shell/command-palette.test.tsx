@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
+import * as searchRoute from "~/routes/resources.search";
 import type { CommandHit } from "./command-search.server";
 import { CommandPalette } from "./command-palette";
+import { clientLoaderOver, unreachable } from "../../../test-support/client-data";
 
 /**
  * R15-5 — the ⌘K palette. Before it, the topbar's box promised a global search
@@ -36,14 +38,18 @@ const HITS: CommandHit[] = [
   },
 ];
 
-function renderPalette(hits: CommandHit[] = HITS) {
+/** `search` answers a query with its hits, or is `unreachable`: a server
+ *  that gives no answer (a restart, a dead network). */
+function renderPalette(search: () => CommandHit[] = () => HITS) {
   let landedAt: string | null = null;
+  let searches = 0;
   const Stub = createRoutesStub([
     { path: "/", Component: () => <CommandPalette onClose={() => {}} /> },
     {
       path: "/resources/search",
-      loader: ({ request }) => ({
-        data: { q: new URL(request.url).searchParams.get("q") ?? "", hits },
+      loader: clientLoaderOver(searchRoute, ({ request }) => {
+        searches += 1;
+        return { data: { q: new URL(request.url).searchParams.get("q") ?? "", hits: search() } };
       }),
     },
     {
@@ -62,7 +68,7 @@ function renderPalette(hits: CommandHit[] = HITS) {
     },
   ]);
   const utils = render(<Stub initialEntries={["/"]} />);
-  return { ...utils, landed: () => landedAt };
+  return { ...utils, landed: () => landedAt, searches: () => searches };
 }
 
 describe("CommandPalette", () => {
@@ -109,7 +115,7 @@ describe("CommandPalette", () => {
         sub: "epic-2 · Viberr Core",
         href: "/projects/viberr-core/epics/epic-2",
       };
-      const { getByLabelText, getByRole, container } = renderPalette([HITS[0]!, epic, HITS[1]!]);
+      const { getByLabelText, getByRole, container } = renderPalette(() => [HITS[0]!, epic, HITS[1]!]);
       fireEvent.change(getByLabelText("Search tasks, epics, branches, agents, projects"), {
         target: { value: "check" },
       });
@@ -244,16 +250,32 @@ describe("CommandPalette: the combobox/listbox contract", () => {
     }
   });
 
-  it("announces an empty result instead of leaving the combobox silent", async () => {
+  /**
+   * Ruling 457: a search the server can't answer (a restart, a 5xx, a dead
+   * network) is the palette's, never the page's. React Router sent it to the
+   * error boundary of the route that owns the palette, which replaced the
+   * page. The route's `clientLoader` now answers null, which the palette reads
+   * as no match.
+   */
+  it.each<[string, () => CommandHit[]]>([
+    ["matches nothing", () => []],
+    ["can't reach the server", unreachable],
+  ])("announces an empty result when the search %s, instead of leaving the combobox silent", async (_label, search) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const { getByLabelText, getByText } = renderPalette([]);
+      const { getByLabelText, getByText, searches } = renderPalette(search);
       fireEvent.change(
         getByLabelText("Search tasks, epics, branches, agents, projects"),
         { target: { value: "zzzz" } },
       );
       await vi.advanceTimersByTimeAsync(200);
-      await waitFor(() => expect(getByText(/Nothing matches/)).toBeTruthy());
+      await waitFor(() => expect(searches()).toBe(1));
+      // Let the answer land: the line reads the same before the search goes
+      // out. CANARY: delete `resources.search.ts`'s `clientLoader` and the
+      // unreachable search takes the palette down with the page.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
       expect(getByText(/Nothing matches/).getAttribute("role")).toBe("status");
     } finally {
       vi.useRealTimers();

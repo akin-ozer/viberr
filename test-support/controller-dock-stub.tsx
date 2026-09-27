@@ -6,7 +6,10 @@ import type { ControllerDockView } from "~/features/controller/controller-dock-q
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
+import * as dockStatusRoute from "~/routes/resources.controller-unseen";
+import * as dockRoute from "~/routes/resources.controller";
 import type { LiveTurnView, UnseenReplyView } from "~/routes/resources.controller-unseen";
+import { clientActionOver, clientLoaderOver, unreachable } from "./client-data";
 
 /**
  * Ruling 121: the controller dock under a routed stub shaped like the app —
@@ -14,6 +17,10 @@ import type { LiveTurnView, UnseenReplyView } from "~/routes/resources.controlle
  * project controller page, and the dock's two resource routes. Shared by the
  * dock's behaviour tests and its ruling-457 perf test, so both drive the same
  * routes and count the same requests.
+ *
+ * The resource routes run as framework mode runs a fetcher's request, through
+ * the real modules' `clientLoader` and `clientAction` (`client-data.ts`); the
+ * stub stands in for the server.
  *
  * Each page offers the two moves a person makes under the dock: links to the
  * other page (a client navigation) and a button that revalidates (what the
@@ -32,6 +39,10 @@ export interface DockStubOptions {
   /** Ruling 457: the viewer's turns working right now (none by default). */
   working?: () => LiveTurnView[];
   action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
+  /** Ruling 457: asked on every request the dock makes; false while the
+   *  server can't be reached (a restart, a dead network), when the request
+   *  gets no answer. Reachable when absent. */
+  reachable?: () => boolean;
   /** The pages hold the `user` stream, as the workspace layout does. */
   live?: boolean;
   /** Mount under `<StrictMode>`, as `entry.client.tsx` does (the dev server
@@ -44,7 +55,7 @@ export interface DockStubCounters {
   loads: URL[];
   /** Every load of the unseen-reply list (`/resources/controller-unseen`). */
   unseenLoads: URL[];
-  /** Every send (`POST /resources/controller`). */
+  /** Every send the server took (`POST /resources/controller`). */
   sends: FormData[];
   /** Every run of a PAGE loader (root, the layout, the board, the task). */
   pageLoads: string[];
@@ -70,6 +81,7 @@ export function mountDock(opts: DockStubOptions) {
     counters.pageLoads.push(id);
     return null;
   };
+  const reachable = opts.reachable ?? (() => true);
   const Stub = createRoutesStub([
     {
       id: "root",
@@ -128,27 +140,30 @@ export function mountDock(opts: DockStubOptions) {
           // The real routes' own answer, so a page revalidation here reloads
           // what it reloads in the app.
           shouldRevalidate: dockResourceShouldRevalidate,
-          loader: ({ request }) => {
+          loader: clientLoaderOver(dockStatusRoute, ({ request }) => {
             counters.unseenLoads.push(new URL(request.url));
+            if (!reachable()) unreachable();
             return {
               unseen: opts.unseen ? opts.unseen() : [],
               working: opts.working ? opts.working() : [],
             };
-          },
+          }),
         },
         {
           id: "routes/resources.controller",
           path: "resources/controller",
           shouldRevalidate: dockResourceShouldRevalidate,
-          loader: ({ request }) => {
+          loader: clientLoaderOver(dockRoute, ({ request }) => {
             counters.loads.push(new URL(request.url));
+            if (!reachable()) unreachable();
             return { view: opts.view(request) };
-          },
-          action: async ({ request }) => {
+          }),
+          action: clientActionOver(dockRoute, async ({ request }) => {
+            if (!reachable()) unreachable();
             const form = await request.formData();
             counters.sends.push(form);
             return opts.action ? opts.action(form) : { ok: true as const, conversationId: "cnv_new" };
-          },
+          }),
         },
       ],
     },

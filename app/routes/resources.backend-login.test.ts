@@ -106,12 +106,35 @@ async function startHungSignIn(userId: string, label: string): Promise<void> {
 }
 
 describe("GET /resources/backend-login", () => {
-  it("redirects a signed-out caller to /login", async () => {
-    const thrown: unknown = await poll("?backend=claude").catch((e) => e);
-    expect(thrown).toBeInstanceOf(Response);
-    // SAFETY: the assertion above fails the test unless `thrown` IS a Response,
-    // so this line only runs on one.
-    expect((thrown as Response).status).toBe(302);
+  /**
+   * Ruling 457, test audit L14-29. Profile → Agent accounts polls this every
+   * 2 s through a fetcher while a sign-in runs, and `requireUser` answered a
+   * missing session with a login redirect naming THIS route as the returnTo: a
+   * fetcher follows a redirect as a navigation, so a stale tab went to /login
+   * and, once signed in, to a page of raw JSON. No session, or a forced
+   * password reset pending, answers 401 in the route's own JSON error shape.
+   */
+  it("answers a signed-out poll 401 in the conventions' error shape, never a login redirect", async () => {
+    const { cookie } = await app.cookieFor(muratId);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, muratId, { pwresetRequired: true });
+    try {
+      // CANARY: guard with `requireUser` again and both polls reject with its
+      // 302 to /login?returnTo=%2Fresources%2Fbackend-login%3Fbackend%3Dcodex.
+      for (const answer of [await poll("?backend=codex"), await poll("?backend=codex", cookie)]) {
+        expect(answer).toEqual({
+          status: 401,
+          body: {
+            error: {
+              code: ERROR_CODES.UNAUTHORIZED,
+              message: "Sign in to see your agent accounts.",
+            },
+          },
+        });
+      }
+    } finally {
+      updateUserFields(app.db, muratId, { pwresetRequired: false });
+    }
   });
 
   it("refuses an unknown backend with 400 instead of guessing one", async () => {

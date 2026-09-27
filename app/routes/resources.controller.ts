@@ -1,7 +1,7 @@
 import { data } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/resources.controller";
-import { requireAuth } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { appErrorResponse } from "~/server/auth/form-action.server";
 import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -19,6 +19,7 @@ import {
   conversationMatchesScope,
   dockTaskExists,
   getControllerDock,
+  signedOutDockView,
   unavailableDockView,
 } from "~/features/controller/controller-dock-query.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
@@ -46,11 +47,23 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  *
  * NOTHING IN EITHER HANDLER THROWS (review finding 2). The dock is a
  * root-owned fetcher, so a thrown response — a 404 as much as the 403 UI-32
- * already caught — replaces the whole page with the root error page. A GET for
- * a scope the person cannot reach answers the benign `unavailable` view (one
- * shape for "no such project" and "not yours", so it is no more of an oracle
- * than the 404 was), and a POST answers `{ ok:false, error }`. The full pages
- * keep their own 404s; this route serves a panel, not a page.
+ * already caught — replaced the whole page with the root error page. The
+ * `clientLoader` and `clientAction` below now keep the page from any failure
+ * (ruling 457), but a failure reaches the dock only as a view not loaded or
+ * the send's generic toast, which say nothing about why. So a GET for a scope
+ * the person cannot reach answers the benign `unavailable` view (one shape
+ * for "no such project" and "not yours", so it is no more of an oracle than
+ * the 404 was), and a POST answers `{ ok:false, error }`. The full pages keep
+ * their own 404s; this route serves a panel, not a page.
+ *
+ * NOR DOES EITHER REDIRECT (ruling 457, test audit L14-29). A caller who is
+ * not signed in (no session, or a forced password reset pending) gets a 401:
+ * the signed-out view for a GET, `{ ok:false, error }` for a POST.
+ * `requireAuth`'s login redirect named this route and the scope's query as
+ * the returnTo, and a fetcher follows a redirect as a navigation, so a stale
+ * tab's open or send went to /login and, once signed in, to a page of raw
+ * JSON. The page's next real navigation asks for the sign-in, with its own
+ * path.
  */
 
 interface DockScopeParams {
@@ -95,10 +108,13 @@ function scopeIsReachable(
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const auth = await requireAuth(request);
-  const db = getDb();
   const url = new URL(request.url);
   const scope = scopeParams(url.searchParams);
+  const auth = await authenticate(request);
+  if (!auth || auth.pwresetRequired) {
+    return data({ view: signedOutDockView(scope) }, { status: 401 });
+  }
+  const db = getDb();
   const actor = { userId: auth.user.id, label: auth.user.email };
   if (!scopeIsReachable(db, scope, actor)) {
     return { view: unavailableDockView(db, { id: auth.user.id }, scope) };
@@ -114,7 +130,19 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const auth = await requireAuth(request);
+  const auth = await authenticate(request);
+  if (!auth || auth.pwresetRequired) {
+    // The message is still in the dock's composer (ruling 259), and a reload
+    // empties it.
+    return data(
+      {
+        ok: false as const,
+        error:
+          "You're signed out, so this wasn't sent. Copy it, then reload the page to sign in again.",
+      },
+      { status: 401 },
+    );
+  }
   const db = getDb();
   const formData = await request.formData();
   const csrfFailure = await csrfError(request, auth.sessionId, formData);
@@ -195,5 +223,38 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: true as const, conversationId };
   } catch (cause) {
     return appErrorResponse(cause);
+  }
+}
+
+/**
+ * Ruling 457: a failed load is the dock's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, and root owns the dock's, so a restart, a 5xx or a dead network
+ * under an open, a thread pick or a `controller.updated` replaced the whole
+ * page with root's error page. Any failure answers null, which the open panel
+ * reads as a view not loaded yet: its loading lines, the composer held, what
+ * was typed kept. The next load that answers puts the view back: the next
+ * `controller.updated` (the stream hands the dock one when it resyncs after a
+ * restart), a thread pick, or opening the panel again.
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ruling 457: a send that gets no answer (a restart, a 5xx, a dead network)
+ * is the dock's to report, never the page's to lose. It answers as a refused
+ * send does, so the dock toasts "The controller could not take that. Try
+ * again." and the message stays in the composer (ruling 259).
+ */
+export async function clientAction({ serverAction }: Route.ClientActionArgs) {
+  try {
+    return await serverAction();
+  } catch {
+    return { ok: false as const };
   }
 }

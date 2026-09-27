@@ -1,6 +1,7 @@
 import type { Route } from "./+types/resources.search";
-import { requireUser } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { searchWorkspace } from "~/features/shell/command-search.server";
 
 /**
@@ -12,7 +13,21 @@ import { searchWorkspace } from "~/features/shell/command-search.server";
  * guard of its own — there is no slug in the request to guard.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // redirect, which named THIS route and the query as the returnTo. The
+  // palette loads it through a fetcher as the person types, and a fetcher
+  // follows a redirect as a navigation: typing in a stale tab went to /login
+  // and, once signed in, to a page of raw JSON. The palette finds no hits in
+  // the refusal and says nothing matches; the page's next real navigation
+  // asks for the sign-in.
+  const ctx = await authenticate(request);
+  if (!ctx || ctx.pwresetRequired) {
+    return Response.json(
+      { error: { code: ERROR_CODES.UNAUTHORIZED, message: "Sign in to search." } },
+      { status: 401 },
+    );
+  }
+  const { user } = ctx;
   const q = new URL(request.url).searchParams.get("q") ?? "";
   const hits = searchWorkspace(
     getDb(),
@@ -22,4 +37,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     q.slice(0, 120),
   );
   return Response.json({ data: { q, hits } });
+}
+
+/**
+ * Ruling 457: a failed search is the palette's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, so a restart, a 5xx or a dead network while the person typed
+ * replaced the page under the palette with its error page. Any failure answers
+ * null: the palette finds no hits in it and says nothing matches, and the next
+ * keystroke searches again.
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
 }
