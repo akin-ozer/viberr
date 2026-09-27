@@ -35,6 +35,20 @@ function templateReviewEntry(
   );
 }
 
+/** The edge one conversion wrote, by stage id and name, for its audit row. */
+interface ConvertedEdge {
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+}
+
+/** The locked mutator's result, carried out of the closure — a plain `let` is
+ *  narrowed to `null` past the callback that assigns it. */
+interface ConvertedEdgeSlot {
+  edge: ConvertedEdge | null;
+}
+
 /**
  * Ruling 519, once at boot: a board created from the Standard template before
  * the ruling still asks a person to confirm the move into Review. Its edge
@@ -58,9 +72,7 @@ export async function convertTemplateReviewEntry(
     try {
       const file = readProjectFile(ref);
       if (!file || !templateReviewEntry(file.parsed.frontmatter)) continue;
-      const written: {
-        edge: { from: string; to: string; fromName: string; toName: string } | null;
-      } = { edge: null };
+      const written: ConvertedEdgeSlot = { edge: null };
       await updateProjectFile(ref, (parsed) => {
         // Re-read under the lock: the read above is not the decision.
         const rule = templateReviewEntry(parsed.frontmatter);
