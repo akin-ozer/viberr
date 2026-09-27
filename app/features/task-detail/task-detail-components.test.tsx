@@ -527,6 +527,75 @@ describe("TimelineItem", () => {
   });
 });
 
+describe("TimelineItem: an entry's pictures show their first row, and fold with its text (ruling 522)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** jsdom lays nothing out: the strip is given 1008px and each tile 240, so
+   *  its first line holds four, and a comment's text `textHeight`. */
+  function layout(textHeight = 0) {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains("tl-attach") ? 1008 : this.matches(".tl-attach > *") ? 240 : 0;
+      return DOMRect.fromRect({ x: 0, y: 0, width, height: 0 });
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("md-body") ? textHeight : 0;
+    });
+  }
+  const shots = (n: number) => Array.from({ length: n }, (_, i) => `shot-${i + 1}.png`);
+  const tiles = (container: HTMLElement) =>
+    [...container.querySelectorAll(".tl-attach > *")].map((t) => t.querySelector(".nm")!.textContent);
+
+  it("a long comment's one toggle opens its text and every picture together, and counts the pictures it hides", () => {
+    // CANARY: draw `files` for `shown` and all ten pictures take three rows
+    // under a folded comment again.
+    layout(900);
+    const { container } = render(
+      <TimelineItem ev={ev({ type: "comment", text: "A long report.", attachments: shots(10) })} attachmentsBase="/a" />,
+    );
+    const text = container.querySelector(".comment-card .md-body")!;
+    const toggles = container.querySelectorAll(".md-collapse-toggle");
+    expect(toggles).toHaveLength(1);
+    const toggle = toggles[0]!;
+    expect(container.querySelector(".comment-card")!.contains(toggle)).toBe(true);
+    expect(text.classList.contains("clamped")).toBe(true);
+    expect(tiles(container)).toEqual(shots(4));
+    expect(toggle.textContent).toBe("Show more · +6 images");
+
+    fireEvent.click(toggle);
+    expect(text.classList.contains("clamped")).toBe(false);
+    expect(tiles(container)).toEqual(shots(10));
+    expect(toggle.textContent).toBe("Show less");
+
+    fireEvent.click(toggle);
+    expect(text.classList.contains("clamped")).toBe(true);
+    expect(tiles(container)).toEqual(shots(4));
+  });
+
+  it("a typed event's pictures fold behind a toggle under them, which counts files once one is not a picture", () => {
+    // CANARY: drop the typed event's FoldToggle and its last two files have
+    // nothing that shows them.
+    layout();
+    const { container } = render(
+      <TimelineItem
+        ev={ev({
+          type: "completion",
+          title: "Completion report",
+          text: "Done.",
+          attachments: ["gates.log", ...shots(5)],
+        })}
+        attachmentsBase="/a"
+      />,
+    );
+    // Pictures first, as the strip always drew them.
+    expect(tiles(container)).toEqual(shots(4));
+    const toggle = container.querySelector(".tl-attach + .md-collapse-toggle")!;
+    expect(toggle.textContent).toBe("Show 2 more files");
+    fireEvent.click(toggle);
+    expect(tiles(container)).toEqual([...shots(5), "gates.log"]);
+    expect(toggle.textContent).toBe("Show less");
+  });
+});
+
 /* --------------------------------------------------- DiagnosticsPanel (G2) */
 
 describe("DiagnosticsPanel state semantics (G2)", () => {

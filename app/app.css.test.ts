@@ -6032,6 +6032,20 @@ describe("app.css ruling 510: a task's attachment list folds like a long comment
   });
 });
 
+describe("app.css ruling 522: a timeline entry's pictures fold to their first row", () => {
+  const decl = (selector: string, prop: string) => requiredDecls(plain, selector).get(prop);
+
+  it("gives every tile of the strip one width, which the first row's count reads off the first tile", () => {
+    // CANARY: give `.tl-attach-file` a width of its own and a strip that
+    // starts with a picture counts the wrong number of tiles on its first line,
+    // folding one too many or leaving a lone tile on a second row.
+    expect(decl(".tl-attach-file", "width")).toBe(decl(".tl-attach-thumb", "width"));
+    expect(decl(".tl-attach-file", "max-width")).toBe(decl(".tl-attach-thumb", "max-width"));
+    // Laid out as a wrapping row, whose first line the count models.
+    expect(decl(".tl-attach", "flex-wrap")).toBe("wrap");
+  });
+});
+
 describe("app.css ruling 515: an account's name never runs under its buttons", () => {
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 

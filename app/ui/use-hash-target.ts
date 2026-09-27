@@ -11,15 +11,22 @@ import { useHydrated } from "./local-time";
  * person scroll back.
  */
 export function revealTarget(target: HTMLElement, focusable: HTMLElement | null = target): void {
-  let box = target.parentElement;
+  const box = scrollingBox(target);
+  if (box) box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+  focusable?.focus({ preventScroll: true });
+}
+
+/** The nearest box that scrolls `el`: the rail on a desktop, the page column
+ *  on a phone. Null when nothing around it scrolls. */
+export function scrollingBox(el: HTMLElement): HTMLElement | null {
+  let box = el.parentElement;
   while (
     box &&
     !(box.scrollHeight > box.clientHeight && /(auto|scroll)/.test(getComputedStyle(box).overflowY))
   ) {
     box = box.parentElement;
   }
-  if (box) box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
-  focusable?.focus({ preventScroll: true });
+  return box;
 }
 
 /**

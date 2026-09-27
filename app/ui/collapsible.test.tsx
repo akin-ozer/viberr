@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { Collapsible } from "./collapsible";
+import { Collapsible, type Hidden } from "./collapsible";
 
 afterEach(() => {
   cleanup();
@@ -134,5 +135,72 @@ describe("Collapsible: the comment fold, shared (ruling 510)", () => {
     expect(body(container).classList.contains("clamped")).toBe(false);
     expect(toggle(container)!.textContent).toBe("Show less");
     expect(toggle(container)!.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+/** A fold whose state its owner holds, as a comment holds it for the pictures
+ *  under its card (ruling 522). */
+function Shared({ more }: { more: Hidden | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible className="attach-list" contentKey={3} open={open} onOpenChange={setOpen} more={more}>
+      {rows(3)}
+    </Collapsible>
+  );
+}
+
+describe("Collapsible: a fold that also hides pictures outside its box (ruling 522)", () => {
+  it("counts them, and shows its toggle for them when the box itself is short", () => {
+    // CANARY: render the toggle for `overflowing` alone and a short comment
+    // with ten screenshots has nothing that shows the six past its first row.
+    contentHeight(() => 200);
+    const { container, unmount } = render(<Shared more={{ count: 6, noun: "images" }} />);
+    expect(body(container).classList.contains("clamped")).toBe(false);
+    expect(toggle(container)!.textContent).toBe("Show 6 more images");
+    expect(toggle(container)!.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle(container)!);
+    expect(toggle(container)!.textContent).toBe("Show less");
+    expect(toggle(container)!.getAttribute("aria-expanded")).toBe("true");
+    unmount();
+
+    // A long box says Show more, and the count rides after it.
+    contentHeight(() => 900);
+    const tall = render(<Shared more={{ count: 1, noun: "image" }} />);
+    expect(body(tall.container).classList.contains("clamped")).toBe(true);
+    expect(toggle(tall.container)!.textContent).toBe("Show more · +1 image");
+  });
+
+  it("closing keeps the toggle where it stood on screen", () => {
+    // CANARY: drop the toggle's layout effect and Show less leaves it 560px
+    // higher, off the top of the box that scrolls it.
+    contentHeight(() => 900);
+    const { container } = render(
+      <div data-scroller style={{ overflowY: "auto" }}>
+        <Shared more={null} />
+      </div>,
+    );
+    const scroller = container.querySelector<HTMLElement>("[data-scroller]")!;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-scroller") ? 5000 : this.classList.contains("attach-list") ? 900 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-scroller") ? 800 : 0;
+    });
+    // The box starts 100px into the scroller and the toggle follows it, 8px
+    // below its clamped 340px or its whole 900.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains("md-collapse-toggle")) return DOMRect.fromRect({ x: 0, y: 0, width: 600, height: 0 });
+      const clamped = body(container).classList.contains("clamped");
+      return DOMRect.fromRect({ x: 0, y: 100 + (clamped ? 340 : 900) + 8 - scroller.scrollTop, width: 80, height: 20 });
+    });
+    fireEvent.click(toggle(container)!);
+    // Read to the end: the toggle stands 208px down the screen.
+    scroller.scrollTop = 800;
+    expect(toggle(container)!.getBoundingClientRect().top).toBe(208);
+
+    fireEvent.click(toggle(container)!);
+    expect(body(container).classList.contains("clamped")).toBe(true);
+    expect(scroller.scrollTop).toBe(240);
+    expect(toggle(container)!.getBoundingClientRect().top).toBe(208);
   });
 });
