@@ -4887,6 +4887,9 @@ a.task-ref, a.kp-ref { white-space: nowrap; }
 .md-collapse-toggle:hover { text-decoration: underline; }
 .md-collapse-toggle svg { width: 14px; height: 14px; transition: transform .15s var(--ease-out); }
 .md-collapse-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+/* Ruling 522: what the toggle hides beyond its box (a comment's pictures under
+   the card), said after Show more in a count's quieter voice. */
+.md-collapse-more { font-weight: 500; color: var(--muted); }
 
 /* P16-UI-04: the bundled display font is declared once, in the token block at
    the top of the file. This second `:root` block used to redefine it here. */

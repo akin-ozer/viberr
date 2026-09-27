@@ -16,7 +16,7 @@ import type { GateNoteState } from "~/shared/project-gates";
 import { Icon, type IconName } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
-import { Collapsible } from "~/ui/collapsible";
+import { Collapsible, FoldToggle, useFirstRow, type Hidden } from "~/ui/collapsible";
 import { AttachmentThumb } from "./attachment-image";
 import { GateResults } from "./gate-results";
 import { fileExtension, fileFamily } from "./attachment-kind";
@@ -80,7 +80,9 @@ const ENTRY_HEADING_BASE = 3;
  * A comment body that clamps when it's very tall (long agent replies) so a
  * single answer can't dominate the timeline: `Collapsible` (`~/ui/collapsible`)
  * measures it and folds it behind Show more / Show less, the fold the
- * attachments panel shares (ruling 510).
+ * attachments panel shares (ruling 510). Ruling 522: the pictures under the
+ * card fold with it, so the item holds the fold's state and says what they
+ * hide (`more`).
  */
 function CollapsibleComment({
   text,
@@ -88,6 +90,9 @@ function CollapsibleComment({
   attachmentNames,
   attachmentsBase,
   taskLinks,
+  open,
+  onOpenChange,
+  more,
 }: {
   text: string;
   mentionNames?: string[];
@@ -98,13 +103,22 @@ function CollapsibleComment({
    *  `repairAttachmentHref`). */
   attachmentNames?: ReadonlySet<string>;
   attachmentsBase?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  more: Hidden | null;
 }) {
   // Embedded attachment images in the body open the same lightbox the
   // thumbnail strip uses (no provider ⇒ the factory is inert, embeds stay
   // plain images).
   const lightbox = useAttachmentLightbox();
   return (
-    <Collapsible className="tl-text md-body" contentKey={text}>
+    <Collapsible
+      className="tl-text md-body"
+      contentKey={text}
+      open={open}
+      onOpenChange={onOpenChange}
+      more={more}
+    >
       <Markdown
         text={text}
         mentionNames={mentionNames}
@@ -188,6 +202,19 @@ const eventKeyOf = (ev: TimelineEventRender) => String(ev.id);
  *  compares equal (an inline `= []` is a new array on every call). */
 const NO_NAMES: string[] = [];
 
+/** An event's files as its strip draws them: the pictures, then the rest. */
+function picturesFirst(names: string[]): string[] {
+  return [...names.filter((name) => IMAGE_RE.test(name)), ...names.filter((name) => !IMAGE_RE.test(name))];
+}
+
+/** Ruling 522: what a folded strip hides, as its toggle counts it: images,
+ *  or files once anything but a picture is among them. */
+function hiddenFiles(names: string[]): Hidden | null {
+  if (names.length === 0) return null;
+  const noun = names.every((name) => IMAGE_RE.test(name)) ? "image" : "file";
+  return { count: names.length, noun: names.length === 1 ? noun : `${noun}s` };
+}
+
 /**
  * Ruling 457 (CS-3 / TASK-4): memoised. Its props hold still while its event
  * does (the timeline shares the rows and the lookups it passes across
@@ -233,6 +260,17 @@ export const TimelineItem = memo(function TimelineItem({
   // Image evidence pops the in-app lightbox on a plain click; the anchors stay
   // real links so modified clicks and no-provider renders keep the raw tab.
   const lightbox = useAttachmentLightbox();
+  // Ruling 522: the files the event's run saved show their first row; the rest
+  // fold with a comment's text, or behind their own toggle under a typed
+  // event, and the toggle says how many it hides.
+  const files = useMemo(
+    () => (ev.attachments && attachmentsBase ? picturesFirst(ev.attachments) : NO_NAMES),
+    [ev.attachments, attachmentsBase],
+  );
+  const firstRow = useFirstRow(files.length);
+  const [open, setOpen] = useState(false);
+  const more = hiddenFiles(files.slice(firstRow.perRow));
+  const shown = open ? files : files.slice(0, firstRow.perRow);
   return (
     <div
       className="tl-item"
@@ -300,6 +338,9 @@ export const TimelineItem = memo(function TimelineItem({
               {...(taskLinks ? { taskLinks } : {})}
               {...(attachmentNames ? { attachmentNames } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}
+              open={open}
+              onOpenChange={setOpen}
+              more={more}
             />
           </div>
         ) : gates ? (
@@ -407,8 +448,8 @@ export const TimelineItem = memo(function TimelineItem({
             with "added by …") — the producing message names its own files.
             Chips need the serving base; without it (bare renders, withheld
             lists) the names stay off rather than rendering dead links. */}
-        {ev.attachments && ev.attachments.length > 0 && attachmentsBase && (
-          <div className="tl-attach">
+        {files.length > 0 && (
+          <div className="tl-attach" ref={firstRow.ref}>
             {/* An image the run captured IS the deliverable on a screenshot
                 task — it renders as the picture, right on the producing
                 message (the owner's ask, 2026-08-20: chips alone made the
@@ -417,49 +458,49 @@ export const TimelineItem = memo(function TimelineItem({
                 extension in the picture's place (owner ask 2026-09-25); the
                 route serves whitelisted image types inline, sandboxed,
                 member-only. */}
-            {ev.attachments.filter((name) => IMAGE_RE.test(name)).map((name) => (
-              <AttachmentThumb
-                key={name}
-                variant="timeline"
-                href={`${attachmentsBase}/${encodeURIComponent(name)}`}
-                name={name}
-                openLabel={`Open attachment ${name}`}
-                onOpen={lightbox({
-                  name,
-                  url: `${attachmentsBase}/${encodeURIComponent(name)}`,
-                })}
-              >
-                <span className="nm">{name}</span>
-              </AttachmentThumb>
-            ))}
-            {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => {
+            {shown.map((name) => {
+              const href = `${attachmentsBase}/${encodeURIComponent(name)}`;
+              if (IMAGE_RE.test(name)) {
+                return (
+                  <AttachmentThumb
+                    key={name}
+                    variant="timeline"
+                    href={href}
+                    name={name}
+                    openLabel={`Open attachment ${name}`}
+                    onOpen={lightbox({ name, url: href })}
+                  >
+                    <span className="nm">{name}</span>
+                  </AttachmentThumb>
+                );
+              }
               const ext = fileExtension(name);
               const label = ext.length > 0 && ext.length <= 5;
               return (
-              // Ruling 105 (+ addendum): a text-typed file opens the in-app
-              // read-only viewer; any other kind the no-preview card with
-              // its Download button.
-              <a
-                key={name}
-                className="tl-attach-file"
-                href={`${attachmentsBase}/${encodeURIComponent(name)}`}
-                target="_blank"
-                rel="noreferrer"
-                onClick={lightbox({
-                  name,
-                  url: `${attachmentsBase}/${encodeURIComponent(name)}`,
-                })}
-              >
-                <span className="tl-attach-glyph" data-kind={fileFamily(name)} aria-hidden="true">
-                  <Icon name={label ? "page" : "file"} />
-                  {label && <span className="tl-attach-ext">{ext}</span>}
-                </span>
-                <span className="nm">{name}</span>
-              </a>
+                // Ruling 105 (+ addendum): a text-typed file opens the in-app
+                // read-only viewer; any other kind the no-preview card with
+                // its Download button.
+                <a
+                  key={name}
+                  className="tl-attach-file"
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={lightbox({ name, url: href })}
+                >
+                  <span className="tl-attach-glyph" data-kind={fileFamily(name)} aria-hidden="true">
+                    <Icon name={label ? "page" : "file"} />
+                    {label && <span className="tl-attach-ext">{ext}</span>}
+                  </span>
+                  <span className="nm">{name}</span>
+                </a>
               );
             })}
           </div>
         )}
+        {/* Ruling 522: a comment's toggle stands at the foot of its card; a
+            typed event has no card, so its pictures' toggle follows them. */}
+        {isTyped && more && <FoldToggle open={open} onOpenChange={setOpen} cut={false} more={more} />}
       </div>
     </div>
   );
