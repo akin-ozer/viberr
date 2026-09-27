@@ -554,8 +554,10 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   between cells; and the task's composer takes the controller composer's frame (the card
   radius, the 4px focus ring) with Comment as its primary action.
 - **Details: each property is its own control** (ruling 501, the way Linear's and GitHub's
-  issue sidebars draw properties): the rows keep the side column's shape (label left,
-  value right, a hairline between). A value is the board card's vocabulary (the priority
+  issue sidebars draw properties): the rows are a property grid (ruling 520), a label
+  column of one width and every value starting on one left edge beside it, with no
+  hairline between; a value that wraps keeps its first line on its label's. A value is
+  the board card's vocabulary (the priority
   flag, the label chips, the due pill; a wait's entries as chips with a status ring: a
   dotted ring open, a check done, a red ring and red chip for an entry that can never
   complete), or, with nothing to say, a quiet line in the placeholder ink: "Normal",
@@ -569,6 +571,16 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   "Saving…" with the spinning loader on the trigger that started it (ruling 368), and a
   refused wait keeps its editor open beside the error. An archived task's values are text,
   with "Archived. Restore this task to edit its details." under them.
+- **Current state is the same property grid** (ruling 520): Stage, Waiting on, Last
+  activity, Owner and Repo are Details' rows, so the side column's property panels and the
+  PR card's two facts share one value line. Each value is led by its mark in a 16px column:
+  the stage's dot; who owes the next move in the board card's marks (the hand for a human
+  or a goal edit, the clock for a schedule, the ring for a queued run, the live pulse for
+  agent work, the ban for other work, whose keys never break at their hyphen); the activity
+  pulse; the owner's avatar; the GitHub mark, the repository in the code face. The values
+  read at one size and weight, the tone on the mark alone. An empty value is the quiet line
+  ("Nothing", "Nothing on the timeline yet", "Unowned"), and "Assign me" the invitation, a
+  ghost trigger. The stage is a ghost trigger too, its menu hanging from its left edge.
 - **Written text sits under the page's headings and shows what it holds** (ruling 478(a),
   (f)): typed timeline events render as markdown like comments (a fenced block scrolls on
   its own, inline code breaks); a timeline entry's or a packet body's top heading renders

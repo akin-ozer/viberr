@@ -8819,7 +8819,6 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .prop-fact > .ico { margin-block: .125rem; color: var(--faint); }
 .prop-fact.by-human > .ico { color: var(--blue-pressed); }
 .prop-fact.by-agent > .ico { color: var(--agent-dark); }
-.prop-fact.by-schedule > .ico { color: inherit; }
 /* A hold's entries keep their keys whole: a browser breaks "VIB-151" after
    its hyphen in a column this narrow. */
 .prop-fact .hold-ref { white-space: nowrap; }
