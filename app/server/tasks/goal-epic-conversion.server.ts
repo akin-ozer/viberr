@@ -6,7 +6,6 @@ import { defaultEpicColor, type EpicStatus, type EpicTimelineEntry } from "~/sch
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { resolveProjectAuthority } from "~/server/auth/project-authority.server";
-import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import {
   createEpicFile,
   listEpicIds,
@@ -31,7 +30,7 @@ import {
   type YamlMapping,
 } from "~/server/files/frontmatter.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
-import { rememberWrite } from "~/server/files/write-cache.server";
+import { writeAndRemember } from "~/server/files/write-cache.server";
 import { logger } from "~/server/logging/logger.server";
 import { epicTaskKeys } from "~/server/projections/epic-query.server";
 import { epicLink } from "~/server/projections/notifications.server";
@@ -518,8 +517,7 @@ async function recordLinkTask(goal: LegacyGoal, index: number, key: string): Pro
       return next;
     });
     const serialized = serializeFrontmatterFile(data, {}, body);
-    writeFileAtomic(goal.path, serialized);
-    rememberWrite(goal.path, serialized);
+    writeAndRemember(goal.path, serialized);
   });
 }
 
@@ -695,8 +693,7 @@ async function rewriteWaits(db: DatabaseSync, state: ProjectConversion, scan: Ta
       if (!hasItem) lines[k] = `${lines[k]} []`;
     }
     const serialized = lines.join("\n");
-    writeFileAtomic(file, serialized);
-    rememberWrite(file, serialized);
+    writeAndRemember(file, serialized);
     return true;
   });
 

@@ -194,10 +194,7 @@ const REVIEWER_ACTOR: FileActorRef = {
   roleHint: "Review & validation",
 };
 
-/** The operator's acceptance packet, for the `resolvePacket` path. Seeded UP
- *  FRONT: a raw test write that lands within 100ms of a real `updateTaskFile`
- *  is treated as a stale read and repaired from the in-process write cache
- *  (task-writer's `repairStaleRead`), which would silently drop it. */
+/** The operator's acceptance packet, for the `resolvePacket` path. */
 const ACCEPT_PACKET: TaskPacket = {
   id: "pkt_accept",
   type: "input",
@@ -719,8 +716,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
         validation: "healthy",
       }),
       goal: "Fix the flake; it turned out to already be fixed.",
-      // Seeded in the SAME up-front write: a later raw write landing within the
-      // stale-read window is repaired away as a stale view of the writer's cache.
       packet,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
