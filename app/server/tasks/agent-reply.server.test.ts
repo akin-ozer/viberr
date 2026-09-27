@@ -1819,7 +1819,7 @@ describe("commentToAgent", () => {
       );
     });
     expect(posted).toBe(true);
-  }, 20_000);
+  });
 
   /**
    * R15-14. `ask_human` ends the run by contract, and the answer used to travel
@@ -2114,7 +2114,7 @@ describe("commentToAgent", () => {
     expect(spec.prompt).toContain(question);
     // …and it knows WHO asked, which is what makes the reply tag a real person.
     expect(spec.prompt).toContain(store.users.arda.name);
-  }, 20_000);
+  });
 
   it("returns the grouped Agent-logs id (logThreadId) for the reply run (BUG 3)", async () => {
     const result = await commentToAgent(
@@ -2212,7 +2212,7 @@ describe("commentToAgent", () => {
     );
     expect(named.agent).toMatchObject({ profileId: "security-reviewer" });
     expect(named.triggered).toBe("started");
-  }, 20_000);
+  });
 
   it("records a contributor or viewer @mention but does NOT trigger a run (RBAC)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
@@ -2384,7 +2384,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
       path.join(path.dirname(ws), ".viberr-plugins"),
     );
     expect(existsSync(path.join(ws, ".claude"))).toBe(false);
-  }, 20_000);
+  });
 });
 
 describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
@@ -2604,7 +2604,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     // The human's words reach the operator's turn, not just the timeline.
     const spec = startedRunSpecs().at(-1);
     expect(spec?.prompt ?? "").toContain("what is holding this up?");
-  }, 20_000);
+  });
 
   /**
    * R15-14, the fallback half. Routing an answered question back to its ASKER is
@@ -2668,7 +2668,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     expect(
       timeline.some((e) => e.text.includes("has been answered by a human")),
     ).toBe(false);
-  }, 20_000);
+  });
 });
 
 /**
