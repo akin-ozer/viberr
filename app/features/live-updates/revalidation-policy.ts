@@ -55,12 +55,14 @@ import {
  * A route re-runs when (a) something it reads is owed (an obligation recorded
  * after its data's coverage, whose facts it reads), (b) a navigation changed a
  * path param or a search param its loader reads, (c) an action it reads just
- * ran, or (d) the navigation is to the URL already on screen (a link to where
- * you are reloads, as React Router's default does). Nothing else skips an
- * obligation: a trigger that interrupts an in-flight load finds the obligation
- * still in the ledger and loads it. No optimistic UI for governed state
- * follows from this: every change the server announced reaches the page
- * through a loader, only the reloads of data already carrying it are gone.
+ * ran, or (d) the navigation is to the URL already on screen, its hash
+ * included (a link to where you are reloads, as React Router's default does;
+ * one that only takes the hash away leaves a place inside the page and reloads
+ * nothing, ruling 523). Nothing else skips an obligation: a trigger that
+ * interrupts an in-flight load finds the obligation still in the ledger and
+ * loads it. No optimistic UI for governed state follows from this: every
+ * change the server announced reaches the page through a loader, only the
+ * reloads of data already carrying it are gone.
  *
  * Tracked in tests: a loader that returns the SAME object every time never
  * shows a landing, so its route stays owed and keeps revalidating (the old
@@ -563,9 +565,14 @@ export function useLiveLedger(seedPosition: number | null = null): LiveLedger | 
   return ledger;
 }
 
-/** True when the URL is the same place (path and search). */
+/**
+ * True when the URL is the one on screen: its path, its search and its hash.
+ * Ruling 523: a press that ends a link's mark takes the hash away
+ * (`useHashTarget`), the one hash change React Router hands the loaders
+ * (a browser would request a page without it); it adds nothing to load.
+ */
 function samePlace(a: URL, b: URL): boolean {
-  return a.pathname === b.pathname && a.search === b.search;
+  return a.pathname === b.pathname && a.search === b.search && a.hash === b.hash;
 }
 
 function sameValues(a: string[], b: string[]): boolean {

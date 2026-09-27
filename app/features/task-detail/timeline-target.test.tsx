@@ -13,7 +13,8 @@ import { timelineSlice } from "./timeline-slice";
  * Ruling 497: a notification about an event opens it on the task page. The
  * link names the event by its time (`#event-<occurredAt>`); the timeline
  * marks it, brings it into view and focuses it, opens the filter tab that hid
- * it, and loads older events until it is among them.
+ * it, and loads older events until it is among them. Ruling 523: the person's
+ * next press or key ends the mark and takes the hash out of the URL.
  */
 
 afterEach(() => {
@@ -130,5 +131,52 @@ describe("a link to a timeline event (ruling 497)", () => {
       fireEvent.click(getByText("again"));
     });
     await waitFor(() => expect(reveals()).toBe(2));
+  });
+});
+
+describe("the next press ends the mark (ruling 523)", () => {
+  it("a press anywhere drops the hash and the mark, keeps the loaded events and the focus, and a new link marks again", async () => {
+    const { container, getByTestId, getByText } = renderAt(`/t#${anchorOf(9)}`);
+    await waitFor(() => expect(targeted(container)).toEqual([anchorOf(9)]));
+    await waitFor(() => expect(document.activeElement?.id).toBe(anchorOf(9)));
+    const event = document.activeElement!;
+
+    await act(async () => {
+      fireEvent.pointerDown(document.body);
+    });
+    // CANARY: listen on the marked entry alone and a press beside it keeps
+    // the mark (and a reload would bring it back).
+    await waitFor(() => expect(getByTestId("url").textContent).toBe("?events=12"));
+    expect(targeted(container)).toEqual([]);
+    // CANARY: drop `focusable` and the tabindex leaves with the mark; a browser
+    // then drops the focus to the body and the keys stop scrolling `.detail`.
+    expect(event.getAttribute("tabindex")).toBe("-1");
+
+    // The bell's row again: the press on it ends nothing (the mark is gone),
+    // and the link it follows marks the event once more.
+    await act(async () => {
+      fireEvent.pointerDown(getByText("again"));
+      fireEvent.click(getByText("again"));
+    });
+    await waitFor(() => expect(targeted(container)).toEqual([anchorOf(1)]));
+    expect(getByTestId("url").textContent).toBe(`#${anchorOf(1)}`);
+  });
+
+  it("a key ends it too, but not a lone modifier or a key held down from before", async () => {
+    const { container, getByTestId } = renderAt(`/t#${anchorOf(1)}`);
+    await waitFor(() => expect(targeted(container)).toEqual([anchorOf(1)]));
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "Meta", metaKey: true });
+      fireEvent.keyDown(document.activeElement!, { key: "Enter", repeat: true });
+    });
+    expect(targeted(container)).toEqual([anchorOf(1)]);
+    expect(getByTestId("url").textContent).toBe(`#${anchorOf(1)}`);
+
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    });
+    // CANARY: listen for pointers alone and the keyboard cannot end it.
+    await waitFor(() => expect(getByTestId("url").textContent).toBe(""));
+    expect(targeted(container)).toEqual([]);
   });
 });

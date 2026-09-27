@@ -2196,6 +2196,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-radius: var(--radius-box);
   background: var(--blue-soft);
 }
+/* Ruling 523: a place a link opened keeps the focus it was given once the
+   person's next press ends its mark, so the keys that scroll from it still
+   work. It is a region focused by script, not a control, so like `.detail` it
+   paints no ring when the mark goes (the packet's mark is its own outline). */
+:is(.tl-item, .detail-packet, .op-recs, .ctl-proposal):focus-visible:not([data-targeted]) { outline: none; }
 .tl-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .tl-actor { font-size: .75rem; font-weight: 800; font-family: var(--font-display); }
 .tl-time { font-size: .75rem; color: var(--placeholder); font-family: var(--font-mono); }
@@ -7348,9 +7353,10 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .ctl-proposal-list { list-style: none; margin: 0; padding: 0; }
 .ctl-proposal { border: 1px solid var(--hairline); border-radius: var(--radius-box); padding: .5rem .75rem; min-width: 0; scroll-margin-block: .75rem; }
 /* A reply's proposal id lands here: the entry it names says so. So does a
-   proposal's notification (ruling 497), which arrives by the router, and a
-   `pushState` never updates `:target`. */
-.ctl-proposal:target, .ctl-proposal[data-targeted] { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: none; }
+   proposal's notification (ruling 497). Marked by `data-targeted` alone, never
+   `:target`: the press that ends the mark takes the hash away with the
+   router's `replaceState` (ruling 523), which never updates `:target`. */
+.ctl-proposal[data-targeted] { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: none; }
 .ctl-proposal p { margin: 0; overflow-wrap: anywhere; }
 .ctl-proposal-head, .ctl-proposal-acts { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
 .ctl-proposal-doc { font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }

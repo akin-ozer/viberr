@@ -199,6 +199,7 @@ export const TimelineItem = memo(function TimelineItem({
   ev,
   anchor,
   targeted = false,
+  focusable = false,
   mentionNames = NO_NAMES,
   attachmentNames,
   attachmentsBase,
@@ -211,6 +212,10 @@ export const TimelineItem = memo(function TimelineItem({
   anchor?: string;
   /** Ruling 497: the link that opened the page named this event. */
   targeted?: boolean;
+  /** Ruling 523: that link focused this event, and it keeps the tabindex that
+   *  let it once the mark ends; a focused element that loses it drops the focus
+   *  to the body, and the keys that scroll `.detail` from it (G7) stop. */
+  focusable?: boolean;
   /** U39-31: the other tasks the event names, key to path. */
   taskLinks?: TaskLinks;
   /** Rulings 483 and 498: the project's Controller page, whose Knowledge base
@@ -237,7 +242,7 @@ export const TimelineItem = memo(function TimelineItem({
     <div
       className="tl-item"
       id={anchor}
-      tabIndex={targeted ? -1 : undefined}
+      tabIndex={targeted || focusable ? -1 : undefined}
       data-targeted={targeted || undefined}
     >
       <div className="tl-rail">
@@ -611,6 +616,10 @@ export function Timeline({
   const targetTime = useHydrated() ? timelineEventTime(hashTarget(location.hash)) : null;
   const target = targetTime ? (rows.find((e) => e.occurredAt === targetTime) ?? null) : null;
   const targeted = useHashTarget(isEventAnchor, target !== null && shownBy(f, target));
+  // Ruling 523: the event the latest link named, still focusable after the
+  // person's next press ends its mark.
+  const [arrived, setArrived] = useState<string | null>(null);
+  if (targeted !== null && targeted !== arrived) setArrived(targeted);
   const steppedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!targetTime || steppedFor.current === location.key) return;
@@ -777,6 +786,7 @@ export function Timeline({
               ev={ev}
               anchor={anchors.get(ev.id)}
               targeted={targeted !== null && anchors.get(ev.id) === targeted}
+              focusable={arrived !== null && anchors.get(ev.id) === arrived}
               mentionNames={mentionNames}
               {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}

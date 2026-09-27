@@ -118,7 +118,10 @@ Intents behind `project.task.tsx` are explained in
   on its task's timeline (marked, focused, its filter tab opened, older events loaded
   until it is shown), the task's `#decision` or `#recommendations`, a proposal's entry
   on the Controller page, the project's GitHub page, an epic's page; a click on a row
-  about the page already on screen brings the place back into view. The
+  about the page already on screen brings the place back into view. The mark lasts until
+  the person's next press anywhere on the page or key (a lone modifier aside), which takes
+  the hash out of the URL in place, keeps the focus where the link put it and reloads
+  nothing (ruling 523). The
   account menu is a Radix ARIA menu (arrows, typeahead, Home/End, focus back to the
   avatar on close; ruling 166), fetched when the pointer or focus reaches the avatar or
   on the first press, which opens it on arrival unless Escape, a second press, or a press

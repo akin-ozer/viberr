@@ -824,7 +824,9 @@ edit in reverse.
   carries it out with `resolve_kb_proposal` (org admin, because it edits an org knowledge
   base). Anyone else reads "An org admin promotes or dismisses proposals." A proposal's
   notification opens its entry here (`#proposal-<id>`, ruling 497): the entry is marked and
-  focused, and one promoted or dismissed since leaves the proposals list in view.
+  focused, and one promoted or dismissed since leaves the proposals list in view. The mark
+  (`data-targeted`, never `:target`) lasts until the person's next press or key, which takes
+  the hash out of the URL (ruling 523).
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 
