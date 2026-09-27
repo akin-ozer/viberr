@@ -1560,7 +1560,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    each revalidation. At rest the copy sits exactly on the dot, in its colour. */
 .chip .working::after, .wait-tag .working::after, .rdot.running::after,
 .home-hero .sub .working::after, .pj-stats .running .working::after,
-.ag-active .working::after, .ag-running .working::after {
+.ag-active .working::after, .ag-running .working::after, .prop-fact .working::after {
   content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--agent);
   animation: pulse-a 1.6s ease-out infinite;
 }
@@ -5763,7 +5763,8 @@ a.card:active, .pj-new:active { transform: scale(.99); }
      still — the adjacent text keeps carrying the state (same treatment as
      .stat-dot.warming). */
   .wait-tag .working::after, .home-hero .sub .working::after, .pj-stats .running .working::after,
-  .chip .working::after, .ag-active .working::after, .ag-running .working::after, .rdot.running::after { animation: none; }
+  .chip .working::after, .ag-active .working::after, .ag-running .working::after, .rdot.running::after,
+  .prop-fact .working::after { animation: none; }
   /* keep centered dialogs centered while they fade out */
   dialog[data-closing] { transform: translate(-50%, -50%); transition: opacity .12s ease; }
   /* the picker's check trades by fade alone, as the copy glyph does (ruling 459) */
@@ -5898,8 +5899,6 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .diff-add { color: var(--teal-dark); }
 .diff-del { color: var(--coral-dark); }
 .archive-hint { margin: .375rem 0 0; }
-.by-human { color: var(--blue-pressed); }
-.by-agent { color: var(--agent-dark); }
 /* The stage dot shrinks inside a pill or a `.kv-row`; only its COLOUR is the
    stage's, so only the colour stays inline. */
 .col-stage-dot.sm { width: .5rem; height: .5rem; }
@@ -8382,24 +8381,33 @@ button.chg-num:hover { color: var(--blue-pressed); background: var(--focus-wash)
    rest a value is the vocabulary the board card already draws (the flag, the
    label chips, the due pill) or, with nothing to say, a quiet line, never the
    bold --fg a side panel gives a fact. For a person who may edit it is a ghost
-   trigger that takes the hover fill and opens its editor under the row. The
-   rows keep the side column's shape (label left, value right, a hairline
-   between), so Details reads as the third panel of one column. */
-.kv.props .kv-row { position: relative; min-height: 2.25rem; padding: .25rem .125rem; }
-.kv.props .kv-row .k { flex: none; }
-.kv.props .kv-row .v { flex-wrap: wrap; justify-content: flex-end; font-weight: 400; }
-.prop-val { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .25rem; min-width: 0; }
+   trigger that takes the hover fill and opens its editor under the row.
+   Ruling 520 made the rows a property grid, as Linear's, Jira's and Notion's
+   are: a label column of one width, every value starting on one left edge
+   beside it, no hairline between. Current state draws the same rows, so the
+   side column's two property panels share one value line. A value's lines are
+   20px, 6px from the row's 32px top, so a value that wraps (a long hold, a
+   long label list) keeps its first line on its label's. A ghost trigger's
+   padding and border hang outside those lines, as they hang past the value
+   column's left edge, so its words sit on the same lines. */
+.kv.props .kv-row {
+  display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); align-items: start; column-gap: .75rem;
+  position: relative; min-height: 2.25rem; padding: .125rem 0; border-bottom: 0;
+}
+.kv.props .kv-row .k { display: flex; align-items: center; min-height: 2rem; }
+.kv.props .kv-row .v { min-height: 2rem; padding-block: .375rem; flex-wrap: wrap; justify-content: flex-start; font-family: var(--font-body); font-weight: 400; line-height: 1.25rem; }
+.prop-val { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .25rem; min-width: 0; }
 /* The invitation takes the placeholder rung, a step under the row's own
    label, and comes up to --muted under the pointer. */
 .prop-empty { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; font-weight: 500; color: var(--placeholder); white-space: nowrap; }
 .prop-empty .ico { width: 12px; height: 12px; }
-/* The trigger lets its padding run past the row's edge, so the value it holds
-   lines up with the values of the panels above it. */
+/* The trigger lets its padding run past the value column's edge (ruling 520:
+   its left one), so the value it holds starts where the text values start. */
 .prop-btn {
   display: inline-flex; align-items: center; max-width: calc(100% + .375rem); min-height: 1.75rem;
-  margin-right: -.375rem; padding: .25rem .375rem;
+  margin-block: calc(-.25rem - 1px); margin-left: calc(-.375rem - 1px); padding: .25rem .375rem;
   border: 1px solid transparent; border-radius: var(--radius-button);
-  background: transparent; color: var(--fg); font: inherit; text-align: right;
+  background: transparent; color: var(--fg); font: inherit; text-align: left;
   cursor: pointer;
   transition: background-color .14s ease, border-color .14s ease, transform .15s var(--ease-out);
 }
@@ -8448,8 +8456,9 @@ button.chg-num:hover { color: var(--blue-pressed); background: var(--focus-wash)
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger), transparent 55%);
 }
 /* Ruling 241's note under the wait is a sentence: it takes the row's width. */
-.kv.props .kv-row.prop-note { flex-direction: column; align-items: flex-start; gap: .25rem; padding: .5rem .125rem; }
-.kv.props .kv-row.prop-note .v { display: block; font-size: .75rem; line-height: 1.5; color: var(--muted); }
+.kv.props .kv-row.prop-note { grid-template-columns: minmax(0, 1fr); row-gap: .25rem; padding: .5rem 0; }
+.kv.props .kv-row.prop-note .k { min-height: 0; }
+.kv.props .kv-row.prop-note .v { display: block; min-height: 0; padding-block: 0; font-size: .75rem; line-height: 1.5; color: var(--muted); }
 
 /* ---------- appended: ruling 503, epics ---------- */
 /* An epic named beside a task: its colour a dot, its title the text. Outlined,
@@ -8726,9 +8735,15 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .pr-acts { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem; }
 .pr-card > .pr-acts { margin-top: 0; }
 .pr-card > .pr-facts { padding-block: .5rem; background: var(--tint-well); }
-.pr-facts .kv-row { flex-wrap: nowrap; align-items: baseline; padding: .125rem 0; border-bottom: 0; font-size: .75rem; }
+/* Ruling 520: the facts take the property grid's label column, so their words
+   start on the value line of the Current state and Details panels under the
+   card, and a fact that wraps keeps its left edge instead of a ragged right. */
+.pr-facts .kv-row {
+  display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); column-gap: .75rem;
+  align-items: baseline; padding: .125rem 0; border-bottom: 0; font-size: .75rem;
+}
 .pr-facts .kv-row .k { white-space: nowrap; }
-.pr-facts .kv-row .v { font-family: inherit; font-weight: 400; color: var(--muted); text-align: right; }
+.pr-facts .kv-row .v { font-family: inherit; font-weight: 400; color: var(--muted); }
 
 /* ---------- appended: ruling 516, the controller's suggestions ---------- */
 /* Ruling 314's examples were three outlined boxes on --border-control, the
@@ -8781,3 +8796,69 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .ctl-empty > .empty { flex: 1; display: grid; place-content: center; }
 /* The page: under the hero's sentence, a little wider than its measure. */
 .empty-hero .ctl-examples { width: min(100%, 30rem); margin-top: 1rem; }
+
+/* ---------- appended: ruling 520, Current state on the property grid ---------- */
+/* The owner, of the task page's Current state card: "these look unorganized
+   somehow not aligned, not standard". Every value was set its own way: the
+   stage a bordered pill with a caret, who the task waits on 14px bold in blue
+   or violet, the last activity 14px bold, the owner's name 12px bold between a
+   22px avatar and a release cross, the repository 14px bold in the display
+   face (its `.mono` lost to `.kv-row .v`). Right-aligned, no two values started
+   at the same x, and the cross, not the name, ended the owner's row. The card
+   now draws the rows Details draws (`.kv.props`, ruling 501, made a property
+   grid by this ruling): the labels in one column, every value on one left edge
+   in one size and weight, each led by its mark in a 16px column. */
+
+/* A value is one child of `.v`, so its words wrap between words, never at a
+   flex item's edge. A fact leads with its mark, which stays on the first line
+   when the words wrap (a long hold, a schedule at 390px). The marks: the
+   activity pulse, the GitHub mark and the hold's ban in the label's ink; who
+   owes the next move in the board card's marks (ruling 365), the tone on the
+   mark alone, so the words read at the row's one weight. */
+.prop-fact { display: inline-flex; align-items: flex-start; gap: .5rem; min-width: 0; line-height: 1.25rem; }
+.prop-fact > .ico { margin-block: .125rem; color: var(--faint); }
+.prop-fact.by-human > .ico { color: var(--blue-pressed); }
+.prop-fact.by-agent > .ico { color: var(--agent-dark); }
+.prop-fact.by-schedule > .ico { color: inherit; }
+/* A hold's entries keep their keys whole: a browser breaks "VIB-151" after
+   its hyphen in a column this narrow. */
+.prop-fact .hold-ref { white-space: nowrap; }
+/* The repository in the code face, as the PR card's bar prints it. */
+.prop-fact > .mono { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+/* A dot is centred in the marks' 16px column: the stage's, and the house's
+   agent pulse (ruling 457's dot, the ring on its ::after). */
+.kv.props .col-stage-dot { width: .5rem; height: .5rem; margin-inline: .25rem; }
+.prop-fact .working {
+  position: relative; width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent);
+  flex: none; margin: calc((1.25rem - .42rem) / 2) calc((1rem - .42rem) / 2);
+}
+.kv.props .stage-static, .kv.props .stage-menu-btn .sm-current { gap: .5rem; }
+
+/* The stage is a ghost trigger, as a Details value is: no chrome at rest, the
+   hover fill under the pointer, a blue edge while its menu is open, and its
+   padding and border past the column's edge, so the dot lines up with the
+   marks under it. The caret points at the menu, which opens under the
+   trigger's left edge (`align="start"`). */
+.kv.props .stage-menu-btn {
+  margin-block: calc(-.25rem - 1px); margin-left: calc(-.375rem - 1px); padding: .25rem .375rem; min-height: 1.75rem;
+  border-color: transparent; background: transparent;
+  font-size: inherit; font-weight: inherit;
+}
+.kv.props .stage-menu-btn:hover:where(:not(:disabled)) { border-color: var(--hairline); background: var(--tint-hover); }
+.kv.props .stage-menu-btn.open { border-color: var(--blue); background: var(--tint-hover); }
+.kv.props .stage-menu-btn .sm-caret { transform: rotate(90deg); }
+.kv.props .stage-menu-btn.open .sm-caret { transform: rotate(-90deg); }
+.stage-menu-pop[data-align="start"] { transform-origin: top left; }
+.stage-menu-pop[data-align="start"][data-side="top"] { transform-origin: bottom left; }
+
+/* The owner: the 22px avatar is the mark, centred on the marks' column so the
+   name starts where the other values' words start, and 1px over the value's
+   20px line at each side; "(you)" a step quieter;
+   the release cross right after the name it releases. "Assign me" is the
+   invitation Details draws for an empty value (`.prop-btn`). */
+.kv.props .rev-stack { gap: .3125rem; min-width: 0; margin-block: -.0625rem; }
+.kv.props .rev-stack .avatar { margin-left: -.1875rem; }
+.kv.props .rev-stack .rs-names { margin-left: 0; min-width: 0; font: inherit; color: var(--fg); overflow-wrap: anywhere; }
+.kv.props .rs-you, .kv.props .dim { color: var(--muted); }
+.kv.props .own-x { margin-left: 0; }
+.prop-btn:disabled { opacity: .7; cursor: default; }

@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from "react";
-import { holdEntriesSentence } from "~/shared/dependencies";
+import { holdEntriesSentence, type DependencyRender } from "~/shared/dependencies";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { Avatar } from "~/ui/avatar";
@@ -719,6 +720,22 @@ function GatesRow({
   });
 }
 
+/**
+ * Ruling 520: the hold's sentence with each entry's label on one line. In the
+ * property grid's value column Chromium breaks a key after its hyphen ("VIB-"
+ * over "151"), and no CSS property stops that; the words between the labels
+ * still wrap.
+ */
+function holdSentenceKeepingLabels(entries: readonly DependencyRender[]): ReactNode {
+  const sentence = holdEntriesSentence(entries);
+  const labels = [...new Set(entries.map((e) => e.label).filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (labels.length === 0) return sentence;
+  // A capturing split: the labels land at the odd indices.
+  return sentence
+    .split(new RegExp(`(${labels.map(escapeRegExp).join("|")})`))
+    .map((run, i) => (i % 2 === 1 ? <span key={i} className="hold-ref">{run}</span> : run));
+}
+
 /** Sidebar "Current state" panel — stage (with governed transition menu),
  * waiting-on, owner controls, repo, and the two dispositions a human decides
  * here: accepting the completion (P14-LV-06) and archiving (R14-3). */
@@ -809,7 +826,12 @@ export function CurrentStatePanel({
           </span>
         )}
       </div>
-      <div className="kv">
+      {/* Ruling 520: the facts are the property grid Details draws (ruling
+          501), one label column and every value on one left edge, each led
+          by its mark: the stage's dot, who owes the next move in the board
+          card's marks (ruling 365), the activity pulse, the owner's avatar,
+          the GitHub mark. */}
+      <div className="kv props">
         <div className="kv-row">
           <span className="k">Stage</span>
           <span className="v">
@@ -819,6 +841,7 @@ export function CurrentStatePanel({
                 currentStageId={task.stage}
                 onSelect={onTransition}
                 busy={transitionBusy}
+                align="start"
               />
             ) : (
               <span className="stage-static">
@@ -841,9 +864,10 @@ export function CurrentStatePanel({
             {task.packet?.awaiting === "goal_edit" ? (
               // Ruling 138: a decided edit_goal packet owes exactly one thing.
               <span
-                className="by-human"
+                className="prop-fact by-human"
                 title="An edit-goal decision was confirmed; saving the edited goal clears the packet."
               >
+                <Icon name="hand" />
                 a goal edit
               </span>
             ) : task.waiting === "human" ? (
@@ -858,9 +882,10 @@ export function CurrentStatePanel({
               // you" for surfaces that resolve the viewer, which this one never
               // did); the project phrase is the correct one here.
               <span
-                className="by-human"
+                className="prop-fact by-human"
                 title="A human decision is needed: see the decision packet, the stage control, or the acceptance action on this page."
               >
+                <Icon name="hand" />
                 a human
               </span>
             ) : task.waiting === "schedule" ? (
@@ -869,38 +894,49 @@ export function CurrentStatePanel({
               // up. Saying "a human" here was the same false demand the board
               // card made, one surface over.
               <span
-                className="by-schedule"
+                className="prop-fact by-schedule"
                 title="No decision is needed: a scheduled run picks this task back up on its own. The Schedules panel below can change or cancel it."
               >
-                {task.resumesAt ? (
-                  <>
-                    a schedule · <LocalDayDotTime iso={task.resumesAt} />
-                  </>
-                ) : (
-                  "a schedule"
-                )}
+                <Icon name="clock" />
+                {/* One run of text, so the time stays beside its words
+                    rather than a flex gap away from them. */}
+                <span>
+                  {task.resumesAt ? (
+                    <>
+                      a schedule · <LocalDayDotTime iso={task.resumesAt} />
+                    </>
+                  ) : (
+                    "a schedule"
+                  )}
+                </span>
               </span>
             ) : task.waiting === "agent" && task.liveRun === "queued" ? (
-              // Ruling 349: the run is parked behind the cap; nothing streams.
+              // Ruling 349: the run is parked behind the cap; nothing streams,
+              // so the board's ring rather than its pulse.
               <span
-                className="by-agent"
+                className="prop-fact by-agent"
                 title="Behind the instance's concurrent-run cap; it starts when a slot frees."
               >
+                <Icon name="ring" />
                 Agent queued
               </span>
             ) : task.waiting === "agent" ? (
-              <span className="by-agent">Agent work</span>
+              <span className="prop-fact by-agent">
+                <span className="working" />
+                Agent work
+              </span>
             ) : task.blockedBy.length > 0 ? (
               // Ruling 131(a): a held task owes nobody anything; what it waits
               // on is other work, named with each entry's live state.
               <span
-                className="sub"
+                className="prop-fact"
                 title={task.blockedBy.map((e) => `${e.label} · ${e.state}`).join(" · ")}
               >
-                Other work: {holdEntriesSentence(task.blockedBy)}
+                <Icon name="ban" />
+                <span>Other work: {holdSentenceKeepingLabels(task.blockedBy)}</span>
               </span>
             ) : (
-              "Nothing"
+              <span className="prop-empty">Nothing</span>
             )}
           </span>
         </div>
@@ -917,15 +953,18 @@ export function CurrentStatePanel({
         <div className="kv-row">
           <span className="k">Last activity</span>
           <span
-            className="v sub"
+            className="v"
             title="The newest event on this task's timeline. Not the last time the task file changed: a background GitHub sync rewrites that without anything happening."
           >
             {task.lastActivityAt ? (
-              <time dateTime={task.lastActivityAt}>
-                <LocalRelative iso={task.lastActivityAt} />
-              </time>
+              <span className="prop-fact">
+                <Icon name="activity" />
+                <time dateTime={task.lastActivityAt}>
+                  <LocalRelative iso={task.lastActivityAt} />
+                </time>
+              </span>
             ) : (
-              "Nothing on the timeline yet"
+              <span className="prop-empty">Nothing on the timeline yet</span>
             )}
           </span>
         </div>
@@ -945,7 +984,7 @@ export function CurrentStatePanel({
                 <Avatar person={owner} size="xs" />
                 <span className="rs-names">
                   {owner.name.split(" ")[0]}
-                  {ownerMine ? " (you)" : ""}
+                  {ownerMine && <span className="rs-you"> (you)</span>}
                 </span>
                 {((ownerMine && canOwn) || canReleaseAnyOwner) && (
                   <button
@@ -973,23 +1012,32 @@ export function CurrentStatePanel({
               // Done task whose every other control read "task closed" still
               // offered it — except to an ADMIN, who may reassign for the
               // record (the release-any-ownership tier).
+              // Ruling 520: the invitation Details makes for an empty value
+              // it can fill ("Add dependency"), a ghost trigger at rest.
               <button
                 type="button"
-                className="rev-add sm"
+                className="prop-btn"
                 disabled={ownerBusy}
                 onClick={() => onOwner("take")}
               >
-                <Icon name="plus" />
-                Assign me
+                <span className="prop-empty">
+                  <Icon name="plus" />
+                  Assign me
+                </span>
               </button>
             ) : (
-              <span className="v sub">Unowned</span>
+              <span className="prop-empty">Unowned</span>
             )}
           </span>
         </div>
         <div className="kv-row">
           <span className="k">Repo</span>
-          <span className="v mono">{task.repo}</span>
+          <span className="v">
+            <span className="prop-fact">
+              <Icon name="github" />
+              <span className="mono">{task.repo}</span>
+            </span>
+          </span>
         </div>
       </div>
       {/* Gap-10: the cue, once the stamp above has crossed its threshold. Stated

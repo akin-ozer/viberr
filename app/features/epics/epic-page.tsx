@@ -291,14 +291,18 @@ export function EpicPage({
                 </div>
                 <div className="kv-row">
                   <span className="k">Created</span>
+                  {/* Ruling 520: one run of text, so a value that wraps
+                      breaks between words rather than before its " · ". */}
                   <span className="v">
-                    {epic.createdByLabel || epic.createdBy}
-                    {epic.createdAt && (
-                      <span className="dim">
-                        {" · "}
-                        <LocalDayDotTime iso={epic.createdAt} />
-                      </span>
-                    )}
+                    <span>
+                      {epic.createdByLabel || epic.createdBy}
+                      {epic.createdAt && (
+                        <span className="dim">
+                          {" · "}
+                          <LocalDayDotTime iso={epic.createdAt} />
+                        </span>
+                      )}
+                    </span>
                   </span>
                 </div>
                 {/* Ruling 476(h): the conversation that planned the epic holds
@@ -308,10 +312,12 @@ export function EpicPage({
                   <div className="kv-row" data-epic-planned>
                     <span className="k">Planned in</span>
                     <span className="v">
-                      <Link className="linkish" to={view.plannedIn.href}>
-                        {view.plannedIn.title}
-                      </Link>
-                      <span className="dim"> · {view.plannedIn.scopeLabel}</span>
+                      <span>
+                        <Link className="linkish" to={view.plannedIn.href}>
+                          {view.plannedIn.title}
+                        </Link>
+                        <span className="dim"> · {view.plannedIn.scopeLabel}</span>
+                      </span>
                     </span>
                   </div>
                 )}
