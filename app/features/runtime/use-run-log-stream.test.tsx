@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, StrictMode, useContext, useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -185,11 +185,14 @@ function Probe({
   threads,
   source = TASK,
   poll,
+  shown,
 }: {
   enabled?: boolean;
   threads?: ConsoleThreadInput[];
   source?: RunLogSource;
   poll?: { runId: string | null; everyMs: number };
+  /** A console on the page showing this thread. */
+  shown?: string;
 }) {
   const input: Parameters<typeof useRunLogStream>[0] = {
     source,
@@ -198,6 +201,14 @@ function Probe({
   };
   if (poll) input.poll = poll;
   store = useRunLogStream(input);
+  return shown ? <ShowsThread logs={store} threadId={shown} /> : null;
+}
+
+/** What the console does once mounted (`AgentLogsPanel`): shows its thread. */
+function ShowsThread({ logs, threadId }: { logs: RunLogStore; threadId: string }) {
+  useEffect(() => {
+    logs.show(threadId);
+  }, [logs, threadId]);
   return null;
 }
 
@@ -556,6 +567,72 @@ describe("a thread the page did not carry", () => {
       status: "failed",
       loadError: "This console is project-member only.",
     });
+  });
+
+  it("ruling 524(e): a load the page's own cleanup aborted is asked again, not failed", async () => {
+    // StrictMode, as on the dev server: React rehearses the mount, so the
+    // console shows its thread, the page's cleanup disposes the store and
+    // aborts that window load, and the console shows the thread again. Here
+    // `fetch` answers as a browser's does: a task later, or with an
+    // AbortError when its signal aborts first.
+    const windowPage: FakeResponse = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          runId: "run_1",
+          threadId: "primary",
+          lines: [0, 1, 2, 3, 4].map((seq) => line(`l${seq}`)),
+          lineKeys: [0, 1, 2, 3, 4].map((seq) => `0:${seq}`),
+          logWindow: win({ headSeq: 4, totalLines: 5 }),
+          facts: FACTS,
+        },
+      }),
+    };
+    const signals: AbortSignal[] = [];
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise<FakeResponse>((resolve, reject) => {
+          const { signal } = init;
+          if (signal) signals.push(signal);
+          const answer = setTimeout(() => resolve(windowPage), 0);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(answer);
+            reject(new DOMException("This operation was aborted", "AbortError"));
+          });
+        }),
+    );
+    // At the root, as `entry.client.tsx` mounts it: React rehearses the
+    // effects of what mounts inside a StrictMode that is already in place.
+    render(
+      <StrictMode>
+        <DataRouter>
+          <Page threads={[unloaded]} shown="primary" />
+        </DataRouter>
+      </StrictMode>,
+    );
+    const seen: string[] = [];
+    const stop = store.subscribe(() => {
+      const view = store.thread("primary");
+      seen.push(view?.loadError ?? view?.status ?? "none");
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await flush();
+    });
+    stop();
+    // CANARY: let `loadWindow`'s catch fail the thread whatever aborted the
+    // request and this reads "Could not load this console: the request
+    // failed."; drop only `dispose`'s hand-back and it is one request, the
+    // thread left loading.
+    expect(seen).not.toContain("Could not load this console: the request failed.");
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "/resources/run-log?runId=run_1&window=1",
+      "/resources/run-log?runId=run_1&window=1",
+    ]);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+    expect(store.thread("primary")).toMatchObject({ status: "ready", loadError: null });
+    expect(texts()).toEqual(["l0", "l1", "l2", "l3", "l4"]);
   });
 });
 
