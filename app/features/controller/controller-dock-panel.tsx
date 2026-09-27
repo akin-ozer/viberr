@@ -8,7 +8,7 @@ import type { ControllerDockView } from "./controller-dock-query.server";
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
-import { controllerExamples } from "./controller-examples";
+import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
 import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -28,7 +28,7 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 
 /** Ruling 314's examples for the scope the dock is open on (shared with the
  *  page, ruling 419(g)). */
-function emptyExamples(view: ControllerDockView): string[] {
+function emptyExamples(view: ControllerDockView): ControllerExample[] {
   return controllerExamples(
     view.scope.kind === "task" && view.scope.taskKey
       ? { kind: "task", taskKey: view.scope.taskKey }
@@ -232,24 +232,11 @@ export function DockPanelBody({
           ) : !current.conversation ? (
             <div className="ctl-empty">
               <p className="empty sm">{emptyCopy(current)}</p>
-              {/* Ruling 314: clicking one SENDS it. An example that only
-                  fills the box would teach the same lesson and then ask the
-                  person to find the button, which is the thing they were
-                  already unsure about. */}
-              <ul className="ctl-examples">
-                {emptyExamples(current).map((example) => (
-                  <li key={example}>
-                    <button
-                      type="button"
-                      className="ctl-example"
-                      onClick={() => onSubmit(example)}
-                      disabled={busy || disabled}
-                    >
-                      {example}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <ControllerExampleList
+                examples={emptyExamples(current)}
+                disabled={busy || disabled}
+                onSend={onSubmit}
+              />
             </div>
           ) : (
             <div className="ctl-msgs dock-msgs">
