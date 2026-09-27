@@ -4,7 +4,6 @@ import { readFileSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
@@ -57,7 +56,6 @@ const PERSONAL_TOKEN = "cwt-arda-workspace-0123456789abcdefghij";
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   process.env.ANTHROPIC_API_KEY = CLAUDE_KEY;
   process.env.CODEX_ACCESS_TOKEN = CODEX_TOKEN;
   // Credential-SHAPED but a flag, not a secret. Redacting a 1-char value would
@@ -70,7 +68,6 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -607,31 +604,6 @@ describe("quota exhaustion from a refused run (D5)", () => {
     )!;
   }
 
-  it("parses both providers' reset clauses, and answers null rather than guessing", () => {
-    // Codex: English prose in the ACCOUNT's timezone, with an ordinal suffix
-    // that Date.parse rejects outright. V9: the components are resolved in UTC,
-    // not in whatever timezone this server happens to run in — Date.parse made
-    // the same sentence mean different instants on a container and a laptop.
-    // CANARY: build the instant with `new Date(year, month, day, …)` instead of
-    // `Date.UTC` and this shifts by the runner's own offset.
-    expect(parseQuotaResetAt(CODEX_REFUSAL)).toEqual({
-      at: Date.UTC(2026, 8, 18, 17, 20) / 1000,
-      precision: "prose",
-    });
-    // Claude: a bare unix epoch after a pipe — no interpretation, no timezone.
-    expect(parseQuotaResetAt("Claude AI usage limit reached|1750000000")).toEqual({
-      at: 1_750_000_000,
-      precision: "exact",
-    });
-    // No date named, and prose that only mentions the limit: null, so the card
-    // falls back to the observed instant instead of inventing a window.
-    expect(
-      parseQuotaResetAt("You've hit your usage limit. Upgrade to Plus."),
-    ).toBeNull();
-    // A word in a month's position that is not a month is not a date.
-    expect(parseQuotaResetAt("try again at soon 18, 2026")).toBeNull();
-  });
-
   /**
    * F32-4 (pass 32). Live: the seeded Codex refresh token had already been
    * consumed elsewhere, the first Codex run died at turn 0 with "Your access
@@ -988,20 +960,7 @@ describe("ruling 130(d): structured refusals and the principal", () => {
     }
   });
 
-  it("parses `resets 11:50am (UTC)` as the next UTC occurrence with precision `clock`", () => {
-    expect(parseQuotaResetAt("You've hit your session limit · resets 11:50am (UTC)", "2026-09-07T09:00:00.000Z")).toEqual({
-      at: Date.UTC(2026, 8, 7, 11, 50) / 1000,
-      precision: "clock",
-    });
-    // Already past today: tomorrow.
-    expect(parseQuotaResetAt("resets 11:50am (UTC)", "2026-09-07T12:00:00.000Z")).toEqual({
-      at: Date.UTC(2026, 8, 8, 11, 50) / 1000,
-      precision: "clock",
-    });
-    expect(parseQuotaResetAt("resets 7pm (UTC)", "2026-09-07T12:00:00.000Z")).toEqual({
-      at: Date.UTC(2026, 8, 7, 19, 0) / 1000,
-      precision: "clock",
-    });
+  it("a clock-derived reset is stored as `clock` and retired with the prose grace", () => {
     // A clock-derived instant is retired with the prose grace, never at the minute.
     const runId = `run_clock_${randomBytes(6).toString("hex")}`;
     const sink = principalSink(runId);

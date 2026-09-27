@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { NotificationItem, type NotificationView } from "./notification-item";
-import { StageMeter } from "~/features/home/project-cards";
 
 afterEach(cleanup);
 
@@ -68,37 +67,5 @@ describe("NotificationItem (shared bell/page row)", () => {
     item.click();
     expect(onOpen).toHaveBeenCalledOnce();
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "n-142-packet" }));
-  });
-});
-
-describe("StageMeter (per-project stages, ruling 15)", () => {
-  const stages = [
-    { id: "todo", name: "To do", color: "slate" },
-    { id: "doing", name: "In progress", color: "violet" },
-    { id: "done", name: "Done", color: "green" },
-  ];
-
-  it("renders flex-weighted segments for non-empty stages, done at 0.45 opacity", () => {
-    const { container } = render(
-      <StageMeter stages={stages} dist={{ todo: 2, done: 3 }} />,
-    );
-    const meter = container.querySelector(".pj-meter")!;
-    const segments = meter.querySelectorAll("span");
-    expect(segments.length).toBe(2); // "doing" has 0 tasks → no segment
-    expect(meter.getAttribute("title")).toBe("2 to do · 0 in progress · 3 done");
-    expect(segments[1]!.style.opacity).toBe("0.45");
-  });
-
-  it("renders a ghost pipeline preview for zero tasks — one faint segment per stage", () => {
-    const { container } = render(<StageMeter stages={stages} dist={{}} />);
-    const meter = container.querySelector(".pj-meter.is-empty")!;
-    expect(meter).not.toBeNull();
-    // A fresh card previews the workflow: one segment per stage, not a dead bar.
-    expect(meter.querySelectorAll("span").length).toBe(stages.length);
-    expect(meter.getAttribute("title")).toContain("No tasks yet");
-    // Regression guard: the empty meter must NOT reuse the global `.empty`
-    // text utility (padding: 2rem), which inflated the 6px bar into a dead
-    // block on freshly-created project cards.
-    expect(meter.classList.contains("empty")).toBe(false);
   });
 });

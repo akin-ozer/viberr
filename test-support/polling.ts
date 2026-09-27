@@ -1,7 +1,10 @@
 /**
- * Settling and polling for a fire-and-forget effect, at the delivery tests'
- * timings: a 5 ms timer and a 2 s ceiling. Other suites poll at their own
- * cadence (25 ms, 50 ms with a nudge) and keep their own loops.
+ * Settling and polling for a fire-and-forget effect, at the three cadences the
+ * suites share: the delivery tests' (`flush`, `waitFor`: a 5 ms timer and a
+ * 2 s ceiling), the runtime suites' `settle` (thirty zero-delay timer turns)
+ * and the agent suites' `pollUntil` (every 25 ms, answering whether the
+ * condition held). A suite at another cadence (50 ms with a nudge) keeps its
+ * own loop.
  */
 
 /** `autoInvokeOperator` is fire-and-forget (`void`): let its microtasks
@@ -30,5 +33,26 @@ export async function waitFor(
   while (!cond()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/** Thirty zero-delay timer turns: long enough for a run's fire-and-forget
+ *  completion chain to come to rest before a runtime suite reads what it
+ *  left. */
+export async function settle(): Promise<void> {
+  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
+}
+
+/** Poll `cond` every 25 ms until it holds or `timeoutMs` passes, and answer
+ *  whether it held; unlike `waitFor`, a miss is the caller's to assert. */
+export async function pollUntil(
+  cond: () => boolean,
+  timeoutMs = 6_000,
+): Promise<boolean> {
+  const start = Date.now();
+  for (;;) {
+    if (cond()) return true;
+    if (Date.now() - start > timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, 25));
   }
 }

@@ -9,6 +9,7 @@ import {
   retireBackendRecordsFor,
   UNDATED_HOLD_MS,
   type BackendQuotaExhaustion,
+  type QuotaReset,
 } from "./backend-quota.server";
 
 /**
@@ -84,6 +85,39 @@ describe("parseQuotaResetAt: a time-only Codex refusal (G35-4)", () => {
       at: Math.round(Date.UTC(2026, 8, 18, 17, 20) / 1000),
       precision: "prose",
     });
+  });
+});
+
+describe("parseQuotaResetAt: an emitted epoch and a (UTC) clock (D5, ruling 130(d))", () => {
+  it("reads an emitted epoch as exact and a (UTC) clock as its next UTC occurrence, and answers null rather than guessing", () => {
+    const rows: { text: string; observed?: string; expected: QuotaReset | null }[] = [
+      // Claude: a bare unix epoch after a pipe — no interpretation, no timezone.
+      { text: "Claude AI usage limit reached|1750000000", expected: { at: 1_750_000_000, precision: "exact" } },
+      // No date named, and prose that only mentions the limit: null, so the card
+      // falls back to the observed instant instead of inventing a window.
+      { text: "You've hit your usage limit. Upgrade to Plus.", expected: null },
+      // A word in a month's position that is not a month is not a date.
+      { text: "try again at soon 18, 2026", expected: null },
+      {
+        text: "You've hit your session limit · resets 11:50am (UTC)",
+        observed: "2026-09-07T09:00:00.000Z",
+        expected: { at: Date.UTC(2026, 8, 7, 11, 50) / 1000, precision: "clock" },
+      },
+      // Already past today: tomorrow.
+      {
+        text: "resets 11:50am (UTC)",
+        observed: "2026-09-07T12:00:00.000Z",
+        expected: { at: Date.UTC(2026, 8, 8, 11, 50) / 1000, precision: "clock" },
+      },
+      {
+        text: "resets 7pm (UTC)",
+        observed: "2026-09-07T12:00:00.000Z",
+        expected: { at: Date.UTC(2026, 8, 7, 19, 0) / 1000, precision: "clock" },
+      },
+    ];
+    for (const { text, observed, expected } of rows) {
+      expect(parseQuotaResetAt(text, observed), text).toEqual(expected);
+    }
   });
 });
 

@@ -22,7 +22,6 @@ import type {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   forceAcceptCompletion,
   recordAgentCompletion,
@@ -288,12 +287,10 @@ beforeEach(() => {
   // no-merge case below compares this whole recorded value.
   mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);
   remote();
-  resetSseBrokerForTests();
   installFakeRuntime();
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

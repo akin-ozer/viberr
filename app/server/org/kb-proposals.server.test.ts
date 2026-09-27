@@ -14,7 +14,6 @@ import {
   type LegacyProposalInput,
 } from "../../../test-support/kb-legacy-proposals";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { resolveStoreTarget, saveKnowledgeBase } from "./resources.server";
 import { writeStoreDoc } from "./store-files.server";
 import {
@@ -77,11 +76,9 @@ const read = (kb: string, doc = "facts.md") =>
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

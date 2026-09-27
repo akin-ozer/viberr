@@ -10,8 +10,8 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { settle } from "../../../test-support/polling";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import {
   currentCorrelation,
@@ -100,7 +100,6 @@ beforeEach(async () => {
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   adapter = new CorrelationProbeAdapter();
   configureRunServiceForTests({ claude: adapter, codex: adapter });
   // Ruling 127: every run here bills VIB-1's owner.
@@ -108,13 +107,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
-}
 
 /** A reviewer run on VIB-1; distinct threads and profiles so several coexist. */
 async function start(threadId: string): Promise<string> {

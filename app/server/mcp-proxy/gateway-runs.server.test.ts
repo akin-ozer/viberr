@@ -18,9 +18,8 @@ import {
   queueFakeCompaction,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
-import { waitFor } from "../../../test-support/polling";
+import { settle, waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
@@ -53,7 +52,6 @@ beforeEach(async () => {
     });
   }
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   await connectFakeBackend(store.db, store.users.arda.id, "claude");
   await connectFakeBackend(store.db, store.users.arda.id, "codex");
@@ -73,13 +71,8 @@ afterEach(async () => {
   await drainRunCompletions();
   await stopMcpGateway();
   await upstream.close();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
-}
 
 const mountSchema = z.strictObject({
   type: z.literal("http"),

@@ -63,7 +63,6 @@ import {
   type OperatorAutonomy,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -240,7 +239,6 @@ describe("Codex structured operator completion", () => {
       goal: "Coordinate a finished implementation into review.",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
 
     adapter = new ControlledAdapter();
@@ -256,7 +254,6 @@ describe("Codex structured operator completion", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx.cleanup();
   });
 
@@ -2318,7 +2315,6 @@ describe("stranded auto-stage resume", () => {
         goal: "Goal to be refined at the triage quality gate.",
       });
       rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
-      resetSseBrokerForTests();
       resetOperatorLeasesForTests();
       adapter2 = new ControlledAdapter();
       configureRunServiceForTests({ claude: adapter2, codex: adapter2 });
@@ -2329,7 +2325,6 @@ describe("stranded auto-stage resume", () => {
 
     afterEach(() => {
       resetOperatorLeasesForTests();
-      resetSseBrokerForTests();
       ctx2.cleanup();
     });
 
@@ -3739,7 +3734,6 @@ describe("pending trigger queue", () => {
       goal: "Ship the parser.",
     });
     rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter3 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter3, codex: adapter3 });
@@ -3750,7 +3744,6 @@ describe("pending trigger queue", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx3.cleanup();
   });
 
@@ -4377,7 +4370,6 @@ describe("stranded codex plan recovery", () => {
       goal: "Add the changelog entry for 2.4.",
     });
     rebuildAll(store4.db, { dataRoot: store4.dataRoot, force: true });
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter4 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter4, codex: adapter4 });
@@ -4388,7 +4380,6 @@ describe("stranded codex plan recovery", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx4.cleanup();
   });
 
@@ -4530,7 +4521,6 @@ describe("runOperator — authority, ordering, orphans", () => {
   beforeEach(async () => {
     ctx5 = createTestDbContext();
     store5 = setupTestStore(ctx5);
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter5 = new ProbeAdapter();
     configureRunServiceForTests({ claude: adapter5, codex: adapter5 });
@@ -4541,7 +4531,6 @@ describe("runOperator — authority, ordering, orphans", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx5.cleanup();
   });
 
@@ -5652,7 +5641,6 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
       goal: "Add the changelog entry.",
     });
     rebuildAll(store6.db, { dataRoot: store6.dataRoot, force: true });
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter6 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter6, codex: adapter6 });
@@ -5663,7 +5651,6 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx6.cleanup();
   });
 
@@ -5819,7 +5806,6 @@ describe("R19-1 — the operator's read-only repository view", () => {
     ctx7 = createTestDbContext();
     store7 = setupTestStore(ctx7);
     origins = ctx7.makeTempDir();
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter7 = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter7, codex: adapter7 });
@@ -5830,7 +5816,6 @@ describe("R19-1 — the operator's read-only repository view", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx7.cleanup();
   });
 

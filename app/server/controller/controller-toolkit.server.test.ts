@@ -1122,12 +1122,9 @@ describe("instance scope: org-role gate on every management tool", () => {
 
     // An open Instance settings tab holds a `user`-scoped stream; the new ask
     // must reach it without a manual reload.
-    const { connectSseClient, resetSseBrokerForTests } = await import(
-      "~/server/events/sse-broker.server"
-    );
-    resetSseBrokerForTests();
+    const { connectSseClient } = await import("~/server/events/sse-broker.server");
     const wire: string[] = [];
-    connectSseClient({
+    const handle = connectSseClient({
       userId: "u_settings_tab",
       scopes: [{ kind: "user" }],
       lastEventId: null,
@@ -1141,7 +1138,7 @@ describe("instance scope: org-role gate on every management tool", () => {
         reason: "It carries the model rule Arda set, as its heading.",
       });
     } finally {
-      resetSseBrokerForTests();
+      handle.close();
     }
     expect(asked).toContain("[done]");
     // The remedy is the deployment change, never a button this page could own.

@@ -17,7 +17,6 @@ import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readEpicFile } from "~/server/files/epic-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -160,14 +159,12 @@ function operatorTools() {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   installFakeRuntime();
   resetOperatorLeasesForTests();
 });
 
 afterEach(() => {
   resetOperatorLeasesForTests();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

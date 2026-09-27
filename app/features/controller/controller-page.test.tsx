@@ -569,7 +569,7 @@ describe("the open conversation's execution", () => {
     );
   });
 
-  it("renders the strip (phase, step, model, Interrupt) and discloses the console on it", async () => {
+  it("renders the strip (phase, step, Interrupt) and discloses the console on it", async () => {
     // Canary: render only the transcript's "is working" row again and every
     // assertion below fails.
     const { container } = renderPage(working(), "?c=cnv_b");
@@ -577,12 +577,8 @@ describe("the open conversation's execution", () => {
     expect(screen.getByText("1 agent running")).toBeTruthy();
     expect(screen.getByText("Working")).toBeTruthy();
     expect(screen.getByText("viberr_controller · list_tasks")).toBeTruthy();
-    // The Elapsed, Turns and Tokens cells are LiveRunPanel's own, pinned in
-    // runs-panels.test.tsx; the model the turn runs on is read here.
-    const runtimeCell = [...container.querySelectorAll(".run-cell")].find(
-      (c) => c.querySelector(".lbl")?.textContent === "Runtime",
-    );
-    expect(runtimeCell?.querySelector(".val")?.textContent).toBe("claude-opus-4-8");
+    // The strip's cells (Elapsed, Turns, Tokens, Runtime) are LiveRunPanel's
+    // own, pinned in runs-panels.test.tsx.
     expect(screen.getByRole("button", { name: "Interrupt" })).toBeTruthy();
 
     // F39 (owner decision): while the turn streams, its console is DISCLOSED

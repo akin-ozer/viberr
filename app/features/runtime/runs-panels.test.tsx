@@ -86,6 +86,12 @@ describe("LiveRunPanel", () => {
     // Ruling 366(e): the digits roll (`@number-flow/react`), and the plain
     // figure rides the wrapper's `data-clock` for anyone reading the DOM.
     expect(container.querySelector(".run-cell .lw-clock")!.getAttribute("data-clock")).toBe("06:42");
+    // The Runtime cell names the model the run is on, for the task page's
+    // strip and the controller's alike.
+    const runtime = [...container.querySelectorAll(".run-cell")].find(
+      (c) => c.querySelector(".lbl")?.textContent === "Runtime",
+    );
+    expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
   });
 
   /**

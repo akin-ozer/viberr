@@ -45,7 +45,6 @@ import {
   resetBackendLoginsForTests,
   startBackendLogin,
 } from "~/server/runtimes/backend-login.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
@@ -120,7 +119,6 @@ beforeEach(async () => {
     },
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
@@ -134,7 +132,6 @@ afterEach(() => {
   resetBackendLoginsForTests();
   resetFakeVendorEnv();
   vendors.cleanup();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

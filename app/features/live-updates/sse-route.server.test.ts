@@ -39,11 +39,7 @@ beforeAll(async () => {
     )
     .run("viberr-core", userId, "contributor");
 });
-afterAll(async () => {
-  const { resetSseBrokerForTests } = await import(
-    "~/server/events/sse-broker.server"
-  );
-  resetSseBrokerForTests();
+afterAll(() => {
   app.cleanup();
 });
 afterEach(async () => {

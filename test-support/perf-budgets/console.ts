@@ -8,10 +8,6 @@ const TASK_CONSOLE =
 const TASK_PAGE =
   "jsdom: TaskDetailPage beside the layout's live stream, one Profiler; the developer streaming beside a finished 50-line operator, no timeline events; fake EventSource and /resources/run-log, fake timers";
 
-/** The `run-events.console.perf.test.ts` fixture. */
-const TABS =
-  "connectSseClient: a board tab (project + user) and a task tab (project + task + user); ten lines of one run on that task";
-
 /** Ruling 457 ratchet ceilings: live run console, task page render and its SSE streams. */
 export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // TASK-1: 1,048,869 while every group's window (display and raw) rode every
@@ -179,21 +175,6 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
     journey: "live-run",
     fixture:
       "jsdom: routes stub root > layout (live stream) > task, each loader counting; TaskDetailPage with 40 rows; a run.log-appended every 500 ms for 19.5 s (short of the F22 20 s tick)",
-  },
-  // LIVE-5: the task tab's layout stream carries the line once.
-  "console:sse.run-line-frames-per-line-task-tab": {
-    ceiling: 1,
-    unit: "count",
-    journey: "live-run",
-    fixture: `${TABS}; frames per line on the task tab`,
-  },
-  // LIVE-5: 1 while every board of the project received and dropped every
-  // line; the frame is task-scoped only now.
-  "console:sse.run-line-frames-per-line-board-tab": {
-    ceiling: 0,
-    unit: "count",
-    journey: "live-run",
-    fixture: `${TABS}; frames per line on the board tab`,
   },
   // CTL-2 (page half): 14 (a 5 s revalidation poll plus the F22 20 s one);
   // the page reads the turn's tail every 5 s and revalidates when it ended.

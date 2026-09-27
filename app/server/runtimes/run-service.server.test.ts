@@ -36,7 +36,6 @@ import {
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { RUN_PHASE } from "./adapter.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { RunCallbacks, RunSpec, RuntimeAdapter } from "./adapter.server";
@@ -55,6 +54,7 @@ import {
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
+import { settle } from "../../../test-support/polling";
 
 // SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
 // mounting it assert how the service ROUTES the dictionary — key-derived
@@ -75,7 +75,6 @@ beforeEach(async () => {
     frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: a run bills a PERSON, so "this backend can run" is a fact about
   // the principal. Arda owns VIB-1 in this file and is every run's principal
@@ -86,7 +85,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -98,10 +96,6 @@ function instantScript(lines: LogLine[], backend: "claude" | "codex" = "claude")
     backend,
     keepRunning: false,
   };
-}
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
 type TestRunInput = Omit<

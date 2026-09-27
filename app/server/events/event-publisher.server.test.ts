@@ -1,14 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { sseEventSchema } from "~/schemas/sse-event.schema";
 import { emitProjectionEvent } from "./projection-events.server";
 import {
   startEventPublisher,
   translateProjectionEvent,
 } from "./event-publisher.server";
-import {
-  connectSseClient,
-  resetSseBrokerForTests,
-} from "./sse-broker.server";
+import { connectSseClient } from "./sse-broker.server";
 
 const AT = "2026-07-05T09:41:00.000Z";
 
@@ -19,10 +16,6 @@ function validated(events: ReturnType<typeof translateProjectionEvent>) {
   }
   return events;
 }
-
-afterEach(() => {
-  resetSseBrokerForTests();
-});
 
 describe("translateProjectionEvent shapes (docs/architecture/decisions.md payload contract)", () => {
   it("task.updated carries compact facts (slug/key/stage/readiness)", () => {

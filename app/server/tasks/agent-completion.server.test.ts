@@ -28,12 +28,12 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { pollUntil } from "../../../test-support/polling";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { stageOutcome } from "./agent-outcome.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
@@ -201,18 +201,6 @@ function taskFile() {
   })!;
 }
 
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 5_000,
-): Promise<boolean> {
-  const start = Date.now();
-  for (;;) {
-    if (predicate()) return true;
-    if (Date.now() - start > timeoutMs) return false;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
-
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -226,7 +214,6 @@ beforeEach(async () => {
     goal: "Exercise the canonical completion handler.",
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
@@ -237,7 +224,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -294,7 +280,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       actor: actorOf(store.users.arda),
       threadId: `th-${runSeq}`,
     });
-    await waitFor(() => {
+    await pollUntil(() => {
       // SAFETY: the SELECT list is the single column `state`, which
       // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
       // sqlite's own answer when the id matches no row.
@@ -1171,7 +1157,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
       { id: runId, state: "finished" },
     );
-    await waitFor(() =>
+    await pollUntil(() =>
       taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
     );
 
@@ -1367,7 +1353,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       log.mock.calls.some(([msg]) => String(msg).includes("react depth reset")),
     ).toBe(true);
     // The operator was re-invoked (a react at a fresh depth), not parked.
-    await waitFor(() => operatorRuns() > before);
+    await pollUntil(() => operatorRuns() > before);
     expect(operatorRuns()).toBe(before + 1);
   });
 
@@ -1461,7 +1447,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(
         log.mock.calls.some(([msg]) => String(msg).includes("moved the task's head")),
       ).toBe(true);
-      await waitFor(() => operatorRuns() > before);
+      await pollUntil(() => operatorRuns() > before);
       expect(operatorRuns()).toBe(before + 1);
     });
 
@@ -1604,7 +1590,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         ),
       ).toEqual(["delivered"]);
       // One hand-off, carrying Viberr's own record of what the option did.
-      await waitFor(() => runOp.mock.calls.length > 0);
+      await pollUntil(() => runOp.mock.calls.length > 0);
       expect(runOp).toHaveBeenCalledTimes(1);
       expect(runOp.mock.calls[0]![1]).toMatchObject({
         trigger: "packet-resolved",
@@ -3857,7 +3843,7 @@ describe("unavailable backend through the specialist start path", () => {
     expect(row.state).toBe("error");
 
     const blockedByRefusal = (text: string) => /isn't connected for/.test(text);
-    const surfaced = await waitFor(() => {
+    const surfaced = await pollUntil(() => {
       const parsed = taskFile().parsed;
       return (
         parsed.timeline.some(
@@ -3940,7 +3926,7 @@ describe("unavailable backend through the specialist start path", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const offered = await waitFor(() => {
+    const offered = await pollUntil(() => {
       const packet = taskFile().parsed.packet;
       return (packet?.options ?? []).some(
         (o) => o.kind === "retry_other_backend",
@@ -3993,7 +3979,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const changed = await waitFor(() => {
+    const changed = await pollUntil(() => {
       const fm = taskFile().parsed.frontmatter;
       return fm.validation === "healthy";
     }, 25_000);
@@ -4037,7 +4023,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       // collide on the (project, task, thread) uniqueness.
       threadId: `th-${runSeq}`,
     });
-    await waitFor(() => {
+    await pollUntil(() => {
       // SAFETY: the SELECT list is the single column `state`, which
       // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
       // sqlite's own answer when the id matches no row.

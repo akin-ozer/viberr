@@ -10,7 +10,6 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
 import { flush, waitFor } from "../../../test-support/polling";
@@ -153,7 +152,6 @@ function recs(): Recommendation[] {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   installFakeRuntime();
   runOp.mockClear();
   pushMock.mockClear();
@@ -168,7 +166,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

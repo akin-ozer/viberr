@@ -11,14 +11,15 @@ import {
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { HomePage, type HomePageData } from "./home-page";
-import { ProjectCard, ProjectRow } from "./project-cards";
+import { ProjectCard, ProjectRow, StageMeter } from "./project-cards";
 import type { HomeProjectCard } from "./home-query.server";
 
 /**
  * UI-26: `home-page.tsx` (1400+ lines) had NO component test — only `StageMeter`
- * was rendered anywhere, via `notification-item.test.tsx`. Pass-12's SELF-1
- * (a ReferenceError that 500'd every blocked task because no test rendered that
- * branch) is the same exposure. These cover the pass-13 honesty branches.
+ * was rendered anywhere, from the notification suite (its tests live here now).
+ * Pass-12's SELF-1 (a ReferenceError that 500'd every blocked task because no
+ * test rendered that branch) is the same exposure. These cover the pass-13
+ * honesty branches.
  */
 
 afterEach(cleanup);
@@ -234,6 +235,37 @@ describe("UI-15: the dimmed band is the TERMINAL stage, not the id 'done'", () =
     expect(bands[0]!.dataset.stageColor).toBe("stone");
     expect(bands[1]!.dataset.stageColor).toBe("rose");
     expect(bands[0]!.style.background).toBe("");
+  });
+});
+
+describe("StageMeter (per-project stages, ruling 15)", () => {
+  const stages = [
+    { id: "todo", name: "To do", color: "slate" },
+    { id: "doing", name: "In progress", color: "violet" },
+    { id: "done", name: "Done", color: "green" },
+  ];
+
+  it("renders flex-weighted segments for non-empty stages", () => {
+    const { container } = render(
+      <StageMeter stages={stages} dist={{ todo: 2, done: 3 }} />,
+    );
+    const meter = container.querySelector(".pj-meter")!;
+    const segments = meter.querySelectorAll("span");
+    expect(segments.length).toBe(2); // "doing" has 0 tasks → no segment
+    expect(meter.getAttribute("title")).toBe("2 to do · 0 in progress · 3 done");
+  });
+
+  it("renders a ghost pipeline preview for zero tasks — one faint segment per stage", () => {
+    const { container } = render(<StageMeter stages={stages} dist={{}} />);
+    const meter = container.querySelector(".pj-meter.is-empty")!;
+    expect(meter).not.toBeNull();
+    // A fresh card previews the workflow: one segment per stage, not a dead bar.
+    expect(meter.querySelectorAll("span").length).toBe(stages.length);
+    expect(meter.getAttribute("title")).toContain("No tasks yet");
+    // Regression guard: the empty meter must NOT reuse the global `.empty`
+    // text utility (padding: 2rem), which inflated the 6px bar into a dead
+    // block on freshly-created project cards.
+    expect(meter.classList.contains("empty")).toBe(false);
   });
 });
 

@@ -469,6 +469,35 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
  * the `notifications.kind: ownership` entry is never reported.
  */
 describe("projectionCheckGaps (ruling 140)", () => {
+  it("F21-1 / ruling 225: reads the baseline's own task_projections CHECKs", async () => {
+    // The positive control behind every `toEqual([])` on a fresh database in
+    // this file: a probe whose pattern stopped matching the baseline's CHECK
+    // would answer `[]` there too, and a missing enum member would ship
+    // unseen. CANARY: reformat either CHECK in `0001_baseline.sql` past the
+    // probe's pattern, or drop its arm here, and this reports nothing.
+    const { projectionCheckGaps } = await import("./boot.server");
+    const ctx = createTestDbContext();
+    try {
+      const db = ctx.makeDb();
+      expect(projectionCheckGaps(db)).toEqual([]);
+      // SAFETY: the baseline creates `task_projections`, so its CREATE TABLE
+      // row is present and `sql` is non-null for a table.
+      const { sql } = db
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_projections'`)
+        .get() as { sql: string };
+      // The table as a root carries it whose CHECKs predate `bypassed` and
+      // `schedule` (sqlite cannot ALTER a CHECK in place).
+      db.exec("DROP TABLE task_projections;");
+      db.exec(sql.replace(/,\s*'bypassed'/, "").replace(/,\s*'schedule'/, ""));
+      expect(projectionCheckGaps(db)).toEqual([
+        "task_projections.validation: bypassed",
+        "task_projections.waiting: schedule",
+      ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it("reports a notifications CHECK that lacks a declared kind, beside the validation gaps", async () => {
     const { projectionCheckGaps } = await import("./boot.server");
     const ctx = createTestDbContext();

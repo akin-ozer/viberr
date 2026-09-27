@@ -164,7 +164,7 @@ function countRows(db: DatabaseSync, sql: string): number {
  *
  * The CHECK is a hand-written mirror of `VALIDATION_VALUES` in
  * `db/migrations/0001_baseline.sql`, and the repository pins the two together
- * (`app/server/db/projection-validation-check.test.ts`). That pin cannot reach a
+ * (`boot.server.test.ts` "projectionCheckGaps"). That pin cannot reach a
  * database that already exists: migrations are squashed and forward-only, so
  * widening the baseline's CHECK changes what a FRESH `projection.sqlite` gets and
  * nothing else. A deployed root carries whatever CHECK shipped the day it was

@@ -23,7 +23,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   interruptRun,
   listRunsForTask,
@@ -199,7 +198,6 @@ function seedAcceptable(stage: string): void {
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   installFakeRuntime();
   const { resetOperatorLeasesForTests } = await import(
     "~/server/runtimes/operator-run.server"
@@ -223,7 +221,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

@@ -20,7 +20,7 @@ import {
   AGENT_UID_FLOOR,
   resetAgentIsolationForTests,
 } from "~/server/runtimes/agent-isolation.server";
-import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
+import { createLocalOrigin, withLocalGithub, type LocalOrigin } from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
@@ -61,7 +61,6 @@ import type {
   RuntimeAdapter,
 } from "~/server/runtimes/adapter.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   drainRunCompletions,
   installFakeRuntime,
@@ -171,7 +170,6 @@ beforeEach(async () => {
     goal: "Let the operator attach a repo and run the specialist.",
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: an agent run bills the TASK OWNER's accounts. Arda owns every
   // task in this file, so connecting his backends is what makes a dispatch
@@ -183,7 +181,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await drainRunCompletions();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -4580,16 +4577,22 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(failure.join("\n")).not.toMatch(/credential/i);
     });
 
-    it("a delivering checkout left with no `.git/HEAD` is removed as its person and cloned again", async () => {
-      // CANARY: drop the `.git/HEAD` check before the reuse arm and the
-      // checkout is reused as it stands: its git fails and the run has no
-      // checkout.
+    /** `acme/widgets` as a local origin, set as the project's repository. */
+    async function widgetsOrigin(): Promise<{ origins: string; origin: LocalOrigin }> {
       const origins = ctx.makeTempDir("viberr-origins-");
-      await createLocalOrigin(origins, { repo: "acme/widgets" });
+      const origin = await createLocalOrigin(origins, { repo: "acme/widgets" });
       const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
         .parsed.frontmatter;
       writeProject(store.dataRoot, { ...fm, repo: "acme/widgets" });
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      return { origins, origin };
+    }
+
+    it("a delivering checkout left with no `.git/HEAD` is removed as its person and cloned again", async () => {
+      // CANARY: drop the `.git/HEAD` check before the reuse arm and the
+      // checkout is reused as it stands: its git fails and the run has no
+      // checkout.
+      const { origins } = await widgetsOrigin();
       // What an older build's half-finished remove left: files, a `.git`
       // whose HEAD is gone, and a directory it could not empty.
       const ws = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "widgets");
@@ -4607,6 +4610,27 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(existsSync(path.join(ws, "stale.txt"))).toBe(false);
       expect(getRun(store.db, runId)!.no_checkout).toBe(0);
       expect(lastRunSpec()?.prompt).toContain("is already checked out in the current directory");
+    });
+
+    it("ruling 129: a reused delivering checkout is refreshed before the run, and its contract and recorded inputs say what the refresh did", async () => {
+      // CANARY: drop the `refreshWorkspaceFromMirror` call in cloneRepo's reuse
+      // arm, or the `refreshed` it returns, and the second run is handed the
+      // checkout with no word about the base that moved under it; drop
+      // `workspaceRefresh` from the run's inputs and a person reading the
+      // console cannot tell either.
+      const { origins, origin } = await widgetsOrigin();
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+
+      await withLocalGithub(origins, () => runAndStop("dev"));
+      await origin.advance({ message: "base moved" });
+      const runId = await withLocalGithub(origins, () => runAndStop("dev"));
+
+      const recorded = listRunLines(store.db, runId).find((l) => l.display.tag === RUN_INPUTS_TAG)
+        ?.display.inputs?.workspaceRefresh;
+      expect(recorded).toBeTruthy();
+      expect(lastRunSpec()?.prompt).toContain(`Before this run Viberr ${recorded}.`);
     });
   });
 });
@@ -5702,7 +5726,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
 });
 
 describe("ruling 422: a dispatched run's contract names the knowledge-base folders it may read", () => {
-  it("puts the profile's KB folder and the project's rulings folder in the read-only exception", async () => {
+  it("puts the profile's KB folder and the project's rulings folder in the read-only exception, and hands the run the rulings index", async () => {
     // CANARY: stop setting `promptInput.kbReadDirs` in the dispatch.
     for (const name of ["house-rules", "project-rulings"]) {
       mkdirSync(path.join(store.dataRoot, "kb", name), { recursive: true });
@@ -5741,5 +5765,10 @@ describe("ruling 422: a dispatched run's contract names the knowledge-base folde
     expect(prompt).toContain("- Read-only exception: the knowledge-base folders");
     expect(prompt).toContain(`\`${house}\``);
     expect(prompt).toContain(`\`${rulings}\``);
+    // Ruling 239: `critic` grants only `house-rules`, so the rulings index can
+    // only reach this run through the fresh-run `withProjectRulings`. CANARY:
+    // unwrap that call and the folder above is still named, but its index is
+    // gone.
+    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("# project-rulings (knowledge base)");
   });
 });

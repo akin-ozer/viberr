@@ -5,7 +5,6 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { withLegacyProposals } from "../../../test-support/kb-legacy-proposals";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { resolveStoreTarget, saveKnowledgeBase } from "./resources.server";
 import { writeStoreDoc } from "./store-files.server";
 import { listKbProposals } from "./kb-proposals.server";
@@ -84,11 +83,9 @@ const merged = async (kb: string, input: Partial<MergeKbCorrectionInput>) => {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

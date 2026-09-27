@@ -656,12 +656,9 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
   async function published<T>(
     body: () => Promise<T>,
   ): Promise<{ result: T; wire: string }> {
-    const { connectSseClient, resetSseBrokerForTests } = await import(
-      "~/server/events/sse-broker.server"
-    );
-    resetSseBrokerForTests();
+    const { connectSseClient } = await import("~/server/events/sse-broker.server");
     const writes: string[] = [];
-    connectSseClient({
+    const handle = connectSseClient({
       userId: "u_watcher",
       scopes: [{ kind: "user" }],
       lastEventId: null,
@@ -671,7 +668,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
       const result = await body();
       return { result, wire: writes.join("") };
     } finally {
-      resetSseBrokerForTests();
+      handle.close();
     }
   }
 

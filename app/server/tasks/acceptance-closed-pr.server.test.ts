@@ -18,7 +18,6 @@ import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   forceAcceptCompletion,
   resolveAcceptanceAffordance,
@@ -117,12 +116,10 @@ function arda() {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   installFakeRuntime();
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

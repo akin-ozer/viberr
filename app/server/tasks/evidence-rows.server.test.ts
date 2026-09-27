@@ -24,7 +24,6 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import {
   applyAgentCompletionEffects,
@@ -388,10 +387,8 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
   }
 
   beforeEach(() => {
-    resetSseBrokerForTests();
     installFakeRuntime();
   });
-  afterEach(resetSseBrokerForTests);
 
   it("merges the agent's rows with the derived delivery rows onto the verdict event", async () => {
     deployReviewer([
