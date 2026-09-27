@@ -89,9 +89,14 @@ export function splitArgs(text: string): string[] {
   return out;
 }
 
-/** The selectors a rule names, one per entry of its selector list. */
-export function selectorParts(rule: CssRule): string[] {
-  return splitArgs(rule.selector);
+const SELECTOR_PARTS = new WeakMap<CssRule, readonly string[]>();
+
+/** The selectors a rule names, one per entry of its selector list. Split once
+ *  per rule: the integrity gate asks every rule this hundreds of times. */
+export function selectorParts(rule: CssRule): readonly string[] {
+  let parts = SELECTOR_PARTS.get(rule);
+  if (!parts) SELECTOR_PARTS.set(rule, (parts = Object.freeze(splitArgs(rule.selector))));
+  return parts;
 }
 
 /** What `rules` leave `selector`: the declarations of every rule that names it
@@ -105,10 +110,10 @@ export function declsFor(rules: readonly CssRule[], selector: string): Map<strin
 }
 
 /** `declsFor` a selector the sheet must style: with no rule naming it this
- *  throws, so a check that reads nothing off it cannot pass. */
+ *  throws, so a check that reads nothing off it cannot pass. (`cssRules` keeps
+ *  only rules that declare something, so an empty answer means no rule.) */
 export function requiredDecls(rules: readonly CssRule[], selector: string): Map<string, string> {
-  if (!rules.some((rule) => selectorParts(rule).includes(selector))) {
-    throw new Error(`${selector} must have a rule`);
-  }
-  return declsFor(rules, selector);
+  const decls = declsFor(rules, selector);
+  if (decls.size === 0) throw new Error(`${selector} must have a rule`);
+  return decls;
 }

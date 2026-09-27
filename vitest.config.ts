@@ -29,7 +29,9 @@ export default defineConfig({
     // on a warm laptop and flaked on CI's cold disks. One budget, stated here,
     // for tests and hooks alike: the harnesses seed that data root in a
     // `beforeAll`/`beforeEach`, and a hook left on the runner's 10 s default
-    // times out whole files under load. Raise it here, never per test.
+    // times out whole files under load. Raise it here; a test raises its own
+    // only while it waits on a real process (a CLI, a watcher, a reply chain),
+    // with the reason beside it (docs/development/testing.md §0).
     testTimeout: 20_000,
     hookTimeout: 20_000,
   },

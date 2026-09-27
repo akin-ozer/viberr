@@ -39,18 +39,6 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/** One signed-in session per person, reused across the file. */
-const sessions = new Map<string, { cookie: string; csrf: string }>();
-
-async function sessionOf(userId: string) {
-  const known = sessions.get(userId);
-  if (known) return known;
-  const { cookie, sessionId } = await app.cookieFor(userId);
-  const made = { cookie, csrf: await app.csrfFor(sessionId) };
-  sessions.set(userId, made);
-  return made;
-}
-
 /** The whole envelope a server loader or action is handed, so the direct
  *  calls below are checked against the real route signatures. */
 function routeArgs<Params extends Record<string, string>>(
@@ -68,13 +56,13 @@ const EPIC_PATTERN = "/projects/:slug/epics/:epicId";
 
 async function epicsPage(userId: string) {
   const { loader } = await import("~/routes/project.epics");
-  const { cookie } = await sessionOf(userId);
+  const { cookie } = await app.sessionFor(userId);
   return loader(routeArgs(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, { cookie }));
 }
 
 async function epicPage(userId: string, epicId: string) {
   const { loader } = await import("~/routes/project.epic");
-  const { cookie } = await sessionOf(userId);
+  const { cookie } = await app.sessionFor(userId);
   return loader(
     routeArgs(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, { cookie }),
   );
@@ -82,7 +70,7 @@ async function epicPage(userId: string, epicId: string) {
 
 async function board(userId: string, search = "") {
   const { loader } = await import("~/routes/project.board");
-  const { cookie } = await sessionOf(userId);
+  const { cookie } = await app.sessionFor(userId);
   const loaded = await loader(
     routeArgs(`/projects/${SLUG}/board${search}`, "/projects/:slug/board", { slug: SLUG }, { cookie }),
   );
@@ -95,7 +83,7 @@ function postBody(csrf: string, fields: Record<string, string>) {
 
 async function postEpics(userId: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.epics");
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   return action(
     routeArgs(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, {
       method: "POST",
@@ -107,7 +95,7 @@ async function postEpics(userId: string, fields: Record<string, string>) {
 
 async function postEpic(userId: string, epicId: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.epic");
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   return action(
     routeArgs(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, {
       method: "POST",
@@ -119,7 +107,7 @@ async function postEpic(userId: string, epicId: string, fields: Record<string, s
 
 async function postTask(userId: string, key: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.task");
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   return action(
     routeArgs(`/projects/${SLUG}/tasks/${key}`, "/projects/:slug/tasks/:key", { slug: SLUG, key }, {
       method: "POST",

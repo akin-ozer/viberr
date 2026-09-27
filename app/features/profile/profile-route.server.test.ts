@@ -87,25 +87,11 @@ async function runLoader(cookie?: string) {
   return loader(routeArgs(app.request("/profile", cookie ? { cookie } : {})));
 }
 
-/** One signed-in session per person, reused across the file: every sign-in is
- *  a scrypt verify. The password change below signs its user's other sessions
- *  out, so it drops that user's entry. */
-const signedIn = new Map<string, { cookie: string; csrf: string }>();
-
-async function sessionOf(userId: string) {
-  const known = signedIn.get(userId);
-  if (known) return known;
-  const { cookie, sessionId } = await app.cookieFor(userId);
-  const made = { cookie, csrf: await app.csrfFor(sessionId) };
-  signedIn.set(userId, made);
-  return made;
-}
-
 async function postAction(
   userId: string,
   fields: Record<string, string>,
 ): Promise<ActionOutcome> {
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   const { action } = await import("~/routes/profile");
   const body = new URLSearchParams({ _csrf: csrf, ...fields });
   return unwrap(
@@ -132,7 +118,7 @@ describe("/profile loader", () => {
   });
 
   it("widens the session user: memberships by id, derived role, prefs defaults", async () => {
-    const { cookie } = await sessionOf(ardaId);
+    const { cookie } = await app.sessionFor(ardaId);
     const { profile } = await runLoader(cookie);
 
     expect(profile.user.id).toBe(ardaId);
@@ -158,7 +144,7 @@ describe("/profile loader", () => {
   });
 
   it("membership role comes from the projection, per user (never hardcoded)", async () => {
-    const { cookie } = await sessionOf(murId);
+    const { cookie } = await app.sessionFor(murId);
     const { profile } = await runLoader(cookie);
     expect(profile.memberships).toEqual([
       { slug: "viberr-core", name: "Viberr Core", role: "maintainer" },
@@ -199,7 +185,7 @@ describe("/profile action", () => {
       on: "0",
     });
     expect(data.ok).toBe(true);
-    const { cookie } = await sessionOf(ardaId);
+    const { cookie } = await app.sessionFor(ardaId);
     const { profile } = await runLoader(cookie);
     expect(profile.prefs.notifs.packets.app).toBe(false);
     expect(profile.prefs.notifs.approvals.app).toBe(true);
@@ -280,7 +266,7 @@ describe("/profile action", () => {
       ),
     );
     // The file's cached session for Murat is one of the other sessions.
-    signedIn.delete(murId);
+    app.forgetSession(murId);
     expect(result.ok).toBe(true);
     expect(result.toast).toBe("Password updated. Other sessions were signed out");
 
@@ -349,7 +335,7 @@ describe("/profile action", () => {
   // `{ok:false,error}` toast path was unreachable. The rejection is now a
   // 403 RESULT the client's existing error handlers surface as a toast.
   it("rejects a forged CSRF token as a 403 result (not a thrown boundary)", async () => {
-    const { cookie } = await sessionOf(ardaId);
+    const { cookie } = await app.sessionFor(ardaId);
     const { action } = await import("~/routes/profile");
     const body = new URLSearchParams({ _csrf: "forged", intent: "identity" });
     // SAFETY: every branch of this action returns either a plain `{ ok }`
@@ -406,7 +392,7 @@ describe("/profile agent accounts (ruling 127)", () => {
   }
 
   async function backendsOf(userId: string) {
-    const { cookie } = await sessionOf(userId);
+    const { cookie } = await app.sessionFor(userId);
     const { profile } = await runLoader(cookie);
     return profile.backends;
   }
