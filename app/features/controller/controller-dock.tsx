@@ -191,7 +191,9 @@ function DockShell({ context }: { context: DockContext }) {
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const view = useFetcher<DockPayload>({ key: "controller-dock" });
+  // Ruling 457: a failed load answers null (the route's `clientLoader`), read
+  // like the time before the first answer.
+  const view = useFetcher<DockPayload | null>({ key: "controller-dock" });
   const send = useFetcher<SendResult>({ key: "controller-dock-send" });
 
   // Restore per-tab state AFTER hydration: reading storage during render would
@@ -275,7 +277,7 @@ function DockShell({ context }: { context: DockContext }) {
   // marks it seen), on every `controller.updated` the page's stream hands the
   // dock, and by the working poll. Not on navigation or on a page's own
   // revalidation: neither changes it (RF-8).
-  const status = useFetcher<DockStatus>({ key: "controller-unseen" });
+  const status = useFetcher<DockStatus | null>({ key: "controller-unseen" });
   const loadStatus = status.load;
   const shownId = current?.conversation?.id ?? null;
   const shownCount = current?.messages.length ?? 0;

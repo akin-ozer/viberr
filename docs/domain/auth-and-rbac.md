@@ -569,7 +569,9 @@ Two routes in, both the vendor's own:
   through `/resources/backend-login` every 2 s while it is live; the success toast
   settles on that result, never on the submit. A tab signed out meanwhile gets a 401
   refusal from the poll, never a login redirect (ruling 457), and the card keeps what its
-  page drew. The card renders the flow as two numbered
+  page drew; so it does for a poll the server never answers (a restart, a 5xx, a dead
+  network), which the route's `clientLoader` answers with null instead of the Profile
+  page's error boundary. The card renders the flow as two numbered
   steps: the vendor's link is an "Open sign-in page" button that names its host and is
   never printed in full, with a "Copy link" button beside it on both backends (ruling
   294: the browser holding the vendor session is often not the one reading this page);

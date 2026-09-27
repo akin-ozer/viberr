@@ -6,10 +6,12 @@ import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
 import type { ProfileBackend } from "./profile-query.server";
+import * as backendLoginRoute from "~/routes/resources.backend-login";
 import type {
   BackendLoginPollAnswer,
   BackendLoginPollData,
 } from "~/routes/resources.backend-login";
+import { clientLoaderOver, unreachable } from "../../../test-support/client-data";
 
 /**
  * Profile → Agent accounts, rendered (ruling 127).
@@ -83,9 +85,11 @@ function runningLogin(
   };
 }
 
+/** `poll` answers the card's poll, or is `unreachable`: a server that gives
+ *  no answer (a restart, a dead network). */
 function panelElement(
   backends: ProfileBackend[],
-  poll: BackendLoginPollAnswer | null = null,
+  poll: () => BackendLoginPollAnswer | null = () => null,
 ) {
   lastSubmit = null;
   const Stub = createRoutesStub([
@@ -107,11 +111,11 @@ function panelElement(
       },
     },
     {
-      // The real poll target. Its answer is what the success toast must settle
-      // on, so it is a route with a loader, not a stubbed function. A refusal
-      // carries its status, as the route answers one.
+      // The real poll target, through the route's own `clientLoader`. Its
+      // answer is what the success toast must settle on, so it is a route
+      // with a loader, not a stubbed function.
       path: "/resources/backend-login",
-      loader: () => (poll && "error" in poll ? Response.json(poll, { status: 401 }) : poll),
+      loader: clientLoaderOver(backendLoginRoute, poll),
     },
   ]);
   return <Stub initialEntries={["/profile"]} />;
@@ -119,7 +123,7 @@ function panelElement(
 
 function renderPanel(
   backends: ProfileBackend[],
-  poll: BackendLoginPollAnswer | null = null,
+  poll: () => BackendLoginPollAnswer | null = () => null,
 ) {
   return render(panelElement(backends, poll));
 }
@@ -697,7 +701,7 @@ describe("AgentAccountsPanel", () => {
         }),
         backend("codex"),
       ],
-      succeeded,
+      () => succeeded,
     );
 
     // Nothing has come back yet: a card that is still waiting must not claim a
@@ -720,23 +724,33 @@ describe("AgentAccountsPanel", () => {
   /**
    * Ruling 457, test audit L14-29: a poll from a signed-out tab used to
    * navigate it to /login. It now answers 401 with the conventions' error
-   * body, and that body reaches this card as the poll's answer: the card keeps
-   * the sign-in the page drew and claims nothing, and the page's next
-   * navigation asks for the sign-in.
+   * body, and that body reaches this card as the poll's answer; the page's
+   * next navigation asks for the sign-in. A poll the server can't answer at
+   * all (a restart, a 5xx, a dead network) reached the Profile page's error
+   * boundary and replaced the page; the route's `clientLoader` now answers
+   * null. Either way the card keeps the sign-in the page drew, claims
+   * nothing, and polls on.
    */
-  it("keeps the sign-in the page drew when a poll answers signed out", async () => {
+  it.each<[string, () => BackendLoginPollAnswer]>([
+    [
+      "is refused as signed out",
+      () => ({ error: { code: "unauthorized", message: "Sign in to see your agent accounts." } }),
+    ],
+    ["can't reach the server", unreachable],
+  ])("keeps the sign-in the page drew when a poll %s", async (_label, poll) => {
     vi.useFakeTimers();
     const { getByText, queryByText } = renderPanel(
       [backend("claude", { login: runningLogin("claude") }), backend("codex")],
-      { error: { code: "unauthorized", message: "Sign in to see your agent accounts." } },
+      poll,
     );
-    // Two poll intervals: the refusal has landed, and been read again.
+    // Two poll intervals: the answer has landed, and been read again.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_100);
     });
     // CANARY: let a refusal past the card's session-id match (its SAFETY cast
     // then hides it from the type checker) and reading its absent `health`
-    // takes the Profile page down with it.
+    // takes the Profile page down with it; delete the route's `clientLoader`
+    // and the unreachable poll does.
     expect(getByText("signing in")).toBeTruthy();
     expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
     expect(queryByText("Claude connected")).toBeNull();

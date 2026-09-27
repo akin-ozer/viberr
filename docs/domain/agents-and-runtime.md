@@ -233,7 +233,10 @@ make).
 
 `/resources/model-catalog?backend=` serves `{ data: { models, efforts, defaultModel,
 defaultEffort } }` to the profile editor (unknown backend → claude; any signed-in user, and a
-signed-out request gets a 401 `{ error }`, never a login redirect, ruling 457).
+signed-out request gets a 401 `{ error }`, never a login redirect, ruling 457). A load the
+server never answers (a restart, a 5xx, a dead network) reaches the editor, not the page's
+error boundary: the route's `clientLoader` answers null, and the editor offers its retry
+(D5, ruling 457).
 The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` and passes
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry

@@ -38,3 +38,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
   return Response.json({ data: { q, hits } });
 }
+
+/**
+ * Ruling 457: a failed search is the palette's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, so a restart, a 5xx or a dead network while the person typed
+ * replaced the page under the palette with its error page. Any failure answers
+ * null: the palette finds no hits in it and says nothing matches, and the next
+ * keystroke searches again.
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
+}

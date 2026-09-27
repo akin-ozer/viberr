@@ -67,7 +67,8 @@ function groupHits(hits: CommandHit[]): HitGroup[] {
 export function CommandPalette({ onClose }: { onClose: () => void }) {
   const { ref, close } = useDialog(onClose);
   const navigate = useNavigate();
-  const fetcher = useFetcher<SearchPayload>();
+  // Ruling 457: a failed search answers null (the route's `clientLoader`).
+  const fetcher = useFetcher<SearchPayload | null>();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);

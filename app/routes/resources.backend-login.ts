@@ -124,3 +124,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
   return Response.json(body);
 }
+
+/**
+ * Ruling 457: a failed poll is the card's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, so a restart, a 5xx or a dead network during a sign-in replaced the
+ * Profile page with its error page. Any failure answers null, which names no
+ * session: the card keeps the sign-in its page drew, and the next poll asks
+ * again 2 s later.
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
+}

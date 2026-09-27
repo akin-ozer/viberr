@@ -18,6 +18,8 @@ import {
 } from "./agent-types";
 import type { ResCatalogGroup } from "./capability-catalog";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
+import * as modelCatalogRoute from "~/routes/resources.model-catalog";
+import { clientLoaderOver, unreachable } from "../../../test-support/client-data";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
   CreateProfileModal,
@@ -101,10 +103,10 @@ function renderModal(props: {
     },
     {
       path: "/resources/model-catalog",
-      loader: ({ request }) => {
+      loader: clientLoaderOver(modelCatalogRoute, ({ request }) => {
         const backend = new URL(request.url).searchParams.get("backend");
         return { data: backend === "codex" ? CODEX_CATALOG : CLAUDE_CATALOG };
-      },
+      }),
     },
   ]);
   return render(<Stub initialEntries={["/"]} />);
@@ -1071,9 +1073,12 @@ describe("CreateProfileModal", () => {
   });
 
   it("D5: a failed model-catalog load offers a retry instead of deadlocking Save", async () => {
-    // The model-catalog loader settles with NO data (a 500/transport failure the
-    // curated-fallback endpoint normally prevents). Save must not sit held with
-    // an empty picker and no way out.
+    // The model-catalog load fails: a restart, a 5xx or a dead network (the
+    // endpoint answers its curated fallback even with no credential, so
+    // nothing else leaves the editor without a catalog). Ruling 457: the
+    // route's `clientLoader` answers null for it, so the failure reaches this
+    // editor, not the error boundary of the page it sits on. Save must not sit
+    // held with an empty picker and no way out.
     const Stub = createRoutesStub([
       {
         path: "/",
@@ -1089,7 +1094,12 @@ describe("CreateProfileModal", () => {
           />
         ),
       },
-      { path: "/resources/model-catalog", loader: () => ({ data: null }) },
+      {
+        path: "/resources/model-catalog",
+        // CANARY: delete `resources.model-catalog.ts`'s `clientLoader` and the
+        // failure takes the page down: no editor, no Retry.
+        loader: clientLoaderOver(modelCatalogRoute, unreachable),
+      },
     ]);
     const { findByText, getByText } = render(<Stub initialEntries={["/"]} />);
     // The retry affordance appears, and the footer says the load failed rather

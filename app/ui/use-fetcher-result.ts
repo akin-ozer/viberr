@@ -7,11 +7,13 @@ import { useEffect, useRef } from "react";
  * idle-check + seen-ref dedupe effect. This hook IS that effect, shared: the
  * handler decides what a result means (success toast, error toast, optimistic
  * rollback); dedupe is by data identity. useActionToast, the path for
- * server-computed toasts, is built on it.
+ * server-computed toasts, is built on it. No data is no result: a fetcher that
+ * has not answered, or a load a route's `clientLoader` answered with null for
+ * a failure (ruling 457).
  */
 export function useFetcherResult<T>(
   fetcher: { state: "idle" | "loading" | "submitting"; data?: T },
-  onResult: (data: T) => void,
+  onResult: (data: NonNullable<T>) => void,
 ): void {
   const seen = useRef<unknown>(null);
   // Ref'd so a per-render handler identity neither re-fires the effect nor

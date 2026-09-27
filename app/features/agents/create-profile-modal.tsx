@@ -185,7 +185,7 @@ export function useModelCatalog(
   // Fetched whenever a backend is selected (open in edit mode, or the backend
   // radio changes in create mode). The endpoint returns the curated fallback
   // even with no credential, so the pickers always populate.
-  const catalogFetcher = useFetcher<{ data: ModelCatalog }>();
+  const catalogFetcher = useFetcher<{ data: ModelCatalog } | null>();
   // D5 (pass 23): so a fetch that SETTLED with no data reads as a failure, not
   // as the pre-load window. Flipped true once a load has actually fired for the
   // current backend; a backend switch resets it.
@@ -205,8 +205,9 @@ export function useModelCatalog(
   const catalogLoading = catalogFetcher.state === "loading";
   // D5: a load fired and SETTLED (idle) with no catalog → the fetch failed. The
   // endpoint returns a curated fallback even without a credential, so this is a
-  // real transport/500 failure. Without a signal, the pending state lasts
-  // forever over an empty picker with no way out. This offers the retry.
+  // real transport/500 failure, which the route's `clientLoader` answers with
+  // null (ruling 457). Without a signal, the pending state lasts forever over
+  // an empty picker with no way out. This offers the retry.
   const catalogFailed =
     Boolean(backend) &&
     catalogLoadFired.current &&

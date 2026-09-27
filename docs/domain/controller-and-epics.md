@@ -213,11 +213,20 @@ a `showModal()` overlay, which would leave the dock inert behind it.
 - **Never the root error page**: the view's route answers a benign empty view for a
   scope the person cannot reach and falls back to this scope's newest thread for a
   selection it cannot honour (reporting `staleSelection`, which the dock uses to forget
-  the stored id). A thrown response from a root-owned fetcher would replace the whole
-  page, which is the hazard ruling 121(f) named for CSRF. The unavailable view names
+  the stored id). A thrown response from a root-owned fetcher replaced the whole page,
+  which is the hazard ruling 121(f) named for CSRF. The unavailable view names
   nothing but what was typed (F35-4): `projectName` is null, the label reads "Not
   available here", and the projection is never read for it, so a non-member cannot learn
-  a project's display name from a guessed slug.
+  a project's display name from a guessed slug. A request the server never answers (a
+  restart, a 5xx, a dead network) keeps the page too (ruling 457). Both routes have a
+  `clientLoader` that answers a failed load with null, which the dock reads as not
+  loaded yet: no dot and no working poll, and the open panel's loading lines over a held
+  composer that keeps what was typed, until a load answers (the next
+  `controller.updated`, which a `stream.resync` after a restart hands it, a thread pick,
+  or opening the panel again). The view's route has a `clientAction` that answers a
+  failed send with `{ ok:false }`, which the dock toasts ("The controller could not take
+  that. Try again.") while the message stays in its composer. Neither says why, so the
+  handlers still answer rather than throw.
 - **Never a login redirect** (ruling 457, test audit L14-29): both routes answer a
   request with no session, or with a forced password reset pending, with a 401, returned
   like every other answer. `requireAuth`'s login redirect named the route and the scope's

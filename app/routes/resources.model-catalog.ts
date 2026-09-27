@@ -64,6 +64,22 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
+ * Ruling 457: a failed load is the editor's, never the page's. React Router
+ * sends a fetcher's failure to the error boundary of the route that owns the
+ * fetcher, so a restart, a 5xx or a dead network as an agent editor opened or
+ * switched backend replaced the page under it with its error page. Any
+ * failure answers null, which the editor reads as a failed load: it offers its
+ * retry (D5).
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The viewer's own Claude credential, or null when they have not connected
  * Claude. Null is not a failure — it is the ordinary state of someone who has
  * not connected the backend yet, and the curated catalog is a complete answer

@@ -738,9 +738,10 @@ function AgentAccountCard({
   // The poll fetcher is the card's OWN: `/resources/backend-login` answers for
   // the signed-in caller only, and loading it on the panel's action fetcher
   // would overwrite the intent result the toast settles on. Once this tab is
-  // signed out it answers a refusal (a 401, ruling 457), which names no
-  // session and so never matches the loader's below.
-  const poll = useFetcher<BackendLoginPollAnswer>();
+  // signed out it answers a refusal (a 401, ruling 457), and a poll that fails
+  // answers null (the route's `clientLoader`); neither names a session, so
+  // neither matches the loader's below.
+  const poll = useFetcher<BackendLoginPollAnswer | null>();
   // The LOADER decides which session exists; the poll only supplies a fresher
   // state OF THAT SESSION. Matching on the id is what keeps a stale answer from
   // an earlier sign-in (a fetcher keeps its last data indefinitely) from
