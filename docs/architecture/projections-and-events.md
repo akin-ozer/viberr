@@ -30,9 +30,13 @@ Writers (`app/server/files/`):
   wraps every read-modify-write of `task.md`, `project.md` and epic files, plus an
   epics-directory lock (`withEpicsLock`) around minting an epic id.
 - **Read-your-own-writes**: `write-cache.server.ts`, shared by the task, project and epic
-  writers, remembers the last content this process wrote per path and prefers it when a
-  locked read disagrees and the mtime has not advanced past the write by more than
-  100 ms (bind mounts over VirtioFS serve stale reads).
+  writers. They write through its `writeAndRemember`, which remembers the last content
+  this process wrote per path and the identity (inode, size, mtime) of the file on each
+  side of the rename: the file the write put there and the one it replaced. A locked read
+  that disagrees gets that content back only while the path still shows one of those two
+  files (bind mounts over VirtioFS serve stale reads); any other identity is another
+  writer and wins however soon after the write it lands, and no clock is read
+  (ruling 513).
 - **Parse memo** (ruling 457): `readProjectFile`, `readTaskFile` and
   `readAgentProfileFile` still read the file on every call, but skip the YAML + Zod
   parse when the bytes equal the bytes they last parsed for that path

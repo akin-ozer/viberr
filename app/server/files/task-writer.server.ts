@@ -8,8 +8,7 @@ import type {
   TaskFrontmatter,
   TaskPacket,
 } from "~/schemas/task-file.schema";
-import { freshestContent, rememberWrite } from "./write-cache.server";
-import { writeFileAtomic } from "./atomic-file.server";
+import { freshestContent, writeAndRemember } from "./write-cache.server";
 import { withFileLock } from "./file-mutex.server";
 import { taskFilePath } from "./file-store-root.server";
 import { parseStoreFile } from "./parse-memo.server";
@@ -149,8 +148,7 @@ export async function updateTaskFile(
     const next = mutate(base) ?? base;
     next.frontmatter.updatedAt = new Date().toISOString();
     const serialized = serializeTaskFile(next);
-    writeFileAtomic(absPath, serialized);
-    rememberWrite(absPath, serialized);
+    writeAndRemember(absPath, serialized);
     return next;
   });
 }
@@ -184,8 +182,7 @@ export async function createTaskFile(
       extraSections: [],
     };
     const serialized = serializeTaskFile(parsed);
-    writeFileAtomic(absPath, serialized);
-    rememberWrite(absPath, serialized);
+    writeAndRemember(absPath, serialized);
     return parsed;
   });
 }
