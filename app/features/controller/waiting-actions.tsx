@@ -86,7 +86,7 @@ function WaitingMessageActions({
     fetcher.submit(body, action ? { method: "post", action, defaultShouldRevalidate: false } : { method: "post" });
   };
   return (
-    <span className="ctl-msg-acts">
+    <span className="inline-row ctl-msg-acts">
       {state === "queued" && (
         <button
           type="button"

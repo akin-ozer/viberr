@@ -806,7 +806,7 @@ function Composer({
             {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
           </span>
         </span>
-        <span className="ctl-composer-sends">
+        <span className="inline-row">
           {live && (
             <button
               type="button"
