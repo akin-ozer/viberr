@@ -18,6 +18,9 @@ export interface AppErrorOptions {
   userMessage?: string;
   /** Structured, secret-free context (ids, field names — never values of secrets). */
   details?: AppErrorDetails;
+  /** The form field a refusal is about, when it is about one (ruling 514):
+   *  the action answers it beside the error, so the form says it there. */
+  field?: string;
   cause?: unknown;
 }
 
@@ -28,6 +31,7 @@ export class AppError extends Error {
   readonly status: number;
   readonly userMessage: string;
   readonly details?: AppErrorDetails;
+  readonly field?: string;
 
   constructor(options: AppErrorOptions) {
     super(options.message ?? options.userMessage ?? options.code, {
@@ -38,6 +42,7 @@ export class AppError extends Error {
     this.status = options.status ?? 500;
     this.userMessage = options.userMessage ?? DEFAULT_USER_MESSAGE;
     this.details = options.details;
+    this.field = options.field;
   }
 
   static notFound(
@@ -61,6 +66,16 @@ export class AppError extends Error {
       status: 400,
       userMessage,
       details,
+    });
+  }
+
+  /** A validation refusal about one form field, named as the form posts it. */
+  static fieldValidation(field: string, userMessage: string): AppError {
+    return new AppError({
+      code: ERROR_CODES.VALIDATION_FAILED,
+      status: 400,
+      userMessage,
+      field,
     });
   }
 

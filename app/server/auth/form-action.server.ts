@@ -38,13 +38,20 @@ export async function requireFormAction(request: Request) {
   };
 }
 
+/** What an action answers when it refuses: the sentence a person reads, and
+ *  the form field it is about when it is about one (ruling 514). */
+interface ActionRefusal {
+  ok: false;
+  error: string;
+  field?: string;
+}
+
 /** Render a CAUGHT throwable as an action response — or re-throw it untouched
  *  when it is not one of ours, so a genuine defect still reaches the error
  *  boundary instead of being flattened into a 500-shaped payload. */
 export function appErrorResponse(cause: unknown) {
   if (!isAppError(cause)) throw cause;
-  return data(
-    { ok: false as const, error: cause.userMessage },
-    { status: cause.status },
-  );
+  const refusal: ActionRefusal = { ok: false, error: cause.userMessage };
+  if (cause.field !== undefined) refusal.field = cause.field;
+  return data(refusal, { status: cause.status });
 }

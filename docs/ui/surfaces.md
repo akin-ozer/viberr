@@ -362,8 +362,10 @@ push or pull request Viberr makes there; it promises no dry-run.
 new tab ("Continue at <host>", so no popup blocker intervenes) and its status line
 reads "Needs sign-in", "Signed in (expires in 52 minutes, renews itself) · <host>" or
 "Sign-in expired: an admin must sign in again" with the server's reason; while signed
-in, the pasted-credential field is replaced by a sentence saying none is used, and
-editing the endpoint warns that saving drops the sign-in. `mcp-oauth-sign-out` revokes
+in, the pasted-credential field is replaced by a sentence saying none is used, and what
+the field held goes with it, so a save sends no key typed before the sign-in landed and a
+sign-out brings the field back empty (ruling 514); editing the endpoint warns that
+saving drops the sign-in. `mcp-oauth-sign-out` revokes
 and drops the tokens. The row says the same without a click: "needs sign-in · checked
 …" on a red dot instead of "unreachable", or "auth: OAuth, signed in (…); held by
 Viberr, runs connect through its gateway". Ruling 486 adds what the sign-in was
@@ -385,6 +387,10 @@ takes a typed name; every server row states where it stands on write tools (ruli
 For an HTTP server it also carries `requestedScopes` (ruling 486): absent keeps what is
 stored, blank clears it, and a scope OAuth does not allow is refused ("The requested
 scope … is not one OAuth allows").
+A refusal that names the `cred` field (ruling 514: a credential under 8 characters, or
+one pasted over a live sign-in the page had not read yet) reads under the credential
+input, which it marks `aria-invalid` and describes; every other refusal reads at the
+form's foot.
 
 The **Controller** tab (screen label `Controller settings`) is the one org-settings
 surface whose controls are not all live (rulings 106, 107, 108): model and effort use

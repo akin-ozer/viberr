@@ -984,6 +984,8 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     const { db } = setup();
     // A credential under 8 chars is refused outright — it never reaches the row.
     // Canary: drop the `< 8` guard in saveMcpServer → this no longer throws.
+    // Ruling 514: the refusal names the credential field, so the editor says
+    // it there (drop `field` and it reads at the form's foot).
     await expect(
       saveMcpServer(
         db,
@@ -991,7 +993,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
         ACTOR,
         { spawnImpl: crashingSpawn("boom\n"), timeoutMs: 50 },
       ),
-    ).rejects.toThrowError(/at least 8 characters/);
+    ).rejects.toMatchObject({ message: expect.stringMatching(/at least 8 characters/), field: "cred" });
     expect(listMcpServers(db).find((m) => m.name === "shorty")).toBeUndefined();
 
     // A longer credential IS allowed; if the dying command echoes it, the

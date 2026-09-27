@@ -381,9 +381,12 @@ describe("health, runs and sign-out (ruling 469)", () => {
     await startServer();
     await signIn();
     const base = { id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url };
-    await expect(saveMcpServer(db, { ...base, cred: "a-pasted-token-123" }, ADMIN.actor)).rejects.toThrow(
-      "cloudflare-api is signed in with OAuth. Sign it out first to use a pasted credential instead.",
-    );
+    await expect(saveMcpServer(db, { ...base, cred: "a-pasted-token-123" }, ADMIN.actor)).rejects.toMatchObject({
+      message: "cloudflare-api is signed in with OAuth. Sign it out first to use a pasted credential instead.",
+      // Ruling 514: about the credential, so the editor says it at that field.
+      // CANARY: refuse without naming it and the editor says it at its foot.
+      field: "cred",
+    });
     // A plain re-save keeps it, probed with the sign-in.
     const kept = await saveMcpServer(db, { ...base, cred: "" }, ADMIN.actor);
     expect(kept.toast).toBe("cloudflare-api saved: 4 tools discovered · signed in with OAuth");
