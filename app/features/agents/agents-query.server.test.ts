@@ -218,7 +218,7 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
     profileId: "operator",
     capabilities,
     extras: [],
-    definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
+    definition: { kind: "operator" },
   });
 
   const noGrant = [
@@ -309,7 +309,7 @@ describe("A-1/A-2 (pass 24): operator materialization matches the runtime gate",
     profileId: "operator",
     capabilities,
     extras: [],
-    definition: { kind: "operator", name: "Operator", role: "Task coordinator" },
+    definition: { kind: "operator" },
   });
 
   it("materializes an absent update-task-branch at the delivery-gate mode (auto ⇒ direct)", () => {
@@ -721,5 +721,99 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
         dataRoot,
       ).customized,
     ).toBe(true);
+  });
+});
+
+/**
+ * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * it. NO other roles needed." Before it, the operator's editor asked for a name
+ * and a role, and a save stored both on the project's deployment beside the
+ * template's scope line, so a stored copy could rename the operator, give it a
+ * role, or keep a scope line the template no longer has.
+ */
+describe("ruling 518: an operator deployment resolves to one agent, called Operator", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  const operator = (definition: AgentDeploymentDefinition): AgentDeployment => ({
+    profileId: "operator",
+    capabilities: [],
+    extras: [],
+    definition,
+  });
+  const view = (deployment: AgentDeployment, dataRoot: string) =>
+    effectiveProfileView(deployment, dataRoot, absentDeliverReviewPrMode(false));
+  // The shipped template's own identity values (operator.profile.md).
+  const templateIdentity: AgentDeploymentDefinition = {
+    kind: "operator",
+    icon: "shield",
+    backends: ["claude", "codex"],
+    model: "orchestration runtime",
+    stages: ["triage", "ready", "impl", "review", "done"],
+    spanAll: true,
+  };
+
+  it("a store and a save from before the ruling show the name alone and are no customization", () => {
+    // CANARY: stop dropping OPERATOR_FIXED_FIELDS from the definition in
+    // `deploymentRuntimeIdentity`, or read the operator's scope from its files.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    // The template as `npm run seed` wrote it before the ruling, a copy boot
+    // never refreshes (the file parse drops its role).
+    const file = join(dataRoot, "agents", "profiles", "operator.md");
+    const legacyScope = "System role · one per active task";
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8")
+        .replace("name: Operator\n", "name: Operator\nrole: Task coordinator\n")
+        .replace("scope: Built in · runs on every task", `scope: ${legacyScope}`),
+      "utf8",
+    );
+    // …and what the editor's save stored beside it.
+    const stale = view(
+      operator({
+        ...templateIdentity,
+        name: "Operator",
+        role: "Task coordinator",
+        scope: legacyScope,
+      }),
+      dataRoot,
+    );
+    expect({
+      name: stale.name,
+      role: stale.role,
+      scope: stale.scope,
+      customized: stale.customized,
+    }).toEqual({
+      name: "Operator",
+      role: "",
+      scope: "Built in · runs on every task",
+      customized: false,
+    });
+    // Non-vacuity: the stored copy is read, and a field the operator does have
+    // (its model) still makes it a customization.
+    expect(
+      view(operator({ ...templateIdentity, scope: legacyScope, model: "sonnet" }), dataRoot)
+        .customized,
+    ).toBe(true);
+  });
+
+  it("a save's snapshot, which carries no name, role or scope, no longer tracks the template", () => {
+    // CANARY: count the operator's fixed fields in `tracksTemplateLive` again.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const saved: AgentDeploymentDefinition = {
+      ...templateIdentity,
+      backends: ["claude"],
+      model: "sonnet",
+      desc: "Runs the task.",
+      autonomy: "supervised",
+      resources: { skills: [], mcps: [], kb: [] },
+    };
+    expect(view(operator(saved), dataRoot).tracksTemplate).toBe(false);
+    // Non-vacuity: a snapshot one field short (no `desc`) still resolves that
+    // field from the template, so it still tracks it.
+    const { desc: _desc, ...short } = saved;
+    expect(view(operator(short), dataRoot).tracksTemplate).toBe(true);
   });
 });

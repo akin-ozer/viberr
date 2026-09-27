@@ -1,4 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { AgentDeployment } from "~/schemas/project-file.schema";
+import {
+  deploymentRuntimeIdentity,
+  OPERATOR_FIXED_FIELDS,
+} from "~/server/agents/deployment-view.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import { projectFilePath } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -25,6 +30,10 @@ const OPERATOR_PROFILE_ID = "operator";
  *   project that has NO specialist deployments at all (first boot / a board
  *   that predates them). A project with ≥1 specialist — even a custom one,
  *   even after removing a built-in — keeps its roster exactly as-is.
+ * - Ruling 518: the operator's deployment loses the name, role and scope a
+ *   save copied onto it before the ruling. They are its template's now and
+ *   resolving already ignores them; removing them keeps the file saying what
+ *   the app shows.
  *
  * Idempotent and best-effort (a per-project failure is logged, never blocks
  * boot). Runs at boot after the projection rescan, before the file watcher
@@ -61,13 +70,19 @@ export function ensureBaseAgentsDeployed(
           ? baseSpecialists.filter((d) => !present.has(d.profileId))
           : []),
       ];
-      if (missing.length === 0) continue;
+      const stripped: string[] = [];
+      const kept = agents.map((a) => {
+        const cleaned = withoutOperatorIdentity(a, dataRoot);
+        if (cleaned !== a) stripped.push(a.profileId);
+        return cleaned;
+      });
+      if (missing.length === 0 && stripped.length === 0) continue;
 
       const next = {
         ...file.parsed,
         frontmatter: {
           ...file.parsed.frontmatter,
-          agents: [...missing, ...agents],
+          agents: [...missing, ...kept],
         },
       };
       writeFileAtomic(
@@ -75,10 +90,18 @@ export function ensureBaseAgentsDeployed(
         serializeProjectFile(next),
       );
       reprojectProject(db, { dataRoot }, project.slug);
-      logger.info("backfilled built-in agents into project", {
-        project: project.slug,
-        added: missing.map((d) => d.profileId),
-      });
+      if (missing.length > 0) {
+        logger.info("backfilled built-in agents into project", {
+          project: project.slug,
+          added: missing.map((d) => d.profileId),
+        });
+      }
+      if (stripped.length > 0) {
+        logger.info("removed the operator's stored name, role and scope", {
+          project: project.slug,
+          profiles: stripped,
+        });
+      }
     } catch (error) {
       logger.error("failed backfilling built-in agents", {
         project: project.slug,
@@ -86,4 +109,22 @@ export function ensureBaseAgentsDeployed(
       });
     }
   }
+}
+
+/** The deployment without the operator fields a save stored before ruling 518,
+ *  or the deployment itself when it is not the operator or stores none. */
+function withoutOperatorIdentity(
+  deployment: AgentDeployment,
+  dataRoot: string | undefined,
+): AgentDeployment {
+  const def = deployment.definition;
+  if (!def) return deployment;
+  const stale = OPERATOR_FIXED_FIELDS.filter((field) => Object.hasOwn(def, field));
+  if (stale.length === 0) return deployment;
+  if (deploymentRuntimeIdentity(deployment, dataRoot).kind !== "operator") {
+    return deployment;
+  }
+  const definition = { ...def };
+  for (const field of stale) delete definition[field];
+  return { ...deployment, definition };
 }

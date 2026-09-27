@@ -124,7 +124,10 @@ members:                          # project roles (4-role system, contracts §3.
 agents:                           # per-project DEPLOYMENT of profile templates
   - profileId: operator
     capabilities: []
-    definition:                   # optional per-field override of the template
+    definition:                   # optional per-field override of the template;
+                                  # never name, role or scope on the operator, which
+                                  # is always "Operator" with no role (ruling 518:
+                                  # resolving drops them, boot removes them)
       autonomy: supervised        # operator only: supervised | full (ruling 67)
   - profileId: developer
     capabilities:                 # id-based against the shared catalog (ruling 2)
@@ -842,7 +845,8 @@ can never break the heading line.
 id: developer
 kind: specialist                  # operator | specialist | controller (ruling 99)
 name: Developer
-role: Implementation
+role: Implementation              # required of every kind but the operator, which
+                                  # has none (ruling 518)
 desc: Implements the change on the task branch and reports what it did.
                                   # one scannable paragraph — what the OPERATOR
                                   # reads when picking a profile. Distinct from
@@ -873,11 +877,18 @@ resources:
 Profile description (markdown body).
 ```
 
-A profile whose frontmatter fails the schema (a missing `name`, an unknown `kind`) is
-unreadable: the parse returns nothing with an `agent_profile.invalid` warning. Unknown
-top-level keys are kept (the schema is `.loose()`) and raise an `agent_profile.unknown_field`
-drift warning against `AGENT_PROFILE_KNOWN_KEYS`. A `kind: controller` profile is instance
-machinery: never deployed into a project's `agents:` list.
+A profile whose frontmatter fails the schema (a missing `name`, an unknown `kind`, a
+specialist or controller with no `role`) is unreadable: the parse returns nothing with an
+`agent_profile.invalid` warning. Unknown top-level keys are kept (the schema is `.loose()`)
+and raise an `agent_profile.unknown_field` drift warning against `AGENT_PROFILE_KNOWN_KEYS`.
+A `kind: controller` profile is instance machinery: never deployed into a project's
+`agents:` list.
+
+`operator.md` is the one operator template (ruling 518). It has no `role`: a copy from
+before the ruling still carries `role: Task coordinator`, which the parse drops with the
+drift warning. Its `name` and `scope` are documentation only, because every surface shows
+the operator as "Operator" over "Built in · runs on every task" (`OPERATOR_NAME`,
+`OPERATOR_SCOPE`) whatever the file says.
 
 Every value in `resources:` is a **store folder name, never a display name**. For
 `skills:` and `mcps:` the slug *is* the folder, so the two coincide. For `kb:` they do

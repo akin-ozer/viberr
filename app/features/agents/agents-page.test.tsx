@@ -279,7 +279,7 @@ describe("ProfileDetail", () => {
       recommend: ["Stage transitions"],
       forbidden: ["Transition a task to Done"],
     };
-    const qualified = note({ kind: "operator", name: "Operator", role: "Orchestration", actions: operatorActions });
+    const qualified = note({ kind: "operator", name: "Operator", role: "", actions: operatorActions });
     // Non-vacuity: the row this note is about really is in the column.
     expect(qualified).toContain("Stage transitions");
     expect(qualified).toContain("is a recommendation at the boundaries this project gates");
@@ -290,7 +290,7 @@ describe("ProfileDetail", () => {
     const direct = note({
       kind: "operator",
       name: "Operator",
-      role: "Orchestration",
+      role: "",
       actions: { ...operatorActions, direct: ["Stage transitions"], recommend: [] },
     });
     expect(direct).toContain("Stage transitions");
@@ -593,7 +593,7 @@ describe("ProfileDetail", () => {
         id: "operator",
         kind: "operator",
         name: "Operator",
-        role: "Task coordinator",
+        role: "",
         icon: "shield",
         spanAll: true,
         backends: ["claude", "codex"],
@@ -1313,7 +1313,7 @@ describe("CreateProfileModal", () => {
         id: "operator",
         kind: "operator",
         name: "Operator",
-        role: "Orchestration",
+        role: "",
         autonomy: "supervised",
       }),
     });
@@ -2507,6 +2507,94 @@ describe("C11: the Agents page drops the retired 'specialist profile' vocabulary
 });
 
 /**
+ * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * it. NO other roles needed." The operator's roster row read "Operator / Task
+ * coordinator" under a group label of its own, "Orchestration"; its hero wore
+ * a "Task coordinator" pill; and its editor asked for a name and a role, which
+ * a save copied onto the project's deployment.
+ */
+describe("ruling 518: the operator is one agent, called Operator", () => {
+  it("its roster row and hero give the name alone, with no group label of its own", () => {
+    // CANARY: give the operator a label in `profileRoleLabel`, or put the
+    // "Orchestration" group label back above it.
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[
+                mkProfile({ id: "operator", kind: "operator", name: "Operator", role: "", icon: "shield" }),
+                mkProfile({}),
+              ]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+    const row = (name: string) =>
+      [...container.querySelectorAll(".profile-list .ag-item")].find(
+        (el) => el.querySelector(".nm")?.textContent === name,
+      )!;
+    // Non-vacuity: an agent profile's row still reads its role.
+    expect(row("Developer").querySelector(".sub")?.textContent).toBe("Implementation");
+    expect(row("Operator").querySelector(".sub")).toBeNull();
+    expect(
+      [...container.querySelectorAll(".profile-list .ag-group-label")].map((el) =>
+        el.textContent?.trim(),
+      ),
+    ).toEqual(["Agent profiles"]);
+    // The page opens on the operator: its name, with no role pill beside it
+    // and no role in its glyph's tooltip.
+    const hero = container.querySelector(".ag-hero")!;
+    expect(hero.querySelector(".ag-hero-name")?.textContent).toBe("Operator");
+    expect(hero.querySelector(".ag-hero-top .pill")).toBeNull();
+    expect(hero.querySelector(".agent-glyph")?.hasAttribute("title")).toBe(false);
+  });
+
+  it("its editor asks for no name or role, and its save sends neither", async () => {
+    // CANARY: render the name and role fields for the operator, or put its
+    // name and role back in the payload.
+    const onSubmit = vi.fn<(p: ProfileFormPayload) => void>();
+    const { container, getByText, queryByPlaceholderText } = renderModal({
+      initial: mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        role: "",
+        backends: ["claude"],
+        model: "sonnet",
+        effort: "high",
+        autonomy: "supervised",
+      }),
+      onSubmit,
+    });
+    // Non-vacuity: this is the operator's editor (its autonomy control is on).
+    expect(container.textContent).toContain("Default autonomy");
+    expect(queryByPlaceholderText("e.g. Migrations")).toBeNull();
+    expect(queryByPlaceholderText("e.g. Schema changes")).toBeNull();
+    const save = () =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+        (b) => b.textContent?.includes("Save changes"),
+      )!;
+    await waitFor(() => expect(getByText(/^Ready to save/)).toBeTruthy());
+    fireEvent.click(save());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const payload = onSubmit.mock.calls[0]![0];
+    expect(payload).toMatchObject({ backend: "claude", model: "sonnet", autonomy: "supervised" });
+    expect(Object.keys(payload)).not.toContain("name");
+    expect(Object.keys(payload)).not.toContain("role");
+  });
+});
+
+/**
  * F20-4 (client half) — the model picker offers a model a real run proved this
  * account can't use, but disables it and explains why, so an admin can't re-pin
  * a profile to a value that would 400 at the SDK.
@@ -2751,7 +2839,7 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     id: "operator",
     kind: "operator",
     name: "Operator",
-    role: "Orchestration",
+    role: "",
     icon: "shield",
   });
   const DEVELOPER = mkProfile({ id: "developer", name: "Developer" });

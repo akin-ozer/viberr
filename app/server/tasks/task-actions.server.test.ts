@@ -4814,8 +4814,6 @@ describe("pass 35: operator and task actions", () => {
             extras: [],
             definition: {
               kind: "operator" as const,
-              name: "Operator",
-              role: "Task coordinator",
               backends: ["claude" as const],
               model: "sonnet",
               autonomy: "supervised" as const,

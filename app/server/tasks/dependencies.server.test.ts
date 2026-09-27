@@ -61,7 +61,7 @@ async function seed(store: TestStore): Promise<void> {
           { capabilityId: "append-typed-events", mode: "direct" },
         ],
         extras: [],
-        definition: { kind: "operator", name: "Operator", role: "Task coordinator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
+        definition: { kind: "operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
       },
     ],
   });

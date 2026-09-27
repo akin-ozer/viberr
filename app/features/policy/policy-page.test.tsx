@@ -38,7 +38,7 @@ const TRANSITIONS: TransitionView[] = [
 // labels — an advisory/group-null label would (correctly) not be counted.
 const PROFILES: PcapProfile[] = [
   {
-    id: "operator", kind: "operator", name: "Operator", icon: "shield", role: "Task coordinator",
+    id: "operator", kind: "operator", name: "Operator", icon: "shield", role: "",
     backends: ["claude"],
     capabilities: [],
     actions: {
@@ -332,7 +332,7 @@ describe("AgentCapability", () => {
   // declares none, and this row printed it raw — the deployed "Org Docs Writer"
   // read "Org Docs Writer · Org Docs Writer" here.
   // U12 residual: the fallback said "Specialist", the retired third name for
-  // this object (`DEFAULT_PROFILE_ROLE_LABEL`, agent-types.ts).
+  // this object (`DEFAULT_SPECIALIST_ROLE_LABEL`, agent-types.ts).
   it("a role that only repeats the name renders as what the profile IS", () => {
     const { container } = render(
       <AgentCapability
@@ -539,11 +539,12 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
       present: true,
       autonomy: "full",
       directDoneLive: true,
-      operatorName: "Operator",
     });
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("On this project:");
-    expect(note.textContent).toContain("(Operator)");
+    // Ruling 518: the operator is one agent, so the sentence names no second
+    // "(Operator)" beside it. CANARY: put the parenthetical back.
+    expect(note.textContent).toContain("On this project: the operator runs at full autonomy");
     expect(note.textContent).toContain("is active");
     expect(note.textContent).not.toContain("not active");
   });
@@ -553,7 +554,6 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
       present: true,
       autonomy: "supervised",
       directDoneLive: false,
-      operatorName: "Operator",
     });
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("supervised");
@@ -565,7 +565,6 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
       present: true,
       autonomy: "full",
       directDoneLive: false,
-      operatorName: "Operator",
     });
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("without the Direct accept grant");
@@ -602,7 +601,6 @@ describe("operatorAutonomyState (F20-19)", () => {
     acceptMode: "direct" | "recommend" | "human" | "off",
   ) => ({
     kind: "operator" as const,
-    name: "Operator",
     autonomy,
     capabilities: [
       { capabilityId: "completion-for-acceptance", mode: acceptMode },
@@ -614,7 +612,6 @@ describe("operatorAutonomyState (F20-19)", () => {
       present: true,
       autonomy: "full",
       directDoneLive: true,
-      operatorName: "Operator",
     });
     expect(operatorAutonomyState([operator("full", "recommend")]).directDoneLive).toBe(false);
     expect(operatorAutonomyState([operator("supervised", "direct")]).directDoneLive).toBe(false);
@@ -623,7 +620,6 @@ describe("operatorAutonomyState (F20-19)", () => {
   it("reports absent when no operator profile is deployed", () => {
     const specialist = {
       kind: "specialist" as const,
-      name: "Developer",
       autonomy: undefined,
       capabilities: [],
     };
@@ -631,7 +627,6 @@ describe("operatorAutonomyState (F20-19)", () => {
       present: false,
       autonomy: null,
       directDoneLive: false,
-      operatorName: null,
     });
   });
 

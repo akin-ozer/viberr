@@ -16,6 +16,7 @@ import {
 } from "./agent-catalog.server";
 import { buildSpecialistPersona } from "~/server/tasks/specialist-run.server";
 import { isKnownModel } from "~/server/runtimes/model-catalog.server";
+import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -241,5 +242,61 @@ describe("ensureBaseAgentsDeployed", () => {
     const beforeIds = rosterIds(dataRoot);
     ensureBaseAgentsDeployed(db, dataRoot);
     expect(rosterIds(dataRoot)).toEqual(beforeIds);
+  });
+
+  /**
+   * Ruling 518 (owner, 2026-09-27): the operator is one agent, called Operator,
+   * with no role. Its editor used to ask for a name and a role, and a save
+   * stored both on the project's deployment with the template's scope line.
+   */
+  it("ruling 518: removes the operator's stored name, role and scope, and keeps an agent profile's", async () => {
+    // CANARY: stop calling `withoutOperatorIdentity`, or let it strip a
+    // deployment that is not the operator.
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    await runDemoSeed(db, { dataRoot });
+    const operator = {
+      kind: "operator",
+      name: "Coordinator",
+      role: "Task coordinator",
+      model: "sonnet",
+      scope: "System role · one per active task",
+      autonomy: "supervised",
+    } satisfies AgentDeploymentDefinition;
+    const developer = {
+      kind: "specialist",
+      name: "Developer",
+      role: "Implementation",
+      model: "sonnet",
+      scope: "Global base",
+    } satisfies AgentDeploymentDefinition;
+    const file = readProjectFile({ projectSlug: "viberr-core", dataRoot })!;
+    const agents = file.parsed.frontmatter.agents.map((a) =>
+      a.profileId === "operator"
+        ? { ...a, definition: operator }
+        : a.profileId === "developer"
+          ? { ...a, definition: developer }
+          : a,
+    );
+    writeFileAtomic(
+      projectFilePath("viberr-core", dataRoot),
+      serializeProjectFile({
+        ...file.parsed,
+        frontmatter: { ...file.parsed.frontmatter, agents },
+      }),
+    );
+    rebuildPath(db, projectFilePath("viberr-core", dataRoot), { dataRoot });
+
+    ensureBaseAgentsDeployed(db, dataRoot);
+
+    const definitionOf = (id: string) =>
+      readProjectFile({ projectSlug: "viberr-core", dataRoot })!
+        .parsed.frontmatter.agents.find((a) => a.profileId === id)?.definition;
+    expect(definitionOf("operator")).toEqual({
+      kind: "operator",
+      model: "sonnet",
+      autonomy: "supervised",
+    });
+    expect(definitionOf("developer")).toEqual(developer);
   });
 });

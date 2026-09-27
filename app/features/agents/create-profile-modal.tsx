@@ -67,8 +67,10 @@ function grantsOf(caps: CapSelection): { capabilityId: string; mode: CapabilityG
 }
 
 export interface ProfileFormPayload {
-  name: string;
-  role: string;
+  /** Absent on the operator's editor: it is one agent, called Operator, with
+   *  no role (ruling 518). */
+  name?: string;
+  role?: string;
   backend: "codex" | "claude";
   /** B5 (pass 34, U34-3): the deployment record this editor was opened on. An
    *  update carries it back so a save composed against a record a concurrent
@@ -467,6 +469,7 @@ function BackendField({
   setBackend,
   viewerConnected,
   seededBackends,
+  firstField = false,
 }: {
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
@@ -491,6 +494,9 @@ function BackendField({
    *  backend anyway — the roster says so), but the narrowing must be stated
    *  BEFORE the save, not discovered in the roster afterwards. */
   seededBackends?: readonly ("codex" | "claude")[];
+  /** The form's first field (the operator's editor, which has no name or role):
+   *  the picked chip, else the first, takes the dialog's initial focus. */
+  firstField?: boolean;
 }) {
   const dropping = (seededBackends ?? []).filter((b) => b !== backend);
   // The picked backend's label when the VIEWER has not connected it, "" when
@@ -509,13 +515,16 @@ function BackendField({
         <span className="fhint">pick exactly one</span>
       </span>
       <div className="pick-chips">
-        {BACKENDS.map((b) => (
+        {BACKENDS.map((b, i) => (
           <button
             type="button"
             key={b.id}
             className={"pick-chip" + (backend === b.id ? " on" : "")}
             aria-pressed={backend === b.id}
             onClick={() => setBackend(b.id)}
+            {...(firstField && (backend === "" ? i === 0 : backend === b.id)
+              ? { "data-autofocus": "" }
+              : {})}
           >
             <AgentGlyph backend={b.id} decorative />
             {b.label}
@@ -1441,7 +1450,9 @@ export function CreateProfileModal({
     setEffort("");
   };
 
-  const fieldsValid = Boolean(name.trim() && role.trim() && backend && stg.length);
+  // Ruling 518: the operator's editor has no name or role to fill.
+  const identityValid = isOperator || Boolean(name.trim() && role.trim());
+  const fieldsValid = Boolean(identityValid && backend && stg.length);
 
   // Model + effort catalog machinery — shared with the controller settings
   // panel (the hook holds the fetch, D5 failure/retry and default-seeding).
@@ -1469,17 +1480,18 @@ export function CreateProfileModal({
   // scolding them for something they haven't had a chance to do yet. Counted:
   // every refusal re-inserts the alert (ModalFooter).
   const [attempted, setAttempted] = useState(0);
-  const missing: "name" | "role" | "backend" | "stages" | "model" | null = !name.trim()
-    ? "name"
-    : !role.trim()
-      ? "role"
-      : !backend
-        ? "backend"
-        : stg.length === 0
-          ? "stages"
-          : modelPending
-            ? "model"
-            : null;
+  const missing: "name" | "role" | "backend" | "stages" | "model" | null =
+    !isOperator && !name.trim()
+      ? "name"
+      : !isOperator && !role.trim()
+        ? "role"
+        : !backend
+          ? "backend"
+          : stg.length === 0
+            ? "stages"
+            : modelPending
+              ? "model"
+              : null;
   const flaggedField = attempted && (missing === "name" || missing === "role") ? missing : null;
 
   const submit = () => {
@@ -1500,8 +1512,6 @@ export function CreateProfileModal({
       return;
     }
     const payload: ProfileFormPayload = {
-      name: name.trim(),
-      role: role.trim(),
       backend,
       stages: [...stg],
       definition,
@@ -1511,6 +1521,11 @@ export function CreateProfileModal({
       caps,
       resources: res,
     };
+    // Ruling 518: the operator has no name or role to send.
+    if (!isOperator) {
+      payload.name = name.trim();
+      payload.role = role.trim();
+    }
     // B5: an EDIT carries the record it was opened on; a create has none.
     if (initial?.fingerprint) payload.fingerprint = initial.fingerprint;
     // Autonomy is an OPERATOR field: a specialist payload must not carry the
@@ -1531,7 +1546,9 @@ export function CreateProfileModal({
   const hint = error
     ? error
     : !fieldsValid
-      ? "Name, role, one execution backend, and at least one stage are required."
+      ? isOperator
+        ? "One execution backend and at least one stage are required."
+        : "Name, role, one execution backend, and at least one stage are required."
       : // F21-13: the reason Save is disabled, in the same place every other
         // reason is given. Silence here is what made the disabled button read as
         // a glitch — and, before the hold existed, what let the click through.
@@ -1571,19 +1588,24 @@ export function CreateProfileModal({
       />
 
       <div className="modal-body">
-        <IdentityFields
-          uid={uid}
-          name={name}
-          setName={setName}
-          role={role}
-          setRole={setRole}
-          flagged={flaggedField}
-        />
+        {/* Ruling 518: the operator is one agent, called Operator, with no
+            role, so its editor has neither field. */}
+        {!isOperator && (
+          <IdentityFields
+            uid={uid}
+            name={name}
+            setName={setName}
+            role={role}
+            setRole={setRole}
+            flagged={flaggedField}
+          />
+        )}
 
         <BackendField
           backend={backend}
           setBackend={pickBackend}
           viewerConnected={connected}
+          firstField={isOperator}
           {...(initial ? { seededBackends: initial.backends } : {})}
         />
 

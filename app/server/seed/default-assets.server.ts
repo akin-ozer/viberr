@@ -389,6 +389,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // dynamic-dispatch outgoing (2026-08-29): the assign/summon capability
     // pair, replaced by `dispatch-agents`.
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
+    // Ruling 518 (owner, 2026-09-27): before the operator lost its role
+    // ("Task coordinator") and its "System role" scope line.
+    "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
     // Ruling 503 (owner, 2026-09-26): before the `goalChain` bullet became the
