@@ -415,15 +415,11 @@ export function startMaintenanceScheduler(
   });
 }
 
-/** Stop the timers (tests + graceful shutdown). */
-function stopMaintenanceScheduler(): void {
+/** Test-only: stop the timers and forget the recorded pass + disk transition
+ *  state. (No shutdown path needs a stop: the timers are unref'd.) */
+export function resetMaintenanceStateForTests(): void {
   for (const handle of timers()) clearInterval(handle);
   setTimers([]);
-}
-
-/** Test-only: forget the recorded pass + disk transition state. */
-export function resetMaintenanceStateForTests(): void {
-  stopMaintenanceScheduler();
   lastPassAt = null;
   lastPassReason = null;
   lastFreedBytes = 0;

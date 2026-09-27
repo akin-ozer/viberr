@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { assertTrustedOrigin, csrfTokenForSession } from "./csrf.server";
+import { describe, expect, it, vi } from "vitest";
+import { resetEnvCacheForTests } from "../config/env.server";
+import { assertTrustedOrigin, getCsrfToken } from "./csrf.server";
 
-const SECRET = "csrf-secret-csrf-secret-csrf-secret-1234";
 const SESSION_ID = "abc123sessionhash";
 
 const SAME_ORIGIN = "http://localhost:5173";
@@ -29,15 +29,19 @@ function postRequest(options: {
   });
 }
 
-const validToken = () => csrfTokenForSession(SESSION_ID, SECRET);
-
-describe("csrfTokenForSession", () => {
-  it("is deterministic per session and differs across sessions/secrets", () => {
-    expect(validToken()).toBe(validToken());
-    expect(csrfTokenForSession("other", SECRET)).not.toBe(validToken());
-    expect(csrfTokenForSession(SESSION_ID, "another-secret-value-here")).not.toBe(
-      validToken(),
-    );
+describe("getCsrfToken", () => {
+  it("is deterministic per session and differs across sessions and secrets", () => {
+    const token = getCsrfToken(SESSION_ID);
+    expect(getCsrfToken(SESSION_ID)).toBe(token);
+    expect(getCsrfToken("other")).not.toBe(token);
+    vi.stubEnv("VIBERR_SESSION_SECRET", "another-secret-value-here-another-secret");
+    resetEnvCacheForTests();
+    try {
+      expect(getCsrfToken(SESSION_ID)).not.toBe(token);
+    } finally {
+      vi.unstubAllEnvs();
+      resetEnvCacheForTests();
+    }
   });
 });
 

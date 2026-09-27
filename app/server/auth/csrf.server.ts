@@ -21,16 +21,12 @@ const CSRF_FIELD_NAME = "_csrf";
  *  empty value all mean "no token was sent" and are refused as such. */
 const csrfFieldSchema = z.string().min(1);
 
-/** Pure token derivation — deterministic per session. Exported for tests. */
-export function csrfTokenForSession(sessionId: string, secret: string): string {
-  return createHmac("sha256", secret)
+/** The session's token, HMAC(session secret, session id): the same on every
+ *  call for one session (the root loader's `<CsrfInput />` and `assertCsrf`). */
+export function getCsrfToken(sessionId: string): string {
+  return createHmac("sha256", getEnv().VIBERR_SESSION_SECRET)
     .update(`viberr-csrf:${sessionId}`, "utf8")
     .digest("base64url");
-}
-
-/** Token for the current session (env wrapper — routes/root loader). */
-export function getCsrfToken(sessionId: string): string {
-  return csrfTokenForSession(sessionId, getEnv().VIBERR_SESSION_SECRET);
 }
 
 function forbidden(reason: string): Response {

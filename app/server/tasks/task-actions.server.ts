@@ -6449,7 +6449,7 @@ export async function operatorPromptAgent(
   // was the operator SPECIFYING a deliverable ("end with an explicit @Arda
   // question naming Stripe, Adyen, and Mock-only"), re-issued on every rework
   // round. The call stays, carrying the audience, so the rule lives at the one
-  // fan-out seam and the non-delivery report is still computed for the timeline.
+  // fan-out seam, which notifies nobody for an agent audience.
   // Ruling 382: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
     db,

@@ -235,7 +235,7 @@ describe("startMaintenanceScheduler (gap 15)", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
-  it("is idempotent and stoppable", () => {
+  it("is idempotent: a second start leaves no timer the reset misses", () => {
     vi.useFakeTimers();
     const store = storeWithTerminalTask();
     startMaintenanceScheduler(store.db, { intervalMs: 1_000 });

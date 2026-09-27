@@ -69,7 +69,7 @@ export interface HomeProjectCard {
   total: number;
   running: number;
   /** Open decisions THIS viewer can act on (R8-3, member-scoped — set by
-   * `listHomeProjectsForUser`; the base list leaves it 0). */
+   * `listHomeProjectsForUser` from `indexDecisionInbox`). */
   waiting: number;
   /** Open decisions the viewer could act on ONLY via the org-admin override
    * (non-member org admins). Surfaced distinctly, never folded into `waiting`. */

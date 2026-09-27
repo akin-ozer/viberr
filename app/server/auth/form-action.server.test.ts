@@ -21,9 +21,11 @@ import { insertUser } from "./user-store.server";
  * shape, so these cases drive the real function with real better-auth session
  * cookies and real request headers rather than re-stating its body.
  *
- * The token layer's own unit coverage lives in `csrf.server.test.ts`; what is
- * pinned HERE is that the preamble wires both layers in, in the right order,
- * and hands the action an actor it can audit.
+ * This is the token layer's one home: the refusals below (a missing, empty or
+ * garbage token, another session's, a header token) are the only proof of
+ * `assertCsrf`'s comparison, beside the proof that the preamble wires both
+ * layers in, in the right order, and hands the action an actor it can audit.
+ * `csrf.server.test.ts` pins the token's derivation and the origin matrix.
  */
 
 const SAME_ORIGIN = "http://localhost:5173";

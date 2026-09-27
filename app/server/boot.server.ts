@@ -140,7 +140,7 @@ type BootIntegrityFields = {
   build: BuildInfo;
   disk: { free: string; total: string; status: DiskStatus } | null;
   /** Ruling 182: what this host can run, probed once here so the first health
-   *  request does not pay for it; the sandbox verdict also gets its own WARN. */
+   *  request does not pay for it. */
   toolchain: Toolchain;
   /** F21-1 / ruling 140: absent on a healthy schema — see
    *  `projectionCheckGaps` (table-qualified CHECK gaps). */
@@ -421,7 +421,7 @@ export function logBootIntegrity(db: DatabaseSync): void {
         }
       : null,
     // Ruling 182: resolved here, once, so the probe's cost lands in boot and
-    // the sandbox verdict is on the one line an operator reads after a deploy.
+    // the toolchain is on the one line an operator reads after a deploy.
     toolchain: cachedToolchain(),
   };
   // Named only when some are actually gone: a healthy boot has nothing to list,

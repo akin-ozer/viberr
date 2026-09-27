@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,6 @@ import {
   type DataRootLock,
   type LockHolder,
   type LockOwnership,
-  type LockOwnershipProbes,
 } from "./data-root-lock.server";
 
 /**
@@ -338,6 +337,17 @@ describe("verifyOwnership (F18-5 fail-closed)", () => {
     lock.release();
   });
 
+  it("reports 'stolen' when the file is replaced, even by one that names our own boot", () => {
+    const dataRoot = ctx.makeTempDir();
+    const lock = acquire(dataRoot, BOOT_A);
+    // A new inode carrying our own holder: only the inode check can tell.
+    rmSync(lock.path, { force: true });
+    writeFileSync(lock.path, JSON.stringify(BOOT_A));
+    expect(lock.verifyOwnership()).toBe("stolen");
+    lock.abandon();
+    rmSync(lock.path, { force: true });
+  });
+
   it("reports 'stolen' when another process replaces the lock file, and abandon() keeps their file", () => {
     const dataRoot = ctx.makeTempDir();
     const lock = acquire(dataRoot, BOOT_A);
@@ -351,67 +361,27 @@ describe("verifyOwnership (F18-5 fail-closed)", () => {
   });
 });
 
-describe("verifyOwnership (injected probes)", () => {
-  /** A real lock held as BOOT_A, judged through `probes`, then released. */
-  function verify(probes: LockOwnershipProbes): LockOwnership {
+describe("verifyOwnership: the checks behind the inode match", () => {
+  it("'stolen' when our held descriptor is unusable", () => {
     const lock = acquire(ctx.makeTempDir(), BOOT_A);
-    try {
-      return lock.verifyOwnership(probes);
-    } finally {
-      lock.release();
-    }
-  }
-
-  it("'stolen' on an inode mismatch, before reading content", () => {
-    expect(
-      verify({
-        fstat: () => ({ ino: 100n, dev: 1n }),
-        stat: () => ({ ino: 999n, dev: 1n }),
-        readHolder: () => BOOT_A,
-      }),
-    ).toBe("stolen");
+    closeSync(lock.fd);
+    expect(lock.verifyOwnership()).toBe("stolen");
+    lock.release();
   });
 
-  it("'stolen' when our held descriptor is unusable (fstat throws)", () => {
-    expect(
-      verify({
-        fstat: () => {
-          throw new Error("EBADF");
-        },
-        stat: () => ({ ino: 1n, dev: 1n }),
-        readHolder: () => BOOT_A,
-      }),
-    ).toBe("stolen");
-  });
-
-  it("'stolen' when inode matches but the content names another boot (VirtioFS ino-reuse guard)", () => {
-    expect(
-      verify({
-        fstat: () => ({ ino: 100n, dev: 1n }),
-        stat: () => ({ ino: 100n, dev: 1n }),
-        readHolder: () => ({ ...HOST_A_OTHER, bootId: "boot-2" }),
-      }),
-    ).toBe("stolen");
+  it("'stolen' when the same inode now names another boot (VirtioFS ino-reuse guard)", () => {
+    const lock = acquire(ctx.makeTempDir(), BOOT_A);
+    // Rewritten in place: the path keeps our inode, the content is another boot's.
+    writeFileSync(lock.path, JSON.stringify({ ...HOST_A_OTHER, bootId: "boot-2" }));
+    expect(lock.verifyOwnership()).toBe("stolen");
+    lock.release();
   });
 
   it("'unverifiable' on a torn read (inode matches, content unreadable)", () => {
-    expect(
-      verify({
-        fstat: () => ({ ino: 100n, dev: 1n }),
-        stat: () => ({ ino: 100n, dev: 1n }),
-        readHolder: () => null,
-      }),
-    ).toBe("unverifiable");
-  });
-
-  it("'held' when inode + boot identity both agree (normal run does not false-positive)", () => {
-    expect(
-      verify({
-        fstat: () => ({ ino: 100n, dev: 1n }),
-        stat: () => ({ ino: 100n, dev: 1n }),
-        readHolder: () => BOOT_A,
-      }),
-    ).toBe("held");
+    const lock = acquire(ctx.makeTempDir(), BOOT_A);
+    writeFileSync(lock.path, "");
+    expect(lock.verifyOwnership()).toBe("unverifiable");
+    lock.release();
   });
 });
 
