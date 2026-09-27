@@ -16,6 +16,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
 import { DecisionPacket } from "./decision-packet";
@@ -143,6 +144,8 @@ function renderPage(props: {
   changesUrl?: string | null;
   /** Ruling 497: where the page opens (a notification's `#decision`). */
   entry?: string;
+  /** Ruling 521: the completion packet as the loader read it. */
+  completion?: CompletionView | null;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -178,6 +181,7 @@ function renderPage(props: {
             canDeliver={props.canDeliver ?? false}
             baseBehindBy={props.baseBehindBy ?? null}
             changesUrl={props.changesUrl ?? null}
+            completion={props.completion ?? null}
           />
         </ToastProvider>
       ),
@@ -222,6 +226,85 @@ describe("ruling 484: the task page offers the Changes panel for an open review 
     ]) {
       const { container, unmount } = renderPage(props);
       expect(heading(container)).toBe(false);
+      unmount();
+    }
+  });
+});
+
+/**
+ * Ruling 521: the completion packet stands where the task is offered for
+ * acceptance, inside the decision that offers it or on its own card beside an
+ * acceptance recommendation, and carries the page's one diff reader while it
+ * shows.
+ */
+describe("ruling 521: the completion packet stands with the offer to accept", () => {
+  const openPr: PrRef = { number: 3, state: "review", title: "Notes" };
+  const COMPLETION: CompletionView = {
+    subjectSha: "5d1f0e2",
+    packet: {
+      summary: "Long timelines fold their quiet stretches.",
+      changes: "- **Timeline**: folds runs of quiet events.",
+      screenshots: [],
+      hiddenScreenshots: 0,
+      at: "2026-09-27T10:00:00.000Z",
+      staleFor: null,
+    },
+    verdicts: [
+      { profileId: "reviewer", name: "Reviewer", result: "approve", reason: "", at: "2026-09-27T09:30:00.000Z", required: true, earlier: null },
+    ],
+    change: { files: 4, add: 260, del: 40, small: false },
+  };
+  const decision: PacketRender = {
+    type: "input",
+    kind: "Completion report",
+    from: "Operator",
+    title: "VIB-151 ready to accept",
+    body: "",
+    observations: [],
+    options: [
+      { kind: "accept_completion", t: "Accept VIB-151", d: "", rec: true },
+      { kind: "request_edit", t: "Ask for one more fix", d: "", rec: false },
+    ],
+  };
+  const changesPanel = (container: HTMLElement) =>
+    [...container.querySelectorAll(".panel-head h2")].some((h) => h.textContent === "Changes");
+
+  it("sits inside the decision that offers acceptance, and the Changes panel gives way to its diff", () => {
+    // CANARY: render the packet beside the decision rather than in it, or
+    // drop `!completionDiff` from the Changes panel's condition, and the
+    // page draws the change twice with two sets of unsent notes.
+    const { container } = renderPage({
+      task: { pr: openPr, packet: decision },
+      workRevisionSha: "5d1f0e2c0ffee",
+      changesUrl: "/projects/viberr-core/tasks/VIB-151/changes",
+      completion: COMPLETION,
+    });
+    const card = container.querySelector<HTMLElement>(".detail-packet .packet")!;
+    expect(card.querySelector(".cmp")).not.toBeNull();
+    expect(card.querySelector(".cmp-verdict")?.textContent).toContain("ReviewerApproved");
+    expect(findButton(card, "Show the diff")).toBeDefined();
+    expect(changesPanel(container)).toBe(false);
+  });
+
+  it("stands on its own card beside an acceptance recommendation or at the boundary once written, and nowhere else", () => {
+    // CANARY: drop the recommendation arm of `completionShown` and the
+    // supervised operator's offer reaches a person without its packet.
+    const rec: RecommendationView = {
+      id: "rec-1",
+      kind: "accept_completion",
+      label: "Accept the completion and close VIB-151",
+      detail: "The reviewer approved the delivered revision.",
+    };
+    const unwritten: CompletionView = { ...COMPLETION, packet: null };
+    const rows: [Parameters<typeof renderPage>[0], boolean][] = [
+      [{ recommendations: [rec], acceptance: { atBoundary: false }, completion: COMPLETION }, true],
+      [{ acceptance: { atBoundary: true }, completion: COMPLETION }, true],
+      [{ acceptance: { atBoundary: true }, completion: unwritten }, false],
+      [{ acceptance: { atBoundary: false }, completion: COMPLETION }, false],
+    ];
+    for (const [props, shown] of rows) {
+      const { container, unmount } = renderPage(props);
+      expect(container.querySelector(".detail-packet > .cmp-card > .cmp") !== null, JSON.stringify(props)).toBe(shown);
       unmount();
     }
   });

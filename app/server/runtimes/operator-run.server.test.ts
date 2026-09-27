@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import {
   updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
 import type {
@@ -856,6 +857,110 @@ describe("Codex structured operator completion", () => {
     });
   });
 
+  /**
+   * Ruling 521: the plan mirror of `write_completion_packet`. `text` carries
+   * the summary, `reason` the summary of the code changes and `screenshots`
+   * the images; the offer later in the same plan is filed on the packet the
+   * step before it wrote.
+   */
+  it("ruling 521: a plan writes the completion packet, then offers the task on it", async () => {
+    // CANARY: drop the `write_completion_packet` arm from `executeCodexPlan`
+    // and the offer is refused for want of the packet; map `reason` to
+    // nothing and the over-200-line change is refused its summary.
+    const sha = "a".repeat(40);
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            ...OPERATOR_POLICY,
+            { capabilityId: "completion-for-acceptance", mode: "recommend" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            autonomy: "full",
+          },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        title: "Codex operator plan",
+        stage: "review",
+        readiness: "ready",
+        waiting: "none",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_1",
+          headSha: sha,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-09-27T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+        engagements: [
+          { profileId: "developer", backend: "codex", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "codex", role: "Code review", delivers: false, verdictCapable: true },
+        ],
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: sha, result: "approve", reason: "looks right", at: "2026-09-27T09:30:00.000Z", rounds: 1 },
+        ],
+        validation: "healthy",
+        pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: sha, mergeable: "clean" },
+        github: { commits: [], changed: { files: 9, add: 180, del: 60 } },
+      }),
+      goal: "Coordinate a finished implementation into review.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    writeTaskAttachment(store.slug, "VIB-1", "after.png", new Uint8Array([0x89, 0x50]), store.dataRoot);
+
+    await start();
+    const step = {
+      profileId: null,
+      delivers: null,
+      toStageId: null,
+      packetType: null,
+      text: null,
+      reason: null,
+      packetOptions: null,
+    };
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Reviewed and approved; offer it.",
+        actions: [
+          {
+            ...step,
+            tool: "write_completion_packet",
+            text: "The attach flow works end to end.",
+            reason: "- **Policy gate**: refuses a second repository.",
+            screenshots: [{ name: "after.png", caption: "The attach dialog" }],
+          },
+          { ...step, tool: "accept_completion" },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      expect(task().frontmatter.completionPacket).toMatchObject({
+        subject: "rev_1",
+        summary: "The attach flow works end to end.",
+        changes: "- **Policy gate**: refuses a second repository.",
+        screenshots: [{ name: "after.png", caption: "The attach dialog" }],
+      });
+      expect(task().frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
+    });
+  });
+
   it("names BOTH reasons separately when a plan hits policy and state in one turn", async () => {
     // `stage-transitions: off` (authority) + an already-Done-style state
     // refusal from resolve_packet with no packet open.
@@ -1433,8 +1538,11 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // comment on another task of the project, in-Viberr like `post_comment`,
     // so it joins the fallback and it is 11. Ruling 503's `set_epic` puts this
     // task in an epic, in-Viberr like `set_dependencies`, so it is 12.
-    expect(tools).toHaveLength(12);
+    // Ruling 521's `write_completion_packet` writes the task's own file, so
+    // it is 13.
+    expect(tools).toHaveLength(13);
     expect(tools).toContain("set_epic");
+    expect(tools).toContain("write_completion_packet");
     expect(tools).toContain("relay_to_task");
     expect(tools).not.toContain("schedule_task_action");
     expect(tools).toContain("set_dependencies");

@@ -636,6 +636,24 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   (ruling 137). The packet and stage causes also withdraw a `transition` card targeting
   the terminal stage; `run_agent` and `delivery` cards survive all three, and the
   "Waiting on you" bell is marked read only when no card survives.
+- **The completion packet** (ruling 521) is what a person reads before accepting:
+  `completionPacket` in task.md ([file-formats.md §2](../architecture/file-formats.md)),
+  the operator's summary of the work, its summary of the code changes when they run past
+  200 changed lines, and the screenshots it picked from the task's image attachments, each
+  with a caption. Only the operator writes it (`write_completion_packet`), bound to the
+  review subject like a verdict, and its offers to accept (the `accept_completion` card, a
+  decision with an `accept_completion` option, the fold's card) are refused until it
+  describes the current subject ([operator.md §5](operator.md)). A person's acceptance
+  never waits for it. The task page shows it inside the decision that offers acceptance,
+  or on its own card at the top of the main column while an acceptance card waits or the
+  task stands at the boundary with a packet written, and never on a closed task. Beside
+  the summary it reads live: each reviewer's verdict on the revision under review (the
+  required reviewers first, one with no verdict there shown as waiting, with any verdict
+  it gave on earlier work marked stale; then anyone else who gave one, marked not
+  required), the screenshots the viewer may see (the attachments' own bar), and the
+  change: its size, and the diff open whole at 200 lines or fewer, else the operator's
+  summary with the diff one press away. While the packet carries the diff, the Changes
+  panel (ruling 484) steps aside.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
   created). Creating one needs `run-agents`, through the task page's run controls or

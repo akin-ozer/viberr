@@ -8,6 +8,8 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { writeTaskAttachment } from "~/server/files/task-attachments.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
@@ -1138,5 +1140,86 @@ describe("buildOperatorToolkit — the acceptance-stage move reads the pull requ
     expect(def.description).toContain("`notAcceptableReason`");
     expect(def.description).not.toMatch(/cannot be moved into the\s+acceptance stage/);
     expect(def.description).toContain("has simply not reached the boundary yet");
+  });
+});
+
+/**
+ * Ruling 521's door: a decision that offers acceptance carries the completion
+ * packet, and the tool its refusal names is mounted on the same grant as the
+ * offer. The writer's own refusals are the completion-packet suite's; the
+ * check itself sits in `operatorOpenPacket`, after the boundary check, so both
+ * backends meet it.
+ */
+describe("buildOperatorToolkit — the completion packet goes with the acceptance decision (ruling 521)", () => {
+  it("refuses a decision offering accept_completion until write_completion_packet describes the delivered revision", async () => {
+    // CANARY: drop the check from `operatorOpenPacket` and the first open
+    // files a decision whose card has nothing summarized on it.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        validation: "healthy",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        branch: "vib-1-work",
+        workRevision: {
+          id: "rev_1",
+          headSha: "a".repeat(40),
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt: "2026-09-27T09:00:00.000Z",
+          sourceProfileId: "developer",
+        },
+        github: { commits: [], changed: { files: 1, add: 12, del: 3 } },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    writeTaskAttachment(
+      store.slug,
+      "VIB-1",
+      "after.png",
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      store.dataRoot,
+    );
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const decision = {
+      packetType: "input",
+      title: "Accept the attach flow",
+      body: "The work is delivered and reviewed.",
+      options: [
+        { kind: "accept_completion", title: "Accept and move to Done", recommended: true },
+        { kind: "request_edit", title: "Ask for one more fix" },
+      ],
+    };
+    const summary = {
+      summary: "One repository per task.",
+      screenshots: [{ name: "after.png", caption: "The attach dialog" }],
+    };
+    // SAFETY: the SDK types a handler's argument as its own generic; each
+    // object here is the shape the tool's zod schema declares.
+    const call = async (name: string, args: typeof decision | typeof summary) =>
+      JSON.stringify(
+        await toolkit.tools.find((t) => t.name === name)!.handler(args as never, {} as never),
+      );
+    const packet = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.packet;
+
+    const refused = await call("open_decision_packet", decision);
+    expect(refused).toContain("[noop]");
+    expect(refused).toContain(
+      "Write the completion packet for revision `aaaaaaa` first (write_completion_packet)",
+    );
+    expect(packet()).toBeNull();
+
+    expect(await call("write_completion_packet", summary)).toContain("[done]");
+    expect(await call("open_decision_packet", decision)).toContain("[done]");
+    expect(packet()!.options.map((o) => o.kind)).toEqual(["accept_completion", "request_edit"]);
   });
 });

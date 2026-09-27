@@ -4721,6 +4721,66 @@ describe("pass 35: operator and task actions", () => {
       expect(file(store).frontmatter.recommendations).toHaveLength(0);
       expect(seam.runOperator).toHaveBeenCalledTimes(1);
     });
+
+    it.each([
+      ["without a completion packet, files no card and re-invokes the operator to write one", false],
+      ["with the operator's completion packet on the revision, files the card", true],
+    ])("ruling 521: delivered work %s", async (_label, packetWritten) => {
+      // CANARY: drop `requirePacket: true` from the fold and the first row
+      // files an acceptance card for work Operator never summarized.
+      const store = setupProjectedStore(ctx);
+      deployOperator(store);
+      seed(store, {
+        stage: "impl",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        branch: "vib-1-work",
+        workRevision: workRev("rev_1"),
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: "rev_1",
+            headSha: "a".repeat(40),
+            result: "approve",
+            reason: "looks right",
+            at: "2026-09-06T09:30:00.000Z",
+            rounds: 1,
+          },
+        ],
+        validation: "healthy",
+        pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: "a".repeat(40), mergeable: "clean" },
+      });
+      if (packetWritten) {
+        const { operatorWriteCompletionPacket, resolveOperatorAuthority } = await import(
+          "./operator-actions.server"
+        );
+        const written = await operatorWriteCompletionPacket(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { projectSlug: store.slug, taskKey: "VIB-1", summary: "The parser handles every fixture." },
+          resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug),
+        );
+        expect(written.outcome).toBe("done");
+      }
+      const seam = operatorSeam();
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+      );
+      if (packetWritten) {
+        await tick();
+        expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
+        expect(seam.runOperator).not.toHaveBeenCalled();
+      } else {
+        await Promise.race([
+          seam.observed,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
+        ]);
+        expect(file(store).frontmatter.recommendations).toHaveLength(0);
+        expect(seam.runOperator).toHaveBeenCalledTimes(1);
+      }
+    });
   });
 
   describe("U35-3: the force-accept record names every bypassed gate", () => {

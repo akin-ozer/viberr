@@ -30,6 +30,8 @@ import {
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
 import { ChangesPanel } from "./changes-slot";
+import { CompletionPacket, type CompletionDiff } from "./completion-packet";
+import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
@@ -130,6 +132,7 @@ export function TaskDetailPage({
   attachmentProducers = {},
   attachmentsBase = null,
   changesUrl = null,
+  completion = null,
   runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
@@ -188,6 +191,10 @@ export function TaskDetailPage({
   /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
    *  read, built by the route component. Null hides the panel. */
   changesUrl?: string | null;
+  /** Ruling 521: the completion packet as the loader read it (Operator's
+   *  summary and screenshots, each reviewer's verdict, the change's size);
+   *  null while nothing is delivered. */
+  completion?: CompletionView | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the run-agent selector offers (loader). */
@@ -776,6 +783,43 @@ export function TaskDetailPage({
     submitTransition(toStageId);
   };
 
+  // Ruling 521: the completion packet stands where the task is offered for
+  // acceptance: inside the decision whose option offers it, else on its own
+  // card at the top of the main column while an acceptance card waits below
+  // or the task stands at the boundary with a packet written. Never on a
+  // closed task, whose acceptance is over.
+  const acceptanceDecision =
+    task.packet?.options.some((o) => o.kind === "accept_completion") ?? false;
+  const completionShown =
+    completion !== null &&
+    !taskClosed &&
+    (acceptanceDecision ||
+      recommendations.some((r) => recReachesAcceptance(r, terminalStageId)) ||
+      (acceptance.atBoundary && completion.packet !== null));
+  // The Changes panel's reader rides inside the packet while it shows, so the
+  // page carries one reader (and one set of unsent notes), not two.
+  const diffReadable = changesUrl !== null && task.pr?.state === "review" && workRevisionSha !== null;
+  const completionDiff: CompletionDiff | null =
+    completionShown && diffReadable && task.pr
+      ? {
+          url: changesUrl,
+          githubHost,
+          prNumber: task.pr.number,
+          revisionSha: workRevisionSha,
+          delivererName: task.specialist?.profileName ?? null,
+        }
+      : null;
+  const completionPacket =
+    completion !== null && completionShown ? (
+      <CompletionPacket
+        view={completion}
+        attachmentsBase={attachmentsBase}
+        verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
+        diff={completionDiff}
+        standalone={!acceptanceDecision}
+      />
+    ) : null;
+
   return (
     // Image evidence anywhere on this page — timeline thumbnails, inline
     // markdown embeds, the Attachments panel, cited evidence filenames —
@@ -838,7 +882,7 @@ export function TaskDetailPage({
         />
       </div>
 
-      {task.packet && (
+      {task.packet ? (
         <div
           className="detail-packet"
           id={TASK_DECISION_ANCHOR}
@@ -848,6 +892,7 @@ export function TaskDetailPage({
           <DecisionPacket
             packet={task.packet}
             busy={resolveBusy}
+            completion={acceptanceDecision ? completionPacket : null}
             // Ruling 319: a packet keyed to an account failure answers its
             // siblings too — the card says so before the confirm, not after.
             alsoAnswers={packetAlsoAnswers}
@@ -904,8 +949,11 @@ export function TaskDetailPage({
               setEditGoalSignal((n) => n + 1);
             }}
           />
+          {acceptanceDecision ? null : completionPacket}
         </div>
-      )}
+      ) : completionPacket ? (
+        <div className="detail-packet">{completionPacket}</div>
+      ) : null}
 
       <div className="detail-side">
         <GithubTrace
@@ -1047,8 +1095,9 @@ export function TaskDetailPage({
         {/* Ruling 484 (F40-54): the delivered revision's files and patches,
             with a note on any line going to the deliverer as one comment.
             Only while the review PR is open and carries a delivered revision;
-            the reader is its own chunk, loaded when the panel opens. */}
-        {changesUrl && task.pr?.state === "review" && workRevisionSha ? (
+            the reader is its own chunk, loaded when the panel opens. Ruling
+            521: not while the completion packet carries the same reader. */}
+        {changesUrl && task.pr?.state === "review" && workRevisionSha && !completionDiff ? (
           <ChangesPanel
             url={changesUrl}
             githubHost={githubHost}

@@ -31,6 +31,7 @@ export const CLEAR_PART = 0.78;
 export function Collapsible({
   className,
   contentKey,
+  max = COLLAPSE_MAX,
   children,
   open,
   onOpenChange,
@@ -41,6 +42,9 @@ export function Collapsible({
   /** Changes whenever the content does. A clamped box keeps its height
    *  whatever its content does, so the resize observer alone can't tell. */
   contentKey: string | number;
+  /** The clamped height (px). Ruling 521: a reviewer's reason on the
+   *  completion packet folds at a few lines, not at a comment's height. */
+  max?: number;
   children: ReactNode;
   /** Ruling 522: the fold's state, held by whoever folds something else with
    *  this box. Absent, the box keeps its own. */
@@ -60,7 +64,7 @@ export function Collapsible({
     if (!el) return;
     // scrollHeight reports the FULL content height even while clamped by
     // max-height, so this stays correct in both states.
-    const measure = () => setOverflowing(el.scrollHeight > COLLAPSE_MAX + 24);
+    const measure = () => setOverflowing(el.scrollHeight > max + 24);
     measure();
     // The first measure above is the whole contract on a host that provides no
     // ResizeObserver (jsdom); only the re-measure on resize is lost.
@@ -68,7 +72,7 @@ export function Collapsible({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [contentKey]);
+  }, [contentKey, max]);
 
   const clamped = overflowing && !expanded;
   return (
@@ -76,7 +80,7 @@ export function Collapsible({
       <div
         ref={ref}
         className={className + (clamped ? " clamped" : "")}
-        style={clamped ? { maxHeight: COLLAPSE_MAX } : undefined}
+        style={clamped ? { maxHeight: max } : undefined}
         onFocus={(event) => {
           if (!clamped || !event.target.matches(":focus-visible")) return;
           // Something in plain sight keeps the fold: closing an attachment's

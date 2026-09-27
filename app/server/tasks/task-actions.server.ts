@@ -10,7 +10,7 @@ import {
   revisionDriftNote as sharedRevisionDriftNote,
 } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import { requiredReviewerRefusals } from "./required-reviewers.server";
+import { requiredReviewerRefusals, type RequiredReviewerView } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd, runDidNotCompleteLead } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
@@ -13862,7 +13862,40 @@ export function resolveAcceptanceAffordance(
   input: { projectSlug: string; taskKey: string; viewerUserId: string },
   ctx: TaskMutationContext = {},
 ): AcceptanceAffordance {
-  const denied: AcceptanceAffordance = {
+  return acceptanceStanding(input, ctx).affordance;
+}
+
+/** The affordance, and the project's required-reviewer rules it was read with. */
+export interface AcceptanceStanding {
+  affordance: AcceptanceAffordance;
+  /** Ruling 178's rules, resolved; empty when the project cannot be read. */
+  requiredReviewers: RequiredReviewerView[];
+}
+
+/**
+ * Ruling 521: `resolveAcceptanceAffordance` with the rules it read. The task
+ * page's completion packet marks a rule's reviewer required whether or not
+ * anyone engaged it, and taking the rules from this read of project.md keeps
+ * the page's revalidation at its store-read budget (ruling 457).
+ */
+export function acceptanceStanding(
+  input: { projectSlug: string; taskKey: string; viewerUserId: string },
+  ctx: TaskMutationContext = {},
+): AcceptanceStanding {
+  let project: ProjectContext;
+  try {
+    project = loadProjectContext(ctx, input.projectSlug);
+  } catch {
+    return { affordance: deniedAffordance(), requiredReviewers: [] };
+  }
+  return {
+    affordance: affordanceIn(project, input, ctx),
+    requiredReviewers: project.requiredReviewers,
+  };
+}
+
+function deniedAffordance(): AcceptanceAffordance {
+  return {
     hasAuthority: false,
     atBoundary: false,
     blockedReason: null,
@@ -13872,12 +13905,14 @@ export function resolveAcceptanceAffordance(
     terminallyBlocked: false,
     verdictSatisfiedBy: null,
   };
-  let project: ProjectContext;
-  try {
-    project = loadProjectContext(ctx, input.projectSlug);
-  } catch {
-    return denied;
-  }
+}
+
+function affordanceIn(
+  project: ProjectContext,
+  input: { projectSlug: string; taskKey: string; viewerUserId: string },
+  ctx: TaskMutationContext,
+): AcceptanceAffordance {
+  const denied = deniedAffordance();
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) return denied;
   const fm = existing.parsed.frontmatter;

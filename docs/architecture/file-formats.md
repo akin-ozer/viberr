@@ -463,6 +463,19 @@ gateRun:                          # optional; ruling 482 — the project's gates
       wallMs: 41230
       log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
                                   # the combined output (null when it could not be saved)
+completionPacket:                 # optional; ruling 521 — what Operator hands over at
+  subject: rev_9f2c               # the acceptance boundary, bound like a verdict to the
+  headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or
+  summary: "One repo per task…"   # `files:<deliveredAt>`; headSha only for a revision).
+  changes: "- **Policy gate**…"   # summary: what was done and why it is complete;
+  screenshots:                    # changes: its summary of the code changes, null for a
+    - name: attach-dialog.png     # change of at most 200 lines (shown whole); screenshots:
+      caption: The attach dialog  # image attachments it picked, each with a caption.
+  at: 2026-09-25T10:20:00Z        # Written by `write_completion_packet` alone; the
+                                  # verdicts and the change are read live, never copied
+                                  # in. For another subject it is stale, and an operator
+                                  # offer to accept is refused until it is written again.
+                                  # A malformed record reads as absent (a diagnostic)
 headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
   prNumber: 114                   # containment check GitHub refused to run. Pinned to all
   revisionHeadSha: a1b2c3d…       # three: the gate re-reads the LIVE head and honours it only

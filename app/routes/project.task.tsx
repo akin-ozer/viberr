@@ -50,7 +50,7 @@ import {
   refreshAndReview,
   releaseOwner,
   requestPacketMaintainerDecision,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   resolvePacket,
   setOwner,
   attachTaskFile,
@@ -73,8 +73,10 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countTaskAttachments,
   listTaskAttachments,
+  taskAttachmentExists,
   MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
+import { completionView } from "~/server/tasks/completion-packet.server";
 import {
   directiveDeferredNote,
   listDeployedSpecialists,
@@ -461,6 +463,40 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? countTaskAttachments(params.slug, params.key)
     : 0;
 
+  // P14-LV-06: the acceptance affordance, with the project's required-reviewer
+  // rules from the same read of project.md (the completion packet below).
+  const standing = acceptanceStanding({
+    projectSlug: params.slug,
+    taskKey: params.key,
+    viewerUserId: user.id,
+  });
+
+  // Ruling 521: the completion packet, with each reviewer's verdict on the
+  // work under review and the change's size, built from what this loader has
+  // already read (the task file, the project's rules, the reviewers' and the
+  // deployed agents' names). A screenshot rides the attachments' own bar: a
+  // viewer who may not see the attachments sees none of it, and one that has
+  // left the store is counted, not drawn. Checked by name rather than against
+  // the list above, which stops at the newest 100.
+  const completion =
+    taskFile && !archived
+      ? completionView(taskFile.parsed.frontmatter, {
+          canSee: runsVisible
+            ? (name) => taskAttachmentExists(params.slug, params.key, name)
+            : null,
+          nameOf: (profileId) => {
+            const engaged = detail.reviewers.find((r) => r.profileId === profileId);
+            return (
+              engaged?.profileName ??
+              deployedSpecialists.find((s) => s.id === profileId)?.name ??
+              engaged?.role ??
+              profileId
+            );
+          },
+          ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
+        })
+      : null;
+
   return {
     // Ruling 349: the hero and the rail read the run row, like the board card.
     task: {
@@ -475,6 +511,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     epics: listEpicChips(db, params.slug),
     attachments,
     attachmentsTotal,
+    /** Ruling 521: the operator's completion packet as the page shows it. */
+    completion,
     // Who saved each attachment and when, from the events that claim names —
     // same visibility bar as the list itself.
     attachmentProducers: runsVisible
@@ -493,11 +531,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // recommendation card — so a withdrawn recommendation left the promised
     // decision with no control at all. Acceptance is a standing authority at the
     // review boundary; both surfaces now read it from the same predicate.
-    acceptance: resolveAcceptanceAffordance({
-      projectSlug: params.slug,
-      taskKey: params.key,
-      viewerUserId: user.id,
-    }),
+    acceptance: standing.affordance,
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
@@ -1569,6 +1603,8 @@ export default function TaskDetailRoute({
       attachments={loaderData.attachments}
       attachmentsTotal={loaderData.attachmentsTotal}
       attachmentProducers={loaderData.attachmentProducers}
+      // Ruling 521: the completion packet the acceptance decision shows.
+      completion={loaderData.completion}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       // Ruling 484: the Changes panel's read, beside the page it posts notes to.
       changesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/changes`}

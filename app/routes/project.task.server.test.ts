@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { SeedUserIds } from "../../test-support/demo-data";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { TaskLinks } from "~/shared/task-key-links";
+import type { CompletionView } from "~/server/tasks/completion-packet.server";
 
 /**
  * F19-22 — the task page's GitHub panel needs the last CHECK as well as the
@@ -41,6 +42,8 @@ interface TaskLoaderData {
   baseBehindBy: number | null;
   /** Ruling 475. */
   mergeCollisions: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
+  /** Ruling 521. */
+  completion: CompletionView | null;
 }
 
 /**
@@ -283,5 +286,94 @@ describe("U39-32: the accept dialog's base lag", () => {
       details: { changed: true, sync: "behind", behindBy: 3 },
     });
     expect((await loadTask("VIB-145")).baseBehindBy).toBe(3);
+  });
+});
+
+/**
+ * Ruling 521: the loader ships the completion packet the decision card draws:
+ * the reviewers by name with their verdicts on the revision under review, and
+ * the screenshots Operator picked, checked against the attachments store for
+ * a viewer who may see it.
+ */
+describe("ruling 521: the completion packet", () => {
+  it("ships the packet for the revision under review, with the reviewer's name and the screenshot it picked", async () => {
+    // CANARY: return `completion: null` from the loader, or hand
+    // `completionView` a `canSee` of null for a member, and this empties.
+    const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+    const { writeCompletionPacket } = await import("~/server/tasks/completion-packet.server");
+    const sha = "a".repeat(40);
+    const ref = { projectSlug: "viberr-core", taskKey: "VIB-142", dataRoot: app.dataRoot };
+    await updateTaskFile(ref, (parsed) => {
+      parsed.frontmatter.workRevision = {
+        id: "rev_1",
+        headSha: sha,
+        treeSha: "t".repeat(40),
+        branch: "vib-142-attach-workspace",
+        createdAt: "2026-09-27T09:00:00.000Z",
+        sourceProfileId: "developer",
+      };
+      parsed.frontmatter.verdicts = [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: sha, result: "approve", reason: "The gate refuses a second repo.", at: "2026-09-27T09:30:00.000Z", rounds: 1 },
+      ];
+    });
+    rebuildPath(app.db, resolveTaskFilePath(ref), { dataRoot: app.dataRoot });
+    writeTaskAttachment("viberr-core", "VIB-142", "attach-dialog.png", new Uint8Array([0x89, 0x50]), app.dataRoot);
+    const written = await writeCompletionPacket(app.db, { dataRoot: app.dataRoot }, {
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+      summary: "A task attaches one repository and records its branch first.",
+      changes: "- **Policy gate**: refuses a second repository.",
+      screenshots: [{ name: "attach-dialog.png", caption: "The attach dialog" }],
+    });
+    expect(written.written).toBe(true);
+
+    expect((await loadTask("VIB-142")).completion).toEqual({
+      subjectSha: "aaaaaaa",
+      packet: {
+        summary: "A task attaches one repository and records its branch first.",
+        changes: "- **Policy gate**: refuses a second repository.",
+        screenshots: [{ name: "attach-dialog.png", caption: "The attach dialog" }],
+        hiddenScreenshots: 0,
+        at: expect.any(String),
+        staleFor: null,
+      },
+      verdicts: [
+        {
+          profileId: "reviewer",
+          name: "Reviewer",
+          result: "approve",
+          reason: "The gate refuses a second repo.",
+          at: "2026-09-27T09:30:00.000Z",
+          required: true,
+          earlier: null,
+        },
+      ],
+      change: { files: 9, add: 412, del: 87, small: false },
+    });
+  });
+
+  it("counts the reviewer a project rule requires, though nobody engaged it on the task", async () => {
+    // CANARY: hand `completionView` no rule reviewers and Reviewer reads as
+    // not required while acceptance waits on its approval (ruling 178).
+    const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    const { updateProjectFile, resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const task = { projectSlug: "viberr-core", taskKey: "VIB-142", dataRoot: app.dataRoot };
+    await updateTaskFile(task, (parsed) => {
+      parsed.frontmatter.engagements = parsed.frontmatter.engagements.filter((e) => e.delivers);
+    });
+    const project = { projectSlug: "viberr-core", dataRoot: app.dataRoot };
+    await updateProjectFile(project, (parsed) => {
+      parsed.frontmatter.requiredReviewers = [{ stageId: "review", profileId: "reviewer" }];
+    });
+    rebuildPath(app.db, resolveProjectFilePath(project), { dataRoot: app.dataRoot });
+    rebuildPath(app.db, resolveTaskFilePath(task), { dataRoot: app.dataRoot });
+
+    const { verdicts } = (await loadTask("VIB-142")).completion!;
+    expect(verdicts.map((v) => [v.name, v.result, v.required])).toEqual([
+      ["Reviewer", "approve", true],
+    ]);
   });
 });

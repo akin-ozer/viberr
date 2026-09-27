@@ -64,6 +64,7 @@ import {
   operatorSnapshot,
   OPERATOR_TIMELINE_DEFAULT,
   operatorTransitionStage,
+  operatorWriteCompletionPacket,
   operatorAutonomyFor,
   operatorBackendFor,
   resolveOperatorAuthority,
@@ -2855,6 +2856,72 @@ describe("operatorAcceptCompletion", () => {
     expect(
       listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
     ).toHaveLength(0);
+  });
+
+  describe("ruling 521: the operator's offer waits for its completion packet", () => {
+    /** The operator's own call inside a drive, as `runOperator` sets it. */
+    const drive = () => ({
+      dataRoot: store.dataRoot,
+      operatorRun: { backend: "claude" as const, autonomy: "supervised" as const, reactDepth: 0 },
+    });
+    const offer = () =>
+      operatorAcceptCompletion(
+        store.db,
+        drive(),
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        authority("supervised"),
+      );
+    const writePacket = () =>
+      operatorWriteCompletionPacket(
+        store.db,
+        drive(),
+        { projectSlug: store.slug, taskKey: "VIB-1", summary: "The parser handles every fixture." },
+        authority("supervised"),
+      );
+
+    it("refuses the offer until the packet is written, and the snapshot says so", async () => {
+      // CANARY: drop the ruling 521 check from operatorAcceptCompletion and
+      // the first offer files a card whose work nobody summarized.
+      deployRoster(DEFAULT_POLICY);
+      seedAcceptable("review");
+      const refused = await offer();
+      expect(refused.outcome).toBe("noop");
+      expect(refused.message).toBe(
+        "Write the completion packet for revision `aaaaaaa` first (write_completion_packet), then offer VIB-1 for acceptance: the person who accepts it reads your summary, the screenshots you pick and the change beside each reviewer's verdict (ruling 521).",
+      );
+      expect(task().frontmatter.recommendations).toHaveLength(0);
+      const snapshot = operatorSnapshot(store.db, drive(), store.slug, "VIB-1", authority("supervised"));
+      expect(snapshot.completionPacket?.state).toBe("none");
+
+      expect((await writePacket()).outcome).toBe("done");
+      expect((await offer()).outcome).toBe("recommended");
+      expect(task().frontmatter.recommendations.map((x) => x.kind)).toEqual(["accept_completion"]);
+    });
+
+    it("refuses a packet written for the revision a new delivery replaced", async () => {
+      // CANARY: accept any packet on file (drop the subject match in
+      // `currentCompletionPacket`) and the summary of rev_1 is offered for rev_2.
+      deployRoster(DEFAULT_POLICY);
+      seedAcceptable("review");
+      await writePacket();
+      const sha = "c".repeat(40);
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          const fm = parsed.frontmatter;
+          fm.workRevision = { ...fm.workRevision!, id: "rev_2", headSha: sha };
+          fm.verdicts = [{ ...fm.verdicts[0]!, revisionId: "rev_2", headSha: sha }];
+          fm.pr = { ...fm.pr!, headSha: sha };
+        },
+      );
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const refused = await offer();
+      expect(refused.outcome).toBe("noop");
+      expect(refused.message).toContain("Write the completion packet for revision `ccccccc` first");
+      expect(refused.message).toContain(
+        "The packet on file describes earlier work, so write it again for what is delivered now.",
+      );
+    });
   });
 });
 

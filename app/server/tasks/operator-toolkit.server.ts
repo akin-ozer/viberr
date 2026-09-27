@@ -39,11 +39,13 @@ import {
   operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
+  operatorWriteCompletionPacket,
   type OperatorActionResult,
   type OperatorAuthority,
   type OperatorOpenPacketInput,
   type OperatorPacketOptionInput,
 } from "./operator-actions.server";
+import { COMPLETION_SCREENSHOTS_MAX } from "~/shared/completion-packet";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -724,7 +726,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "open_decision_packet",
-        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. An option TITLE is a promise the resolution keeps: the resolver dispatches on the `kind` alone, so a title that names an act the kind cannot perform is refused here (ruling 164). Use 'force_accept' for the admin override of a wedged acceptance gate, 'move_stage' with `toStage` for a board move, and never a redirect or custom option that describes either, or that asks a person to edit an agent profile. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. ONE packet stands at a time: this REFUSES while a packet is already open (whoever is answering it must not be stranded) — answer from that packet, or withdraw it with resolve_decision_packet when it is genuinely moot, then open yours. Ruling 85: when the blocker is a CAPABILITY no deployed agent declares (see `deployedSpecialists[].capabilities` — browser, web, verdict, delivery), state the gap as an observation AND name the product's remedy — that capability is grantable on an agent profile from the project's Agents surface. Say it in the packet's own words, in the body and the observations, beside any workaround you offer; never write it as an OPTION, because no option kind edits an agent profile and a title that says one does is refused here (ruling 164). A packet that stays silent about the remedy and lists only workarounds hides the fix. You never change that configuration yourself. The human resolves it from the task page.",
+        "Open a STRUCTURED decision or blocking packet for a human to resolve — the canonical governed hand-off (not a comment). Use it when you reach a genuine decision point or the limit of your authority (a task stuck after repeated no-progress, a policy/credential block, or a completion the human must accept). Prefer this over a plain comment for anything requiring a human choice. Set `packetType` to 'blocked' when work is stuck (also marks the task blocked) or 'input' for a decision. Give 2-4 `options`, each with a stable `kind` and a short title; mark exactly one `recommended`. An option TITLE is a promise the resolution keeps: the resolver dispatches on the `kind` alone, so a title that names an act the kind cannot perform is refused here (ruling 164). Use 'force_accept' for the admin override of a wedged acceptance gate, 'move_stage' with `toStage` for a board move, and never a redirect or custom option that describes either, or that asks a person to edit an agent profile. Use kind 'edit_goal' for an option that asks the human to refine/specify the task GOAL — confirming it opens the goal editor and the packet clears automatically when the edited goal is saved. ONE packet stands at a time: this REFUSES while a packet is already open (whoever is answering it must not be stranded) — answer from that packet, or withdraw it with resolve_decision_packet when it is genuinely moot, then open yours. Ruling 85: when the blocker is a CAPABILITY no deployed agent declares (see `deployedSpecialists[].capabilities` — browser, web, verdict, delivery), state the gap as an observation AND name the product's remedy — that capability is grantable on an agent profile from the project's Agents surface. Say it in the packet's own words, in the body and the observations, beside any workaround you offer; never write it as an OPTION, because no option kind edits an agent profile and a title that says one does is refused here (ruling 164). A packet that stays silent about the remedy and lists only workarounds hides the fix. You never change that configuration yourself. The human resolves it from the task page. A packet with an `accept_completion` option offers the task for acceptance, so it is refused until `write_completion_packet` has described the work under review (ruling 521); the page shows that packet, with the verdicts and the change, inside your decision, so do not repeat the verdicts as observations.",
         {
           packetType: z
             .enum(["input", "blocked"])
@@ -734,7 +736,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           observations: z
             .array(
               z.strictObject({
-                k: z.string().describe("Label, e.g. 'Branch' or 'Reviewer verdict'."),
+                k: z.string().describe("Label, e.g. 'Branch' or 'Signal'."),
                 v: z.string().describe("Value."),
                 code: z.boolean().optional().describe("Render the value as code."),
               }),
@@ -1160,10 +1162,52 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // autonomy does NOT smuggle it back in (owner ruling Q1: the human-only-Done
   // exception requires an explicit grant, never an autonomy side-effect).
   if (gate(authority, "completion-for-acceptance") !== "deny") {
+    // Ruling 521: the packet every acceptance offer carries, on the same
+    // grant, since it exists only to go with one.
+    add(
+      tool(
+        "write_completion_packet",
+        "Write the completion packet: what a person reads before accepting this task into Done (ruling 521). Write it before EVERY acceptance offer, `accept_completion` or a decision packet with an `accept_completion` option: both are refused until the packet describes the work under review, and a new revision or delivery makes it stale, so write it again then. Viberr shows each reviewer's verdict and the change itself beside it, read live, so never restate a verdict or paste a diff into it. `summary`: what was done against the goal and why it is complete, for a person who has not followed the task: the outcome first, then anything they must know before accepting (a follow-up, a known limit, a check only the deployed site can answer). Markdown, a few short paragraphs or bullets. `changes`: what changed in the code, by area, naming the files that matter. Required when get_task's `completionPacket.changesSummaryRequired` is true (a change of more than 200 lines, which the page shows as your summary with the diff one press away); otherwise leave it out and the diff is shown whole. `screenshots`: the images among this task's attachments that show the result, by exact file name from `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. Pick the ones a person needs to judge visible work; leave it out when nothing visible changed.",
+        {
+          summary: z
+            .string()
+            .describe("What was done and why it is complete, for the person who accepts (markdown, under 4000 characters)."),
+          changes: z
+            .string()
+            .optional()
+            .describe("Your summary of the code changes by area, naming the files that matter. Required for a change of more than 200 lines."),
+          screenshots: z
+            .array(
+              z.object({
+                name: z.string().describe("The attachment's exact file name."),
+                caption: z.string().optional().describe("One line: what the screenshot shows."),
+              }),
+            )
+            .max(COMPLETION_SCREENSHOTS_MAX)
+            .optional()
+            .describe(`Up to ${COMPLETION_SCREENSHOTS_MAX} image attachments that show the result.`),
+        },
+        async (args) => {
+          const input: Parameters<typeof operatorWriteCompletionPacket>[2] = {
+            ...base,
+            summary: prose(args.summary),
+          };
+          if (args.changes) input.changes = prose(args.changes);
+          if (args.screenshots) {
+            input.screenshots = args.screenshots.map((s) => ({
+              name: s.name,
+              caption: s.caption ? prose(s.caption) : null,
+            }));
+          }
+          return resultText(await operatorWriteCompletionPacket(db, ctx, input, authority));
+        },
+      ),
+      "write_completion_packet",
+    );
     add(
       tool(
         "accept_completion",
-        "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted, merge pending — you do NOT merge it yourself and a merge does not happen when you accept, whether or not GitHub is reachable (a real merge is a human-only action). A human merges the accepted PR afterward; never tell anyone the PR was merged. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply — the maintainer's acceptance is what merges the review PR when GitHub is reachable, otherwise it is left 'merge pending'. Only call this once the work has reached the review boundary and the review is clean. A task with NOTHING to deliver (get_task `noChanges: true` — no branch, no PR) is accepted the same way and completes with no changes: nothing is merged, and the server re-checks the remote branch state before closing. Never call deliver_for_review for such a task, and never open a decision packet asking a human how to close it out. A pull request the acceptance gate would refuse cannot be recommended for acceptance: while get_task shows `notAcceptableReason`, this tool refuses with that sentence; call `update_branch_from_base`, which routes the conflict (ruling 475), or deliver the unpushed revision instead. It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492): accepting would withdraw that decision unanswered, so wait for a person to answer it.",
+        "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted, merge pending — you do NOT merge it yourself and a merge does not happen when you accept, whether or not GitHub is reachable (a real merge is a human-only action). A human merges the accepted PR afterward; never tell anyone the PR was merged. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply — the maintainer's acceptance is what merges the review PR when GitHub is reachable, otherwise it is left 'merge pending'. Only call this once the work has reached the review boundary and the review is clean. A task with NOTHING to deliver (get_task `noChanges: true` — no branch, no PR) is accepted the same way and completes with no changes: nothing is merged, and the server re-checks the remote branch state before closing. Never call deliver_for_review for such a task, and never open a decision packet asking a human how to close it out. A pull request the acceptance gate would refuse cannot be recommended for acceptance: while get_task shows `notAcceptableReason`, this tool refuses with that sentence; call `update_branch_from_base`, which routes the conflict (ruling 475), or deliver the unpushed revision instead. It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492): accepting would withdraw that decision unanswered, so wait for a person to answer it. And it refuses until `write_completion_packet` has described the work under review (ruling 521): write the packet first, then call this.",
         {},
         async () =>
           resultText(await operatorAcceptCompletion(db, ctx, base, authority)),

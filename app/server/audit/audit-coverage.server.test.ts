@@ -238,6 +238,28 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 521: the completion packet the operator writes before it
+        // offers a task for acceptance, here over files a run delivered.
+        name: "writeCompletionPacket",
+        action: "task.completion_packet.written",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          const { writeCompletionPacket } = await import("~/server/tasks/completion-packet.server");
+          await updateTaskFile(
+            { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+            (parsed) => {
+              parsed.frontmatter.deliveredAt = "2026-09-27T09:00:00.000Z";
+            },
+          );
+          await writeCompletionPacket(store.db, fileCtx, {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            summary: "The report is written and checked against the goal.",
+          });
+        },
+      },
+      {
         // Ruling 488: a relay from one task to another, audited on the target.
         name: "relayToTask",
         action: "task.relayed",

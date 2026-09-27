@@ -1314,6 +1314,48 @@ const gateRunSchema = z
   .loose();
 export type GateRun = z.infer<typeof gateRunSchema>;
 
+// ------------------------------------------- completion packet (ruling 521)
+
+/** One screenshot the operator put on the completion packet. */
+const completionScreenshotSchema = z
+  .object({
+    /** The file's name in the task's attachments store. */
+    name: z.string().min(1),
+    /** What the screenshot shows, in the operator's words. */
+    caption: z.string().default(""),
+  })
+  .loose();
+
+/**
+ * Ruling 521 (owner, 2026-09-27): the operator's summary of finished work,
+ * which a person reads before accepting it into the terminal stage.
+ *
+ * Written by the operator alone (`write_completion_packet`), before it offers
+ * the task for acceptance. Bound to the review subject it describes, like a
+ * verdict: once a new revision or a new delivery of files replaces that
+ * subject, the packet is stale and the operator writes it again before the
+ * next offer. What the packet shows beside the summary is read live, never
+ * copied into it: each reviewer's verdict on the current subject, and the
+ * change itself. Sizes are the writer's to enforce (`~/shared/completion-packet`),
+ * so this schema, which every page ships, stays small.
+ */
+const completionPacketSchema = z
+  .object({
+    /** `reviewSubjectId` when the packet was written. */
+    subject: z.string().min(1),
+    /** That subject's head sha, for display; absent when it is not a commit. */
+    headSha: z.string().min(1).optional(),
+    /** What was done and why it is complete: markdown, the operator's words. */
+    summary: z.string().min(1),
+    /** The operator's summary of the code changes, by area; null when the
+     *  change is small enough to show whole. */
+    changes: z.string().nullable().default(null),
+    screenshots: z.array(completionScreenshotSchema).default([]),
+    at: z.string().min(1),
+  })
+  .loose();
+export type CompletionPacket = z.infer<typeof completionPacketSchema>;
+
 // -------------------------------------------------------- frontmatter
 
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
@@ -1494,6 +1536,9 @@ const taskFrontmatterFields = {
   /** Ruling 482: the project's gates as Viberr last ran them on this task
    *  (absent until a run is first asked for). */
   gateRun: gateRunSchema.optional(),
+  /** Ruling 521: the operator's summary of the finished work, for the person
+   *  who accepts it (absent until the operator first writes one). */
+  completionPacket: completionPacketSchema.optional(),
   github: githubCacheSchema.nullable(),
   /** Ruling 503: the epic this task belongs to (`epic-3`), or null. The epic
    *  itself is canonical in `projects/<slug>/epics/<epicId>.md`; the task
@@ -1878,6 +1923,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "headCheckWaiver",
   // Ruling 482: the server's own gate evidence.
   "gateRun",
+  // Ruling 521: the operator's summary for the person who accepts.
+  "completionPacket",
   "github",
   "epic",
   "createdAt",
@@ -2308,6 +2355,16 @@ export function parseTaskFrontmatter(
       data,
       "gateRun",
       taskFrontmatterFields.gateRun,
+      undefined,
+    ),
+    // Ruling 521: absent means the operator never wrote one. A malformed
+    // record falls back to absent with a diagnostic, which the operator's next
+    // acceptance offer answers by writing it again.
+    completionPacket: tolerant(
+      diagnostics,
+      data,
+      "completionPacket",
+      taskFrontmatterFields.completionPacket,
       undefined,
     ),
     github: tolerant(
