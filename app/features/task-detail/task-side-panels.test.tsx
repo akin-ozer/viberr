@@ -9,6 +9,7 @@ import { toISODate } from "~/ui/calendar";
 import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
+import { Icon, type IconName } from "~/ui/icon";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -649,5 +650,98 @@ describe("ruling 138: Waiting on · a decided edit_goal packet", () => {
       },
     });
     expect(kv(container, "Waiting on")).toBe("a goal edit");
+  });
+});
+
+/**
+ * Ruling 520 — Current state draws the rows the Details panel draws (ruling
+ * 501): the labels in one column, every value on one left edge, each led by
+ * its mark, and an empty one said quietly. The owner's screenshot had five
+ * values set five ways and right-aligned.
+ */
+describe("ruling 520: Current state is a property grid", () => {
+  /** What `Icon` draws for a glyph: one mark is told from another by its paths. */
+  function glyph(name: IconName): string {
+    const { container, unmount } = render(<Icon name={name} />);
+    const paths = container.querySelector("svg")!.innerHTML;
+    unmount();
+    return paths;
+  }
+
+  /** A row of the property grid, by its label. */
+  function prop(container: HTMLElement, label: string): Element {
+    const row = [...container.querySelectorAll(".kv.props .kv-row")].find(
+      (r) => r.querySelector(".k")?.textContent === label,
+    );
+    if (!row) throw new Error(`no "${label}" row on the property grid`);
+    return row;
+  }
+
+  const WAITS: [string, Partial<TaskDetail>, string, IconName | "pulse"][] = [
+    ["a human owes the next move", { waiting: "human" }, "a human", "hand"],
+    ["a schedule picks it back up", { waiting: "schedule", resumesAt: null }, "a schedule", "clock"],
+    ["its run is queued", { waiting: "agent", liveRun: "queued" }, "Agent queued", "ring"],
+    ["an agent is at work", { waiting: "agent", liveRun: "running" }, "Agent work", "pulse"],
+    [
+      "other work holds it",
+      { waiting: "none", blockedBy: [{ ref: "JC-2", label: "JC-2", state: "open", taskKey: "JC-2" }] },
+      "Other work: JC-2",
+      "ban",
+    ],
+  ];
+
+  it.each(WAITS)("when %s, Waiting on leads with the board card's mark", (_, patch, words, mark) => {
+    // CANARY: draw a queued run with the pulse, or drop a mark, and the card
+    // stops speaking the board card's vocabulary (ruling 365).
+    const { container } = renderPanel(patch);
+    const fact = prop(container, "Waiting on").querySelector(".v > .prop-fact")!;
+    expect(fact.textContent).toBe(words);
+    const lead = fact.firstElementChild!;
+    if (mark === "pulse") expect(lead.className).toBe("working");
+    else expect(lead.innerHTML).toBe(glyph(mark));
+  });
+
+  it("keeps each held entry's key on one line, the words between them free to wrap", () => {
+    // CANARY: print the sentence as one string and Chromium breaks "VIB-151"
+    // after its hyphen in the value column.
+    const { container } = renderPanel({
+      waiting: "none",
+      blockedBy: [
+        { ref: "JC-2", label: "JC-2", state: "open", taskKey: "JC-2" },
+        { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3" },
+      ],
+    });
+    const fact = prop(container, "Waiting on").querySelector(".v > .prop-fact")!;
+    expect(fact.textContent).toBe("Other work: JC-2 and JC-3 (done)");
+    expect([...fact.querySelectorAll(".hold-ref")].map((r) => r.textContent)).toEqual(["JC-2", "JC-3"]);
+  });
+
+  it("says an empty value quietly, and offers Assign me as the invitation Details makes", () => {
+    // CANARY: print "Nothing" as the bare value and it takes the row's full
+    // ink, the loudest word in the card for the least news.
+    const { container } = renderPanel({ waiting: "none", lastActivityAt: null, owner: null });
+    for (const [label, words] of [
+      ["Waiting on", "Nothing"],
+      ["Last activity", "Nothing on the timeline yet"],
+      ["Owner", "Unowned"],
+    ]) {
+      expect(prop(container, label).querySelector(".v > .prop-empty")?.textContent, label).toBe(words);
+    }
+    cleanup();
+    // A contributor may take the seat: a ghost trigger holding the
+    // invitation, not a boxed button in a column of text.
+    const view = renderAsContributor({ owner: null });
+    const assign = view.getByRole("button", { name: "Assign me" });
+    expect(assign.className).toBe("prop-btn");
+    expect(assign.querySelector(".prop-empty")).not.toBeNull();
+  });
+
+  it("leads the repository with the GitHub mark, in the code face", () => {
+    // CANARY: put `mono` back on the value itself and `.kv-row .v`'s display
+    // face wins: the repository in bold Inter, as the screenshot had it.
+    const { container } = renderPanel();
+    const fact = prop(container, "Repo").querySelector(".v > .prop-fact")!;
+    expect(fact.firstElementChild!.innerHTML).toBe(glyph("github"));
+    expect(fact.querySelector(".mono")?.textContent).toBe("akin-ozer/viberr");
   });
 });
