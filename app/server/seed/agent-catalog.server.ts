@@ -52,7 +52,7 @@ interface ProfileBase {
   id: string;
   kind: "operator" | "specialist";
   name: string;
-  /** Absent on the operator alone (ruling 517). */
+  /** Absent on the operator alone (ruling 518). */
   role?: string;
   icon: string;
   backends: ("codex" | "claude")[];
@@ -84,7 +84,7 @@ function profile(
 export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
-      // Ruling 517: one agent, called Operator, with no role beside the name.
+      // Ruling 518: one agent, called Operator, with no role beside the name.
       id: "operator", kind: "operator", name: "Operator",
       icon: "shield", backends: ["claude", "codex"], model: "orchestration runtime",
       scope: "Built in · runs on every task",

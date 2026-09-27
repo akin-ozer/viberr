@@ -30,7 +30,6 @@ function deployOperator(
     deployed?: boolean;
     autonomy?: OperatorAutonomy;
     completion?: CapabilityMode;
-    name?: string;
   },
 ): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -51,7 +50,6 @@ function deployOperator(
               extras: [],
               definition: {
                 kind: "operator",
-                name: operator.name ?? "Operator",
                 backends: ["claude"],
                 model: "sonnet",
                 autonomy: operator.autonomy ?? "supervised",
@@ -64,10 +62,11 @@ function deployOperator(
 describe("resolveAcceptanceAuthority", () => {
   it("grants the exception only for full autonomy + an explicit direct grant", () => {
     const store = setupTestStore(ctx);
-    deployOperator(store, { autonomy: "full", completion: "direct", name: "Atlas" });
+    deployOperator(store, { autonomy: "full", completion: "direct" });
+    // Ruling 518: the operator is always called Operator.
     expect(resolveAcceptanceAuthority(store.slug, { dataRoot: store.dataRoot })).toEqual({
       operatorCanAccept: true,
-      operatorName: "Atlas",
+      operatorName: "Operator",
     });
   });
 

@@ -393,7 +393,7 @@ export function AgentCapability({
                   "Org Docs Writer · Org Docs Writer" here — the library deploy
                   copies the NAME into the role when the template declares none.
                   One shared label rule for every roster surface, which gives
-                  the operator none (ruling 517). */}
+                  the operator none (ruling 518). */}
               {role && <span className="sub">{role}</span>}
             </span>
             <span className="pcap-counts">

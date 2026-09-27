@@ -542,7 +542,7 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
     });
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("On this project:");
-    // Ruling 517: the operator is one agent, so the sentence names no second
+    // Ruling 518: the operator is one agent, so the sentence names no second
     // "(Operator)" beside it. CANARY: put the parenthetical back.
     expect(note.textContent).toContain("On this project: the operator runs at full autonomy");
     expect(note.textContent).toContain("is active");

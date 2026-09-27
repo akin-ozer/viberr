@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OPERATOR_SCOPE } from "~/server/agents/deployment-view.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
 /**
@@ -28,8 +29,11 @@ describe("seeded agent catalog copy", () => {
     expect(SCOPE_OF("reviewer")).toBe("Global base");
   });
 
-  it("the operator states its real scope (one instance per active task)", () => {
-    expect(SCOPE_OF("operator")).toBe("System role · one per active task");
+  it("the operator states the scope line every surface shows for it", () => {
+    // Ruling 518: "System role · one per active task" gave the operator a
+    // second role; the line is fixed in the view (`OPERATOR_SCOPE`), and the
+    // shipped asset matches this catalog (operator-parity.server.test.ts).
+    expect(SCOPE_OF("operator")).toBe(OPERATOR_SCOPE);
   });
 
   it("no seeded copy names a workspace the product does not have", () => {
@@ -39,7 +43,8 @@ describe("seeded agent catalog copy", () => {
       p.frontmatter.scope,
       p.frontmatter.desc,
       p.frontmatter.name,
-      p.frontmatter.role,
+      // The operator has no role (ruling 518).
+      p.frontmatter.role ?? "",
       p.description,
     ]);
     for (const line of copy) {

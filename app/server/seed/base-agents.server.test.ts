@@ -245,11 +245,11 @@ describe("ensureBaseAgentsDeployed", () => {
   });
 
   /**
-   * Ruling 517 (owner, 2026-09-27): the operator is one agent, called Operator,
+   * Ruling 518 (owner, 2026-09-27): the operator is one agent, called Operator,
    * with no role. Its editor used to ask for a name and a role, and a save
    * stored both on the project's deployment with the template's scope line.
    */
-  it("ruling 517: removes the operator's stored name, role and scope, and keeps an agent profile's", async () => {
+  it("ruling 518: removes the operator's stored name, role and scope, and keeps an agent profile's", async () => {
     // CANARY: stop calling `withoutOperatorIdentity`, or let it strip a
     // deployment that is not the operator.
     const db = ctx.makeDb();

@@ -36,7 +36,7 @@ const agentProfileFrontmatterSchema = z
     name: z.string().min(1),
     /** What the profile does, shown under its name. Every kind but the operator
      *  requires one (the refinement below). The operator has none (ruling
-     *  517): it is one agent, called Operator. */
+     *  518): it is one agent, called Operator. */
     role: z.string().min(1).optional(),
     /** Short scannable description (one paragraph) — what the OPERATOR reads
      * when picking a profile for a task (generic-agents G-selection). Distinct
@@ -162,7 +162,7 @@ export function parseAgentProfileContent(
   // preserved but otherwise SILENT — the exact drift the task/project files guard
   // against. Surface it as a warning so a stale profile is diagnosable (and a
   // fixture guard can assert zero unknowns on the shipped profiles).
-  // Ruling 517: the operator has no role, so a `role` on its file (a hand-edited
+  // Ruling 518: the operator has no role, so a `role` on its file (a hand-edited
   // copy from before the ruling) is drift too, and it is dropped here so no
   // reader can show it.
   const frontmatter = { ...result.data };

@@ -172,7 +172,7 @@ interface PersonaEditHolder {
 
 type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
-  /** Absent on the operator, which has no role (ruling 517). */
+  /** Absent on the operator, which has no role (ruling 518). */
   role?: string;
   backend: "codex" | "claude";
   /** Ruling 139 parity with `deployed` (U36-3): the model and effort the
@@ -243,7 +243,7 @@ export function deploymentFingerprint(deployment: AgentDeployment): string {
 const profileFormSchema = z.object({
   // U35-1 (pass 35): the name as the person meant it, entities decoded once
   // and markup refused; the id is derived from the normalized text. Ruling
-  // 517: the operator's form carries no name or role, so both may be absent
+  // 518: the operator's form carries no name or role, so both may be absent
   // here and an agent profile's save requires them (`requireIdentity`).
   name: z
     .string()
@@ -311,7 +311,7 @@ function requireProjectAction(
 }
 
 /** An agent profile is saved with a name and a role. The operator has
- *  neither: it is one agent, called Operator (ruling 517). */
+ *  neither: it is one agent, called Operator (ruling 518). */
 function requireIdentity(form: ProfileFormInput): void {
   if (!form.name) throw AppError.validation("Name is required.");
   if (!form.role) throw AppError.validation("Role is required.");
@@ -839,7 +839,7 @@ export async function updateAgentProfile(
 
   let appliedUpdate: ProfileSaveResult["applied"] | undefined;
   // The name the saved profile goes by: the form's, or the operator's own,
-  // which no save changes (ruling 517). Filled inside the writer callback.
+  // which no save changes (ruling 518). Filled inside the writer callback.
   let savedName = form.name;
   // Ruling 467: the persona this save wrote when it differs from the one it
   // replaced, for the audit row (a holder: the writer callback fills it).
@@ -910,7 +910,7 @@ export async function updateAgentProfile(
     // + effort (the operator no longer keeps the "orchestration runtime"
     // placeholder — it runs on a real backend/model). The operator additionally
     // stores its default autonomy, and never a name, a role or a scope: those
-    // are its template's (ruling 517, `OPERATOR_FIXED_FIELDS`). Written field
+    // are its template's (ruling 518, `OPERATOR_FIXED_FIELDS`). Written field
     // by field in the file's order.
     const definition: AgentDeploymentDefinition = { kind: current.kind };
     if (!isOperator) {

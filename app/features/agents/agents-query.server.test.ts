@@ -725,13 +725,13 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
 });
 
 /**
- * Ruling 517 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
  * it. NO other roles needed." Before it, the operator's editor asked for a name
  * and a role, and a save stored both on the project's deployment beside the
  * template's scope line, so a stored copy could rename the operator, give it a
  * role, or keep a scope line the template no longer has.
  */
-describe("ruling 517: an operator deployment resolves to one agent, called Operator", () => {
+describe("ruling 518: an operator deployment resolves to one agent, called Operator", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);
 

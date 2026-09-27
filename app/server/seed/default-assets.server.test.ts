@@ -933,7 +933,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         "8d89f1bedb4a339b7541961051b69647539c092bd72bb0ceb6e265162e233e55",
       ],
     } satisfies Record<string, readonly string[]>;
-    // Ruling 517: the operator's template while it still had a role ("Task
+    // Ruling 518: the operator's template while it still had a role ("Task
     // coordinator") and a "System role" scope line.
     const beforeOneOperator = {
       [path.join("agents", "profiles", "operator.md")]: [

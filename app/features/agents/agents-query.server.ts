@@ -328,7 +328,7 @@ const SAVE_SNAPSHOT_FIELDS = [
  * P13-AP-07): on akinozer.com all seven deployments did, and the sentence told
  * the owner that editing would end an inheritance that had already ended.
  *
- * Ruling 517: the operator's name and scope always resolve from its template
+ * Ruling 518: the operator's name and scope always resolve from its template
  * and no save writes them, so they never count as a field still to fork.
  */
 function tracksTemplateLive(
@@ -552,7 +552,7 @@ export function effectiveProfileView(
   const view: AgentProfileView = {
     id: deployment.profileId,
     kind,
-    // Ruling 517: the operator is called Operator, whatever its template or an
+    // Ruling 518: the operator is called Operator, whatever its template or an
     // older save says, and has no role.
     name:
       kind === "operator"
@@ -574,7 +574,7 @@ export function effectiveProfileView(
     // Ruling 153: a definition-less deployment (the seeded rows) resolves the
     // template live, its default effort included.
     effort: def?.effort ?? template?.effort ?? "",
-    // Ruling 517: the operator's scope line is fixed like its name.
+    // Ruling 518: the operator's scope line is fixed like its name.
     scope: kind === "operator" ? OPERATOR_SCOPE : (def?.scope ?? template?.scope ?? ""),
     // OBS-7: a deployment holds a `definition` only once this project WROTE one
     // — the seeded roster carries none (agent-catalog.server.ts deploys

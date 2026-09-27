@@ -2507,13 +2507,13 @@ describe("C11: the Agents page drops the retired 'specialist profile' vocabulary
 });
 
 /**
- * Ruling 517 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
  * it. NO other roles needed." The operator's roster row read "Operator / Task
  * coordinator" under a group label of its own, "Orchestration"; its hero wore
  * a "Task coordinator" pill; and its editor asked for a name and a role, which
  * a save copied onto the project's deployment.
  */
-describe("ruling 517: the operator is one agent, called Operator", () => {
+describe("ruling 518: the operator is one agent, called Operator", () => {
   it("its roster row and hero give the name alone, with no group label of its own", () => {
     // CANARY: give the operator a label in `profileRoleLabel`, or put the
     // "Orchestration" group label back above it.

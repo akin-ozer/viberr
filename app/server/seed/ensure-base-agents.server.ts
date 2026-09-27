@@ -30,7 +30,7 @@ const OPERATOR_PROFILE_ID = "operator";
  *   project that has NO specialist deployments at all (first boot / a board
  *   that predates them). A project with ≥1 specialist — even a custom one,
  *   even after removing a built-in — keeps its roster exactly as-is.
- * - Ruling 517: the operator's deployment loses the name, role and scope a
+ * - Ruling 518: the operator's deployment loses the name, role and scope a
  *   save copied onto it before the ruling. They are its template's now and
  *   resolving already ignores them; removing them keeps the file saying what
  *   the app shows.
@@ -111,7 +111,7 @@ export function ensureBaseAgentsDeployed(
   }
 }
 
-/** The deployment without the operator fields a save stored before ruling 517,
+/** The deployment without the operator fields a save stored before ruling 518,
  *  or the deployment itself when it is not the operator or stores none. */
 function withoutOperatorIdentity(
   deployment: AgentDeployment,

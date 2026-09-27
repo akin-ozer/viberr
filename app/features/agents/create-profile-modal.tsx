@@ -68,7 +68,7 @@ function grantsOf(caps: CapSelection): { capabilityId: string; mode: CapabilityG
 
 export interface ProfileFormPayload {
   /** Absent on the operator's editor: it is one agent, called Operator, with
-   *  no role (ruling 517). */
+   *  no role (ruling 518). */
   name?: string;
   role?: string;
   backend: "codex" | "claude";
@@ -1450,7 +1450,7 @@ export function CreateProfileModal({
     setEffort("");
   };
 
-  // Ruling 517: the operator's editor has no name or role to fill.
+  // Ruling 518: the operator's editor has no name or role to fill.
   const identityValid = isOperator || Boolean(name.trim() && role.trim());
   const fieldsValid = Boolean(identityValid && backend && stg.length);
 
@@ -1521,7 +1521,7 @@ export function CreateProfileModal({
       caps,
       resources: res,
     };
-    // Ruling 517: the operator has no name or role to send.
+    // Ruling 518: the operator has no name or role to send.
     if (!isOperator) {
       payload.name = name.trim();
       payload.role = role.trim();
@@ -1588,7 +1588,7 @@ export function CreateProfileModal({
       />
 
       <div className="modal-body">
-        {/* Ruling 517: the operator is one agent, called Operator, with no
+        {/* Ruling 518: the operator is one agent, called Operator, with no
             role, so its editor has neither field. */}
         {!isOperator && (
           <IdentityFields

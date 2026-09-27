@@ -24,7 +24,7 @@ decides delivery (the server pushes), leases shared files to its own task, sched
 its own task's later runs (ruling 487), proposes changes to the project's rulings, and,
 under full autonomy with an explicit grant, accepts completion.
 
-It is one agent, called Operator, with no role (ruling 517). Every surface shows it as
+It is one agent, called Operator, with no role (ruling 518). Every surface shows it as
 "Operator" over "Built in · runs on every task" (`OPERATOR_NAME`, `OPERATOR_SCOPE`);
 no template or deployment renames it, gives it a role or rewords that line
 (`OPERATOR_FIXED_FIELDS`, dropped when a deployment resolves). Its editor on Agents has no

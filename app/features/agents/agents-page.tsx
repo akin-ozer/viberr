@@ -982,7 +982,7 @@ export function ProfileDetail({
             <h2 className="ag-hero-name">{a.name}</h2>
             {/* Quiet: the role describes. The "not connected" pill beside it is
                 the one thing on this line that wants a person. The operator
-                has no role (ruling 517), so its name stands alone. */}
+                has no role (ruling 518), so its name stands alone. */}
             {heroRole && (
               <Pill kind="neutral" sm quiet>
                 {heroRole}
@@ -1906,7 +1906,7 @@ export function AgentsPage({
       {tab === "profiles" ? (
         <div className="agents-layout">
           <aside className="profile-list">
-            {/* Ruling 517: the operator is one agent, so it heads the list on
+            {/* Ruling 518: the operator is one agent, so it heads the list on
                 its own, with no group label naming a second role for it. */}
             {operator && (
               <ProfileItem

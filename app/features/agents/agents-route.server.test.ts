@@ -1065,7 +1065,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("edit stores the operator's backend/model/autonomy + governs its caps", async () => {
-    // Ruling 517: the operator is one agent, called Operator, with no role. The
+    // Ruling 518: the operator is one agent, called Operator, with no role. The
     // editor sends neither; this payload carries what an editor from before the
     // ruling sent, and the save stores neither.
     // CANARY: write `form.name`, `form.role` or `current.scope` into the
@@ -1505,7 +1505,7 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
       autonomy: "supervised" | "full",
       accept: "recommend" | "direct",
     ) =>
-      // What the operator's editor sends: no name and no role (ruling 517).
+      // What the operator's editor sends: no name and no role (ruling 518).
       JSON.stringify({
         backend: "claude",
         stages: ["triage", "ready", "impl", "review", "done"],

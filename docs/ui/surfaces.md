@@ -470,7 +470,7 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   operator-recommendation chip renders "specialist"; the Agents
   page's live-roster empty state, run-in-flight stat, capability matrix modal and
   role-less profile card say "agent profile" / "agent threads", not "specialist".
-- **One Operator, with no role** (ruling 517; `app/features/copy-ban.test.ts`,
+- **One Operator, with no role** (ruling 518; `app/features/copy-ban.test.ts`,
   `agents-page.test.tsx`): nothing a person or an agent reads calls the operator a
   coordinator, in code or in a seeded asset. Its rows on Agents and Policy, its hero and
   its glyph's tooltip give the name alone, with no role pill, no "Orchestration" group

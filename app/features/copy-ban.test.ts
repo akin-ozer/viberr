@@ -998,7 +998,7 @@ describe("F19-12: the retired 'primary specialist' vocabulary is gone from copy"
 });
 
 /**
- * Ruling 517 — the operator has one name. The owner, over a screenshot of the
+ * Ruling 518 — the operator has one name. The owner, over a screenshot of the
  * task page's Execution profile reading OPERATOR above "Coordinator": "no need
  * to call it coordinator as well. It's a unqiue agent called Operator that's
  * it. NO other roles needed." The word was the task page's hard-coded label,
@@ -1009,7 +1009,7 @@ describe("F19-12: the retired 'primary specialist' vocabulary is gone from copy"
  */
 const OPERATOR_ALIAS = /\bcoordinators?\b/i;
 
-describe("ruling 517: nothing a person or an agent reads calls the operator a coordinator", () => {
+describe("ruling 518: nothing a person or an agent reads calls the operator a coordinator", () => {
   it("no rendered, server-built or prompt string, and no seeded asset, says 'coordinator'", () => {
     const assets = walkAll(ASSETS).filter((f) => f.endsWith(".md"));
     // Non-vacuity: the operator's own profile is among the assets read.

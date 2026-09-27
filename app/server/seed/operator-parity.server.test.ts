@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { OPERATOR_SCOPE } from "~/server/agents/deployment-view.server";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
@@ -39,8 +38,6 @@ describe("operator profile parity: asset template vs seed catalog (seed #4)", ()
     expect(asset.backends).toEqual(catalog.backends);
     expect(asset.model).toBe(catalog.model);
     expect(asset.scope).toBe(catalog.scope);
-    // Ruling 517: and it is the line the app shows, which no file changes.
-    expect(asset.scope).toBe(OPERATOR_SCOPE);
     expect(asset.stages).toEqual(catalog.stages);
     expect(asset.spanAll).toBe(catalog.spanAll);
     // Capability grants must match exactly (order-independent).

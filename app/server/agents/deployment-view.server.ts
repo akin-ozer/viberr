@@ -34,7 +34,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 export interface TemplateProfile {
   kind: "operator" | "specialist";
   name: string;
-  /** Empty on the operator, which has no role (ruling 517). */
+  /** Empty on the operator, which has no role (ruling 518). */
   role: string;
   icon: string;
   backends: ("codex" | "claude")[];
@@ -179,16 +179,16 @@ export interface DeploymentRuntimeIdentity {
   backends: ("codex" | "claude")[];
 }
 
-/** Ruling 517: the operator's one name, on every surface. */
+/** Ruling 518: the operator's one name, on every surface. */
 export const OPERATOR_NAME = "Operator";
 
-/** Ruling 517: the line under the operator's name, whatever its template says.
+/** Ruling 518: the line under the operator's name, whatever its template says.
  *  A store copy seeded before the ruling still reads "System role · one per
  *  active task", and `npm run seed` writes a copy boot never refreshes. */
 export const OPERATOR_SCOPE = "Built in · runs on every task";
 
 /**
- * Ruling 517: the operator is one agent, called Operator, with no role, so no
+ * Ruling 518: the operator is one agent, called Operator, with no role, so no
  * deployment may rename it, give it a role or reword the line that says what
  * it is. The override's copy of these fields is dropped when the deployment
  * resolves; a save no longer writes them, and boot removes the copies a save

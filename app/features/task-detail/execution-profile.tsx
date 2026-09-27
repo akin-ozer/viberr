@@ -1124,7 +1124,7 @@ export function ExecutionProfile({
                 <Icon name="shield" />
               </span>
               <span>
-                {/* Ruling 517: the cell's kicker names the agent, Operator, and
+                {/* Ruling 518: the cell's kicker names the agent, Operator, and
                     nothing here gives it a second name or a role. */}
                 {task.operator && <div className="sub">{task.operator.sinceLabel}</div>}
                 <div className="sub xs dim">

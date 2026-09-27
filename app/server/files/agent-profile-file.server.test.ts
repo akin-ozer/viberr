@@ -58,12 +58,12 @@ describe("parseAgentProfileContent — schema drift detection", () => {
 });
 
 /**
- * Ruling 517 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
  * it. NO other roles needed." The operator's file carries no role; every other
  * kind still needs one. A store copy from before the ruling still says
  * `role: Task coordinator`, and no reader may show it.
  */
-describe("parseAgentProfileContent — ruling 517: the operator alone has no role", () => {
+describe("parseAgentProfileContent — ruling 518: the operator alone has no role", () => {
   it("an operator file that still carries a role parses without it and flags it as drift", () => {
     // CANARY: stop dropping `role` from an operator's frontmatter, or stop
     // listing it among the drifted fields.

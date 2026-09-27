@@ -199,7 +199,7 @@ export const DEFAULT_SPECIALIST_ROLE_LABEL = "Agent profile";
 
 /**
  * The role line a profile renders under (or beside) its name, or null for the
- * operator: it is one agent, called Operator, with no role (ruling 517), so
+ * operator: it is one agent, called Operator, with no role (ruling 518), so
  * its row, pill and glyph show the name alone.
  *
  * P14-WL-05: the library deploy writes `role: fm.role || fm.name`, so a
