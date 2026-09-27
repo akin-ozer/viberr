@@ -133,7 +133,7 @@
 
 **Verdict** — a required reviewer's `approve | request_changes` (`REVIEW_VERDICT_RESULTS`), bound to the review subject (a revision id, or `files:<deliveredAt>`). A project member's GitHub approval on the PR, bound to the delivered head, counts as an approving verdict (ruling 68).
 
-**Waiting** — whose turn it is (`WAITING_VALUES`): `human | agent | none | schedule`. Forced to `none` in the terminal stage; `none` while a task waits on other work with no packet or recommendation open (ruling 131). `schedule` is derived by the projection, never written to a file: the file says `human`, but nothing a person could do is open and a pending schedule will pick the task back up (ruling 225).
+**Waiting** — whose turn it is (`WAITING_VALUES`): `human | agent | none | schedule`. Forced to `none` in the terminal stage; `none` while a task waits on other work with no packet or recommendation open (ruling 131), and `human` again once the wait is released. `schedule` is derived by the projection, never written to a file: the file says `human`, but nothing a person could do is open and a pending schedule will pick the task back up (ruling 225).
 
 **Workspace** — the delivering engagement's git clone under `tasks/<KEY>/workspace/<repo>`; supporting runs get `workspace/support/<profileId>/<repo>`. Cut from a per-project mirror; reclaimed once the task is terminal.
 

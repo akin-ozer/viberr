@@ -98,9 +98,7 @@ async function waitForSchedule(
  * FIFO on one lock: this one is enqueued from inside `start`, so it is already
  * queued when the runner's own finalize for the first occurrence enqueues
  * behind it — and the runner AWAITS that finalize before driving the second
- * occurrence. (A raw `writeTask` also loses outright: landing inside 100 ms of
- * the claim's write, `repairStaleRead` correctly reads it as a stale view of
- * the writer's own cache and undoes it.)
+ * occurrence.
  */
 class ClosesTheTaskOnFirstStart implements RuntimeAdapter {
   readonly backend = "claude" as const;

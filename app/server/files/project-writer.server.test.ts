@@ -1,5 +1,6 @@
 import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { staleViewOf } from "../../../test-support/stale-mount";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import {
@@ -12,7 +13,8 @@ import {
 /**
  * Read-your-own-writes repair for project.md (P11-51) — the same VirtioFS
  * stale-read hazard the task writer guards, extended to member/agent/policy
- * edits and the task-key counter.
+ * edits and the task-key counter. What counts as provably stale is
+ * write-cache's own test (ruling 513); these prove the writer reads through it.
  */
 
 const ctx = createTestDbContext();
@@ -23,18 +25,16 @@ describe("updateProjectFile stale-read repair (P11-51)", () => {
     const store = setupTestStore(ctx);
     const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };
     const absPath = resolveProjectFilePath(ref);
-    const preContent = readFileSync(absPath, "utf8");
+    const stale = staleViewOf(absPath);
 
     // First edit: add a member.
     await updateProjectFile(ref, (parsed) => {
       parsed.frontmatter.members.push({ userId: "u_first", role: "viewer" });
     });
 
-    // Simulate the VirtioFS stale cache: disk reverts to pre-write with an
-    // OLDER mtime.
-    writeFileSync(absPath, preContent);
-    const past = (Date.now() - 10_000) / 1000;
-    utimesSync(absPath, past, past);
+    // The VirtioFS stale cache: the mount goes on serving the file that edit
+    // replaced.
+    stale.serve();
 
     // Second edit reads the (stale) disk — the repair restores our own write
     // as the base, so the first member is not erased.
@@ -47,7 +47,7 @@ describe("updateProjectFile stale-read repair (P11-51)", () => {
     expect(ids).toContain("u_second");
   });
 
-  it("a genuine external edit (newer mtime) wins over the write cache", async () => {
+  it("a genuine external edit wins over the write cache", async () => {
     const store = setupTestStore(ctx);
     const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };
     const absPath = resolveProjectFilePath(ref);
@@ -56,7 +56,9 @@ describe("updateProjectFile stale-read repair (P11-51)", () => {
       parsed.frontmatter.members.push({ userId: "u_app", role: "viewer" });
     });
 
-    // A human edits project.md AFTER our write (newer mtime) — disk wins.
+    // A human edits project.md AFTER our write — disk wins. (The stamp well
+    // past ours keeps this about the writer; an edit landing straight after
+    // ours is write-cache's own row.)
     const external = readFileSync(absPath, "utf8").replace("u_app", "u_hand_edited");
     writeFileSync(absPath, external);
     const future = (statSync(absPath).mtimeMs + 5_000) / 1000;
@@ -78,15 +80,13 @@ describe("updateProjectFile stale-read repair (P11-51)", () => {
     const absPath = resolveProjectFilePath(ref);
 
     const first = await allocateTaskKey(ref);
-    const preContent = readFileSync(absPath, "utf8");
+    const stale = staleViewOf(absPath);
     const second = await allocateTaskKey(ref);
     expect(second).not.toBe(first);
 
-    // Revert the file to the state after `first` (nextTaskNumber lower) with an
-    // older mtime — the next allocation must NOT reuse `second`.
-    writeFileSync(absPath, preContent);
-    const past = (Date.now() - 10_000) / 1000;
-    utimesSync(absPath, past, past);
+    // The mount serves the file as `first` left it (nextTaskNumber lower),
+    // the one `second` replaced — the next allocation must NOT reuse `second`.
+    stale.serve();
 
     const third = await allocateTaskKey(ref);
     expect(third).not.toBe(first);

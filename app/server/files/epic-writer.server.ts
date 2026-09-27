@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { freshestContent, rememberWrite } from "./write-cache.server";
+import { freshestContent, writeAndRemember } from "./write-cache.server";
 import { diagError, type FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   EPIC_FRONTMATTER_KEYS,
@@ -10,7 +10,6 @@ import {
   type ParsedEpicFile,
 } from "~/schemas/epic-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
-import { writeFileAtomic } from "./atomic-file.server";
 import { withFileLock } from "./file-mutex.server";
 import { epicFilePath, epicsDir } from "./file-store-root.server";
 import {
@@ -270,8 +269,7 @@ export async function createEpicFile(
         },
       ],
     });
-    writeFileAtomic(abs, serialized);
-    rememberWrite(abs, serialized);
+    writeAndRemember(abs, serialized);
   });
 }
 
@@ -314,8 +312,7 @@ export async function updateEpicFile(
     if (serializeEpicFile(parsed) === raw) return parsed;
     parsed.frontmatter.updatedAt = new Date().toISOString();
     const serialized = serializeEpicFile(parsed);
-    writeFileAtomic(abs, serialized);
-    rememberWrite(abs, serialized);
+    writeAndRemember(abs, serialized);
     return parsed;
   });
 }

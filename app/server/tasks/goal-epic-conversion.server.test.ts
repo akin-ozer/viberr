@@ -84,7 +84,6 @@ async function loadModules() {
     taskFile,
     epicWriter,
     projectWriter,
-    writeCache,
     rebuilder,
     epicQuery,
     notifications,
@@ -100,7 +99,6 @@ async function loadModules() {
     import("~/server/files/task-file.server"),
     import("~/server/files/epic-writer.server"),
     import("~/server/files/project-writer.server"),
-    import("~/server/files/write-cache.server"),
     import("~/server/projections/rebuilder.server"),
     import("~/server/projections/epic-query.server"),
     import("~/server/projections/notifications.server"),
@@ -125,7 +123,6 @@ async function loadModules() {
     taskFile,
     epicWriter,
     projectWriter,
-    writeCache,
     rebuilder,
     epicQuery,
     notifications,
@@ -249,14 +246,8 @@ function legacyStore(m: Modules, app: AppTestContext) {
     },
     epicRaw: (epicId: string) => readFileSync(m.storeRoot.epicFilePath(SLUG, epicId, dataRoot), "utf8"),
     epicIds: () => m.epicWriter.listEpicIds(SLUG, dataRoot),
-    /** Hand edits land on disk the way a person's do: the writers' memory of
-     *  their own last write must not "repair" them. */
-    forgetWrites: () => m.writeCache.resetWriteCacheForTests(),
     reproject: () => m.rebuilder.rebuildProject(app.db, SLUG, { dataRoot }),
-    convert() {
-      m.writeCache.resetWriteCacheForTests();
-      return m.conversion.convertGoalsToEpics(app.db, { dataRoot });
-    },
+    convert: () => m.conversion.convertGoalsToEpics(app.db, { dataRoot }),
   };
 }
 
@@ -1245,7 +1236,6 @@ describe("ruling 503(h): a conversion interrupted part-way finishes on the next 
     );
     m.rebuilder.rebuildEpicFile(app.db, SLUG, "epic-2", { dataRoot: app.dataRoot });
     // What `joinEpic` wrote on the task it had moved.
-    store.forgetWrites();
     await m.taskWriter.updateTaskFile({ projectSlug: SLUG, taskKey: "VIB-160", dataRoot: app.dataRoot }, (parsed) => {
       delete parsed.unknownFrontmatter.goalRef;
       parsed.frontmatter.epic = "epic-2";

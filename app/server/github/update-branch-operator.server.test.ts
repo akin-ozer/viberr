@@ -910,8 +910,6 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
   });
 
   it("ruling 163 (b): at the work stage there is nothing to return to: no marker, no sentence", async () => {
-    // A separate store: the write cache (write-cache.server) keeps the packet
-    // write above ahead of a raw fixture rewrite of the same path.
     deployDeliverer(true);
     withMergeBoard();
     seedAt("impl", {
