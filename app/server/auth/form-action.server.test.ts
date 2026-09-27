@@ -434,6 +434,14 @@ describe("appErrorResponse", () => {
     expect(rendered.data.error).not.toContain("VALIDATION");
   });
 
+  it("names the form field a refusal is about, so the form says it there (ruling 514)", () => {
+    // CANARY: leave `field` out of the payload and the MCP editor says a
+    // refused credential at the form's foot, far from the field.
+    const rendered = appErrorResponse(AppError.fieldValidation("cred", "That credential is too short."));
+    expect(rendered.data).toEqual({ ok: false, error: "That credential is too short.", field: "cred" });
+    expect(rendered.init?.status).toBe(400);
+  });
+
   /**
    * The refusal path, and the reason the function exists in this file rather
    * than as a bare `catch`: anything that is NOT one of ours must come back out

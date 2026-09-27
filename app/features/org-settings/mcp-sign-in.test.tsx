@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, data, useLoaderData } from "react-router";
 import { z } from "zod";
 import type { McpView } from "~/server/org/resources.server";
 import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
@@ -42,23 +42,43 @@ const BASE: McpView = {
   oauth: { status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, reason: null, scope: null },
 };
 
-function renderPanel(mcp: McpView) {
+/** What the stub server does beyond answering every intent `ok`. */
+interface StubServer {
+  /** The row once the sign-in started in the editor has landed: the callback
+   *  publishes, and the page reads the row again after the start answers. A
+   *  sign-out reads the row the page opened with. */
+  landed?: McpView;
+  /** How `mcp-save` is refused, as `appErrorResponse` answers it. */
+  refuseSave?: { ok: false; error: string; field?: string };
+}
+
+function renderPanel(mcp: McpView, server: StubServer = {}) {
   posted = [];
+  let current = mcp;
+  function loader() {
+    return { mcps: [current] };
+  }
+  function Page() {
+    const { mcps } = useLoaderData<typeof loader>();
+    return (
+      <ToastProvider>
+        <ResourcesPanel
+          kbs={[]}
+          mcps={mcps}
+          skills={[]}
+          gagents={[]}
+          templateGrants={{ kbs: {}, mcps: {}, skills: {} }}
+          stages={[]}
+        />
+      </ToastProvider>
+    );
+  }
   const Stub = createRoutesStub([
     {
+      id: "settings",
       path: "/org/settings",
-      Component: () => (
-        <ToastProvider>
-          <ResourcesPanel
-            kbs={[]}
-            mcps={[mcp]}
-            skills={[]}
-            gagents={[]}
-            templateGrants={{ kbs: {}, mcps: {}, skills: {} }}
-            stages={[]}
-          />
-        </ToastProvider>
-      ),
+      Component: Page,
+      loader,
       action: async ({ request }) => {
         const fields: Record<string, string> = {};
         for (const [key, value] of (await request.formData()).entries()) {
@@ -67,13 +87,18 @@ function renderPanel(mcp: McpView) {
         }
         posted.push(fields);
         if (fields.intent === "mcp-oauth-start") {
+          current = server.landed ?? current;
           return { ok: true, authorizeUrl: AUTHORIZE_URL, issuer: "mcp.cloudflare.com" };
         }
+        if (fields.intent === "mcp-oauth-sign-out") current = mcp;
+        if (fields.intent === "mcp-save" && server.refuseSave) return data(server.refuseSave, { status: 400 });
         return { ok: true, toast: "cloudflare-api signed out." };
       },
     },
   ]);
-  return render(<Stub initialEntries={["/org/settings"]} />);
+  return render(
+    <Stub initialEntries={["/org/settings"]} hydrationData={{ loaderData: { settings: loader() } }} />,
+  );
 }
 
 function row(container: HTMLElement): HTMLElement {
@@ -178,6 +203,86 @@ describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
     expect(queryByRole("group", { name: /OAuth sign-in/ })).toBeNull();
     // Ruling 486(c): a command signs nothing in, so it asks for no scopes.
     expect(queryByRole("textbox", { name: /Requested scopes/ })).toBeNull();
+  });
+});
+
+describe("a pasted credential and an OAuth sign-in in one editor (ruling 514)", () => {
+  const CONFLICT = "cloudflare-api is signed in with OAuth. Sign it out first to use a pasted credential instead.";
+  /** The row after the sign-in: its connection check listed the tools. */
+  const LANDED: McpView = {
+    ...BASE,
+    up: true,
+    tools: 2,
+    lastError: null,
+    discoveredTools: ["whoami", "delete_zone"],
+    oauth: {
+      status: "signed_in",
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      renews: true,
+      issuer: "mcp.cloudflare.com",
+      reason: null,
+      scope: null,
+    },
+  };
+
+  /** The owner's steps (2026-09-27): paste an API key into the editor, then
+   *  sign in with OAuth instead, and wait until the editor says so. */
+  async function pasteThenSignIn() {
+    const view = renderPanel(BASE, { landed: LANDED });
+    fireEvent.click(view.getByLabelText("Edit cloudflare-api"));
+    fireEvent.change(view.getByLabelText(/Credential/), { target: { value: "a-pasted-api-token-123" } });
+    fireEvent.click(view.getByRole("button", { name: /^Sign in$/ }));
+    await view.findByRole("button", { name: "Sign out" });
+    return view;
+  }
+
+  it("Save & re-test saves the write tools with the sign-in, and sends no key typed before it landed", async () => {
+    // CANARY: keep the draft once the field gives way to the sentence, and the
+    // save posts the hidden key, which the server refuses with CONFLICT under
+    // a form that shows no credential at all (the owner's screenshot).
+    const { getByRole, queryByLabelText } = await pasteThenSignIn();
+    expect(queryByLabelText(/Credential/)).toBeNull();
+    const dialog = getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "whoami" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /Save & re-test/ }));
+    await waitFor(() => expect(posted.map((fields) => fields.intent)).toContain("mcp-save"));
+    const save = posted.find((fields) => fields.intent === "mcp-save");
+    expect(save).toMatchObject({ mcpId: "mcp_cf", cred: "", writeTools: '["whoami"]' });
+    expect(save).not.toHaveProperty("clearCred");
+  });
+
+  it("a sign-out brings the credential field back empty", async () => {
+    // CANARY: blank the draft only when saving, and the key typed before the
+    // sign-in is back in the field, where the next paste lands beside it.
+    const { getByRole, findByLabelText } = await pasteThenSignIn();
+    fireEvent.click(getByRole("button", { name: "Sign out" }));
+    expect(await findByLabelText(/Credential/)).toHaveProperty("value", "");
+  });
+
+  const REFUSALS: [string, NonNullable<StubServer["refuseSave"]>, boolean][] = [
+    ["the credential is said under its field", { ok: false, error: CONFLICT, field: "cred" }, true],
+    [
+      "another field stays at the form's foot",
+      { ok: false, error: "An MCP server named cloudflare-api already exists." },
+      false,
+    ],
+  ];
+  it.each(REFUSALS)("a refusal about %s", async (_about, refusal, atField) => {
+    // CANARY: ignore the refusal's `field` and the conflict reads under the
+    // write tools, far from the credential it is about; send every refusal
+    // to the field and a name clash reads there. This editor never saw the
+    // sign-in land (its live update was missed), so its field is still up
+    // when the server refuses.
+    const { getByLabelText, getByRole } = renderPanel(BASE, { refuseSave: refusal });
+    fireEvent.click(getByLabelText("Edit cloudflare-api"));
+    const input = getByLabelText(/Credential/);
+    fireEvent.change(input, { target: { value: "a-pasted-api-token-123" } });
+    fireEvent.click(getByRole("button", { name: /Save & re-test/ }));
+    const shown = await within(getByRole("dialog")).findByText(refusal.error);
+    expect(input.closest(".field")?.contains(shown)).toBe(atField);
+    expect(input.getAttribute("aria-invalid")).toBe(atField ? "true" : null);
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(describedBy === null ? null : document.getElementById(describedBy)).toBe(atField ? shown : null);
   });
 });
 

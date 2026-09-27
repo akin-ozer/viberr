@@ -363,7 +363,22 @@ export function McpModal({
   };
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
-  const { action, err, setErr } = useModalAction(() => setDone(true));
+  const { action, err, errField, setErr } = useModalAction(() => setDone(true));
+  // Ruling 514: a refusal about the credential (too short, or pasted over a
+  // live sign-in this editor had not seen yet) is said at that field.
+  const credErr = err !== null && errField === "cred" ? err : null;
+  // Ruling 469(e): while signed in, the credential field gives way to a
+  // sentence, and (ruling 514) what it held goes with it. A draft typed, or
+  // filled in by the browser, before the sign-in landed used to ride the next
+  // save unseen, where the server refused it as a pasted credential over the
+  // live sign-in. Dropped while rendering, so no save sends it and a sign-out
+  // brings the field back empty.
+  const credReplaced = signedIn && transport === "HTTP" && target.trim() === initial?.target;
+  if (credReplaced && (cred !== "" || clearCred || credErr !== null)) {
+    setCred("");
+    setClearCred(false);
+    if (credErr !== null) setErr(null);
+  }
   const canSave = slugify(name).length > 1 && target.trim().length > 3;
   return (
     <MiniModal
@@ -497,7 +512,7 @@ export function McpModal({
           </span>
         </div>
       )}
-      {signedIn && transport === "HTTP" && target.trim() === initial?.target ? (
+      {credReplaced ? (
         // Ruling 469: a connection holds one credential, and a live sign-in is
         // it. The server refuses a pasted token over it; the field says why.
         <div className="field">
@@ -533,8 +548,19 @@ export function McpModal({
                 ? "•••••••• (unchanged)"
                 : "paste a token or API key"
           }
-          onChange={(e) => setCred(e.target.value)}
+          aria-invalid={credErr !== null || undefined}
+          aria-describedby={credErr !== null ? "mcp-cred-err" : undefined}
+          onChange={(e) => {
+            setCred(e.target.value);
+            setErr(null);
+          }}
         />
+        {credErr !== null && (
+          <div className="form-err" id="mcp-cred-err" role="alert">
+            <Icon name="alert" />
+            {credErr}
+          </div>
+        )}
         {initial?.hasCred && (
           <button
             type="button"
@@ -542,6 +568,7 @@ export function McpModal({
             onClick={() => {
               setClearCred((v) => !v);
               setCred("");
+              setErr(null);
             }}
           >
             {clearCred ? "Keep the stored credential" : "Remove the stored credential"}
@@ -660,7 +687,7 @@ export function McpModal({
           </span>
         </div>
       </div>
-      {err && (
+      {err && credErr === null && (
         <div className="form-err">
           <Icon name="alert" />
           {err}

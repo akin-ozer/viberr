@@ -28,7 +28,9 @@ export interface OrgActionSuccess {
   issuer?: string;
 }
 
-export type OrgActionData = OrgActionSuccess | { ok: false; error: string };
+/** A refusal names the form field it is about when it is about one
+ *  (`appErrorResponse`, ruling 514). */
+export type OrgActionData = OrgActionSuccess | { ok: false; error: string; field?: string };
 
 const ORG_SETTINGS_ACTION = "/org/settings";
 

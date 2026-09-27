@@ -56,8 +56,9 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
 
 - **Routes** stay thin: guard → server call → route-shaped data. Mutations go through
   `requireFormAction` (session + CSRF + `intent`) and return `{ ok, toast }` or
-  `{ ok: false, error }` (`appErrorResponse` renders a caught `AppError` that way);
-  loaders never mutate.
+  `{ ok: false, error }` (`appErrorResponse` renders a caught `AppError` that way, with
+  `field` when the refusal names the form field it is about: `AppError.fieldValidation`,
+  ruling 514); loaders never mutate.
 - **Governed task logic** lives in `app/server/tasks/*`; controller logic in
   `app/server/controller/*`, and epic logic in `app/server/tasks/epic-actions.server.ts`
   (ruling 503); project and

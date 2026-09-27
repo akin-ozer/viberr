@@ -1649,7 +1649,9 @@ export async function saveMcpServer(
     // 5 chars. A sealed box (never round-tripped by the UI, but handled here) is
     // long by construction, so the floor only applies to fresh plaintext.
     if (!isSecretBox(rawCred) && rawCred.length < 8) {
-      throw AppError.validation(
+      // Ruling 514: about the credential, so the editor says it there.
+      throw AppError.fieldValidation(
+        "cred",
         "That credential is too short. Enter at least 8 characters, or leave it blank for no auth.",
       );
     }
@@ -1687,7 +1689,9 @@ export async function saveMcpServer(
 
   // Ruling 469: a connection holds one credential. A sign-in drops a pasted
   // token when it lands, so a pasted token over a live sign-in is refused
-  // rather than silently shadowing it (the editor hides the field meanwhile).
+  // rather than silently shadowing it (the editor hides the field meanwhile,
+  // and drops what it held, ruling 514; an editor that has not seen the
+  // sign-in yet shows this refusal at its credential field).
   const oauthBefore = input.id ? mcpOAuthCredential(db, input.id) : null;
   const signedIn = oauthBefore?.state === "signed_in";
   // SAFETY: `oauth_ref` and `oauth_json` are nullable TEXT columns of
@@ -1704,7 +1708,8 @@ export async function saveMcpServer(
   // another server.
   const repointed = before !== null && (before.target !== target || before.transport !== transport);
   if (signedIn && !repointed && rawCred && !input.clearCred) {
-    throw AppError.validation(
+    throw AppError.fieldValidation(
+      "cred",
       `${name} is signed in with OAuth. Sign it out first to use a pasted credential instead.`,
     );
   }

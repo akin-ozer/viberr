@@ -9,21 +9,25 @@ import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-acti
  * these are the pieces the modals and the row panels both need.
  */
 
-/** Shared modal-close-with-inline-error fetcher wiring. */
+/** Shared modal-close-with-inline-error fetcher wiring. `errField` is the form
+ *  field the refusal in `err` named, if any (ruling 514); read it beside
+ *  `err`, never alone. */
 export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {
   const [err, setErr] = useState<string | null>(null);
+  const [errField, setErrField] = useState<string | null>(null);
   const push = useToast();
   const action = useOrgAction({
     onResult: (d) => {
       if (!d.ok) {
         setErr(d.error);
+        setErrField(d.field ?? null);
         return;
       }
       if (d.toast) push(d.toast);
       onDone(d);
     },
   });
-  return { action, err, setErr };
+  return { action, err, errField, setErr };
 }
 
 /**
