@@ -961,30 +961,72 @@ const RETIRED_VOCAB = /primary specialists?\b/i;
 /** The capability id is an identifier, not copy — it may appear anywhere. */
 const VOCAB_ALLOW = ["assign-primary-specialist"];
 
+/** Every line of rendered, server-built or prompt copy under the app's four
+ *  source roots (comments stripped) that matches `pattern`, less the lines
+ *  naming an allowed identifier. */
+function copyLinesMatching(pattern: RegExp, allow: readonly string[] = []): string[] {
+  const offenders: string[] = [];
+  const roots = [
+    path.join(APP, "features"),
+    path.join(APP, "routes"),
+    path.join(APP, "server"),
+    path.join(APP, "shared"),
+  ];
+  for (const root of roots) {
+    for (const file of walk(root)) {
+      const src = stripComments(readFileSync(file, "utf8"));
+      src.split("\n").forEach((line, i) => {
+        if (!pattern.test(line)) return;
+        if (allow.some((a) => line.includes(a))) return;
+        offenders.push(
+          `${path.relative(APP, file)}:${i + 1} → ${line.trim().slice(0, 100)}`,
+        );
+      });
+    }
+  }
+  return offenders;
+}
+
 describe("F19-12: the retired 'primary specialist' vocabulary is gone from copy", () => {
   it("no rendered or server-built copy calls the delivering agent a 'primary specialist'", () => {
-    const offenders: string[] = [];
-    const roots = [
-      path.join(APP, "features"),
-      path.join(APP, "routes"),
-      path.join(APP, "server"),
-      path.join(APP, "shared"),
-    ];
-    for (const root of roots) {
-      for (const file of walk(root)) {
-        const src = stripComments(readFileSync(file, "utf8"));
-        src.split("\n").forEach((line, i) => {
-          if (!RETIRED_VOCAB.test(line)) return;
-          if (VOCAB_ALLOW.some((a) => line.includes(a))) return;
-          offenders.push(
-            `${path.relative(APP, file)}:${i + 1} → ${line.trim().slice(0, 100)}`,
-          );
-        });
-      }
-    }
+    const offenders = copyLinesMatching(RETIRED_VOCAB, VOCAB_ALLOW);
     expect(
       offenders,
       `retired "primary specialist" vocabulary — say "delivering agent":\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 517 — the operator has one name. The owner, over a screenshot of the
+ * task page's Execution profile reading OPERATOR above "Coordinator": "no need
+ * to call it coordinator as well. It's a unqiue agent called Operator that's
+ * it. NO other roles needed." The word was the task page's hard-coded label,
+ * the operator's shipped role ("Task coordinator", in the seed asset and the
+ * catalog), the role an `@operator` reply target carried, and two prompts. It
+ * is a noun ban: "coordinate" and "coordinating" describe what the operator
+ * does, and comments may still tell the history.
+ */
+const OPERATOR_ALIAS = /\bcoordinators?\b/i;
+
+describe("ruling 517: nothing a person or an agent reads calls the operator a coordinator", () => {
+  it("no rendered, server-built or prompt string, and no seeded asset, says 'coordinator'", () => {
+    const assets = walkAll(ASSETS).filter((f) => f.endsWith(".md"));
+    // Non-vacuity: the operator's own profile is among the assets read.
+    expect(assets.map((f) => path.basename(f))).toContain("operator.profile.md");
+    const offenders = [
+      ...copyLinesMatching(OPERATOR_ALIAS),
+      ...assets.flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .flatMap((line, i) =>
+            OPERATOR_ALIAS.test(line) ? [`${path.relative(APP, file)}:${i + 1} → ${line.trim()}`] : [],
+          ),
+      ),
+    ];
+    expect(
+      offenders,
+      `the operator is called Operator, never a coordinator:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 });

@@ -52,7 +52,8 @@ interface ProfileBase {
   id: string;
   kind: "operator" | "specialist";
   name: string;
-  role: string;
+  /** Absent on the operator alone (ruling 517). */
+  role?: string;
   icon: string;
   backends: ("codex" | "claude")[];
   model: string;
@@ -83,9 +84,10 @@ function profile(
 export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
-      id: "operator", kind: "operator", name: "Operator", role: "Task coordinator",
+      // Ruling 517: one agent, called Operator, with no role beside the name.
+      id: "operator", kind: "operator", name: "Operator",
       icon: "shield", backends: ["claude", "codex"], model: "orchestration runtime",
-      scope: "System role · one per active task",
+      scope: "Built in · runs on every task",
       stages: ["triage", "ready", "impl", "review", "done"], spanAll: true,
       resources: {
         // B7 (pass 16): NO `viberr` grant — this writer was the last one that

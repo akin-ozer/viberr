@@ -1124,9 +1124,8 @@ export function ExecutionProfile({
                 <Icon name="shield" />
               </span>
               <span>
-                {/* The cell's kicker already says OPERATOR — the value slot
-                    promotes what the sub-line carried. */}
-                <div className="nm">Coordinator</div>
+                {/* Ruling 517: the cell's kicker names the agent, Operator, and
+                    nothing here gives it a second name or a role. */}
                 {task.operator && <div className="sub">{task.operator.sinceLabel}</div>}
                 <div className="sub xs dim">
                   Decides which agent runs at each stage, from the stage the

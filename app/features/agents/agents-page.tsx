@@ -184,7 +184,7 @@ function ProfileGlyph({ a, lg }: { a: AgentProfileView; lg?: boolean }) {
       className={
         "agent-glyph" + (lg ? " lg" : "") + (a.kind === "operator" ? " op" : "")
       }
-      title={profileRoleLabel(a.name, a.role, a.kind)}
+      title={profileRoleLabel(a.name, a.role, a.kind) ?? undefined}
     >
       <Icon name={storeIcon(a.icon)} />
     </span>
@@ -237,6 +237,7 @@ function ProfileItem({
     backendHealth && !backendHealth.viewerConnected
       ? notConnectedNote(backendHealth.backend)
       : undefined;
+  const role = profileRoleLabel(a.name, a.role, a.kind);
   return (
     <button
       type="button"
@@ -249,7 +250,7 @@ function ProfileItem({
       <ProfileGlyph a={a} />
       <span className="ag-item-main">
         <span className="nm">{a.name}</span>
-        <span className="sub">{profileRoleLabel(a.name, a.role, a.kind)}</span>
+        {role && <span className="sub">{role}</span>}
       </span>
       <ActiveBadge count={count} unusable={unusable} />
     </button>
@@ -851,6 +852,7 @@ export function ProfileDetail({
   onSyncResources?: (a: AgentProfileView) => void;
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
+  const heroRole = profileRoleLabel(a.name, a.role, a.kind);
   // "running on N" is a claim about LIVE runs, not engagements: an assigned
   // profile sits idle on most of its tasks (the F16 note below). Count only the
   // tasks with an agent_runs row actually state='running' (`d.running`), or the
@@ -979,10 +981,13 @@ export function ProfileDetail({
                 profile is a section within it. */}
             <h2 className="ag-hero-name">{a.name}</h2>
             {/* Quiet: the role describes. The "not connected" pill beside it is
-                the one thing on this line that wants a person. */}
-            <Pill kind={a.kind === "operator" ? "agent" : "neutral"} sm quiet>
-              {profileRoleLabel(a.name, a.role, a.kind)}
-            </Pill>
+                the one thing on this line that wants a person. The operator
+                has no role (ruling 517), so its name stands alone. */}
+            {heroRole && (
+              <Pill kind="neutral" sm quiet>
+                {heroRole}
+              </Pill>
+            )}
             {runningKeys.length > 0 ? (
               <span className="ag-running">
                 <span className="working" />
@@ -1901,7 +1906,8 @@ export function AgentsPage({
       {tab === "profiles" ? (
         <div className="agents-layout">
           <aside className="profile-list">
-            <div className="ag-group-label">Orchestration</div>
+            {/* Ruling 517: the operator is one agent, so it heads the list on
+                its own, with no group label naming a second role for it. */}
             {operator && (
               <ProfileItem
                 a={operator}

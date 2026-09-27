@@ -182,7 +182,8 @@ function toView(
     // `desc` is the blurb; the body is the persona. Fall back to the body only
     // when a legacy template carries no `desc` at all.
     summary: fm.desc.trim() || parsed.description,
-    role: fm.role,
+    // A specialist template always has one (the file schema requires it).
+    role: fm.role ?? "",
     persona: parsed.description,
     stages: fm.stages,
     model: fm.model,

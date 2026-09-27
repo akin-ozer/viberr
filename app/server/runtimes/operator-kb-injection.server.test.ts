@@ -335,7 +335,7 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
     expect(prompt).toContain("Project operator guidance");
     expect(prompt).toContain("MARKER-PERSONA-7");
     // The core manual is still present (never discarded).
-    expect(prompt).toContain("coordinator");
+    expect(prompt).toContain("You are the Operator for one Viberr task");
   });
 
   it("always carries the non-negotiable stage + trust-boundary rules, even with no persona", () => {

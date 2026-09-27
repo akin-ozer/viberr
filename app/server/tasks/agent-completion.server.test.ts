@@ -181,8 +181,6 @@ function deployOperator(): void {
         extras: [],
         definition: {
           kind: "operator",
-          name: "Operator",
-          role: "Task coordinator",
           backends: ["claude"],
           model: "sonnet",
           autonomy: "supervised",
@@ -351,8 +349,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             // The live deployment the owner just set.
             backends: ["claude"],
             model: "sonnet",
@@ -421,8 +417,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -1065,8 +1059,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -1194,8 +1186,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3221,8 +3211,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3367,8 +3355,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3532,8 +3518,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3647,8 +3631,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3804,8 +3786,6 @@ describe("unavailable backend through the specialist start path", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3899,8 +3879,6 @@ describe("unavailable backend through the specialist start path", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",

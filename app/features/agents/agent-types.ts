@@ -182,26 +182,25 @@ export interface LibraryProfileView {
 }
 
 /**
- * What a profile IS on this board, for the two places a stored role says
- * nothing: the render fallback below, and the roster's own `role` default when
- * neither the deployment nor the template declares one
+ * What an agent profile IS on this board, for the two places a stored role
+ * says nothing: the render fallback below, and the roster's own `role` default
+ * when neither the deployment nor the template declares one
  * (`effectiveProfileView`). ONE literal, shared, so the label a card shows and
  * the label the server assembles cannot drift apart.
  *
- * U12 residual: the specialist branch read "Specialist" — the retired third
- * name for the object the Agents page has called an agent PROFILE since C11
- * (engaged per task as the delivering agent, or as a supporting one). It leaked
- * onto every role-less card's hero pill, roster row and glyph tooltip, i.e.
- * exactly the profiles whose stored role is empty and can least afford a name
- * the rest of the page does not use.
+ * U12 residual: it read "Specialist" — the retired third name for the object
+ * the Agents page has called an agent PROFILE since C11 (engaged per task as
+ * the delivering agent, or as a supporting one). It leaked onto every
+ * role-less card's hero pill, roster row and glyph tooltip, i.e. exactly the
+ * profiles whose stored role is empty and can least afford a name the rest of
+ * the page does not use.
  */
-export const DEFAULT_PROFILE_ROLE_LABEL = {
-  operator: "Orchestration",
-  specialist: "Agent profile",
-} as const satisfies Record<"operator" | "specialist", string>;
+export const DEFAULT_SPECIALIST_ROLE_LABEL = "Agent profile";
 
 /**
- * The role line a profile renders under (or beside) its name.
+ * The role line a profile renders under (or beside) its name, or null for the
+ * operator: it is one agent, called Operator, with no role (ruling 517), so
+ * its row, pill and glyph show the name alone.
  *
  * P14-WL-05: the library deploy writes `role: fm.role || fm.name`, so a
  * template whose frontmatter carries no `role` deploys with its NAME in the
@@ -215,10 +214,11 @@ export function profileRoleLabel(
   name: string,
   role: string,
   kind: "operator" | "specialist",
-): string {
+): string | null {
+  if (kind === "operator") return null;
   const trimmed = role.trim();
   if (!trimmed || trimmed.toLowerCase() === name.trim().toLowerCase()) {
-    return DEFAULT_PROFILE_ROLE_LABEL[kind];
+    return DEFAULT_SPECIALIST_ROLE_LABEL;
   }
   return trimmed;
 }

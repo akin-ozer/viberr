@@ -75,7 +75,7 @@
 
 **MCP server** — an org-registered Model Context Protocol server (`HTTP` or `stdio`) a profile may be granted. Granting a server is the whole authorization for its tools (ruling 39), except its **write tools** (ruling 176). Names in `RESERVED_MCP_NAMES` (`viberr`, `viberr_agent`, `viberr_browser`, `viberr_controller`, `viberr_ops` and their hyphen forms) belong to Viberr's in-process servers.
 
-**Operator** — the per-task coordination agent (`kind: operator`, one deployment per project). It triages, dispatches agents, opens packets, recommends or performs transitions, leases files to its task, proposes rulings, and decides delivery. It never writes code.
+**Operator** — the one agent that drives every task (`kind: operator`, one deployment per project), always called Operator and with no role (ruling 517). It triages, dispatches agents, opens packets, recommends or performs transitions, leases files to its task, proposes rulings, and decides delivery. It never writes code.
 
 **Org role** — `users.role`: `admin | member`. Governs instance surfaces (org settings, insights, audit export). Distinct from project roles.
 

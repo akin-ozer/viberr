@@ -361,7 +361,7 @@ export async function reconcileWorkspaceDelivery(
     backend = "claude",
     // U12: "specialist" is retired display vocabulary — this default flows into
     // the RENDERED timeline actor role (roleHint → actor-ref). Mirrors
-    // DEFAULT_PROFILE_ROLE_LABEL.specialist in app/features/agents/agent-types.ts.
+    // DEFAULT_SPECIALIST_ROLE_LABEL in app/features/agents/agent-types.ts.
     role = "Agent profile",
   } = input;
 

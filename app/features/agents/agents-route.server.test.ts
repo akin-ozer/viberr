@@ -1065,11 +1065,16 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("edit stores the operator's backend/model/autonomy + governs its caps", async () => {
+    // Ruling 517: the operator is one agent, called Operator, with no role. The
+    // editor sends neither; this payload carries what an editor from before the
+    // ruling sent, and the save stores neither.
+    // CANARY: write `form.name`, `form.role` or `current.scope` into the
+    // operator's definition in `updateAgentProfile` again.
     const result = saved(await postAction(ids.arda, {
       intent: "update-profile",
       profileId: "operator",
       payload: JSON.stringify({
-        name: "Operator",
+        name: "Coordinator",
         role: "Task coordinator",
         backend: "codex",
         stages: ["triage", "ready", "impl", "review", "done"],
@@ -1080,10 +1085,18 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       }),
     }));
     expect(result.ok).toBe(true);
+    expect(result.toast).toContain('Profile "Operator" updated');
 
     const data = await runLoader(ids.arda);
     const operator = data.profiles.find((p) => p.id === "operator")!;
     expect(operator.kind).toBe("operator");
+    expect({ name: operator.name, role: operator.role }).toEqual({ name: "Operator", role: "" });
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const stored = readProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === "operator")!.definition!;
+    for (const field of ["name", "role", "scope"]) expect(stored).not.toHaveProperty(field);
+    // Non-vacuity: the save did write the operator's definition.
+    expect(stored.autonomy).toBe("full");
     // The operator now runs on a real backend + model (not a placeholder).
     expect(operator.backends).toContain("codex");
     expect(operator.model).not.toBe("orchestration runtime");
@@ -1492,9 +1505,8 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
       autonomy: "supervised" | "full",
       accept: "recommend" | "direct",
     ) =>
+      // What the operator's editor sends: no name and no role (ruling 517).
       JSON.stringify({
-        name: "Operator",
-        role: "Task coordinator",
         backend: "claude",
         stages: ["triage", "ready", "impl", "review", "done"],
         definition: "Operator.",
@@ -1522,6 +1534,7 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
     expect(elevated.ok).toBe(true);
     expect(elevated.governanceNotice?.message).toContain("full autonomy");
     expect(elevated.governanceNotice?.message).toContain("without a human");
+    expect(elevated.governanceNotice?.message).toMatch(/^Operator now runs/);
 
     // A dedicated, greppable audit event — not just the generic updated row.
     // (`listAuditEvents` is newest-first, and an earlier test also elevates the

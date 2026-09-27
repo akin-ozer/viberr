@@ -56,3 +56,41 @@ describe("parseAgentProfileContent — schema drift detection", () => {
     }
   });
 });
+
+/**
+ * Ruling 517 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * it. NO other roles needed." The operator's file carries no role; every other
+ * kind still needs one. A store copy from before the ruling still says
+ * `role: Task coordinator`, and no reader may show it.
+ */
+describe("parseAgentProfileContent — ruling 517: the operator alone has no role", () => {
+  it("an operator file that still carries a role parses without it and flags it as drift", () => {
+    // CANARY: stop dropping `role` from an operator's frontmatter, or stop
+    // listing it among the drifted fields.
+    const { parsed, diagnostics } = parseAgentProfileContent(
+      "---\nid: operator\nkind: operator\nname: Operator\nrole: Task coordinator\n---\nRuns the task.",
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.frontmatter).not.toHaveProperty("role");
+    const drift = diagnostics.find((d) => d.code === "agent_profile.unknown_field");
+    expect(drift?.message).toContain("field(s): role.");
+  });
+
+  it("an operator file without a role is clean, and any other kind without one is invalid", () => {
+    // CANARY: make `role` optional for every kind, or required of the operator.
+    const operator = parseAgentProfileContent(
+      "---\nid: operator\nkind: operator\nname: Operator\n---\nRuns the task.",
+    );
+    expect(operator.parsed).not.toBeNull();
+    expect(operator.diagnostics).toEqual([]);
+    for (const kind of ["specialist", "controller"]) {
+      const { parsed, diagnostics } = parseAgentProfileContent(
+        `---\nid: x\nkind: ${kind}\nname: X\n---\nBody.`,
+      );
+      expect(parsed).toBeNull();
+      expect(
+        diagnostics.find((d) => d.code === "agent_profile.invalid")?.message,
+      ).toContain(`a ${kind} profile needs a role`);
+    }
+  });
+});

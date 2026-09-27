@@ -8,6 +8,9 @@ import type {
 } from "~/schemas/project-file.schema";
 import {
   deploymentRuntimeIdentity,
+  OPERATOR_FIXED_FIELDS,
+  OPERATOR_NAME,
+  OPERATOR_SCOPE,
   primaryRunBackend,
   readTemplate,
   type TemplateProfile,
@@ -33,7 +36,7 @@ import {
 } from "~/shared/capabilities";
 import { humanGatesPreWorkAdvance } from "~/shared/workflow/stage-roles";
 import { specialistGrantModes } from "~/server/tasks/specialist-tool-policy";
-import { DEFAULT_PROFILE_ROLE_LABEL } from "./agent-types";
+import { DEFAULT_SPECIALIST_ROLE_LABEL } from "./agent-types";
 import type {
   AgentProfileView,
   LibraryProfileView,
@@ -324,14 +327,21 @@ const SAVE_SNAPSHOT_FIELDS = [
  * hold a full snapshot, which a template edit never reaches (ruling 156,
  * P13-AP-07): on akinozer.com all seven deployments did, and the sentence told
  * the owner that editing would end an inheritance that had already ended.
+ *
+ * Ruling 517: the operator's name and scope always resolve from its template
+ * and no save writes them, so they never count as a field still to fork.
  */
 function tracksTemplateLive(
+  kind: "operator" | "specialist",
   def: AgentDeploymentDefinition | null,
   template: TemplateProfile | null,
 ): boolean {
   if (!template) return false;
   if (!def) return true;
-  return SAVE_SNAPSHOT_FIELDS.some((field) => def[field] === undefined);
+  const fixed: readonly string[] = kind === "operator" ? OPERATOR_FIXED_FIELDS : [];
+  return SAVE_SNAPSHOT_FIELDS.some(
+    (field) => !fixed.includes(field) && def[field] === undefined,
+  );
 }
 
 /**
@@ -542,11 +552,20 @@ export function effectiveProfileView(
   const view: AgentProfileView = {
     id: deployment.profileId,
     kind,
-    name: def?.name ?? template?.name ?? deployment.profileId,
-    // U12 residual: this default was "Specialist" — retired vocabulary, and the
-    // one value the card cannot improve on, since `profileRoleLabel` only
-    // rewrites a role that is empty or repeats the name. Shared literal.
-    role: def?.role ?? template?.role ?? DEFAULT_PROFILE_ROLE_LABEL[kind],
+    // Ruling 517: the operator is called Operator, whatever its template or an
+    // older save says, and has no role.
+    name:
+      kind === "operator"
+        ? OPERATOR_NAME
+        : (def?.name ?? template?.name ?? deployment.profileId),
+    // U12 residual: a specialist's default was "Specialist", retired
+    // vocabulary, and the one value the card cannot improve on, since
+    // `profileRoleLabel` only rewrites a role that is empty or repeats the
+    // name. Shared literal.
+    role:
+      kind === "operator"
+        ? ""
+        : (def?.role ?? template?.role ?? DEFAULT_SPECIALIST_ROLE_LABEL),
     icon: def?.icon ?? template?.icon ?? "agents",
     backends,
     model,
@@ -555,7 +574,8 @@ export function effectiveProfileView(
     // Ruling 153: a definition-less deployment (the seeded rows) resolves the
     // template live, its default effort included.
     effort: def?.effort ?? template?.effort ?? "",
-    scope: def?.scope ?? template?.scope ?? "",
+    // Ruling 517: the operator's scope line is fixed like its name.
+    scope: kind === "operator" ? OPERATOR_SCOPE : (def?.scope ?? template?.scope ?? ""),
     // OBS-7: a deployment holds a `definition` only once this project WROTE one
     // — the seeded roster carries none (agent-catalog.server.ts deploys
     // profileId + capabilities), so the snapshot is the fork itself. The
@@ -607,7 +627,7 @@ export function effectiveProfileView(
     // definition-less row resolves the template live and cannot drift.
     templateDrift: templateDriftOf(def, template),
     source: template ? "template" : "project",
-    tracksTemplate: tracksTemplateLive(def, template),
+    tracksTemplate: tracksTemplateLive(kind, def, template),
     // B5: the record this view was built from, for the editor to submit back.
     fingerprint: deploymentFingerprint(deployment),
   };

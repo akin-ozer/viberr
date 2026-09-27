@@ -375,6 +375,7 @@ export function AgentCapability({
           const advisoryOnCodex =
             codexPrimary &&
             [...direct, ...recommend].some((l) => isClaudeOnlyEnforcedLabel(l));
+          const role = profileRoleLabel(p.name, p.role, p.kind);
           return (
           <button
             type="button"
@@ -391,10 +392,9 @@ export function AgentCapability({
               {/* P14-WL-05: the deployed "Org Docs Writer" read
                   "Org Docs Writer · Org Docs Writer" here — the library deploy
                   copies the NAME into the role when the template declares none.
-                  One shared label rule for every roster surface. */}
-              <span className="sub">
-                {profileRoleLabel(p.name, p.role, p.kind)}
-              </span>
+                  One shared label rule for every roster surface, which gives
+                  the operator none (ruling 517). */}
+              {role && <span className="sub">{role}</span>}
             </span>
             <span className="pcap-counts">
               {direct.length + recommend.length + human.length === 0 ? (
@@ -643,16 +643,14 @@ export function WorkflowRules({
               <strong>On this project:</strong>{" "}
               {operator.directDoneLive ? (
                 <>
-                  the operator
-                  {operator.operatorName ? ` (${operator.operatorName})` : ""} runs
-                  at <strong>full autonomy</strong> with that grant set to{" "}
+                  the operator runs at <strong>full autonomy</strong> with that
+                  grant set to{" "}
                   <em>Direct</em>, so the exception is{" "}
                   <strong>active</strong>: it can close a passing task itself.{" "}
                 </>
               ) : operator.present ? (
                 <>
-                  the operator
-                  {operator.operatorName ? ` (${operator.operatorName})` : ""} runs{" "}
+                  the operator runs{" "}
                   <strong>
                     {operator.autonomy === "full"
                       ? "at full autonomy without the Direct accept grant"

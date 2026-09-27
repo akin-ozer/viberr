@@ -172,7 +172,8 @@ interface PersonaEditHolder {
 
 type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
-  role: string;
+  /** Absent on the operator, which has no role (ruling 517). */
+  role?: string;
   backend: "codex" | "claude";
   /** Ruling 139 parity with `deployed` (U36-3): the model and effort the
    *  update wrote — the row used to carry neither. */
@@ -241,19 +242,18 @@ export function deploymentFingerprint(deployment: AgentDeployment): string {
 
 const profileFormSchema = z.object({
   // U35-1 (pass 35): the name as the person meant it, entities decoded once
-  // and markup refused; the id is derived from the normalized text.
+  // and markup refused; the id is derived from the normalized text. Ruling
+  // 517: the operator's form carries no name or role, so both may be absent
+  // here and an agent profile's save requires them (`requireIdentity`).
   name: z
     .string()
+    .default("")
     .transform(normalizeDisplayName)
     .superRefine((name, issue) => {
-      if (!name) {
-        issue.addIssue({ code: "custom", message: "Name is required." });
-        return;
-      }
-      const refusal = displayNameRefusal(name);
+      const refusal = name ? displayNameRefusal(name) : null;
       if (refusal) issue.addIssue({ code: "custom", message: refusal });
     }),
-  role: z.string().trim().min(1, "Role is required."),
+  role: z.string().trim().default(""),
   backend: z.enum(["codex", "claude"]),
   stages: z.array(z.string().min(1)).min(1, "At least one stage is required."),
   definition: z.string().default(""),
@@ -308,6 +308,13 @@ function requireProjectAction(
     "change agent capability policy",
     { dataRoot: ctx.dataRoot },
   );
+}
+
+/** An agent profile is saved with a name and a role. The operator has
+ *  neither: it is one agent, called Operator (ruling 517). */
+function requireIdentity(form: ProfileFormInput): void {
+  if (!form.name) throw AppError.validation("Name is required.");
+  if (!form.role) throw AppError.validation("Role is required.");
 }
 
 function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
@@ -466,6 +473,7 @@ export async function createAgentProfile(
 ): Promise<ProfileSaveResult> {
   const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
   const form = parseForm(input.form);
+  requireIdentity(form);
 
   const ref = {
     projectSlug: input.projectSlug,
@@ -830,6 +838,9 @@ export async function updateAgentProfile(
   };
 
   let appliedUpdate: ProfileSaveResult["applied"] | undefined;
+  // The name the saved profile goes by: the form's, or the operator's own,
+  // which no save changes (ruling 517). Filled inside the writer callback.
+  let savedName = form.name;
   // Ruling 467: the persona this save wrote when it differs from the one it
   // replaced, for the audit row (a holder: the writer callback fills it).
   const personaEdit: PersonaEditHolder = { after: null };
@@ -852,6 +863,8 @@ export async function updateAgentProfile(
     }
     const current = effectiveProfileView(deployment, ctx.dataRoot, VIEW_WITHOUT_POLICY);
     const isOperator = current.kind === "operator";
+    if (isOperator) savedName = current.name;
+    else requireIdentity(form);
     // Ruling 139: a CHANGED effort is judged by name against the backend it
     // will run on. An unchanged value is never re-judged, so a deployment
     // that legitimately stores a preserved tier (Codex `minimal`, accepted
@@ -896,35 +909,31 @@ export async function updateAgentProfile(
     // Full-definition override. Both kinds now store the picked backend + model
     // + effort (the operator no longer keeps the "orchestration runtime"
     // placeholder — it runs on a real backend/model). The operator additionally
-    // stores its default autonomy.
-    const definition: AgentDeploymentDefinition = {
-      kind: current.kind,
-      name: form.name,
-      role: form.role,
-      icon: current.icon,
-      backends: [form.backend],
-      model: form.model.trim() || defaultModelFor(form.backend),
-      ...(form.effort.trim()
-        ? { effort: form.effort.trim() }
-        : isOperator
-          ? {}
-          : { effort: defaultEffortFor(form.backend) }),
-      scope: current.scope,
-      // Empty definition → keep the existing/template prose (current.desc);
-      // never persist a generated placeholder that would permanently shadow the
-      // org template's real description (and its ungrammatical "a implementation
-      // specialist" wording). Same for operator and specialist.
-      desc: form.definition.trim() || current.desc,
-      // Empty persona → keep the existing persona (deployment override or the
-      // template body), mirroring the desc rule above.
-      ...(form.persona.trim()
-        ? { persona: form.persona.trim() }
-        : current.definition
-          ? { persona: current.definition }
-          : {}),
-      stages: form.stages,
-      spanAll: current.spanAll,
-    };
+    // stores its default autonomy, and never a name, a role or a scope: those
+    // are its template's (ruling 517, `OPERATOR_FIXED_FIELDS`). Written field
+    // by field in the file's order.
+    const definition: AgentDeploymentDefinition = { kind: current.kind };
+    if (!isOperator) {
+      definition.name = form.name;
+      definition.role = form.role;
+    }
+    definition.icon = current.icon;
+    definition.backends = [form.backend];
+    definition.model = form.model.trim() || defaultModelFor(form.backend);
+    if (form.effort.trim()) definition.effort = form.effort.trim();
+    else if (!isOperator) definition.effort = defaultEffortFor(form.backend);
+    if (!isOperator) definition.scope = current.scope;
+    // Empty definition → keep the existing/template prose (current.desc);
+    // never persist a generated placeholder that would permanently shadow the
+    // org template's real description (and its ungrammatical "a implementation
+    // specialist" wording). Same for operator and specialist.
+    definition.desc = form.definition.trim() || current.desc;
+    // Empty persona → keep the existing persona (deployment override or the
+    // template body), mirroring the desc rule above.
+    const persona = form.persona.trim() || current.definition;
+    if (persona) definition.persona = persona;
+    definition.stages = form.stages;
+    definition.spanAll = current.spanAll;
     // Operator only: a specialist definition carries no `autonomy` key at all.
     if (isOperator) {
       definition.autonomy = form.autonomy ?? current.autonomy ?? "supervised";
@@ -959,10 +968,10 @@ export async function updateAgentProfile(
     gov.isOperator && gov.newAutonomy === "full" && gov.newDirectAccept;
 
   const details: ProfileUpdatedAuditDetails = {
-    name: form.name,
-    role: form.role,
+    name: savedName,
     backend: form.backend,
   };
+  if (!gov.isOperator) details.role = form.role;
   if (appliedUpdate) {
     details.model = appliedUpdate.model;
     details.effort = appliedUpdate.effort;
@@ -978,7 +987,7 @@ export async function updateAgentProfile(
   }
   const result: ProfileSaveResult = {
     profileId: input.profileId,
-    name: form.name,
+    name: savedName,
   };
   if (appliedUpdate) result.applied = appliedUpdate;
   carryCouplingNotices(details, result, delivery.notices);
@@ -994,10 +1003,10 @@ export async function updateAgentProfile(
   let governanceNotice: { message: string } | undefined;
   if (autonomyElevatedToFull || directAcceptNewlyGranted) {
     const message = directDoneLive
-      ? `${form.name} now runs at full autonomy with “Accept completion into Done” granted. It can move tasks to Done without a human.`
+      ? `${savedName} now runs at full autonomy with “Accept completion into Done” granted. It can move tasks to Done without a human.`
       : autonomyElevatedToFull
-        ? `${form.name} autonomy raised to full. It crosses auto boundaries and dispatches agents without asking; approval and human boundaries still wait for a person, and “Accept completion into Done” still needs its direct grant to close tasks.`
-        : `“Accept completion into Done” granted to ${form.name}. It takes effect only at full autonomy (currently ${gov.newAutonomy}).`;
+        ? `${savedName} autonomy raised to full. It crosses auto boundaries and dispatches agents without asking; approval and human boundaries still wait for a person, and “Accept completion into Done” still needs its direct grant to close tasks.`
+        : `“Accept completion into Done” granted to ${savedName}. It takes effect only at full autonomy (currently ${gov.newAutonomy}).`;
     governanceNotice = { message };
     recordAudit(db, {
       action: "project.operator.autonomy_changed",
@@ -1006,7 +1015,7 @@ export async function updateAgentProfile(
       subjectId: input.profileId,
       projectSlug: input.projectSlug,
       details: {
-        name: form.name,
+        name: savedName,
         from: gov.priorAutonomy,
         to: gov.newAutonomy,
         acceptCompletionIntoDone: gov.newDirectAccept ? "direct" : "off",
