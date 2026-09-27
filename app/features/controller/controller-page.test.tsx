@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createRoutesStub, useLocation, type ActionFunction } from "react-router";
+import { createRoutesStub, replace, useLocation, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, surfaceLabel } from "./controller-page";
 import { readableStep } from "~/features/runtime/readable-step";
@@ -38,8 +38,8 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     controllerName: "Controller",
     projectName: "Viberr Core",
     conversations: [
-      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false },
-      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false },
+      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false, readable: true, canDelete: true, working: false },
+      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false, readable: true, canDelete: true, working: false },
     ],
     conversation: null,
     messages: [],
@@ -51,6 +51,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     corrections: { shown: [], total: 0 },
     viewerOwnsActive: false,
     showingAll: false,
+    showAllAs: "org admin",
     viewerIsOrgAdmin: true,
     ...over,
   };
@@ -1518,5 +1519,161 @@ describe("the project's knowledge-base corrections (ruling 498)", () => {
     renderPage(view({ corrections: { shown: [correction], total: 21 } }));
     const more = await screen.findByRole("region", { name: "Knowledge base" });
     expect(within(more).getByText("The newest 1 of 21. The audit log keeps the rest for 90 days.")).toBeTruthy();
+  });
+});
+
+/**
+ * Ruling 525: a conversation is deleted from the rail. Each row the viewer may
+ * delete carries a Delete that asks first; the confirm says what goes, and for
+ * whom when it is somebody else's. A thread the viewer may delete but not read
+ * is listed without its words and opens nothing.
+ */
+describe("ruling 525: deleting a conversation from the rail", () => {
+  const open: NonNullable<ControllerSurfaceView["conversation"]> = {
+    id: "cnv_t",
+    userId: "u1",
+    userLabel: "arda@viberr.dev",
+    projectSlug: "viberr-core",
+    taskKey: "VIB-142",
+    title: "Task thread",
+    createdAt: "2026-09-01T11:00:00.000Z",
+    updatedAt: "2026-09-01T11:00:00.000Z",
+    lastMessageAt: "2026-09-01T11:00:00.000Z",
+  };
+  const sealed: ControllerSurfaceView["conversations"][number] = {
+    id: "cnv_s",
+    title: "Selin Aksoy's conversation",
+    ownerLabel: "Selin Aksoy",
+    own: false,
+    lastMessageAt: "2026-09-01T09:00:00.000Z",
+    projectSlug: "viberr-core",
+    taskKey: "VIB-150",
+    unread: false,
+    readable: false,
+    canDelete: true,
+    working: true,
+  };
+
+  function recorded() {
+    const posted: Record<string, string>[] = [];
+    const record = async (request: Request) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+    };
+    return { posted, record };
+  }
+
+  it("offers Delete on the rows the viewer may delete, and asks before it posts", async () => {
+    // CANARY: submit from the row's button directly and a post lands before
+    // the dialog is answered.
+    const { posted, record } = recorded();
+    const v = view({ conversation: open, viewerOwnsActive: true });
+    v.conversations = v.conversations.map((c) => (c.id === "cnv_t" ? { ...c, canDelete: false } : c));
+    renderPage(v, "?c=cnv_t", async ({ request }) => {
+      await record(request);
+      return { ok: true, toast: "Conversation deleted." };
+    });
+    await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
+    expect(screen.getAllByRole("button", { name: /^Delete / }).map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Delete Board thread",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Board thread" }));
+    expect(posted).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete this conversation?" });
+    expect(dialog.getAttribute("data-screen-label")).toBe("Delete conversation dialog");
+    expect(dialog.textContent).toContain(
+      "“Board thread” goes for good: its messages and the logs of its turns. This cannot be undone.",
+    );
+    const commit = within(dialog).getByRole("button", { name: "Delete conversation" });
+    expect(commit.className).toBe("btn danger");
+    await act(async () => {
+      fireEvent.click(commit);
+    });
+    await screen.findByText("Conversation deleted.");
+    // The page says which thread it has open, so the server can move it off
+    // one it deletes; this one stays.
+    expect(posted).toEqual([
+      { _csrf: "tok", intent: "delete-conversation", conversationId: "cnv_b", open: "cnv_t" },
+    ]);
+  });
+
+  it("says the open thread is deleted once the redirect off it lands, after any earlier result", async () => {
+    // The redirect carries no result and the fetcher keeps the one it had.
+    // CANARY: toast the redirect only while the fetcher holds no data, and the
+    // second delete below lands silently.
+    const { posted, record } = recorded();
+    let search = "?c=cnv_t";
+    function Probe() {
+      search = useLocation().search;
+      return null;
+    }
+    const v = view({ conversation: open, viewerOwnsActive: true });
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "tok", theme: "system" }),
+        children: [
+          {
+            path: "projects/:slug/controller",
+            Component: () => (
+              <ToastProvider>
+                <ControllerPage view={v} projectSlug="viberr-core" />
+                <Probe />
+              </ToastProvider>
+            ),
+            action: async ({ request }) => {
+              await record(request);
+              const last = posted.at(-1)!;
+              return last.conversationId === last.open
+                ? replace("/projects/viberr-core/controller")
+                : { ok: true, toast: "The other one is deleted." };
+            },
+          },
+        ],
+      },
+    ]);
+    render(<Stub initialEntries={["/projects/viberr-core/controller?c=cnv_t"]} />);
+    const remove = async (name: string) => {
+      fireEvent.click(await screen.findByRole("button", { name }));
+      const dialog = await screen.findByRole("alertdialog");
+      await act(async () => {
+        fireEvent.click(within(dialog).getByRole("button", { name: "Delete conversation" }));
+      });
+    };
+    await remove("Delete Board thread");
+    await screen.findByText("The other one is deleted.");
+    await remove("Delete Task thread");
+    await screen.findByText("Conversation deleted.");
+    expect(search).toBe("");
+    expect(posted.map((p) => [p.conversationId, p.open])).toEqual([
+      ["cnv_b", "cnv_t"],
+      ["cnv_t", "cnv_t"],
+    ]);
+  });
+
+  it("lists a thread the viewer may delete but not read without its words, and opens nothing", async () => {
+    // CANARY: render every row as a link and this one opens a transcript its
+    // viewer may not read.
+    const v = view({ showingAll: true, showAllAs: "project admin", viewerIsOrgAdmin: false });
+    v.conversations = [...v.conversations, sealed];
+    const { container } = renderPage(v, "?all=1");
+    await screen.findByText("Selin Aksoy's conversation", { selector: ".ctl-conv-title" });
+    expect(screen.queryByRole("link", { name: /Selin Aksoy/ })).toBeNull();
+    expect(container.querySelector(".ctl-conv-sealed")?.textContent).toContain("Selin Aksoy's conversation");
+    expect(screen.getByRole("link", { name: "Show mine only" })).toBeTruthy();
+    const options = Array.from(screen.getByRole("combobox", { name: "Conversation" }).querySelectorAll("option"));
+    expect(options.map((o) => o.textContent).join(" | ")).not.toContain("Selin");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Selin Aksoy's conversation" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete Selin Aksoy's conversation?" });
+    expect(dialog.textContent).toMatch(
+      /^Delete Selin Aksoy's conversation\?This conversation about VIB-150, last active .+, goes for good, for Selin Aksoy too: its messages and the logs of its turns\. The turn it is working on stops first\. This cannot be undone\./,
+    );
+  });
+
+  it("names who the viewer lists everyone's as", async () => {
+    renderPage(view({ showAllAs: "project admin", viewerIsOrgAdmin: false }));
+    expect(await screen.findByRole("link", { name: "Show everyone's (project admin)" })).toBeTruthy();
   });
 });

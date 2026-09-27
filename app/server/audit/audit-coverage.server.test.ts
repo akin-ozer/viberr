@@ -1180,6 +1180,33 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
+      {
+        // Ruling 525: a person deletes a controller conversation, here their
+        // own thread anchored to a task, so the row names the task it was
+        // about.
+        name: "deleteControllerConversation",
+        action: "controller.conversation.deleted",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { createConversation } = await import(
+            "~/server/controller/controller-conversations.server"
+          );
+          const { deleteControllerConversation } = await import(
+            "~/server/controller/controller-deletion.server"
+          );
+          const conversation = createConversation(store.db, {
+            userId: store.users.arda.id,
+            userLabel: store.users.arda.email,
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+          });
+          deleteControllerConversation(
+            store.db,
+            { conversationId: conversation.id, projectSlug: store.slug, dataRoot: store.dataRoot },
+            actorArda(),
+          );
+        },
+      },
       // Ruling 469: an MCP connection's OAuth sign-in, against the in-test
       // authorization server. Instance-wide: the registry is org-level.
       ...(["org.mcp.oauth_connected", "org.mcp.oauth_failed", "org.mcp.oauth_signed_out"] as const).map(

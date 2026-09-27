@@ -9073,3 +9073,26 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .cmp-over { color: var(--faint); }
 .chg-inline > .chg-slot { margin-top: .5rem; }
 .chg-inline .chg-fail, .chg-inline .chg-stale { font-size: .75rem; }
+
+/* ---------- appended: ruling 525, deleting a controller conversation ---------- */
+/* Each row the viewer may delete carries the shared row ✕ (`.stg-x`, named
+   destructive), drawn always like every row action since P16-UI-25: a hover
+   reveal is invisible to a finger. It sits over the row's right edge rather
+   than beside it, so the row keeps the rail's full width for its title, which
+   stops short of the button instead of running under it. */
+.ctl-conv-row { position: relative; }
+.ctl-conv-row.deletable > .ctl-conv, .ctl-conv-row.deletable > .ctl-conv-sealed { padding-right: 2.25rem; }
+.ctl-conv-del { position: absolute; top: 50%; right: .375rem; translate: 0 -50%; }
+/* Somebody else's conversation, listed to a project admin so they can delete
+   it: its words stay its starter's (ruling 99(d)), so it is no link. It takes
+   the box `.ctl-conv` draws (app.css.test.ts holds the two together) and none
+   of its hover or press, which belong to a row that opens. */
+.ctl-conv-sealed {
+  display: flex;
+  flex-direction: column;
+  gap: .125rem;
+  padding: .5rem .75rem;
+  border-radius: var(--radius-box);
+  border: 1px solid transparent;
+}
+.ctl-conv-sealed .ctl-conv-title { color: var(--muted); font-weight: 400; }

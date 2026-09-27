@@ -60,7 +60,7 @@ Roles are a strict tier: `viewer ⊂ contributor ⊂ maintainer ⊂ admin`.
 | `view`, `comment` | ✓ | ✓ | ✓ | ✓ |
 | `create-task`, `own-task`, `edit-task-meta`, `attach-file`, `manage-epics` | ✓ | ✓ | ✓ | |
 | `approve-transition`, `resolve-packet`, `accept-completion`, `update-goal`, `run-agents`, `reorder-board`, `reconcile-github`, `grant-github-scope`, `rescan-project` | ✓ | ✓ | | |
-| `release-any-ownership`, `manage-members`, `manage-agents`, `edit-policy`, `force-accept-completion` | ✓ | | | |
+| `release-any-ownership`, `manage-members`, `manage-agents`, `delete-controller-conversations`, `edit-policy`, `force-accept-completion` | ✓ | | | |
 
 Two grants gate more than their labels name, and each definition carries a `covers`
 line saying so (ruling 309(a)): `edit-task-meta` also gates what a task waits on

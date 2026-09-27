@@ -1,5 +1,5 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
-import { data } from "react-router";
+import { data, replace } from "react-router";
 import type { Route } from "./+types/project.controller";
 import { pageTitle } from "~/shared/page-title";
 import { appErrorResponse } from "~/server/auth/form-action.server";
@@ -9,6 +9,7 @@ import { requireProjectMember } from "~/server/auth/require-project.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { createConversation } from "~/server/controller/controller-conversations.server";
+import { deleteControllerConversation } from "~/server/controller/controller-deletion.server";
 import {
   interruptControllerTurn,
   runControllerTurn,
@@ -156,6 +157,26 @@ export async function action({ request, params }: Route.ActionArgs) {
             ? "Turn interrupted. The transcript records that it was stopped."
             : "That turn had already ended.",
       };
+    }
+    if (intent === "delete-conversation") {
+      // Ruling 525: the rail's Delete, confirmed on the page. The engine
+      // decides who may (its starter, an org admin, or a holder of
+      // `delete-controller-conversations` here), stops a running turn and
+      // purges what the turns logged. Only this board's and its tasks'
+      // threads: another scope's id is not found.
+      const conversationId = String(formData.get("conversationId") ?? "");
+      deleteControllerConversation(
+        db,
+        { conversationId, projectSlug: params.slug },
+        { userId: auth.user.id, label: auth.user.email },
+      );
+      // The thread on screen is gone, and its URL would now answer 404: land
+      // where a bare visit does (U33-8), in place of the entry that named it.
+      if (String(formData.get("open") ?? "") === conversationId) {
+        const page = `/projects/${encodeURIComponent(params.slug)}/controller`;
+        return replace(formData.get("all") === "1" ? `${page}?all=1` : page);
+      }
+      return { ok: true as const, toast: "Conversation deleted." };
     }
     return data({ ok: false as const, error: "Unknown action." }, { status: 400 });
   } catch (cause) {

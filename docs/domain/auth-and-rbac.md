@@ -102,7 +102,7 @@ the provider onto `users.github_handle` with `auth.github_handle.recorded`.
 `users.role` is `admin | member` (CHECK-constrained). Org admins alone reach
 `/org/settings` (every tab and intent), `/org/settings/audit-export`, `/insights`,
 the Home store re-scan and rebuild-projections actions, and everyone's controller
-transcripts (read, and interrupt a live turn). Any signed-in user may **create a
+transcripts (read, interrupt a live turn, and delete, ruling 525). Any signed-in user may **create a
 project** and becomes its project admin (FR5). The last active org admin cannot be
 demoted, disabled or removed, and nobody can demote, disable or remove themselves.
 
@@ -134,6 +134,7 @@ access share; `app/shared/rbac.test.ts` holds this table to it row by row:
 | `release-any-ownership`: release any task owner | ✓ | | | |
 | `manage-members`: manage members and roles | ✓ | | | |
 | `manage-agents`: manage agent profiles | ✓ | | | |
+| `delete-controller-conversations`: delete another person's controller conversation about this project, its board's or one of its tasks'; everyone may delete their own (ruling 525) | ✓ | | | |
 | `edit-policy`: edit workflow and policy, and archive or restore the project itself | ✓ | | | |
 | `force-accept-completion`: force-accept past the review gate | ✓ | | | |
 

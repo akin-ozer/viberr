@@ -75,7 +75,7 @@ const VIEW: ControllerSurfaceView = {
   controllerName: "Controller",
   projectName: "Viberr Core",
   conversations: [
-    { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-24T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false },
+    { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-24T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false, readable: true, canDelete: true, working: false },
   ],
   conversation: {
     id: "cnv_b",
@@ -97,6 +97,7 @@ const VIEW: ControllerSurfaceView = {
   corrections: { shown: [], total: 0 },
   viewerOwnsActive: true,
   showingAll: false,
+  showAllAs: "org admin",
   viewerIsOrgAdmin: true,
 };
 
