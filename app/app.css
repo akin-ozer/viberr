@@ -8956,12 +8956,18 @@ a.pr-branch:hover { background: var(--tint-hover); }
    than beside it, so the row keeps the rail's full width for its title, which
    stops short of the button instead of running under it. */
 .ctl-conv-row { position: relative; }
-.ctl-conv-row.deletable > .ctl-conv { padding-right: 2.25rem; }
+.ctl-conv-row.deletable > .ctl-conv, .ctl-conv-row.deletable > .ctl-conv-sealed { padding-right: 2.25rem; }
 .ctl-conv-del { position: absolute; top: 50%; right: .375rem; translate: 0 -50%; }
 /* Somebody else's conversation, listed to a project admin so they can delete
-   it: its words stay its starter's (ruling 99(d)), so it opens nothing, and
-   it neither answers the pointer nor presses like a row that does. */
-.ctl-conv.sealed { cursor: default; }
-.ctl-conv.sealed:hover { background: none; }
-.ctl-conv.sealed:active { transform: none; }
-.ctl-conv.sealed .ctl-conv-title { color: var(--muted); font-weight: 400; }
+   it: its words stay its starter's (ruling 99(d)), so it is no link. It takes
+   the box `.ctl-conv` draws (app.css.test.ts holds the two together) and none
+   of its hover or press, which belong to a row that opens. */
+.ctl-conv-sealed {
+  display: flex;
+  flex-direction: column;
+  gap: .125rem;
+  padding: .5rem .75rem;
+  border-radius: var(--radius-box);
+  border: 1px solid transparent;
+}
+.ctl-conv-sealed .ctl-conv-title { color: var(--muted); font-weight: 400; }

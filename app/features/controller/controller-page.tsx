@@ -566,8 +566,9 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
                     {face}
                   </Link>
                 ) : (
-                  // Ruling 525: listed so it can be deleted, never opened.
-                  <div className="ctl-conv sealed">{face}</div>
+                  // Ruling 525: listed so it can be deleted, never opened. Not
+                  // a `.ctl-conv`: that is a link, and presses like one.
+                  <div className="ctl-conv-sealed">{face}</div>
                 )}
                 {c.canDelete && (
                   <button

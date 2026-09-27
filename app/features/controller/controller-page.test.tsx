@@ -1621,7 +1621,7 @@ describe("ruling 525: deleting a conversation from the rail", () => {
     const { container } = renderPage(v, "?all=1");
     await screen.findByText("Selin Aksoy's conversation", { selector: ".ctl-conv-title" });
     expect(screen.queryByRole("link", { name: /Selin Aksoy/ })).toBeNull();
-    expect(container.querySelector(".ctl-conv.sealed")?.textContent).toContain("Selin Aksoy's conversation");
+    expect(container.querySelector(".ctl-conv-sealed")?.textContent).toContain("Selin Aksoy's conversation");
     expect(screen.getByRole("link", { name: "Show mine only" })).toBeTruthy();
     const options = Array.from(screen.getByRole("combobox", { name: "Conversation" }).querySelectorAll("option"));
     expect(options.map((o) => o.textContent).join(" | ")).not.toContain("Selin");
