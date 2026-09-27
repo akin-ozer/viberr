@@ -52,7 +52,8 @@ describe("GET /resources/search", () => {
    */
   it("answers a signed-out query 401 in the conventions' error shape, never a login redirect", async () => {
     const { cookie } = await app.cookieFor(userId);
-    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(userId);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, userId, { pwresetRequired: true });
     try {
       // CANARY: guard with `requireUser` again and both queries reject with its
       // 302 to /login?returnTo=%2Fresources%2Fsearch%3Fq%3Ddeploy.
@@ -63,7 +64,7 @@ describe("GET /resources/search", () => {
         });
       }
     } finally {
-      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(userId);
+      updateUserFields(app.db, userId, { pwresetRequired: false });
     }
   });
 });

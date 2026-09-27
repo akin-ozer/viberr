@@ -734,8 +734,9 @@ describe("AgentAccountsPanel", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_100);
     });
-    // CANARY: read the poll's `login.id` or `health` without a guard and the
-    // refusal, which carries neither, takes the Profile page down with it.
+    // CANARY: let a refusal past the card's session-id match (its SAFETY cast
+    // then hides it from the type checker) and reading its absent `health`
+    // takes the Profile page down with it.
     expect(getByText("signing in")).toBeTruthy();
     expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
     expect(queryByText("Claude connected")).toBeNull();

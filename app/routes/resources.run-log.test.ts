@@ -185,7 +185,8 @@ describe("GET /resources/run-log for the console (ruling 457)", () => {
 describe("GET /resources/run-log signed out (ruling 457)", () => {
   it("answers 401 in the conventions' error shape, never a login redirect", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(ardaId);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, ardaId, { pwresetRequired: true });
     try {
       // CANARY: guard with `requireUser` again and both reads reject with its
       // 302 to /login?returnTo=%2Fresources%2Frun-log%3FrunId%3D….
@@ -198,7 +199,7 @@ describe("GET /resources/run-log signed out (ruling 457)", () => {
         });
       }
     } finally {
-      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(ardaId);
+      updateUserFields(app.db, ardaId, { pwresetRequired: false });
     }
   });
 });

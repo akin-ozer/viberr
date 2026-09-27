@@ -69,11 +69,12 @@ async function get(userId: string, query: string) {
 
 /** Runs `body` with a forced password reset pending for `userId`. */
 async function withPendingReset<T>(userId: string, body: () => Promise<T>): Promise<T> {
-  app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(userId);
+  const { updateUserFields } = await import("~/server/auth/user-store.server");
+  updateUserFields(app.db, userId, { pwresetRequired: true });
   try {
     return await body();
   } finally {
-    app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(userId);
+    updateUserFields(app.db, userId, { pwresetRequired: false });
   }
 }
 

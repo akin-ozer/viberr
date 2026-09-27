@@ -88,7 +88,8 @@ describe("resources/model-catalog", () => {
    */
   it("answers a signed-out load 401 in the conventions' error shape, never a login redirect", async () => {
     const { cookie } = await app.cookieFor(ardaId);
-    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(ardaId);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, ardaId, { pwresetRequired: true });
     try {
       // CANARY: guard with `requireUser` again and both loads reject with its
       // 302 to /login?returnTo=%2Fresources%2Fmodel-catalog%3Fbackend%3Dcodex.
@@ -104,7 +105,7 @@ describe("resources/model-catalog", () => {
         });
       }
     } finally {
-      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(ardaId);
+      updateUserFields(app.db, ardaId, { pwresetRequired: false });
     }
   });
 

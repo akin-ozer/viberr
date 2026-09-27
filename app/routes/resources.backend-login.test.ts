@@ -116,7 +116,8 @@ describe("GET /resources/backend-login", () => {
    */
   it("answers a signed-out poll 401 in the conventions' error shape, never a login redirect", async () => {
     const { cookie } = await app.cookieFor(muratId);
-    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(muratId);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, muratId, { pwresetRequired: true });
     try {
       // CANARY: guard with `requireUser` again and both polls reject with its
       // 302 to /login?returnTo=%2Fresources%2Fbackend-login%3Fbackend%3Dcodex.
@@ -132,7 +133,7 @@ describe("GET /resources/backend-login", () => {
         });
       }
     } finally {
-      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(muratId);
+      updateUserFields(app.db, muratId, { pwresetRequired: false });
     }
   });
 

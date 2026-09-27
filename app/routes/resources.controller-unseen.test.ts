@@ -98,7 +98,8 @@ describe("/resources/controller-unseen (O39-d)", () => {
   it("answers a signed-out load 401 with an empty status, never a login redirect", async () => {
     await replied(deniz, null);
     const { cookie } = await app.cookieFor(deniz);
-    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(deniz);
+    const { updateUserFields } = await import("~/server/auth/user-store.server");
+    updateUserFields(app.db, deniz, { pwresetRequired: true });
     try {
       // CANARY: guard with `requireAuth` again and both loads reject with its
       // 302 to /login?returnTo=%2Fresources%2Fcontroller-unseen.
@@ -106,7 +107,7 @@ describe("/resources/controller-unseen (O39-d)", () => {
         expect(answer).toMatchObject({ init: { status: 401 }, data: { unseen: [], working: [] } });
       }
     } finally {
-      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(deniz);
+      updateUserFields(app.db, deniz, { pwresetRequired: false });
     }
   });
 });
