@@ -21,23 +21,10 @@ export function withRetracted(box: string, retracted: string): string {
   return box.trim() ? `${box.trimEnd()}\n\n${retracted}` : retracted;
 }
 
-/**
- * Ruling 527: what a message still waiting on the running turn lets its
- * sender do, on the page and in the dock. **Send now** takes a queued message
- * into the running turn at its next step (the server sends it next instead
- * when that turn can take no more). **Retract** takes back a message nothing
- * has read yet, queued or waiting to steer: it leaves the conversation and its
- * text goes back to the composer. Rendered for the conversation's owner only;
- * the server re-checks both.
- */
-export function WaitingActions({
-  turn,
-  messageId,
-  conversationId,
-  csrf,
-  action,
-  onRetracted,
-}: {
+/** Ruling 527: where a message waits on the running turn, if it still does. */
+type WaitingState = "queued" | "steering";
+
+interface WaitingActionsProps {
   turn: Pick<ConversationTurnState, "queued" | "steering"> | null;
   messageId: string;
   conversationId: string;
@@ -46,7 +33,36 @@ export function WaitingActions({
    *  page's own route. */
   action?: string;
   onRetracted: (text: string) => void;
-}): React.ReactNode {
+}
+
+/**
+ * Ruling 527: what a message still waiting on the running turn lets its
+ * sender do, on the page and in the dock. **Send now** takes a queued message
+ * into the running turn at its next step (the server sends it next instead
+ * when that turn can take no more). **Retract** takes back a message nothing
+ * has read, queued or waiting to steer: it leaves the conversation and its
+ * text goes back to the composer. Rendered for the conversation's owner only;
+ * the server re-checks both. A message that is not waiting renders nothing
+ * and mounts no fetcher.
+ */
+export function WaitingActions(props: WaitingActionsProps): React.ReactNode {
+  const { turn, messageId } = props;
+  const state: WaitingState | null = turn?.steering.includes(messageId)
+    ? "steering"
+    : turn?.queued.some((q) => q.messageId === messageId)
+      ? "queued"
+      : null;
+  return state ? <WaitingMessageActions {...props} state={state} /> : null;
+}
+
+function WaitingMessageActions({
+  state,
+  messageId,
+  conversationId,
+  csrf,
+  action,
+  onRetracted,
+}: WaitingActionsProps & { state: WaitingState }): React.ReactNode {
   const fetcher = useFetcher<WaitingActionResult>();
   const push = useToast();
   useFetcherResult(fetcher, (result) => {
@@ -57,9 +73,6 @@ export function WaitingActions({
     if (result.retracted !== undefined) onRetracted(result.retracted);
     if (result.toast) push(result.toast);
   });
-  const queued = turn?.queued.some((q) => q.messageId === messageId) ?? false;
-  const steering = turn?.steering.includes(messageId) ?? false;
-  if (!queued && !steering) return null;
   const busy = fetcher.state !== "idle";
   const submit = (intent: "send-now" | "retract") => {
     const body = new FormData();
@@ -74,7 +87,7 @@ export function WaitingActions({
   };
   return (
     <span className="ctl-msg-acts">
-      {queued && (
+      {state === "queued" && (
         <button
           type="button"
           className="linkish"
