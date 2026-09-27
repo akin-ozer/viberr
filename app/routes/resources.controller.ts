@@ -1,7 +1,7 @@
 import { data } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/resources.controller";
-import { requireAuth } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { appErrorResponse } from "~/server/auth/form-action.server";
 import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -19,6 +19,7 @@ import {
   conversationMatchesScope,
   dockTaskExists,
   getControllerDock,
+  signedOutDockView,
   unavailableDockView,
 } from "~/features/controller/controller-dock-query.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
@@ -51,6 +52,15 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  * shape for "no such project" and "not yours", so it is no more of an oracle
  * than the 404 was), and a POST answers `{ ok:false, error }`. The full pages
  * keep their own 404s; this route serves a panel, not a page.
+ *
+ * NOR DOES EITHER REDIRECT (ruling 457, test audit L14-29). A caller who is
+ * not signed in (no session, or a forced password reset pending) gets a 401:
+ * the signed-out view for a GET, `{ ok:false, error }` for a POST.
+ * `requireAuth`'s login redirect named this route and the scope's query as
+ * the returnTo, and a fetcher follows a redirect as a navigation, so a stale
+ * tab's open or send went to /login and, once signed in, to a page of raw
+ * JSON. The page's next real navigation asks for the sign-in, with its own
+ * path.
  */
 
 interface DockScopeParams {
@@ -95,10 +105,13 @@ function scopeIsReachable(
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const auth = await requireAuth(request);
-  const db = getDb();
   const url = new URL(request.url);
   const scope = scopeParams(url.searchParams);
+  const auth = await authenticate(request);
+  if (!auth || auth.pwresetRequired) {
+    return data({ view: signedOutDockView(scope) }, { status: 401 });
+  }
+  const db = getDb();
   const actor = { userId: auth.user.id, label: auth.user.email };
   if (!scopeIsReachable(db, scope, actor)) {
     return { view: unavailableDockView(db, { id: auth.user.id }, scope) };
@@ -114,7 +127,19 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const auth = await requireAuth(request);
+  const auth = await authenticate(request);
+  if (!auth || auth.pwresetRequired) {
+    // The message is still in the dock's composer (ruling 259), and a reload
+    // empties it.
+    return data(
+      {
+        ok: false as const,
+        error:
+          "You're signed out, so this wasn't sent. Copy it, then reload the page to sign in again.",
+      },
+      { status: 401 },
+    );
+  }
   const db = getDb();
   const formData = await request.formData();
   const csrfFailure = await csrfError(request, auth.sessionId, formData);

@@ -89,6 +89,9 @@ describe("the dock's working poll (ruling 457, CTL-2)", () => {
       pattern: "/resources/controller-unseen",
       context: new RouterContextProvider(),
     });
+    // Signed in, the route answers the status itself; only a caller who is not
+    // gets the 401 `data()` wraps (ruling 457).
+    if (!("working" in status)) throw new Error(`expected the status, got ${JSON.stringify(status)}`);
     // The turn is in it, with its scope, so the button and the step line can
     // read it without the transcript.
     expect(status.working).toEqual([

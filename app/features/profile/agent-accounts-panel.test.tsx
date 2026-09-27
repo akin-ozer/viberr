@@ -6,7 +6,10 @@ import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
 import type { ProfileBackend } from "./profile-query.server";
-import type { BackendLoginPollData } from "~/routes/resources.backend-login";
+import type {
+  BackendLoginPollAnswer,
+  BackendLoginPollData,
+} from "~/routes/resources.backend-login";
 
 /**
  * Profile → Agent accounts, rendered (ruling 127).
@@ -82,7 +85,7 @@ function runningLogin(
 
 function panelElement(
   backends: ProfileBackend[],
-  poll: BackendLoginPollData | null = null,
+  poll: BackendLoginPollAnswer | null = null,
 ) {
   lastSubmit = null;
   const Stub = createRoutesStub([
@@ -105,9 +108,10 @@ function panelElement(
     },
     {
       // The real poll target. Its answer is what the success toast must settle
-      // on, so it is a route with a loader, not a stubbed function.
+      // on, so it is a route with a loader, not a stubbed function. A refusal
+      // carries its status, as the route answers one.
       path: "/resources/backend-login",
-      loader: () => poll,
+      loader: () => (poll && "error" in poll ? Response.json(poll, { status: 401 }) : poll),
     },
   ]);
   return <Stub initialEntries={["/profile"]} />;
@@ -115,7 +119,7 @@ function panelElement(
 
 function renderPanel(
   backends: ProfileBackend[],
-  poll: BackendLoginPollData | null = null,
+  poll: BackendLoginPollAnswer | null = null,
 ) {
   return render(panelElement(backends, poll));
 }
@@ -711,6 +715,30 @@ describe("AgentAccountsPanel", () => {
       await vi.advanceTimersByTimeAsync(50);
     });
     expect(queryByText("Claude connected")).toBeTruthy();
+  });
+
+  /**
+   * Ruling 457, test audit L14-29: a poll from a signed-out tab used to
+   * navigate it to /login. It now answers 401 with the conventions' error
+   * body, and that body reaches this card as the poll's answer: the card keeps
+   * the sign-in the page drew and claims nothing, and the page's next
+   * navigation asks for the sign-in.
+   */
+  it("keeps the sign-in the page drew when a poll answers signed out", async () => {
+    vi.useFakeTimers();
+    const { getByText, queryByText } = renderPanel(
+      [backend("claude", { login: runningLogin("claude") }), backend("codex")],
+      { error: { code: "unauthorized", message: "Sign in to see your agent accounts." } },
+    );
+    // Two poll intervals: the refusal has landed, and been read again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_100);
+    });
+    // CANARY: read the poll's `login.id` or `health` without a guard and the
+    // refusal, which carries neither, takes the Profile page down with it.
+    expect(getByText("signing in")).toBeTruthy();
+    expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
+    expect(queryByText("Claude connected")).toBeNull();
   });
 });
 

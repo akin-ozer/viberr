@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react";
-import { createRoutesStub, Link, Outlet, useRevalidator } from "react-router";
+import { createRoutesStub, data, Link, Outlet, useRevalidator } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerDock } from "~/features/controller/controller-dock";
 import type { ControllerDockView } from "~/features/controller/controller-dock-query.server";
@@ -32,6 +32,10 @@ export interface DockStubOptions {
   /** Ruling 457: the viewer's turns working right now (none by default). */
   working?: () => LiveTurnView[];
   action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
+  /** Ruling 457: the dock's two loads answer with a 401 status, returned the
+   *  way the real routes answer a signed-out tab (`view` then supplies the
+   *  signed-out view). */
+  signedOut?: boolean;
   /** The pages hold the `user` stream, as the workspace layout does. */
   live?: boolean;
   /** Mount under `<StrictMode>`, as `entry.client.tsx` does (the dev server
@@ -130,10 +134,11 @@ export function mountDock(opts: DockStubOptions) {
           shouldRevalidate: dockResourceShouldRevalidate,
           loader: ({ request }) => {
             counters.unseenLoads.push(new URL(request.url));
-            return {
+            const status = {
               unseen: opts.unseen ? opts.unseen() : [],
               working: opts.working ? opts.working() : [],
             };
+            return opts.signedOut ? data(status, { status: 401 }) : status;
           },
         },
         {
@@ -142,7 +147,8 @@ export function mountDock(opts: DockStubOptions) {
           shouldRevalidate: dockResourceShouldRevalidate,
           loader: ({ request }) => {
             counters.loads.push(new URL(request.url));
-            return { view: opts.view(request) };
+            const answer = { view: opts.view(request) };
+            return opts.signedOut ? data(answer, { status: 401 }) : answer;
           },
           action: async ({ request }) => {
             const form = await request.formData();

@@ -474,6 +474,45 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.getByText("task page")).toBeTruthy();
   });
 
+  /**
+   * Ruling 457, test audit L14-29: a signed-out tab's dock loads used to
+   * navigate it to /login. They now answer 401 (returned, so the fetcher
+   * holds the answer and root's error boundary never sees it) with an empty
+   * status and the signed-out view, and the panel says what happened and
+   * what to do, blaming neither the scope nor a missing Claude account.
+   */
+  it("says the person is signed out, and offers no composer, on a signed-out tab", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      signedOut: true,
+      view: () =>
+        taskView({
+          signedOut: true,
+          unavailable: true,
+          available: false,
+          scope: {
+            ...taskView().scope,
+            projectName: null,
+            label: "Signed out",
+            contextLine: "Signed out: sign in again to talk to the controller.",
+          },
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+    // CANARY: drop the panel's `signedOut` branches and it says the task is
+    // not open to the person, and that their Claude account isn't connected.
+    await screen.findByText(
+      "You're signed out, so the controller can't answer here. Reload the page to sign in again.",
+    );
+    expect(screen.queryByText(/nothing to work with here/)).toBeNull();
+    expect(panel.querySelector("[data-not-connected]")).toBeNull();
+    const composer = await screen.findByLabelText("Message to the controller");
+    expect(composer.hasAttribute("disabled")).toBe(true);
+    expect(composer.getAttribute("placeholder")).toBe("Sign in again to send a message.");
+    expect(screen.getByText("task page")).toBeTruthy();
+  });
+
   it("sends into the thread the person picked, not the one still on screen (finding 15)", async () => {
     const { sends } = mount({
       path: "/projects/viberr/tasks/VIB-1",

@@ -11,7 +11,10 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { utcDayKey } from "~/shared/dates/format";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
-import type { BackendLoginPollData } from "~/routes/resources.backend-login";
+import type {
+  BackendLoginPollAnswer,
+  BackendLoginPollData,
+} from "~/routes/resources.backend-login";
 import type {
   ProfileBackend,
   ProfileBackendAccount,
@@ -734,15 +737,19 @@ function AgentAccountCard({
 
   // The poll fetcher is the card's OWN: `/resources/backend-login` answers for
   // the signed-in caller only, and loading it on the panel's action fetcher
-  // would overwrite the intent result the toast settles on.
-  const poll = useFetcher<BackendLoginPollData>();
+  // would overwrite the intent result the toast settles on. Once this tab is
+  // signed out it answers a refusal (a 401, ruling 457), which names no
+  // session and so never matches the loader's below.
+  const poll = useFetcher<BackendLoginPollAnswer>();
   // The LOADER decides which session exists; the poll only supplies a fresher
   // state OF THAT SESSION. Matching on the id is what keeps a stale answer from
   // an earlier sign-in (a fetcher keeps its last data indefinitely) from
   // rendering a brand-new attempt as already finished.
+  // SAFETY: a refusal carries no `login` (`BackendLoginRefusal`), so an answer
+  // naming the loader's session is always the poll's own data.
   const polled =
     poll.data && data.login && poll.data.login?.id === data.login.id
-      ? poll.data
+      ? (poll.data as BackendLoginPollData)
       : null;
   const login = polled?.login ?? data.login;
   // A poll may only ADD "connected", never take it away: the loader is the

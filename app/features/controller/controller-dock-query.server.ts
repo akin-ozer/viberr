@@ -88,6 +88,11 @@ export interface ControllerDockView {
   turn: ConversationTurnState;
   threads: ControllerDockThread[];
   viewerOwnsActive: boolean;
+  /** Ruling 457: the caller is not signed in. Only the view
+   *  `/resources/controller` answers with its 401 carries it, `unavailable`
+   *  with it, and the panel then asks for a sign-in instead of blaming the
+   *  scope or the person's Claude account. */
+  signedOut?: boolean;
 }
 
 export function describeDockScope(
@@ -244,25 +249,20 @@ export function dockTaskExists(
   return taskExists(db, projectSlug, taskKey);
 }
 
-/** The view for a scope this person cannot talk in here: the panel explains
- *  itself and offers no composer, and the page it sits on is untouched.
+/** What the two refusal views below share: no thread, no composer, and a
+ *  scope that names nothing but what the person's page asked about.
  *
- *  F35-4 (pass 35): this view names nothing but what the person typed. It used
- *  to spread `describeDockScope`, which reads the project's display name out
- *  of the projection into `projectName`, `label` and `contextLine`, so a
- *  non-member learned a project's name from a slug they guessed while every
- *  other door (board, task, `.data`, attachments, run-log, the controller's own
- *  tools) answers the slug alone. The projection is not read here at all. */
-export function unavailableDockView(
-  db: DatabaseSync,
-  /** Ruling 127: even the refusal view answers availability for THIS person. */
-  viewer: { id: string },
+ *  F35-4 (pass 35): the unavailable view used to spread `describeDockScope`,
+ *  which reads the project's display name out of the projection into
+ *  `projectName`, `label` and `contextLine`, so a non-member learned a
+ *  project's name from a slug they guessed while every other door (board,
+ *  task, `.data`, attachments, run-log, the controller's own tools) answers
+ *  the slug alone. The projection is not read for a refusal at all. */
+function refusedDockView(
   binding: { projectSlug: string | null; taskKey: string | null },
-  dataRoot?: string,
-): ControllerDockView {
+  says: { label: string; contextLine: string },
+): Omit<ControllerDockView, "available" | "controllerName"> {
   return {
-    available: isBackendAvailableFor(db, viewer.id, "claude", { dataRoot }),
-    controllerName: resolveControllerName(dataRoot),
     unavailable: true,
     staleSelection: false,
     scope: {
@@ -270,8 +270,8 @@ export function unavailableDockView(
       projectSlug: binding.projectSlug,
       taskKey: binding.taskKey,
       projectName: null,
-      label: "Not available here",
-      contextLine: "Not available here: this project or task is not open to you.",
+      label: says.label,
+      contextLine: says.contextLine,
       // A place to go, built from the slug the person typed (the page route
       // answers its own 404 there), never from the projection.
       pageHref: binding.projectSlug
@@ -284,5 +284,44 @@ export function unavailableDockView(
     turn: IDLE_TURN,
     threads: [],
     viewerOwnsActive: false,
+  };
+}
+
+/** The view for a scope this person cannot talk in here: the panel explains
+ *  itself and offers no composer, and the page it sits on is untouched. */
+export function unavailableDockView(
+  db: DatabaseSync,
+  /** Ruling 127: even the refusal view answers availability for THIS person. */
+  viewer: { id: string },
+  binding: { projectSlug: string | null; taskKey: string | null },
+  dataRoot?: string,
+): ControllerDockView {
+  return {
+    available: isBackendAvailableFor(db, viewer.id, "claude", { dataRoot }),
+    controllerName: resolveControllerName(dataRoot),
+    ...refusedDockView(binding, {
+      label: "Not available here",
+      contextLine: "Not available here: this project or task is not open to you.",
+    }),
+  };
+}
+
+/** Ruling 457 (test audit L14-29): the view for a caller who is not signed in
+ *  (no session, or a forced password reset pending), which
+ *  `/resources/controller` answers with its 401 instead of a login redirect.
+ *  Nothing is read for it, not even the controller's configured name: nobody
+ *  is asking. The name is the one the dock shows before any view lands. */
+export function signedOutDockView(binding: {
+  projectSlug: string | null;
+  taskKey: string | null;
+}): ControllerDockView {
+  return {
+    available: false,
+    controllerName: "Controller",
+    signedOut: true,
+    ...refusedDockView(binding, {
+      label: "Signed out",
+      contextLine: "Signed out: sign in again to talk to the controller.",
+    }),
   };
 }

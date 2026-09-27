@@ -23,19 +23,24 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-async function unseenFor(userId: string) {
+/** One load of the route, signed in with `cookie` or with no session at all. */
+async function load(cookie?: string) {
   const { loader } = await import("~/routes/resources.controller-unseen");
-  const { cookie } = await app.cookieFor(userId);
-  const request = app.request("/resources/controller-unseen", { cookie });
-  return (
-    await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/resources/controller-unseen",
-      context: new RouterContextProvider(),
-    })
-  ).unseen;
+  const request = app.request("/resources/controller-unseen", cookie ? { cookie } : {});
+  return loader({
+    request,
+    url: new URL(request.url),
+    params: {},
+    pattern: "/resources/controller-unseen",
+    context: new RouterContextProvider(),
+  });
+}
+
+async function unseenFor(userId: string) {
+  const answer = await load((await app.cookieFor(userId)).cookie);
+  // Signed in, the loader answers the status itself; only a refusal is wrapped.
+  if (!("unseen" in answer)) throw new Error("expected the viewer's status, got a refusal");
+  return answer.unseen;
 }
 
 async function replied(userId: string, projectSlug: string | null) {
@@ -80,17 +85,28 @@ describe("/resources/controller-unseen (O39-d)", () => {
     expect(view.shouldRevalidate()).toBe(false);
   });
 
-  it("is refused without a session", async () => {
-    const { loader } = await import("~/routes/resources.controller-unseen");
-    const request = app.request("/resources/controller-unseen");
-    await expect(
-      loader({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: "/resources/controller-unseen",
-        context: new RouterContextProvider(),
-      }),
-    ).rejects.toBeDefined();
+  /**
+   * Ruling 457, test audit L14-29. The dock loads this through a root-owned
+   * fetcher on every page it mounts on, on each `controller.updated` and every
+   * 5 s while a turn works. `requireAuth` answered a missing session with a
+   * login redirect naming THIS route as the returnTo, and a fetcher follows a
+   * redirect as a navigation: a stale tab went to /login and, once signed in,
+   * to a page of raw JSON. No session, or a forced password reset pending,
+   * answers 401 with nothing to show, and returns it: a thrown response would
+   * replace the page with root's error boundary.
+   */
+  it("answers a signed-out load 401 with an empty status, never a login redirect", async () => {
+    await replied(deniz, null);
+    const { cookie } = await app.cookieFor(deniz);
+    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(deniz);
+    try {
+      // CANARY: guard with `requireAuth` again and both loads reject with its
+      // 302 to /login?returnTo=%2Fresources%2Fcontroller-unseen.
+      for (const answer of [await load(), await load(cookie)]) {
+        expect(answer).toMatchObject({ init: { status: 401 }, data: { unseen: [], working: [] } });
+      }
+    } finally {
+      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(deniz);
+    }
   });
 });

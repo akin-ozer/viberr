@@ -5,10 +5,11 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 
 /**
- * Route-level tests for GET /resources/model-catalog: requires auth,
- * returns the curated catalog shape per backend, and defaults an unknown
+ * Route-level tests for GET /resources/model-catalog: requires auth (a 401,
+ * never a login redirect), returns the curated catalog shape per backend, and defaults an unknown
  * backend to claude so the modal always renders.
  *
  * Ruling 127 gave this route BOTH arms to answer, and which one it takes is a
@@ -50,12 +51,9 @@ interface ModelCatalogBody {
   data: ModelCatalog;
 }
 
-async function runLoader(
-  query: string,
-  userId?: string,
-): Promise<Response> {
+/** One load, signed in with `cookie` or with no session at all. */
+async function load(query: string, cookie?: string): Promise<Response> {
   const { loader } = await import("~/routes/resources.model-catalog");
-  const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
   const request = app.request(
     `/resources/model-catalog${query}`,
     cookie ? { cookie } : {},
@@ -69,13 +67,44 @@ async function runLoader(
   });
 }
 
+async function runLoader(
+  query: string,
+  userId?: string,
+): Promise<Response> {
+  return load(query, userId ? (await app.cookieFor(userId)).cookie : undefined);
+}
+
 describe("resources/model-catalog", () => {
-  it("redirects signed-out users to /login", async () => {
-    const thrown = await runLoader("?backend=claude").catch((e) => e);
-    expect(thrown).toBeInstanceOf(Response);
-    // SAFETY: the assertion above has already failed the test unless `thrown`
-    // is the redirect Response `requireUser` throws for a signed-out request.
-    expect((thrown as Response).status).toBe(302);
+  /**
+   * Ruling 457, test audit L14-29. The agent editors load this through a
+   * fetcher when they open and when the backend changes, and `requireUser`
+   * answered a missing session with a login redirect naming THIS route as the
+   * returnTo: a fetcher follows a redirect as a navigation, so opening an
+   * editor in a stale tab went to /login and, once signed in, to a page of
+   * raw JSON. No session, or a forced password reset pending, answers 401 in
+   * the conventions' JSON error shape, which the editor reads as a failed load
+   * it offers to retry.
+   */
+  it("answers a signed-out load 401 in the conventions' error shape, never a login redirect", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(ardaId);
+    try {
+      // CANARY: guard with `requireUser` again and both loads reject with its
+      // 302 to /login?returnTo=%2Fresources%2Fmodel-catalog%3Fbackend%3Dcodex.
+      for (const res of [await load("?backend=codex"), await load("?backend=codex", cookie)]) {
+        expect({ status: res.status, body: await res.json() }).toEqual({
+          status: 401,
+          body: {
+            error: {
+              code: ERROR_CODES.UNAUTHORIZED,
+              message: "Sign in to read the model catalog.",
+            },
+          },
+        });
+      }
+    } finally {
+      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(ardaId);
+    }
   });
 
   it("returns the curated claude catalog for a signed-in user", async () => {

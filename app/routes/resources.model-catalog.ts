@@ -1,6 +1,7 @@
 import type { Route } from "./+types/resources.model-catalog";
-import { requireUser } from "~/server/auth/require-user.server";
+import { authenticate } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
+import { ERROR_CODES } from "~/server/errors/error-codes";
 import { getModelCatalog } from "~/server/runtimes/model-catalog.server";
 import {
   runCredentialFor,
@@ -29,7 +30,26 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * silently offering one that 400s at the SDK.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // redirect, which named THIS route as the returnTo. The editors load it
+  // through a fetcher when they open and when the backend changes, and a
+  // fetcher follows a redirect as a navigation: opening one in a stale tab
+  // went to /login and, once signed in, to a page of raw JSON. The editor
+  // reads the refusal as a failed load and offers its retry (D5); the page's
+  // next real navigation asks for the sign-in.
+  const ctx = await authenticate(request);
+  if (!ctx || ctx.pwresetRequired) {
+    return Response.json(
+      {
+        error: {
+          code: ERROR_CODES.UNAUTHORIZED,
+          message: "Sign in to read the model catalog.",
+        },
+      },
+      { status: 401 },
+    );
+  }
+  const { user } = ctx;
   const db = getDb();
   const url = new URL(request.url);
   const raw = url.searchParams.get("backend");

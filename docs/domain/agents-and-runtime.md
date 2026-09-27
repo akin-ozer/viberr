@@ -230,7 +230,8 @@ make).
 | codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, `CODEX_MODELS` in `model-catalog.server.ts`; GPT-6 Sol and Luna are not in the CLI's bundled catalog, the account's server offers them only to a client at 0.155.0 or later; Astra is the CLI's own default but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`) on every model except GPT-5.5, which stops at `xhigh`; `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
 
 `/resources/model-catalog?backend=` serves `{ data: { models, efforts, defaultModel,
-defaultEffort } }` to the profile editor (unknown backend → claude; `requireUser` only).
+defaultEffort } }` to the profile editor (unknown backend → claude; any signed-in user, and a
+signed-out request gets a 401 `{ error }`, never a login redirect, ruling 457).
 The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` and passes
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
@@ -797,7 +798,8 @@ a succeeding Codex MCP call). Phases (`RUN_PHASE`) are stored as their display s
 window is written when it closes, never onto a settled row.
 
 Consumers: `GET /resources/run-log?runId=&since=|before=&limit=` (1..500, member-gated;
-controller runs by conversation ownership) returns `{ runId, threadId, state, lines,
+controller runs by conversation ownership; a signed-out request gets a 401 `{ error }`,
+never a login redirect, ruling 457) returns `{ runId, threadId, state, lines,
 headSeq, oldestSeq, hasMore, facts }`, `facts` being the run row's `RunLiveFacts` (phase,
 step, turns, tokens, the cache record; ruling 457, one mapping with the task loader's
 `RunView`, `runLiveFacts`); `raw=0` leaves each line's stored envelope out, and
