@@ -1161,8 +1161,12 @@ function AgentAccountCard({
                       : null;
                   return (
                     <div className="conn-row" key={account.id} data-account={account.id}>
-                      <span className="conn-main">
-                        <b>{account.name}</b>
+                      {/* Ruling 515: the name and its facts, then the buttons
+                          under them, as the account in use reads above. The
+                          name keeps one line; the title holds all of it when
+                          a narrow row ends it in an ellipsis. */}
+                      <div className="conn-main">
+                        <b title={account.name}>{account.name}</b>
                         <span className="sub">
                           {accountKindWord(account.health)}
                           {on ? (
@@ -1172,31 +1176,31 @@ function AgentAccountCard({
                           ) : null}
                           {account.health.available ? "" : " · sign-in file missing"}
                         </span>
-                        {renameFor(account)}
-                      </span>
-                      {/* The row's own flex wrap spaces the buttons, as on
-                          the connections list (`.conn-row`). */}
-                      {account.health.available ? (
-                        <button
-                          type="button"
-                          className="btn sm"
-                          disabled={busy}
-                          aria-busy={accountBusy("backend-account-switch", account.id) || undefined}
-                          onClick={() =>
-                            submit({ intent: "backend-account-switch", backend, account: account.id })
-                          }
-                        >
-                          {accountBusy("backend-account-switch", account.id) && (
-                            <Icon name="loader" className="spin" />
-                          )}
-                          {accountBusy("backend-account-switch", account.id)
-                            ? "Switching…"
-                            : "Use this account"}
-                        </button>
-                      ) : account.health.kind === "login" ? (
-                        signInButtons(account.id, false)
-                      ) : null}
-                      {manageButtons(account)}
+                      </div>
+                      <div className="cred-manage">
+                        {account.health.available ? (
+                          <button
+                            type="button"
+                            className="btn sm"
+                            disabled={busy}
+                            aria-busy={accountBusy("backend-account-switch", account.id) || undefined}
+                            onClick={() =>
+                              submit({ intent: "backend-account-switch", backend, account: account.id })
+                            }
+                          >
+                            {accountBusy("backend-account-switch", account.id) && (
+                              <Icon name="loader" className="spin" />
+                            )}
+                            {accountBusy("backend-account-switch", account.id)
+                              ? "Switching…"
+                              : "Use this account"}
+                          </button>
+                        ) : account.health.kind === "login" ? (
+                          signInButtons(account.id, false)
+                        ) : null}
+                        {manageButtons(account)}
+                      </div>
+                      {renameFor(account)}
                     </div>
                   );
                 })}

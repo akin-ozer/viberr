@@ -533,8 +533,10 @@ place either backend is connected.
 **Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
 backend; one is **in use**, the one their runs bill. A connected card leads with it
 (its health, usage and refusals are about that account; once there is a choice the
-green line opens "Runs use <name>"), then lists **Other Claude accounts** as
-connection rows, each with **Use this account** (`backend-account-switch` {account}):
+green line opens "Runs use <name>"), then lists **Other Claude accounts**, a row each:
+the name (one line, cut with an ellipsis only where the row is narrower than it) and its
+facts over the row's buttons, the order the account in use has (ruling 515). Each has
+**Use this account** (`backend-account-switch` {account}):
 a switch, not a sign-in, because every account keeps its vendor sign-in in a home of its
 own on this server; it takes effect for the next run, a run already going keeps its
 account, and the toast says "Claude runs now use <name>". An account whose sign-in file
