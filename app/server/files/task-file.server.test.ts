@@ -796,7 +796,7 @@ describe("task.md structure injection through metadata the escaper skipped", () 
 /**
  * F37-59: the `timeline.out_of_order` heads-up used to end "display sorts by
  * timestamp". Nothing sorts. `listTaskEvents` is `ORDER BY position ASC` over
- * the verbatim file index the rebuilder writes, `sliceTimeline` takes the first
+ * the verbatim file index the rebuilder writes, `timelineSlice` takes the first
  * N off the front of that array, and the task timeline component only filters
  * it. The panel whose job is to tell a reader the truth about the record was
  * telling them the page had already compensated.

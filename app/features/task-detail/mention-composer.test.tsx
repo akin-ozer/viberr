@@ -307,6 +307,7 @@ describe("comment composer @-mention autocomplete", () => {
   it("marks the input as a combobox controlling the listbox", async () => {
     const { ce, editor } = await renderComposer();
     expect(ce.getAttribute("role")).toBe("combobox");
+    expect(ce.getAttribute("aria-expanded")).toBe("false");
     await setText(editor, "@de");
     await waitFor(() => expect(ce.getAttribute("aria-expanded")).toBe("true"));
     const controls = ce.getAttribute("aria-controls")!;
