@@ -288,7 +288,9 @@ export interface LiveRunLogStore extends RunLogStore {
   poll(runId: string): Promise<string | null>;
   /** UI-30: false for a viewer whose run-log requests would 403. */
   setEnabled(enabled: boolean): void;
-  /** Aborts every request in flight (unmount). */
+  /** Aborts every request in flight (unmount). React can go on using a
+   *  disposed store, so a window load it cuts short is asked again the next
+   *  time its thread is shown (ruling 524(e)). */
   dispose(): void;
 }
 
@@ -536,11 +538,14 @@ export function createLiveRunLogStore(
       t.replacing = false;
       update(t, { status: "failed", loadError });
     };
+    // Ruling 524(e): a request `dispose` aborted is not a failure, and the
+    // thread is no longer this request's (`dispose` handed it back).
+    const { signal } = abort;
     try {
       const { status, data } = await getData<WindowPage>(
         `/resources/run-log?runId=${encodeURIComponent(t.runId)}&window=1`,
       );
-      if (!current(t)) return;
+      if (signal.aborted || !current(t)) return;
       if (data === null) {
         fail(
           status === 403
@@ -576,9 +581,9 @@ export function createLiveRunLogStore(
       if (rawView) void fillRaw(t);
       void tail(t);
     } catch {
-      if (current(t)) fail("Could not load this console: the request failed.");
+      if (!signal.aborted && current(t)) fail("Could not load this console: the request failed.");
     } finally {
-      t.windowing = false;
+      if (!signal.aborted) t.windowing = false;
     }
   };
 
@@ -849,6 +854,18 @@ export function createLiveRunLogStore(
     dispose() {
       abort.abort();
       abort = new AbortController();
+      // Ruling 524(e): under StrictMode, React's development build (the dev
+      // server) rehearses every mount: the console shows its thread, the
+      // page's cleanup disposes the store, and the console shows it again.
+      // The aborted window load read as "the request failed" until the
+      // console mounted anew. Each load cut short hands its thread back, so
+      // the next show asks again.
+      for (const t of threadMap.values()) {
+        if (!t.windowing) continue;
+        t.windowing = false;
+        t.replacing = false;
+        update(t, { status: "unloaded" });
+      }
     },
   };
 }

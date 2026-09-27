@@ -788,6 +788,7 @@ describe("app.css search field vs palette trigger (P16-F6)", () => {
 const BREAKPOINTS = {
   "max-width: 1400px": "board columns tighten before any layout reflows",
   "max-width: 1100px": "THE TWO-COLUMN COLLAPSE — every 2-up layout goes 1-up",
+  "width > 1100px": "the collapse's exact complement: the controller's full-height band (ruling 524(a))",
   "max-width: 1080px": "topbar tier 1 — brand wordmark, root crumb, shortcut chip",
   "max-width: 1000px": "settings tab rail goes horizontal",
   "max-width: 900px": "home topbar collapses to the palette; project-row stats drop",
@@ -798,8 +799,9 @@ const BREAKPOINTS = {
 } satisfies Record<string, string>;
 
 describe("app.css breakpoints (P16-F8)", () => {
-  /** Every `(max-width: Npx)` / `(min-width: Npx)` in the sheet, in order. */
-  const widths = [...CODE.matchAll(/\((m(?:in|ax)-width:\s*\d+px)\)/g)].map((m) =>
+  /** Every `(max-width: Npx)` / `(min-width: Npx)` / `(width > Npx)` in the
+   *  sheet, in order. */
+  const widths = [...CODE.matchAll(/\((m(?:in|ax)-width:\s*\d+px|width\s*[<>]=?\s*\d+px)\)/g)].map((m) =>
     m[1].replace(/\s+/g, " "),
   );
 
@@ -822,6 +824,19 @@ describe("app.css breakpoints (P16-F8)", () => {
       .map(([w, n]) => `${w} × ${n}`)
       .sort();
     expect(duplicated).toEqual([]);
+  });
+
+  it("a complement starts exactly where the breakpoint it names ends", () => {
+    // Ruling 524(a): the controller's band is `(width > 1100px)`, the
+    // collapse's complement, so no zoomed width falls between the two blocks
+    // (a `min-width: 1101px` left 1100.5px in neither). A complement is the
+    // one breakpoint whose number another one owns, so it must move with it.
+    // CANARY: move the collapse to 1200px and leave the band at 1100px.
+    const complements = Object.keys(BREAKPOINTS).filter((w) => w.startsWith("width > "));
+    expect(complements).not.toEqual([]);
+    for (const w of complements) {
+      expect(Object.keys(BREAKPOINTS), w).toContain(`max-width: ${w.slice("width > ".length)}`);
+    }
   });
 
   it("every named breakpoint is actually used", () => {
@@ -3125,14 +3140,15 @@ describe("app.css controller layout (ruling 419)", () => {
   };
   const collapse = () => CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
 
-  it("pins the rail beside the conversation and makes it its own scroller", () => {
-    // CANARY: drop `position: sticky` or `overflow-y: auto` from `.ctl-side`.
-    const side = ruleBody(CODE, ".ctl-side");
-    expect(side).toMatch(/position:\s*sticky/);
-    expect(side).toMatch(/align-self:\s*start/);
-    expect(side).toMatch(/overflow-y:\s*auto/);
-    // Capped at the scrollport: under the top bar, clear of the dock button.
-    expect(side).toMatch(/max-height:\s*calc\(100dvh - var\(--topbar-h\) - var\(--dock-clear\)\)/);
+  it("keeps the rail its own scroller, a column of the band beside the conversation", () => {
+    // Ruling 524(a): the rail no longer pins a short card over empty page; the
+    // band's one row gives it the conversation's height and it scrolls inside
+    // that. CANARY: drop `overflow-y: auto` from `.ctl-side`, or the band's
+    // row, and the rail scrolls with the page and stretches it again.
+    const side = requiredDecls(plain, ".ctl-side");
+    expect(side.get("overflow-y")).toBe("auto");
+    expect(side.get("min-height")).toBe("0");
+    expect(requiredDecls(plain, ".ctl-layout").get("grid-template-rows")).toBe("minmax(0, 1fr)");
   });
 
   it("keeps the transcript a capped scroller in the one-column layout", () => {
@@ -3235,7 +3251,7 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);
   });
 
-  it("shows the thread switcher only in the one-column layout, and no key hint on touch", () => {
+  it("shows the thread switcher only where the rail's list is out of view, and no key hint on touch", () => {
     expect(ruleBody(CODE, ".ctl-picker")).toMatch(/display:\s*none/);
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-picker")).toMatch(/display:\s*block/);
     const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/);
@@ -3248,6 +3264,85 @@ describe("app.css controller layout (ruling 419)", () => {
     // goal chains' own controls it also listed left with them, ruling 503.)
     const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)![1];
     expect(coarse).toMatch(/\.ctl-all-toggle \.linkish\s*\{\s*padding-block:\s*\.3rem;\s*\}/);
+  });
+});
+
+/**
+ * Ruling 524 (owner, 2026-09-27: "it show lots of empty space everywhere"). The
+ * controller page was a 1200px column centred on a 1920px screen, its console
+ * a 320px box under the composer, and the rail and the transcript each ended
+ * at a height of their own over empty page. jsdom has no layout, so the rules
+ * the band rests on are pinned here; the before and after screenshots are on
+ * the ruling's PR.
+ */
+describe("app.css controller band (ruling 524)", () => {
+  const band = RULES.filter((r) => r.at.some((a) => a === "@media (width > 1100px)"));
+  const split = band.filter((r) => r.at.some((a) => a.startsWith("@container ctl")));
+  const wide = band.filter((r) => !split.includes(r));
+  const OPEN = '.ctl-layout:has(> .ctl-run:not([data-console="closed"]))';
+  const CLOSED = '.ctl-layout:has(> .ctl-run[data-console="closed"])';
+
+  it("(a) puts the run in a column between the conversation and the rail", () => {
+    // CANARY: drop the three-column rule, and the pane lands in the rail's
+    // 17rem column with the rail pushed under the conversation.
+    expect(requiredDecls(wide, OPEN).get("grid-template-columns")).toBe("minmax(0, 1fr) minmax(0, 1fr) 17rem");
+    // Too narrow for three (a project's page on a laptop): the conversation
+    // and the run split the band, the rail follows under it, and the head's
+    // switcher names the thread.
+    expect(requiredDecls(split, OPEN).get("grid-template-columns")).toBe("minmax(0, 1fr) minmax(0, 1fr)");
+    expect(requiredDecls(split, `${OPEN} > .ctl-side`).get("grid-column")).toBe("1 / -1");
+    const picker = '.ctl-wrap:has(> .ctl-layout > .ctl-run:not([data-console="closed"])) .ctl-picker';
+    expect(requiredDecls(split, picker).get("display")).toBe("block");
+    // A hidden console leaves the strip alone: it goes under the composer and
+    // the rail comes back beside the conversation.
+    expect(requiredDecls(wide, '.ctl-layout > .ctl-run[data-console="closed"]').get("grid-row")).toBe("2");
+    expect(requiredDecls(wide, `${CLOSED} > .ctl-side`).get("grid-row")).toBe("1 / -1");
+    // The standalone page is no longer a 1200px column, and it is the
+    // screen's height so the band has one to fill.
+    expect(requiredDecls(plain, ".ctl-wrap.standalone").get("max-width")).toBe("1920px");
+    expect(requiredDecls(wide, ".ctl-wrap.standalone").get("height")).toBe("100dvh");
+  });
+
+  it("(a) gives the console the pane's height, where it was a 320px box", () => {
+    // CANARY: drop the `.ctl-run .console` rule and the console is 320px
+    // however tall the screen, over an empty pane.
+    const box = requiredDecls(wide, ".ctl-run .console");
+    expect(box.get("flex")).toBe("1");
+    expect(box.get("height")).toBe("auto");
+    // Every box between the pane and the console passes the height down.
+    for (const link of [".ctl-run > .runbar", ".ctl-run > .panel", ".ctl-run > .runbar > .runbar-body", ".ctl-run .runbar-console > .panel"]) {
+      expect(requiredDecls(wide, link).get("flex"), link).toBe("1");
+    }
+    // One column is no band: the collapse keeps the page flowing, and the
+    // console its own 320px.
+    expect(requiredDecls(RULES.filter((r) => r.at.includes("@media (max-width: 1100px)")), ".ctl-wrap .ctl-layout").get("flex")).toBe("none");
+    expect(requiredDecls(plain, ".console").get("height")).toBe("320px");
+  });
+
+  it("(d) reads the run's facts as one strip under its phase, with the actions beside the phase", () => {
+    // The four cells were boxes floated right of the phase, and Hide console
+    // and Interrupt took a row of their own under them: 140px of card for
+    // two lines of text. CANARY: restore `.run-stats { display: flex }`.
+    const body = requiredDecls(plain, ".runbar-body");
+    expect(body.get("display")).toBe("grid");
+    expect(body.get("grid-template-areas")).toBe('"phase actions" "stats stats"');
+    const stats = requiredDecls(plain, ".run-stats");
+    expect(stats.get("display")).toBe("grid");
+    expect(stats.get("grid-area")).toBe("stats");
+    expect(stats.get("grid-template-columns")).toBe("repeat(4, minmax(0, 1fr))");
+    // A narrow card stacks, and a phone's takes the cells two by two.
+    const narrow = RULES.filter((r) => r.at.some((a) => a.startsWith("@container runbar")));
+    expect(requiredDecls(narrow, ".run-stats").get("grid-template-columns")).toBe("repeat(2, minmax(0, 1fr))");
+  });
+
+  it("(d) wraps the SDK line inside its own box before the console's toggles leave the row", () => {
+    // In the run pane the line dropped under the state pill and pushed
+    // "{ } raw" and "follow" to a third row. CANARY: drop `min-width: 0`
+    // from `.logs-meta`, or the toggles' `margin-left: auto`.
+    const meta = requiredDecls(plain, ".logs-meta");
+    expect(meta.get("flex")).toBe("1 1 12rem");
+    expect(meta.get("min-width")).toBe("0");
+    expect(requiredDecls(plain, ".logs-tools").get("margin-left")).toBe("auto");
   });
 });
 
@@ -3991,7 +4086,7 @@ describe("app.css ruling 478: the task page at phone width", () => {
     expect(declsAt(".attach-file .attach-by", []).get("flex")).toBe("none");
   });
 
-  it("(c) F40-33: the live strip's text column may shrink below the step's 44ch", () => {
+  it("(c) F40-33: the live strip's text column may shrink, and a long step ends in an ellipsis", () => {
     // WEB-2 at 375px: the step ran to x=388 in a 341px strip and the page
     // scrolled sideways. CANARY: drop `.run-phase-text { min-width: 0 }`.
     expect(declsAt(".run-phase-text", []).get("min-width")).toBe("0");
