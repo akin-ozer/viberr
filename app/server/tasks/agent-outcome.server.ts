@@ -3,6 +3,7 @@ import { z } from "zod";
 import { UNIFIED_CAP_CATALOG } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
+  EVIDENCE_STATUSES,
   normalizeEvidenceRows,
   type EvidenceRow,
   type FileActorRef,
@@ -134,18 +135,28 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
     // editor offered it to every profile regardless of backend. The completion
     // pipeline already reads `outcome.evidence` for both backends and gates it
     // on the same grant, so this is the whole gap.
+    // Ruling 526: what was checked, how it came out and whether it passed,
+    // the fields `report_outcome` declares.
     evidence: {
       type: ["array", "null"],
       description:
-        "ONLY when your role is to cite evidence: short REFERENCES to what you checked (a suite name, a file, a check) with two count columns. Never raw output — that lives in the run logs. null otherwise.",
+        "ONLY when your role is to cite evidence: up to 8 short REFERENCES to what you checked (a suite, a file and line, a check, a source), each with how it came out and whether it passed. Never raw output — that lives in the run logs. null otherwise.",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["label", "add", "del"],
+        required: ["label", "result", "status"],
         properties: {
-          label: { type: "string" },
-          add: { type: ["string", "null"] },
-          del: { type: ["string", "null"] },
+          label: { type: "string", description: "What you checked or cite, in a short phrase." },
+          result: {
+            type: ["string", "null"],
+            description: "How it came out, in a few words ('102 passed, 0 failed'); null when the label says it all.",
+          },
+          status: {
+            type: "string",
+            enum: [...EVIDENCE_STATUSES],
+            description:
+              "pass for a check that passed, fail for a check that failed or a finding that blocks, info for a reference that is neither.",
+          },
         },
       },
     },
@@ -240,8 +251,8 @@ const codexEnvelopeSchema = z.object({
       z
         .object({
           label: z.unknown().optional(),
-          add: z.unknown().optional(),
-          del: z.unknown().optional(),
+          result: z.unknown().optional(),
+          status: z.unknown().optional(),
         })
         .nullable()
         .catch(null),
@@ -366,7 +377,7 @@ const stagedOutcomeSchema = z.object({
     })
     .optional(),
   evidence: z
-    .array(z.object({ label: z.string(), add: z.string(), del: z.string() }))
+    .array(z.object({ label: z.string(), result: z.string(), status: z.enum(EVIDENCE_STATUSES) }))
     .optional(),
   // Ruling 488: a restart between the run and its completion keeps the relay.
   relay: z.array(z.object({ taskKey: z.string(), text: z.string() })).optional(),

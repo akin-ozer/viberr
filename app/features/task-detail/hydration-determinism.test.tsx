@@ -113,8 +113,8 @@ const TIMELINE: TimelineEventRender[] = [
     title: "Completion report",
     text: "Implemented repo attach.",
     evidence: [
-      { label: "unit/policy_gate_test", add: "+14", del: "0" },
-      { label: "screenshot-1.png", add: "", del: "" },
+      { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+      { label: "screenshot-1.png", result: "", status: "info" },
     ],
     attachments: ["screenshot-1.png"],
   }),

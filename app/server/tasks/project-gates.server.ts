@@ -5,7 +5,6 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { Readable } from "node:stream";
 import {
-  EVIDENCE_EMPTY_COLUMN,
   normalizeEvidenceRows,
   type GateResult,
   type GateRun,
@@ -753,10 +752,10 @@ function gateRunEvent(run: GateRun, gates: readonly ProjectGate[], taskKey: stri
   }
   const evidence = normalizeEvidenceRows(
     // Ruling 493: the timeline reads these rows back (`gateNoteView`).
+    // Ruling 526: each row says whether its gate passed.
     run.results.map((r) => ({
       label: gateEvidenceLabel(r),
-      add: EVIDENCE_EMPTY_COLUMN,
-      del: EVIDENCE_EMPTY_COLUMN,
+      status: r.exitCode === 0 ? "pass" : "fail",
     })),
   );
   const logs = run.results.flatMap((r) => (r.log ? [r.log] : []));

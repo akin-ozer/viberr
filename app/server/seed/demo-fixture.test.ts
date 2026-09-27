@@ -277,9 +277,11 @@ describe("demo fixture", () => {
     });
     expect(comment?.actor).toMatchObject({ kind: "human", name: "Arda Kaya", initials: "AK" });
     expect(completion).toMatchObject({ title: "Completion report" });
+    // Ruling 526 departs from data.js here: the mock's rows carried a diff's
+    // two columns ("+14", "0"), where a row now says how its check came out.
     expect(completion?.evidence).toEqual([
-      { label: "unit/policy_gate_test", add: "+14", del: "0" },
-      { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+      { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+      { label: "integration/pr_sync_test", result: "11 passed", status: "pass" },
     ]);
     expect(completion?.actor).toMatchObject({ kind: "agent", backend: "codex", name: "Codex", role: "Implementation" });
     expect(policy?.actor).toEqual({ kind: "system", name: "Policy engine" });

@@ -8,11 +8,14 @@ import {
   type FileDiagnostic,
 } from "~/schemas/file-diagnostics";
 import {
+  EVIDENCE_EMPTY_COLUMN,
+  EVIDENCE_STATUSES,
   packetObservationSchema,
   packetOptionSchema,
   parseTaskFrontmatter,
   taskPacketSchema,
   TIMELINE_EVENT_TYPES,
+  type EvidenceRow,
   type ParsedTaskFile,
   type TaskFileEvent,
   type TaskPacket,
@@ -41,8 +44,12 @@ import {
  *                    <blank line>
  *                    <text — RichText micro-format>
  *                    evidence:            (optional, outcome events — P13-D-26:
- *                    - <label> · <add> · <del>   a completion, a reviewer's
- *                                                verdict, or an agent's report)
+ *                    - [<status>] <label> · <result>   a completion, a
+ *                                         reviewer's verdict, or an agent's
+ *                                         report; ruling 526 put the status
+ *                                         first, and an older
+ *                                         `- <label> · <add> · <del>` row
+ *                                         still reads)
  *                    attachments:         (optional — names of files the
  *                    - <file name>         event's run saved into the task's
  *                                          attachments/ dir; the dir is truth)
@@ -143,6 +150,43 @@ function splitSections(body: string): RawSection[] {
 
 // ------------------------------------------------------------- timeline
 
+/** Ruling 526: an evidence row opens with its status in brackets. */
+const EVIDENCE_ROW_RE = /^\[([a-z]+)\] (.+)$/;
+/** A count cell of an older row that is a diff's size ("+412", "−87"). */
+const SIGNED_COUNT_RE = /^[+−-]?\d+$/;
+
+/**
+ * One `evidence:` row, less its `- `. A row reads `[<status>] <label> ·
+ * <result>`, the result being the last segment (the label may hold the
+ * separator itself). A row written before ruling 526 reads
+ * `<label> · <add> · <del>`: it becomes an `info` row whose result is its two
+ * cells, a diff's two counts side by side ("+412 −87") and any other pair
+ * with a comma ("102 passed, 0 failed"). Null for a row in neither shape.
+ */
+function parseEvidenceRow(line: string): EvidenceRow | null {
+  const marked = EVIDENCE_ROW_RE.exec(line);
+  const status = EVIDENCE_STATUSES.find((s) => s === marked?.[1]);
+  if (marked && status) {
+    const parts = marked[2]!.split(SEP);
+    const result = parts.length > 1 ? parts.pop()!.trim() : "";
+    return {
+      label: parts.join(SEP).trim(),
+      result: result === EVIDENCE_EMPTY_COLUMN ? "" : result,
+      status,
+    };
+  }
+  const parts = line.split(SEP);
+  if (parts.length < 3) return null;
+  const del = parts.pop()!.trim();
+  const add = parts.pop()!.trim();
+  const cells = [add, del].filter((cell) => cell !== "" && cell !== EVIDENCE_EMPTY_COLUMN);
+  return {
+    label: parts.join(SEP).trim(),
+    result: cells.join(cells.every((cell) => SIGNED_COUNT_RE.test(cell)) ? " " : ", "),
+    status: "info",
+  };
+}
+
 function parseEventBlock(
   headingLine: string,
   bodyLines: string[],
@@ -241,7 +285,7 @@ function parseEventBlock(
   const textLines = textEnd === -1 ? rest : rest.slice(0, textEnd);
   const text = textLines.map(unescapeEventTextLine).join("\n").trim();
 
-  let evidence: { label: string; add: string; del: string }[] | null = null;
+  let evidence: EvidenceRow[] | null = null;
   if (evidenceIdx !== -1) {
     evidence = [];
     for (const line of rest.slice(evidenceIdx + 1)) {
@@ -250,8 +294,8 @@ function parseEventBlock(
       // A following `attachments:` marker (or any other non-row line) ends the
       // block — same tolerance the rows always had.
       if (!trimmed.startsWith("- ")) break;
-      const parts = trimmed.slice(2).split(SEP);
-      if (parts.length < 3) {
+      const row = parseEvidenceRow(trimmed.slice(2));
+      if (!row) {
         diagnostics.push(
           diagWarning(
             "timeline.malformed_evidence",
@@ -261,9 +305,7 @@ function parseEventBlock(
         );
         continue;
       }
-      const del = parts.pop()!.trim();
-      const add = parts.pop()!.trim();
-      evidence.push({ label: parts.join(SEP).trim(), add, del });
+      evidence.push(row);
     }
   }
 
@@ -354,7 +396,7 @@ function serializeEvent(event: TaskFileEvent): string {
     lines.push("");
     lines.push("evidence:");
     for (const row of event.evidence) {
-      lines.push(`- ${row.label}${SEP}${row.add}${SEP}${row.del}`);
+      lines.push(`- [${row.status}] ${row.label}${SEP}${row.result || EVIDENCE_EMPTY_COLUMN}`);
     }
   }
   if (event.attachments && event.attachments.length > 0) {

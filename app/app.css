@@ -2238,23 +2238,59 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-node.proposal { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .tl-proposal-link { display: inline-block; margin-top: .25rem; font-size: .75rem; }
 
-.tl-card {
-  margin-top: .5rem;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-box);
-  background: color-mix(in srgb, var(--surface), transparent 30%);
-  padding: .5rem .75rem;
+/* Ruling 526: an outcome's evidence is a checklist, and a reviewer's verdict a
+   card around it. Both hold a short set, so on a wide timeline they stop at
+   the gate table's measure (ruling 493). */
+.ev-list, .vd-card {
+  margin-top: .5rem; max-width: 36rem;
+  border: 1px solid var(--hairline); border-radius: var(--radius-box);
+  background: var(--surface); overflow: hidden;
 }
-.tl-card.evidence { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); background: var(--tint-hover); }
-/* A citation line, optionally followed by its diff counts. The label takes the
-   room (min-width: 0 so a long one wraps instead of shoving the counts off the
-   edge); the counts hold their own column. A block whose rows carry no counts
-   renders label-only — see the timeline's evidence block. */
-.tl-card .ev-row { display: flex; justify-content: space-between; gap: 1rem; padding: .125rem 0; }
-.tl-card .ev-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
-.tl-card .ev-row .ev-counts { flex: none; font-variant-numeric: tabular-nums; }
-.tl-card .ev-row .add { color: var(--teal-dark); }
-.tl-card .ev-row .del { color: var(--coral-dark); }
+/* A row is its mark, what was checked and how it came out, in the body face
+   at the timeline's size: the monospace block it replaced read every row as a
+   log line, and its green and red counts painted "0 failed" as a failure. The
+   marks are the circle family and the colours the gate table's: a pass the
+   success green, a failure the blocked red on a tinted row, a reference a
+   quiet ring. The result keeps the row's end and drops under the label when
+   the two do not fit, so a phone keeps both. */
+.ev-list { list-style: none; margin-bottom: 0; padding: 0; font-size: .88rem; line-height: 1.45; }
+.ev-item { display: flex; align-items: flex-start; gap: .5rem; padding: .5rem .75rem; border-top: 1px solid var(--hairline); }
+.ev-item:first-child { border-top: 0; }
+.ev-mark { flex: none; display: flex; align-items: center; height: 1.45em; color: var(--faint); }
+.ev-item[data-status="pass"] .ev-mark { color: var(--success-dark); }
+.ev-item[data-status="pass"] .ev-mark circle { fill: var(--success-soft); }
+.ev-item[data-status="fail"] { background: color-mix(in srgb, var(--red-light), transparent 55%); }
+.ev-item[data-status="fail"] .ev-mark, .ev-item[data-status="fail"] .ev-result { color: var(--coral-dark); font-weight: 600; }
+.ev-item[data-status="fail"] .ev-mark circle { fill: var(--red-light); }
+.ev-body {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  column-gap: .75rem;
+}
+.ev-label { flex: 1 1 12rem; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.ev-result { color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ev-add { color: var(--teal-dark); }
+.ev-del { color: var(--coral-dark); }
+/* A label token that names a real attachment. The text-link token (P13-D-18
+   precedent): --blue on white is 3.84:1 and fails AA for normal text;
+   --teal-dark clears it in both themes. */
+.ev-file { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
+.ev-file:hover { text-decoration-thickness: 2px; }
+/* The verdict: its title in the verdict's colour with the tally under it and
+   the judged revision at its end, what the note adds, then the checklist on
+   the card's own edge. */
+.vd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .75rem; }
+.vd-head-main { min-width: 0; }
+.vd-title { margin: 0; font-size: .88rem; font-weight: 600; line-height: 1.3; color: var(--fg); overflow-wrap: anywhere; }
+.vd-card[data-result="request_changes"] .vd-title { color: var(--coral-dark); }
+.vd-card[data-result="approve"] .vd-title { color: var(--success-dark); }
+.vd-tally { margin: .125rem 0 0; font-size: .75rem; color: var(--muted); }
+.vd-rev {
+  flex: none; padding: .125rem .375rem; border-radius: var(--radius-small);
+  background: var(--tint-hover); font-size: .75rem; line-height: 1.3; color: var(--muted);
+}
+.vd-detail { padding: 0 .75rem .75rem; font-size: .88rem; line-height: 1.5; color: var(--muted); }
+.vd-card > .ev-list { margin: 0; max-width: none; border-width: 1px 0 0; border-radius: 0; }
 
 .comment-card {
   border: 1px solid var(--hairline);
@@ -4822,6 +4858,8 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .md-body pre, .md-table-wrap { overflow-wrap: normal; }
 /* U39-29/31: a task key a text names; a key never breaks at its dash. */
 a.task-ref, a.kp-ref { white-space: nowrap; }
+/* Ruling 526: an evidence row's code span is the same chip. */
+.ev-label code.mono,
 .md-body code.mono {
   background: var(--tint-press);
   padding: .04rem .25rem;
@@ -7132,11 +7170,6 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .lightbox-card .lightbox-text-status {
   padding: .5rem .25rem 0; font-size: .75rem; color: var(--muted);
 }
-/* Evidence label token that names a real attachment (timeline.tsx linkify). */
-/* Same token text-links use (P13-D-18 precedent) — --blue on white is 3.84:1
-   and fails AA for normal text; --teal-dark clears it in both themes. */
-.tl-card .ev-row .ev-file { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
-.tl-card .ev-row .ev-file:hover { text-decoration-thickness: 2px; }
 
 /* ------------------------------------------------------------------ */
 /* Dynamic agent dispatch (2026-08-29): the execution profile's two run

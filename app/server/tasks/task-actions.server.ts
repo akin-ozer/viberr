@@ -17,6 +17,7 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { escapeRegExp } from "~/shared/text/regexp";
 import { endSentence } from "~/shared/text/sentence";
 import { countLabel } from "~/shared/text/plural";
+import { VERDICT_NOTE_TITLE, verdictNoteText } from "~/shared/verdict-note";
 import type {
   CollisionServerOutcome,
   DeliveryServerOutcome,
@@ -58,7 +59,6 @@ import {
   requiredReviewers,
   normalizeEvidenceRows,
   sanitizeEventAttachmentNames,
-  EVIDENCE_EMPTY_COLUMN,
   type EvidenceRow,
   type PacketOption,
   type ParsedTaskFile,
@@ -3824,11 +3824,13 @@ export function deliveredWorkEvidence(fm: {
   const changed = fm.github?.changed ?? null;
   const revision = activeWorkRevision(fm.workRevision);
   const branch = revision?.branch ?? fm.branch;
+  // Ruling 526: the size of the change is a reference, neither a pass nor a
+  // failure, with its two counts as the result the timeline colours.
   if (changed) {
     rows.push({
-      label: `${changed.files} file(s) changed${branch ? ` on \`${branch}\`` : ""}`,
-      add: `+${changed.add}`,
-      del: `−${changed.del}`,
+      label: `${countLabel(changed.files, "file")} changed${branch ? ` on \`${branch}\`` : ""}`,
+      result: `+${changed.add} −${changed.del}`,
+      status: "info",
     });
   }
   const commits = fm.github?.commits ?? [];
@@ -3836,10 +3838,10 @@ export function deliveredWorkEvidence(fm: {
     const rev = revision;
     rows.push({
       label:
-        `${commits.length} commit(s) delivered` +
+        `${countLabel(commits.length, "commit")} delivered` +
         (rev?.headSha ? `, revision ${rev.headSha.slice(0, 7)}` : ""),
-      add: EVIDENCE_EMPTY_COLUMN,
-      del: EVIDENCE_EMPTY_COLUMN,
+      result: "",
+      status: "info",
     });
   }
   return rows;
@@ -4258,15 +4260,15 @@ export async function recordAgentCompletion(
         // needs next, and the one that makes a stale verdict visible.
         const onRevision = rev ? ` on \`${rev.headSha.slice(0, 12)}\`` : "";
         if (verdict === "request_changes") {
-          title = "Changes requested";
+          title = VERDICT_NOTE_TITLE.changesRequested;
           summary = `${roleDisplay} requested changes${onRevision}.`;
         } else if (!rev || !reviewerProfileId) {
           // Approve with nothing to bind to — no delivered revision yet. Record
           // the prose but never claim a pass.
-          title = "Approval noted";
+          title = VERDICT_NOTE_TITLE.noted;
           summary = `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
         } else if (validation === "healthy") {
-          title = "Review passed";
+          title = VERDICT_NOTE_TITLE.passed;
           // R19-8: when the subject is a VERIFICATION revision, say what was
           // actually judged — there is no "work" to have approved. The two
           // bases are different facts (no branch at all vs. a branch carrying
@@ -4295,18 +4297,18 @@ export async function recordAgentCompletion(
           const objecting = required.filter((e) => resultOf(e.profileId) === "request_changes");
           const pending = required.filter((e) => resultOf(e.profileId) !== "approve");
           if (validation === "failing" && objecting.length > 0) {
-            title = "Approval noted, rework still needed";
+            title = `${VERDICT_NOTE_TITLE.noted}, rework still needed`;
             summary =
               `${roleDisplay} approved${onRevision}, but ${nameList(objecting)} ` +
               `requested changes on it, so it is not cleared.`;
           } else if (pending.length > 0) {
-            title = `Approval noted, waiting on ${nameList(pending)}`;
+            title = `${VERDICT_NOTE_TITLE.noted}, waiting on ${nameList(pending)}`;
             summary =
               `${roleDisplay} approved${onRevision}. ${nameList(pending)} ` +
               `${pending.length === 1 ? "has" : "have"} not reviewed it yet, ` +
               "and acceptance waits for every required reviewer.";
           } else {
-            title = "Approval noted";
+            title = VERDICT_NOTE_TITLE.noted;
             summary = `${roleDisplay} approved${onRevision}.`;
           }
         }
@@ -4394,7 +4396,7 @@ export async function recordAgentCompletion(
           // D8: the outcome is the AGENT'S judgment — attribute it honestly.
           actor: actorRef,
           title,
-          text: `**Validation:** ${validation}. ${summary}`,
+          text: verdictNoteText(validation, summary),
           toAgent: false,
           evidence,
         };

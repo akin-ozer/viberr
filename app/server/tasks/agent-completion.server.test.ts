@@ -3103,7 +3103,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           title: "Which API surface should this use?",
           body: "Two candidates.",
         },
-        evidence: [{ label: "unit suite", add: 12, del: 0 }],
+        evidence: [{ label: "unit suite", result: "12 passed", status: "pass" }],
       }),
     );
     await applyAgentCompletionEffects(

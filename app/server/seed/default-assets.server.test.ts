@@ -404,6 +404,26 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(guide).toContain("`kbCorrections`");
   });
 
+  /**
+   * Ruling 526: the timeline draws a verdict's evidence as a checklist, so the
+   * Reviewer is told what each row carries: what it checked, how it came out,
+   * and its pass, fail or info mark. A store seeded before it upgrades in place.
+   */
+  it("ruling 526: the reviewer skill asks for each row's result and mark, and its outgoing hash is recorded", async () => {
+    // Canaries: drop the mark from the skill's evidence-rows bullet; remove
+    // the outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const rel = path.join("skills", "reviewer-expertise", "SKILL.md");
+    expect(
+      shippedCopyIsUnedited(rel, "0fea5d36f4a35643d4352cccfc35183018a76907bc9387c4c2b34bb9abbbb57a", {}),
+      "the skill's outgoing hash is not recorded",
+    ).toBe(true);
+    const skill = readFileSync(path.join(REPO_ROOT, "app/server/seed/assets/reviewer-expertise.skill.md"), "utf8");
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    expect(skill).toContain("and marks it `pass`, `fail`, or `info`");
+    expect(skill).toContain("so mark a row that blocks as `fail`");
+  });
+
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();

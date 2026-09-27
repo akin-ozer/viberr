@@ -37,8 +37,12 @@ import type { RescanSummary } from "./rebuilder.server";
  * `epic_id` from task.md `epic`, and epic files project into
  * `epic_projections`. A row written by an older build never named the column,
  * so an unchanged task file would keep its NULL forever without this stamp.
+ * 6 = ruling 526: an evidence row projects as `{ label, result, status }`, read
+ * from the older `label · add · del` line too. `evidence_json` written by an
+ * older build holds `add` and `del`, which the timeline no longer reads, so an
+ * unchanged task file would draw its rows with no result without this stamp.
  */
-export const PROJECTION_DERIVATION_VERSION = 5;
+export const PROJECTION_DERIVATION_VERSION = 6;
 
 const SETTING_KEY = "projection.derivationVersion";
 

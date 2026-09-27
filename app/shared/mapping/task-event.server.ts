@@ -1,4 +1,6 @@
+import type { EvidenceStatus } from "~/schemas/task-file.schema";
 import { GATES_SYSTEM_ID, gateNoteView, type GateNoteView } from "~/shared/project-gates";
+import { verdictNoteView, type VerdictNoteView } from "~/shared/verdict-note";
 import type { ActorRender } from "./actor.server";
 
 /**
@@ -27,11 +29,13 @@ export type TaskEventRow = {
   attachments_json: string | null;
 };
 
-/** The evidence rows a completion/verdict event carries, as stored. */
+/** The evidence rows a completion/verdict event carries, as stored: what was
+ *  checked, how it came out and whether it passed (ruling 526). */
 export interface EvidenceRowRender {
   label: string;
-  add: string;
-  del: string;
+  /** Empty when the label says it all. */
+  result: string;
+  status: EvidenceStatus;
 }
 
 export interface TimelineEventRender {
@@ -47,8 +51,7 @@ export interface TimelineEventRender {
   text: string;
   /** Comments only — renders the `comment-card toagent` tint. */
   toAgent: boolean;
-  /** Outcome events (completion / verdict / an agent's report — P13-D-26);
-   *  add/del are short signed display strings ("+14", "−4") and may be empty. */
+  /** Outcome events (completion / verdict / an agent's report — P13-D-26). */
   evidence: EvidenceRowRender[] | null;
   /** Files the event's run saved into the task's attachments/ dir — names
    *  only, rendered as chips linking to the serving route. */
@@ -57,10 +60,18 @@ export interface TimelineEventRender {
    *  absent on every other event. The rows carry the logs, so such an event's
    *  `evidence` is null and `attachments` keeps only a file no row links. */
   gates?: GateNoteView;
+  /** Ruling 526: a reviewer's verdict read back into its result, revision and
+   *  whatever its sentence adds (`verdictNoteView`), absent on every other
+   *  event. */
+  verdict?: VerdictNoteView;
 }
 
 export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
   const event = mapEventRow(row);
+  if (row.type === "quality") {
+    const verdict = verdictNoteView(event);
+    return verdict ? { ...event, verdict } : event;
+  }
   // Written by the gates' system actor (ruling 482(d)); the projection keys a
   // system actor by its bare id (`rebuilder.server.ts`).
   if (row.type !== "note" || row.actor_kind !== "system" || row.actor_ref !== GATES_SYSTEM_ID) {

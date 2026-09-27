@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  EVIDENCE_EMPTY_COLUMN,
   normalizeEvidenceRows,
   type GateRun,
   type WorkRevision,
@@ -169,8 +168,7 @@ describe("gateNoteView (ruling 493)", () => {
     evidence: normalizeEvidenceRows(
       run.results.map((r) => ({
         label: gateEvidenceLabel(r),
-        add: EVIDENCE_EMPTY_COLUMN,
-        del: EVIDENCE_EMPTY_COLUMN,
+        status: r.exitCode === 0 ? "pass" : "fail",
       })),
     ),
     attachments: run.results.flatMap((r) => (r.log ? [r.log] : [])),
@@ -225,7 +223,7 @@ describe("gateNoteView (ruling 493)", () => {
     // CANARY: stop comparing the title and any note with such rows is a gate run.
     expect(gateNoteView(noteOf(run, "Left waiting on an absent agent", text))).toBeNull();
     const reworded = noteOf(run, GATE_NOTE_TITLE.passed, text);
-    reworded.evidence = [{ label: "install passed quickly", add: EVIDENCE_EMPTY_COLUMN, del: EVIDENCE_EMPTY_COLUMN }];
+    reworded.evidence = [{ label: "install passed quickly", result: "", status: "pass" }];
     expect(gateNoteView(reworded)).toBeNull();
     expect(gateNoteView({ title: GATE_NOTE_TITLE.passed, text, evidence: null, attachments: null })).toBeNull();
   });

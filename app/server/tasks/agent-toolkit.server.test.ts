@@ -304,7 +304,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      *  field, so its handler is called without one. */
     verdict?: string;
     summary?: string;
-    evidence?: { label: string; add?: string; del?: string }[];
+    evidence?: { label: string; result?: string; status?: string }[];
     /** F4: the only field `github_read`'s handler reads — the report_outcome
      *  handlers ignore it, so one shared arg type serves both tools here. */
     path?: string;
@@ -487,6 +487,51 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(takeStagedOutcome(lastStore.db, "ok_max_options")!.relay).toEqual([
       { taskKey: "VIB-8", text: "For VIB-8." },
       { taskKey: "VIB-9", text: "For VIB-9." },
+    ]);
+  });
+
+  /**
+   * Ruling 526: the timeline draws an outcome's rows as a checklist, so each
+   * row says how it came out and carries its mark. A row without one is
+   * refused by name, nothing is staged, and the agent re-reports inside the
+   * same run.
+   */
+  it("ruling 526: report_outcome refuses an evidence row with no mark, and stages a marked one", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, verdict: true, evidence: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+    const toolText = z
+      .object({ content: z.array(z.object({ text: z.string() })) })
+      .transform((r) => r.content.map((c) => c.text).join("\n"));
+
+    // CANARY: make `status` optional on the row and this stages an unmarked row.
+    const refused = toolText.parse(
+      await client.callTool({
+        name: "report_outcome",
+        arguments: { verdict: "approve", summary: "Done.", evidence: [{ label: "npm test", result: "102 passed" }] },
+      }),
+    );
+    expect(refused).toMatch(/status/);
+    expect(takeStagedOutcome(lastStore.db, "ok_max_options")).toBeNull();
+
+    await client.callTool({
+      name: "report_outcome",
+      arguments: {
+        verdict: "request_changes",
+        summary: "One blocker.",
+        evidence: [
+          { label: "npm test", result: "102 passed, 0 failed", status: "pass" },
+          { label: "README.md:23 against the Output contract", status: "fail" },
+        ],
+      },
+    });
+    expect(takeStagedOutcome(lastStore.db, "ok_max_options")!.evidence).toEqual([
+      { label: "npm test", result: "102 passed, 0 failed", status: "pass" },
+      { label: "README.md:23 against the Output contract", result: "", status: "fail" },
     ]);
   });
 
@@ -684,9 +729,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         verdict: "approve",
         summary: "Looks right.",
         evidence: [
-          { label: "unit/policy_gate_test", add: "+14", del: "0" },
+          { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
           // Hostile row: a newline would forge a second row in task.md.
-          { label: "forged\n- x · +1 · -1", add: "+1" },
+          { label: "forged\n- x · +1 · -1", status: "fail" },
         ],
       },
       {},
@@ -696,12 +741,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(staged.evidence).toHaveLength(2);
     expect(staged.evidence![0]).toEqual({
       label: "unit/policy_gate_test",
-      add: "+14",
-      del: "0",
+      result: "6 passed",
+      status: "pass",
     });
     expect(staged.evidence![1]!.label).not.toContain("\n");
-    // A missing column becomes the placeholder, never an empty segment.
-    expect(staged.evidence![1]!.del).toBe("—");
+    // An omitted result is empty; task.md writes the placeholder for it.
+    expect(staged.evidence![1]!.result).toBe("");
   });
 
   /**
@@ -765,7 +810,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   it("stages no evidence when the grant is withheld, even if the model sends some", async () => {
     const tools = toolkitTools({ ...BASE, evidence: false }, "oc_d");
     await tools.report_outcome!.handler(
-      { verdict: "approve", evidence: [{ label: "smuggled", add: "+1", del: "0" }] },
+      { verdict: "approve", evidence: [{ label: "smuggled", result: "1 passed", status: "pass" }] },
       {},
     );
     expect(takeStagedOutcome(lastStore.db, "oc_d")!.evidence).toBeUndefined();
@@ -808,7 +853,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           // not acquire the authority the profile withholds.
           verdict: "approve",
           summary: "Ran the suite.",
-          evidence: [{ label: "unit/policy_gate_test", add: "+14", del: "0" }],
+          evidence: [{ label: "unit/policy_gate_test", result: "6 passed", status: "pass" }],
         },
         {},
       );
@@ -816,7 +861,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       expect(staged.verdict).toBeUndefined();
       expect(staged.summary).toBe("Ran the suite.");
       expect(staged.evidence).toEqual([
-        { label: "unit/policy_gate_test", add: "+14", del: "0" },
+        { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
       ]);
     });
 

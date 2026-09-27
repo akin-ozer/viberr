@@ -26,8 +26,9 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
-import { EVIDENCE_EMPTY_COLUMN } from "~/schemas/task-file.schema";
+import type { VerdictNoteView } from "~/shared/verdict-note";
 import { eventMeta, typedKind } from "./event-meta";
+import { citedFiles, EvidenceList, VerdictCard } from "./evidence-list";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { mentionNamesFor } from "./mention-autocomplete";
@@ -133,58 +134,6 @@ function CollapsibleComment({
 }
 
 /**
- * R19-19: linkify an evidence label whose tokens name a REAL attachment.
- * Agents are told to "cite the exact filename" when a screenshot backs a
- * claim; when a token (backticks/quotes/trailing punctuation stripped) matches
- * a file the task actually has, it becomes a link to the serving route.
- * Everything else renders as the plain text it always was — no guessing.
- */
-function EvidenceLabel({
-  label,
-  attachments,
-  base,
-}: {
-  label: string;
-  attachments?: ReadonlySet<string>;
-  base?: string;
-}) {
-  // A cited file opens the in-app card on a plain click (owner request
-  // 2026-08-21, widened by the ruling-105 addendum to every kind); modified
-  // clicks keep the raw-file tab.
-  const lightbox = useAttachmentLightbox();
-  if (!attachments || attachments.size === 0 || !base) return <span>{label}</span>;
-  const parts = label.split(/(\s+)/);
-  return (
-    <span>
-      {parts.map((part, i) => {
-        const clean = part.replace(/^[`"'([]+|[`"'),.;:\]]+$/g, "");
-        if (!clean || !attachments.has(clean)) return part;
-        const at = part.indexOf(clean);
-        const url = `${base}/${encodeURIComponent(clean)}`;
-        return (
-          <span key={i}>
-            {part.slice(0, at)}
-            <a
-              className="ev-file"
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              // Images open the lightbox; text files (ruling 105) the read-only
-              // viewer; any other cited file the no-preview card — every kind
-              // carries the Download button (ruling 105 addendum).
-              onClick={lightbox({ name: clean, url })}
-            >
-              {clean}
-            </a>
-            {part.slice(at + clean.length)}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
-/**
  * Ruling 493: a gate run's note takes its ending's mark on the rail and its
  * word in the pill, in the PR card's colours (`gatesPill`). Beside the actor
  * the pill finishes the sentence: "Project gates passed".
@@ -194,6 +143,17 @@ const GATE_NOTE_META = {
   failed: { node: "blocked", icon: "x", label: "failed" },
   error: { node: "blocked", icon: "alert", label: "could not run" },
 } as const satisfies Record<GateNoteState, { node: string; icon: IconName; label: string }>;
+
+/**
+ * Ruling 526: a verdict's mark on the rail is the reviewer's own verdict, as a
+ * gate run's is its ending (ruling 493): the check on green for an approval
+ * (ruling 491), the cross on red for changes requested. Its pill stays the
+ * category; the card under it says the rest.
+ */
+const VERDICT_META = {
+  approve: { node: "completion", icon: "check", label: "Review verdict" },
+  request_changes: { node: "blocked", icon: "x", label: "Review verdict" },
+} as const satisfies Record<VerdictNoteView["result"], { node: string; icon: IconName; label: string }>;
 
 /** Row keys for `useStableRows` (stable, module-level). */
 const eventKeyOf = (ev: TimelineEventRender) => String(ev.id);
@@ -258,7 +218,12 @@ export const TimelineItem = memo(function TimelineItem({
   attachmentsBase?: string;
 }) {
   const gates = ev.gates;
-  const meta = gates ? GATE_NOTE_META[gates.state] : eventMeta(ev.type);
+  const verdict = ev.verdict;
+  const meta = gates
+    ? GATE_NOTE_META[gates.state]
+    : verdict
+      ? VERDICT_META[verdict.result]
+      : eventMeta(ev.type);
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
   const guest = actor.kind === "human" && "guest" in actor && actor.guest;
@@ -267,11 +232,15 @@ export const TimelineItem = memo(function TimelineItem({
   const lightbox = useAttachmentLightbox();
   // Ruling 522: the files the event's run saved show their first row; the rest
   // fold with a comment's text, or behind their own toggle under a typed
-  // event, and the toggle says how many it hides.
-  const files = useMemo(
-    () => (ev.attachments && attachmentsBase ? picturesFirst(ev.attachments) : NO_NAMES),
-    [ev.attachments, attachmentsBase],
-  );
+  // event, and the toggle says how many it hides. Ruling 526: a typed event's
+  // row that names a file already opens it, so a file that is not a picture
+  // is not drawn a second time as a tile (a gate note's logs, ruling 493).
+  const files = useMemo(() => {
+    if (!ev.attachments || !attachmentsBase) return NO_NAMES;
+    const cited = isTyped && ev.evidence && attachmentNames ? citedFiles(ev.evidence, attachmentNames) : null;
+    const kept = cited ? ev.attachments.filter((name) => IMAGE_RE.test(name) || !cited.has(name)) : ev.attachments;
+    return kept.length > 0 ? picturesFirst(kept) : NO_NAMES;
+  }, [ev.attachments, ev.evidence, isTyped, attachmentNames, attachmentsBase]);
   const firstRow = useFirstRow(files.length);
   const [open, setOpen] = useState(false);
   const more = hiddenFiles(files.slice(firstRow.perRow));
@@ -367,6 +336,18 @@ export const TimelineItem = memo(function TimelineItem({
               <GateResults rows={gates.rows} attachmentsBase={attachmentsBase ?? null} openLog={lightbox} />
             )}
           </>
+        ) : verdict ? (
+          <VerdictCard
+            title={ev.title ?? ""}
+            verdict={verdict}
+            rows={ev.evidence}
+            attachments={attachmentNames}
+            base={attachmentsBase}
+            openFile={lightbox}
+            mentionNames={mentionNames}
+            headingBase={ENTRY_HEADING_BASE}
+            {...(taskLinks ? { taskLinks } : {})}
+          />
         ) : (
           <>
             {ev.title && (
@@ -413,39 +394,12 @@ export const TimelineItem = memo(function TimelineItem({
                 </Link>
               )}
             {ev.evidence && (
-              <div className="tl-card evidence">
-                {/* The add/del columns are a DIFF shape. A verdict's rows are
-                    usually citations with no counts, and the normalizer fills
-                    both cells with the `—` placeholder so the `label · add ·
-                    del` line still round-trips through task.md — which rendered
-                    as two meaningless dashes pinned to the right of every row.
-                    The placeholder stays in the FILE (the parser pops the last
-                    two segments); it just stops being drawn when no row in the
-                    block cites a real count. Block-level, not per-row, so rows
-                    stay aligned when only some carry numbers. */}
-                {(() => {
-                  const counted = ev.evidence.some(
-                    (e) =>
-                      (e.add && e.add !== EVIDENCE_EMPTY_COLUMN) ||
-                      (e.del && e.del !== EVIDENCE_EMPTY_COLUMN),
-                  );
-                  return ev.evidence.map((e, i) => (
-                    <div className="ev-row" key={i}>
-                      <EvidenceLabel
-                        label={e.label}
-                        {...(attachmentNames ? { attachments: attachmentNames } : {})}
-                        {...(attachmentsBase ? { base: attachmentsBase } : {})}
-                      />
-                      {counted && (
-                        <span className="ev-counts">
-                          <span className="add">{e.add}</span>{" "}
-                          <span className="del">{e.del}</span>
-                        </span>
-                      )}
-                    </div>
-                  ));
-                })()}
-              </div>
+              <EvidenceList
+                rows={ev.evidence}
+                attachments={attachmentNames}
+                base={attachmentsBase}
+                openFile={lightbox}
+              />
             )}
           </>
         )}

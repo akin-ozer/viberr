@@ -387,7 +387,7 @@ describe("TimelineItem", () => {
     expect(pills).not.toContain("app user · not in project");
   });
 
-  it("completion: title, done pill, evidence rows with add/del", () => {
+  it("completion: title, done pill, evidence as a checklist, a failure first", () => {
     const { container } = render(
       <TimelineItem
         ev={ev({
@@ -397,8 +397,9 @@ describe("TimelineItem", () => {
           title: "Completion report",
           text: "Implemented repo attach.",
           evidence: [
-            { label: "unit/policy_gate_test", add: "+14", del: "0" },
-            { label: "integration/pr_sync_test", add: "+38", del: "−4" },
+            { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+            { label: "9 files changed on `vib-142`", result: "+412 −87", status: "info" },
+            { label: "integration/pr_sync_test", result: "1 failed", status: "fail" },
           ],
           occurredAt: yesterdayIso(15, 12),
         })}
@@ -416,10 +417,17 @@ describe("TimelineItem", () => {
     // is comment-only now (the colored node + category pill already say it's an
     // agent action, so the badge was redundant on events).
     expect(pills).toEqual(["Completion report"]);
-    const rows = container.querySelectorAll(".tl-card.evidence .ev-row");
-    expect(rows).toHaveLength(2);
-    expect(rows[0]!.querySelector(".add")!.textContent).toBe("+14");
-    expect(rows[1]!.querySelector(".del")!.textContent).toBe("−4");
+    // Ruling 526: a failure is read before what passed, and says so in words
+    // as well as its mark; the file keeps the order the agent wrote.
+    // CANARY: drop the sort in `EvidenceList` and the failure reads second.
+    const rows = [...container.querySelectorAll(".ev-list .ev-item")];
+    expect(rows.map((r) => r.getAttribute("data-status"))).toEqual(["fail", "pass", "info"]);
+    expect(rows[0]!.querySelector(".ev-label")!.textContent).toBe("Failed: integration/pr_sync_test");
+    expect(rows[0]!.querySelector(".ev-result")!.textContent).toBe("1 failed");
+    // A diff's counts keep their colours, and a code span is code.
+    expect(rows[2]!.querySelector(".ev-add")!.textContent).toBe("+412");
+    expect(rows[2]!.querySelector(".ev-del")!.textContent).toBe("−87");
+    expect(rows[2]!.querySelector("code.mono")!.textContent).toBe("vib-142");
     expect(container.querySelector(".tl-time")!.textContent).toBe(
       "Yesterday · 15:12",
     );
@@ -4509,6 +4517,80 @@ describe("TimelineItem — a gate run's note (ruling 493)", () => {
     expect(error.container.querySelector(".tl-meta .pill")?.textContent).toBe("could not run");
     expect(error.container.querySelector(".tl-text")?.textContent).toBe("The delivering checkout is missing.");
     expect(error.container.querySelector(".gate-table")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 526: a reviewer's verdict is a card: its title in the verdict's
+ * colour, the tally of its checks, the revision it judged, and the checklist
+ * with what blocks first. The note's "Validation:" lead and its plain opening
+ * are not said again, and a file a row opens is not drawn again as a tile.
+ */
+describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
+  const BASE = "/projects/viberr-core/tasks/VIB-142/attachments";
+  const LOG = "vib-142-review-validate-cases.log";
+  const verdictNote = (partial: Partial<TimelineEventRender>) =>
+    ev({
+      type: "quality",
+      actor: { kind: "agent", backend: "claude", name: "Estimate Reviewer", role: "Review" },
+      title: "Changes requested",
+      text: "**Validation:** failing. Estimate Reviewer requested changes on `07e57314c533`.",
+      verdict: { result: "request_changes", sha: "07e5731", detail: null },
+      evidence: [
+        { label: "npm test (vitest)", result: "102 passed, 0 failed", status: "pass" },
+        { label: "`pnpm validate` on 77 realistic cases", result: "75 of 77 right", status: "fail" },
+        { label: LOG, result: "", status: "info" },
+      ],
+      attachments: [LOG, "board.png"],
+      ...partial,
+    });
+
+  it("draws the title, the tally, the revision and the checklist, and says nothing twice", () => {
+    // CANARY: drop the `verdict ?` branch from TimelineItem and the note is a
+    // sentence over a monospaced block again.
+    const { container, getByRole } = render(
+      <TimelineItem ev={verdictNote({})} attachmentNames={new Set([LOG, "board.png"])} attachmentsBase={BASE} />,
+    );
+    expect(container.querySelector(".tl-node.blocked")).not.toBeNull();
+    const card = getByRole("group", { name: "Changes requested" });
+    expect(card.getAttribute("data-result")).toBe("request_changes");
+    expect(card.querySelector(".vd-tally")!.textContent).toBe("1 of 2 checks failed");
+    expect(card.querySelector(".vd-rev")!.textContent).toBe("on revision 07e5731");
+    const rows = [...card.querySelectorAll(".ev-item")];
+    expect(rows.map((r) => r.getAttribute("data-status"))).toEqual(["fail", "pass", "info"]);
+    expect(getByRole("link", { name: LOG }).getAttribute("href")).toBe(`${BASE}/${LOG}`);
+    expect(container.textContent).not.toContain("Validation:");
+    expect(container.textContent).not.toContain("requested changes on");
+    // The log opens from its row; the picture still shows as itself.
+    // CANARY: drop the cited filter from the files memo and the log is a tile too.
+    const tiles = [...container.querySelectorAll(".tl-attach a")].map((a) => a.getAttribute("href"));
+    expect(tiles).toEqual([`${BASE}/board.png`]);
+  });
+
+  it("draws an approval green, and keeps what the note says beyond its opening", () => {
+    const { container, getByRole } = render(
+      <TimelineItem
+        ev={verdictNote({
+          title: "Approval noted, waiting on Security",
+          text: "**Validation:** changed. Estimate Reviewer approved on `07e57314c533`. Security has not reviewed it yet, and acceptance waits for every required reviewer.",
+          verdict: {
+            result: "approve",
+            sha: "07e5731",
+            detail: "Security has not reviewed it yet, and acceptance waits for every required reviewer.",
+          },
+          evidence: [{ label: "README.md:23", result: "", status: "info" }],
+          attachments: null,
+        })}
+      />,
+    );
+    expect(container.querySelector(".tl-node.completion")).not.toBeNull();
+    const card = getByRole("group", { name: "Approval noted, waiting on Security" });
+    expect(card.getAttribute("data-result")).toBe("approve");
+    expect(card.querySelector(".vd-detail")!.textContent).toBe(
+      "Security has not reviewed it yet, and acceptance waits for every required reviewer.",
+    );
+    // References alone are no checks to count.
+    expect(card.querySelector(".vd-tally")).toBeNull();
   });
 });
 

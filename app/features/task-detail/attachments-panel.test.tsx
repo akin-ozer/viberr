@@ -173,7 +173,7 @@ function evidenceEvent(label: string): TimelineEventRender {
     text: "Reported completion",
     toAgent: false,
     attachments: null,
-    evidence: [{ label, add: "+2", del: "−0" }],
+    evidence: [{ label, result: "", status: "info" }],
   };
 }
 
@@ -293,14 +293,17 @@ describe("TimelineItem evidence linkify", () => {
         attachmentsBase={BASE}
       />,
     );
-    const link = container.querySelector<HTMLAnchorElement>(".ev-row .ev-file")!;
+    const link = container.querySelector<HTMLAnchorElement>(".ev-item .ev-file")!;
     expect(link).not.toBeNull();
     expect(link.getAttribute("href")).toBe(`${BASE}/board-after.png`);
     expect(link.textContent).toBe("board-after.png");
-    // The surrounding words stay plain text.
-    expect(container.querySelector(".ev-row")!.textContent).toContain(
-      "shows the fix",
-    );
+    // The surrounding words stay plain text, and the name's backticks are its
+    // code face (ruling 526), never printed. CANARY: drop the code-span split
+    // in `EvidenceLabel` and the row reads "`board-after.png`".
+    const row = container.querySelector(".ev-item")!;
+    expect(row.textContent).toContain("shows the fix");
+    expect(row.textContent).not.toContain("`");
+    expect(link.querySelector("code.mono")).not.toBeNull();
   });
 
   it("leaves labels alone when nothing matches — no guessed links", () => {

@@ -370,8 +370,9 @@ describe("openTaskPr", () => {
           text: "**Validation:** healthy.",
           toAgent: false,
           evidence: [
-            { label: "unit/policy_gate_test", add: "+14", del: "0" },
-            { label: "2 commit(s) delivered", add: "—", del: "—" },
+            { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
+            { label: "README.md:23 against the Output contract", result: "contradicts it", status: "fail" },
+            { label: "2 commits delivered", result: "", status: "info" },
           ],
         },
         {
@@ -381,7 +382,7 @@ describe("openTaskPr", () => {
           title: "Older",
           text: "stale",
           toAgent: false,
-          evidence: [{ label: "stale/suite", add: "+1", del: "0" }],
+          evidence: [{ label: "stale/suite", result: "1 passed", status: "pass" }],
         },
       ],
     });
@@ -403,9 +404,12 @@ describe("openTaskPr", () => {
     expect(res.status).toBe("ok");
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
     expect(sent.body).toContain("## Evidence");
-    expect(sent.body).toContain("- unit/policy_gate_test · +14 · 0");
-    // The empty-column placeholder is a serialization detail, not PR prose.
-    expect(sent.body).toContain("- 2 commit(s) delivered\n");
+    // Ruling 526: a check says how it ended in words, since a PR body has no
+    // marks; a reference is its label and result alone.
+    expect(sent.body).toContain("- **Passed:** unit/policy_gate_test · 6 passed\n");
+    expect(sent.body).toContain("- **Failed:** README.md:23 against the Output contract · contradicts it\n");
+    // The empty-result placeholder is a serialization detail, not PR prose.
+    expect(sent.body).toContain("- 2 commits delivered\n");
     expect(sent.body).not.toContain("stale/suite");
   });
 
