@@ -24,9 +24,11 @@ import { clientActionOver, clientLoaderOver, unreachable } from "./client-data";
  *
  * Each page offers the two moves a person makes under the dock: links to the
  * other page (a client navigation) and a button that revalidates (what the
- * page's own live stream does on an event). `live` mounts the `user` stream
- * a real board holds (`routes/project`), for tests that emit SSE events
- * through a stubbed `EventSource`.
+ * page's own live stream does on an event). The task page also links to the
+ * project's full controller page, which the dock stays off, and that page
+ * links back. `live` mounts the `user` stream a real board holds
+ * (`routes/project`), for tests that emit SSE events through a stubbed
+ * `EventSource`.
  */
 
 const USER_SCOPES = [sseScopes.user()];
@@ -128,10 +130,20 @@ export function mountDock(opts: DockStubOptions) {
                 <>
                   <div>task page</div>
                   <Link to="/projects/viberr/board">back to the board</Link>
+                  <Link to="/projects/viberr/controller">open the controller page</Link>
                 </>
               ),
             },
-            { id: "routes/project.controller", path: "controller", Component: () => <div>controller page</div> },
+            {
+              id: "routes/project.controller",
+              path: "controller",
+              Component: () => (
+                <>
+                  <div>controller page</div>
+                  <Link to="/projects/viberr/tasks/VIB-1">back to VIB-1</Link>
+                </>
+              ),
+            },
           ],
         },
         {

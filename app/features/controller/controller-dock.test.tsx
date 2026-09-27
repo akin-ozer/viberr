@@ -440,24 +440,25 @@ describe("the controller dock (ruling 121)", () => {
     expect(document.activeElement).toBe(close);
   });
 
-  it("forgets a stored selection the server could not honour (review finding 2)", async () => {
-    window.sessionStorage.setItem(
-      "viberr.dock.selected",
-      JSON.stringify({ "viberr|VIB-1": "cnv_gone" }),
-    );
+  it("forgets a picked thread the server could not honour (review finding 2)", async () => {
+    // A thread from the list that is gone by the time its view is asked for.
     const { loads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
       view: (request) =>
         new URL(request.url).searchParams.get("c") === "cnv_gone"
           ? taskView({ staleSelection: true })
-          : taskView(),
+          : taskView({
+              threads: [{ id: "cnv_gone", title: "Gone by now", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
+            }),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
-    // It asked once with the stale id, then dropped it — the page is intact.
-    await waitFor(() => expect(loads[0]!.searchParams.get("c")).toBe("cnv_gone"));
-    await waitFor(() =>
-      expect(window.sessionStorage.getItem("viberr.dock.selected")).not.toContain("cnv_gone"),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Threads here (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Gone by now/ }));
+    // It asked once with the picked id, then dropped it for the scope's
+    // newest thread — the page is intact. CANARY: drop the `stale` effect and
+    // the dock stays on the id the server refused.
+    await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_gone"));
+    await waitFor(() => expect(loads.at(-1)?.searchParams.has("c")).toBe(false));
     expect(screen.getByText("task page")).toBeTruthy();
   });
 
@@ -810,7 +811,6 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.queryByRole("button", { name: /Second thread/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "New thread" }));
     await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("new"));
-    expect(window.sessionStorage.getItem("viberr.dock.selected")).toContain('"viberr|VIB-1":"new"');
   });
 
   it("sends through the resource route with the scope and the surface, then follows the thread it landed in", async () => {
@@ -909,7 +909,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.getByText("task page")).toBeTruthy();
   });
 
-  it("renders the transcript and the working state, and shows the dot on the trigger", async () => {
+  it("renders the transcript and the working state", async () => {
     mount({
       path: "/projects/viberr/tasks/VIB-1",
       view: () =>
@@ -933,7 +933,7 @@ describe("the controller dock (ruling 121)", () => {
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
-      // Ruling 457: the button's dot reads the dock's status.
+      // Ruling 457: the button's announcer reads the dock's status.
       working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
@@ -947,7 +947,6 @@ describe("the controller dock (ruling 121)", () => {
     expect(
       screen.getAllByRole("status").map((el) => el.textContent).join(" | "),
     ).toContain("Controller is working");
-    await waitFor(() => expect(trigger.querySelector(".live-dot")).not.toBeNull());
     // History never wears the entry animation marker.
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
   });
@@ -1458,5 +1457,85 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
     rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
     expect(screen.getByRole("status")).toBe(region);
     expect(region.textContent).toBe("Controller replied: Yes.");
+  });
+});
+
+/**
+ * Ruling 528 (owner, 2026-09-27: "this view shows old run(I made a new one),
+ * also shows like there is a pending message that I didn't read yet ... I want
+ * this for real but for only new messages else I don't want it"). The owner's
+ * instance dock showed the thread it had shown before while the conversation
+ * they had since started on the full page worked, and the button's pulsing
+ * working dot read as a reply waiting.
+ */
+describe("ruling 528: the dock opens on the newest thread, and its one dot is a reply not yet read", () => {
+  /** VIB-1's threads as the view lists them, newest first. */
+  const threads = [
+    { id: "cnv_new", title: "Started on the full page", lastMessageAt: "2026-09-27T16:18:00.000Z", unread: false },
+    { id: "cnv_old", title: "Which model are you now?", lastMessageAt: "2026-09-27T16:13:00.000Z", unread: false },
+  ];
+
+  async function pickOlder(loads: URL[]) {
+    fireEvent.click(await screen.findByRole("button", { name: "Threads here (2)" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Which model are you now\?/ }));
+    await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_old"));
+  }
+
+  it("(a) every open asks for the newest thread; a pick holds only while the panel stays open", async () => {
+    const { loads } = mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView({ threads }) });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(loads.length).toBe(1));
+    expect(loads[0]!.searchParams.has("c")).toBe(false);
+    await pickOlder(loads);
+
+    // Closed, then opened again: the newest thread, not the one picked.
+    // CANARY: drop `setSelected({})` from the trigger's open, and this asks
+    // for cnv_old.
+    fireEvent.click(screen.getByRole("button", { name: "Close the controller dock" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+    const closed = loads.length;
+    fireEvent.click(trigger);
+    await waitFor(() => expect(loads.length).toBe(closed + 1));
+    expect(loads.at(-1)!.searchParams.has("c")).toBe(false);
+
+    // The owner's path: the panel open on the older thread, off to the full
+    // page (which carries no dock; the tab remembers the panel open), and back.
+    // CANARY: keep the selection in sessionStorage again, and the panel comes
+    // back asking for cnv_old.
+    await pickOlder(loads);
+    fireEvent.click(screen.getByRole("link", { name: "open the controller page" }));
+    await screen.findByText("controller page");
+    expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull();
+    const away = loads.length;
+    fireEvent.click(screen.getByRole("link", { name: "back to VIB-1" }));
+    await screen.findByRole("dialog", { name: "Controller dock" });
+    await waitFor(() => expect(loads.length).toBe(away + 1));
+    expect(loads.at(-1)!.searchParams.has("c")).toBe(false);
+  });
+
+  it("(b) the button shows no dot for a working turn, and the unread dot while one works", async () => {
+    let replied = false;
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+      working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
+      unseen: () => (replied ? [BOARD_REPLY] : []),
+    });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    // The status has landed: the announcer says the turn works (ruling 476(d)).
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Controller is working"));
+    // CANARY: put the `.live-dot` back on the trigger.
+    expect(trigger.querySelector(".live-dot, .unseen-dot")).toBeNull();
+
+    // A reply lands in another thread while the turn still works.
+    replied = true;
+    act(() => {
+      window.dispatchEvent(new Event(CONTROLLER_UPDATED_EVENT));
+    });
+    const fab = await screen.findByRole("button", { name: /a new reply/ });
+    // CANARY: gate the unread dot on `!working` again, and nothing shows.
+    expect(fab.querySelector(".unseen-dot")).not.toBeNull();
+    expect(fab.querySelector(".live-dot")).toBeNull();
   });
 });
