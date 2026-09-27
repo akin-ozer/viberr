@@ -282,7 +282,11 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const f = fm(store, r.slug);
     expect(boundary(f.workflow, "triage", "ready")).toBe("approval");
     expect(boundary(f.workflow, "ready", "impl")).toBe("approval");
-    // impl→review stays approval; review→done stays the locked human boundary.
+    // Ruling 519 made the move into Review automatic on the template; a strict
+    // board still has a person approve it. CANARY: let `presetWorkflow` gate
+    // only the boundaries before work starts and this reads `auto`.
+    expect(boundary(f.workflow, "impl", "review")).toBe("approval");
+    // review→done stays the locked human boundary.
     expect(boundary(f.workflow, "review", "done")).toBe("human");
     expect(f.workflow.find((b) => b.to === "done")?.locked).toBe(true);
     expect(opAutonomy(f.agents)).toBeUndefined(); // still supervised
@@ -295,7 +299,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).toBe("recommend");
   });
 
-  it("balanced keeps the shipped template's deliver-review-pr: direct", async () => {
+  it("balanced keeps the shipped template's deliver-review-pr: direct and its automatic move into Review", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
@@ -306,6 +310,9 @@ describe("createProject — policy preset shapes REAL governance", () => {
       { dataRoot: store.dataRoot },
     );
     const f = fm(store, r.slug);
+    // Ruling 519: nobody confirms the move into Review on a new board; the
+    // operator makes it. CANARY: put the template's edge back to `approval`.
+    expect(boundary(f.workflow, "impl", "review")).toBe("auto");
     const op = f.agents.find((a) => a.profileId === "operator")!;
     expect(
       op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,

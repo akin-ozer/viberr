@@ -3,6 +3,7 @@ import { describeRevisionDrift } from "~/shared/revision-drift";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
+  approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -1666,10 +1667,11 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
 
 describe("operatorTransitionStage", () => {
   it("supervised + recommend mode recommends and does not move (approval boundary)", async () => {
-    // impl → review is an `approval` boundary — a human gate — so a supervised
-    // operator recommends and waits (triage → ready is now `auto`, so it would
-    // NOT recommend; the approval boundary is the one that still routes to a card).
+    // impl → review is an `approval` boundary here — a human gate — so a
+    // supervised operator recommends and waits (an `auto` boundary would NOT
+    // recommend; the approval boundary is the one that still routes to a card).
     deployRoster(DEFAULT_POLICY);
+    approveReviewEntry(store);
     seedTask("impl");
     const r = await operatorTransitionStage(
       store.db,
@@ -1682,12 +1684,42 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.waiting).toBe("human");
   });
 
+  it("ruling 519: on the Standard board the operator moves the task into Review itself and says why on the move", async () => {
+    // CANARY: put the template's In Progress → Review edge back to `approval`
+    // and this files a card a person has to apply; drop the quote from the
+    // operator's transition event and its reason reaches nobody.
+    deployRoster(DEFAULT_POLICY); // supervised, `stage-transitions: recommend`
+    seedTask("impl");
+    const why = "PR #21 carries the redesign, and every gate passes on the branch.";
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", reason: why },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("review");
+    expect(task().frontmatter.recommendations.filter((x) => x.kind === "transition")).toEqual([]);
+    expect(task().timeline.find((e) => e.type === "transition")).toMatchObject({
+      actor: { kind: "operator" },
+      text: `**Transition:** operator moved VIB-1 from In Progress to Review.\n\n> ${why}`,
+    });
+    expect(listAuditEvents(store.db, { action: "task.transition" })[0]?.details).toMatchObject({
+      from: "impl",
+      to: "review",
+      boundary: "auto",
+      by: "operator",
+      reason: why,
+    });
+  });
+
   it("ruling 151: full autonomy RECOMMENDS an approval boundary instead of crossing it", async () => {
     // Pass 35, F35-2 (owner Q35-1): the boundary always wins. This case used to
     // assert the opposite ("full autonomy moves the task across an approval
     // boundary as the operator"). Canary: delete the `boundary === "approval"`
     // branch in operatorTransitionStage and the task moves.
     deployRoster(DEFAULT_POLICY);
+    approveReviewEntry(store);
     seedTask("impl");
     const r = await operatorTransitionStage(
       store.db,
@@ -1714,6 +1746,7 @@ describe("operatorTransitionStage", () => {
       ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "stage-transitions"),
       { capabilityId: "stage-transitions", mode: "direct" },
     ]);
+    approveReviewEntry(store);
     seedTask("impl");
     const r = await operatorTransitionStage(
       store.db,
@@ -1771,8 +1804,10 @@ describe("operatorTransitionStage", () => {
   });
 
   it("ruling 152(a): the done reply names the NEXT boundary so one turn walks consecutive auto stages", async () => {
-    // Canary: return the bare "Moved …" sentence again.
+    // Canary: return the bare "Moved …" sentence again. A person approves the
+    // move into Review on this board, so the second reply names that arm.
     deployRoster(DEFAULT_POLICY);
+    approveReviewEntry(store);
     seedTask("triage");
     const r = await operatorTransitionStage(
       store.db,
@@ -3443,9 +3478,10 @@ describe("applyRecommendation / dismissRecommendation", () => {
 
   it("a stage transition clears stale transition recommendations", async () => {
     deployRoster(DEFAULT_POLICY);
+    approveReviewEntry(store);
     seedTask("impl");
     // Supervised operator recommends moving to review (impl→review is an
-    // `approval` boundary, so it produces a transition card).
+    // `approval` boundary on this board, so it produces a transition card).
     await operatorTransitionStage(
       store.db,
       { dataRoot: store.dataRoot },
@@ -6214,7 +6250,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
 
   it("ruling 162 (b): the move INTO the acceptance stage is refused with the same sentence while the PR conflicts", async () => {
     // Canary: drop the `mergeStageEntryRefusal` read in operatorTransitionStage:
-    // the move files a "Move the task to Review" card (the approval boundary).
+    // the operator moves the task into Review (an `auto` boundary, ruling 519).
     deployRoster(DEFAULT_POLICY);
     seedReviewedWithPr("impl", "conflicting");
     const r = await operatorTransitionStage(
@@ -6232,8 +6268,8 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.message).toContain("Call update_branch_from_base, which routes the conflict (ruling 475)");
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().frontmatter.recommendations).toEqual([]);
-    // A clean PR crosses the same boundary as before (a recommendation card) —
-    // and it crosses it WITH `notAcceptableReason` standing. Pass-35 cluster
+    // A clean PR crosses the same boundary — the operator moves the task, the
+    // boundary being `auto` — and it crosses it WITH `notAcceptableReason` standing. Pass-35 cluster
     // review: the field is `acceptanceRefusalFor`, whose third gate is "this
     // task is not at the boundary yet", so it is set on every task short of the
     // acceptance stage and its own remedy is this move. The shipped tool and
@@ -6253,7 +6289,8 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("full"),
     );
-    expect(ok.outcome).toBe("recommended");
+    expect(ok.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("review");
   });
 
   it("ruling 163 (a): Merge to Review is a rework move on `validation: changed`; Merge to In Progress is not offered", async () => {

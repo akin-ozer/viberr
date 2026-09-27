@@ -3,6 +3,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEW_APPROVAL_WORKFLOW,
   setupTestStore,
   writeProject,
   writeTask,
@@ -107,6 +108,10 @@ describe("ruling 131(f): converting the two live holds", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       repo: null,
+      // A person approves the move out of In Progress, as on the live board
+      // then: a release turn that stops there settles, and draws no stranded
+      // nudge (the Standard template's move is `auto` since ruling 519).
+      workflow: REVIEW_APPROVAL_WORKFLOW,
       agents: [
         {
           profileId: "operator",

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -10,6 +11,7 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
 import { flush, waitFor } from "../../../test-support/polling";
@@ -41,8 +43,10 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
  * record "Move the task to Review".
  *
  * `performDelivery` now records that transition recommendation itself when
- * nothing else made the task actionable. The default test project IS VC-1's
- * shape: `impl → review` at an `approval` boundary (GOVERNED_TEMPLATE).
+ * nothing else made the task actionable. The test project is VC-1's shape:
+ * `impl → review` at an `approval` boundary, as the Standard template had it
+ * then (`approveReviewEntry`). Since ruling 519 the Standard board's move into
+ * Review is `auto`: the operator makes it, and the delivery records nothing.
  *
  * push-workspace + pr-open are stubbed through `performDelivery`'s ctx `deps`
  * seam so it reaches the `result.status === "ok"` branch without git or GitHub;
@@ -152,6 +156,7 @@ function recs(): Recommendation[] {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
+  approveReviewEntry(store);
   installFakeRuntime();
   runOp.mockClear();
   pushMock.mockClear();
@@ -459,6 +464,22 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
       waitingOnYou: true,
     });
     expect(inbox[0]!.from).toMatchObject({ kind: "system", name: "Delivery" });
+  });
+
+  it("ruling 519: on the Standard board, where the move into Review is `auto`, a delivery records no card and rings no bell", async () => {
+    // CANARY: drop the `auto` return in `recordDeliveredNextStep` and a person
+    // is asked to confirm a move the operator makes itself.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, workflow: GOVERNED_TEMPLATE.workflow });
+    deployDeliveryOperator(store, "supervised");
+    seedTask();
+    expect(await deliver()).toBe("delivered");
+
+    expect(recs()).toEqual([]);
+    expect(decisionsRequiring(store.db, store.users.arda.id).mine).toEqual([]);
+    expect(
+      listNotifications(store.db, store.users.arda.id).filter((n) => n.taskKey === "VIB-1"),
+    ).toHaveLength(0);
   });
 
   it("B. an operator that ALREADY recommended the move gets no duplicate", async () => {

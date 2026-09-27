@@ -551,7 +551,9 @@ Details that matter:
   that changes a path another task leases is refused before it reaches GitHub (rulings
   245, 353). Under `recommend` the card reads the RECORDED `pr.unpushedRevision` fact and
   proposes "Push `<sha>` to PR #N". A supervised delivery always leaves an actionable next
-  step (a "Move to Review" recommendation) when the operator recorded none (ruling 58);
+  step (a "Move to Review" recommendation) when the operator recorded none (ruling 58), on
+  a board where a person approves that move; where the move is `auto` (the Standard
+  template, ruling 519) the operator makes it itself and no card is filed;
   a full-autonomy delivery whose PR is new or whose head moved owes the `delivered`
   follow-up (§3). The doctrine and the seeded persona say that pushing is never a
   person's job and never an agent's. A pull request a person closed without merging is

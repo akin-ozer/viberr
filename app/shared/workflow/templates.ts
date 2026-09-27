@@ -31,6 +31,10 @@ export interface WorkflowTemplate {
   workflow: WorkflowBoundary[];
 }
 
+/** The Standard template's words for its In Progress → Review edge (ruling
+ *  519), shared with the boot conversion that writes them onto older boards. */
+export const TEMPLATE_REVIEW_ENTRY_BY = "Operator, when the work is ready for review";
+
 export const GOVERNED_TEMPLATE: WorkflowTemplate = {
   id: "governed-5",
   label: "Standard · 5 stages",
@@ -65,8 +69,14 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
     {
       from: "impl",
       to: "review",
-      boundary: "approval",
-      by: "Operator transition request, with evidence attached",
+      // Ruling 519 (owner, 2026-09-27): Review is a state the task reaches on
+      // its own, not one a person confirms. The operator moves the task there
+      // when the work is ready and says why on the move; the one person's gate
+      // on this board is acceptance, the edge below. It was `approval`, and the
+      // boards created while it was are converted once at boot
+      // (`convertTemplateReviewEntry`).
+      boundary: "auto",
+      by: TEMPLATE_REVIEW_ENTRY_BY,
       locked: false,
     },
     {

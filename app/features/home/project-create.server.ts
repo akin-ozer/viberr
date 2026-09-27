@@ -80,11 +80,12 @@ export type PolicyPreset = "strict" | "balanced" | "auto";
  * The policy preset shapes REAL governance, not just copy:
  *
  * - **strict** — a human gates every stage: the operator does NOT auto-advance
- *   before work starts. Every pre-work `auto` boundary becomes `approval`, so a
- *   human must approve triage→ready (and ready→impl) before an agent touches the
- *   repo. Operator stays supervised.
- * - **balanced** — the template defaults (pre-work boundaries auto-advance under
- *   a supervised operator; impl→review approval; review→done human).
+ *   before work starts. Every `auto` boundary short of the last stage becomes
+ *   `approval`, so a human must approve triage→ready (and ready→impl) before an
+ *   agent touches the repo, and the move into review too (ruling 519 made that
+ *   one automatic everywhere else). Operator stays supervised.
+ * - **balanced** — the template defaults (the operator advances every boundary
+ *   up to review under a supervised operator; review→done human).
  * - **auto** — the operator runs at FULL autonomy: it crosses the governed
  *   boundaries itself and accepts completion (review→done stays human-locked,
  *   an invariant no preset can grant).
