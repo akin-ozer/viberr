@@ -523,6 +523,21 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
     expect(isKnownModel("codex", "opus[1m]")).toBe(false);
   });
 
+  it("ruling 526(c): the live list's \"Default (recommended)\" is known on a COLD process", () => {
+    // The CLI lists `default` first. A controller that stored it ran on it
+    // until the server restarted; then the empty live cache made the
+    // validator substitute `sonnet`, so the run was Sonnet while the picker
+    // still said Default. `default` reaches the SDK as no model at all, which
+    // is what was picked: the account's own default.
+    // CANARY: drop `model === CLAUDE_ACCOUNT_DEFAULT` from
+    // claudeModelRunsVerbatim and the first two assertions go red.
+    resetModelCatalogCache();
+    expect(isKnownModel("claude", "default")).toBe(true);
+    expect(resolveRunModel("claude", "default")).toBe("default");
+    // Codex's list is closed and names no account default.
+    expect(isKnownModel("codex", "default")).toBe(false);
+  });
+
   it("pass 34 (F34-7): the variant's display name is the LIVE row's when cached, else the family name plus the variant", async () => {
     // Canary: delete the variant branch in modelDisplayName (the cold case
     // echoes the id) or the live lookup (the warm case does).

@@ -18,6 +18,14 @@ export const CLAUDE_MODEL_ALIASES: readonly string[] = [
 ];
 
 /**
+ * Ruling 526(c): the live catalog's first row, "Default (recommended)". A run
+ * handed it passes no model to the SDK (`resolveClaudeModel` returns
+ * undefined), so the CLI runs the account's own default. Not a family alias:
+ * it names no tier, and the curated list never offers it.
+ */
+export const CLAUDE_ACCOUNT_DEFAULT = "default";
+
+/**
  * A DATED Claude id, e.g. `claude-sonnet-4-5` or `claude-opus-4-1-20250805` —
  * what `resolveClaudeModel` forwards to the SDK verbatim, and the shape a live
  * `supportedModels()` row carries. Deliberately NOT matched by seed display
@@ -61,16 +69,17 @@ export function splitClaudeVariant(model: string): ClaudeModelParts {
 
 /**
  * Would a Claude run execute this stored id VERBATIM even when the served
- * model catalog does not list it? True for the family aliases, for dated ids
- * and for a family alias carrying a context-window variant — exactly the
- * values `resolveRunModel("claude", …)` passes through rather than
- * substituting the default. A picker must therefore never rewrite such a
+ * model catalog does not list it? True for the family aliases, for dated ids,
+ * for a family alias carrying a context-window variant and for the account
+ * default — exactly the values `resolveRunModel("claude", …)` passes through
+ * rather than substituting the default. A picker must therefore never rewrite such a
  * value to the catalog default: the rewrite would be a silent model change,
  * not a display correction.
  */
 export function claudeModelRunsVerbatim(model: string): boolean {
   return (
     CLAUDE_MODEL_ALIASES.includes(model) ||
+    model === CLAUDE_ACCOUNT_DEFAULT ||
     DATED_CLAUDE_ID_RE.test(model) ||
     CLAUDE_ALIAS_VARIANT_RE.test(model)
   );

@@ -32,6 +32,10 @@ export type AgentRunRow = {
   kind: RunKind;
   backend: RunBackend;
   model: string;
+  /** Ruling 526(d): the effort tier the run was handed, after
+   *  `resolveRunEffort`; null when none was set (the SDK default applies) and
+   *  on rows from before the column. */
+  effort: string | null;
   session_id: string | null;
   sdk: string;
   /** The deployed agent's display name ("dev"/"Operator"/…); null on seed/
@@ -134,6 +138,8 @@ export interface InsertRunInput {
   /** Requested backend, kept for glyph fidelity. */
   backend: RunBackend;
   model: string;
+  /** Ruling 526(d): see `AgentRunRow.effort`. Omitted stores NULL. */
+  effort?: string | null;
   sdk: string;
   sessionId?: string | null;
   /** The deployed agent's display name (grouped-picker label). */
@@ -176,7 +182,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
   db.prepare(
     `INSERT INTO agent_runs
        (id, task_key, project_slug, thread_id, role, kind, backend,
-        model, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
+        model, effort, session_id, sdk, agent_name, agent_profile_id, state, phase, step,
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, interrupted_reason, credential_user_id, verdict_withheld,
@@ -184,7 +190,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
-        @model, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
+        @model, @effort, @sessionId, @sdk, @agentName, @agentProfileId, @state, @phase, @step,
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
         @interruptedBy, @interruptedReason, @credentialUserId, @verdictWithheld,
@@ -193,7 +199,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
         thread_id=excluded.thread_id, role=excluded.role, kind=excluded.kind,
-        backend=excluded.backend, model=excluded.model,
+        backend=excluded.backend, model=excluded.model, effort=excluded.effort,
         session_id=excluded.session_id, sdk=excluded.sdk,
         agent_name=excluded.agent_name, agent_profile_id=excluded.agent_profile_id,
         state=excluded.state,
@@ -217,6 +223,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     kind: input.kind,
     backend: input.backend,
     model: input.model,
+    effort: input.effort ?? null,
     sessionId: input.sessionId ?? null,
     sdk: input.sdk,
     agentName: input.agentName ?? null,

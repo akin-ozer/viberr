@@ -3,7 +3,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   CLAUDE_ALIAS_VARIANT_RE,
-  DATED_CLAUDE_ID_RE,
+  claudeModelRunsVerbatim,
   splitClaudeVariant,
 } from "~/shared/model-ids";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
@@ -315,8 +315,10 @@ export function assertModelForBackend(backend: RealBackend, model: string): void
  * Is `model` a real, valid model id for `backend`?
  *
  * Claude: the curated family aliases, PLUS anything the LIVE catalog offered
- * (see below), PLUS a dated `claude-*` id. Codex: the curated list only —
- * Codex exposes no list endpoint, so the picker can never offer anything else.
+ * (see below), PLUS what `claudeModelRunsVerbatim` accepts (a dated
+ * `claude-*` id, an alias with a variant, the account default `default`).
+ * Codex: the curated list only — Codex exposes no list endpoint, so the
+ * picker can never offer anything else.
  * Display labels from seed profiles ("codex-large · claude-sonnet",
  * "claude-sonnet", "codex-large", "orchestration runtime") are NOT valid ids
  * and still return false.
@@ -335,12 +337,13 @@ export function isKnownModel(backend: RealBackend, model: string): boolean {
   const cat = backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED;
   if (cat.models.some((m) => m.value === model)) return true;
   if (backend === "codex") return false;
-  if (DATED_CLAUDE_ID_RE.test(model)) return true;
-  // Pass 34 (F34-7): a family alias with a context-window variant (`opus[1m]`)
-  // is what the live catalog offers and what a profile stores; it is known
+  // The static rule the client pickers share: a dated id; a family alias with
+  // a context-window variant (`opus[1m]`, pass 34 F34-7), which is what the
+  // live catalog offers and what a profile stores; and the account default
+  // (ruling 526(c)), the live list's "Default (recommended)". Each is known
   // BEFORE the live cache is consulted, so a cold process never substitutes
   // the catalog default for a value the picker itself offered.
-  if (CLAUDE_ALIAS_VARIANT_RE.test(model)) return true;
+  if (claudeModelRunsVerbatim(model)) return true;
   return liveCatalogModelValues("claude").has(model);
 }
 

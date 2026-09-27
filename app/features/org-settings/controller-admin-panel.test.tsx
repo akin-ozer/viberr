@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { formatDayDotTime } from "~/shared/dates/format";
 import { ToastProvider } from "~/ui/toast";
+import { settle } from "../../../test-support/polling";
 import {
   ControllerAdminPanel,
   type ControllerGrantRequestView,
@@ -39,6 +40,13 @@ const CLAUDE_CATALOG: ModelCatalog = {
       supportsEffort: true,
       efforts: ["low", "medium", "high", "xhigh", "max"],
     },
+    // The live list's Haiku takes no effort tier.
+    {
+      value: "haiku",
+      displayName: "Claude Haiku",
+      description: "Fastest.",
+      supportsEffort: false,
+    },
   ],
   efforts: ["low", "medium", "high", "xhigh", "max"],
   defaultModel: "sonnet",
@@ -67,6 +75,11 @@ const KBS = [
 afterEach(cleanup);
 
 let lastForm: Record<string, string> | null = null;
+/** Every form the panel posted, oldest first. */
+let posted: Record<string, string>[] = [];
+/** The last form posted with `intent`, or null. */
+const postedFor = (intent: string) =>
+  posted.findLast((f) => f.intent === intent) ?? null;
 
 /** A posted form field the panel sets (text only — the page-test rule). */
 const textField = z.string();
@@ -94,6 +107,7 @@ function renderPanel(
   requests: ControllerGrantRequestView[] = [],
 ) {
   lastForm = null;
+  posted = [];
   const config = { ...CONFIG, ...overrides };
   const Stub = createRoutesStub([
     {
@@ -112,13 +126,15 @@ function renderPanel(
       ),
       action: async ({ request }) => {
         const fd = await request.formData();
-        lastForm = {};
+        const form: Record<string, string> = {};
         for (const [k, v] of fd.entries()) {
           // The panel posts text fields only; a File entry names no field
           // these tests capture (the page-test harness's textField rule).
           const field = textField.safeParse(v);
-          if (field.success) lastForm[k] = field.data;
+          if (field.success) form[k] = field.data;
         }
+        lastForm = form;
+        posted.push(form);
         return { ok: true, toast: "stub done" };
       },
     },
@@ -228,6 +244,11 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
       container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')
         ?.value,
     ).toBe("high");
+    // Ruling 526: a pick saves at once, but this is the catalog's re-seed, not
+    // a pick: opening the tab writes nothing. CANARY: hand `pickModel` to
+    // useModelCatalog and the re-seed posts `controller-model`.
+    await settle();
+    expect(posted).toEqual([]);
   });
 
   it("saves model, effort and the grants (KBs by dir) in one intent", async () => {
@@ -242,8 +263,10 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
     expect(effortSel).toBeTruthy();
     fireEvent.change(effortSel!, { target: { value: "xhigh" } });
     fireEvent.click(getByText("Save controller"));
-    await waitFor(() => expect(lastForm).not.toBeNull());
-    expect(lastForm).toMatchObject({
+    // The effort pick has already posted on its own (ruling 526); Save posts
+    // it again with everything else.
+    await waitFor(() => expect(postedFor("controller-save")).not.toBeNull());
+    expect(postedFor("controller-save")).toMatchObject({
       intent: "controller-save",
       model: "opus",
       effort: "xhigh",
@@ -390,7 +413,7 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
 
 describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
   it("renders every locked section read-only, with the unlock note", async () => {
-    const { container, getByText } = renderPanel({}, ["qa-echo"], LOCKED);
+    const { container, getByText, queryByText } = renderPanel({}, ["qa-echo"], LOCKED);
     // No grant chip is a control any more: the groups hold spans only (the
     // pinned viberr_ops chip was already a span), so there is nothing to
     // toggle and nothing announcing pressable state.
@@ -440,23 +463,26 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     }
     // Model stays editable: once the catalog answers, the select is a real
     // control (it is disabled only during the load, lock or no lock).
-    expect(getByText("Save controller")).toBeTruthy();
     await waitFor(() =>
       expect(
         container.querySelector('select[aria-label="Model"]:disabled'),
       ).toBeNull(),
     );
+    // Ruling 526: a pick saves itself, so with every section locked there is
+    // nothing left for Save to do and the tab has none.
+    expect(queryByText("Save controller")).toBeNull();
   });
 
   it("a locked save posts blank for every locked section (server keeps stored)", async () => {
     // A locked section renders read-only and posts BLANK, which the server
     // reads as "keep the stored value" — so a stale grant/doctrine copy the
-    // panel is holding can never be posted back as a change, and a
-    // model/effort-only save succeeds under the lock. Model still posts.
+    // panel is holding can never be posted back as a change. Model still
+    // posts. The instructions are unlocked here: with every section locked
+    // the tab has no Save at all (ruling 526).
     const { container, getByText } = renderPanel(
       { kb: ["Controller handbook"] },
       ["qa-echo"],
-      LOCKED,
+      { ...LOCKED, instructions: false },
     );
     await waitFor(() =>
       expect(
@@ -469,7 +495,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(lastForm?.skills).toBe("");
     expect(lastForm?.kb).toBe("");
     expect(lastForm?.mcps).toBe("");
-    expect(lastForm?.definition).toBe("");
+    expect(lastForm?.definition).toBe("doctrine text");
     expect(lastForm?.model).toBe("opus");
   });
 
@@ -515,6 +541,35 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(ghost?.textContent).toContain("ghost-skill");
     expect(ghost?.querySelector(".res-chip-note")?.textContent).toBe("missing");
     expect(ghost?.getAttribute("title")).toContain("locked on this deployment");
+  });
+});
+
+/**
+ * Ruling 526: a model or effort pick saves the moment it is made. It used to
+ * wait for Save, below the grants and the doctrine, and a pick followed by
+ * "Open the controller" was lost without a word: the next turn ran the old
+ * model.
+ */
+describe("ruling 526: a model or effort pick saves at once", () => {
+  it("posts controller-model with the pick alone, under the default full lock", async () => {
+    // CANARY: hand ModelEffortFields the plain setters again and nothing posts.
+    const { container } = renderPanel({}, ["qa-echo"], LOCKED);
+    const model = container.querySelector<HTMLSelectElement>('select[aria-label="Model"]');
+    await waitFor(() => expect(model?.value).toBe("opus"));
+    fireEvent.change(
+      container.querySelector<HTMLSelectElement>('select[aria-label="Effort"]')!,
+      { target: { value: "low" } },
+    );
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ intent: "controller-model", model: "opus", effort: "low" });
+    // No grant or doctrine rides along, so no lock can refuse the pick.
+    expect(Object.keys(posted[0]!).sort()).toEqual(["_csrf", "effort", "intent", "model"]);
+
+    // A model with no effort tier posts a blank effort, as Save always did.
+    fireEvent.change(model!, { target: { value: "haiku" } });
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toMatchObject({ intent: "controller-model", model: "haiku", effort: "" });
+    expect(container.querySelector('select[aria-label="Effort"]')).toBeNull();
   });
 });
 

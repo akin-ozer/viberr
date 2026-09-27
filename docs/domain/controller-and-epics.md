@@ -279,7 +279,8 @@ M` boundaries between turns.
 
 - **Live run** (above the transcript, only while a turn is `running`): the run's phase
   and last tool step, elapsed from the run's own `started_at`, turns and tokens off the
-  run row, the model, **View logs** (scrolls to the console and selects the thread) and
+  run row, the model and the effort it was handed (Runtime, `opus[1m] · max`; the model
+  alone when no effort was set, ruling 526(d)), **View logs** (scrolls to the console and selects the thread) and
   **Interrupt**. The phase, step, turns and tokens follow the console's tail reads (each
   line, and the 5-second status read), and the loader on the `controller.updated`
   reference a lifecycle flip publishes (the sink routes a controller run's state
@@ -859,13 +860,20 @@ and the tool — stands.
 
 ## 6. Configuring the controller (rulings 106 and 108)
 
-Instance settings → Controller tab (`controller-admin-panel.tsx`, `controller-save`
-intent, `saveControllerConfig`):
+Instance settings → Controller tab (`controller-admin-panel.tsx`; the `controller-model`
+intent, `saveControllerModel`, and the `controller-save` intent, `saveControllerConfig`):
 
 - **Model and effort** use the same catalog pickers as the agent profile editor
-  (`ModelEffortFields` + `useModelCatalog("claude")`); a dated `claude-*` id or a
-  family alias the served catalog does not list is preserved verbatim rather than
-  repinned. Always editable. The model is read fresh on every turn, resumes included.
+  (`ModelEffortFields` + `useModelCatalog("claude")`); a dated `claude-*` id, a family
+  alias, or the account default `default` (ruling 526(c)) that the served catalog does
+  not list is preserved verbatim rather than repinned. Always editable, and **saved the
+  moment a person picks** (ruling 526): `controller-model` writes those two keys and
+  nothing else, so no section lock applies, audits `org.controller.updated` `{ model,
+  effort }` and toasts what the next turn runs in the Agents page's words ("The
+  controller runs Claude Opus · Maximum from its next turn"). A model with no effort
+  tiers saves none. The catalog's own re-seeding when the tab opens saves nothing. With
+  every section locked the tab has no Save button, since nothing is left for it to do.
+  The model is read fresh on every turn, resumes included.
 - **Grant sections** (skills, knowledge bases, org MCP servers) and **instructions**
   (the doctrine file) are **deployment-locked by default, org admins included**.
   Four variables unlock one section each: `VIBERR_UNLOCK_CONTROLLER_SKILLS`, `_KB`,

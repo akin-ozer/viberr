@@ -154,18 +154,32 @@ export interface ModelCatalogState {
   effortOptions: string[];
 }
 
-/** Clamp the effort pick to the tiers `model` offers: the catalog default when
- *  that model offers it, else its first tier. A pick already on offer stands. */
+/** The effort pick clamped to the tiers `model` offers: the catalog default
+ *  when that model offers it, else its first tier. A pick already on offer
+ *  stands. Exported for the controller panel, which saves a model pick with
+ *  the effort the picker will stand on (ruling 526). */
+export function effortOnOffer(catalog: ModelCatalog, model: string, effort: string): string {
+  const offered = effortsFor(catalog, model);
+  if (effort && offered.includes(effort)) return effort;
+  const fallback = offered.includes(catalog.defaultEffort) ? catalog.defaultEffort : offered[0];
+  return fallback ?? catalog.defaultEffort;
+}
+
 function seedEffort(
   catalog: ModelCatalog,
   model: string,
   effort: string,
   setEffort: (v: string) => void,
 ): void {
-  const offered = effortsFor(catalog, model);
-  if (effort && offered.includes(effort)) return;
-  const fallback = offered.includes(catalog.defaultEffort) ? catalog.defaultEffort : offered[0];
-  setEffort(fallback ?? catalog.defaultEffort);
+  const next = effortOnOffer(catalog, model, effort);
+  if (next !== effort) setEffort(next);
+}
+
+/** Whether the picker offers an effort for `model`: hidden only for a model
+ *  the catalog lists without one. A model without tiers saves no effort. */
+export function modelTakesEffort(catalog: ModelCatalog | null, model: string): boolean {
+  const selected = catalog?.models.find((m) => m.value === model);
+  return !selected || selected.supportsEffort;
 }
 
 /** The effort tiers the picker offers for one model: the model's own list when
@@ -260,7 +274,7 @@ export function useModelCatalog(
     () => catalog?.models.find((m) => m.value === model) ?? null,
     [catalog, model],
   );
-  const showEffort = !catalog || !selectedModel || selectedModel.supportsEffort;
+  const showEffort = modelTakesEffort(catalog, model);
   const effortOptions = catalog ? effortsFor(catalog, model) : [];
 
   return {
@@ -625,6 +639,7 @@ export function ModelEffortFields({
   selectedModel,
   showEffort,
   effortOptions,
+  modelHint = "the model this profile runs on",
 }: {
   uid: string;
   backend: "codex" | "claude" | "";
@@ -641,6 +656,8 @@ export function ModelEffortFields({
   selectedModel: CatalogModel | null;
   showEffort: boolean;
   effortOptions: string[];
+  /** The Model label's hint once the catalog has answered. */
+  modelHint?: string;
 }) {
   return (
     <div className="field-row">
@@ -652,7 +669,7 @@ export function ModelEffortFields({
               ? "loading available models…"
               : catalogFailed
                 ? "couldn't load the models"
-                : "the model this profile runs on"}
+                : modelHint}
           </span>
           {/* D5 (pass 23): a fetch that failed used to strand Save forever with
               no error and no way out — the picker sat empty and the footer said

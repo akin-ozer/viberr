@@ -451,6 +451,9 @@ const BASELINE_COLUMNS: readonly {
       // names it on every insert — the ruling-127 failure shape again. NULL is
       // the truth for a run that predates it: the one account there was.
       { name: "credential_account_id", ddl: "credential_account_id TEXT" },
+      // Ruling 526(d): `upsertRun` names the run's effort on every insert. NULL
+      // is the truth for a run that predates it: nothing recorded the tier.
+      { name: "effort", ddl: "effort TEXT" },
     ],
   },
   {

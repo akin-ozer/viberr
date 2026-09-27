@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import {
+  effortOnOffer,
   ModelEffortFields,
+  modelTakesEffort,
   useModelCatalog,
 } from "~/features/agents/create-profile-modal";
 import { Icon } from "~/ui/icon";
@@ -32,6 +34,12 @@ import { useOrgAction } from "./use-org-action";
  * here and `saveControllerConfig` refuses a change to it server-side, so the
  * panel and any other caller are bound by the same rule. Model and effort
  * stay editable either way.
+ *
+ * Ruling 526: a model or effort pick is saved the moment it is made. It used
+ * to wait for Save, which sits below the grants and the doctrine, so a pick
+ * followed by "Open the controller" was dropped without a word and the next
+ * turn ran the old model. With every section locked there is nothing left for
+ * Save to do, so the tab has no Save.
  */
 
 export interface ControllerConfigView {
@@ -265,6 +273,7 @@ export function ControllerAdminPanel({
   requests: ControllerGrantRequestView[];
 }) {
   const action = useOrgAction();
+  const pickAction = useOrgAction();
   const uid = useId();
   const [model, setModel] = useState(config.model);
   const [effort, setEffort] = useState(config.effort);
@@ -282,14 +291,14 @@ export function ControllerAdminPanel({
   );
   const [grantMcps, setGrantMcps] = useState(new Set(config.mcps));
 
-  const lockedSections = (
-    [
-      ["skills", locks.skills],
-      ["mcps", locks.mcps],
-      ["kb", locks.kb],
-      ["instructions", locks.instructions],
-    ] as const
-  ).filter(([, locked]) => locked);
+  const sections = [
+    ["skills", locks.skills],
+    ["mcps", locks.mcps],
+    ["kb", locks.kb],
+    ["instructions", locks.instructions],
+  ] as const;
+  const lockedSections = sections.filter(([, locked]) => locked);
+  const saveable = lockedSections.length < sections.length;
 
   // The controller always runs on Claude (controller-run resolves
   // `resolveRunModel("claude", …)`), so the catalog backend is fixed — no
@@ -303,6 +312,26 @@ export function ControllerAdminPanel({
     showEffort,
     effortOptions,
   } = useModelCatalog("claude", model, setModel, effort, setEffort);
+
+  // Ruling 526: only a person's pick saves. The catalog's own re-seeding
+  // (above) keeps the plain setters, so opening the tab never writes.
+  const saveModel = (nextModel: string, nextEffort: string) =>
+    pickAction.submit({
+      intent: "controller-model",
+      model: nextModel,
+      effort: modelTakesEffort(catalog, nextModel) ? nextEffort : "",
+    });
+  const pickModel = (next: string) => {
+    // The effort the picker will stand on for the new model, saved with it.
+    const nextEffort = catalog ? effortOnOffer(catalog, next, effort) : effort;
+    setModel(next);
+    setEffort(nextEffort);
+    saveModel(next, nextEffort);
+  };
+  const pickEffort = (next: string) => {
+    setEffort(next);
+    saveModel(model, next);
+  };
 
   const toggle = (
     set: Set<string>,
@@ -426,9 +455,9 @@ export function ControllerAdminPanel({
         uid={uid}
         backend="claude"
         model={model}
-        setModel={setModel}
+        setModel={pickModel}
         effort={effort}
-        setEffort={setEffort}
+        setEffort={pickEffort}
         catalog={catalog}
         catalogLoading={catalogLoading}
         catalogFailed={catalogFailed}
@@ -436,6 +465,7 @@ export function ControllerAdminPanel({
         selectedModel={selectedModel}
         showEffort={showEffort}
         effortOptions={effortOptions}
+        modelHint="saved as you pick · applies from the next turn"
       />
       <div className="field">
         <span className="flabel">
@@ -505,21 +535,23 @@ export function ControllerAdminPanel({
           onChange={(e) => setDefinition(e.target.value)}
         />
       </div>
-      <div className="ctladm-foot">
-        <span className="fine xs dim">
-          Changes apply from the next controller turn.
-        </span>
-        <button
-          type="button"
-          className="btn primary sm"
-          onClick={save}
-          disabled={action.busy}
-          aria-busy={action.busy}
-        >
-          <Icon name="check" />
-          {action.busy ? "Saving…" : "Save controller"}
-        </button>
-      </div>
+      {saveable && (
+        <div className="ctladm-foot">
+          <span className="fine xs dim">
+            Changes apply from the next controller turn.
+          </span>
+          <button
+            type="button"
+            className="btn primary sm"
+            onClick={save}
+            disabled={action.busy}
+            aria-busy={action.busy}
+          >
+            <Icon name="check" />
+            {action.busy ? "Saving…" : "Save controller"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

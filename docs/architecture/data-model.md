@@ -219,7 +219,7 @@ registers for key rotation: `github_pats.encrypted_token`, `org_mcp_servers.cred
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `agent_runs` | P | One row per run. Identity and routing: `id`, `project_slug`, `task_key`, `thread_id`, `role` (the engagement's role), `kind`, `backend` (`claude \| codex`), `model`, `session_id`, `sdk`, `agent_name`, `agent_profile_id`. Lifecycle: `state` (`queued \| running \| finished \| error \| interrupted`), `phase`, `step`, `started_at`, `finished_at`, `created_at`, `updated_at`, `interrupted_by` (the person, or null) and `interrupted_reason` (`restart` when boot recovery stopped it, else null). Usage: `turns`, `input_tokens`, `cached_input_tokens`, `output_tokens`, `total_cost_usd`, `usage_final`. Completion contract: `outcome_key`, `dispatched_by_name`, `dispatched_by_user_id`, `no_checkout` (ruling 248), `verdict_withheld` (ruling 316). Credential: `credential_user_id`, `credential_kind`. Prompt cache (ruling 369): `cache_write_tokens`, `first_call_prompt_tokens`, `first_call_cache_write`, `first_call_cache_read`, `first_call_warm`, `first_call_miss_reason`, `cache_ttl_bucket`, `peak_prompt_tokens`, `last_prompt_tokens`, `compactions`. |
+| `agent_runs` | P | One row per run. Identity and routing: `id`, `project_slug`, `task_key`, `thread_id`, `role` (the engagement's role), `kind`, `backend` (`claude \| codex`), `model`, `effort` (ruling 526(d)), `session_id`, `sdk`, `agent_name`, `agent_profile_id`. Lifecycle: `state` (`queued \| running \| finished \| error \| interrupted`), `phase`, `step`, `started_at`, `finished_at`, `created_at`, `updated_at`, `interrupted_by` (the person, or null) and `interrupted_reason` (`restart` when boot recovery stopped it, else null). Usage: `turns`, `input_tokens`, `cached_input_tokens`, `output_tokens`, `total_cost_usd`, `usage_final`. Completion contract: `outcome_key`, `dispatched_by_name`, `dispatched_by_user_id`, `no_checkout` (ruling 248), `verdict_withheld` (ruling 316). Credential: `credential_user_id`, `credential_kind`. Prompt cache (ruling 369): `cache_write_tokens`, `first_call_prompt_tokens`, `first_call_cache_write`, `first_call_cache_read`, `first_call_warm`, `first_call_miss_reason`, `cache_ttl_bucket`, `peak_prompt_tokens`, `last_prompt_tokens`, `compactions`. |
 | `run_log_lines` | C | Projected console lines per run: `id`, `run_id`, `seq` (unique per run), `occurred_at`, `raw_json`, `display_json`, `created_at`. Retained 30 days; the `.jsonl` file is the truth. |
 | `staged_outcomes` | C | A Claude `report_outcome` envelope staged mid-run (`outcome_key`, `outcome_json`, `created_at`; the run's first; a later call is refused) until the completion callback consumes it; orphans pruned after 24 h. |
 
@@ -249,6 +249,10 @@ registers for key rotation: `github_pats.encrypted_token`, `org_mcp_servers.cred
   `credential_account_id` (ruling 507) is which of the principal's accounts it billed
   (`user_backend_credentials.id`, no foreign key: the run outlives the account); NULL on a
   refused run and on runs from before the ruling.
+- `model` is the model the run executes (after `substituteRunModel`) and `effort` (ruling
+  526(d)) the tier it was handed after `resolveRunEffort`; the Live run strip's Runtime
+  cell prints both. `effort` is NULL when none was set, so the SDK's own default applied,
+  and on runs from before the column.
 
 `agent_runs.credential_user_id` is the run's **credential principal** (ruling 127):
 whose connected backend account it billed, and therefore whose runtime home holds
@@ -340,7 +344,7 @@ second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLU
 - `agent_runs`: `dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
   `interrupted_reason`, `usage_final` (backfilled to 1 on `finished` rows), `no_checkout`,
   `verdict_withheld` and the eleven ruling-369 columns (`cache_write_tokens` through
-  `credential_kind`), and `credential_account_id` (ruling 507);
+  `credential_kind`), `credential_account_id` (ruling 507) and `effort` (ruling 526(d));
 - `controller_conversations`: `task_key`, `seen_seq` (backfilled to each conversation's
   newest `seq`, so existing threads count as read);
 - `org_mcp_servers`: `tool_policy_json`, `tool_names_json`, `oauth_ref`, `oauth_json`,

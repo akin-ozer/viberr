@@ -585,7 +585,10 @@ const RunStripFacts = memo(function RunStripFacts({
         </div>
         <div className="run-cell">
           <div className="lbl">Runtime</div>
-          <div className="val mono">{run.model}</div>
+          {/* Ruling 526(d): the model and the effort the run was handed. */}
+          <div className="val mono">
+            {run.effort ? `${run.model} · ${run.effort}` : run.model}
+          </div>
         </div>
       </div>
     </>

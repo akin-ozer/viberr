@@ -79,10 +79,12 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "credential_kind",
         // Ruling 507: `upsertRun` names the billed account on every insert.
         "credential_account_id",
+        // Ruling 526(d): and the run's effort.
+        "effort",
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(21);
+      expect(columns()).toHaveLength(22);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
 
       // F37-71: a task projection from before the recommendation-kinds column.

@@ -381,6 +381,34 @@ describe("run-service lifecycle", () => {
     await settle();
     expect(specs[1]?.effort).toBeUndefined();
   });
+
+  it("ruling 526(d): the row and its view record the effort the run was handed", async () => {
+    // The row had no effort, so the Runtime tile could not tell a Maximum run
+    // from a default one. It records the RESOLVED tier: "minimal" is Codex's
+    // scale, and a Claude run is handed "low".
+    // CANARY: store `input.effort` on the row instead and the first assertion
+    // reads "minimal"; drop the projection's `effort` and the view's is absent.
+    captureSpecs();
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", effort: "minimal", prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(getRun(store.db, runId)?.effort).toBe("low");
+    const view = listRunsForTask(store.db, store.slug, "VIB-1").find(
+      (r) => r.serverRunId === runId,
+    );
+    expect(view?.effort).toBe("low");
+
+    // No effort set: NULL, and the SDK default applies.
+    const { runId: unset } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t2", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(getRun(store.db, unset)?.effort).toBeNull();
+  });
 });
 
 describe("a run with no credential principal (ruling 127)", () => {

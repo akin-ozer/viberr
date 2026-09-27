@@ -94,6 +94,17 @@ describe("LiveRunPanel", () => {
     expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
   });
 
+  it("ruling 526(d): the Runtime cell names the effort beside the model when the run had one", () => {
+    // CANARY: render `run.model` alone and this reads "opus[1m]".
+    const { container } = render(
+      <LiveRunPanel runtime={[mkRun({ model: "opus[1m]", effort: "max" })]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+    );
+    const runtime = [...container.querySelectorAll(".run-cell")].find(
+      (c) => c.querySelector(".lbl")?.textContent === "Runtime",
+    );
+    expect(runtime?.querySelector(".val")?.textContent).toBe("opus[1m] · max");
+  });
+
   /**
    * F35-1: the Tokens cell tells an estimate from a total. While the row holds
    * the Claude adapter's live estimate it prints `~n` with the tooltip; a

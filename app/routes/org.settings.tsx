@@ -66,7 +66,13 @@ import {
   controllerSectionLocks,
   resolveControllerConfig,
   saveControllerConfig,
+  saveControllerModel,
 } from "~/server/controller/controller-profile.server";
+import {
+  modelDisplayName,
+  resolveRunModel,
+} from "~/server/runtimes/model-catalog.server";
+import { effortLabel } from "~/features/agents/create-profile-modal";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import {
   testOAuthCredentials,
@@ -559,6 +565,19 @@ export async function action({ request }: Route.ActionArgs) {
             ? "Controller updated. Changes apply from its next turn"
             : `Controller updated, which answers its grant ${answered.length === 1 ? "request" : "requests"} for ${answered.join(", ")}. Changes apply from its next turn`,
         );
+      }
+      case "controller-model": {
+        // Ruling 526: the Controller tab's model and effort pickers apply the
+        // moment they change. The toast names what the next turn runs, in the
+        // Agents page's words (ruling 479(e)).
+        const saved = saveControllerModel(
+          db,
+          { model: field("model"), effort: field("effort") },
+          actor,
+        );
+        const model = modelDisplayName("claude", resolveRunModel("claude", saved.model));
+        const effort = saved.effort ? effortLabel(saved.effort) : "default effort";
+        return ok(`The controller runs ${model} · ${effort} from its next turn`);
       }
       case "controller-request-decline": {
         // Ruling 390 (amended 2026-09-23): an org admin's explicit "no" to a

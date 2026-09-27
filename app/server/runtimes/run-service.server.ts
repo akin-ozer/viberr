@@ -939,6 +939,13 @@ export async function startRun(
   // (an env key colliding with a credential key) throws instead of stranding
   // a `running` row.
   const credential = resolveRunCredential(db, input);
+  // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
+  // funnel every path goes through (specialist, operator, resume). It used to
+  // run only on the D4 cross-backend retry, so a profile whose stored effort
+  // came from the other backend's scale ("minimal" from Codex, "max" from
+  // Claude) shipped a tier the target SDK does not accept. An unset effort
+  // stays unset — the SDK default applies, as before.
+  const effort = input.effort?.trim() ? resolveRunEffort(input.backend, input.effort) : null;
   const runRow: InsertRunInput = {
     id: runId,
     projectSlug: input.projectSlug,
@@ -950,6 +957,9 @@ export async function startRun(
     // The model that will ACTUALLY run (F21-13) — a run header naming a model
     // the provider never saw is the lie this closes.
     model,
+    // Ruling 526(d): and the effort it is handed, so the Runtime tile names
+    // both. Before, the row had no effort and a Maximum run read like any other.
+    effort,
     sdk: SDK_LABEL[input.backend] ?? "",
     sessionId: input.resumeSessionId ?? null,
     agentName: input.agentName ?? null,
@@ -1009,15 +1019,7 @@ export async function startRun(
   // as `CLAUDE_CONFIG_DIR` on the credential env; the Codex adapter's private
   // home copies the account's sign-in from here and hands it back here.
   if (credential.ok) spec.accountHome = credential.credential.accountHome;
-  // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
-  // funnel every path goes through (specialist, operator, resume). It used to
-  // run only on the D4 cross-backend retry, so a profile whose stored effort
-  // came from the other backend's scale ("minimal" from Codex, "max" from
-  // Claude) shipped a tier the target SDK does not accept. An unset effort
-  // stays unset — the SDK default applies, as before.
-  if (input.effort?.trim()) {
-    spec.effort = resolveRunEffort(input.backend, input.effort);
-  }
+  if (effort) spec.effort = effort;
   if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) spec.compactAnchor = input.compactAnchor;
   if (input.attachmentsWritableDir) {

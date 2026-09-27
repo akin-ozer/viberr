@@ -501,6 +501,9 @@ export interface RunView {
   backend: "claude" | "codex";
   sdk: string;
   model: string;
+  /** Ruling 526(d): the effort tier the run was handed (`agent_runs.effort`);
+   *  null or absent when none was set and the SDK default applied. */
+  effort?: string | null;
   /** Provider session/thread id (may be null before init lands). */
   sid: string | null;
   /** P11-43: the provider kept an on-disk transcript for this session, so the

@@ -218,6 +218,60 @@ export interface SavedControllerConfig extends ControllerConfig {
   answeredRequests: ResourceRequest[];
 }
 
+function requireControllerProfile(dataRoot?: string): ParsedProfile {
+  const existing = readControllerProfile(dataRoot);
+  if (!existing) {
+    throw AppError.notFound(
+      "The controller profile is missing from the store. Restart the app to restore the shipped one, then edit it.",
+    );
+  }
+  return existing;
+}
+
+/** The profile with `model` and `effort` set. "" effort means "backend
+ *  default": the key is removed rather than stored blank, so the file reads
+ *  the same as one that never carried it. */
+function withModelAndEffort(
+  profile: ParsedProfile,
+  model: string,
+  effort: string,
+): ParsedProfile {
+  const frontmatter: AgentProfileFrontmatter = { ...profile.frontmatter, model };
+  if (effort) frontmatter.effort = effort;
+  else delete frontmatter.effort;
+  return { frontmatter, description: profile.description };
+}
+
+/**
+ * Ruling 526: the Controller tab's model and effort pickers apply the moment
+ * they change, through this save. It writes those two keys and nothing else,
+ * so the grants and the doctrine stay exactly as stored and no deployment
+ * lock applies (ruling 108 locks four sections; the model and effort were
+ * always editable). RBAC is the caller's, as for {@link saveControllerConfig}.
+ */
+export function saveControllerModel(
+  db: DatabaseSync,
+  input: { model: string; effort: string },
+  actor: AuditActor,
+  ctx: { dataRoot?: string } = {},
+): ControllerConfig {
+  const existing = requireControllerProfile(ctx.dataRoot);
+  const model = input.model.trim();
+  const effort = input.effort.trim();
+  writeFileAtomic(
+    agentProfileFilePath(CONTROLLER_PROFILE_ID, ctx.dataRoot),
+    serializeAgentProfile(withModelAndEffort(existing, model, effort)),
+  );
+  recordAudit(db, {
+    action: "org.controller.updated",
+    actor,
+    subjectKind: "agent_profile",
+    subjectId: CONTROLLER_PROFILE_ID,
+    details: { model, effort },
+  });
+  return resolveControllerConfig(ctx.dataRoot);
+}
+
 /**
  * Admin edit of the controller's configuration. RBAC is the CALLER's (the
  * org-settings route gates on org admin); this trusts its caller like every
@@ -230,12 +284,7 @@ export function saveControllerConfig(
   actor: AuditActor,
   ctx: { dataRoot?: string; locks?: ControllerSectionLocks } = {},
 ): SavedControllerConfig {
-  const existing = readControllerProfile(ctx.dataRoot);
-  if (!existing) {
-    throw AppError.notFound(
-      "The controller profile is missing from the store. Restart the app to restore the shipped one, then edit it.",
-    );
-  }
+  const existing = requireControllerProfile(ctx.dataRoot);
   // Ruling 108: a locked section is NEVER rewritten from the input. An empty
   // list (the panel posts blank for a locked section, since it renders it
   // read-only) keeps the stored value — so a CLEAR cannot be expressed through
@@ -295,19 +344,12 @@ export function saveControllerConfig(
     }
     writeDefinition = false;
   }
-  const merged: ParsedProfile = {
-    frontmatter: {
-      ...existing.frontmatter,
-      model: input.model.trim(),
-      resources,
-    },
-    description: existing.description,
-  };
-  // "" means "backend default": the key is removed rather than stored blank,
-  // so the file reads the same as one that never carried it.
   const effort = input.effort.trim();
-  if (effort) merged.frontmatter.effort = effort;
-  else delete merged.frontmatter.effort;
+  const merged = withModelAndEffort(
+    { ...existing, frontmatter: { ...existing.frontmatter, resources } },
+    input.model.trim(),
+    effort,
+  );
   writeFileAtomic(
     agentProfileFilePath(CONTROLLER_PROFILE_ID, ctx.dataRoot),
     serializeAgentProfile(merged),

@@ -635,6 +635,10 @@ CREATE TABLE "agent_runs" (
   kind TEXT NOT NULL CHECK (kind IN ('operator', 'primary', 'reviewer', 'controller')),
   backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
   model TEXT NOT NULL,
+  -- Ruling 526(d): the effort tier the run was handed (`resolveRunEffort` for
+  -- its backend). NULL when none was set, so the SDK's own default applied,
+  -- and on runs from before the column.
+  effort TEXT,
   session_id TEXT,
   sdk TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL CHECK (state IN

@@ -252,6 +252,7 @@ function projectRow(
     backend,
     sdk: row.sdk || SDK_LABEL[backend] || "",
     model: row.model,
+    effort: row.effort,
     sid: row.session_id,
     // P11-43: the Export link 404s when the provider kept no on-disk transcript.
     // Compute REAL exportability here (does the transcript actually exist?) so

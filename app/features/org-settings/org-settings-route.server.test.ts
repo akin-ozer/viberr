@@ -394,6 +394,64 @@ describe("controller-save (ruling 106)", () => {
 });
 
 /**
+ * Ruling 526 — the Controller tab saves a model or effort pick the moment it is
+ * made, through `controller-model`. Before, a pick waited for the Save button
+ * below the grants and the doctrine, and leaving the tab dropped it without a
+ * word: the next turn ran the old model and the Runtime tile said so.
+ */
+describe("controller-model (ruling 526)", () => {
+  it("writes the model and effort alone, under full lock, and the toast names what runs", async () => {
+    // CANARY: drop the `controller-model` case and the route answers
+    // "Unknown action."; have saveControllerModel write anything besides the
+    // two keys and the whole-config comparison below fails.
+    const { resolveControllerConfig } = await import(
+      "~/server/controller/controller-profile.server"
+    );
+    const { getDb } = await import("~/server/db/sqlite.server");
+    const { queryAuditEventsForExport } = await import(
+      "~/server/audit/audit-export.server"
+    );
+    const file = path.join(app.dataRoot, "agents", "profiles", "controller.md");
+    const before = resolveControllerConfig(app.dataRoot);
+    // The test app sets no unlock variable, so every section is locked: the
+    // pick needs no Save and no grant round-trip to land.
+    const reply = await postAction(ids.arda, {
+      intent: "controller-model",
+      model: "opus",
+      effort: "max",
+    });
+    expect(reply).toMatchObject({
+      ok: true,
+      toast: "The controller runs Claude Opus · Maximum from its next turn",
+    });
+    const after = resolveControllerConfig(app.dataRoot);
+    expect(after.model).toBe("opus");
+    expect(after.effort).toBe("max");
+    expect({ ...after, model: before.model, effort: before.effort }).toEqual(before);
+    // SAFETY: saveControllerModel writes this row's details as {model, effort}.
+    const details = JSON.parse(
+      queryAuditEventsForExport(getDb(), { action: "org.controller.updated" })[0]
+        ?.detailsJson ?? "{}",
+    ) as { model: string; effort: string };
+    expect(details).toEqual({ model: "opus", effort: "max" });
+
+    // A blank effort, what the panel posts for a model with no tiers (the live
+    // list's Haiku), removes the key, and the toast says the default applies.
+    const blank = await postAction(ids.arda, {
+      intent: "controller-model",
+      model: "haiku",
+      effort: "",
+    });
+    expect(blank).toMatchObject({
+      ok: true,
+      toast: "The controller runs Claude Haiku · default effort from its next turn",
+    });
+    expect(readFileSync(file, "utf8")).not.toContain("effort:");
+    expect(resolveControllerConfig(app.dataRoot).model).toBe("haiku");
+  });
+});
+
+/**
  * Ruling 108 — the controller's grant sections and instructions are locked by
  * default, ORG ADMINS INCLUDED: only a deployment environment variable unlocks
  * a section. The test app sets none of them, so this suite runs against the

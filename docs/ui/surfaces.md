@@ -341,9 +341,10 @@ connections (`connection-add`, `connection-replace`, `connection-recheck`,
 `kb-delete`, `skill-save`, `skill-delete`, `mcp-save`, `mcp-test`, `mcp-delete`,
 `mcp-oauth-start`, `mcp-oauth-sign-out`, `store-mkdir`, `store-upload`,
 `store-read-doc`, `store-write-doc`, `store-delete`, `store-import-github`), agent
-templates (`agent-save`, `agent-delete`), controller (`controller-save`, `controller-request-decline`), runtime
+templates (`agent-save`, `agent-delete`), controller (`controller-model`, ruling 526,
+`controller-save`, `controller-request-decline`), runtime
 (`set-concurrency`, `set-run-spend-cap`, ruling 175), audit (`audit-export-s3`,
-`s3-config-save`, `s3-config-clear`). That is 45 intents.
+`s3-config-save`, `s3-config-clear`). That is 46 intents.
 A GitHub connection row (ruling 463) says what its token reaches: a `<details>`
 (`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"
 when the read stopped at its cap) and whose body lists each repository with a quiet
@@ -397,7 +398,9 @@ form's foot.
 
 The **Controller** tab (screen label `Controller settings`) is the one org-settings
 surface whose controls are not all live (rulings 106, 107, 108): model and effort use
-the agent profile editor's own catalog pickers and are always editable; the skills,
+the agent profile editor's own catalog pickers, are always editable and save the moment
+a person picks, with a toast naming what the next turn runs (ruling 526; the Model
+label's hint says "saved as you pick · applies from the next turn"); the skills,
 knowledge-base and MCP grant lists and the doctrine body render read-only unless the
 matching `VIBERR_UNLOCK_CONTROLLER_*` variable is set at deploy time, with one note
 naming the locked sections and their variables; the built-in `viberr_ops` diagnostics
@@ -406,7 +409,8 @@ a disabled control, because a toggle that cannot do anything is worse than a
 statement); and the grant requests the controller raised for itself
 (`request_resource_grant`, recorded in `agents/controller-requests.md`) are listed with
 their remedy and one control each, **Decline**. There is no Grant button: the save that
-leaves the resource granted is what answers a request (ruling 390). Details in
+leaves the resource granted is what answers a request (ruling 390). With every section
+locked, the product default, the tab has no **Save controller** at all (ruling 526). Details in
 [../domain/controller-and-epics.md §6](../domain/controller-and-epics.md#6-configuring-the-controller-rulings-106-and-108)
 and [../operations/configuration.md §2](../operations/configuration.md).
 

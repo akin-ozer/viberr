@@ -640,7 +640,7 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
 ### 3.1 Persistence
 
 - `agent_runs`: `id, task_key, project_slug, thread_id, role, kind, backend, model,
-  session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
+  effort, session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
   usage_final, total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
   dispatched_by_name, dispatched_by_user_id, no_checkout, verdict_withheld,
@@ -648,7 +648,9 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   record (ruling 369):
   `cache_write_tokens, first_call_prompt_tokens, first_call_cache_write,
   first_call_cache_read, first_call_warm, first_call_miss_reason, cache_ttl_bucket,
-  peak_prompt_tokens, last_prompt_tokens, compactions, credential_kind`. `interrupted_by`
+  peak_prompt_tokens, last_prompt_tokens, compactions, credential_kind`. `effort` is the
+  tier the run was handed after `resolveRunEffort`, NULL when none was set (ruling 526(d));
+  the Live run strip prints it beside the model. `interrupted_by`
   is the person who stopped the run (a `users.id`) or null; `interrupted_reason`
   (`restart` or null) says why an `interrupted` run stopped when nobody did (ruling 158
   addendum, pass 35 U35-7). `outcome_key`, `dispatched_by_*`, `no_checkout` and
