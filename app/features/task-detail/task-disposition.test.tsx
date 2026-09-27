@@ -310,6 +310,45 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
   });
 });
 
+/**
+ * Ruling 529: a question the work does not wait on says so. CALC-1's owner
+ * read a decision packet as the thing the task was stuck on while an agent
+ * kept working beside it.
+ */
+describe("ruling 529: a question asked while an agent works reads as not blocking", () => {
+  const question: PacketRender = {
+    type: "input",
+    kind: "Decision required",
+    from: "Operator",
+    title: "Which estimate shape should the research recommend?",
+    body: "",
+    observations: [],
+    options: [
+      { kind: "request_edit", t: "Adopt B", d: "Descriptions may name servers and applications.", rec: true },
+      { kind: "request_edit", t: "Adopt A", d: "One estimate per service.", rec: false },
+    ],
+  };
+
+  it("takes the quiet surface and says so only beside a working agent, and never on a block", () => {
+    // CANARY: drop either half of the page's `aside` condition and a block, or
+    // a question the task does wait on, tells its owner the work goes on.
+    const rows: [Partial<TaskDetail>, boolean][] = [
+      [{ packet: question, waiting: "agent" }, true],
+      [{ packet: question, waiting: "human" }, false],
+      [{ packet: { ...question, type: "blocked", kind: "Blocked decision" }, waiting: "agent" }, false],
+    ];
+    for (const [task, aside] of rows) {
+      const { container, unmount } = renderPage({ task });
+      const card = container.querySelector<HTMLElement>(".detail-packet .packet")!;
+      expect(card.hasAttribute("data-aside"), JSON.stringify(task)).toBe(aside);
+      expect(card.querySelector(".packet-aside")?.textContent ?? null).toBe(
+        aside ? "Not blocking: an agent keeps working while you decide." : null,
+      );
+      unmount();
+    }
+  });
+});
+
 /** An action the test answers when it decides to (ruling 368). */
 function heldAction() {
   let answer: () => void = () => {};

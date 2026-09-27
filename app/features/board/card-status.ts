@@ -25,6 +25,8 @@ import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pi
  * (`blocked`) displaced from the seat by a working agent joins them: ruling
  * 168(a) kept it beside "agent working" because the two are different facts,
  * while a human wait absorbs it (the hold IS what the human is asked about).
+ * So does a decision the viewer owes (ruling 529), first and in the seat's own
+ * words: a question can stand open while an agent keeps working.
  *
  * Every label comes from the vocabulary that owns it (`pill.tsx`,
  * `github-pills.ts`); the only words minted here are the wait tags, which have
@@ -97,8 +99,9 @@ export interface CardProblem {
   key: string;
   label: string;
   icon: IconName;
-  /** A demand rather than a failure: amber ink instead of red. */
-  tone?: "amber";
+  /** A demand rather than a failure: amber ink instead of red; blue for a
+   *  decision the viewer owes, the seat's "waiting on you" ink (ruling 529). */
+  tone?: "amber" | "blue";
 }
 
 /** How many problem chips a card draws before folding the rest into "+N". */
@@ -109,6 +112,13 @@ export function cardProblems(task: BoardCard): CardProblem[] {
   if (task.archived) return [];
   const terminal = task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   const out: CardProblem[] = [];
+  // Ruling 529: CALC-1's card said only "agent working" while a decision
+  // waited on its owner. Both were true, and the one that is the viewer's own
+  // leads, as it does when it holds the seat (R8-3: only the viewer who can
+  // act is named).
+  if (task.waitingOnMe === true && task.waiting === "agent") {
+    out.push({ key: "you", label: "waiting on you", icon: "hand", tone: "blue" });
+  }
   if (task.displayReadiness === "blocked" && task.waiting === "agent") {
     out.push({ key: "blocked", label: readinessLabel("blocked"), icon: "ban", tone: "amber" });
   }

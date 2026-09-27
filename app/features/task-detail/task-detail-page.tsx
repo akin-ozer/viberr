@@ -893,6 +893,10 @@ export function TaskDetailPage({
             packet={task.packet}
             busy={resolveBusy}
             completion={acceptanceDecision ? completionPacket : null}
+            // Ruling 529: a question the work does not wait on, because an
+            // agent keeps working beside it (the wait the board card and the
+            // Waiting on row read). A block never is.
+            aside={task.packet.type === "input" && task.waiting === "agent"}
             // Ruling 319: a packet keyed to an account failure answers its
             // siblings too — the card says so before the confirm, not after.
             alsoAnswers={packetAlsoAnswers}

@@ -861,9 +861,14 @@ export function DecisionPacket({
   onAsk,
   onEditGoal,
   completion = null,
+  aside = false,
 }: {
   packet: PacketRender;
   busy: boolean;
+  /** Ruling 529: a question asked while an agent keeps working on the task,
+   *  which the work does not wait on. The card takes a quieter surface and
+   *  says so in its first line. */
+  aside?: boolean;
   /** Ruling 521: the completion packet, drawn between the evidence and the
    *  options when one of them offers the task for acceptance. */
   completion?: ReactNode;
@@ -1224,9 +1229,15 @@ export function DecisionPacket({
     );
   }
   return (
-    <div className={"packet " + (isBlocked ? "blocked" : "input")}>
+    <div className={"packet " + (isBlocked ? "blocked" : "input")} data-aside={aside ? "" : undefined}>
       <PacketHead kind={p.kind} from={p.from} blocked={isBlocked} />
       <div className="packet-body">
+        {aside && (
+          <p className="packet-aside">
+            <span className="working" aria-hidden="true" />
+            Not blocking: an agent keeps working while you decide.
+          </p>
+        )}
         <h2>{p.title}</h2>
         <PacketBody text={p.body} />
 
