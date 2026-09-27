@@ -76,7 +76,7 @@ export function attachmentKind(name: string): AttachmentKind {
 }
 
 /** How much of the head the NUL test reads — git's own window. */
-export const BINARY_SNIFF_CHARS = 8_000;
+const BINARY_SNIFF_CHARS = 8_000;
 
 /** A NUL in the decoded head means the bytes were never text (a UTF-8 text
  *  file cannot contain U+0000 by accident; a binary almost always does). */

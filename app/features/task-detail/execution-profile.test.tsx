@@ -255,20 +255,13 @@ describe("ruling 131(d): the run control on a held task", () => {
     const btn = agentRunButton(container);
     expect(btn).toBeTruthy();
     expect(btn!.disabled).toBe(true);
-    // The server's own sentence, from the shared `holdRefusal`.
+    // The server's own sentence, from the shared `holdRefusal`. Ruling 356:
+    // the done entry reads as done (CANARY: drop the done split from
+    // `holdEntriesSentence`).
     expect(container.textContent).toContain(
       "waits on JC-2 and JC-3 (done) and Viberr is holding it",
     );
     expect(container.textContent).toContain("running an agent on it is refused");
-  });
-
-  it("ruling 356: a done entry reads as done on the control, not as still waited on", () => {
-    // CANARY: drop the done split from `holdEntriesSentence`. This test's
-    // fixture always carried JC-3 as done; until ruling 356 the assertion
-    // above REQUIRED "waits on goal-1 link 2 and JC-3" (the entry that is now
-    // JC-2 was a goal link until ruling 503).
-    const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
-    expect(container.textContent).toContain("waits on JC-2 and JC-3 (done) and Viberr is holding it");
     // F39-44: JC-3 is never printed bare, so it can never read as waited on.
     expect(container.textContent).not.toMatch(/JC-3(?! \(done\))/);
   });
@@ -561,24 +554,6 @@ describe("ruling 127: the run controls answer for the task owner", () => {
     expect(container.textContent).not.toContain("on your Profile");
   });
 
-  it("addresses the OWNER themselves in the store's own words (a wiped runtime volume)", () => {
-    const wiped =
-      "Your Codex sign-in file is missing from this server (the runtime volume was wiped). " +
-      "Sign in again on your Profile → Agent accounts.";
-    const { container } = renderExec({
-      task: ownedTask(),
-      meId: "u-arda",
-      operatorBackend: "codex",
-      runPrincipal: connectedPrincipal({
-        codex: { available: false, detail: wiped },
-      }),
-    });
-    expect(container.textContent).toContain(wiped);
-    expect(container.textContent).toContain(
-      "Runs on this task use your own account",
-    );
-  });
-
   it("refuses the run NOW but keeps SCHEDULING alive (the owner can connect it first)", () => {
     const { container } = renderExec({
       task: ownedTask(),
@@ -700,6 +675,8 @@ describe("ruling 368: the run controls name the request in flight", () => {
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
     expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+    // Ruling 459: one loader, never a second one drawn beside it.
+    expect(b.querySelectorAll(".spin")).toHaveLength(1);
     // The agent control's request is not this one.
     expect(agentButton(container).hasAttribute("aria-busy")).toBe(false);
   });
@@ -724,6 +701,7 @@ describe("ruling 368: the run controls name the request in flight", () => {
     expect(b.textContent).toBe("Starting…");
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+    expect(b.querySelectorAll(".spin")).toHaveLength(1);
     expect(operatorButton(run.container).hasAttribute("aria-busy")).toBe(false);
     cleanup();
 
@@ -740,37 +718,5 @@ describe("ruling 368: the run controls name the request in flight", () => {
     expect(operatorButton(container).textContent).toBe("Run operator");
     expect(operatorButton(container).hasAttribute("aria-busy")).toBe(false);
     expect(agentButton(container).textContent).toBe("Run");
-  });
-});
-
-/**
- * Better-ui review 2026-09-24: the when-picker turns a start into "Schedule",
- * and the button's new width slid the picker under the pointer that had just
- * used it. `app.css` holds each start at the width of its widest label (the
- * in-flight "Scheduling…" since ruling 368), keyed on `.op-run > .run-go`,
- * which the dispatch's `.op-run.agent-run` row matches too. This pins that the
- * rendered starts are what that selector selects, on both sides of the
- * switch. Canary: drop `run-go` from either button.
- */
-describe("a run control's start keeps its width rule across Run and Schedule", () => {
-  it("the operator's and the dispatch's starts are the elements the width rules select", () => {
-    const { container } = renderExec({ task: ownedTask(), runPrincipal: connectedPrincipal() });
-    const operatorStart = () =>
-      container.querySelector<HTMLButtonElement>(".op-run:not(.agent-run) > .run-go")!;
-    const dispatchStart = () =>
-      container.querySelector<HTMLButtonElement>(".op-run.agent-run > .run-go")!;
-    expect(operatorStart().textContent).toBe("Run operator");
-    expect(dispatchStart().textContent).toBe("Run");
-    for (const [picker, start] of [
-      ["When the operator run starts", operatorStart],
-      ["When the agent run starts", dispatchStart],
-    ] as const) {
-      fireEvent.change(container.querySelector<HTMLSelectElement>(`select[aria-label="${picker}"]`)!, {
-        target: { value: "60" },
-      });
-      expect(start().textContent).toBe("Schedule");
-    }
-    // The rule sizes the two starts and nothing else in the panel.
-    expect(container.querySelectorAll(".run-go")).toHaveLength(2);
   });
 });

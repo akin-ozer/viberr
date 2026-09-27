@@ -5,8 +5,8 @@
  * loader re-slices. Pure and client-safe so the route and tests share it.
  */
 
-export const TIMELINE_INITIAL_SLICE = 30;
-export const TIMELINE_SLICE_STEP = 30;
+const TIMELINE_INITIAL_SLICE = 30;
+const TIMELINE_SLICE_STEP = 30;
 
 /** Parses the `?events=` param; anything unusable → the initial slice. */
 export function clampTimelineLimit(raw: string | null | undefined): number {
@@ -28,11 +28,6 @@ export interface TimelineSlice<T> {
   nextLimit: number;
 }
 
-/** Newest-first input (file order) → bounded newest-first slice. */
-export function sliceTimeline<T>(events: T[], limit: number): TimelineSlice<T> {
-  return timelineSlice(events, events.length, limit);
-}
-
 /** How many events a slice for `limit` shows — the SQL `LIMIT` a reader that
  *  fetches only the shipped window uses (ruling 457). */
 export function timelineWindowSize(limit: number): number {
@@ -40,9 +35,10 @@ export function timelineWindowSize(limit: number): number {
 }
 
 /**
- * {@link sliceTimeline} over a window already cut to at least
- * {@link timelineWindowSize} newest events, given the full `total` — the same
- * slice, without reading the older events it would drop.
+ * Newest-first input (file order) → bounded newest-first slice, given the full
+ * `total`. `events` may be a window already cut to at least
+ * {@link timelineWindowSize} newest events: the slice is the same, without
+ * reading the older events it would drop.
  */
 export function timelineSlice<T>(events: T[], total: number, limit: number): TimelineSlice<T> {
   const shown = Math.min(total, timelineWindowSize(limit));

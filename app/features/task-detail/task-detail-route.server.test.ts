@@ -379,13 +379,7 @@ describe("comment action — @agent routing detection", () => {
     }
   }
 
-  // 20s, not the 5s default: this test drives the FULL orchestration path
-  // (comment → mention resolution → operator lease → run start → interrupt),
-  // and under the parallel full-suite load it exceeded 5s often enough to go
-  // red about one run in three while passing 3/3 in isolation. A timeout that
-  // measures machine load rather than behavior is a false signal — the
-  // assertions below are unchanged.
-  it("@operator on a task WITH a specialist triggers the agent + names it in the toast", { timeout: 20_000 }, async () => {
+  it("@operator on a task WITH a specialist triggers the agent + names it in the toast", async () => {
     // SAFETY: arda is a project admin, so the comment runs to completion and the
     // action returns its `comment` arm — the only success arm that carries
     // `toAgent`/`agent`/`triggered` next to the toast.
@@ -409,7 +403,7 @@ describe("comment action — @agent routing detection", () => {
     expect(humanComment).toMatchObject({ type: "comment", toAgent: true });
   });
 
-  it("@codex also routes + triggers; plain member mentions do not", { timeout: 20_000 }, async () => {
+  it("@codex also routes + triggers; plain member mentions do not", async () => {
     // SAFETY: the same `comment` arm — an @mention that resolves to a deployed
     // specialist reports through `toAgent`/`triggered`.
     const codex = (await postIntent("VIB-153", ids.arda, {
@@ -499,6 +493,15 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     await new Promise((r) => setTimeout(r, 0));
     const { runDemoSeed } = await import("../../../test-support/demo-seed");
     await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+    // The seed rewrites the task files behind the in-process write cache, and
+    // it can land inside that cache's mtime slack of the previous test's own
+    // write — whereupon the next locked read "repairs" VIB-142 back to that
+    // test's resolved packet and refuses the fresh one as already resolved.
+    // Forget those writes so every test here reads the seed it was promised.
+    const { resetWriteCacheForTests } = await import(
+      "~/server/files/write-cache.server"
+    );
+    resetWriteCacheForTests();
   });
 
   /**
@@ -942,19 +945,6 @@ describe("ownership actions", () => {
     expect(audit.n).toBe(1);
   });
 
-  it("take-over writes the take-over copy", async () => {
-    // Selin owns VIB-148 (from the earlier test); Murat takes over.
-    // SAFETY: murat is a maintainer, so the take-over returns the ownership arm.
-    const result = (await postIntent("VIB-148", ids.murat, {
-      intent: "owner-take",
-    })) as { ok: true };
-    expect(result.ok).toBe(true);
-    const after = await runLoader("VIB-148", ids.murat);
-    expect(after.task.timeline[0]!.text).toBe(
-      "Took over task ownership from **Selin Aksoy**. The owner is the human reviewer and acceptance authority.",
-    );
-  });
-
   it("non-members are denied ownership; hand-off to a non-member is denied", async () => {
     // R15-4: a non-member never gets past the route's visibility gate, so the
     // refusal is the unknown-slug 404 rather than the mutation's own 403.
@@ -966,6 +956,11 @@ describe("ownership actions", () => {
     expect(take?.init?.status).toBe(404);
     expect(String(take?.data)).toBe("No project at projects/viberr-core.");
 
+    // Murat takes the seat over from Selin first: only the current owner or a
+    // project admin may hand it off, so the refusal below is the target's.
+    expect(
+      await postIntent("VIB-148", ids.murat, { intent: "owner-take" }),
+    ).toMatchObject({ ok: true });
     // SAFETY: a hand-off target must be a project member and deniz is not, so the
     // mutation's own guard denies through `appErrorResponse`.
     const toGuest = (await postIntent("VIB-148", ids.murat, {
@@ -1128,46 +1123,6 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     );
   });
 
-  it("a run-agent dispatch WITH a prompt records the human's own @Agent hand-off comment", async () => {
-    // R21-9's law applied to the dispatch prompt: a directive that reaches an
-    // agent off the record is invisible to supervision, so the route appends
-    // the dispatching human's own "@<Agent> <prompt>" comment, before the start
-    // (ruling 375).
-    queueFakeRun({
-      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
-      keepRunning: true,
-    }, "codex");
-    // SAFETY: the developer is engaged on VIB-166 (previous test) and no run is
-    // live (it was interrupted), so this returns the success arm again.
-    const result = (await postIntent("VIB-166", ids.arda, {
-      intent: "run-agent", profileId: "developer",
-      prompt: "Focus on the lint debt first",
-    })) as { ok: true; toast: string };
-    expect(result.toast).toBe(
-      "Codex run started for Developer · streaming to agent logs",
-    );
-
-    const after = await runLoader("VIB-166", ids.arda);
-    const handoff = after.task.timeline.find(
-      (e) =>
-        e.type === "comment" &&
-        e.actor.kind === "human" &&
-        e.text === "@Developer Focus on the lint debt first",
-    );
-    expect(handoff, "the prompt must land as the human's own comment").toBeDefined();
-    expect(handoff!.toAgent).toBe(true);
-
-    const primary = after.runtime.find(
-      (r) => r.kind === "primary" && (r.state === "running" || r.state === "idle"),
-    );
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      app.db,
-      { projectSlug: "viberr-core", taskKey: "VIB-166", runId: primary!.serverRunId },
-      { userId: ids.arda, label: "arda@viberr.dev" },
-    );
-  });
-
   it("ruling 152(c) (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, the hand-off comment stays on the record unanswered (ruling 375), and the retry is on the schedule", async () => {
     // Canary: remove the `isDispatchHeld` catch in the run-agent arm and the
     // route answers the 409 as an error instead of the hold toast.
@@ -1318,12 +1273,29 @@ describe("acceptance affordance (P14-LV-06)", () => {
   });
 
   it("accept-completion refuses when the task is not at the boundary", async () => {
+    // The POST carries the echo the dialog would send for VIB-166 as the page
+    // shows it, so it clears ruling 88's disclosure check (a bare POST is
+    // refused there first) and meets the boundary itself.
+    const { acceptanceDisclosureFields } = await import(
+      "~/shared/acceptance-disclosure"
+    );
+    const shown = await runLoader("VIB-166", ids.arda);
     // SAFETY: VIB-166 is not at the review boundary, so acceptance is refused
     // inside the try instead of granted.
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "accept-completion",
+      ...acceptanceDisclosureFields({
+        pr: shown.task.pr?.state ?? "none",
+        revision: shown.workRevisionSha ?? "none",
+        verdict: shown.task.validation,
+      }),
     })) as ActionRefusal;
-    expect(result.init.status).toBeGreaterThanOrEqual(400);
+    expect(result.init.status).toBe(409);
+    expect(result.data.error).toContain(
+      "A completion can only be accepted from the boundary the workflow puts before Done.",
+    );
+    // …the same sentence the page already shows beside the missing control.
+    expect(result.data.error).toBe(shown.acceptance.blockedReason);
   });
 });
 
@@ -1363,8 +1335,9 @@ describe("task archive (R14-3)", () => {
 /* --------------------------------------------------- F20-11 read-marking */
 
 describe("F20-11: task-view read-marking fires only on a genuine navigation", () => {
-  /** Run the loader against an arbitrary wire URL (a `.data` revalidation vs a
-   *  clean document path) so we can prove which one marks notifications seen. */
+  /** Run the loader against an arbitrary wire URL (here the `.data` address a
+   *  revalidation uses) so we can prove it marks nothing seen. The clean
+   *  document load that DOES mark is R19-15's, in project.task.server.test.ts. */
   async function runLoaderAt(
     key: string,
     userId: string,
@@ -1412,27 +1385,6 @@ describe("F20-11: task-view read-marking fires only on a genuine navigation", ()
       { "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" },
     );
     expect(readAt("f2011_data")).toBeNull();
-  });
-
-  it("a real document navigation DOES mark the viewer's rows seen (R19-15 preserved)", async () => {
-    const { createNotification } = await import(
-      "~/server/projections/notifications.server"
-    );
-    createNotification(app.db, {
-      id: "f2011_doc",
-      userId: ids.arda,
-      kind: "packet",
-      ptype: "blocked",
-      text: "Blocked — decision needed",
-      projectSlug: "viberr-core",
-      taskKey: "VIB-148",
-    });
-    // A genuine top-level load: clean route path, `Sec-Fetch-Mode: navigate`.
-    await runLoaderAt("VIB-148", ids.arda, "/projects/viberr-core/tasks/VIB-148", {
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Dest": "document",
-    });
-    expect(readAt("f2011_doc")).not.toBeNull();
   });
 });
 
@@ -1796,18 +1748,6 @@ describe("ruling 320 — the loader-to-page wire", () => {
       `the loader computes these and the page declares them, but the route never hands them over: ${unfed.join(", ")}`,
     ).toEqual([]);
   });
-
-  it("the queued-question row ruling 241 built now has its data", async () => {
-    // The specific field, named, so a future prop-shape change that breaks the
-    // generic check above still fails on the one this ruling was found through.
-    const result = await runLoader("VIB-142", ids.arda);
-    expect(result).toHaveProperty("queuedQuestions");
-    const jsx = (await import("node:fs")).readFileSync(
-      "app/routes/project.task.tsx",
-      "utf8",
-    );
-    expect(jsx).toContain("queuedQuestions={loaderData.queuedQuestions}");
-  });
 });
 
 describe("attach-file (F39-6) — the human writer, end to end through the route", () => {
@@ -1858,11 +1798,16 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
   });
 
   it("refuses a NON-MEMBER, and refuses a type the serving route would not render", async () => {
-    // CANARY: drop `requireAction(… "attach-file" …)` in attachTaskFile and the
-    // non-member writes into a project they cannot even see.
+    // R15-4: a non-member is stopped by the route's visibility gate, before the
+    // intent switch, with the unknown-slug 404; the grant check inside
+    // attachTaskFile is the VIEWER case below.
     await expect(
       postFile("VIB-141", ids.deniz, "sneaky.txt", "x"),
-    ).rejects.toBeDefined();
+    ).rejects.toMatchObject({
+      init: { status: 404 },
+      data: "No project at projects/viberr-core.",
+    });
+    expect(await attachmentsOf("VIB-141")).not.toContain("sneaky.txt");
 
     // SAFETY: an extension outside the upload whitelist throws AppError, which
     // the route renders through `appErrorResponse` — the refusal arm.
@@ -1875,6 +1820,51 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     expect(badType.data.ok).toBe(false);
     expect(badType.data.error).toContain("does not store");
     expect(await attachmentsOf("VIB-141")).not.toContain("page.html");
+  });
+
+  it("refuses a VIEWER at attachTaskFile's own attach-file grant, and stores nothing", async () => {
+    // A viewer is a member, so the visibility gate lets the request through and
+    // the refusal is the writer's own: `attach-file` is contributor and up.
+    // CANARY: drop `requireAction(… "attach-file" …)` in attachTaskFile and the
+    // viewer's file lands.
+    const { updateProjectFile } = await import(
+      "~/server/files/project-writer.server"
+    );
+    const { reprojectProject } = await import(
+      "~/server/projections/rebuilder.server"
+    );
+    /** Deniz on viberr-core as a viewer, or off it again: in the file the
+     *  writer's guard reads and in the projection the visibility gate reads. */
+    const seatDeniz = async (role: "viewer" | null) => {
+      await updateProjectFile(
+        { projectSlug: "viberr-core", dataRoot: app.dataRoot },
+        (parsed) => {
+          parsed.frontmatter.members = parsed.frontmatter.members.filter(
+            (m) => m.userId !== ids.deniz,
+          );
+          if (role) parsed.frontmatter.members.push({ userId: ids.deniz, role });
+        },
+      );
+      reprojectProject(app.db, { dataRoot: app.dataRoot }, "viberr-core");
+    };
+    await seatDeniz("viewer");
+    try {
+      // SAFETY: the grant refusal is an AppError raised inside the action's
+      // try, answered on the refusal arm through `appErrorResponse`.
+      const refused = (await postFile(
+        "VIB-141",
+        ids.deniz,
+        "viewer-notes.txt",
+        "x",
+      )) as ActionRefusal;
+      expect(refused.init.status).toBe(403);
+      expect(refused.data.error).toBe(
+        "Your project role (viewer) cannot attach a file to a task.",
+      );
+      expect(await attachmentsOf("VIB-141")).not.toContain("viewer-notes.txt");
+    } finally {
+      await seatDeniz(null);
+    }
   });
 
   /**

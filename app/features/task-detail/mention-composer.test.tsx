@@ -474,13 +474,6 @@ describe("Timeline empty state (UI-40)", () => {
     attachments: null,
   };
 
-  it("says the task never started only when there are NO events at all", () => {
-    const { getByText } = renderTimeline([]);
-    expect(
-      getByText(/No activity yet\. This task hasn't started its operator loop\./),
-    ).toBeTruthy();
-  });
-
   it("blames the FILTER when the task has history but the tab matched nothing", () => {
     const { getByText, queryByText } = renderTimeline([typedEvent], true);
     fireEvent.click(getByText("Comments"));

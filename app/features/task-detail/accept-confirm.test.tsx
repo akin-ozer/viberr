@@ -218,6 +218,10 @@ describe("the no-change row states what is true of THIS task", () => {
     const text = open({ noChanges: false, task: { branch: "vib-151" } });
     expect(text).toContain("No linked pull request");
     expect(text).not.toContain("completed with no changes");
+    // Nor is F20-6's auto-detect arm, which needs its own flag. Canary: derive
+    // `noPullRequest` from `!task.pr` inside the component and this ordinary
+    // accept flips to the auto-detect copy.
+    expect(text).not.toContain("Nothing to merge yet");
   });
 });
 
@@ -267,14 +271,6 @@ describe("F20-6: the no-PR auto-detect arm", () => {
     const text = openAutoDetect({ branch: null });
     expect(text).toContain("Nothing to merge yet");
     expect(text).toContain("re-checks the branch");
-  });
-
-  it("the flag is required — an ordinary no-PR accept still reads 'closes without a merge'", () => {
-    // Canary: derive `noPullRequest` from `!task.pr` inside the component and
-    // this ordinary accept would flip to the auto-detect copy.
-    const text = open({ noChanges: false, task: { branch: "vib-151" } });
-    expect(text).toContain("No linked pull request");
-    expect(text).not.toContain("Nothing to merge yet");
   });
 });
 

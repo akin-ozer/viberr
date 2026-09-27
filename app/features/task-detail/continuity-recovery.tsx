@@ -74,13 +74,13 @@ import { Pill, type PillKind } from "~/ui/pill";
  */
 
 /** The typed timeline event pass 18 landed (`TIMELINE_EVENT_TYPES`). */
-export const CONTINUITY_EVENT_TYPE = "continuity";
+const CONTINUITY_EVENT_TYPE = "continuity";
 
 /**
  * The heading of the panel this one points a human at for a new run. Exported
- * so the co-located test can assert `execution-profile.tsx` still renders this
- * exact string — the UX19-4 rule: naming a control that then cannot be found is
- * worse than naming none.
+ * so the co-located test can check, on the rendered task page, that the panel
+ * it names really carries this heading — the UX19-4 rule: naming a control that
+ * then cannot be found is worse than naming none.
  */
 export const EXECUTION_PANEL_LABEL = "Execution profile";
 
