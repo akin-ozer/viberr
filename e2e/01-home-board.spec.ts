@@ -1,9 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
- * Golden path (a): login (via stored session) → Home renders the three
- * seeded projects → open the viberr-core board → stage columns render
- * with the VIB-142 card in Review.
+ * Golden path (a): login (via stored session) → Home → open the viberr-core
+ * board → stage columns render with the VIB-142 card in Review.
  *
  * Plus the board's drag-and-drop stage moves (dnd-kit): real pointer input —
  * down, stepped moves (crossing the activation distance), up. The server
@@ -46,14 +45,6 @@ async function liftOver(
   const to = (await target.boundingBox())!;
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
 }
-
-test("home renders the three seeded projects", async ({ page }) => {
-  await page.goto("/");
-
-  const cards = page.locator(".pj-card, .pj-row");
-  await expect(cards).toHaveCount(3);
-  await expect(page.getByText("Viberr Core").first()).toBeVisible();
-});
 
 test("viberr-core board renders stage columns and the VIB-142 card", async ({
   page,

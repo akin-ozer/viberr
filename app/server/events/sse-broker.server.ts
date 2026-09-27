@@ -116,7 +116,7 @@ export interface SseRoute {
   taskOnly?: boolean;
 }
 
-export function routeMatchesConnection(
+function routeMatchesConnection(
   route: SseRoute,
   conn: { userId: string; scopes: SseScope[] },
 ): boolean {
@@ -223,7 +223,7 @@ function getState(): BrokerState {
 // ----------------------------------------------------------- wire format
 
 /** One SSE message: id + event name + single-line JSON data. */
-export function formatSseMessage(id: number, name: string, json: string): string {
+function formatSseMessage(id: number, name: string, json: string): string {
   return `id: ${id}\nevent: ${name}\ndata: ${json}\n\n`;
 }
 

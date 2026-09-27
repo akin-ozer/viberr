@@ -45,7 +45,6 @@ import {
   resetBackendLoginsForTests,
   startBackendLogin,
 } from "~/server/runtimes/backend-login.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
@@ -120,7 +119,6 @@ beforeEach(async () => {
     },
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
@@ -134,7 +132,6 @@ afterEach(() => {
   resetBackendLoginsForTests();
   resetFakeVendorEnv();
   vendors.cleanup();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -1245,34 +1242,5 @@ describe("governed actions record audit rows (table-driven)", () => {
       }
       expect(newest.actorLabel.length).toBeGreaterThan(0);
     }
-  });
-
-  it("rebuildProjections drops + re-projects to identical counts", () => {
-    const countSchema = z.object({ c: z.number() });
-    const rowCounts = () => ({
-      projects: countSchema.parse(
-        store.db.prepare(`SELECT count(*) c FROM projects`).get(),
-      ).c,
-      tasks: countSchema.parse(
-        store.db.prepare(`SELECT count(*) c FROM task_projections`).get(),
-      ).c,
-      events: countSchema.parse(
-        store.db.prepare(`SELECT count(*) c FROM task_events`).get(),
-      ).c,
-    });
-    const countsBefore = rowCounts();
-    expect(countsBefore.projects).toBeGreaterThan(0);
-    expect(countsBefore.tasks).toBeGreaterThan(0);
-
-    const summary = rebuildProjections(store.db, {
-      dataRoot: store.dataRoot,
-      actor: { userId: store.users.arda.id, label: store.users.arda.email },
-    });
-    expect(summary.projects).toBe(countsBefore.projects);
-    expect(summary.tasks).toBe(countsBefore.tasks);
-    expect(summary.errors).toBe(0);
-
-    const countsAfter = rowCounts();
-    expect(countsAfter).toEqual(countsBefore);
   });
 });

@@ -7,7 +7,6 @@ import {
   rejoinChainAroundStage,
   spliceStageIntoChain,
   stageFlowPath,
-  strictestBoundary,
 } from "./transitions";
 
 /**
@@ -77,22 +76,6 @@ function expectWellFormedChain(
 const GOVERNED_STAGES = stages("triage", "ready", "impl", "review", "done");
 const GOVERNED_WORKFLOW = GOVERNED_TEMPLATE.workflow;
 
-describe("strictestBoundary", () => {
-  const table = [
-    ["auto", "approval", "approval"],
-    ["approval", "auto", "approval"],
-    ["auto", "human", "human"],
-    ["human", "approval", "human"],
-    ["auto", "auto", "auto"],
-    ["human", "human", "human"],
-  ] as const;
-  for (const [a, b, expected] of table) {
-    it(`${a} + ${b} → ${expected}`, () => {
-      expect(strictestBoundary(a, b)).toBe(expected);
-    });
-  }
-});
-
 describe("spliceStageIntoChain", () => {
   it("the preset's 4 rules round-trip untouched when nothing is inserted", () => {
     const out = spliceStageIntoChain(GOVERNED_STAGES, GOVERNED_WORKFLOW, "nope");
@@ -127,12 +110,8 @@ describe("spliceStageIntoChain", () => {
     expect(reviewToQa!.by).toBe(defaultTransitionBy("human"));
   });
 
-  const midTable = [
-    { boundary: "auto", at: 1 },
-    { boundary: "approval", at: 1 },
-    { boundary: "human", at: 1 },
-  ] as const;
-  for (const { boundary, at } of midTable) {
+  const midTable = ["auto", "approval", "human"] as const;
+  for (const boundary of midTable) {
     it(`a mid-chain insert inherits the replaced ${boundary} boundary on both halves`, () => {
       const before = [
         rule("triage", "ready", boundary),
@@ -146,7 +125,6 @@ describe("spliceStageIntoChain", () => {
         ["new", "ready", boundary],
       ]);
       expect(out).toHaveLength(before.length + 1);
-      expect(out.indexOf(out[0]!)).toBe(at - 1); // replaced in place, first slot
       expectWellFormedChain(next, out);
     });
   }
@@ -226,8 +204,10 @@ describe("rejoinChainAroundStage", () => {
     { inB: "approval", outB: "auto", merged: "approval", by: "a->x" },
     { inB: "human", outB: "auto", merged: "human", by: "a->x" },
     { inB: "auto", outB: "human", merged: "human", by: "x->b" },
+    { inB: "human", outB: "approval", merged: "human", by: "a->x" },
     // Tie → the OUT edge's copy: the merged rule still ends where it ended.
     { inB: "approval", outB: "approval", merged: "approval", by: "x->b" },
+    { inB: "human", outB: "human", merged: "human", by: "x->b" },
   ] as const;
   for (const { inB, outB, merged, by } of strictnessTable) {
     it(`${inB} + ${outB} collapses to ${merged}`, () => {

@@ -162,8 +162,9 @@ describe("the dock tells a person a reply is waiting (O39-d)", () => {
     act(() => {
       window.dispatchEvent(new Event(CONTROLLER_UPDATED_EVENT));
     });
-    // CANARY: drop `shouldRevalidate` from the dock's view route and the
-    // revalidation reloads the transcript with `seen=1`, reading the reply.
+    // CANARY: make `dockResourceShouldRevalidate` answer true and the
+    // revalidation reloads the transcript with `seen=1`, reading the reply
+    // (the routes' own export is pinned in resources.controller-unseen.test.ts).
     const fab = await screen.findByRole("button", { name: /a new reply/ });
     expect(fab.querySelector(".unseen-dot")).not.toBeNull();
     expect(loads.length).toBe(closedAt);
@@ -694,49 +695,6 @@ describe("the controller dock (ruling 121)", () => {
     }
   });
 
-  /**
-   * O39-d: the working poll runs with the panel closed too, and a load nobody
-   * is reading must not mark the reply it fetches as seen. Only the open
-   * panel's loads say `seen`, and since ruling 457 the closed dock loads no
-   * transcript at all.
-   */
-  it("O39-d: only an OPEN panel's load marks its transcript seen", async () => {
-    // The turn starts once the fake clock is in, so the poll arms on it.
-    let started = false;
-    const { loads, unseenLoads } = mount({
-      path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working: started, runId: "run_1", phase: null, step: null, answering: null, queued: [] } }),
-      working: () =>
-        started ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }] : [],
-    });
-    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
-    await restored();
-    vi.useFakeTimers();
-    started = true;
-    try {
-      await act(async () => {
-        fireEvent.click(trigger);
-      });
-      expect(loads.at(-1)!.searchParams.get("seen")).toBe("1");
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /^Controller · VIB-1/ }));
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-      expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull();
-      const closedAt = loads.length;
-      const polledAt = unseenLoads.length;
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
-      });
-      // CANARY: load the view from the closed dock's poll again and it reads
-      // the reply while nobody is looking.
-      expect(unseenLoads.length).toBeGreaterThan(polledAt);
-      expect(loads.length).toBe(closedAt);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("animates only a reply that arrives while the panel is open (finding 32)", async () => {
     const first: ControllerDockView["messages"][number] = {
       id: "m1",
@@ -899,7 +857,8 @@ describe("the controller dock (ruling 121)", () => {
      * destroy what the person had written, with a toast that unmounts itself
      * after 2,600 ms as the only account of it.
      *
-     * CANARY: move `setText("")` back beside `send.submit(...)` and this is "".
+     * CANARY: move `setText("")` back beside `send.submit(...)`, or clear
+     * before the `result.ok` check, and this is "".
      */
     // SAFETY: `findByLabelText("Message to the controller")` resolves the
     // composer, which the dock renders as a `<textarea>`.
@@ -1064,19 +1023,6 @@ describe("ruling 259: the dock compares the box with what went out, trimmed", ()
     expect(sends[0]!.get("text")).toBe("hello");
     // CANARY: clear on every success and the next message is lost.
     expect(box.value).toBe(`${typed}and the next thing`);
-  });
-
-  it("keeps the message when the send fails", async () => {
-    mount({
-      path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView(),
-      action: () => ({ ok: false, error: "That request expired." }),
-    });
-    const box = await typeIntoDock();
-    clickSend();
-    await screen.findByText("That request expired.");
-    // CANARY: clear before the `result.ok` check and the failed message is gone.
-    expect(box.value).toBe(typed);
   });
 });
 

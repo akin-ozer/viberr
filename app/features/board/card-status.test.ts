@@ -87,6 +87,12 @@ describe("cardStatus: the wait takes the seat, else the readiness word", () => {
   it("an inconsistency risk is a problem, never the seat", () => {
     expect(cardStatus(task({ displayReadiness: "inconsistency_risk_detected" }))).toBeNull();
     expect(cardProblems(task({ displayReadiness: "inconsistency_risk_detected" })).map((p) => p.key)).toEqual(["risk"]);
+    // …and unlike a demand it never yields to a human wait (ruling 168(a)).
+    expect(
+      cardProblems(
+        task({ displayReadiness: "inconsistency_risk_detected", waiting: "human", waitingOnMe: true }),
+      ).map((p) => p.key),
+    ).toEqual(["risk"]);
   });
 
   it("an unknown value never greenwashes (C12)", () => {
@@ -140,6 +146,8 @@ describe("cardProblems: everything wrong, most severe first", () => {
       expect(cardProblems(task({ validation: v }))).toEqual([]);
     }
     expect(cardProblems(task({ validation: "failing", displayReadiness: "merged" }))).toEqual([]);
+    // N20-14: a force-accepted card owes nobody a verdict, so the bypass goes too.
+    expect(cardProblems(task({ validation: "bypassed", displayReadiness: "accepted" }))).toEqual([]);
   });
 
   it("checks and reviews speak only when actionable (P13-D-28)", () => {

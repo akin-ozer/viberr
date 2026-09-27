@@ -792,13 +792,19 @@ describe("InsightsPage", () => {
   });
 
   it("renders with a null success rate and null duration", () => {
-    const { getAllByText } = renderPage({
+    const { container } = renderPage({
       ...FULL,
       outcomes: { ...FULL.outcomes, finished: 0, error: 0, interrupted: 0, successRate: null },
       avgDurationMs: null,
     });
-    // Both the success-rate and avg-duration cards read the "n/a" placeholder.
-    expect(getAllByText("n/a").length).toBeGreaterThanOrEqual(2);
+    // Both the success-rate and avg-duration cards read the "n/a" placeholder,
+    // and no other stat card does: the cache panel prints its own "n/a" cells,
+    // so a page-wide count of the placeholder proves nothing about these two.
+    // CANARY: render a null rate as "0%" and "Completion rate" drops out.
+    const na = [...container.querySelectorAll(".stat-card")]
+      .filter((c) => c.querySelector(".stat-val")?.textContent === "n/a")
+      .map((c) => c.querySelector(".stat-label")?.textContent);
+    expect(na).toEqual(["Completion rate", "Avg run time"]);
   });
 });
 

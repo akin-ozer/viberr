@@ -98,7 +98,7 @@ const resolvedByRequest = new WeakMap<Request, Promise<AuthResolution>>();
  * `renewalHeaders` is a Headers object that carries any `Set-Cookie` the refresh
  * produced (usually empty — most requests are within the updateAge window).
  */
-export function authenticateWithHeaders(
+function authenticateWithHeaders(
   request: Request,
 ): Promise<AuthResolution> {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -262,7 +262,7 @@ const ROLE_ORDER = {
 } satisfies Record<UserRole, number>;
 
 /** Role hierarchy check: admin > member. */
-export function roleSatisfies(role: UserRole, required: UserRole): boolean {
+function roleSatisfies(role: UserRole, required: UserRole): boolean {
   return ROLE_ORDER[role] >= ROLE_ORDER[required];
 }
 

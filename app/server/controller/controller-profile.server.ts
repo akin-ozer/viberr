@@ -45,13 +45,7 @@ export const CONTROLLER_PROFILE_ID = "controller";
 
 // Ruling 108 — the lock vocabulary (sections, unlock variables, the unlock
 // value) lives in `~/shared/controller-locks` (P07-G, pass 32) so the panel and
-// this enforcer read ONE definition. Re-exported for the server's importers.
-export {
-  CONTROLLER_SECTION_LABEL,
-  CONTROLLER_UNLOCK_ENV,
-  CONTROLLER_UNLOCK_VALUE,
-  type ControllerSectionLocks,
-} from "~/shared/controller-locks";
+// this enforcer read ONE definition.
 import {
   CONTROLLER_SECTION_LABEL,
   CONTROLLER_UNLOCK_ENV,

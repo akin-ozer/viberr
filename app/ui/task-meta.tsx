@@ -96,7 +96,7 @@ const MONTHS = [
 /** `YYYY-MM-DD` → "Mon D" in a fixed, locale-independent vocabulary (the app
  *  never leaves English copy, and a locale-formatted date would drift between
  *  server render and client hydration). Falls back to the raw string. */
-export function formatDueDate(due: string): string {
+function formatDueDate(due: string): string {
   const [y, m, d] = due.split("-").map(Number);
   if (!y || !m || !d || m < 1 || m > 12) return due;
   return `${MONTHS[m - 1]} ${d}`;
@@ -113,7 +113,7 @@ function todayISO(): string {
 /** A due date is overdue when it is strictly before today. Plain `YYYY-MM-DD`
  *  strings sort lexically the same as chronologically, so a string compare is
  *  the whole test. */
-export function isOverdue(dueDate: string | null, today: string): boolean {
+function isOverdue(dueDate: string | null, today: string): boolean {
   return dueDate != null && dueDate < today;
 }
 

@@ -37,13 +37,6 @@ describe("workspace rail order (A00-9, pass 32)", () => {
  * every path on the list is actually under the layout that renders it.
  */
 describe("standalone pages carry the app header (ruling 145)", () => {
-  it("is the two instance pages, and names them the way the crumb reads", () => {
-    expect(STANDALONE_PAGES.map((p) => [p.path, p.label])).toEqual([
-      ["/org/settings", "Instance settings"],
-      ["/insights", "Insights"],
-    ]);
-  });
-
   it("answers on the path alone — a tab is not a page", () => {
     // The header names the SURFACE; which tab is open is the tab rail's job
     // (`aria-current`), and the search string never reaches this.

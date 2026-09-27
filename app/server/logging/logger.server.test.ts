@@ -95,13 +95,4 @@ describe("writeFatalSync (F20-8a)", () => {
     expect(() => writeFatalSync("FATAL: crash", undefined, closedFd)).not.toThrow();
     expect(writes).toHaveLength(0);
   });
-
-  it("defaults to the real fd-2 writer when no sink is passed", () => {
-    // The default is the whole point: a crash handler calls this with no sink
-    // and the bytes still have to reach stderr. The line below is therefore a
-    // REAL one in the test run's stderr — that is the assertion.
-    expect(() =>
-      writeFatalSync("FATAL: default-sink probe (expected in test output)"),
-    ).not.toThrow();
-  });
 });

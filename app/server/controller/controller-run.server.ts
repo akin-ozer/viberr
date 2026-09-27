@@ -254,7 +254,7 @@ export interface ControllerMounts {
  * prompt names a knowledge base its tool refuses is a dead end invented by a
  * second copy of this expression, so there is one.
  */
-export function controllerKbNames(
+function controllerKbNames(
   kb: readonly string[],
   projectSlug: string | null,
   dataRoot?: string,
@@ -715,20 +715,6 @@ async function startTurnRun(
     db,
   );
   return runId;
-}
-
-/** Test seam: settling is only reachable from a live run's completion
- *  callback, and the FIFO's abandonment path needs a queued-start failure. */
-export function settleTurnForTests(
-  db: DatabaseSync,
-  conversationId: string,
-  input: ControllerTurnInput,
-  state: "finished" | "error" | "interrupted" = "finished",
-  runId = "run_test",
-  /** Ruling 465: the user message the settling turn answered. */
-  answering: string | null = null,
-): Promise<void> {
-  return settleTurn(db, conversationId, runId, state, input, answering);
 }
 
 /**

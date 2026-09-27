@@ -51,8 +51,8 @@ import {
 } from "~/features/policy/policy-actions.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { isAppError, type AppError } from "~/server/errors/app-error.server";
-import { ROLE_RANK, RBAC_DEFINITIONS, PROJECT_ROLES,
-  roleCan, rolesForAction, type ProjectRole, type RbacAction } from "~/shared/rbac";
+import { RBAC_DEFINITIONS, PROJECT_ROLES,
+  rolesForAction, type ProjectRole, type RbacAction } from "~/shared/rbac";
 import { ALWAYS_HUMAN_CAPABILITY_IDS } from "~/shared/capabilities";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
@@ -81,7 +81,9 @@ import { listAuditEvents } from "../../../test-support/audit-log";
  * ("here is a driver" / "here is the tier") could drift apart silently. Now:
  * TypeScript refuses a driver table with a missing key, `covers every action`
  * refuses it at runtime too, and the expectation of each generated case is read
- * from the same object the guards read.
+ * from the same object the guards read. That binds the CALL SITES to the table;
+ * the table itself — each action's tier, typed out by hand — is pinned in
+ * app/shared/rbac.test.ts.
  *
  * Pass-7 (R7-1 / D2): every guard is ALSO driven as an ORG-admin who is NOT a
  * project member — the emergency override must grant project-admin authority
@@ -724,55 +726,6 @@ async function assertMatchesMatrix(action: RbacAction, driver: MatrixDriver) {
 }
 
 describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", () => {
-  it("ROLE_RANK is a strict monotonic tier viewer<contributor<maintainer<admin", () => {
-    expect(ROLE_RANK.viewer).toBeLessThan(ROLE_RANK.contributor);
-    expect(ROLE_RANK.contributor).toBeLessThan(ROLE_RANK.maintainer);
-    expect(ROLE_RANK.maintainer).toBeLessThan(ROLE_RANK.admin);
-  });
-
-  it("every ACTION_ROLES set is monotonic (if a role holds it, every higher role does)", () => {
-    // The whole design assumes a tier; a non-monotonic set would be a bug.
-    //
-    // P13: this list used to be hand-maintained, so it silently stopped covering
-    // the matrix the moment an action was added — `force-accept-completion`
-    // (pass 12) was never checked here. Derive it from RBAC_DEFINITIONS so a new
-    // action is covered the day it lands.
-    const actions: RbacAction[] = RBAC_DEFINITIONS.map((d) => d.id);
-    expect(actions.length).toBe(RBAC_DEFINITIONS.length);
-    for (const a of actions) {
-      const roles = rolesForAction(a).map((r) => ROLE_RANK[r]).sort((x, y) => x - y);
-      const floor = roles[0]!;
-      const holders = PROJECT_ROLES.filter((r) => ROLE_RANK[r] >= floor);
-      expect(new Set(rolesForAction(a)), `action ${a} must be a rank floor`).toEqual(
-        new Set(holders),
-      );
-    }
-  });
-
-  /**
-   * `roleCan` is the predicate the guards (and `ownerException`) actually call,
-   * and it is what the Policy table renders through — so the tier claim has to
-   * hold THERE, not only in the raw sets. UPWARD-CLOSED in one direction and
-   * STRICT in the other: a contributor grant reaches maintainer and admin; a
-   * maintainer grant never reaches contributor or viewer.
-   */
-  it("roleCan is upward-closed and strictly denies below the floor", () => {
-    const ordered = [...PROJECT_ROLES].sort((a, b) => ROLE_RANK[a] - ROLE_RANK[b]);
-    for (const def of RBAC_DEFINITIONS) {
-      const floor = Math.min(...def.roles.map((r) => ROLE_RANK[r]));
-      for (const role of ordered) {
-        expect(
-          roleCan(role, def.id),
-          `roleCan("${role}", "${def.id}") must be ${ROLE_RANK[role] >= floor}`,
-        ).toBe(ROLE_RANK[role] >= floor);
-      }
-      // A NON-member (null role) holds nothing at all, whatever the tier says —
-      // membership is the outer gate on every row (R15-4).
-      expect(roleCan(null, def.id), `a non-member must not hold "${def.id}"`).toBe(false);
-      expect(roleCan(undefined, def.id)).toBe(false);
-    }
-  });
-
   it("covers every action in the matrix — a new action cannot ship untested", () => {
     // The completeness half of the table-driven design. Without it, adding a row
     // to RBAC_DEFINITIONS would ship an action whose SERVER enforcement nothing
@@ -1699,28 +1652,6 @@ describe("D2 org-admin emergency override (R7-1)", () => {
 });
 
 /**
- * B-WF7: `reorderTask` requires `reorder-board`, then delegates a cross-stage
- * drop to a `manual: true` transition requiring `approve-transition`. The two
- * are the same tier TODAY, so the split cannot 403 halfway — but nothing said
- * so, and a future tier change on either one would fail a drag AFTER the
- * visible gate had already passed. This is that statement, in code.
- */
-describe("B-WF7: reorder-board and approve-transition stay one tier", () => {
-  it("every role that may reorder the board may also authorize the transition it implies", () => {
-    const reorder = rolesForAction("reorder-board");
-    const transition = rolesForAction("approve-transition");
-    for (const role of reorder) {
-      expect(
-        transition,
-        `role "${role}" can reorder the board but could not authorize the ` +
-          `cross-stage move a drag performs — reorderTask would 403 after the ` +
-          `visible gate passed`,
-      ).toContain(role);
-    }
-  });
-});
-
-/**
  * E7 + E1: `view` and `comment` are the two rows in the matrix that NO role
  * tier narrows. The matrix drivers above prove the per-role answer; these cases
  * pin what the live HTTP probe found on top of it — that a refusal is refused
@@ -1738,14 +1669,6 @@ describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => 
       return isAppError(error) ? error : null;
     }
   }
-
-  it("both rows are held by EVERY role — the matrix says so and no guard narrows it", () => {
-    for (const action of ["view", "comment"] as const) {
-      expect(new Set(rolesForAction(action))).toEqual(
-        new Set(["admin", "maintainer", "contributor", "viewer"]),
-      );
-    }
-  });
 
   it("every role reaches the project; a non-member is refused by the same gate", async () => {
     const byRole = usersByRole();
@@ -1776,54 +1699,5 @@ describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => 
     // `requireVisibleProject` IS its access control, so "refused" has to mean
     // the timeline never took the write.
     expect(commentTexts()).not.toContain("Non-member says hello");
-  });
-});
-
-describe("the matrix itself is pinned, not just the call sites", () => {
-  /**
-   * Everything above derives its expectation from `rolesForAction` — the same
-   * map the guards read — so it binds CALL SITES to the matrix but cannot see a
-   * change to the matrix. Widening a tier (e.g. `manage-agents` to maintainer)
-   * keeps every one of those tests green while silently handing out authority.
-   *
-   * This is the other half: the tiers written out by hand. Editing ACTION_ROLES
-   * now requires editing this table too, which is the point — a role tier is a
-   * policy decision, so it should never move as a side effect of a refactor.
-   */
-  const EXPECTED_TIERS = {
-    view: ["admin", "maintainer", "contributor", "viewer"],
-    comment: ["admin", "maintainer", "contributor", "viewer"],
-    "create-task": ["admin", "maintainer", "contributor"],
-    "own-task": ["admin", "maintainer", "contributor"],
-    "approve-transition": ["admin", "maintainer"],
-    "resolve-packet": ["admin", "maintainer"],
-    "accept-completion": ["admin", "maintainer"],
-    "update-goal": ["admin", "maintainer"],
-    "edit-task-meta": ["admin", "maintainer", "contributor"],
-    "attach-file": ["admin", "maintainer", "contributor"],
-    "manage-epics": ["admin", "maintainer", "contributor"],
-    "run-agents": ["admin", "maintainer"],
-    "reorder-board": ["admin", "maintainer"],
-    "reconcile-github": ["admin", "maintainer"],
-    "grant-github-scope": ["admin", "maintainer"],
-    "rescan-project": ["admin", "maintainer"],
-    "release-any-ownership": ["admin"],
-    "manage-members": ["admin"],
-    "manage-agents": ["admin"],
-    "edit-policy": ["admin"],
-    "force-accept-completion": ["admin"],
-  } satisfies Record<RbacAction, ProjectRole[]>;
-
-  it("every action holds exactly the roles the policy decision assigned it", () => {
-    const actual = Object.fromEntries(
-      RBAC_DEFINITIONS.map((d) => [d.id, [...d.roles]]),
-    );
-    expect(actual).toEqual(EXPECTED_TIERS);
-  });
-
-  it("covers every action in the matrix — a new action cannot slip in untiered", () => {
-    expect(RBAC_DEFINITIONS.map((d) => d.id).sort()).toEqual(
-      Object.keys(EXPECTED_TIERS).sort(),
-    );
   });
 });

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
+import { onTestFinished } from "vitest";
 
 /**
  * Ruling 457: deterministic counters for the perf tests (the one home for
@@ -10,7 +11,42 @@ import { DatabaseSync, StatementSync } from "node:sqlite";
  * between `start` and `stop`, so every module (including ones that prepared
  * their statements before the probe started) is counted. A test holds one
  * database, so the process-wide scope is the database under test.
+ *
+ * Start a probe inside a test: it also stops when that test finishes, so a
+ * throw inside the window cannot leave the prototypes or `fs` wrapped for the
+ * rest of the file (the next probe would capture the wrapper as its original,
+ * and a leaked `countSql(db)` would read a database the cleanup has closed).
+ * Probes may nest and stop in any order: a stopped probe's wrapper only
+ * forwards, and it comes off as soon as nothing live is installed above it.
  */
+
+/** Any of the overloaded functions a probe wraps. */
+type Wrappable = (...args: never[]) => void;
+
+/** What each installed wrapper replaced, and whether its probe has stopped. */
+const INSTALLED = new WeakMap<Wrappable, { original: Wrappable; stopped: () => boolean }>();
+
+function install<K extends string>(
+  target: Record<K, Wrappable>,
+  key: K,
+  wrapper: Wrappable,
+  stopped: () => boolean,
+): void {
+  INSTALLED.set(wrapper, { original: target[key], stopped });
+  // defineProperty: the originals are overloaded, and each wrapper forwards
+  // whatever arguments it was given.
+  Object.defineProperty(target, key, { configurable: true, writable: true, value: wrapper });
+}
+
+/** Takes stopped probes' wrappers off `target[key]`, top down, and stops at
+ *  the first one whose probe is still counting (it comes off when it stops). */
+function unwind<K extends string>(target: Record<K, Wrappable>, key: K): void {
+  for (;;) {
+    const entry = INSTALLED.get(target[key]);
+    if (!entry?.stopped()) return;
+    Object.defineProperty(target, key, { configurable: true, writable: true, value: entry.original });
+  }
+}
 
 export interface SqlTally {
   /** Statement executions: `run`/`get`/`all`/`iterate` plus every `exec`. */
@@ -62,72 +98,83 @@ export function countSql(db?: DatabaseSync): SqlProbe {
     exec: DatabaseSync.prototype.exec,
     prepare: DatabaseSync.prototype.prepare,
   };
+  let stopped = false;
+  const isStopped = () => stopped;
+  const stop = (): SqlTally => {
+    stopped = true;
+    for (const key of ["run", "get", "all", "iterate"] as const) unwind(proto, key);
+    unwind(DatabaseSync.prototype, "exec");
+    unwind(DatabaseSync.prototype, "prepare");
+    return tally;
+  };
+  // Registered before anything is wrapped: outside a test this throws with
+  // nothing to undo.
+  onTestFinished(() => {
+    stop();
+  });
   // Recorded BEFORE the call, so a write's autocommit is judged by the
-  // transaction state it ran in. Installed with defineProperty: the methods are
-  // overloaded, and each wrapper forwards whatever arguments it was given.
-  Object.defineProperty(proto, "run", {
-    configurable: true,
-    writable: true,
-    value: function run(this: StatementSync, ...args: Parameters<StatementSync["run"]>) {
-      record(this.sourceSQL);
+  // transaction state it ran in.
+  install(
+    proto,
+    "run",
+    function run(this: StatementSync, ...args: Parameters<StatementSync["run"]>) {
+      if (!stopped) record(this.sourceSQL);
       return originals.run.apply(this, args);
     },
-  });
-  Object.defineProperty(proto, "get", {
-    configurable: true,
-    writable: true,
-    value: function get(this: StatementSync, ...args: Parameters<StatementSync["get"]>) {
+    isStopped,
+  );
+  install(
+    proto,
+    "get",
+    function get(this: StatementSync, ...args: Parameters<StatementSync["get"]>) {
+      if (stopped) return originals.get.apply(this, args);
       const at = record(this.sourceSQL);
       const row = originals.get.apply(this, args);
       tally.rows[at] = row === undefined ? 0 : 1;
       return row;
     },
-  });
-  Object.defineProperty(proto, "all", {
-    configurable: true,
-    writable: true,
-    value: function all(this: StatementSync, ...args: Parameters<StatementSync["all"]>) {
+    isStopped,
+  );
+  install(
+    proto,
+    "all",
+    function all(this: StatementSync, ...args: Parameters<StatementSync["all"]>) {
+      if (stopped) return originals.all.apply(this, args);
       const at = record(this.sourceSQL);
       const rows = originals.all.apply(this, args);
       tally.rows[at] = rows.length;
       return rows;
     },
-  });
-  Object.defineProperty(proto, "iterate", {
-    configurable: true,
-    writable: true,
-    value: function iterate(this: StatementSync, ...args: Parameters<StatementSync["iterate"]>) {
-      record(this.sourceSQL);
+    isStopped,
+  );
+  install(
+    proto,
+    "iterate",
+    function iterate(this: StatementSync, ...args: Parameters<StatementSync["iterate"]>) {
+      if (!stopped) record(this.sourceSQL);
       return originals.iterate.apply(this, args);
     },
-  });
-  DatabaseSync.prototype.exec = function exec(this: DatabaseSync, sql: string) {
-    record(sql);
-    return originals.exec.call(this, sql);
-  };
-  DatabaseSync.prototype.prepare = function prepare(
-    this: DatabaseSync,
-    ...args: Parameters<DatabaseSync["prepare"]>
-  ) {
-    tally.prepares += 1;
-    return originals.prepare.apply(this, args);
-  };
-  let stopped = false;
-  return {
-    tally,
-    stop() {
-      if (!stopped) {
-        stopped = true;
-        proto.run = originals.run;
-        proto.get = originals.get;
-        proto.all = originals.all;
-        proto.iterate = originals.iterate;
-        DatabaseSync.prototype.exec = originals.exec;
-        DatabaseSync.prototype.prepare = originals.prepare;
-      }
-      return tally;
+    isStopped,
+  );
+  install(
+    DatabaseSync.prototype,
+    "exec",
+    function exec(this: DatabaseSync, sql: string) {
+      if (!stopped) record(sql);
+      return originals.exec.call(this, sql);
     },
-  };
+    isStopped,
+  );
+  install(
+    DatabaseSync.prototype,
+    "prepare",
+    function prepare(this: DatabaseSync, ...args: Parameters<DatabaseSync["prepare"]>) {
+      if (!stopped) tally.prepares += 1;
+      return originals.prepare.apply(this, args);
+    },
+    isStopped,
+  );
+  return { tally, stop };
 }
 
 export interface FileReadProbe {
@@ -145,30 +192,27 @@ export interface FileReadProbe {
 export function countFileReads(root: string): FileReadProbe {
   const reads: string[] = [];
   const original = fs.readFileSync;
+  let stopped = false;
+  const stop = (): string[] => {
+    stopped = true;
+    unwind(fs, "readFileSync");
+    syncBuiltinESMExports();
+    return reads;
+  };
+  onTestFinished(() => {
+    stop();
+  });
   const resolvedRoot = path.resolve(root);
   const wrapped = function readFileSync(...args: Parameters<typeof fs.readFileSync>) {
     // Every data-root read in the app passes a path string; a descriptor or a
     // URL resolves outside the root and is not counted.
     const abs = path.resolve(String(args[0]));
-    if (abs.startsWith(resolvedRoot + path.sep)) reads.push(path.relative(resolvedRoot, abs));
+    if (!stopped && abs.startsWith(resolvedRoot + path.sep)) reads.push(path.relative(resolvedRoot, abs));
     return original.apply(fs, args);
   };
-  // Installed with defineProperty for the same reason as the SQL wrappers: the
-  // original is overloaded and the wrapper forwards its arguments unchanged.
-  Object.defineProperty(fs, "readFileSync", { value: wrapped, configurable: true, writable: true });
+  install(fs, "readFileSync", wrapped, () => stopped);
   syncBuiltinESMExports();
-  let stopped = false;
-  return {
-    reads,
-    stop() {
-      if (!stopped) {
-        stopped = true;
-        fs.readFileSync = original;
-        syncBuiltinESMExports();
-      }
-      return reads;
-    },
-  };
+  return { reads, stop };
 }
 
 export interface FileWrites {
@@ -195,38 +239,40 @@ export function countFileWrites(root: string): FileWriteProbe {
   };
   const originalMkdir = fs.mkdirSync;
   const originalAppend = fs.appendFileSync;
-  Object.defineProperty(fs, "mkdirSync", {
-    configurable: true,
-    writable: true,
-    value: function mkdirSync(...args: Parameters<typeof fs.mkdirSync>) {
-      const rel = under(String(args[0]));
+  let stopped = false;
+  const isStopped = () => stopped;
+  const stop = (): FileWrites => {
+    stopped = true;
+    unwind(fs, "mkdirSync");
+    unwind(fs, "appendFileSync");
+    syncBuiltinESMExports();
+    return writes;
+  };
+  onTestFinished(() => {
+    stop();
+  });
+  install(
+    fs,
+    "mkdirSync",
+    function mkdirSync(...args: Parameters<typeof fs.mkdirSync>) {
+      const rel = stopped ? null : under(String(args[0]));
       if (rel !== null) writes.mkdirs.push(rel);
       return originalMkdir.apply(fs, args);
     },
-  });
-  Object.defineProperty(fs, "appendFileSync", {
-    configurable: true,
-    writable: true,
-    value: function appendFileSync(...args: Parameters<typeof fs.appendFileSync>) {
-      const rel = under(String(args[0]));
+    isStopped,
+  );
+  install(
+    fs,
+    "appendFileSync",
+    function appendFileSync(...args: Parameters<typeof fs.appendFileSync>) {
+      const rel = stopped ? null : under(String(args[0]));
       if (rel !== null) writes.appends.push(rel);
       return originalAppend.apply(fs, args);
     },
-  });
+    isStopped,
+  );
   syncBuiltinESMExports();
-  let stopped = false;
-  return {
-    writes,
-    stop() {
-      if (!stopped) {
-        stopped = true;
-        fs.mkdirSync = originalMkdir;
-        fs.appendFileSync = originalAppend;
-        syncBuiltinESMExports();
-      }
-      return writes;
-    },
-  };
+  return { writes, stop };
 }
 
 export interface StatementRecord {

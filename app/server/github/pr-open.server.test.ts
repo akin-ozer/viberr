@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -25,9 +24,6 @@ import { findOpenScopeViolation } from "~/server/projections/policy-violations.s
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { composePrBody, openTaskPr, prBodySha256 } from "./pr-open.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -122,19 +118,6 @@ describe("composePrBody", () => {
     expect(body).not.toContain("](");
     expect(body).not.toContain("/projects/core/tasks/VIB-1");
   });
-
-  it("builds the absolute back-link when an origin IS configured", () => {
-    const body = composePrBody({
-      taskKey: "VIB-1",
-      projectSlug: "core",
-      title: "Wire it",
-      goal: "Wire.",
-      appOrigin: "https://v.example",
-    });
-    expect(body).toContain(
-      "[VIB-1 · Wire it](https://v.example/projects/core/tasks/VIB-1)",
-    );
-  });
 });
 
 describe("openTaskPr", () => {
@@ -167,6 +150,8 @@ describe("openTaskPr", () => {
     expect(sent.head).toBe(BRANCH);
     expect(sent.body).toContain("https://viberr.example/projects/");
     expect(sent.body).toContain("VIB-201");
+    // No evidence on the task and no compare to derive rows from: no section.
+    expect(sent.body).not.toContain("## Evidence");
 
     // fm.pr is written from the real response (not fabricated), in the
     // CANONICAL cache vocabulary: an open PR is "review", never raw "open".

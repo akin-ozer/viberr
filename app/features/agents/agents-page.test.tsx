@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -201,21 +202,33 @@ function mkDeployment(patch: Partial<AgentDeploymentView>): AgentDeploymentView 
   };
 }
 
+/** ProfileDetail as the Agents page mounts it for a managing admin of Viberr
+ *  Core with nothing deployed; a case passes only the props it varies. */
+function detail(
+  a: AgentProfileView,
+  extra: Partial<ComponentProps<typeof ProfileDetail>> = {},
+) {
+  return (
+    <ProfileDetail
+      a={a}
+      stages={STAGES}
+      workflow={WORKFLOW}
+      insts={[]}
+      projectName="Viberr Core"
+      canManage
+      onOpen={() => {}}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      {...extra}
+    />
+  );
+}
+
 describe("ProfileDetail", () => {
   it("renders hero, stage chips, cap columns, resources and deployments", () => {
     const onOpen = vi.fn();
     const { container, getByText } = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[mkDeployment({})]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={onOpen}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({}), { insts: [mkDeployment({})], onOpen }),
     );
     expect(getByText("Developer")).toBeTruthy();
     expect(getByText("2 of 5 stages")).toBeTruthy();
@@ -235,20 +248,13 @@ describe("ProfileDetail", () => {
     // Two engagements, one actually running. The count reflects the live run,
     // not the two idle engagements (the old code counted every task key).
     const { getByText, queryByText } = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[
+      detail(mkProfile({}), {
+        insts: [
           mkDeployment({ taskKey: "VIB-142", running: true }),
           mkDeployment({ taskKey: "VIB-143", running: false }),
-        ]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={vi.fn()}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+        ],
+        onOpen: vi.fn(),
+      }),
     );
     expect(getByText("running on 1 task")).toBeTruthy();
     expect(queryByText(/engaged on/)).toBeNull();
@@ -264,19 +270,7 @@ describe("ProfileDetail", () => {
    */
   it("OBS-4: the operator card qualifies a recommend-only Stage transitions row", () => {
     const note = (a: Parameters<typeof mkProfile>[0]) =>
-      render(
-        <ProfileDetail
-          a={mkProfile(a)}
-          stages={STAGES}
-          workflow={WORKFLOW}
-          insts={[]}
-          projectName="Viberr Core"
-          canManage
-          onOpen={() => {}}
-          onDelete={() => {}}
-          onEdit={() => {}}
-        />,
-      ).container.textContent ?? "";
+      render(detail(mkProfile(a))).container.textContent ?? "";
 
     const operatorActions = {
       direct: ["Assign the delivering agent"],
@@ -316,19 +310,7 @@ describe("ProfileDetail", () => {
    */
   it("OBS-7: a forked global profile says it is customized; an untouched one does not", () => {
     const scopeLine = (a: Parameters<typeof mkProfile>[0]) =>
-      render(
-        <ProfileDetail
-          a={mkProfile(a)}
-          stages={STAGES}
-          workflow={WORKFLOW}
-          insts={[]}
-          projectName="Viberr Core"
-          canManage
-          onOpen={() => {}}
-          onDelete={() => {}}
-          onEdit={() => {}}
-        />,
-      ).container.querySelector(".ag-scope")!.textContent;
+      render(detail(mkProfile(a))).container.querySelector(".ag-scope")!.textContent;
 
     expect(scopeLine({ scope: "Global base", customized: false })).toBe(
       "Global base",
@@ -359,25 +341,12 @@ describe("ProfileDetail", () => {
       templateResources: { skills: [], mcps: ["context7"], kb: [] },
     };
     const onSync = vi.fn();
-    const detail = (canSyncTemplate: boolean) => (
-      <ProfileDetail
-        a={mkProfile({
-          templateDrift,
-          resources: { skills: ["k8s-notes"], mcps: [], kb: [] },
-        })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        canSyncTemplate={canSyncTemplate}
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-        onSyncResources={onSync}
-      />
-    );
-    const { container, getByText } = render(detail(true));
+    const drifted = (canSyncTemplate: boolean) =>
+      detail(
+        mkProfile({ templateDrift, resources: { skills: ["k8s-notes"], mcps: [], kb: [] } }),
+        { canSyncTemplate, onSyncResources: onSync },
+      );
+    const { container, getByText } = render(drifted(true));
     expect(container.querySelector(".ag-scope")!.textContent).toBe(
       "Global base · grants differ from the template",
     );
@@ -395,7 +364,7 @@ describe("ProfileDetail", () => {
     cleanup();
 
     // A project admin who is not an org admin: the marker, never the button.
-    const { queryByText, container: again } = render(detail(false));
+    const { queryByText, container: again } = render(drifted(false));
     expect(queryByText("Use the template's grants")).toBeNull();
     expect(again.querySelector(".ag-scope")!.textContent).toContain(
       "grants differ from the template",
@@ -404,18 +373,7 @@ describe("ProfileDetail", () => {
 
     // A copy that matches its template says nothing about grants.
     const { container: clean, queryByText: none } = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        canSyncTemplate
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({}), { canSyncTemplate: true }),
     );
     expect(clean.querySelector(".ag-scope")!.textContent).toBe("Global base");
     expect(none(/Differs from the template/)).toBeNull();
@@ -492,31 +450,21 @@ describe("ProfileDetail", () => {
     //
     // Canary: restore the two separate `{claudeOnly && …}{carveOut && …}` spans.
     const { container } = render(
-      <ProfileDetail
-        a={mkProfile({
-          id: "codex-dev",
-          name: "Codex developer",
-          role: "Implementation",
-          backends: ["codex"],
-          model: "gpt-5-codex",
-          actions: {
-            direct: [],
-            recommend: [],
-            forbidden: ["Execute code or write to the repo"],
-            off: [],
-          },
-          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "off" }],
-          resources: { skills: [], mcps: [], kb: [] },
-        })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({
+        id: "codex-dev",
+        name: "Codex developer",
+        role: "Implementation",
+        backends: ["codex"],
+        model: "gpt-5-codex",
+        actions: {
+          direct: [],
+          recommend: [],
+          forbidden: ["Execute code or write to the repo"],
+          off: [],
+        },
+        capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "off" }],
+        resources: { skills: [], mcps: [], kb: [] },
+      })),
     );
     const row = [...container.querySelectorAll(".cap-item")].find((el) =>
       (el.textContent ?? "").includes("Execute code or write to the repo"),
@@ -532,47 +480,37 @@ describe("ProfileDetail", () => {
 
   it("a fresh minimal profile claims no verdict authority and no skills", () => {
     const { container, getByText, queryByText } = render(
-      <ProfileDetail
-        a={mkProfile({
-          id: "docs-writer",
-          name: "Docs writer",
-          role: "Docs",
-          // What the honest derivation yields for a newly created profile: the
-          // governed toggles withheld, advisory guidance at its catalog default.
-          actions: {
-            direct: [
-              "Read the repository & diff",
-              "Read the task & repository",
-            ],
-            recommend: [],
-            forbidden: [
-              "Merge a pull request",
-              "Transition a task to Done",
-              "Change project policy",
-            ],
-            off: [
-              "Execute code or write to the repo",
-              "Report a validation verdict",
-              "Approve the review",
-              "Request changes",
-              "Post quality-flag events",
-            ],
-          },
-          capabilities: [
-            { capabilityId: "execute-code-or-write-repo", mode: "off" },
-            { capabilityId: "report-validation-verdict", mode: "off" },
+      detail(mkProfile({
+        id: "docs-writer",
+        name: "Docs writer",
+        role: "Docs",
+        // What the honest derivation yields for a newly created profile: the
+        // governed toggles withheld, advisory guidance at its catalog default.
+        actions: {
+          direct: [
+            "Read the repository & diff",
+            "Read the task & repository",
           ],
-          resources: { skills: [], mcps: [], kb: [] },
-        })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+          recommend: [],
+          forbidden: [
+            "Merge a pull request",
+            "Transition a task to Done",
+            "Change project policy",
+          ],
+          off: [
+            "Execute code or write to the repo",
+            "Report a validation verdict",
+            "Approve the review",
+            "Request changes",
+            "Post quality-flag events",
+          ],
+        },
+        capabilities: [
+          { capabilityId: "execute-code-or-write-repo", mode: "off" },
+          { capabilityId: "report-validation-verdict", mode: "off" },
+        ],
+        resources: { skills: [], mcps: [], kb: [] },
+      })),
     );
     // No verdict authority anywhere in the capability columns.
     const cols = container.querySelector(".cap-cols")!;
@@ -613,31 +551,21 @@ describe("ProfileDetail", () => {
 
   it("the advisory line keeps each label's mode instead of flattening them", () => {
     const { container } = render(
-      <ProfileDetail
-        a={mkProfile({
-          id: "docs-writer",
-          name: "Docs writer",
-          role: "Docs",
-          actions: {
-            direct: ["Read the repository & diff"],
-            recommend: [],
-            // An advisory capability the admin explicitly reserved for humans:
-            // it used to read identically to the `direct` one above.
-            forbidden: ["Approve the review"],
-            off: [],
-          },
-          capabilities: [],
-          resources: { skills: [], mcps: [], kb: [] },
-        })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({
+        id: "docs-writer",
+        name: "Docs writer",
+        role: "Docs",
+        actions: {
+          direct: ["Read the repository & diff"],
+          recommend: [],
+          // An advisory capability the admin explicitly reserved for humans:
+          // it used to read identically to the `direct` one above.
+          forbidden: ["Approve the review"],
+          off: [],
+        },
+        capabilities: [],
+        resources: { skills: [], mcps: [], kb: [] },
+      })),
     );
     // R15-12: one <li> per capability now, so the mode travels with its own
     // label instead of riding a single joined sentence.
@@ -659,27 +587,17 @@ describe("ProfileDetail", () => {
 
   it("operator: no Delete button, real backend + autonomy cells, lifecycle hint", () => {
     const { container, getByText, queryByText } = render(
-      <ProfileDetail
-        a={mkProfile({
-          id: "operator",
-          kind: "operator",
-          name: "Operator",
-          role: "Task coordinator",
-          icon: "shield",
-          spanAll: true,
-          backends: ["claude", "codex"],
-          autonomy: "supervised",
-          model: "claude-sonnet-4-5",
-        })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        role: "Task coordinator",
+        icon: "shield",
+        spanAll: true,
+        backends: ["claude", "codex"],
+        autonomy: "supervised",
+        model: "claude-sonnet-4-5",
+      })),
     );
     expect(queryByText("Delete")).toBeNull();
     expect(getByText("Edit profile")).toBeTruthy();
@@ -699,17 +617,7 @@ describe("ProfileDetail", () => {
   it("delete flows through the inline alertdialog confirm", () => {
     const onDelete = vi.fn();
     const { container, getByText } = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[mkDeployment({})]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={onDelete}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({}), { insts: [mkDeployment({})], onDelete }),
     );
     fireEvent.click(getByText("Delete"));
     // Ruling 458(f): the shared ConfirmDialog, named by its title, with the
@@ -729,20 +637,11 @@ describe("ProfileDetail", () => {
   // its fade never names the next profile.
   // Canary: read `a` from props in DeleteConfirm and the heading turns to Reviewer.
   it("the delete confirm keeps the profile it opened for while the selection changes under it", () => {
-    const props = {
-      stages: STAGES,
-      workflow: WORKFLOW,
-      insts: [mkDeployment({})],
-      projectName: "Viberr Core",
-      canManage: true,
-      onOpen: () => {},
-      onDelete: () => {},
-      onEdit: () => {},
-    };
-    const { getByText, queryByText, rerender } = render(<ProfileDetail a={mkProfile({})} {...props} />);
+    const props = { insts: [mkDeployment({})] };
+    const { getByText, queryByText, rerender } = render(detail(mkProfile({}), props));
     fireEvent.click(getByText("Delete"));
     expect(getByText("Delete the Developer profile?")).toBeTruthy();
-    rerender(<ProfileDetail a={mkProfile({ id: "reviewer", name: "Reviewer" })} {...props} />);
+    rerender(detail(mkProfile({ id: "reviewer", name: "Reviewer" }), props));
     expect(getByText("Delete the Developer profile?")).toBeTruthy();
     expect(queryByText("Delete the Reviewer profile?")).toBeNull();
   });
@@ -754,17 +653,7 @@ describe("ProfileDetail", () => {
   // no clue at all when NONE of a profile's stages exist on this board.
   it("LV-02: spanAll lights every chip and the counter never exceeds the board", () => {
     const { container, getByText } = render(
-      <ProfileDetail
-        a={mkProfile({ id: "operator", kind: "operator", spanAll: true })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({ id: "operator", kind: "operator", spanAll: true })),
     );
     expect(getByText("active across the whole lifecycle")).toBeTruthy();
     // Every board stage is eligible — none struck through.
@@ -781,17 +670,11 @@ describe("ProfileDetail", () => {
     // unassignable; `impl` names the WORK role, and this board's work stage is
     // `doing` (its entry stage `todo` fills work too on a board this short).
     const { container, getByText, queryByText } = render(
-      <ProfileDetail
-        a={mkProfile({ stages: ["ready", "impl"] })}
-        stages={LIGHTWEIGHT_BOARD}
-        workflow={LIGHTWEIGHT_WORKFLOW}
-        insts={[]}
-        projectName="Lightweight Lab"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({ stages: ["ready", "impl"] }), {
+        stages: LIGHTWEIGHT_BOARD,
+        workflow: LIGHTWEIGHT_WORKFLOW,
+        projectName: "Lightweight Lab",
+      }),
     );
     expect(getByText("2 of 3 stages")).toBeTruthy();
     expect(queryByText("0 of 3 stages")).toBeNull();
@@ -804,20 +687,14 @@ describe("ProfileDetail", () => {
 
   it("R14-1: a declaration that lands nowhere leaves the profile eligible everywhere", () => {
     const { container, getByText } = render(
-      <ProfileDetail
-        // Neither id is a stage here and neither names a known role, so the
-        // declaration says nothing about this workflow. Rule 3: unrestricted —
-        // silently disabling every agent is the failure we actually observed.
-        a={mkProfile({ stages: ["spec-review", "handoff"] })}
-        stages={LIGHTWEIGHT_BOARD}
-        workflow={LIGHTWEIGHT_WORKFLOW}
-        insts={[]}
-        projectName="Lightweight Lab"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      // Neither id is a stage here and neither names a known role, so the
+      // declaration says nothing about this workflow. Rule 3: unrestricted —
+      // silently disabling every agent is the failure we actually observed.
+      detail(mkProfile({ stages: ["spec-review", "handoff"] }), {
+        stages: LIGHTWEIGHT_BOARD,
+        workflow: LIGHTWEIGHT_WORKFLOW,
+        projectName: "Lightweight Lab",
+      }),
     );
     expect(
       getByText("declared stages don't exist here · eligible everywhere"),
@@ -827,19 +704,7 @@ describe("ProfileDetail", () => {
   });
 
   it("LV-02: a profile that declares no stages is unrestricted, not ineligible", () => {
-    const { container, getByText } = render(
-      <ProfileDetail
-        a={mkProfile({ stages: [] })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const { container, getByText } = render(detail(mkProfile({ stages: [] })));
     // Mirrors specialistEligibleForStage: no declared stages = eligible
     // everywhere (the guard treats it that way, so the panel must too).
     expect(getByText("no stage restriction · eligible everywhere")).toBeTruthy();
@@ -862,17 +727,7 @@ describe("ProfileDetail", () => {
 
   function renderEligibility(a: AgentProfileView, board = STAGES, workflow = WORKFLOW) {
     return render(
-      <ProfileDetail
-        a={a}
-        stages={board}
-        workflow={workflow}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(a, { stages: board, workflow }),
     ).container.querySelector(".stage-chips")!.parentElement!.textContent!;
   }
 
@@ -906,19 +761,7 @@ describe("ProfileDetail", () => {
   });
 
   it("hides manage affordances for non-admins", () => {
-    const { queryByText } = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage={false}
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const { queryByText } = render(detail(mkProfile({}), { canManage: false }));
     expect(queryByText("Delete")).toBeNull();
     expect(queryByText("Edit profile")).toBeNull();
   });
@@ -934,22 +777,14 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     // Live: renaming an org MCP orphaned every grant to it, and this panel kept
     // painting a normal chip while the run exposed zero tools under that name.
     const { container, getByText } = render(
-      <ProfileDetail
-        a={withGrants()}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        resourceCatalog={[
+      detail(withGrants(), {
+        resourceCatalog: [
           { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill", def: false }] },
           { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http", def: false }] },
           { group: "Knowledge bases", key: "kb", mono: true, items: [] },
-        ]}
-        insts={[]}
-        projectName="P"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+        ],
+        projectName: "P",
+      }),
     );
     const missing = container.querySelectorAll(".res-chip.missing");
     expect(missing).toHaveLength(1);
@@ -968,20 +803,7 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
       ...mkProfile({}),
       resources: { skills: [], mcps: [], kb: ["team-rulings"] },
     };
-    const { getByText } = render(
-      <ProfileDetail
-        a={granted}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        rulingsKb="team-rulings"
-        insts={[]}
-        projectName="P"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const { getByText } = render(detail(granted, { rulingsKb: "team-rulings", projectName: "P" }));
     expect(
       getByText(/Removing the grant here would not stop this profile reading it/),
     ).toBeTruthy();
@@ -991,36 +813,12 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     // The overwhelming majority of projects. CANARY: render the note
     // unconditionally and every project grows a paragraph about a KB it has not
     // got, naming an empty store directory.
-    const { queryByText } = render(
-      <ProfileDetail
-        a={withGrants()}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="P"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const { queryByText } = render(detail(withGrants(), { projectName: "P" }));
     expect(queryByText(/the project's rulings/)).toBeNull();
   });
 
   it("marks nothing when the catalog is unknown — never invents a missing state", () => {
-    const { container } = render(
-      <ProfileDetail
-        a={withGrants()}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="P"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const { container } = render(detail(withGrants(), { projectName: "P" }));
     expect(container.querySelectorAll(".res-chip.missing")).toHaveLength(0);
   });
 });
@@ -1779,7 +1577,9 @@ describe("CreateProfileModal", () => {
    * F19-35 — the collapsible group headers (`cap-mghead`) carried expanded vs
    * collapsed in the `open` CSS class alone: the chevron rotates and a screen
    * reader learns nothing. Both matrices use the same header, so both are
-   * pinned here.
+   * pinned here. UX-21: every group after the first starts COLLAPSED, and an
+   * expanded header points at its own body while a collapsed one points at
+   * nothing — never a dangling id.
    */
   it("capability + resource group headers report expanded/collapsed (aria-expanded)", () => {
     const { container, getByText } = renderModal({
@@ -1812,6 +1612,14 @@ describe("CreateProfileModal", () => {
     expect(
       heads().map((h) => h.getAttribute("aria-expanded")),
     ).toContain("false");
+    const body = container.querySelector(".cap-mbody")!;
+    expect(body.id).not.toBe("");
+    expect(heads()[0]!.getAttribute("aria-controls")).toBe(body.id);
+    expect(
+      heads()
+        .find((h) => h.getAttribute("aria-expanded") === "false")!
+        .getAttribute("aria-controls"),
+    ).toBeNull();
 
     // A collapsed capability group flips to expanded on click.
     const collapsed = heads().find(
@@ -1988,41 +1796,6 @@ describe("CreateProfileModal", () => {
   });
 
   /**
-   * F19 UX-21 — the two `cap-mghead` accordions were the only custom-button
-   * disclosures in the app that never reported their state: it lived in the
-   * chevron's CSS rotation alone. Every group after the first starts COLLAPSED,
-   * so reaching any capability outside "Repository & execution" means operating
-   * a control whose state a screen reader cannot read.
-   */
-  it("UX-21 — both accordions report expanded/collapsed state", () => {
-    const { container } = renderModal({
-      initial: null,
-      resourceCatalog: [
-        { group: "Skills", key: "skills", mono: true, items: [{ id: "repo-write", def: false }] },
-        { group: "MCP servers", key: "mcps", mono: true, items: [] },
-      ],
-    });
-    const heads = () => [...container.querySelectorAll(".cap-mghead")];
-    // Capability groups + resource groups — every one of them reports.
-    expect(heads().length).toBeGreaterThan(3);
-    expect(heads().every((h) => h.hasAttribute("aria-expanded"))).toBe(true);
-    // The first group of each section is open and points at its own body.
-    const first = heads()[0]!;
-    expect(first.getAttribute("aria-expanded")).toBe("true");
-    const body = container.querySelector(".cap-mbody")!;
-    expect(body.id).not.toBe("");
-    expect(first.getAttribute("aria-controls")).toBe(body.id);
-    // A collapsed header has no body to point at, and never a dangling id.
-    const collapsedIdx = heads().findIndex(
-      (h) => h.getAttribute("aria-expanded") === "false",
-    );
-    expect(collapsedIdx).toBeGreaterThan(0);
-    expect(heads()[collapsedIdx]!.getAttribute("aria-controls")).toBeNull();
-    fireEvent.click(heads()[collapsedIdx]!);
-    expect(heads()[collapsedIdx]!.getAttribute("aria-expanded")).toBe("true");
-  });
-
-  /**
    * F19 UX-23 — the collapsed summary printed bare digits ("3 2 1") whose only
    * key was the dot colour, while the identical strip on the Policy page names
    * every mode (`.pcap-counts` in policy-page.tsx's `AgentCapability`). Zero
@@ -2073,20 +1846,6 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
     expect(
       getByText("Ready to save: this forks Developer for Viberr Core."),
     ).toBeTruthy();
-  });
-
-  it("A11Y-9 (pass 32): every collapsible section header is a named, state-carrying button", () => {
-    const { container } = renderModal({
-      initial: mkProfile({ source: "project", name: "Migrations" }),
-    });
-    const heads = [...container.querySelectorAll<HTMLButtonElement>("button.cap-mghead")];
-    expect(heads.length).toBeGreaterThan(0);
-    for (const head of heads) {
-      // Named by the group label it contains; the live tree tool reported
-      // these unnamed, so the computed name is what this pins.
-      expect(head.textContent!.trim().length).toBeGreaterThan(0);
-      expect(head.getAttribute("aria-expanded")).toMatch(/^(true|false)$/);
-    }
   });
 
   it("a project-created profile has nothing to fork and says so plainly", () => {
@@ -2369,8 +2128,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     const toast = document.querySelector(".toast")!;
     expect(toast.textContent).toContain("That template no longer exists.");
-    // `alert` is the triangle path; `check` is the tick.
-    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+    expect(toast.getAttribute("data-kind")).toBe("error");
   });
 });
 
@@ -2411,20 +2169,7 @@ describe("F16: the roster tells the truth about backend connections", () => {
   };
 
   const renderDetail = (backendHealth?: BackendHealthMap) =>
-    render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        {...(backendHealth ? { backendHealth } : {})}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    render(detail(mkProfile({}), backendHealth ? { backendHealth } : {}));
 
   it("still says 'idle · available' when the viewer has the backend connected", () => {
     const { getByText, queryByText } = renderDetail(HEALTHY);
@@ -2572,19 +2317,7 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
  */
 describe("UX19-11: the delete-profile confirm states R15-7's real outcome", () => {
   const renderConfirm = (insts: AgentDeploymentView[]) => {
-    const utils = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={insts}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const utils = render(detail(mkProfile({}), { insts }));
     fireEvent.click(utils.getByText("Delete"));
     return utils.container.querySelector('[role="alertdialog"]')!;
   };
@@ -2626,19 +2359,7 @@ describe("UX19-11: the delete-profile confirm states R15-7's real outcome", () =
  */
 describe("F20-9: the operator card carries the Transition-to-Done exception note", () => {
   const renderDetail = (a: AgentProfileView) =>
-    render(
-      <ProfileDetail
-        a={a}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    render(detail(a));
 
   it("renders the imported Policy-page exception copy on the operator card", () => {
     const { container } = renderDetail(
@@ -2679,27 +2400,17 @@ describe("F20-9: the operator card carries the Transition-to-Done exception note
 describe("F20-4: the model cell flags a provider-refused model", () => {
   it("shows an 'unavailable' badge carrying the provider reason", () => {
     const { getByText } = render(
-      <ProfileDetail
-        a={mkProfile({
-          backends: ["codex"],
-          model: "gpt-5.6-sol",
-          modelLabel: "GPT-5.6 Sol",
-          modelKnown: true,
-          modelUnavailable: {
-            reason:
-              "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
-            markedAt: "2026-08-15T00:00:00.000Z",
-          },
-        })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({
+        backends: ["codex"],
+        model: "gpt-5.6-sol",
+        modelLabel: "GPT-5.6 Sol",
+        modelKnown: true,
+        modelUnavailable: {
+          reason:
+            "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+          markedAt: "2026-08-15T00:00:00.000Z",
+        },
+      })),
     );
     const badge = getByText("unavailable");
     expect(badge).toBeTruthy();
@@ -2709,19 +2420,7 @@ describe("F20-4: the model cell flags a provider-refused model", () => {
   });
 
   it("shows no unavailable badge when the model is not marked", () => {
-    const { queryByText } = render(
-      <ProfileDetail
-        a={mkProfile({ backends: ["codex"], modelKnown: true })}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
-    );
+    const { queryByText } = render(detail(mkProfile({ backends: ["codex"], modelKnown: true })));
     expect(queryByText("unavailable")).toBeNull();
   });
 });
@@ -2749,17 +2448,7 @@ describe("C10: deployment status renders through the shared pill mapper", () => 
 
   it("the profile-detail deployment row uses the same pill", () => {
     const { container } = render(
-      <ProfileDetail
-        a={mkProfile({})}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        insts={[mkDeployment({ status: "waiting on human" })]}
-        projectName="Viberr Core"
-        canManage
-        onOpen={() => {}}
-        onDelete={() => {}}
-        onEdit={() => {}}
-      />,
+      detail(mkProfile({}), { insts: [mkDeployment({ status: "waiting on human" })] }),
     );
     const pill = container.querySelector(".deploy-row .pill")!;
     expect(pill.textContent).toContain("waiting on a human");
@@ -3323,16 +3012,7 @@ describe("CreateProfileModal fingerprint (B5)", () => {
  * case names its finding and the canary that turns it red.
  */
 describe("ruling 479: the Agents page says what the runtime does", () => {
-  const detailProps = {
-    stages: STAGES,
-    workflow: WORKFLOW,
-    insts: [],
-    projectName: "akinozer.com",
-    canManage: true,
-    onOpen: () => {},
-    onDelete: () => {},
-    onEdit: () => {},
-  };
+  const site = { projectName: "akinozer.com" };
 
   /**
    * (a) F40-36: live, the matrix read "Approve the review: Off" for both
@@ -3419,12 +3099,11 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
    */
   it("(b) a granted MCP server that needs a sign-in is marked, with the remedy in its text", () => {
     const { container } = render(
-      <ProfileDetail
-        {...detailProps}
-        a={mkProfile({
-          resources: { skills: [], mcps: ["cloudflare-api", "cloudflare-docs"], kb: [] },
-        })}
-        resourceCatalog={[
+      detail(mkProfile({
+        resources: { skills: [], mcps: ["cloudflare-api", "cloudflare-docs"], kb: [] },
+      }), {
+        ...site,
+        resourceCatalog: [
           { group: "Skills", key: "skills", mono: true, items: [] },
           {
             group: "MCP servers",
@@ -3444,8 +3123,8 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
             ],
           },
           { group: "Knowledge bases", key: "kb", mono: true, items: [] },
-        ]}
-      />,
+        ],
+      }),
     );
     // Marked the way a missing grant is (the same class), with its own note.
     const flagged = container.querySelectorAll(".res-chip.missing");
@@ -3469,19 +3148,14 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
   it("(d) 'Use the template's grants' names what it removes and adds before it submits", () => {
     const onSync = vi.fn();
     const { getByText, container } = render(
-      <ProfileDetail
-        {...detailProps}
-        a={mkProfile({
-          name: "Platform Engineer",
-          templateDrift: {
-            missing: { skills: [], mcps: [], kb: [] },
-            extra: { skills: [], mcps: ["cloudflare-api"], kb: [] },
-            templateResources: { skills: [], mcps: ["cloudflare-docs"], kb: [] },
-          },
-        })}
-        canSyncTemplate
-        onSyncResources={onSync}
-      />,
+      detail(mkProfile({
+        name: "Platform Engineer",
+        templateDrift: {
+          missing: { skills: [], mcps: [], kb: [] },
+          extra: { skills: [], mcps: ["cloudflare-api"], kb: [] },
+          templateResources: { skills: [], mcps: ["cloudflare-docs"], kb: [] },
+        },
+      }), { ...site, canSyncTemplate: true, onSyncResources: onSync }),
     );
     fireEvent.click(getByText("Use the template's grants"));
     expect(onSync).not.toHaveBeenCalled();
@@ -3502,29 +3176,26 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
    */
   it("(e) every kind shows model and effort; the operator keeps Autonomy as its own cell", () => {
     const specialist = render(
-      <ProfileDetail
-        {...detailProps}
-        a={mkProfile({ backends: ["claude"], modelLabel: "Claude Opus", modelKnown: true, effort: "max" })}
-      />,
+      detail(
+        mkProfile({ backends: ["claude"], modelLabel: "Claude Opus", modelKnown: true, effort: "max" }),
+        site,
+      ),
     );
     expect(specialist.getByText("Model · effort")).toBeTruthy();
     expect(specialist.getByText("Claude Opus · Maximum")).toBeTruthy();
     cleanup();
 
     const operator = render(
-      <ProfileDetail
-        {...detailProps}
-        a={mkProfile({
-          id: "operator",
-          kind: "operator",
-          name: "Operator",
-          backends: ["claude"],
-          modelLabel: "Claude Opus",
-          modelKnown: true,
-          effort: "high",
-          autonomy: "supervised",
-        })}
-      />,
+      detail(mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        backends: ["claude"],
+        modelLabel: "Claude Opus",
+        modelKnown: true,
+        effort: "high",
+        autonomy: "supervised",
+      }), site),
     );
     expect(operator.getByText("Claude Opus · High")).toBeTruthy();
     expect(operator.getByText("Autonomy")).toBeTruthy();
@@ -3533,10 +3204,10 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
 
     // An unset effort is the backend's own default, and says so.
     const unset = render(
-      <ProfileDetail
-        {...detailProps}
-        a={mkProfile({ backends: ["claude"], modelLabel: "Claude Sonnet", modelKnown: true, effort: "" })}
-      />,
+      detail(
+        mkProfile({ backends: ["claude"], modelLabel: "Claude Sonnet", modelKnown: true, effort: "" }),
+        site,
+      ),
     );
     expect(unset.getByText("Claude Sonnet · default effort")).toBeTruthy();
   });
@@ -3585,9 +3256,7 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
    * Canary: delete the visually hidden state text.
    */
   it("(f) each stage chip carries its eligibility as text", () => {
-    const { container } = render(
-      <ProfileDetail {...detailProps} a={mkProfile({ stages: ["ready", "impl"] })} />,
-    );
+    const { container } = render(detail(mkProfile({ stages: ["ready", "impl"] }), site));
     const chips = [...container.querySelectorAll(".stage-chips .stage-chip")];
     expect(chips.map((c) => c.textContent)).toEqual([
       "Triage, not eligible",

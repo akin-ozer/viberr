@@ -22,7 +22,6 @@ import type {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   forceAcceptCompletion,
   recordAgentCompletion,
@@ -288,12 +287,10 @@ beforeEach(() => {
   // no-merge case below compares this whole recorded value.
   mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);
   remote();
-  resetSseBrokerForTests();
   installFakeRuntime();
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -572,8 +569,10 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
     expect(result.outcome).toBe("recommended");
     const rec = task().frontmatter.recommendations[0];
     expect(rec?.label).toMatch(/no changes/i);
-    const detail = task().timeline.find((e) => e.text.includes("nothing to deliver"));
-    expect(detail?.text).not.toContain("merges the review PR");
+    // Read off the card itself: the timeline also carries the reviewer's
+    // "nothing to deliver" verdict, which never mentions a merge either.
+    expect(rec?.detail).toContain("nothing is merged");
+    expect(rec?.detail).not.toContain("merges the review PR");
   });
 
   it("R19-8: full autonomy closes it with the no-change event", async () => {

@@ -16,7 +16,6 @@ import {
   probeTool,
   probeTools,
   resetProbeCacheForTests,
-  resetToolchainCacheForTests,
   resolveToolchain,
   shellInventoryPrompt,
   versionOf,
@@ -34,11 +33,9 @@ const ctx = createTestDbContext();
 beforeEach(() => {
   // The suite is primed hermetic (setup-env); these tests drive the resolver.
   primeToolchain(null);
-  resetToolchainCacheForTests();
 });
 afterEach(() => {
   ctx.cleanup();
-  resetToolchainCacheForTests();
   primeHermeticToolchain();
 });
 
@@ -160,12 +157,11 @@ describe("resolveToolchain", () => {
 });
 
 describe("cachedToolchain", () => {
-  it("resolves once per process and honours the suite's hermetic override", () => {
-    // Without the override the real resolver would run: prove memoization on
-    // a primed reading instead, then that the prime wins over the cache.
+  it("returns the primed reading, and a re-prime wins over it", () => {
+    // Without the override the real resolver would run and spawn the host's
+    // programs, so only the override path is driven here.
     primeToolchain({ ...HERMETIC_TOOLCHAIN, npm: "primed" });
     expect(cachedToolchain().npm).toBe("primed");
-    expect(cachedToolchain()).toBe(cachedToolchain());
     primeToolchain({ ...HERMETIC_TOOLCHAIN, npm: "re-primed" });
     expect(cachedToolchain().npm).toBe("re-primed");
   });

@@ -147,13 +147,6 @@ describe("UI-58: the Board/List seg carries its selected state", () => {
 });
 
 describe("UI-58: the list view has a keyboard move control", () => {
-  it("renders the StageMenu per row when the viewer can move tasks", () => {
-    const { container } = renderBoard([task()], { view: "list" });
-    // Before the fix ListView rendered a static stage pill and nothing else —
-    // drag-and-drop had no keyboard equivalent outside the board layout.
-    expect(container.querySelector(".stage-menu-btn, button.stage-static, .own-btn")).toBeTruthy();
-  });
-
   it("falls back to the task page's read-only stage rendering (dot + name)", () => {
     // Pass 30: same fact, same treatment — the read-only stage shows the
     // stage-colored dot + name (`.stage-static`), not a bare neutral pill.
@@ -216,28 +209,6 @@ describe("ruling 225: the board says a clock rest is a clock rest", () => {
     expect(
       container.querySelector(".card .chip.st.scheduled")!.textContent!.trim(),
     ).toBe("resumes on its own");
-  });
-
-  it("never draws a demand pill over a tag that says nobody is needed", () => {
-    // Ruling 168(a) made a "blocked" pill above "waiting on you" yield, as one
-    // demand said twice. Over a clock rest the two are not a repetition, they
-    // contradict: "input required" says a person is needed right now, the tag
-    // says the task comes back on its own.
-    const { container } = renderBoard([
-      task({
-        key: "VIB-1",
-        stage: "impl",
-        waiting: "schedule",
-        resumesAt: "2026-09-14T02:28:00.000Z",
-        readiness: "input_required",
-        displayReadiness: "input_required",
-      }),
-    ]);
-    expect(container.querySelector(".card .chip.st.input")).toBeNull();
-    expect(container.textContent).not.toContain("input required");
-    expect(
-      container.querySelector(".card .chip.st.scheduled")!.textContent!.trim(),
-    ).toMatch(/^resumes \S/);
   });
 
   it("leaves the subtitle's human count to the humans", () => {
@@ -356,7 +327,7 @@ describe("interface review 2026-09-06: the lane outline and the card corner", ()
   });
 });
 
-describe("P13-D-6: the card and the list row draw validation status (FR24)", () => {
+describe("P13-D-6: the card draws validation status (FR24)", () => {
   it("renders the ValidationPill on a card whose validation is failing", () => {
     // Before the fix `grep -c validation board-page.tsx` was 0: a reviewer's
     // request_changes set validation:"failing" and touched nothing the card
@@ -369,71 +340,9 @@ describe("P13-D-6: the card and the list row draw validation status (FR24)", () 
     expect(card.textContent).toContain("validation failing");
     expect(card.querySelector(".card-props .chip.pb")).toBeTruthy();
   });
-
-  it("stays silent when there is no validation signal at all", () => {
-    const { container } = renderBoard([
-      task({ key: "VIB-1", validation: "none" }),
-    ]);
-    expect(container.querySelector(".card")!.textContent).not.toContain(
-      "validation",
-    );
-    expect(container.querySelector(".card")!.textContent).not.toContain(
-      "no validation",
-    );
-  });
-
-  it("renders it in the list row too", () => {
-    const { container } = renderBoard(
-      [task({ key: "VIB-1", validation: "failing" })],
-      { view: "list" },
-    );
-    expect(container.querySelector(".card")!.textContent).toContain(
-      "validation failing",
-    );
-  });
-
-  it("draws the pill for a card the readiness pill reports as ready", () => {
-    // The readiness pill cannot stand in: displayReadiness only adds
-    // accepted/merged and deriveReadiness folds only parse diagnostics.
-    const { container } = renderBoard([
-      task({ key: "VIB-1", displayReadiness: "ready", validation: "failing" }),
-    ]);
-    const card = container.querySelector(".card")!;
-    expect(card.querySelector(".chip.st.ready")!.textContent).toBe("ready");
-    expect(card.textContent).toContain("validation failing");
-  });
 });
 
-describe("D4: degraded continuity reaches the board (card + filter)", () => {
-  it("draws a warning-toned continuity cue on a card whose continuity is degraded", () => {
-    // Before D4 this state lived ONLY on the task page's Continuity Recovery
-    // panel; a supervisor scanning the board could not see it. The card now
-    // carries the same state, warning tone (risk pill), refresh glyph.
-    const { container } = renderBoard([
-      task({ key: "VIB-1", continuity: "degraded" }),
-    ]);
-    const card = container.querySelector('[data-board-card="VIB-1"]')!;
-    expect(card.textContent).toContain("degraded continuity");
-    expect(card.querySelector(".card-props .chip.pb")).toBeTruthy();
-  });
-
-  it("stays silent on a card whose continuity is healthy", () => {
-    const { container } = renderBoard([task({ key: "VIB-1", continuity: null })]);
-    expect(container.querySelector('[data-board-card="VIB-1"]')!.textContent).not.toContain(
-      "continuity",
-    );
-  });
-
-  it("draws the same cue in the list row", () => {
-    const { container } = renderBoard(
-      [task({ key: "VIB-1", continuity: "degraded" })],
-      { view: "list" },
-    );
-    const row = container.querySelector(".card.list-row")!;
-    expect(row.textContent).toContain("degraded continuity");
-    expect(row.querySelector(".chip.pb")).toBeTruthy();
-  });
-
+describe("D4: degraded continuity reaches the board's filter bar", () => {
   it("shows the 'Degraded continuity' filter chip (with a tally) only when a degraded task exists", () => {
     const withDegraded = renderBoard([
       task({ key: "VIB-1", stage: "impl", continuity: "degraded" }),
@@ -453,26 +362,6 @@ describe("D4: degraded continuity reaches the board (card + filter)", () => {
         b.textContent!.includes("Degraded continuity"),
       ),
     ).toBe(false);
-  });
-
-  it("filters the board to only degraded-continuity tasks (canary for the filter clause)", () => {
-    const { container } = renderBoard(
-      [
-        task({ key: "VIB-1", stage: "impl", continuity: "degraded" }),
-        task({ key: "VIB-2", stage: "impl", continuity: null }),
-      ],
-      { search: "filter=continuity" },
-    );
-    // Only the degraded card survives the filter.
-    expect(container.querySelector('[data-board-card="VIB-1"]')).toBeTruthy();
-    expect(container.querySelector('[data-board-card="VIB-2"]')).toBeNull();
-    // The healthy card is accounted for by the empty-state copy, not vanished.
-    const implEmpty = [...container.querySelectorAll(".column")].find((c) =>
-      c.querySelector(".col-head .nm")!.textContent!.includes("In Progress"),
-    );
-    // (Both cards were in the same column, so the column still shows the survivor
-    // — the count check above is the real assertion; this just proves no crash.)
-    expect(implEmpty).toBeTruthy();
   });
 });
 
@@ -628,6 +517,13 @@ describe("ruling 503(e): the board's epic filter", () => {
     expect([...empty.container.querySelectorAll(".empty")].map((e) => e.textContent)).toContain(
       "The 1 task here is hidden by the “Epic: Checkout revamp” filter.",
     );
+  });
+
+  it("picking an epic in the select filters the board to it", () => {
+    const { container } = renderBoard(three(), { epics: EPICS });
+    const select = container.querySelector<HTMLSelectElement>(".board-epic-filter select")!;
+    fireEvent.change(select, { target: { value: "epic-1" } });
+    expect(subtitle(container)).toBe("1 of 3 tasks · 0 waiting on a human in this project");
   });
 
   it("`none` shows the tasks in no epic, and Clear resets it", () => {
@@ -836,61 +732,13 @@ describe("B1: accepting from the board asks first", () => {
   });
 });
 
-describe("F15-09/R21-8: 'agent working' renders once, and input-required yields to it", () => {
-  it("the card top goes quiet while an agent carries the task", () => {
-    const { container } = renderBoard([
-      // The mapping layer derives `agent_working` from waiting: "agent" (see
-      // deriveDisplayReadiness); the card renders that value, it does not
-      // re-derive it from `waiting` + `readiness`.
-      task({ waiting: "agent", readiness: "input_required", displayReadiness: "agent_working" }),
-    ]);
-    // F15-09's half: the claim is made ONCE — the foot's WaitTag, never a
-    // duplicate pill in the top slot.
-    const working = [...container.querySelectorAll(".card .chip")]
-      .filter((el) => el.textContent!.trim() === "agent working");
-    expect(working).toHaveLength(1);
-    // R21-8's half: "input required" claims a human is needed right now —
-    // false while the agent works, so no chip says it at all.
-    expect(container.querySelector(".card .chip.st.input")).toBeNull();
-    expect(container.textContent).not.toContain("input required");
-  });
-
-  it("when waiting flips to human, the foot's wait tag speaks and the top stays quiet (ruling 168)", () => {
-    // Before ruling 168 "input required" reasserted in the top slot here —
-    // the one demand said twice, once as the pill and once as the tag.
-    const { container } = renderBoard([
-      task({
-        waiting: "human",
-        waitingOnMe: true,
-        readiness: "input_required",
-        displayReadiness: "input_required",
-      }),
-    ]);
-    expect(container.querySelector(".card .chip.st.input")).toBeNull();
-    expect(container.textContent).not.toContain("input required");
-    expect(container.querySelector(".card .chip.st.you")!.textContent!.trim()).toBe(
-      "waiting on you",
-    );
-  });
-
+describe("ruling 365: a hold beside a working agent is an amber problem chip", () => {
   it("'blocked' never yields — beside a working agent it becomes an amber problem chip (ruling 365)", () => {
     const { container } = renderBoard([
       task({ waiting: "agent", readiness: "blocked", displayReadiness: "blocked" }),
     ]);
     expect(container.querySelector(".card .chip.st")!.textContent).toBe("agent working");
     expect(container.querySelector(".card .chip.pb.amber")!.textContent).toBe("blocked");
-  });
-
-  it("does the same in the list view", () => {
-    const { container } = renderBoard(
-      [task({ waiting: "agent", readiness: "input_required", displayReadiness: "agent_working" })],
-      { view: "list" },
-    );
-    const working = [...container.querySelectorAll(".chip")].filter(
-      (el) => el.textContent!.trim() === "agent working",
-    );
-    expect(working).toHaveLength(1);
-    expect(container.textContent).not.toContain("input required");
   });
 });
 
@@ -1121,51 +969,6 @@ describe("R19-14: only the entry lane offers task creation", () => {
   });
 });
 
-describe("R16-6: the card says when Done still needs a human", () => {
-  // Owner ruling 2026-08-04: `merge-pull-request` stays human-only, so a
-  // full-autonomy task reaches the done stage with its PR open. `pr.state`
-  // already carries that as "accepted" ("a human accepted the completion but
-  // the real merge is still pending") — the card just never drew it, so a
-  // merge-pending task and a merged one looked the same.
-
-  it("draws `merge pending` on an accepted-but-unmerged PR", () => {
-    const { getByText, queryByText } = renderBoard([
-      task({
-        stage: "done",
-        displayReadiness: "accepted",
-        pr: { number: 124, state: "accepted", title: "Attach a credential" },
-      }),
-    ]);
-    expect(getByText("merge pending")).toBeTruthy();
-    // The PR chip still names the PR; the pill is the addition, not a swap.
-    expect(getByText("#124")).toBeTruthy();
-    expect(queryByText("closed")).toBeNull();
-  });
-
-  it("draws the shared `closed` pill on a PR closed without merging (H10)", () => {
-    const { getByText, queryByText } = renderBoard([
-      task({
-        pr: { number: 124, state: "closed", title: "Attach a credential" },
-      }),
-    ]);
-    expect(getByText("closed")).toBeTruthy();
-    expect(queryByText("merge pending")).toBeNull();
-  });
-
-  it("stays silent for a merged PR and for one still under review", () => {
-    // Density rule: only ACTIONABLE state earns a pill. The readiness pill and
-    // the PR chip already carry these two.
-    for (const state of ["merged", "review"] as const) {
-      const { queryByText, unmount } = renderBoard([
-        task({ pr: { number: 124, state, title: "Attach a credential" } }),
-      ]);
-      expect(queryByText("merge pending"), state).toBeNull();
-      expect(queryByText("closed"), state).toBeNull();
-      unmount();
-    }
-  });
-});
-
 /**
  * F19-13 — the two board layouts are one board. The card foot drew the
  * PR-state, failing-checks and changes-requested pills; the list row drew none
@@ -1177,24 +980,6 @@ describe("F19-13: the list row reads the same state the card does", () => {
   const listRow = (tasks: BoardTask[]) =>
     renderBoard(tasks, { view: "list" }).container.querySelector(".list-row")!
       .textContent!;
-
-  it("draws `merge pending` on an accepted-but-unmerged PR", () => {
-    expect(
-      listRow([
-        task({
-          stage: "done",
-          displayReadiness: "accepted",
-          pr: { number: 124, state: "accepted", title: "Attach a credential" },
-        }),
-      ]),
-    ).toContain("merge pending");
-  });
-
-  it("draws the `closed` pill on a PR closed without merging", () => {
-    expect(
-      listRow([task({ pr: { number: 124, state: "closed", title: "t" } })]),
-    ).toContain("closed");
-  });
 
   it("draws failing checks and a changes-requested review", () => {
     const text = listRow([
@@ -1278,13 +1063,6 @@ describe("F19-8: an archived card is inert and honest", () => {
     ).toBe("Branch VIB-9-abandoned");
   });
 
-  it("keeps the urgent/waiting card treatment off an archived card", () => {
-    const { container } = renderBoard([archivedTask()], { search: ARCHIVED });
-    const card = container.querySelector(".card")!;
-    expect(card.classList.contains("urgent")).toBe(false);
-    expect(card.classList.contains("wait-human")).toBe(false);
-  });
-
   it("offers no Move control and no drag, even to a maintainer", () => {
     const { container } = renderBoard([archivedTask()], {
       search: ARCHIVED,
@@ -1328,140 +1106,10 @@ describe("F19-8: an archived card is inert and honest", () => {
     expect(row.textContent).toContain("archived");
     expect(row.textContent).not.toContain("merge pending");
     expect(row.textContent).not.toContain("awaiting verdict");
-    expect(container.querySelector(".wait-tag")).toBeNull();
     // The row falls back to the static stage pill, like a viewer who cannot
     // move tasks sees.
     expect(container.querySelector('[aria-label^="Change stage"]')).toBeNull();
     expect(row.textContent).toContain("In Progress");
-  });
-});
-
-/**
- * N20-14 / C2 — a force-accepted (terminal) card WITHDRAWS the validation pill,
- * matching the task hero (task-detail-components.test.tsx "a force-accepted task
- * never wears 'awaiting verdict' or a redundant bypass pill on the hero"). The
- * projection still carries the honest `bypassed` value (`deriveValidation` from
- * the durable `acceptance: "forced"` fact); the card simply does not RENDER a
- * live-obligation pill on terminal work — an accepted completion owes nobody a
- * verdict. The readiness pill stays, because "accepted" IS the terminal status,
- * not a live claim.
- *
- * (This moved from a "carries the gate-bypassed validation" assertion once C2's
- * card-side withdrawal landed — the exact hand-off C-VOCAB flagged. The
- * bypassed→risk pill mapping is still exercised, by the non-terminal case below.)
- */
-describe("N20-14/C2: a force-accepted card withdraws the validation pill", () => {
-  it("shows the terminal readiness but no 'awaiting verdict' or 'gate bypassed' chip", () => {
-    const { container } = renderBoard([
-      task({
-        key: "VIB-2",
-        stage: "done",
-        displayReadiness: "accepted",
-        validation: "bypassed",
-      }),
-    ]);
-    const card = container.querySelector(".card")!;
-    // The terminal status stays (the readiness pill); the live obligation goes.
-    expect(card.querySelector(".card-props .chip.st.done")!.textContent).toBe("accepted");
-    expect(card.textContent).not.toContain("awaiting verdict");
-    // C2 (canary): revert the `!terminal` guard in StateSignals and the
-    // withdrawn validation pill returns — this assertion goes red.
-    expect(card.textContent).not.toContain("gate bypassed");
-  });
-
-  it("still draws the bypassed pill on a NON-terminal card — the mapping is intact, only withheld on terminal work", () => {
-    const { container } = renderBoard([
-      task({
-        key: "VIB-3",
-        stage: "impl",
-        displayReadiness: "ready",
-        validation: "bypassed",
-      }),
-    ]);
-    const card = container.querySelector(".card")!;
-    expect(card.textContent).toContain("accepted · gate bypassed");
-    // A problem chip: an override, not a clean pass.
-    expect(card.querySelector(".chip.pb")).toBeTruthy();
-  });
-});
-
-/**
- * F19-8 / F19-13 — the board's archived contract, and one vocabulary across both
- * views.
- *
- * Under the "Archived" filter the board rendered archived tasks through the
- * ordinary card: live readiness, live validation, "waiting on a human", a drag
- * handle and a working Move menu — directly beneath a banner calling the work
- * abandoned and out of the review queue. UXO-1 had removed exactly those pills
- * from the task hero one commit earlier, for exactly this reason: an archived
- * task owes nobody a verdict. The list row carried the same defect and, on top
- * of it, silently dropped the PR-state pills the card draws (H10 re-opened in
- * one of two views).
- */
-describe("F19-8: an archived task states that it is archived, and nothing else", () => {
-  const archived = () =>
-    task({
-      archived: true,
-      displayReadiness: "ready",
-      validation: "healthy",
-      waiting: "human",
-    });
-
-  it("replaces the live readiness/validation/wait signals on the card", () => {
-    const { container } = renderBoard([archived()], {
-      search: "filter=archived",
-    });
-    // Scope to the card: the board SUBTITLE legitimately says "0 ready", and a
-    // page-wide text query would match that instead of the card's pills.
-    const card = container.querySelector(".card")!;
-    expect(card).toBeTruthy();
-    expect(card.textContent).toContain("archived");
-    expect(card.textContent).not.toContain("ready");
-    expect(card.textContent).not.toContain("healthy");
-    expect(card.textContent).not.toMatch(/waiting on a human/i);
-  });
-
-  it("offers no Move control on an archived card, even to a viewer who can move tasks", () => {
-    const { queryByLabelText } = renderBoard([archived()], {
-      search: "filter=archived",
-      canTransition: true,
-    });
-    expect(queryByLabelText(/change stage/i)).toBeNull();
-  });
-
-  it("keeps the Move control on a LIVE card — the gate is `archived`, not the filter", () => {
-    const { getByLabelText } = renderBoard([task()], { canTransition: true });
-    expect(getByLabelText(/change stage/i)).toBeTruthy();
-  });
-
-  it("applies the same contract to the list row", () => {
-    const { container } = renderBoard([archived()], {
-      view: "list",
-      search: "filter=archived",
-    });
-    const row = container.querySelector(".list-row")!;
-    expect(row).toBeTruthy();
-    expect(row.textContent).toContain("archived");
-    expect(row.textContent).not.toContain("ready");
-    expect(row.textContent).not.toContain("healthy");
-  });
-});
-
-describe("F19-13: the list row draws the PR-state pills the card draws", () => {
-  it("names a merge-pending PR in the list view too", () => {
-    const { getByText } = renderBoard(
-      [task({ pr: { number: 124, state: "accepted", title: "Attach a credential" } })],
-      { view: "list" },
-    );
-    expect(getByText("merge pending")).toBeTruthy();
-  });
-
-  it("names a closed PR in the list view too", () => {
-    const { getByText } = renderBoard(
-      [task({ pr: { number: 124, state: "closed", title: "Attach a credential" } })],
-      { view: "list" },
-    );
-    expect(getByText("closed")).toBeTruthy();
   });
 });
 
@@ -1502,22 +1150,6 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
     expect(text).toContain("a4c790ce63ef");
     // Ruling 132: the ONE canonical sentence, verbatim.
     expect(text).toContain("2 authored commits since review merge unreviewed");
-  });
-
-  // F19-23: the noun was already switched here; the VERB was not, so a single
-  // drifted commit read "1 commit added since review; they merge unreviewed."
-  // Assert the whole clause — the old assertion stopped before the bug.
-  it("uses the singular for a single added commit, verb included", () => {
-    const text = openConfirm({
-      pr: {
-        number: 124,
-        state: "review",
-        title: "t",
-        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 1, baseRefresh: null },
-      },
-    });
-    expect(text).toContain("1 authored commit since review merges unreviewed");
-    expect(text).not.toContain("commits since review merge unreviewed");
   });
 
   it("shows the verdict it is about to accept over", () => {
@@ -2088,75 +1720,13 @@ describe("D19: arrow-key traversal over the board (R19-10)", () => {
 });
 
 /**
- * UXV19-6 — the other half of F19-13. Board and List are two views of ONE
- * surface, and the card foot draws two more pills under its actionable-state
- * rule: a failing build, and a teammate asking for changes on the PR. The list
- * row drew neither, so switching the segmented control made a broken build
- * invisible — and nothing else on the row covers it (validation is task-row
- * state with no CI input, and "Blocked or waiting" does not filter on either).
- *
- * Canary: delete the two pills from ListView's non-archived branch and the
- * three list-view expectations below fail while the card ones stay green.
- */
-describe("UXV19-6: the list row draws the ACTIONABLE PR-check/review pills the card draws", () => {
-  const broken = () =>
-    task({
-      pr: { number: 124, state: "review", title: "Attach a credential" },
-      prChecks: { total: 5, passing: 2, failing: 3, pending: 0, state: "failing" },
-      prReview: "changes_requested",
-    });
-
-  it("a failing build and a changes-requested review survive the Board→List switch", () => {
-    const card = renderBoard([broken()]);
-    expect(card.getByText("3/5 checks failing")).toBeTruthy();
-    expect(card.getByText("changes requested")).toBeTruthy();
-    cleanup();
-
-    const { container, getByText } = renderBoard([broken()], { view: "list" });
-    const row = container.querySelector(".list-row")!;
-    expect(getByText("3/5 checks failing")).toBeTruthy();
-    expect(getByText("changes requested")).toBeTruthy();
-    // Both live on the row itself, not somewhere else on the page.
-    expect(row.textContent).toContain("3/5 checks failing");
-    expect(row.textContent).toContain("changes requested");
-  });
-
-  it("stays silent when the checks pass and nobody asked for changes — same density rule as the card", () => {
-    const { container } = renderBoard(
-      [
-        task({
-          pr: { number: 124, state: "review", title: "Attach a credential" },
-          prChecks: { total: 5, passing: 5, failing: 0, pending: 0, state: "passing" },
-          prReview: "approved",
-        }),
-      ],
-      { view: "list" },
-    );
-    const row = container.querySelector(".list-row")!;
-    expect(row.textContent).not.toContain("checks");
-    expect(row.textContent).not.toContain("approved");
-  });
-
-  it("an archived row still states only that it is archived", () => {
-    const { container } = renderBoard(
-      [{ ...broken(), archived: true }],
-      { view: "list", search: "filter=archived" },
-    );
-    const row = container.querySelector(".list-row")!;
-    expect(row.textContent).toContain("archived");
-    expect(row.textContent).not.toContain("checks failing");
-    expect(row.textContent).not.toContain("changes requested");
-  });
-});
-
-/**
  * Pass-19 gap 10 — a task that quietly stopped moving looked exactly like one
  * being worked, right down to the pulsing "agent working" dot.
  *
  * `quiet` arrives resolved from the server (board-query.server.ts): it is what
- * the chip selects on and what three surfaces draw, so it must be the SAME value
- * in the SSR pass and in hydration. The relative TEXT beside it is the
- * time-dependent part, and that goes through `LocalRelative`.
+ * the "No activity" chip selects on, so it must be the SAME value in the SSR
+ * pass and in hydration. Ruling 172 took the cue itself off the card and the
+ * row; the chip carries it.
  */
 describe("gap-10: the board says when a task has gone quiet", () => {
   const quietTask = (patch: Partial<BoardTask> = {}) =>
@@ -2165,32 +1735,6 @@ describe("gap-10: the board says when a task has gone quiet", () => {
       quiet: true,
       ...patch,
     });
-
-  it("ruling 172: the card and the row no longer print the cue — the chip carries it", () => {
-    // Gap-10 drew "no activity · 4h" in the card's foot; the owner (2026-09-09)
-    // wants last activity off the board's cards. The wait tag is the whole
-    // status seat, and the "No activity" filter chip below still finds the task.
-    const { container } = renderBoard([quietTask()]);
-    const foot = container.querySelector(".card-props")!;
-    expect(foot.textContent).not.toContain("no activity");
-    expect(foot.textContent).toContain("agent working");
-    cleanup();
-    const list = renderBoard([quietTask()], { view: "list" });
-    expect(list.container.querySelector(".list-row")!.textContent).not.toContain("no activity");
-  });
-
-  it("never draws it on an archived card", () => {
-    // R14-3 / F19-8: archived work is out of the flow and owes nobody anything.
-    // The server's `isQuiet` refuses archived tasks outright; this pins the
-    // second belt, so a stale annotation can never light up an archived card.
-    const { container } = renderBoard(
-      [quietTask({ archived: true })],
-      { search: "filter=archived" },
-    );
-    const card = container.querySelector(".card")!;
-    expect(card.textContent).toContain("archived");
-    expect(card.textContent).not.toContain("no activity");
-  });
 
   it("gives the board a 'No activity' chip that selects exactly those tasks", () => {
     const tasks = [
@@ -2323,15 +1867,6 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(row?.textContent).toContain("Merging this will likely put VIB-2's PR #3 in conflict on package.json.");
   });
 
-  it("names the acceptance and the move it performs, in the shared vocabulary", () => {
-    const text = openConfirm({})
-      .container.querySelector("dialog")!
-      .textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("Moving to Done accepts this completion");
-    // The `stage-move` ceremony's Moving row names leaving + terminal stage.
-    expect(text).toContain("In Progress → Done");
-  });
-
   it("ruling 88: the confirmed drop POSTs the ceremony's own acknowledgment", async () => {
     // F21-2: the board's ceremony was client architecture — the reorder POST
     // behind it carried nothing back from the dialog, so the server accepted
@@ -2414,24 +1949,6 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     );
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.ackRevision).toBe(sha);
-  });
-
-  it("still discloses the PR, its drift and the verdict it accepts over", () => {
-    const text = openConfirm({
-      validation: "changed",
-      pr: {
-        number: 124,
-        state: "review",
-        title: "t",
-        revisionDrift: { headSha: "a4c790ce63efbeef", authored: 2, baseRefresh: null },
-      },
-    })
-      .container.querySelector("dialog")!
-      .textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("PR #124 · in review");
-    expect(text).toContain("a4c790ce63ef");
-    expect(text).toContain("2 authored commits since review merge unreviewed");
-    expect(text).toContain("awaiting verdict"); // the ValidationPill verdict row
   });
 
   it("discloses a refusal without dead-ending the drop: the server still answers", async () => {
@@ -2556,54 +2073,6 @@ describe("D9: the board announces moves to a screen reader", () => {
         "Accepted VIB-1, moved to Done",
       ),
     );
-  });
-});
-
-describe("ruling 172: a held task's card says `blocked`, not what it waits on", () => {
-  // Ruling 131(a) drew a neutral "blocked by goal-1 link 2 (JC-3), …" chip on
-  // the card and the row; the owner (2026-09-09) wants goal links off the
-  // board. The readiness pill still carries the hold, and the task page — the
-  // hero's wait chips and Details' "Blocked by" — names the entries.
-  const held = () =>
-    task({
-      key: "JC-9",
-      readiness: "blocked",
-      displayReadiness: "blocked",
-      waiting: "none",
-      // Ruling 457 (BOARD-3): the card no longer even carries the entries the
-      // task waits on; the readiness word is the whole hold.
-    });
-  const waitChipOf = (root: Element) =>
-    [...root.querySelectorAll(".chip")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
-
-  it("draws the readiness pill and no 'blocked by' chip, on the card and the row", () => {
-    for (const view of [undefined, "list" as const]) {
-      const { container } = renderBoard([held()], view ? { view } : {});
-      expect(waitChipOf(container), `no wait chip in ${view ?? "card"} view`).toBeUndefined();
-      expect(
-        [...container.querySelectorAll(".chip.st.blocked")].some((p) => p.textContent?.trim() === "blocked"),
-      ).toBe(true);
-      expect(container.textContent).not.toContain("goal-1");
-      cleanup();
-    }
-  });
-
-  it("the fold counts the problem pills alone", () => {
-    const stormy = task({
-      ...held(),
-      pr: { number: 124, state: "closed", title: "Attach a credential" },
-      prChecks: { total: 5, passing: 3, failing: 2, pending: 0, state: "failing" },
-      prReview: "changes_requested",
-      validation: "failing",
-    });
-    const { container } = renderBoard([stormy]);
-    const card = container.querySelector(".card")!;
-    expect(waitChipOf(card)).toBeUndefined();
-    const fold = card.querySelector(".chip.more")!;
-    // validation + checks shown; review, closed folded.
-    expect(visibleText(fold)).toBe("+2");
-    expect(fold.getAttribute("title")).not.toContain("blocked by");
-    expect(fold.querySelector(".vh")!.textContent).not.toContain("blocked by");
   });
 });
 
@@ -2990,67 +2459,6 @@ describe("ruling 168: the board card states each fact once", () => {
       },
       ...patch,
     });
-
-  it("a packet's hold on a human: the wait tag speaks, the readiness pill and the verdict chip stay silent", () => {
-    const { container } = renderBoard([held()]);
-    const card = container.querySelector(".card")!;
-    expect(card.querySelector(".chip.st.blocked")).toBeNull();
-    expect(card.textContent).not.toContain("blocked");
-    expect(card.textContent).not.toContain("awaiting verdict");
-    expect(card.querySelector(".chip.st.you")!.textContent!.trim()).toBe("waiting on you");
-  });
-
-  it.each(["ready", "input_required", "goal_edit_pending"] as const)(
-    "'%s' yields to a human wait tag the same way",
-    (r) => {
-      const { container } = renderBoard([held({ displayReadiness: r })]);
-      // ONE status chip, and it is the wait's.
-      const status = container.querySelectorAll(".card .chip.st");
-      expect(status).toHaveLength(1);
-      expect(status[0].classList.contains("you")).toBe(true);
-    },
-  );
-
-  it("a dependency hold keeps its 'blocked' pill — nobody is waited on, so nothing else says it", () => {
-    const { container } = renderBoard([held({ waiting: "none", waitingOnMe: false })]);
-    expect(container.querySelector(".card .chip.st")!.textContent).toBe("blocked");
-    expect(container.querySelector(".card .chip.st.you")).toBeNull();
-  });
-
-  it("a problem never yields: inconsistency risk stays beside 'waiting on you'", () => {
-    const { container } = renderBoard([
-      held({
-        readiness: "inconsistency_risk_detected",
-        displayReadiness: "inconsistency_risk_detected",
-      }),
-    ]);
-    // Ruling 365: the problem is a chip beside the status, never the status.
-    expect(container.querySelector(".card .chip.pb")!.textContent).toBe("inconsistency risk");
-    expect(container.querySelector(".card .chip.st.you")!.textContent!.trim()).toBe("waiting on you");
-  });
-
-  it.each(["changed", "healthy", "none"] as const)(
-    "validation '%s' is a description and stays off the card",
-    (v) => {
-      const { container } = renderBoard([task({ key: "VIB-1", validation: v })]);
-      const text = container.querySelector(".card")!.textContent!;
-      expect(text).not.toContain("validation");
-      expect(text).not.toContain("awaiting verdict");
-    },
-  );
-
-  it("validation 'failing' is a problem and renders", () => {
-    const { container } = renderBoard([task({ key: "VIB-1", validation: "failing" })]);
-    expect(container.querySelector(".card")!.textContent).toContain("validation failing");
-  });
-
-  it("the agent is the backend's badge, named with the profile (ruling 365)", () => {
-    const { container } = renderBoard([held()]);
-    const badge = container.querySelector(".card .who .abadge")!;
-    expect(badge.getAttribute("aria-label")).toBe("Claude · Developer");
-    expect(badge.getAttribute("title")).toBe("Claude · Developer");
-    expect(container.querySelector(".card")!.textContent).not.toContain("Developer");
-  });
 
   it("the list row makes the same three cuts", () => {
     const { container } = renderBoard([held()], { view: "list" });

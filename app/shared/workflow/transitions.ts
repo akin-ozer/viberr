@@ -45,7 +45,7 @@ const STRICTNESS = {
 } satisfies Record<Boundary, number>;
 
 /** The tighter of two boundaries (auto < approval < human). */
-export function strictestBoundary(a: Boundary, b: Boundary): Boundary {
+function strictestBoundary(a: Boundary, b: Boundary): Boundary {
   return STRICTNESS[a] >= STRICTNESS[b] ? a : b;
 }
 

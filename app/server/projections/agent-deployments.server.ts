@@ -47,7 +47,7 @@ type DeploymentTaskRow = {
   reviewers_json: string;
   operator_json: string | null;
   /** 1 when this task carries an open decision packet (the same predicate
-   *  decisions.server.ts and home-query.server.ts use). */
+   *  decisions.server.ts uses). */
   has_packet: number;
 };
 

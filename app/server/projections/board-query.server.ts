@@ -156,7 +156,7 @@ export function removedAccountLabel(userId: string): string {
  * The resolver has no row and no name hint in that case, so `name === userId`
  * is the exact signal (both call sites pass `nameHint: null`).
  */
-export function labelUnresolvedHuman(render: ActorRender): ActorRender {
+function labelUnresolvedHuman(render: ActorRender): ActorRender {
   if (render.kind !== "human" || render.name !== render.userId) return render;
   return {
     ...render,

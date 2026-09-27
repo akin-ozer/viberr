@@ -95,7 +95,7 @@ export interface ControllerDockView {
   signedOut?: boolean;
 }
 
-export function describeDockScope(
+function describeDockScope(
   db: DatabaseSync,
   binding: { projectSlug: string | null; taskKey: string | null },
 ): ControllerDockScope {

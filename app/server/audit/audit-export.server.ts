@@ -163,7 +163,7 @@ function csvField(value: string): string {
 }
 
 /** Serialize rows to CSV with a header line and CRLF terminators (RFC 4180). */
-export function auditRowsToCsv(rows: readonly AuditExportRow[]): string {
+function auditRowsToCsv(rows: readonly AuditExportRow[]): string {
   const lines = [COLUMNS.join(",")];
   for (const row of rows) {
     lines.push(COLUMNS.map((c) => csvField(cellFor(row, c))).join(","));
@@ -190,7 +190,7 @@ interface AuditExportJsonRow {
 /** Serialize rows to a JSON array. `details` is inlined as PARSED JSON when it
  *  is valid (so the export is a real object tree, not a string-of-JSON), else
  *  the raw string is preserved under `detailsRaw`. */
-export function auditRowsToJson(rows: readonly AuditExportRow[]): string {
+function auditRowsToJson(rows: readonly AuditExportRow[]): string {
   const out = rows.map((row) => {
     const base: AuditExportJsonRow = {
       id: row.id,

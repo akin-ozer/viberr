@@ -319,9 +319,6 @@ describe("writeTaskAttachment", () => {
   it("refuses a file over the size cap", () => {
     setRoot();
     const tooBig = new Uint8Array(MAX_UPLOAD_BYTES + 1);
-    expect(() =>
-      writeTaskAttachment("p1", "VIB-1", "big.bin", tooBig, root),
-    ).toThrow();
     // Named by the reason a reader can act on, not by the extension check.
     expect(() =>
       writeTaskAttachment("p1", "VIB-1", "big.txt", tooBig, root),

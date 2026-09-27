@@ -5,21 +5,22 @@ import { isRunBoundary, isRunInputsLine, isWaitLine, type LogLine } from "./runt
 /**
  * Ruling 457 (LIVE-4): the console's four folds, applied incrementally.
  *
- * What the console draws is `foldWaits(groupThoughts(collapseTelemetry(
- * hoistRunInputs(lines))))` (runs-helpers.ts, log-noise.ts): telemetry runs
- * collapse into one row, reasoning runs into one disclosure, a call's
- * heartbeats into one wait row, and each run's `run·inputs` line moves to the
- * head of its block. Recomputed from scratch on every appended line, that was
- * work that grew with the console's history. Every one of those folds merges a
- * line only into the row drawn LAST, so an appended line can be folded onto
- * the rows already drawn; only two changes start over: a `run·inputs` line
- * arriving after its block already has rows (it moves to the block's head, so
- * the block is folded again, once per run) and anything that is not an append
- * (a backward page, a new window, the raw toggle), which folds everything.
+ * What the console draws: each run's `run·inputs` line moved to the head of
+ * its block (P19-G11), then telemetry runs collapsed into one row (P14-WL-02),
+ * reasoning runs into one disclosure (P19-RC1) and a call's heartbeats into one
+ * wait row (ruling 366) — every fold but the move a no-op under `raw`. Run as a
+ * batch chain from scratch on every appended line, that was work that grew
+ * with the console's history. Every one of those folds merges a line only into
+ * the row drawn LAST, so an appended line can be folded onto the rows already
+ * drawn; only two changes start over: a `run·inputs` line arriving after its
+ * block already has rows (it moves to the block's head, so the block is folded
+ * again, once per run) and anything that is not an append (a backward page, a
+ * new window, the raw toggle), which folds everything.
  *
- * The result is exactly the batch chain's (console-fold.test.ts proves it on
- * random consoles), with one addition: every row carries a `key`, its first
- * line's key, which is what the console keys the row and its disclosure by.
+ * The result is exactly the batch chain's (console-fold.test.ts keeps that
+ * chain as its oracle and proves it on random consoles), with one addition:
+ * every row carries a `key`, its first line's key, which is what the console
+ * keys the row and its disclosure by.
  */
 
 /** A console line as the fold reads it: its key and its display projection. */
@@ -92,6 +93,8 @@ export function createConsoleFolder<T extends FoldLine>(): ConsoleFolder<T> {
       return;
     }
     if (isWaitLine(display)) {
+      // Keyed on the call, not on adjacency: two calls back to back are two
+      // waits. A single heartbeat still folds; it is a call still open.
       if (last?.kind === "wait" && last.lines[0]!.display.progress?.call === display.progress?.call) {
         rows[rows.length - 1] = { kind: "wait", key: last.key, lines: [...last.lines, line] };
       } else {
@@ -103,7 +106,10 @@ export function createConsoleFolder<T extends FoldLine>(): ConsoleFolder<T> {
   };
 
   /** Folds the current block's lines onto `rows[0, blockStart)`, inputs first
-   *  (`hoistRunInputs`: each one spliced to the head, so the newest first). */
+   *  (each one moved to the head in turn, so the newest first). The inputs
+   *  line is written by another writer than the provider's stream, so where it
+   *  lands in the stored order is a start-up race; drawn at its block's head,
+   *  "what was this run given?" reads the same every time (P19-G11). */
   const refoldBlock = (raw: boolean) => {
     rows.length = blockStart;
     const inputs = block.filter((l) => isRunInputsLine(l.display)).reverse();

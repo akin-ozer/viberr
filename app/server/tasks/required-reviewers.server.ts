@@ -103,7 +103,7 @@ export interface RequiredReviewerTaskState {
  * (revision-bound, like `currentVerdicts`; an approval of an older revision
  * is history, ruling 163).
  */
-export function requiredReviewerApproved(
+function requiredReviewerApproved(
   rule: Pick<RequiredReviewerView, "profileId">,
   fm: Pick<RequiredReviewerTaskState, "workRevision" | "deliveredAt" | "verdicts">,
 ): boolean {

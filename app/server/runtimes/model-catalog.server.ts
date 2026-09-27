@@ -659,10 +659,8 @@ async function realQueryFn(): Promise<ClaudeQueryFn> {
  * one, their key, exactly as `runCredentialFor` assembles it for a run. The
  * probe spends nothing (listing models is free), but it does read a personal
  * account, so it reads the account of the person who asked.
- *
- * Exported so the confinement is assertable — see the model-catalog tests.
  */
-export function claudeProbeOptions(
+function claudeProbeOptions(
   credential: RunCredential,
   launch: AgentLaunch | null = null,
 ): ClaudeQueryOptions {

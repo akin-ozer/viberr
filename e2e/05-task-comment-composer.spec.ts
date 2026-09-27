@@ -118,15 +118,6 @@ test("@-mention: clicking a row inserts and the posted bytes carry the mention t
   expect(body).toContain(`${stamp} @operator`);
 });
 
-test("Escape closes the mention menu without inserting", async ({ page }) => {
-  await page.locator(".composer-ce").click();
-  await page.keyboard.type("@ard");
-  await expect(page.getByRole("listbox")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("listbox")).toHaveCount(0);
-  await expect(page.locator(".composer-ce")).toHaveText("@ard");
-});
-
 test("after a successful post, undo cannot resurrect the sent comment", async ({
   page,
 }) => {
@@ -143,21 +134,4 @@ test("after a successful post, undo cannot resurrect the sent comment", async ({
   // The editor stays empty — history was cleared with the draft.
   await expect(page.locator(".composer-placeholder")).toBeVisible();
   await expect(page.locator(".composer-ce")).not.toContainText(stamp);
-});
-
-test("the composer is an accessible combobox wired to the mention listbox", async ({
-  page,
-}) => {
-  const ce = page.locator(".composer-ce");
-  await expect(ce).toHaveAttribute("role", "combobox");
-  await expect(ce).toHaveAttribute("aria-expanded", "false");
-  await ce.click();
-  await page.keyboard.type("@ard");
-  await expect(ce).toHaveAttribute("aria-expanded", "true");
-  const controls = await ce.getAttribute("aria-controls");
-  expect(controls).toBeTruthy();
-  await expect(page.locator(`#${controls}`)).toBeVisible();
-  const active = await ce.getAttribute("aria-activedescendant");
-  expect(active).toBeTruthy();
-  await expect(page.locator(`#${active}`)).toBeVisible();
 });

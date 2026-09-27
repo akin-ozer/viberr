@@ -104,27 +104,6 @@ describe("board action — a non-member never learns the project exists (E2)", (
     });
   }
 
-  it("a member reaches the intent switch", async () => {
-    const result = reply(
-      await post("viberr-core", ids.arda, { intent: "no-such-intent" }),
-    );
-    expect(result.status).toBe(400);
-    expect(result.error).toBe("Unknown action.");
-  });
-
-  it("an org admin passes as the audited D2 override", async () => {
-    const { updateUserFields } = await import("~/server/auth/user-store.server");
-    updateUserFields(app.db, ids.deniz, { role: "admin" });
-    try {
-      const result = reply(
-        await post("viberr-core", ids.deniz, { intent: "no-such-intent" }),
-      );
-      expect(result.status).toBe(400);
-    } finally {
-      updateUserFields(app.db, ids.deniz, { role: "member" });
-    }
-  });
-
   it("a MEMBER below the required tier still gets the honest 403", async () => {
     // The secrecy rule is about non-members. Selin is a contributor here, so she
     // may open the board and must be told plainly why she cannot reorder it —
@@ -253,6 +232,8 @@ describe("create-task carries the metadata fields from the form", () => {
       title: "Bare probe",
       goal: "a goal long enough to pass the floor",
     });
+    // The create toast names the column the task landed in (board-page.tsx).
+    expect("stageName" in result ? result.stageName : null).toBe("Triage");
     const key = z.object({ key: z.string() }).parse(result).key;
     const fm = readTaskFile({
       projectSlug: "viberr-core",

@@ -81,11 +81,11 @@ export interface TranscriptReclamation {
  *  (`DEFAULT_TRANSCRIPT_RETENTION_DAYS`, `DEFAULT_SESSION_HOME_RETENTION_DAYS`)
  *  and the coercion. `0` is a real value meaning "keep forever", and a
  *  negative or non-numeric value fails boot where it used to read as unset. */
-export function transcriptRetentionDays(): number {
+function transcriptRetentionDays(): number {
   return getEnv().VIBERR_TRANSCRIPT_RETENTION_DAYS;
 }
 
-export function sessionHomeRetentionDays(): number {
+function sessionHomeRetentionDays(): number {
   return getEnv().VIBERR_SESSION_HOME_RETENTION_DAYS;
 }
 

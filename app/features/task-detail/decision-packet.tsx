@@ -99,7 +99,7 @@ function PacketBody({ text }: { text: string }): ReactNode {
  * path-shaped key outright — a path is not a field name, so it renders a
  * neutral label rather than masquerading as one.
  */
-export function observationLabel(key: string): string {
+function observationLabel(key: string): string {
   const raw = key.trim();
   // Ruling 470: a path-shaped key (`origin/main`, `CI/CD`, `src/pages`) is the
   // agent's own label and is shown as written, only capped. It used to be

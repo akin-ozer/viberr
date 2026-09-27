@@ -12,10 +12,7 @@ import {
 } from "../../../test-support/test-store";
 import { taskFilePath } from "~/server/files/file-store-root.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
-import {
-  getTaskDetail,
-  listTaskDiagnostics,
-} from "~/server/projections/task-query.server";
+import { getTaskDetail } from "~/server/projections/task-query.server";
 
 /**
  * Phase 10 — diagnostics end-to-end flow: a broken canonical file must
@@ -68,7 +65,7 @@ describe("malformed frontmatter → readiness floor + readable diagnostic → cl
     expect(detail.readiness).not.toBe("ready");
     expect(detail.diagnosticCount).toBeGreaterThan(0);
 
-    const diags = listTaskDiagnostics(store.db, store.slug, "VIB-9");
+    const diags = detail.diagnostics;
     expect(diags.length).toBeGreaterThan(0);
     for (const d of diags) {
       // Readable: every finding has a code and a human sentence — the
@@ -84,7 +81,7 @@ describe("malformed frontmatter → readiness floor + readable diagnostic → cl
     const healed = getTaskDetail(store.db, store.slug, "VIB-9")!;
     expect(healed.readiness).toBe("ready");
     expect(healed.diagnosticCount).toBe(0);
-    expect(listTaskDiagnostics(store.db, store.slug, "VIB-9")).toEqual([]);
+    expect(healed.diagnostics).toEqual([]);
   });
 
   it("entirely mangled frontmatter (no closing fence) still projects with a floor", () => {
@@ -115,7 +112,7 @@ describe("malformed frontmatter → readiness floor + readable diagnostic → cl
 
     const detail = getTaskDetail(store.db, store.slug, "VIB-9")!;
     expect(detail.readiness).toBe("input_required"); // warning floor
-    const diags = listTaskDiagnostics(store.db, store.slug, "VIB-9");
+    const diags = detail.diagnostics;
     expect(diags.some((d) => d.code === "reference.unknown_stage")).toBe(true);
     const unknownStage = diags.find((d) => d.code === "reference.unknown_stage")!;
     expect(unknownStage.message).toContain("qa");
@@ -139,9 +136,8 @@ describe("malformed frontmatter → readiness floor + readable diagnostic → cl
       "utf8",
     );
     reproject();
-    const diags = listTaskDiagnostics(store.db, store.slug, "VIB-9");
-    expect(diags.some((d) => d.code === "body.duplicate_section")).toBe(true);
     const detail = getTaskDetail(store.db, store.slug, "VIB-9")!;
+    expect(detail.diagnostics.some((d) => d.code === "body.duplicate_section")).toBe(true);
     expect(detail.readiness).toBe("input_required"); // warning floor
     // FIRST occurrence wins — the projected goal is the original text.
     expect(detail.goal).toContain("Test goal.");

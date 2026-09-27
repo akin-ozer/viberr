@@ -451,10 +451,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   comma, period, colon or parentheses). "primary specialist" may not appear in rendered
   or server-built copy (the capability id `assign-primary-specialist` excepted); say
   "delivering agent".
-- **Retired "specialist" wording** (`app/features/retired-vocabulary.test.tsx`): the
-  seeded agent assets, the developer skill mounted into a run, the seeded Task-contract
-  KB doc and the workflow template written into every new `project.md` name the
-  delivering agent; no operator-recommendation chip renders "specialist"; the Agents
+- **Retired "specialist" wording** (`app/features/retired-vocabulary.test.tsx`): no
+  seeded agent asset teaches the retired "primary specialist" model; no
+  operator-recommendation chip renders "specialist"; the Agents
   page's live-roster empty state, run-in-flight stat, capability matrix modal and
   role-less profile card say "agent profile" / "agent threads", not "specialist".
 - Queue rows say "Review", not "Accept" (ruling 30). The board's attention chip is

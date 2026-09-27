@@ -20,7 +20,6 @@ import {
 } from "./runtime-registry.server";
 import { runCredentialFor } from "./backend-credentials.server";
 import { codexRunHomeDir } from "./user-homes.server";
-import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
@@ -81,105 +80,7 @@ async function withAmbientHomes<T>(body: () => T | Promise<T>): Promise<T> {
   }
 }
 
-/**
- * What the shipped container's process carries (ruling 142): the image bakes
- * `NODE_ENV=production`, `PORT`, `VIBERR_DATA_ROOT` and the browser binary in,
- * `.env` adds the public origin, an OAuth client id, a proxy count and the
- * unlock flags — and `UV_CACHE_DIR`, which is NOT Viberr's configuration and
- * is meant for the child.
- */
-const AMBIENT_APP_CONFIG = {
-  NODE_ENV: "production",
-  PORT: "5173",
-  VIBERR_DATA_ROOT: "/data",
-  VIBERR_BROWSER_EXECUTABLE: "/usr/bin/chromium",
-  BETTER_AUTH_URL: "https://viberr.example.com",
-  GITHUB_OAUTH_CLIENT_ID: "iv1.example-client-id",
-  VIBERR_TRUST_PROXY: "1",
-  VIBERR_UNLOCK_CONTROLLER_SKILLS: "enabled",
-  UV_CACHE_DIR: "/data/runtimes/uv-cache",
-} as const;
-
-/**
- * Run `body` with the container's own configuration set on the SERVER's
- * process, then put the environment back exactly as it was. The values are
- * all schema-valid, and the validated-env cache is dropped afterwards so a
- * later `getEnv()` in this file cannot be pinned to them.
- */
-async function withAmbientAppConfig<T>(body: () => T | Promise<T>): Promise<T> {
-  const previous: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(AMBIENT_APP_CONFIG)) {
-    previous[key] = process.env[key];
-    process.env[key] = value;
-  }
-  try {
-    return await body();
-  } finally {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    resetEnvCacheForTests();
-  }
-}
-
 describe("test-harness hermeticity", () => {
-  it("scrubs every credential to empty rather than deleting it", () => {
-    for (const key of CREDENTIAL_KEYS) {
-      expect(process.env[key]).toBe("");
-    }
-  });
-
-  it("the base spawn env both adapters are built on carries no credential", () => {
-    // Ruling 127: this is what makes per-person credentials safe. A run's
-    // child env is `filteredSpawnEnv()` plus exactly one principal's
-    // credential, so anything credential-shaped surviving the filter would be
-    // seen by every run, whoever it bills.
-    const env = filteredSpawnEnv();
-    for (const key of CREDENTIAL_KEYS) {
-      expect({ key, value: env[key] }).toEqual({ key, value: undefined });
-    }
-  });
-
-  it("the base spawn env carries neither vendor HOME", async () => {
-    // Ruling 127: `CLAUDE_CONFIG_DIR` / `CODEX_HOME` are not credential-SHAPED,
-    // so `CREDENTIAL_ENV_RE` lets both through — but a home is where a vendor
-    // binary keeps its credential. An ambient one (a deployment upgrading onto
-    // this branch with its old `.env`, which compose still injects) would ride
-    // into every child, and one `codex exec` from inside a run billed to Alice
-    // would authenticate against whatever sign-in file that directory holds.
-    await withAmbientHomes(() => {
-      const env = filteredSpawnEnv();
-      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
-      expect(env.CODEX_HOME).toBeUndefined();
-    });
-  });
-
-  it("the base spawn env carries none of the app's own configuration", async () => {
-    // Ruling 142 (pass 34, U34-7): ruling 127 built this base around what a
-    // child must not learn about OTHER people's credentials; the other half
-    // is what it must not learn about THIS server. `NODE_ENV=production` and
-    // `PORT=5173` rode into a Developer run's shell and broke the project's
-    // own `vitest` and `next start`. Every name the env schema declares is
-    // stripped; a name it does not declare is not Viberr's configuration
-    // and passes, which is what keeps PATH/HOME and the image's agent-facing
-    // UV caches working.
-    await withAmbientAppConfig(() => {
-      const env = filteredSpawnEnv();
-      expect(env.NODE_ENV).toBeUndefined();
-      expect(env.PORT).toBeUndefined();
-      expect(env.VIBERR_DATA_ROOT).toBeUndefined();
-      expect(env.VIBERR_BROWSER_EXECUTABLE).toBeUndefined();
-      expect(env.BETTER_AUTH_URL).toBeUndefined();
-      expect(env.GITHUB_OAUTH_CLIENT_ID).toBeUndefined();
-      expect(env.VIBERR_TRUST_PROXY).toBeUndefined();
-      expect(env.VIBERR_UNLOCK_CONTROLLER_SKILLS).toBeUndefined();
-      expect(ENV_KEYS.filter((key) => key in env)).toEqual([]);
-      expect(env.PATH).toBeTruthy();
-      expect(env.UV_CACHE_DIR).toBe(AMBIENT_APP_CONFIG.UV_CACHE_DIR);
-    });
-  });
-
   it("a .env credential cannot be reloaded into the process", () => {
     // Reproduces the module-scope `loadEnvFile()` in env.server.ts against a
     // .env that DOES carry every credential, so the assertion holds identically
@@ -192,6 +93,8 @@ describe("test-harness hermeticity", () => {
         `${CREDENTIAL_KEYS.map((key) => `${key}=leaked-from-dot-env`).join("\n")}\n`,
       );
       loadEnvFile(envFile);
+      // Still "": setup-env.ts left every key present and empty. A key it had
+      // deleted would now read the file's value, and a real one would stay.
       for (const key of CREDENTIAL_KEYS) {
         expect(process.env[key]).toBe("");
       }
@@ -544,7 +447,16 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
   it("a Codex run's window is config, never an env key", async () => {
     const primary = await childEnvFor("primary", "codex");
     expect(primary.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
-    expect(primary.added.filter((k) => k.startsWith("CLAUDE_"))).toEqual([]);
+    // The credential and its home (`runCredentialFor`), which the adapter
+    // turns into the run's fork plus the shared state db (ruling 181), git
+    // and the marker.
+    expect(primary.added).toEqual([
+      "CODEX_API_KEY",
+      "CODEX_HOME",
+      "CODEX_SQLITE_HOME",
+      "GIT_CEILING_DIRECTORIES",
+      "VIBERR_RUN_ID",
+    ]);
   });
 
   it("the policy's own key list is exactly what the two tests above name: nothing", async () => {

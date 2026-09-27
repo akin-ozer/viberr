@@ -10,7 +10,7 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { createNotification } from "~/server/projections/notifications.server";
-import type { Recommendation } from "~/schemas/task-file.schema";
+import { DIVERGED_BRANCH_REMEDY, type Recommendation } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -874,6 +874,9 @@ describe("ruling 135: the workspace reconcile records the unpushed revision", ()
     }));
     expect(readFm(diverged).frontmatter.pr?.unpushedRevision).toEqual({ revisionSha: HEAD_SHA, prHeadSha: PR_HEAD, relation: "diverged" });
     expect(readFm(diverged).timeline[0]!.text).toContain("holds commits this workspace does not");
+    // Ruling 321: the diverged line carries the shared remedy (merge, never a
+    // rebase), not a sentence of its own.
+    expect(readFm(diverged).timeline[0]!.text).toContain(DIVERGED_BRANCH_REMEDY);
 
     const unknown = owned();
     await reconcile(unknown, fakeExec({

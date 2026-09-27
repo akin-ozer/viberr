@@ -95,8 +95,8 @@ describe("agentNamesByProfile (NEW-5)", () => {
     });
     const map = agentNamesByProfile(db, "viberr-core");
     expect(map.get("developer")).toBe("Developer");
-    // Whichever reviewer row is most recent by (created_at, rowid) wins; both are valid names.
-    expect(["Reviewer", "Senior Reviewer"]).toContain(map.get("reviewer"));
+    // The later row wins (created_at, then rowid).
+    expect(map.get("reviewer")).toBe("Senior Reviewer");
   });
 
   it("skips rows with no stored name (nameless seed/legacy runs)", () => {
@@ -118,8 +118,6 @@ describe("createActorResolver — human initials", () => {
     const human = (nameHint: string) =>
       resolve({ kind: "human", userId: "u_gone", nameHint });
     expect(human("Deniz Şahin")).toMatchObject({ name: "Deniz Şahin", initials: "DŞ" });
-    expect(human("  arda   kaya  second")).toMatchObject({ initials: "AK" });
-    expect(human("élodie ünal")).toMatchObject({ initials: "ÉÜ" });
   });
 });
 

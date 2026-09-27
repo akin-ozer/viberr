@@ -19,8 +19,8 @@ import {
 import type { PatValidation } from "~/schemas/github-pat.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
+import { serverExec } from "~/server/tasks/workspace-git.server";
 import {
-  defaultExec,
   discardLocalTaskBranch,
   pushWorkspaceBranch,
   isWorkflowScopeRejection,
@@ -221,7 +221,7 @@ function fakeGit(opts: {
     }
     if (args.includes("push")) {
       // `timedOut` is OMITTED unless the child was killed, exactly as
-      // `defaultExec` writes it — a falsy key would not be the same outcome.
+      // `execOutcome` writes it — a falsy key would not be the same outcome.
       const pushed: ExecOutcome = {
         ok: opts.pushOk !== false,
         stdout: "",
@@ -815,7 +815,8 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // Same class as the clone-timeout bug this was found with: a process that
     // was killed never "returned" anything, and saying it did sends the reader
     // hunting for a git error that was never printed.
-    // Canary: drop `timedOut` from defaultExec and the reason reverts.
+    // Canary: drop the `pushRes.timedOut` arm of the push-failure reason and
+    // the reason reverts.
     bindPat();
     const git = fakeGit({
       branch: "vib-1-work",
@@ -833,18 +834,19 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(reason).not.toContain("returned non-zero");
   });
 
-  it("defaultExec actually DETECTS a killed child (the fake above cannot prove this)", async () => {
+  it("the server's git runner detects a killed child (the fake above cannot prove this)", async () => {
     // The test above injects a fake exec, so it only proves the classification
     // downstream of `timedOut` — it would keep passing with the detection
     // deleted, which is exactly what its first canary showed. This one runs a
     // real process past a real timeout.
-    // Canary: set `const timedOut = false` in defaultExec and this fails.
-    const res = await defaultExec("sleep", ["5"], { cwd: process.cwd(), timeoutMs: 50 });
+    // Canary: drop the `killed || signal` arm in `execOutcome`
+    // (workspace-git.server.ts) and this fails.
+    const res = await serverExec("sleep", ["5"], { cwd: process.cwd(), timeoutMs: 50 });
     expect(res.ok).toBe(false);
     expect(res.timedOut).toBe(true);
 
     // …and a plain non-zero exit is NOT reported as a timeout.
-    const failed = await defaultExec("sh", ["-c", "exit 3"], {
+    const failed = await serverExec("sh", ["-c", "exit 3"], {
       cwd: process.cwd(),
       timeoutMs: 10_000,
     });

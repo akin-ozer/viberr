@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIF_PREFS } from "~/features/profile/notification-prefs";
+import { mergeNotifPrefs } from "~/features/profile/notification-prefs";
 import type { ProfileData } from "~/features/profile/profile-page";
 
 /** A maintainer's profile with neither GitHub nor an agent account connected:
@@ -64,5 +64,5 @@ export const PROFILE_DATA: ProfileData = {
       accounts: [],
     },
   ],
-  prefs: { notifs: DEFAULT_NOTIF_PREFS, tlDefault: "all" },
+  prefs: { notifs: mergeNotifPrefs(null), tlDefault: "all" },
 };

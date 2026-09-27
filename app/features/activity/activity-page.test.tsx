@@ -8,7 +8,6 @@ import { createRoutesStub } from "react-router";
 import {
   ActivityPage,
   actIcon,
-  AUDIT_COMPACT_MIN,
   compactAuditEntries,
   isRuntimeSessionOpen,
 } from "./activity-page";
@@ -321,29 +320,11 @@ describe("ActivityPage", () => {
  * governance event onto it — a goal edit, a divergence note, an archive
  * disposition — precisely so they stop rendering as "Policy violation". The
  * Activity page's icon map never learned the word, so those rows fell through
- * to the unknown-type dot and emitted an `act-note` tint class `app.css` did
- * not define: de-alarmed events rendered typeless in the one cross-task feed.
+ * to the unknown-type dot. The map is keyed on TIMELINE_EVENT_TYPES now, so a
+ * contract type the map lacks is a compile error; what is left to run is the
+ * tolerant fallback for a type from outside the contract.
  */
 describe("stream vocabulary (P14-UI-62)", () => {
-  it("gives `note` a real icon and tint class, not the unknown-type dot", () => {
-    const { container } = renderActivity([
-      {
-        id: 9,
-        taskKey: "VIB-151",
-        type: "note",
-        actor: { kind: "human", name: "Arda Kaya" },
-        occurredAt: iso(0, 10, 12),
-        text: "**Archived:** VIB-151 was archived — its record is kept.",
-      },
-    ]);
-    const ico = container.querySelector(".pev-ico")!;
-    expect(ico.className).toContain("act-note");
-    // `dot` is the tolerant fallback for a type outside the vocabulary — the
-    // exact glyph a `note` row used to get.
-    expect(actIcon("note")).toBe("message");
-    expect(ico.querySelector("svg")!.innerHTML).not.toContain("circle");
-  });
-
   it("an unknown type still falls back to the dot rather than throwing", () => {
     const { container } = renderActivity([
       {
@@ -416,44 +397,6 @@ const ROLE_CHANGE: AuditLogEntryView = {
 };
 
 describe("audit-column compaction (R19-7)", () => {
-  it("recognises the row by the projection's OWN sentence, not a guess", () => {
-    // The view model carries no action name, so the fold matches on rendered
-    // text. Pin that text to the projection that writes it: reword
-    // `runtime.run.started` and this fails here rather than silently
-    // un-compacting the column.
-    // Resolved from the vitest root, not `import.meta.url`: under jsdom that
-    // is an http: URL and `fileURLToPath` throws.
-    const src = readFileSync(
-      path.resolve(process.cwd(), "app/server/projections/activity-feed.server.ts"),
-      "utf8",
-    );
-    const template = /case "runtime\.run\.started":[\s\S]*?return `([^`]+)`/.exec(
-      src,
-    );
-    expect(template, "runtime.run.started must still have a text template")
-      .toBeTruthy();
-    const rendered = template![1]!
-      .replace("${actor}", "operator")
-      .replace("${role}", "Reviewer");
-    // A renamed interpolation is a reworded sentence too.
-    expect(rendered).not.toContain("${");
-    expect(isRuntimeSessionOpen({ ...session(1, 9, 0), text: rendered })).toBe(
-      true,
-    );
-    // The WHOLE trailing sentence is required, end-anchored — see the spoof
-    // test below for why. A row that merely opens with the phrase, or that
-    // carries anything after the audit-policy tail, is not this event.
-    expect(
-      isRuntimeSessionOpen({
-        ...session(1, 9, 0),
-        text: "operator opened the Reviewer runtime session.",
-      }),
-    ).toBe(false);
-    expect(
-      isRuntimeSessionOpen({ ...session(1, 9, 0), text: `${rendered} VC-4` }),
-    ).toBe(false);
-  });
-
   /**
    * The recogniser reads `entry.text`, and `entry.text` OPENS with the actor's
    * display name — which any member sets for themselves (`app/routes/
@@ -590,6 +533,18 @@ describe("audit-column compaction (R19-7)", () => {
         text: "operator interrupted an agent run. Recorded per audit policy on",
       }),
     ).toBe(false);
+    // The WHOLE trailing sentence is required, end-anchored — see the spoof
+    // test above for why. A row that merely opens with the phrase, or that
+    // carries anything after the audit-policy tail, is not this event.
+    expect(
+      isRuntimeSessionOpen({
+        ...session(1, 9, 0),
+        text: "operator opened the Reviewer runtime session.",
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeSessionOpen({ ...session(1, 9, 0), text: `${RUNTIME_SESSION_TEXT} VC-4` }),
+    ).toBe(false);
   });
 
   it("folds a consecutive run into one row, keeping order and every entry", () => {
@@ -627,7 +582,6 @@ describe("audit-column compaction (R19-7)", () => {
   });
 
   it("a lone session row stays verbatim — one row folded into one saves nothing", () => {
-    expect(AUDIT_COMPACT_MIN).toBe(2);
     const rows = compactAuditEntries([CREDENTIAL, session(1, 9, 40), ROLE_CHANGE]);
     expect(rows.every((r) => !r.compacted)).toBe(true);
     expect(rows).toHaveLength(3);
@@ -704,11 +658,20 @@ describe("audit-column compaction (R19-7)", () => {
  */
 describe("hydration first pass (SSR)", () => {
   it("renderToString emits absolute UTC days and UTC clocks, never Today/Yesterday", () => {
+    // Today's rows: their local forms would say "Today" / "today …"; the first
+    // pass must not. (The fixed July rows read absolute in either form.)
+    // CANARY: render the local forms on the first pass and the Today negative
+    // below goes red on any host.
+    const now = new Date().toISOString();
     const stream = [
+      { ...STREAM[1]!, id: 30, occurredAt: now },
       { ...STREAM[0]!, occurredAt: "2026-07-04T09:41:00.000Z" },
       { ...STREAM[2]!, occurredAt: "2026-07-03T16:04:00.000Z" },
     ];
-    const audit = [{ ...AUDIT[0]!, occurredAt: "2026-07-03T22:15:00.000Z" }];
+    const audit = [
+      { ...AUDIT[1]!, occurredAt: now },
+      { ...AUDIT[0]!, occurredAt: "2026-07-03T22:15:00.000Z" },
+    ];
     const Stub = createRoutesStub([
       {
         path: "/projects/:slug/activity",

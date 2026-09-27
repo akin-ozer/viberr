@@ -17,7 +17,10 @@ import { reapStaleWarmups, resetWarmupsForTest } from "./mcp-warmup.server";
 
 const dbCtx = createTestDbContext();
 const ACTOR = { userId: "u_admin", label: "admin@viberr.dev" };
-afterEach(() => resetWarmupsForTest());
+afterEach(() => {
+  resetWarmupsForTest();
+  dbCtx.cleanup();
+});
 
 /** The JSON-RPC request lines the probe writes; this fake routes on `method`
  *  alone and ignores anything else the handshake carries. */
@@ -218,6 +221,9 @@ describe("startMcpWarmup (R19-18)", () => {
     const row = listMcpServers(db).find((m) => m.name === "orphan-stdio")!;
     expect(row.warmingSince).toBeNull();
     expect(row.lastError).toBeTruthy();
+    // The orphaned warm-up still writes its verdict; let it land before the
+    // database closes.
+    await settle();
   });
 });
 

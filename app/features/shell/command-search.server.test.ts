@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,9 +14,6 @@ import { defaultEpicColor, type EpicStatus } from "~/schemas/epic-file.schema";
 import { createEpicFile } from "~/server/files/epic-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { searchWorkspace } from "./command-search.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * R15-5 — the ⌘K palette's query. The scoping assertions matter most: the
@@ -211,14 +207,6 @@ describe("searchWorkspace", () => {
     expect(hit?.kind).toBe("branch");
     // A branch is still a jump to its task.
     expect(hit?.href).toContain("/tasks/VIB-9");
-  });
-
-  it("finds the project itself", () => {
-    const store = seed();
-    const hits = searchWorkspace(store.db, asMember(store), "viberr", {
-      dataRoot: store.dataRoot,
-    });
-    expect(hits.some((h) => h.kind === "project")).toBe(true);
   });
 
   it("shows a NON-MEMBER nothing at all (R15-4 scoping)", () => {

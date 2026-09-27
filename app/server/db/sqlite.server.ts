@@ -38,7 +38,7 @@ export function openDatabase(dbPath: string): DatabaseSync {
 }
 
 /** Where a reader's copy lives, relative to `state/`: `state/tmp/reader-<pid>/`. */
-export const READER_SNAPSHOT_DIR = "tmp";
+const READER_SNAPSHOT_DIR = "tmp";
 
 /**
  * A read-only handle on the projection database (ruling 158). `db` is either
@@ -99,7 +99,7 @@ export function readWalIdentity(walPath: string): string | null {
  * resetting the WAL under every attempt, which is honest: the alternative is a
  * copy that can pass an integrity check and still be wrong.
  */
-export function copyStorePair(dbPath: string, copyPath: string): void {
+function copyStorePair(dbPath: string, copyPath: string): void {
   const wal = `${dbPath}-wal`;
   let straddled = "";
   for (let attempt = 1; attempt <= READER_COPY_ATTEMPTS; attempt += 1) {

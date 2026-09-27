@@ -20,6 +20,7 @@ import {
   principalRefusalMessage,
   resolveTaskRunPrincipal,
   resolveUserRunPrincipal,
+  type RunPrincipalRefusal,
 } from "./run-principal.server";
 import {
   claudeLoginCredentialPath,
@@ -285,5 +286,42 @@ describe("principalRefusalMessage", () => {
     const unowned = { kind: "unowned", taskKey: "VIB-9" } as const;
     expect(principalRefusalMessage(unowned, "claude").startsWith("Claude runs on VIB-9")).toBe(true);
     expect(principalRefusalMessage(unowned, "codex").startsWith("Codex runs on VIB-9")).toBe(true);
+  });
+
+  it("names no environment variable — ruling 127 left none to set", () => {
+    // CANARY: bring back the deployment-wide answer (a key, a token or a home
+    // to set) in any of the three sentences and this fails.
+    writeOwnedTask("VIB-5", store.users.murat.id);
+    for (const backend of ["claude", "codex"] as const) {
+      const resolution = resolveTaskRunPrincipal(
+        store.db,
+        { dataRoot: store.dataRoot },
+        store.slug,
+        "VIB-5",
+        backend,
+      );
+      if (resolution.ok) throw new Error("expected the owner to have no account");
+      expect(resolution.refusal.kind).toBe("no-credential");
+      const refusals: RunPrincipalRefusal[] = [
+        { kind: "unowned", taskKey: "VIB-9" },
+        { kind: "owner-missing", ownerUserId: "u_gone" },
+        resolution.refusal,
+      ];
+      for (const refusal of refusals) {
+        const message = principalRefusalMessage(refusal, backend);
+        for (const gone of [
+          "ANTHROPIC_API_KEY",
+          "CLAUDE_CODE_OAUTH_TOKEN",
+          "CLAUDE_CONFIG_DIR",
+          "CODEX_API_KEY",
+          "OPENAI_API_KEY",
+          "CODEX_HOME",
+          "VIBERR_CODEX_USE_CLI_AUTH",
+          "VIBERR_CLAUDE_USE_CLI_AUTH",
+        ]) {
+          expect(message, `${refusal.kind} · ${backend}`).not.toContain(gone);
+        }
+      }
+    }
   });
 });

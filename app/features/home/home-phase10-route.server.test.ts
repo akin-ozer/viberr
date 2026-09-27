@@ -169,37 +169,18 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
     const rows = listAuditEvents(app.db, { action: "projection.rebuild" });
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0]!.actorUserId).toBe(ardaId);
-  });
 
-  /**
-   * P13-D-33: rescan and rebuild each walk the whole store and had no limiter,
-   * lock or min-interval — holding the button ran one full sweep per click.
-   */
-  it("throttles a repeat rebuild and a repeat rescan with a 429", async () => {
-    const { resetSingleFlight } = await import(
-      "~/server/projections/single-flight.server"
-    );
-    resetSingleFlight();
-
-    const first = projectionRun(
-      await postHome(ardaId, { intent: "rebuild-projections" }),
-    );
-    expect(first.ok).toBe(true);
-
-    const second = refusal(
-      await postHome(ardaId, { intent: "rebuild-projections" }),
-    );
-    expect(second.init?.status).toBe(429);
-    expect(second.data.ok).toBe(false);
-    expect(second.data.error).toContain("try again in");
-
+    // P13-D-33: rescan and rebuild each walk the whole store and had no
+    // limiter, lock or min-interval — holding the button ran one full sweep
+    // per click. A repeat is refused with a 429 until the cooldown passes.
+    const again = refusal(await postHome(ardaId, { intent: "rebuild-projections" }));
+    expect(again.init?.status).toBe(429);
+    expect(again.data.ok).toBe(false);
+    expect(again.data.error).toContain("try again in");
     // Independent cooldowns: the rebuild's does not swallow the re-scan.
-    const rescan = projectionRun(await postHome(ardaId, { intent: "rescan" }));
-    expect(rescan.ok).toBe(true);
+    expect(projectionRun(await postHome(ardaId, { intent: "rescan" })).ok).toBe(true);
     const rescanAgain = refusal(await postHome(ardaId, { intent: "rescan" }));
     expect(rescanAgain.init?.status).toBe(429);
-
-    resetSingleFlight();
   });
 });
 

@@ -408,15 +408,6 @@ describe("StoreBrowser document editor", () => {
     );
   });
 
-  it("a non-text file offers no editor affordance", () => {
-    const { queryByLabelText } = renderBrowser({
-      tree: [
-        { type: "file", name: "contract.pdf", sizeBytes: 900, mtime: new Date().toISOString() },
-      ],
-    });
-    expect(queryByLabelText("Open contract.pdf")).toBeNull();
-  });
-
   it("a new document colliding with an existing file confirms before replacing", async () => {
     const { getByText, getByPlaceholderText, getByLabelText, getByRole, queryByRole } =
       renderBrowser();
@@ -568,7 +559,7 @@ describe("StoreBrowser document editor", () => {
  * hand-rolled handler rendered a failed store operation under the green tick.
  */
 describe("StoreBrowser failure toast kind (P13-D-10)", () => {
-  it("renders the alert glyph, not the success tick, when the action fails", async () => {
+  it("pushes a failed action as an error toast, not under the success tick", async () => {
     const { getByText, getByLabelText } = renderBrowser({
       actionResult: { ok: false, error: "Folder already exists." },
     });
@@ -579,8 +570,7 @@ describe("StoreBrowser failure toast kind (P13-D-10)", () => {
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     const toast = document.querySelector(".toast")!;
     expect(toast.textContent).toContain("Folder already exists.");
-    // `alert` is the triangle path; `check` is the tick.
-    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+    expect(toast.getAttribute("data-kind")).toBe("error");
   });
 });
 

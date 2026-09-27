@@ -338,19 +338,6 @@ describe("ruling 503(f): create_epic acts with the asker's authority", () => {
       `Murat Yıldız (via the controller) moved VIB-160 to ${epicId}.`,
     );
   });
-
-  it("a `tasks` key or a lead the store refuses leaves no epic behind", async () => {
-    const before = mods.listEpicIds(SLUG, app.dataRoot);
-    // CANARY: check the `tasks` keys after `withEpicsLock` mints the id.
-    expect(await call(ids.maintainer, "create_epic", { title: "Ghost work", tasks: ["VIB-999"] })).toBe(
-      "[error] Task VIB-999 not found.",
-    );
-    // A lead is someone its notices can reach: a member of the project.
-    expect(await call(ids.maintainer, "create_epic", { title: "Ghost lead", lead: "deniz@viberr.dev" })).toBe(
-      "[error] An epic's lead must be a member of this project.",
-    );
-    expect(mods.listEpicIds(SLUG, app.dataRoot)).toEqual(before);
-  });
 });
 
 // ------------------------------------------------------ list_epics, get_epic

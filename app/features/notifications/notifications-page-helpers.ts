@@ -83,7 +83,5 @@ export function needsYouTime(iso: string, now: Date = new Date()): string {
  *  site in the file still printing viewer-local time straight from SSR, which
  *  mismatched on hydration for every viewer outside the server's zone. */
 export function needsYouTimeUTC(iso: string): string {
-  const bucket = formatDayBucketUTC(iso);
-  const clock = formatClockUTC(iso);
-  return bucket === "Today" ? clock : bucket.toLowerCase() + " " + clock;
+  return formatDayBucketUTC(iso).toLowerCase() + " " + formatClockUTC(iso);
 }

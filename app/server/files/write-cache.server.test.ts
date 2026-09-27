@@ -245,19 +245,4 @@ describe("rememberWrite — the bound", () => {
 
     expect(freshestContent(hot, STALE, taskFile)).toBe(OURS);
   });
-
-  it("resetWriteCacheForTests forgets everything — suites cannot bleed into each other", () => {
-    // The map outlives any single test in a worker; without a real clear, one
-    // suite's write would repair another suite's read and the failure would
-    // land somewhere unrelated.
-    const abs = path.join(dir, "task.md");
-    ourWriteLanded(abs, OURS);
-    mountServesStaleBytes(abs, STALE);
-
-    resetWriteCacheForTests();
-
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    expect(freshestContent(abs, STALE, taskFile)).toBe(STALE);
-    expect(warn).not.toHaveBeenCalled();
-  });
 });

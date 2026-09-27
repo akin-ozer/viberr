@@ -34,7 +34,7 @@ export type ContextBackend = RunBackend;
  * and `codexCompactionConfig` (Codex, `model_auto_compact_token_limit` with
  * scope `total`) would carry again.
  */
-export const AUTO_COMPACT_WINDOW = {
+const AUTO_COMPACT_WINDOW = {
   claude: { operator: null, primary: null, reviewer: null, controller: null },
   codex: { operator: null, primary: null, reviewer: null, controller: null },
 } as const satisfies Record<ContextBackend, Record<RunKind, number | null>>;
@@ -51,7 +51,7 @@ export const CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 export const CONTEXT_ENV_KEYS: readonly string[] = [];
 
 /** The mid-run window for one run, or null when the CLI's default stands. */
-export function autoCompactWindow(backend: ContextBackend, kind: RunKind): number | null {
+function autoCompactWindow(backend: ContextBackend, kind: RunKind): number | null {
   return AUTO_COMPACT_WINDOW[backend][kind];
 }
 

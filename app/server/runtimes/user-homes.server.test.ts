@@ -16,21 +16,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { isAppError } from "~/server/errors/app-error.server";
 import {
-  ACCOUNT_HOME_SHARED_DIRS,
-  assertPathSafeUserId,
   backendAccountHome,
   claudeLoginCredentialPath,
   codexCompactionHomeId,
   codexLoginCredentialPath,
   codexRunHomeDir,
-  CODEX_HOME_SHARED_DIRS,
   ensureBackendAccountHome,
   ensureUserBackendHome,
   finishCodexRunHome,
   listUserRuntimeRoots,
   prepareCodexRunHome,
   repairCodexRolloutPaths,
-  USER_RUNTIMES_DIR,
   userBackendHome,
   userRuntimeRoot,
 } from "./user-homes.server";
@@ -50,7 +46,7 @@ describe("path resolution", () => {
   it("puts each person's backend homes under runtimes/users/<id>", () => {
     const root = ctx.makeTempDir();
     expect(userRuntimeRoot("u_arda", root)).toBe(
-      path.join(root, "runtimes", USER_RUNTIMES_DIR, "u_arda"),
+      path.join(root, "runtimes", "users", "u_arda"),
     );
     expect(userBackendHome("u_arda", "claude", root)).toBe(
       path.join(root, "runtimes", "users", "u_arda", "claude-home"),
@@ -75,11 +71,12 @@ describe("path resolution", () => {
   });
 });
 
-describe("assertPathSafeUserId", () => {
+describe("a user id is refused unless it is a path segment", () => {
   it("accepts the ids Viberr actually mints", () => {
+    const root = ctx.makeTempDir();
     const id = newId("u");
-    expect(assertPathSafeUserId(id)).toBe(id);
-    expect(assertPathSafeUserId("u_arda1")).toBe("u_arda1");
+    expect(path.basename(userRuntimeRoot(id, root))).toBe(id);
+    expect(path.basename(userRuntimeRoot("u_arda1", root))).toBe("u_arda1");
   });
 
   it.each([
@@ -91,9 +88,10 @@ describe("assertPathSafeUserId", () => {
     ["too long", "u".repeat(65)],
     ["a space", "u arda"],
   ])("refuses %s", (_name, userId) => {
+    const root = ctx.makeTempDir();
     const thrown = (() => {
       try {
-        assertPathSafeUserId(userId);
+        userRuntimeRoot(userId, root);
         return null;
       } catch (error) {
         return error;
@@ -104,12 +102,6 @@ describe("assertPathSafeUserId", () => {
     if (isAppError(thrown) && userId) {
       expect(thrown.userMessage).not.toContain(userId);
     }
-  });
-
-  it("refuses to derive a path from an unsafe id", () => {
-    const root = ctx.makeTempDir();
-    expect(() => userBackendHome("../../etc", "claude", root)).toThrow();
-    expect(() => userRuntimeRoot("u_arda/..", root)).toThrow();
   });
 });
 
@@ -136,7 +128,7 @@ describe("listUserRuntimeRoots", () => {
     const root = ctx.makeTempDir();
     ensureUserBackendHome("u_arda", "claude", root);
     ensureUserBackendHome("u_murat", "codex", root);
-    const usersDir = path.join(root, "runtimes", USER_RUNTIMES_DIR);
+    const usersDir = path.join(root, "runtimes", "users");
     // A stray file and a directory whose name is not a usable id: a sweep that
     // walked these would be deleting inside something Viberr never wrote.
     writeFileSync(path.join(usersDir, "README.txt"), "not a home");
@@ -193,7 +185,6 @@ describe("per-account homes (ruling 507)", () => {
     const root = ctx.makeTempDir();
     const backendHome = userBackendHome("u_arda", "claude", root);
     const ensured = ensureBackendAccountHome("u_arda", "claude", { id: "ubc_work", legacyHome: false }, root);
-    expect([...ACCOUNT_HOME_SHARED_DIRS.claude]).toEqual(["projects"]);
     const link = path.join(ensured.home, "projects");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(realpathSync(link)).toBe(realpathSync(path.join(backendHome, "projects")));
@@ -283,8 +274,7 @@ describe("per-run Codex homes (ruling 181)", () => {
     expect(readFileSync(path.join(home.dir, "config.toml"), "utf8")).toBe('model = "x"\n');
     // Links, so a rollout the CLI writes through `sessions/` is the shared
     // home's — where `probeSessionContinuity` and the exporter look.
-    expect([...CODEX_HOME_SHARED_DIRS]).toEqual(["sessions", "skills", "memories"]);
-    for (const name of CODEX_HOME_SHARED_DIRS) {
+    for (const name of ["sessions", "skills", "memories"]) {
       const link = path.join(home.dir, name);
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(realpathSync(link)).toBe(realpathSync(path.join(shared, name)));

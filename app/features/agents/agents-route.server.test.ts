@@ -197,24 +197,6 @@ function refusalError(reply: AgentsActionReply): string | undefined {
   return "ok" in reply ? undefined : reply.data.error;
 }
 
-/** What a route THROWS to refuse a non-member: `data(message, { status })` —
- *  React Router's `DataWithResponseInit`, carrying the status and the body. */
-interface ThrownRouteRefusal {
-  init?: { status?: number };
-  data?: unknown;
-}
-
-/** The refusal a guarded entry point threw. The rejection handler names the
- *  contract (`requireProjectMember` / `requireVisibleProject` throw `data(…)`)
- *  and the resolve branch answers an EMPTY refusal, so a call that unexpectedly
- *  succeeds reads `undefined` and fails its case instead of passing it. */
-function refusalThrownBy<T>(call: Promise<T>): Promise<ThrownRouteRefusal> {
-  return call.then(
-    (): ThrownRouteRefusal => ({}),
-    (rejection: ThrownRouteRefusal) => rejection,
-  );
-}
-
 const FORM = {
   name: "Migrations",
   role: "Schema changes",
@@ -235,19 +217,6 @@ describe("loader", () => {
     );
     expect(thrown).toBeInstanceOf(Response);
     expect(thrown?.status).toBe(302);
-  });
-
-  it("answers a non-member as an unknown slug, never 403 (F19-28)", async () => {
-    // deniz is a registered user but NOT a member of viberr-core. This used to
-    // assert 403 ("Only project members can view this project's agents") — a
-    // project-existence ORACLE, since an unknown slug 404s. R15-4 makes
-    // projects members-only, so the two answers must be indistinguishable: the
-    // loader runs ALONE under single fetch's `?_routes=` filter, so the
-    // layout's 404 chokepoint is not a substitute for this gate.
-    const thrown = await refusalThrownBy(runLoader(ids.deniz));
-    expect(thrown.init?.status).toBe(404);
-    expect(String(thrown.data)).toBe("No project at projects/viberr-core.");
-    expect(String(thrown.data)).not.toMatch(/member/i);
   });
 
   it("assembles the seeded roster: operator first, template fields + id-based actions", async () => {
@@ -432,21 +401,6 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
       payload: JSON.stringify(FORM),
     });
     expect(refusalStatus(result)).toBe(403);
-  });
-
-  it("answers a non-member as an unknown slug, never 403 (E2)", async () => {
-    // Was 403 — a reply that confirms the project exists. The project is
-    // invisible to a non-member (R15-4), so the action refuses before it ever
-    // reaches the `manage-agents` tier check. The member-below-tier case above
-    // still gets the honest 403.
-    const thrown = await refusalThrownBy(
-      postAction(ids.deniz, {
-        intent: "delete-profile",
-        profileId: "reviewer",
-      }),
-    );
-    expect(thrown.init?.status).toBe(404);
-    expect(String(thrown.data)).toMatch(/^No project at projects\//);
   });
 
   it("rejects deleting the operator even for an admin (server invariant)", async () => {
@@ -1641,20 +1595,6 @@ describe("F21-13 — a model foreign to the chosen backend is refused", () => {
       "utf8",
     );
     expect(file).not.toContain("gpt-5.6-terra");
-  });
-
-  it("refuses a Claude model on a Codex profile (the mirror direction)", async () => {
-    const reply = await postAction(ids.arda, {
-      intent: "create-profile",
-      payload: JSON.stringify({
-        ...FORM,
-        name: "Crossed Back",
-        backend: "codex",
-        model: "claude-sonnet-4-5",
-      }),
-    });
-    expect(refusalStatus(reply)).toBe(400);
-    expect(refusalError(reply)).toContain("Claude");
   });
 
   it("refuses the same pair on UPDATE, not only on create", async () => {

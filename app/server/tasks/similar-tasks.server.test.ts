@@ -2,12 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { baseTaskFrontmatter, setupTestStore, writeTask } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  SIMILAR_TITLE_THRESHOLD,
-  similarOpenTasks,
-  titleOverlap,
-  titleTokens,
-} from "./similar-tasks.server";
+import { similarOpenTasks } from "./similar-tasks.server";
 
 /**
  * Ruling 324 — the two real near-misses, and the board they were measured on.
@@ -25,48 +20,6 @@ afterEach(ctx.cleanup);
 /** The real titles, from the real board. */
 const SHOP_29 = "Gateway routes for inventory, cart and checkout";
 const PROPOSED = "Gateway routes for orders, cart and inventory";
-/** The three genuinely-adjacent tasks a looser threshold would flag. */
-const ADMIN = [
-  "Admin product management",
-  "Admin inventory management",
-  "Admin order management",
-];
-
-describe("titleOverlap", () => {
-  it("clears the threshold on the near-miss that actually happened", () => {
-    // SHOP-27's packet, live: "Gateway routes for orders, cart and inventory"
-    // against SHOP-29, already written and sitting at Triage. Four significant
-    // words shared of six — 0.67.
-    expect(titleOverlap(PROPOSED, SHOP_29)).toBeGreaterThan(SIMILAR_TITLE_THRESHOLD);
-    // SHOP-26's packet was the same title word for word.
-    expect(titleOverlap(SHOP_29, SHOP_29)).toBe(1);
-  });
-
-  it("stays under it on the adjacent tasks a looser bar would flag", () => {
-    // CANARY: drop SIMILAR_TITLE_THRESHOLD to 0.5. These three are real,
-    // distinct, live tasks; flagging them teaches a person to skip the notice,
-    // which is worse than not having one.
-    for (const [a, b] of [
-      [ADMIN[0]!, ADMIN[1]!],
-      [ADMIN[0]!, ADMIN[2]!],
-      [ADMIN[1]!, ADMIN[2]!],
-    ]) {
-      expect(titleOverlap(a, b), `${a} ~ ${b}`).toBeLessThan(SIMILAR_TITLE_THRESHOLD);
-    }
-  });
-
-  it("ignores word order, punctuation, case and the small words", () => {
-    expect(
-      titleOverlap("Cart availability against inventory", "INVENTORY! availability; against — cart"),
-    ).toBe(1);
-    expect(titleTokens("Gateway routes for orders, cart and inventory")).toEqual(
-      new Set(["gateway", "routes", "orders", "cart", "inventory"]),
-    );
-    // A title with nothing significant in it matches nothing, rather than
-    // everything — an empty set against an empty set is not a duplicate.
-    expect(titleOverlap("it is the", "a to of")).toBe(0);
-  });
-});
 
 describe("similarOpenTasks", () => {
   function board(titles: Record<string, string>, archived: string[] = []) {
@@ -99,6 +52,9 @@ describe("similarOpenTasks", () => {
   it("says nothing about the 3,403 pairs of a real board that are not duplicates", () => {
     // The whole value of this disclosure is that it is quiet. Measured across
     // the shopify-clone board's 83 titles, this threshold flags none of them.
+    // CANARY: drop SIMILAR_TITLE_THRESHOLD to 0.5 and "Admin order management"
+    // flags its two Admin neighbours: real, distinct, live tasks, and flagging
+    // them teaches a person to skip the notice.
     const store = board({
       "VIB-1": "Orders service and the checkout saga",
       "VIB-2": "Cart availability against inventory",
@@ -131,6 +87,22 @@ describe("similarOpenTasks", () => {
     // CANARY: drop the `archived = 0` filter and VIB-3 comes back — an archived
     // task is off every board and owns nothing, so naming it is noise.
     expect(found.map((t) => t.key)).not.toContain("VIB-3");
+  });
+
+  it("ignores word order, punctuation, case and the small words; a title of only small words matches nothing", () => {
+    const store = board({ "VIB-2": "Cart availability against inventory", "VIB-9": "To do" });
+    const found = (title: string) =>
+      similarOpenTasks(store.db, store.slug, title).map((t) => t.key);
+    // Order, punctuation and case: every significant word is shared.
+    expect(found("INVENTORY! Availability; AGAINST — cart")).toEqual(["VIB-2"]);
+    // The small words carry no identity: counted, they would dilute this to 0.5.
+    expect(found("Cart availability, and the inventory that this is against")).toEqual([
+      "VIB-2",
+    ]);
+    // Nothing significant on either side is not a match: "To do" has no
+    // significant word either, and an empty set against an empty set is not a
+    // duplicate.
+    expect(found("it is the")).toEqual([]);
   });
 
   it("shows the closest few, not a search result", () => {

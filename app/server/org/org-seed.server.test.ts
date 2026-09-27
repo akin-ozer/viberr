@@ -9,10 +9,8 @@ import { seedOrgResources } from "./org-seed.server";
 import { listKnowledgeBases, listMcpServers, listSkills } from "./resources.server";
 
 /**
- * Org-resource seed: additive to the phase-3/8 demo seed, idempotent under
- * --reset, and the EXISTING demo-seed expectations stay intact (10 tasks /
- * 32 events / 10 notifications / 18 runs — the count-regression guard the
- * 9B brief demands).
+ * Org-resource seed: additive to the phase-3/8 demo seed (the demo fixture's
+ * own counts are pinned by demo-fixture.test.ts) and idempotent under --reset.
  */
 
 const dbCtx = createTestDbContext();
@@ -21,28 +19,14 @@ afterEach(dbCtx.cleanup);
 async function seedAll(reset = false) {
   const db = dbCtx.makeDb();
   const dataRoot = dbCtx.makeTempDir();
-  const demo = await runDemoSeed(db, { dataRoot, reset });
+  await runDemoSeed(db, { dataRoot, reset });
   const org = seedOrgResources(db, { dataRoot, reset });
-  return { db, dataRoot, demo, org };
+  return { db, dataRoot, org };
 }
 
 describe("seedOrgResources", () => {
-  it("adds org resources with REAL files while the demo dataset stays intact", async () => {
-    const { db, dataRoot, demo, org } = await seedAll();
-
-    // Existing seed output regression (brief contract). 12 tasks = 10
-    // viberr-core + 2 stub-project tasks (DEP-31/BIL-9); 3 profiles after the
-    // Advisor/consultant removal AND the Tester→Reviewer merge (operator +
-    // developer + reviewer). No `runs` — the seed fabricates ZERO run
-    // history (R7-2).
-    expect(demo).toMatchObject({
-      users: 5,
-      projects: 3,
-      tasks: 12,
-      events: 36,
-      notifications: 10,
-      agentProfiles: 3,
-    });
+  it("adds org resources with REAL files", async () => {
+    const { db, dataRoot, org } = await seedAll();
 
     expect(org).toMatchObject({
       kbs: 3,

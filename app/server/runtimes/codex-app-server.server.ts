@@ -123,11 +123,6 @@ export function codexVendor(): CodexVendor {
   }
 }
 
-/** The vendored `codex` binary for this platform. */
-export function codexBinaryPath(): string {
-  return codexVendor().binary;
-}
-
 /** `env` with `dirs` first on its PATH, as the SDK does for its own lookup. */
 export function withPathDirs(env: Record<string, string>, dirs: readonly string[]) {
   if (dirs.length === 0) return env;
@@ -165,7 +160,7 @@ const realSpawn: SpawnAppServer = (binary, args, env) =>
  */
 export function compactCodexThread(input: CompactThreadInput): Promise<CompactOutcome> {
   const spawn = input.spawn ?? realSpawn;
-  const realBinary = input.binary ?? codexBinaryPath();
+  const realBinary = input.binary ?? codexVendor().binary;
   const binary = input.launch ? input.launch.launcher : realBinary;
   // A launched run always carries its env (the credential's home rides it).
   const env = input.launch ? launchEnv(input.launch, realBinary, input.env ?? {}) : input.env;

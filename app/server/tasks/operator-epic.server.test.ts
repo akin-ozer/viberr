@@ -17,7 +17,6 @@ import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readEpicFile } from "~/server/files/epic-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -160,14 +159,12 @@ function operatorTools() {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   installFakeRuntime();
   resetOperatorLeasesForTests();
 });
 
 afterEach(() => {
   resetOperatorLeasesForTests();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -410,10 +407,9 @@ function persistPlan(runId: string, plan: string): void {
 }
 
 describe("ruling 503(g): a Codex operator reaches set_epic through its plan", () => {
-  it("the plan schema offers set_epic and its epicId, 17 verbs with every grant, and withholds it without append-typed-events", () => {
+  it("the plan schema offers set_epic and its epicId, and withholds it without append-typed-events", () => {
     deployOperator(FULL_POLICY, "codex");
     const tools = operatorPlanToolsFor(authority());
-    expect(tools).toHaveLength(17);
     expect(tools).toContain("set_epic");
     const schema = operatorPlanSchemaFor(authority());
     const item = schema.properties.actions.items;

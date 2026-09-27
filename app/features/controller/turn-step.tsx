@@ -2,8 +2,6 @@ import type { ConversationTurnState } from "~/server/controller/controller-run.s
 import { readableStep } from "~/features/runtime/readable-step";
 import { useFreshLine } from "~/ui/use-fresh-line";
 
-export { readableStep };
-
 /**
  * Ruling 250 (pass 37, F37-79): what the live controller turn is doing, on the
  * row that says it is working.

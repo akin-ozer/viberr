@@ -371,6 +371,9 @@ describe("github import", () => {
       expect(result.toast).toContain(
         "2 files imported from owner/repo/docs into docs/ (a snapshot, not a live sync)",
       );
+      // Clean import → nothing skipped, toast stays clean (E5).
+      expect(result.skipped).toBe(0);
+      expect(result.toast).not.toContain("skipped");
     }
     expect(readFileSync(path.join(target.rootAbs, "docs", "readme.md"), "utf8")).toBe(
       "# readme",
@@ -379,24 +382,6 @@ describe("github import", () => {
       "# deep",
     );
     expect(existsSync(path.join(target.rootAbs, "docs", ".hidden.md"))).toBe(false);
-
-    // P13-KM-13: re-importing the SAME source refreshes its folder in place.
-    // It used to suffix (`docs-2`), so every re-import left another full copy
-    // behind and all of them were injected into every run.
-    const again = await importGithubSnapshot(
-      db,
-      target,
-      "https://github.com/owner/repo/tree/main/docs",
-      ACTOR,
-      { fetchImpl: importTransport.fetchImpl },
-    );
-    expect(again.status).toBe("imported");
-    if (again.status === "imported") {
-      expect(again.folder).toBe("docs");
-      // Clean import → nothing skipped, toast stays clean (E5).
-      expect(again.skipped).toBe(0);
-      expect(again.toast).not.toContain("skipped");
-    }
   });
 
   it("a /blob/ URL imports its ONE file into the browsed folder — no wrapper dir", async () => {

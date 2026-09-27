@@ -4,7 +4,6 @@ import {
   agentRoleDisplay,
   decodeActorRef,
   encodeActorRef,
-  roleToSlug,
 } from "./actor-ref.server";
 
 /**
@@ -69,7 +68,6 @@ describe("encodeActorRef / decodeActorRef", () => {
   });
 
   it("an empty profile id never yields a malformed ref", () => {
-    expect(roleToSlug("   ")).not.toBe("");
     const decoded = decodeActorRef(
       encodeActorRef({
         kind: "agent",

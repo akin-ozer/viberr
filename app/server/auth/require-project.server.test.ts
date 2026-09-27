@@ -504,6 +504,14 @@ describe("the refusal is silent to the client, never to the audit log", () => {
    * being buried under a scan.
    */
   it("writes no authority row for a slug that does not exist", async () => {
+    // Its own probe, so the negative holds when this case runs alone.
+    const probe = await callGuard(
+      childSurfaceUrl(GHOST, "policy"),
+      GHOST,
+      WHAT,
+      probes.deniz.cookie,
+    );
+    expect(probe.status).toBe(404);
     const ghostRows = listAuditEvents(app.db, { limit: 500 }).filter(
       (row) => row.subjectId === GHOST || row.projectSlug === GHOST,
     );

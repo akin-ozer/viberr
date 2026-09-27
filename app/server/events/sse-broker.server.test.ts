@@ -10,7 +10,6 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   closeAllSseConnections,
   connectSseClient,
-  formatSseMessage,
   getSseBrokerStats,
   HEARTBEAT_CHUNK,
   HEARTBEAT_INTERVAL_MS,
@@ -19,7 +18,6 @@ import {
   resetSseBrokerForTests,
   RING_BUFFER_SIZE,
   STREAM_RING_BUFFER_SIZE,
-  routeMatchesConnection,
   runProcessShutdown,
   type SseScope,
 } from "./sse-broker.server";
@@ -242,15 +240,6 @@ describe("scope filtering", () => {
     expect(a.names()).toContain("projection.rebuilt");
     expect(b.names()).toContain("projection.rebuilt");
   });
-
-  it("routeMatchesConnection: user route ignores project scopes entirely", () => {
-    expect(
-      routeMatchesConnection(
-        { userId: "u1" },
-        { userId: "u1", scopes: [{ kind: "project", slug: "p" }] },
-      ),
-    ).toBe(false);
-  });
 });
 
 describe("wire format", () => {
@@ -270,9 +259,6 @@ describe("wire format", () => {
       entityId: "p/K-1",
       data: { projectSlug: "p", taskKey: "K-1", stage: "impl", readiness: "ready" },
     });
-    expect(formatSseMessage(7, "x.y", "{}")).toBe(
-      "id: 7\nevent: x.y\ndata: {}\n\n",
-    );
   });
 
   it("hello is a stream.open event whose id equals the current head", () => {
@@ -332,6 +318,9 @@ describe("ring buffer replay (Last-Event-ID)", () => {
     // And 10, the newest id the ring let go of, can: 11 onwards is replayed.
     const edge = connect("u1", [{ kind: "user" }], { lastEventId: base + 10 });
     expect(edge.names().filter((n) => n === "projection.rebuilt")).toHaveLength(RING_BUFFER_SIZE);
+    // 9, one short of the edge, is gone: the ring holds exactly RING_BUFFER_SIZE.
+    const past = connect("u1", [{ kind: "user" }], { lastEventId: base + 9 });
+    expect(past.names()).toEqual(["stream.open", "stream.resync"]);
   });
 
   it("sends stream.resync when the id is from a previous server life", () => {
@@ -407,13 +396,6 @@ describe("ring buffer replay (Last-Event-ID)", () => {
       .slice(1)
       .map((w) => Number(/^id: (\d+)$/m.exec(w)?.[1]));
     expect(ids).toEqual(ids.toSorted((a, b) => a - b));
-  });
-
-  it("caps the buffer at RING_BUFFER_SIZE", () => {
-    for (let i = 0; i < RING_BUFFER_SIZE + 50; i += 1) {
-      publishSseEvent(rebuiltEvent(), { broadcast: true });
-    }
-    expect(getSseBrokerStats().bufferedEvents).toBe(RING_BUFFER_SIZE);
   });
 });
 

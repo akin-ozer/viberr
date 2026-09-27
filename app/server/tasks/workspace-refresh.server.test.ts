@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -378,25 +377,5 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     const failed = await refresh(broken);
     expect(failed.status).toBe("fetch_failed");
     expect(describeWorkspaceRefresh(failed, "main")).toContain("not refreshed:");
-  });
-});
-
-/**
- * Ruling 129, the wiring half (pass 34 review): the module is only worth its
- * ruling if a dispatch actually calls it. This pins the CALLER — a reused
- * delivering checkout is refreshed before the run is handed it, and the run
- * says what happened.
- */
-describe("ruling 129: the dispatch refreshes a reused checkout", () => {
-  it("cloneRepo's reuse path calls the refresh, and the run's inputs and contract disclose it", async () => {
-    // Canary: delete the `refreshWorkspaceFromMirror` call in cloneRepo's
-    // reuse branch — the module goes back to having no production caller,
-    // which is the state this review found.
-    const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
-    expect(source).toContain("refreshWorkspaceFromMirror(db, refreshInput)");
-    expect(source).toContain("clone?.refreshed");
-    // The two disclosures the ruling names.
-    expect(source).toContain("workspaceRefresh: clone?.refreshed");
-    expect(source).toContain("Before this run Viberr ${input.workspaceRefresh}");
   });
 });

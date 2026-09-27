@@ -11,11 +11,7 @@ import {
 } from "../../../test-support/test-store";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  countActivityStream,
-  countAuditLog,
-  listAuditLog,
-} from "./activity-feed.server";
+import { countAuditLog, listAuditLog } from "./activity-feed.server";
 import {
   openScopeViolation,
   resolveScopeViolation,
@@ -24,7 +20,7 @@ import {
 /**
  * Phase 10 — audit panel deepening: readable templates for the new action
  * kinds (grant-scope attempts, runtime session opens), per-violation
- * resolve context, and the count queries behind "Show older". No entry may
+ * resolve context, and the audit-log count behind "Show older". No entry may
  * ever surface raw JSON — asserted across every rendered row.
  */
 
@@ -198,9 +194,5 @@ describe("pagination counts (Phase 10)", () => {
     expect(countAuditLog(store.db, store.slug)).toBe(baseline + 6);
     expect(listAuditLog(store.db, store.slug, { limit: 3 })).toHaveLength(3);
     expect(listAuditLog(store.db, store.slug)).toHaveLength(baseline + 6);
-  });
-
-  it("countActivityStream counts the project's task_events", () => {
-    expect(countActivityStream(store.db, store.slug)).toBe(0);
   });
 });

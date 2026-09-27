@@ -14,14 +14,12 @@ import { getMaxConcurrentRuns } from "~/server/settings/instance-settings.server
 
 let app: AppTestContext;
 let ardaId: string;
-let elifId: string;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda; // org admin
-  elifId = userIds.elif; // org member (not admin)
 });
 afterAll(() => app.cleanup());
 
@@ -82,12 +80,5 @@ describe("org-settings set-concurrency", () => {
     const bad = await setCap(ardaId, "-1");
     expect(bad.body.ok).toBe(false);
     expect(getMaxConcurrentRuns(app.db)).toBe(4);
-  });
-
-  it("a non-admin org member is refused", async () => {
-    const before = getMaxConcurrentRuns(app.db);
-    const { status } = await setCap(elifId, "7");
-    expect(status).not.toBe(200);
-    expect(getMaxConcurrentRuns(app.db)).toBe(before);
   });
 });

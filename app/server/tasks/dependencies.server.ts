@@ -441,15 +441,15 @@ export async function announceRelease(
  * the loop ruling 237 exists to break. A start that fails says so on the
  * timeline instead, which is the same honesty the resolution's own arm keeps.
  */
-export async function drainQueuedQuestions(
+async function drainQueuedQuestions(
   db: DatabaseSync,
   ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
-): Promise<number> {
+): Promise<void> {
   const queued = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter
     .queuedQuestions;
-  if (!queued || queued.length === 0) return 0;
+  if (!queued || queued.length === 0) return;
   const taken: QueuedQuestion[] = [];
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     // Re-read under the lock: a concurrent release or a person clearing the
@@ -457,7 +457,7 @@ export async function drainQueuedQuestions(
     taken.push(...parsed.frontmatter.queuedQuestions);
     parsed.frontmatter.queuedQuestions = [];
   });
-  if (taken.length === 0) return 0;
+  if (taken.length === 0) return;
   // Dynamic, like every other reach into task-actions from this module: the two
   // import each other and a static edge here closes the cycle.
   const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
@@ -507,7 +507,6 @@ export async function drainQueuedQuestions(
     }
   }
   reprojectTask(db, ctx, projectSlug, taskKey);
-  return taken.length;
 }
 
 // ---------------------------------------------------------------- engine
@@ -608,12 +607,10 @@ export async function releaseDependents(
 }
 
 /** Every live project, for the runner's tick. */
-export async function releaseDueDependents(db: DatabaseSync, ctx: TaskActionContext = {}): Promise<number> {
+async function releaseDueDependents(db: DatabaseSync, ctx: TaskActionContext = {}): Promise<void> {
   // SAFETY: `slug` TEXT PRIMARY KEY and `archived` INTEGER NOT NULL on `projects`.
   const rows = db.prepare(`SELECT slug FROM projects WHERE archived = 0`).all() as { slug: string }[];
-  let count = 0;
-  for (const row of rows) count += (await releaseDependents(db, ctx, row.slug)).length;
-  return count;
+  for (const row of rows) await releaseDependents(db, ctx, row.slug);
 }
 
 // ------------------------------------------------------------------ runner

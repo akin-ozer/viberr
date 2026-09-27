@@ -13,7 +13,7 @@ import type { NotificationKind } from "~/shared/mapping/notification.server";
  * `ghConnected` pref is dropped entirely (derived from the user row instead).
  */
 
-export const NOTIF_PREF_CATEGORIES = [
+const NOTIF_PREF_CATEGORIES = [
   "packets",
   // Ruling 481(a): an agent's question, its own toggle. It used to ride
   // "approvals", so silencing stage-approval noise silenced every question.
@@ -43,8 +43,8 @@ export type NotifPrefs = Record<NotifPrefCategory, NotifChannelPrefs>;
 
 /** Every routing category ON by default — the model is opt-OUT (a user only
  *  ever stores a pref when they silence a category). A factory, not a shared
- *  constant, because `mergeNotifPrefs` hands its fallback straight to callers:
- *  the exported default must never be reachable (and mutable) through one. */
+ *  constant, because `mergeNotifPrefs` hands its fallback straight to callers,
+ *  and a shared default would be reachable (and mutable) through one. */
 function defaultNotifPrefs() {
   return {
     packets: { app: true },
@@ -58,8 +58,6 @@ function defaultNotifPrefs() {
     ownership: { app: true },
   } satisfies NotifPrefs;
 }
-
-export const DEFAULT_NOTIF_PREFS = defaultNotifPrefs();
 
 /**
  * The EXPLICIT singular-kind → plural-category map (contracts §4). Every

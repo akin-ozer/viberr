@@ -42,9 +42,9 @@ import { toError } from "~/shared/errors";
  *
  * The first tier with any candidate decides; more than one candidate in that
  * tier is AMBIGUOUS and notifies nobody, because guessing is worse than a
- * visible non-delivery. {@link MentionFanout.ambiguous} carries those handles
- * so the comment can say so on the timeline instead of the mention silently
- * going nowhere — a human comment gets a policy note, a machine-authored one
+ * visible non-delivery. The comment says so on the timeline instead of the
+ * mention silently going nowhere — a human comment gets
+ * {@link mentionNonDeliveryNote} as a policy note, a machine-authored one
  * carries {@link withAmbiguityDisclosure}. A person tagged twice in one comment
  * (by handle and by name) is notified once.
  *
@@ -67,7 +67,7 @@ import { toError } from "~/shared/errors";
 /** Handles that route to agents, never to a person named e.g. "Claude": the
  *  reserved handles (their one home is ~/ui/mention-spans) plus the instance
  *  controller's, which never maps to a human either (ruling 99). */
-export const RESERVED_HANDLES = new Set<string>([
+const RESERVED_HANDLES = new Set<string>([
   ...RESERVED_MENTION_HANDLES,
   CONTROLLER_MENTION_HANDLE,
 ]);
@@ -239,7 +239,7 @@ export function resolveMentionTargets(
  * only one who can retag and is still looking at the task; on a machine-authored
  * comment (agent / operator) nobody would ever learn the tag reached no one.
  */
-export function ambiguousMentionNote(handles: readonly string[]): string {
+function ambiguousMentionNote(handles: readonly string[]): string {
   if (handles.length === 0) return "";
   const list = handles.map((h) => `@${h}`).join(", ");
   const subject = handles.length === 1 ? "matches" : "match";
@@ -254,7 +254,7 @@ export function ambiguousMentionNote(handles: readonly string[]): string {
  * anyway) is the boundary crossing this fix closes. Deliberately says nothing
  * about the person beyond the handle the author already typed.
  */
-export function nonMemberMentionNote(handles: readonly string[]): string {
+function nonMemberMentionNote(handles: readonly string[]): string {
   if (handles.length === 0) return "";
   const list = handles.map((h) => `@${h}`).join(", ");
   const subject = handles.length === 1 ? "is not a member" : "are not members";
@@ -450,41 +450,27 @@ export interface NotifyMentionsInput {
   audience?: "agent" | "open";
 }
 
-export interface MentionFanout {
-  /** Users actually notified (users-table order). */
-  mentioned: string[];
-  /** Handles that matched several people and therefore notified nobody. */
-  ambiguous: string[];
-  /** Handles that named one real person who is not a member of this project,
-   *  and therefore notified nobody (F33-9). */
-  nonMembers: string[];
-}
-
 /**
  * Notify every MEMBER of `input.projectSlug` the text unambiguously @mentions,
- * and report the handles that reached nobody. Routing prefs are respected via
- * `createNotification` (a user who silenced the `mention` category is skipped
- * there).
+ * and return who was notified (users-table order). Routing prefs are respected
+ * via `createNotification` (a user who silenced the `mention` category is
+ * skipped there).
  *
  * Ambiguity is judged over ALL enabled users, before the author exclusion: a
  * comment by one Arda tagging "@arda" on a team of two is still ambiguous —
  * dropping the author would silently redirect it to the other one. Membership is
  * applied to the WINNER of that ladder (F33-9): a resolved non-member is not a
- * notification, it is a `nonMembers` handle the author is shown.
+ * notification. The handles that reached nobody are reported by
+ * {@link mentionNonDeliveryNote} and {@link withAmbiguityDisclosure}, which
+ * resolve over the same ladder.
  */
-export function fanOutMentions(
+export function notifyMentionedUsers(
   db: DatabaseSync,
   input: NotifyMentionsInput,
-): MentionFanout {
-  const { userIds, matchedBy, ambiguous, nonMembers } = resolveIn(
-    db,
-    input.text,
-    input.projectSlug,
-  );
-  // Ruling 232: a directive addressed to an agent notifies no person. The
-  // handles that reached nobody are still reported, because they are facts
-  // about the text and the author's disclosure is written from them.
-  if (input.audience === "agent") return { mentioned: [], ambiguous, nonMembers };
+): string[] {
+  // Ruling 232: a directive addressed to an agent notifies no person.
+  if (input.audience === "agent") return [];
+  const { userIds, matchedBy } = resolveIn(db, input.text, input.projectSlug);
   // Only needed to quote a recipient, so only read when there is one.
   const knownNames = userIds.length > 0 ? enabledUsers(db).map((u) => u.name) : [];
   const mentioned: string[] = [];
@@ -508,19 +494,7 @@ export function fanOutMentions(
     }
     createNotification(db, notification);
   }
-  return { mentioned, ambiguous, nonMembers };
-}
-
-/**
- * Notified user ids only — the shape every existing comment writer consumes.
- * Callers that surface the non-delivery note (human comments) use
- * {@link fanOutMentions} instead.
- */
-export function notifyMentionedUsers(
-  db: DatabaseSync,
-  input: NotifyMentionsInput,
-): string[] {
-  return fanOutMentions(db, input).mentioned;
+  return mentioned;
 }
 
 /** The enabled users a text unambiguously @mentions — for diffing a reply's

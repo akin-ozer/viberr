@@ -11,9 +11,9 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime, queueFakeRun } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { settle } from "../../../test-support/polling";
 import { getRun } from "./run-store.server";
 import {
   drainRunQueue,
@@ -45,7 +45,6 @@ beforeEach(async () => {
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: every run here bills VIB-1's owner, so he has to have the
   // backend connected or the cap would never be reached — each run would be
@@ -54,13 +53,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
-}
 
 /** A reviewer run that streams a line then STAYS running (handle live) until it
  *  is interrupted — the way to hold a concurrency slot open in a test. Distinct

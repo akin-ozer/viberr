@@ -70,7 +70,9 @@ people load first: `root`, `root.css` (the render-blocking stylesheet alone),
 npm run build && node scripts/measure-routes.mjs --check
 ```
 
-CI's verify job runs the same check after its build step. `node scripts/measure-routes.mjs
+CI's verify job is configured to run the same check after its build step, but no CI job
+has executed since 2026-09-07 ([testing.md](testing.md) §1), so the check is a local gate
+for now. `node scripts/measure-routes.mjs
 routes/project.task` (no flag) still prints the raw and gzip figures for any route.
 
 The bundle table also accepts a `raised` note: a ceiling that went up says why beside the
@@ -101,13 +103,13 @@ The harnesses, one home each:
 |---|---|
 | `test-support/test-app.ts`, `demo-seed.ts` | route loaders and actions in-process, with real sessions and CSRF |
 | `test-support/perf-clock.ts` | the wall clock a server fixture reads: one local time, the same in every zone (`pinPerfClock`) |
-| `test-support/perf-counters.ts` | SQL executions, rows, compiles and commits (`countSql`, `tallyServerReads`), store-file reads and writes (`countFileReads`, `countFileWrites`); wraps the `node:sqlite` prototypes and `node:fs`, restored on exit |
+| `test-support/perf-counters.ts` | SQL executions, rows, compiles and commits (`countSql`, `tallyServerReads`), store-file reads and writes (`countFileReads`, `countFileWrites`); wraps the `node:sqlite` prototypes and `node:fs`, restored when the window closes or, on a throw inside it, when the test ends (`onTestFinished`) |
 | `test-support/render-counter.ts` | which components rendered in each commit, read off the fiber tree the way DevTools does (`createRenderCounter` + `<Profiler onRender>`), `settle`, and DOM writes (`observeMutations`) |
 | `test-support/revalidation-harness.tsx` | loaders re-run per trigger, with single fetch's choice of routes and the real SSE broker in-process |
 | `test-support/console-fixture.ts` | a big task: 870 console lines over three agent groups |
 | `test-support/controller-dock-stub.tsx` | the dock's routed stub: requests per navigation, view loads per send |
 | `test-support/static-imports.ts` | a module's static client closure, and so whether a route reaches a package (no build needed) |
-| `test-support/css-rules.ts` | the one `app.css` parser, for CSS budgets (infinite loops on the main thread, scrollers without a gutter) |
+| `test-support/css-rules.ts` | the one `app.css` parser, shared by `app.css.test.ts` and `app.css.perf.test.ts` (endless animations off the compositor, scrollers without a gutter, thumbnails without a box) |
 
 ## 5. What the first pass measured
 

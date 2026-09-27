@@ -208,7 +208,7 @@ export function attachmentProducers(db: DatabaseSync, slug: string, key: string)
   return producers;
 }
 
-export function listTaskDiagnostics(
+function listTaskDiagnostics(
   db: DatabaseSync,
   slug: string,
   key: string,

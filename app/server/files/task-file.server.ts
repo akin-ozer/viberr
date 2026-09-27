@@ -584,7 +584,7 @@ export function parseTaskFileContent(
           "timeline.out_of_order",
           // The message used to end "display sorts by timestamp". Nothing sorts:
           // `listTaskEvents` is ORDER BY position ASC (the verbatim file index
-          // the rebuilder writes), `sliceTimeline` takes the first N off the
+          // the rebuilder writes), `timelineSlice` takes the first N off the
           // front of that array, and the task timeline component only filters
           // it. So the reader of a task whose file HAS an inversion was told the
           // page had compensated, on the one panel whose job is to tell them the

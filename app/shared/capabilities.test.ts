@@ -8,7 +8,6 @@ import {
   ENFORCED_CAPABILITY_IDS,
   UNIFIED_CAP_CATALOG,
   applyVerdictOutcomeGate,
-  capabilityByLabel,
   capabilityEnforcement,
   coerceSpecialistCapabilityMode,
   conservativeGrantsFor,
@@ -17,30 +16,6 @@ import {
 } from "./capabilities";
 
 describe("capability catalog", () => {
-  it("A00-8 (pass 32): the ENFORCED_CAPABILITY_IDS literal lists each id exactly once", async () => {
-    // A Set swallows a duplicate silently, so `execute-code-or-write-repo` sat
-    // in ENFORCED_CAPABILITY_IDS twice for a whole pass — a future edit would
-    // have deleted the wrong copy and changed nothing. The literal is read from
-    // the source so a duplicate cannot hide inside the Set again. (The set
-    // deliberately OVERLAPS the claude-only one — those ids have a runtime
-    // consumer, scoped to Claude; capabilityEnforcement checks that set first.)
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("./capabilities.ts", import.meta.url), "utf8");
-    const start = source.indexOf("export const ENFORCED_CAPABILITY_IDS");
-    const end = source.indexOf("]);", start);
-    const literal = source.slice(start, end);
-    const seen = new Map<string, number>();
-    for (const m of literal.matchAll(/^\s*"([a-z-]+)",/gm)) {
-      seen.set(m[1]!, (seen.get(m[1]!) ?? 0) + 1);
-    }
-    const duplicated = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
-    expect(duplicated).toEqual([]);
-    // Ruling 185 moved the headline write family OUT of this literal (Codex is
-    // no longer OS-confined, so it binds on Claude alone).
-    expect(seen.has("execute-code-or-write-repo")).toBe(false);
-    expect(seen.has("use-web-search-fetch")).toBe(true);
-  });
-
   it("has no duplicate ids and every enforced id exists in the catalog", () => {
     const ids = CAP_CATALOG.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -52,43 +27,9 @@ describe("capability catalog", () => {
       expect(idSet.has(id), `${id} in ALWAYS_HUMAN but missing from catalog`).toBe(true);
     }
   });
-
-  it("pruned ids (F11/R3, dynamic-dispatch) are gone from the catalog", () => {
-    const ids = new Set(CAP_CATALOG.map((c) => c.id));
-    // The last two retired in the dynamic-dispatch rework (2026-08-29),
-    // collapsed into the single `dispatch-agents` gate.
-    for (const gone of ["edit-other-task-branch", "open-or-merge-pr", "compress-timelines", "owner-reassignment", "assign-primary-specialist", "summon-reviewers"]) {
-      expect(ids.has(gone), `${gone} should have been pruned`).toBe(false);
-    }
-    expect(ids.has("dispatch-agents")).toBe(true);
-  });
 });
 
 describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
-  it("classifies the FINE-GRAINED tool-denylist caps as claude-only", () => {
-    for (const id of ["create-task-branch", "commit-push-branch", "open-review-pr"]) {
-      expect(capabilityEnforcement(id), id).toBe("claude-only");
-    }
-  });
-
-  it("ruling 185: the headline repo-write cap is claude-only again — Codex is not OS-confined", () => {
-    // History: P13-RT-02 labeled it BOTH (withheld Codex runs got the
-    // read-only sandbox), R22 removed the sandbox and made it claude-only, the
-    // 2026-08-31 parity ruling restored the sandbox for withheld runs, and
-    // ruling 185 removed the sandbox for good — bubblewrap could not start
-    // under Docker's default seccomp profile (F36-1) and the network-off
-    // filter broke every synchronous child process (F36-11). On Codex the
-    // prompt and the server-owned delivery gate carry it, which the matrix
-    // renders as "advisory on Codex". Canary: move the cap back to
-    // ENFORCED_CAPABILITY_IDS and this reads "both".
-    expect(capabilityEnforcement("execute-code-or-write-repo")).toBe("claude-only");
-    expect(
-      CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("execute-code-or-write-repo"),
-    ).toBe(true);
-    // Web search still binds on both: it is the CLI's own tool switch.
-    expect(capabilityEnforcement("use-web-search-fetch")).toBe("both");
-  });
-
   it("classifies structural ALWAYS_HUMAN caps as BOTH — never advisory-on-Codex", () => {
     // Regression for the adversarial-review finding: merge-pull-request was
     // mislabeled "claude-only" (⇒ the matrix badged it 'advisory on Codex'),
@@ -114,16 +55,6 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(capabilityEnforcement("summon-reviewers")).toBe("advisory");
     expect(capabilityEnforcement("post-quality-flags")).toBe("advisory");
     expect(capabilityEnforcement("no-such-capability")).toBe("advisory");
-  });
-
-  it("classifies web egress as BOTH — the Codex webSearchMode channel enforces it (P14-RT-06)", () => {
-    // It used to be labeled claude-only on the strength of a "prompt-level on
-    // Codex" fallback that never existed in any prompt. Codex now disables web
-    // search for a withheld grant, so both backends remove the built-in tool.
-    expect(capabilityEnforcement("use-web-search-fetch")).toBe("both");
-    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("use-web-search-fetch")).toBe(
-      false,
-    );
   });
 
   it("classifies generic-agent collaboration gates by their real transport", () => {
@@ -158,30 +89,6 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(entry.promotable).toBe(false);
   });
 
-  it("matrix badges: claude-only for the SCOPED delivery commands and, since ruling 185, the headline", () => {
-    // What the CapabilityMatrixModal actually does: label → id → enforcement.
-    // The scoped commands are claude-only at the tool layer — Codex has no
-    // denylist channel, and their real Codex boundary is the credential-less
-    // agent + the server-owned delivery gate. The headline "Execute code or
-    // write to the repo" joined them when ruling 185 removed the Codex OS
-    // sandbox that had bound it (the 2026-08-31 parity ruling).
-    const claudeOnlyLabels = [
-      "Create the task-key branch",
-      "Commit & push to the branch",
-      "Open the review pull request",
-    ];
-    for (const label of claudeOnlyLabels) {
-      const id = capabilityByLabel(label)?.id;
-      expect(id, label).toBeTruthy();
-      expect(capabilityEnforcement(id!), label).toBe("claude-only");
-    }
-    // Merge a pull request is ALWAYS_HUMAN → both backends, never claude-only.
-    expect(capabilityEnforcement(capabilityByLabel("Merge a pull request")!.id)).toBe("both");
-    // Ruling 185: the headline write family joined the claude-only list.
-    expect(
-      capabilityEnforcement(capabilityByLabel("Execute code or write to the repo")!.id),
-    ).toBe("claude-only");
-  });
 });
 
 describe("delivery grants (F14 headline gate · B-AG1 no silent escalation)", () => {

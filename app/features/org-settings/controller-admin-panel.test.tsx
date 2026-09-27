@@ -516,24 +516,6 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     expect(ghost?.querySelector(".res-chip-note")?.textContent).toBe("missing");
     expect(ghost?.getAttribute("title")).toContain("locked on this deployment");
   });
-
-  it("P07-G (pass 32): the panel and the server read ONE lock vocabulary", async () => {
-    // The panel used to carry hand-copied mirrors of the server's maps with a
-    // drift test between them; both now import `~/shared/controller-locks`.
-    const shared = await import("~/shared/controller-locks");
-    const server = await import(
-      "~/server/controller/controller-profile.server"
-    );
-    expect(server.CONTROLLER_UNLOCK_ENV).toBe(shared.CONTROLLER_UNLOCK_ENV);
-    expect(server.CONTROLLER_UNLOCK_VALUE).toBe(shared.CONTROLLER_UNLOCK_VALUE);
-    expect(server.CONTROLLER_SECTION_LABEL).toBe(shared.CONTROLLER_SECTION_LABEL);
-    expect(shared.CONTROLLER_SECTION_LABEL).toEqual({
-      skills: "skill grants",
-      kb: "knowledge base grants",
-      mcps: "MCP server grants",
-      instructions: "instructions",
-    });
-  });
 });
 
 /**

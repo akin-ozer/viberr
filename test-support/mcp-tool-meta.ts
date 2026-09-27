@@ -84,12 +84,7 @@ export async function publishedSchemas(
   if (!server || !("instance" in server)) {
     throw new Error("publishedSchemas needs an in-process MCP server");
   }
-  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-  const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-  await server.instance.connect(serverEnd);
-  const client = new Client({ name: "schema-read", version: "1" }, { capabilities: {} });
-  await client.connect(clientEnd);
+  const client = await connectedClient(server, "schema-read");
   const out = new Map<string, JsonValue>();
   for (const listed of (await client.listTools()).tools) {
     // SAFETY: `inputSchema` crossed the MCP wire as JSON, so it is JSON.
@@ -108,11 +103,17 @@ export async function publishedInstructions(
   if (!server || !("instance" in server)) {
     throw new Error("publishedInstructions needs an in-process MCP server");
   }
+  const client = await connectedClient(server, "instructions-read");
+  return client.getInstructions() ?? "";
+}
+
+/** A real MCP client, connected over an in-memory pair to a mount's live server. */
+async function connectedClient(server: McpSdkServerConfigWithInstance, name: string) {
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
   await server.instance.connect(serverEnd);
-  const client = new Client({ name: "instructions-read", version: "1" }, { capabilities: {} });
+  const client = new Client({ name, version: "1" }, { capabilities: {} });
   await client.connect(clientEnd);
-  return client.getInstructions() ?? "";
+  return client;
 }

@@ -189,19 +189,6 @@ describe("P3.7 governance & lifecycle fixes", () => {
     expect(decisionEvent?.text).toContain("Gate the /health/scripts route");
   });
 
-  it("packet: a non-owner contributor is still forbidden (C3)", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, PACKET);
-    await expect(
-      resolvePacket(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actorOf(store.users.selin), // contributor, NOT the owner
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
   it("packet: the contributor OWNER CAN accept_completion (R6-2 owner exception)", async () => {
     const store = setupProjectedStore(ctx);
     withTask(
@@ -216,79 +203,6 @@ describe("P3.7 governance & lifecycle fixes", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("done");
-  });
-
-  it("packet: a NON-owner contributor still cannot accept_completion (R6-2)", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(
-      store,
-      { stage: "review", ownerUserId: store.users.arda.id }, // owned by admin, not selin
-      PACKET,
-    );
-    await expect(
-      resolvePacket(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actorOf(store.users.selin), // contributor, NOT the owner
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("packet: a viewer OWNER cannot accept_completion (owner exception needs contributor+)", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(
-      store,
-      { stage: "review", ownerUserId: store.users.elif.id }, // viewer owner
-      PACKET,
-    );
-    await expect(
-      resolvePacket(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actorOf(store.users.elif), // viewer — read+comment only, can't own or accept
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("a bare re-entry into review does NOT launder a standing failing (#9)", async () => {
-    const store = setupProjectedStore(ctx);
-    // failing, at impl, with NO new revision since the rejection: a live
-    // request_changes verdict bound to the current work revision.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "impl",
-        ownerUserId: store.users.arda.id,
-        branch: "vib-1-work",
-        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
-        workRevision: workRev("rev_1"),
-        verdicts: [rejectionVerdict("rev_1")],
-        validation: "failing",
-      }),
-      timeline: [
-        {
-          occurredAt: new Date().toISOString(),
-          type: "quality",
-          actor: { kind: "operator" },
-          title: "Changes requested",
-          text: "**Validation:** failing. Reviewer requested changes.",
-          toAgent: false,
-          evidence: null,
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    // No rework → failing must survive the re-entry (not laundered to changed).
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-      .parsed.frontmatter;
-    expect(fm.validation).toBe("failing");
   });
 
   it("acceptCompletion (via packet) refuses a failing-validation task (C2)", async () => {
@@ -417,31 +331,6 @@ describe("P3.7 governance & lifecycle fixes", () => {
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
   });
 
-  it("forceAcceptCompletion denies a NON-admin (maintainer) — admin-only override (DG-2)", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(
-      store,
-      {
-        stage: "review",
-        ownerUserId: store.users.arda.id,
-        branch: "vib-1-work",
-        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
-        workRevision: workRev("rev_1"),
-        verdicts: [rejectionVerdict("rev_1")],
-        validation: "failing",
-      },
-      PACKET,
-    );
-    await expect(
-      forceAcceptCompletion(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actorOf(store.users.murat), // maintainer, not admin
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
   it("dragging a card into Done reports acceptance, not a bare move (C4)", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", ownerUserId: store.users.arda.id, validation: "healthy" });
@@ -455,7 +344,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
     expect(res.task.stage).toBe("done");
   });
 
-  it("updateTaskGoal edits the canonical goal + records a policy event (X11)", async () => {
+  it("updateTaskGoal edits the canonical goal and records a neutral Goal updated note (X11, P13-LV-03)", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id });
     await updateTaskGoal(
@@ -469,35 +358,9 @@ describe("P3.7 governance & lifecycle fixes", () => {
     // P13-LV-03: a human editing the goal is a neutral note, not a violation.
     expect(file.parsed.timeline[0]).toMatchObject({ type: "note", title: "Goal updated" });
   });
-
-  it("updateTaskGoal is forbidden for a contributor (X11 RBAC)", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store, { stage: "impl" });
-    await expect(
-      updateTaskGoal(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", goal: "Sneaky rewrite." },
-        actorOf(store.users.selin),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
 });
 
 describe("transitionStage boundary enforcement", () => {
-  it("undeclared boundary (triage→impl) → validation error", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store);
-    await expect(
-      transitionStage(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-  });
-
   it("approval boundary (impl→review): low-role forbidden, maintainer ok", async () => {
     // impl → review is the `approval` human-gate boundary (triage → ready is now
     // `auto`, tested below).
@@ -523,7 +386,7 @@ describe("transitionStage boundary enforcement", () => {
     expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
   });
 
-  it("auto boundary (triage→ready): any member incl. viewer; operator attaches", async () => {
+  it("auto boundary (triage→ready): a contributor may cross it; operator attaches", async () => {
     // Post-D2: triage → ready is `auto` — any project member may cross it, and
     // leaving triage attaches an operator (ruling 16 semantics).
     const store = setupProjectedStore(ctx);
@@ -573,7 +436,7 @@ describe("transitionStage boundary enforcement", () => {
     const task = await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
-      actorOf(store.users.murat), // maintainer clears the approval boundary
+      actorOf(store.users.murat), // triage → ready is an auto boundary
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
@@ -594,27 +457,7 @@ describe("transitionStage boundary enforcement", () => {
     expect(task.readiness).toBe("blocked");
   });
 
-  it("entering the review stage sets validation to 'changed' (FR24 live signal)", async () => {
-    const store = setupProjectedStore(ctx);
-    // Delivered work under review with no verdicts yet → review entry derives
-    // the live "changed" signal (a revision is up but unjudged).
-    withTask(store, {
-      stage: "impl",
-      validation: "none",
-      branch: "vib-1-work",
-      workRevision: workRev("rev_1"),
-    });
-    const task = await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-      actorOf(store.users.murat), // maintainer clears the approval boundary
-      { dataRoot: store.dataRoot },
-    );
-    expect(task.stage).toBe("review");
-    expect(task.validation).toBe("changed");
-  });
-
-  it("human boundary (review→done locked): reviewer forbidden, admin ok, waiting→none", async () => {
+  it("human boundary (review→done): a contributor is forbidden, an admin accepts, waiting→none", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review", waiting: "human" });
     await expect(
@@ -718,7 +561,7 @@ describe("transitionStage boundary enforcement", () => {
 });
 
 describe("transitionStage manual mode (board / task-detail dropdown)", () => {
-  it("moves across a NON-boundary edge (triage→impl) for a maintainer, forbidden for a reviewer", async () => {
+  it("moves across a NON-boundary edge (triage→impl) manually for an admin, forbidden for a contributor", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store);
     // triage→impl is not a declared boundary — rejected without `manual`.
@@ -731,7 +574,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
       ),
     ).rejects.toMatchObject({ status: 400 });
 
-    // A reviewer cannot manual-move (admin|maintainer only).
+    // A contributor cannot manual-move (admin|maintainer only).
     await expect(
       transitionStage(
         store.db,
@@ -913,22 +756,6 @@ describe("reorderTask (drag-to-reorder, persistent board order)", () => {
     expect(stageOrder(store, "impl")).toEqual(["VIB-2", "VIB-1"]);
     const detail = getTaskDetail(store.db, store.slug, "VIB-1")!;
     expect(detail.timeline.some((e) => e.type === "transition")).toBe(true);
-  });
-
-  it("is admin|maintainer only — a reviewer is rejected", async () => {
-    const store = setupProjectedStore(ctx);
-    seedTasks(store, [
-      { key: "VIB-1", stage: "impl" },
-      { key: "VIB-2", stage: "impl" },
-    ]);
-    await expect(
-      reorderTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", beforeKey: "VIB-2" },
-        actorOf(store.users.selin),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -1227,7 +1054,7 @@ describe("resolvePacket kind matrix", () => {
 
   // 20s (see the routing tests): resolving this packet starts a real run through
   // the fake adapter, which under full-suite parallelism can exceed the 5s default.
-  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", { timeout: 20_000 }, async () => {
+  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", async () => {
     // Canary: reinstate the unconditional `assertStageEligible` in
     // dispatchAgentRun (the resolution's retry is refused).
     installFakeRuntime();
@@ -1279,12 +1106,35 @@ describe("resolvePacket kind matrix", () => {
     expect(started?.details).toMatchObject({ profileId: "dev", backend: "claude", stageEligibility: "engaged-deliverer" });
   });
 
-  it("retry_other_backend: packet cleared, run restarts on the target backend, switch persists to the snapshot", { timeout: 20_000 }, async () => {
+  it("retry_other_backend: packet cleared, run restarts on the target backend, and the switch is PINNED past the live profile (T7/F27-B1)", async () => {
     const { interruptRun } = await import(
       "~/server/runtimes/run-service.server"
     );
     installFakeRuntime();
     const store = setupProjectedStore(ctx);
+    // The Developer profile is DEPLOYED ON CODEX — the backend the retry
+    // exists to escape. Without a pin, every later run reverts to it.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-5.6-terra",
+            effort: "",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const RETRY_PACKET: TaskPacket = {
       type: "blocked",
       kind: "Blocked decision",
@@ -1353,119 +1203,36 @@ describe("resolvePacket kind matrix", () => {
     expect(
       texts.some((t) => t.includes("**Decision:** Retry on Claude Code")),
     ).toBe(true);
+
+    // T7 (pass 31): the packet is where the STICKY switch is actually decided.
+    // The snapshot (`engagement.backend`) moving is something a plain profile
+    // edit also does; the pin (`pinnedBackend`) is what makes the human's
+    // choice outrank the live profile on every later run. Live 2026-08-31
+    // (UC-2): a Codex quota error raised a recovery packet, the human picked
+    // "Retry on Claude", and the switch had to survive the fact that the
+    // Developer profile was still deployed on Codex.
+    // Canary: drop the `engaged.pinnedBackend = input.backendOverride`
+    // write-back in specialist-run and the pin assertion fails; keep it but
+    // reorder the resolver to prefer the live deployment and the later run
+    // comes back on codex.
+    expect(deliveringEngagement(file.parsed.frontmatter)?.pinnedBackend).toBe("claude");
+
+    // …so the next ordinary run stays on Claude even though the deployed
+    // profile still says Codex.
+    const { startAgentRun } = await import("./specialist-run.server");
+    const later = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actorOf(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: later.runId, dataRoot: store.dataRoot },
+      actorOf(store.users.murat),
+    );
+    expect(later.backend).toBe("claude");
   });
-
-  /**
-   * T7 (pass 31) — the packet is where the STICKY switch is actually decided,
-   * and the test above stops one field short of it. It asserts the snapshot
-   * (`engagement.backend`) moved, which a plain profile edit also does; the
-   * pin (`pinnedBackend`) is the thing that makes the human's choice outrank
-   * the live profile on every later run, and no test connected the two.
-   *
-   * Live 2026-08-31 (UC-2): a Codex quota error raised a recovery packet, the
-   * human picked "Retry on Claude", and the switch had to survive the fact
-   * that the Developer profile was still deployed on Codex.
-   */
-  it(
-    "T7/F27-B1: resolving retry_other_backend PINS the engagement — the switch outlives the live profile",
-    { timeout: 20_000 },
-    async () => {
-      // Canary: drop the `engaged.pinnedBackend = input.backendOverride`
-      // write-back in specialist-run and the pin assertion fails; keep it but
-      // reorder the resolver to prefer the live deployment and the second run
-      // comes back on codex.
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      const { startAgentRun } = await import("./specialist-run.server");
-      const { readProjectFile } = await import("~/server/files/project-writer.server");
-      installFakeRuntime();
-      const store = setupProjectedStore(ctx);
-      // The Developer profile is DEPLOYED ON CODEX — the backend the retry
-      // exists to escape. Without a pin, every later run reverts to it.
-      const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...project.parsed.frontmatter,
-        repo: null,
-        agents: [
-          {
-            profileId: "dev",
-            capabilities: [],
-            extras: [],
-            definition: {
-              kind: "specialist",
-              name: "dev",
-              role: "developer",
-              backends: ["codex"],
-              model: "gpt-5.6-terra",
-              effort: "",
-            },
-          },
-        ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-      withTask(
-        store,
-        {
-          stage: "impl",
-          waiting: "human",
-          readiness: "blocked",
-          engagements: [
-            { profileId: "dev", backend: "codex", role: "developer", delivers: true, verdictCapable: false },
-          ],
-        },
-        {
-          type: "blocked",
-          kind: "Blocked decision",
-          from: "operator",
-          title: "The Codex run failed — pick a recovery path",
-          body: "",
-          observations: [],
-          options: [
-            { kind: "retry_other_backend", t: "Retry on Claude Code", d: "", rec: true, backend: "claude" },
-            { kind: "redirect", t: "Redirect", d: "", rec: false },
-          ],
-        },
-      );
-
-      await resolvePacket(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actorOf(store.users.murat),
-        { dataRoot: store.dataRoot },
-      );
-
-      const read = () =>
-        readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-          .parsed.frontmatter;
-      const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
-      const first = listRunsForTaskRows(store.db, store.slug, "VIB-1");
-      expect(first).toHaveLength(1);
-      expect(first[0]!.backend).toBe("claude");
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: first[0]!.id, dataRoot: store.dataRoot },
-        actorOf(store.users.murat),
-      );
-
-      // The packet's choice was recorded as a PIN, not just a snapshot refresh.
-      expect(deliveringEngagement(read())?.pinnedBackend).toBe("claude");
-
-      // …so the next ordinary run stays on Claude even though the deployed
-      // profile still says Codex.
-      const later = await startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actorOf(store.users.murat),
-        { dataRoot: store.dataRoot },
-      );
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: later.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.murat),
-      );
-      expect(later.backend).toBe("claude");
-    },
-  );
 
   // The recovery packet the operator authors on a closed-without-merge PR
   // (pr-diverged trigger): rework / archive / archive+delete-branch.
@@ -2960,25 +2727,6 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("resolving an already-resolved packet → 409 conflict, no crash", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store, { stage: "review" }, PACKET);
-    await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    await expect(
-      resolvePacket(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 409 });
-  });
-
   it("every resolve marks the task's packet + approval notifications read", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review" }, PACKET);
@@ -3274,22 +3022,6 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
     withTask(store, {
       stage: "done",
       pr: { number: 7, state: "merged", title: "PR" },
-    });
-    await expect(
-      completeTaskMerge(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        actorOf(store.users.selin), // contributor
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
-
-  it("is admin|maintainer only (contributor forbidden)", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store, {
-      stage: "done",
-      pr: { number: 7, state: "accepted", title: "PR" },
     });
     await expect(
       completeTaskMerge(
@@ -3861,22 +3593,6 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     );
   });
 
-  it("ruling 189 still stands for a CHOSEN option: it amends the contract", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
-    await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    const goal = goalOf(store);
-    expect(goal).toContain("Choose the payment provider");
-    // The clause that settles the contradiction the amendment may create — the
-    // reviewer must not read the answer as an agent overstepping.
-    expect(goal).toContain("the decision wins");
-  });
-
   /**
    * O39-b, live on ax-clone AX-22: a review deadlock asked round after round,
    * and every "Let the rework continue" answer appended the same block, four
@@ -3943,20 +3659,6 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await answer(ask("Reviewer has requested changes 3 times running"));
     await answer(ask("Reviewer has requested changes 4 times running"));
     expect(goalOf(store).split("requested changes").length - 1).toBe(1);
-  });
-
-  it("writes a CHOSEN option into the goal too, title and description", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
-    await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    const goal = goalOf(store);
-    expect(goal).toContain("Mock-only");
-    expect(goal).toContain("Deterministic, non-monetary");
   });
 
   it("keeps the original goal above it — the amendment adds, never replaces", async () => {

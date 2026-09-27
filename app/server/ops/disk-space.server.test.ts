@@ -11,7 +11,6 @@ import {
   diskThresholds,
   formatBytes,
   measureDataRootSpace,
-  resetDiskSpaceCacheForTests,
 } from "./disk-space.server";
 
 /**
@@ -41,7 +40,6 @@ afterEach(() => {
   delete process.env.VIBERR_DISK_LOW_FREE_MB;
   delete process.env.VIBERR_DISK_CRITICAL_FREE_MB;
   resetEnvCacheForTests();
-  resetDiskSpaceCacheForTests();
   ctx.cleanup();
 });
 
@@ -135,7 +133,7 @@ describe("measureDataRootSpace (gap 16)", () => {
 });
 
 describe("dfReading", () => {
-  it("parses the POSIX df layout from the right so spaced filesystem names survive", () => {
+  it("reads the host's df -kP output", () => {
     const dataRoot = ctx.makeTempDir();
     const reading = dfReading(dataRoot);
     // Real df on the test host: a positive total, free within it.

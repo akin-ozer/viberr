@@ -17,13 +17,9 @@ import {
   readInstanceSecrets,
 } from "../config/instance-secrets.server";
 import { acquireDataRootLock, DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
-import {
-  DEFAULT_MIGRATIONS_DIR,
-  runMigrations,
-} from "./migration-runner.server";
+import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
 import {
-  BACKUP_FORMAT,
   createBackup,
   projectionPathIn,
   readManifest,
@@ -51,7 +47,7 @@ interface Fixture {
 function fixture(): Fixture {
   const dataRoot = ctx.makeTempDir();
   const db = openDatabase(projectionPathIn(dataRoot));
-  runMigrations(db, DEFAULT_MIGRATIONS_DIR);
+  runMigrations(db);
   db.prepare(
     `INSERT INTO users (id, email, name, title, role, idp, avatar_tone,
        pwreset_required, theme, disabled, created_at, updated_at, created_by)
@@ -201,7 +197,7 @@ describe("createBackup", () => {
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
     const manifest = readManifest(backup.dir);
 
-    expect(manifest.format).toBe(BACKUP_FORMAT);
+    expect(manifest.format).toBe("viberr-backup/1");
     expect(manifest.projection?.rows.users).toBe(1);
     expect(manifest.contains.join(" ")).toContain("sealed GitHub PATs");
     // The two exclusions an operator must not have to guess at.

@@ -160,16 +160,12 @@ describe("needsYouTime", () => {
     expect(needsYouTime(iso(1, 16, 4))).toBe("yesterday 16:04");
   });
 
-  it("the UTC first-pass form reads the same stamp in every viewer timezone", () => {
+  it("the UTC first-pass form is the absolute UTC day and clock, whatever the host zone", () => {
     // The "Waiting on you" card printed viewer-LOCAL time straight from SSR
     // while the stream panel beside it had used *UTC-first since UXA-5, so the
     // card mismatched on hydration for every viewer outside the server's zone.
     // This is the absolute form the first pass renders.
-    // Canary: point the card back at `needsYouTime` unconditionally and the
-    // page test below stops agreeing with the server's own markup.
-    const at = "2026-08-20T09:05:00.000Z";
-    expect(needsYouTimeUTC(at)).toBe(needsYouTimeUTC(at));
-    expect(needsYouTimeUTC(at)).toMatch(/\b09:05\b/);
+    expect(needsYouTimeUTC("2026-08-20T09:05:00.000Z")).toBe("aug 20 09:05");
   });
 });
 

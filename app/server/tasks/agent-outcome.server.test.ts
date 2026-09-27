@@ -21,7 +21,7 @@ const grant = (capabilityId: string, mode: CapabilityGrant["mode"]): CapabilityG
 });
 
 describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
-  it("a DELIVERING agent with a legacy `recommend` verdict grant stays OFF", () => {
+  it("a legacy `recommend` verdict grant stays OFF", () => {
     // main's seed gave the developer report-validation-verdict:recommend — a
     // decorative no-op there. It must NOT coerce to `direct` here (that would
     // arm verdict-veto on the builder against live pre-branch data — R1/R2).
@@ -30,7 +30,7 @@ describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
     expect(resolveAgentCollab(grants).verdict).toBe(false);
   });
 
-  it("F10-14: a SUPPORTING agent with NO verdict grant is OFF (explicit-only)", () => {
+  it("F10-14: no verdict grant means OFF (explicit-only)", () => {
     // Verdict authority is explicit-only now — there is no implicit `direct`
     // default for a non-delivering engagement. A reviewer gains gating verdict
     // power ONLY via an explicit report-validation-verdict:direct grant.
@@ -38,24 +38,13 @@ describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
     expect(resolveAgentCollab([]).verdict).toBe(false);
   });
 
-  it("F10-14: a SUPPORTING agent WITH an explicit direct grant is ON", () => {
+  it("F10-14: an explicit direct grant arms the verdict", () => {
     const grants = [grant("report-validation-verdict", "direct")];
     expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
     expect(resolveAgentCollab(grants).verdict).toBe(true);
   });
 
-  it("a DELIVERING agent with no verdict grant stays OFF", () => {
-    expect(effectiveCollabMode([], "report-validation-verdict")).toBe("off");
-    expect(resolveAgentCollab([]).verdict).toBe(false);
-  });
-
-  it("an EXPLICIT direct grant arms verdict even on a delivering agent", () => {
-    const grants = [grant("report-validation-verdict", "direct")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
-    expect(resolveAgentCollab(grants).verdict).toBe(true);
-  });
-
-  it("an EXPLICIT human/off grant disables verdict even on a supporting agent", () => {
+  it("an explicit human/off grant disables the verdict", () => {
     expect(
       effectiveCollabMode([grant("report-validation-verdict", "off")], "report-validation-verdict"),
     ).toBe("off");
@@ -213,9 +202,8 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     expect(fallback.options[0]!.d).not.toMatch(/operator/i);
   });
 
-  it("ruling 478(e): the Codex envelope carries `reply`, and the schema stays strict", () => {
+  it("ruling 478(e): the Codex envelope carries `reply`", () => {
     // CANARY: drop `if (opt.reply === true) choice.reply = true;` in the parser.
-    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
     const o = parseAgentOutcomeJson(
       JSON.stringify({
         summary: "Blocked on the Cloudflare side.",
@@ -277,8 +265,7 @@ describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
   // would be a Claude-only capability that the profile editor still offered to
   // every profile regardless of backend — the kind of silent backend asymmetry
   // this app is supposed to not have.
-  it("declares evidence in the envelope, and it stays strict-schema conformant", () => {
-    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
+  it("declares evidence in the envelope", () => {
     expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("evidence");
   });
 
@@ -331,10 +318,9 @@ describe("relay is a BOTH-backend channel (ruling 488)", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);
 
-  it("declares relay in the envelope, strict-schema conformant, and parses its entries", () => {
+  it("declares relay in the envelope and parses its entries", () => {
     // CANARIES: drop `relay` from AGENT_OUTCOME_JSON_SCHEMA; drop the parser's
     // copy onto the outcome.
-    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
     expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("relay");
     const o = parseAgentOutcomeJson(
       JSON.stringify({

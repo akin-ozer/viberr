@@ -1,13 +1,9 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { checkRepoAccess } from "./repo-access-check.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);

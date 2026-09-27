@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -57,9 +56,6 @@ const wakeOperator: OperatorWake = async (
 ) => {
   invoked.push({ projectSlug, taskKey, trigger });
 };
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);

@@ -303,8 +303,7 @@ describe("getInsightsSummary", () => {
       finishedAt: "2026-08-20T10:00:00.000Z", // 10 min BEFORE start
     });
     const s = getInsightsSummary(db, NOW);
-    expect(s.avgDurationMs).not.toBeNull();
-    expect(s.avgDurationMs!).toBeGreaterThanOrEqual(0);
+    expect(s.avgDurationMs).toBe(0);
   });
 
   // F26-4: the byModel/byProject breakdowns are capped at TOP_N (8). A rare but

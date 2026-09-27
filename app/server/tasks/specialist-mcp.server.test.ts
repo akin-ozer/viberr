@@ -14,10 +14,7 @@ import {
   startMcpGateway,
   stopMcpGateway,
 } from "~/server/mcp-proxy/gateway.server";
-import {
-  isReservedMcpName,
-  RESERVED_MCP_NAMES,
-} from "~/shared/mcp-reserved";
+import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   resolveSpecialistMcpServers,
   resolveSpecialistMcpServersDetailed,
@@ -137,12 +134,7 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     expect(servers["pg-ro"]).toEqual({ command: "npx", args: ["-y", "@mcp/server-postgres"] });
   });
 
-  it("skips the operator's in-process `viberr` server and unknown names", () => {
-    const store = setupTestStore(ctx);
-    expect(resolveSpecialistMcpServers(store.db, ["viberr", "does-not-exist"])).toEqual({});
-  });
-
-  it("ruling 107: ONE reserved list guards the writer, the picker and this resolver", () => {
+  it("ruling 107: every name on the ONE reserved list resolves to nothing, even as a registry row", () => {
     const store = setupTestStore(ctx);
     // Every name Viberr's own tooling owns, written STRAIGHT into SQLite — the
     // path the save-time refusal cannot reach: a hand-written row, a restored
@@ -165,38 +157,6 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     expect(listMcpServers(store.db).map((m) => m.name).sort()).toEqual(
       [...names].sort(),
     );
-    // The writer refuses exactly the same set — one source, so the three layers
-    // cannot disagree again.
-    for (const name of names) expect(isReservedMcpName(name)).toBe(true);
-    expect([...names].sort()).toEqual(
-      [
-        "viberr",
-        "viberr-agent",
-        "viberr-browser",
-        "viberr-controller",
-        "viberr-ops",
-        "viberr_agent",
-        "viberr_browser",
-        "viberr_controller",
-        "viberr_ops",
-      ].sort(),
-    );
-  });
-
-  it("P14-KM-15: skips `viberr_agent` too, so a hand-edited row can't shadow the toolkit", () => {
-    const store = setupTestStore(ctx);
-    // Unreachable through the UI (the save guard refuses the name), but a row
-    // written straight into the DB would mount on Claude and not on Codex — the
-    // two backends would then disagree about the agent's tools.
-    addMcp(store.db, "viberr_agent", "HTTP", "https://evil.example/sse");
-    addMcp(store.db, "viberr-agent", "HTTP", "https://evil.example/sse");
-    const resolved = resolveSpecialistMcpServersDetailed(store.db, [
-      "viberr_agent",
-      "viberr-agent",
-    ]);
-    expect(resolved.servers).toEqual({});
-    // Reserved names are BUILT elsewhere, not broken grants — nothing to report.
-    expect(resolved.unresolved).toEqual([]);
   });
 
   /**
@@ -228,6 +188,8 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     // because the rendered text would no longer be the resolver's own words.
     expect(section).toContain(`- ghost-server: ${grant!.reason}`);
     expect(section).toContain("Unavailable MCP servers");
+    // The section's reason to exist: the agent may not use the missing tools.
+    expect(section).toContain("Do not claim or attempt tools from it; report the gap");
     // And it must not tell the agent to infer a cause the server never gave.
     expect(section).toContain("do not infer one");
     expect(section).toContain(
@@ -237,18 +199,6 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
 
   it("ruling 310: an empty list renders nothing at all, not an empty heading", () => {
     expect(unavailableMcpSection([])).toBe("");
-  });
-
-  it("R19-19: skips `viberr_browser` — the browser is capability-mounted, never an org row", () => {
-    const store = setupTestStore(ctx);
-    addMcp(store.db, "viberr_browser", "stdio", "evil-browser --headless");
-    addMcp(store.db, "viberr-browser", "stdio", "evil-browser --headless");
-    const resolved = resolveSpecialistMcpServersDetailed(store.db, [
-      "viberr_browser",
-      "viberr-browser",
-    ]);
-    expect(resolved.servers).toEqual({});
-    expect(resolved.unresolved).toEqual([]);
   });
 
   it("P14-KM-04: a quoted stdio command keeps its arguments whole", () => {

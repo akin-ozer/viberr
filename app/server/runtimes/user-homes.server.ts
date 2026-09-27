@@ -82,7 +82,7 @@ import { toError } from "~/shared/errors";
 export type { RealBackend };
 
 /** The directory under `<dataRoot>/runtimes` that holds the per-person homes. */
-export const USER_RUNTIMES_DIR = "users";
+const USER_RUNTIMES_DIR = "users";
 
 /** A user id — and, since ruling 181, a run id — may become a PATH SEGMENT
  *  here, so each is validated as one. Viberr mints ids as `u_<base64url>` /
@@ -91,7 +91,7 @@ export const USER_RUNTIMES_DIR = "users";
  *  than resolved. */
 const PATH_SAFE_SEGMENT_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-export function assertPathSafeUserId(userId: string): string {
+function assertPathSafeUserId(userId: string): string {
   if (!PATH_SAFE_SEGMENT_RE.test(userId)) {
     throw AppError.validation(
       "That user id cannot be used for a runtime home.",
@@ -175,7 +175,7 @@ export interface BackendAccountRef {
  * a private home from the backend home anyway (ruling 181) and only take the
  * account's `auth.json` from here.
  */
-export const ACCOUNT_HOME_SHARED_DIRS = {
+const ACCOUNT_HOME_SHARED_DIRS = {
   claude: ["projects"],
   codex: [],
 } as const satisfies Record<RealBackend, readonly string[]>;
@@ -350,7 +350,7 @@ export function listUserRuntimeRoots(
 const CODEX_RUN_HOMES_DIR = "runs";
 
 /** The state directories a run shares with the person's home, by link. */
-export const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as const;
+const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as const;
 
 /** The vendor-owned files a run gets a private copy of. */
 const CODEX_HOME_SEEDED_FILES = ["auth.json", "config.toml"] as const;

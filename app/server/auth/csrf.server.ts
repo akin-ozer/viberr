@@ -15,22 +15,18 @@ import { getEnv } from "../config/env.server";
  * (plus rate limiting). Everything else calls assertCsrf(request, sessionId).
  */
 
-export const CSRF_FIELD_NAME = "_csrf";
+const CSRF_FIELD_NAME = "_csrf";
 
 /** A submitted token is a non-empty string; a file part, a missing field or an
  *  empty value all mean "no token was sent" and are refused as such. */
 const csrfFieldSchema = z.string().min(1);
 
-/** Pure token derivation — deterministic per session. Exported for tests. */
-export function csrfTokenForSession(sessionId: string, secret: string): string {
-  return createHmac("sha256", secret)
+/** The session's token, HMAC(session secret, session id): the same on every
+ *  call for one session (the root loader's `<CsrfInput />` and `assertCsrf`). */
+export function getCsrfToken(sessionId: string): string {
+  return createHmac("sha256", getEnv().VIBERR_SESSION_SECRET)
     .update(`viberr-csrf:${sessionId}`, "utf8")
     .digest("base64url");
-}
-
-/** Token for the current session (env wrapper — routes/root loader). */
-export function getCsrfToken(sessionId: string): string {
-  return csrfTokenForSession(sessionId, getEnv().VIBERR_SESSION_SECRET);
 }
 
 function forbidden(reason: string): Response {
@@ -98,11 +94,14 @@ export function assertTrustedOrigin(request: Request): void {
   }
 }
 
-/** Pure core so tests can pass an explicit secret. */
-export async function assertCsrfWithSecret(
+/**
+ * Guard for every mutating action of an authenticated user. Pass the
+ * already-parsed formData when you have it (a request body can only be
+ * read once without cloning).
+ */
+export async function assertCsrf(
   request: Request,
   sessionId: string,
-  secret: string,
   formData?: FormData,
 ): Promise<void> {
   assertTrustedOrigin(request);
@@ -118,28 +117,10 @@ export async function assertCsrfWithSecret(
   }
   if (!provided) throw forbidden("Missing CSRF token.");
 
-  const expected = csrfTokenForSession(sessionId, secret);
+  const expected = getCsrfToken(sessionId);
   const a = Buffer.from(provided, "utf8");
   const b = Buffer.from(expected, "utf8");
   if (a.byteLength !== b.byteLength || !timingSafeEqual(a, b)) {
     throw forbidden("Invalid CSRF token.");
   }
-}
-
-/**
- * Guard for every mutating action of an authenticated user. Pass the
- * already-parsed formData when you have it (a request body can only be
- * read once without cloning).
- */
-export async function assertCsrf(
-  request: Request,
-  sessionId: string,
-  formData?: FormData,
-): Promise<void> {
-  await assertCsrfWithSecret(
-    request,
-    sessionId,
-    getEnv().VIBERR_SESSION_SECRET,
-    formData,
-  );
 }

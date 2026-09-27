@@ -64,12 +64,11 @@ import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server"
 import { errorMessage, toError } from "~/shared/errors";
 
 /**
- * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
- * v0.156.0 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
- * DECLARED dependency so this line cannot go stale again; 0.146.0 → 0.153.4
- * moved the SDK's surface in three additive places, listed on that constant,
- * and none of the event shapes this adapter or the wire normalizer reads;
- * 0.153.4 → 0.156.0 moved only the pinned CLI).
+ * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified against
+ * {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the DECLARED
+ * dependency; 0.146.0 → 0.153.4 moved the SDK's surface in three additive
+ * places, listed on that constant, and none of the event shapes this adapter
+ * or the wire normalizer reads; 0.153.4 → 0.156.0 moved only the pinned CLI).
  * `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
@@ -321,7 +320,7 @@ function codexMcpServers(
  * from before this fence; it falls back to the CLI default rather than run a
  * tier the deployment never chose.
  */
-export function resolveCodexReasoningEffort(
+function resolveCodexReasoningEffort(
   effort?: string,
 ): ModelReasoningEffort | undefined {
   switch (effort) {

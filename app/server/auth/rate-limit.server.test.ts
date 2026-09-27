@@ -73,7 +73,7 @@ describe("TokenBucketLimiter", () => {
    * nothing, and every later insert paid a full O(n) scan — the throttle
    * becoming the amplifier.
    */
-  it("bounds the tracked-key map and does not rescan on every new key", () => {
+  it("bounds the tracked-key map, forgives the oldest equally-spent key, and time-limits the prune", () => {
     const now = 0;
     const limiter = new TokenBucketLimiter({
       capacity: 1,
@@ -92,7 +92,8 @@ describe("TokenBucketLimiter", () => {
     // answered false. (Every bucket here is equally spent, so the least
     // -throttled eviction degenerates to the first-inserted one.)
     expect(limiter.tryConsume("k0")).toBe(true);
-    // And the O(n) scan is time-limited, not once per insert.
+    // And the prune's O(n) sweep is time-limited, not run once per insert
+    // (the eviction scan for a victim still is; this does not measure it).
     expect(prune.mock.calls.length).toBeLessThanOrEqual(1);
   });
 

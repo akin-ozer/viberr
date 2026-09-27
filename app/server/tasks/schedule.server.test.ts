@@ -270,26 +270,6 @@ describe("scheduleTaskAction", () => {
     expect(timeline("VIB-1").some((e) => e.actor?.kind === "human")).toBe(true);
   });
 
-  it("R22: pins no autonomy or backend — the run resolves the live profile at fire time", async () => {
-    // R22 supersedes R19-A's schedule-time clamp: the entry stores nothing to
-    // clamp, so the fired run resolves AND clamps against whatever operator
-    // profile is deployed when it fires (see runOperator → resolveOperatorAuthority).
-    // Canary: re-add `autonomy`/`backend` to the stored entry in
-    // schedule.server.ts and these read back a value instead of undefined.
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id, stage: "impl" }) });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    await scheduleTaskAction(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: new Date(Date.now() + 3_600_000).toISOString() },
-      actor(),
-      dctx(),
-    );
-    const stored = schedules("VIB-1")[0]!;
-    expect(stored).not.toHaveProperty("autonomy");
-    expect(stored).not.toHaveProperty("backend");
-  });
-
   it("run-agent (dynamic dispatch): pins the DEPLOYED profile id + prompt; an undeployed id is refused at create time", async () => {
     // Deploy `dev` so the picker has something real; the entry pins ONLY the
     // profile identity (R22's rule: backend/model/capabilities resolve from the
@@ -641,38 +621,6 @@ describe("fireDueSchedules", () => {
     expect(spec.prompt).toContain("re-check before standup");
   });
 
-  it("P14-RV-03: an ARCHIVED task never fires — the run is retired, not started", async () => {
-    // R14-3 calls archive a terminal disposition, and the dialog promises the
-    // task "leaves the board and the review queue". Archiving withdrew the
-    // packet and the recommendations but never touched `schedules`, so the one
-    // thing it failed to stop was the one thing that acts with NO human
-    // watching (FR39): a scheduled operator re-run on abandoned work.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-9", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        archived: true,
-        schedules: [rawSchedule({ id: "sch_arch" })],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    const res = await fireDueSchedules(store.db, dctx());
-    expect(res.fired).toBe(0);
-    expect(res.skipped).toBe(1);
-    // The occurrence is RETIRED (recorded), not left pending to fire later.
-    expect(schedules("VIB-9").find((s) => s.id === "sch_arch")!.status).not.toBe(
-      "pending",
-    );
-    // The retirement IS audited (the occurrence must never vanish), but the
-    // outcome names WHY it did not run — no operator was enqueued.
-    const audit = listAuditEvents(store.db).filter(
-      (e) => e.action === "task.schedule.fired",
-    );
-    expect(audit).toHaveLength(1);
-    expect(audit[0]?.details).toMatchObject({ outcome: "skipped-archived" });
-  });
-
   it("hunt 2026-08-29: an ARCHIVED PROJECT never fires — the freeze the fire path's operatorAuthorized bypassed", async () => {
     // The fire arm runs under `operatorAuthorized: true`, which skips
     // requireRunAgents and with it the F17/R6-3 archived-project read-only
@@ -925,20 +873,6 @@ describe("fireDueSchedules", () => {
     expect(schedules("VIB-1")[0]!.status).toBe("claimed");
   });
 
-  it("retires a due schedule on a Done task WITHOUT running the operator (skipped-done)", async () => {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id, stage: terminalStage(), schedules: [rawSchedule({ id: "sch_done" })] }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    const res = await fireDueSchedules(store.db, dctx());
-    expect(res.fired).toBe(0);
-    expect(res.skipped).toBe(1);
-    expect(schedules("VIB-3")[0]!.status).toBe("fired");
-    const ev = listAuditEvents(store.db).find((e) => e.action === "task.schedule.fired");
-    expect(ev!.details?.outcome).toBe("skipped-done");
-  });
-
   it("U36-9 (pass 36): the skipped-done note names the terminal stage as the board calls it", async () => {
     // Live: "HLC-1 is already Done — the scheduled run is moot." on a board
     // whose last stage is Shipped. Canary: put the literal "Done" back.
@@ -961,59 +895,11 @@ describe("fireDueSchedules", () => {
     expect(note.text).not.toContain("already Done");
   });
 
-  it("F19-20: a task Done'd AFTER the tick's SELECT is retired, not run (the file decides, not the projection)", async () => {
-    // The tick reads candidates from `task_projections`, then works through
-    // them one awaited locked write at a time. An acceptance landing in that
-    // gap left `row.stage` stale, and the in-lock re-check only looked at
-    // `target.status` — which an acceptance never touches — so the occurrence
-    // was CLAIMED and a real unwatched operator turn was enqueued against a
-    // merged, Done task. FR39: never on a terminal stage.
-    //
-    // The projection row keeps the pre-accept stage while the FILE is already
-    // Done — exactly the mid-tick state, reproduced without a race.
-    //
-    // Canary: re-derive `mootBecause` from `row.stage` instead of
-    // `parsed.frontmatter.stage` and this fires an operator run.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-7", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        schedules: [rawSchedule({ id: "sch_toctou" })],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    // …and now the task reaches Done in the file, with the projection unrebuilt.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-7", {
-        ownerUserId: store.users.arda.id,
-        stage: terminalStage(),
-        schedules: [rawSchedule({ id: "sch_toctou" })],
-      }),
-    });
-    // SAFETY: the SELECT names one column, 0001_baseline declares
-    // `task_projections.stage` TEXT NOT NULL, and VIB-7 was projected above.
-    expect(
-      (
-        store.db
-          .prepare(`SELECT stage FROM task_projections WHERE task_key='VIB-7'`)
-          .get() as { stage: string }
-      ).stage,
-    ).toBe("impl"); // the stale snapshot the tick will select
-
-    const res = await fireDueSchedules(store.db, dctx());
-    expect(res.fired).toBe(0);
-    expect(res.skipped).toBe(1);
-    expect(schedules("VIB-7").find((s) => s.id === "sch_toctou")!.status).toBe("fired");
-    const ev = listAuditEvents(store.db).find((e) => e.action === "task.schedule.fired");
-    expect(ev!.details?.outcome).toBe("skipped-done");
-    // No operator turn was enqueued against the closed task.
-    expect(startedRunSpecs().some((s) => s.kind === "operator")).toBe(false);
-  });
-
   it("F19-20: a task Done'd AFTER its occurrence was CLAIMED is refused at fire time — and the task SAYS no run started", async () => {
-    // The claim-time re-check above closes the window it can see. This is the
-    // one it cannot: both occurrences were claimed while the task was live, and
-    // the FIRST drive's turn closes the task before the second is driven. FR39
+    // The claim-time re-check (the stale-projection tests below) closes the
+    // window it can see. This is the one it cannot: both occurrences were
+    // claimed while the task was live, and the FIRST drive's turn closes the
+    // task before the second is driven. FR39
     // says never on a terminal stage, so `runOperator` refuses — and the
     // occurrence's own record has to match, because the claim already wrote
     // "Scheduled action starting" to the timeline and an audit row saying
@@ -1066,30 +952,6 @@ describe("fireDueSchedules", () => {
     });
   });
 
-  it("B-WF3: the operator run says it is SCHEDULED and carries the note", async () => {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        schedules: [
-          rawSchedule({ id: "sch_note", prompt: "re-check whether CI went green" }),
-        ],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(1);
-    await waitForSchedule("VIB-1", "sch_note", "fired");
-
-    // The reason a human scheduled the re-run has to reach the turn: as a bare
-    // `manual` trigger the operator could not tell a scheduled re-check from
-    // someone pressing "Run operator", and the note existed only in a timeline
-    // entry the prompt never pointed at.
-    const prompt = startedRunSpecs().find((s) => s.kind === "operator")?.prompt ?? "";
-    expect(prompt).toContain("SCHEDULED re-check");
-    expect(prompt).toContain("re-check whether CI went green");
-  });
-
   /**
    * Build the exact state a tick opens with when an acceptance (or an archive)
    * lands between the candidate SELECT and this row's claim: the FILE has moved
@@ -1117,6 +979,14 @@ describe("fireDueSchedules", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(key, patch),
     });
+    // The stale snapshot the tick will select.
+    expect(
+      z
+        .object({ stage: z.string() })
+        .parse(
+          store.db.prepare(`SELECT stage FROM task_projections WHERE task_key = ?`).get(key),
+        ).stage,
+    ).toBe("impl");
   }
 
   it("F19-20/FR39: a task that reached Done AFTER the tick's snapshot never fires", async () => {
@@ -1151,7 +1021,12 @@ describe("fireDueSchedules", () => {
     withStaleProjection("VIB-5", { archived: true });
 
     const res = await fireDueSchedules(store.db, dctx());
+    expect(res.fired).toBe(0);
     expect(res.skipped).toBe(1);
+    // The occurrence is RETIRED (recorded), not left pending to fire later, and
+    // the retirement is audited once: the occurrence never vanishes.
+    expect(schedules("VIB-5")[0]!.status).toBe("fired");
+    expect(listAuditEvents(store.db, { action: "task.schedule.fired" })).toHaveLength(1);
     const ev = listAuditEvents(store.db).find((e) => e.action === "task.schedule.fired");
     expect(ev!.details?.outcome).toBe("skipped-archived");
     const timeline = readTaskFile({

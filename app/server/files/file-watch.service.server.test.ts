@@ -115,7 +115,7 @@ describe("unlinkDir handling (E13)", () => {
       .prepare(`SELECT task_key FROM task_projections WHERE project_slug = ?`)
       .all(store.slug);
     expect(left.map((r) => r.task_key)).toEqual(["VIB-2"]);
-  }, 15000);
+  });
 
   it("a recursive PROJECT rm reconciles the whole project (no orphan rows)", async () => {
     const store = setupTestStore(ctx);
@@ -132,7 +132,7 @@ describe("unlinkDir handling (E13)", () => {
       "project + task rows pruned",
       () => pokeDir(path.join(store.dataRoot, "projects")),
     );
-  }, 15000);
+  });
 });
 
 describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
@@ -180,7 +180,7 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
       () => projectedTitle() === "Edited title after pruning",
       "task.md reprojected after edit",
     );
-  }, 15000);
+  });
 });
 
 /**
@@ -370,14 +370,13 @@ describe("a failed rebuild is retried (ruling 218)", () => {
   }, 30_000);
 
   /**
-   * The rung-exhaustion guard, pinned separately so the reason the ladder above
-   * is 500 long does not live only in a comment. `scheduleRetry` gives up after
-   * the last rung; a test ladder that runs out mid-wait stops retrying and the
-   * canary fails for a reason that has nothing to do with ruling 218.
+   * The ruled ladder, pinned (ruling 218(a)). `scheduleRetry` gives up after
+   * the last rung, which is why the test ladder above is 500 long: a test
+   * ladder that runs out mid-wait stops retrying and the canary fails for a
+   * reason that has nothing to do with ruling 218.
    */
-  it("ruling 218's ladder gives up after its last rung, which is why the test ladder is long", () => {
+  it("ruling 218's ladder is 2s, 5s, 15s, 45s, 120s", () => {
     expect(RETRY_BACKOFF_MS).toEqual([2_000, 5_000, 15_000, 45_000, 120_000]);
-    expect(RETRY_BACKOFF_MS).toHaveLength(5);
   });
 });
 
@@ -389,7 +388,7 @@ describe("watcher liveness (E8)", () => {
 
     watcher.emit("error", new Error("EMFILE: too many open files"));
     expect(isFileWatcherAlive()).toBe(false);
-  }, 15000);
+  });
 
   it("ENOENT is benign: deleting a watched path must not kill the watcher", async () => {
     // Deleting a watched subtree can race chokidar into a spurious ENOENT
@@ -404,7 +403,7 @@ describe("watcher liveness (E8)", () => {
       }),
     );
     expect(isFileWatcherAlive()).toBe(true);
-  }, 15000);
+  });
 });
 
 describe("watcher re-arm lifecycle (F10-08)", () => {
@@ -432,5 +431,5 @@ describe("watcher re-arm lifecycle (F10-08)", () => {
     } finally {
       vi.useRealTimers();
     }
-  }, 15000);
+  });
 });

@@ -11,8 +11,8 @@ import type { SeedUserIds } from "../../../test-support/demo-data";
 
 /**
  * Route-level tests for the phase-4 shell: real Requests against the actual
- * route module loaders/actions (auth gating, seeded board shape, create-task
- * RBAC, notification reads, theme persistence).
+ * route module loaders/actions (auth gating, seeded board shape, notification
+ * reads, theme persistence, project creation).
  */
 
 let app: AppTestContext;
@@ -57,7 +57,6 @@ type RouteActionResult = Awaited<
     | typeof import("~/routes/_index").action
     | typeof import("~/routes/notifications.read").action
     | typeof import("~/routes/prefs.theme").action
-    | typeof import("~/routes/project.board").action
   >
 >;
 
@@ -73,7 +72,6 @@ function actionOutcome(result: RouteActionResult) {
     ok: "ok" in result ? result.ok : undefined,
     key: "key" in result ? result.key : undefined,
     slug: "slug" in result ? result.slug : undefined,
-    stageName: "stageName" in result ? result.stageName : undefined,
     changed: "changed" in result ? result.changed : undefined,
     payload: "data" in result ? result.data : undefined,
     error:
@@ -82,15 +80,6 @@ function actionOutcome(result: RouteActionResult) {
     headers: "init" in result ? new Headers(result.init?.headers) : undefined,
   };
 }
-
-/**
- * A guard refuses by THROWING React Router's `data(message, { status })`, so
- * the rejection reaches the test untyped and is parsed where it lands.
- */
-const thrownRefusalSchema = z.object({
-  data: z.unknown(),
-  init: z.object({ status: z.number() }).nullish(),
-});
 
 /** `.get()` hands back untyped SQLite cells, so the row is parsed on read. */
 const memberRoleRowSchema = z.object({ role: z.string() }).optional();
@@ -190,20 +179,6 @@ describe("workspace layout loader (seeded)", () => {
       ).catch((e) => e);
       expect(thrown?.init?.status ?? thrown?.status).toBe(404);
       expect(String(thrown?.data ?? thrown)).toBe("No project at projects/viberr-core.");
-    });
-
-    it("the task-detail surface is refused too (the layout gate covers children)", async () => {
-      const { loader } = await import("~/routes/project");
-      const { cookie } = await app.cookieFor(seedIds.deniz);
-      const thrown = await loader(
-        loaderArgs(
-          "/projects/viberr-core/tasks/VIB-142",
-          PROJECT_PATTERN,
-          { slug: "viberr-core" },
-          cookie,
-        ),
-      ).catch((e) => e);
-      expect(thrown?.init?.status ?? thrown?.status).toBe(404);
     });
 
     /**
@@ -490,77 +465,6 @@ describe("home loader (seeded)", () => {
     expect(result.prefs.stars["deploy-pipeline"]).toBe(true);
     expect(result.unread).toBe(6);
     expect(result.org.users.admins).toBeGreaterThanOrEqual(1);
-  });
-});
-
-describe("board create-task action", () => {
-  async function postCreate(userId: string, title: string) {
-    const { action } = await import("~/routes/project.board");
-    const { cookie, sessionId } = await app.cookieFor(userId);
-    const csrf = await app.csrfFor(sessionId);
-    const body = new URLSearchParams({
-      _csrf: csrf,
-      intent: "create-task",
-      title,
-      goal: "",
-      stage: "triage",
-    });
-    const request = app.request("/projects/viberr-core/board", {
-      method: "POST",
-      cookie,
-      body,
-    });
-    return action({
-      request,
-      url: new URL(request.url),
-      params: { slug: "viberr-core" },
-      pattern: `${PROJECT_PATTERN}/board`,
-      context: new RouterContextProvider(),
-    });
-  }
-
-  it("member creates a task → file on disk + board card", async () => {
-    const result = actionOutcome(
-      await postCreate(seedIds.arda, "Route-level create task"),
-    );
-    expect(result.ok).toBe(true);
-    expect(result.key).toMatch(/^VIB-\d+$/);
-    expect(result.stageName).toBe("Triage");
-
-    const taskFile = path.join(
-      app.dataRoot,
-      "projects",
-      "viberr-core",
-      "tasks",
-      result.key ?? "",
-      "task.md",
-    );
-    expect(existsSync(taskFile)).toBe(true);
-
-    const { getBoard } = await import(
-      "~/server/projections/board-query.server"
-    );
-    const board = getBoard(app.db, "viberr-core")!;
-    const triage = board.columns.find((c) => c.stage.id === "triage")!;
-    const created = triage.tasks.find((t) => t.key === result.key)!;
-    expect(created).toBeDefined();
-    expect(created.readiness).toBe("input_required");
-    expect(created.waiting).toBe("human");
-    expect(created.goal).toBe("Goal to be refined at the triage quality gate.");
-    expect(created.operator).toBeNull(); // triage tasks get no operator
-  });
-
-  // E2: this used to assert the inner guard's 403 ("Only project members can
-  // create tasks") — the one reply in the app that confirmed a members-only
-  // project exists. The board action now runs `requireVisibleProject` first, so
-  // a non-member gets the same unknown-slug 404 as every other route and intent.
-  // Per-intent coverage lives in app/routes/project.board.server.test.ts.
-  it("non-member is refused as an unknown slug (R15-4 secrecy)", async () => {
-    const thrown = thrownRefusalSchema.parse(
-      await postCreate(seedIds.deniz, "Should not exist").catch((e) => e),
-    );
-    expect(thrown.init?.status).toBe(404);
-    expect(String(thrown.data)).toBe("No project at projects/viberr-core.");
   });
 });
 

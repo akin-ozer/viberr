@@ -151,11 +151,36 @@ const CREDENTIAL_COLUMNS = `id, user_id, backend, kind, method, secret_suffix,
 
 /**
  * Ruling 507: the order that puts a person's ACTIVE account first — the most
- * recently selected, then the newer row, then the id, so the answer is total
- * even for two rows written in one millisecond. The one definition of "active":
- * every reader that wants the account runs bill takes the first row of it.
+ * recently selected, then the newer row, then the id, so the answer is total.
+ * The one definition of "active": every reader that wants the account runs
+ * bill takes the first row of it. Selection stamps are unique per person and
+ * backend ({@link selectionStamp}), so the tie-breakers never pick the active
+ * account.
  */
 const ACTIVE_FIRST = "selected_at DESC, created_at DESC, id DESC";
+
+const latestSelectionSchema = z.object({ latest: z.string().nullable() });
+
+/**
+ * The `selected_at` that makes an account the active one: now, or one
+ * millisecond past the person's latest selection on that backend when that is
+ * not already in the past. Two selections in one millisecond (a connect and a
+ * switch, two sign-ins) would otherwise tie, and {@link ACTIVE_FIRST} would
+ * settle the tie on the random id instead of on which came last.
+ */
+function selectionStamp(db: DatabaseSync, userId: string, backend: RealBackend): string {
+  const now = Date.now();
+  const row = latestSelectionSchema.parse(
+    db
+      .prepare(
+        `SELECT MAX(selected_at) AS latest FROM user_backend_credentials
+          WHERE user_id = ? AND backend = ?`,
+      )
+      .get(userId, backend),
+  );
+  const latest = row.latest === null ? Number.NaN : Date.parse(row.latest);
+  return new Date(latest >= now ? latest + 1 : now).toISOString();
+}
 
 /** 0001_baseline declares `backend`, `kind`, `detail_json`, `created_at` and
  *  `updated_at` NOT NULL with CHECK constraints pinning the two vocabularies;
@@ -663,7 +688,7 @@ export async function setBackendApiKey(
     value.slice(-4),
     JSON.stringify(detail),
     verifiedAt,
-    now,
+    selectionStamp(db, actor.userId, backend),
     now,
     now,
   );
@@ -824,6 +849,7 @@ export function recordBackendLogin(
   target: LoginTarget,
 ): BackendCredentialRow {
   const now = new Date().toISOString();
+  const selectedAt = selectionStamp(db, actor.userId, backend);
   const facts = JSON.stringify(trimDetail(detail));
   const stored = target.existing && getBackendAccount(db, actor.userId, target.id) !== null;
   if (stored) {
@@ -831,7 +857,7 @@ export function recordBackendLogin(
       `UPDATE user_backend_credentials
           SET method = ?, detail_json = ?, verified_at = ?, selected_at = ?, updated_at = ?
         WHERE id = ? AND user_id = ?`,
-    ).run(method, facts, now, now, now, target.id, actor.userId);
+    ).run(method, facts, now, selectedAt, now, target.id, actor.userId);
   } else {
     db.prepare(
       `INSERT INTO user_backend_credentials
@@ -845,7 +871,7 @@ export function recordBackendLogin(
       method,
       facts,
       now,
-      now,
+      selectedAt,
       target.legacyHome ? 1 : 0,
       now,
       now,
@@ -898,10 +924,14 @@ export function switchBackendAccount(
       `${backendAccountName(row)} can't be used yet: ${health.detail ?? "its credential is not usable."}`,
     );
   }
-  const now = new Date().toISOString();
   db.prepare(
     `UPDATE user_backend_credentials SET selected_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
-  ).run(now, now, row.id, actor.userId);
+  ).run(
+    selectionStamp(db, actor.userId, row.backend),
+    new Date().toISOString(),
+    row.id,
+    actor.userId,
+  );
   activeAccountChanged(db, actor.userId, row.backend);
   recordAudit(db, {
     action: "profile.backend.switched",
@@ -1154,11 +1184,17 @@ export function backendAccountHealth(
   if (pathExists(vendorLoginCredentialPath(row.backend, home))) {
     return { ...base, available: true, verification: "file", detail: null };
   }
-  if ((env.platform ?? process.platform) === "darwin" && pathExists(home)) {
-    // On macOS the vendor client keeps its sign-in in the login Keychain, which
+  if (
+    row.backend === "claude" &&
+    (env.platform ?? process.platform) === "darwin" &&
+    pathExists(home)
+  ) {
+    // On macOS the Claude client keeps its sign-in in the login Keychain, which
     // a server-side probe cannot read without popping an unlock dialog. The
     // home exists, so the binary HAS run here: honour the sign-in and report
-    // the weaker verification rather than hiding it.
+    // the weaker verification rather than hiding it. Codex signs in to its
+    // `auth.json` alone, and a run copies only that file into its home, so a
+    // Codex home without it cannot run on any platform.
     return { ...base, available: true, verification: "presence", detail: null };
   }
   return {

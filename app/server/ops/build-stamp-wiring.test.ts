@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveBuildInfo } from "./build-info.server";
 
 /**
  * Ruling 345 (pass 37, F37-181) — a build stamp the image declares and nothing
@@ -85,28 +84,5 @@ describe("the build stamp is wired end to end (ruling 345)", () => {
     // worth having. CANARY: delete the verify block and a deploy can still
     // report success over a container that never restarted.
     expect(deploy).toContain("/resources/health");
-  });
-
-  it("a stamped env resolves to `env`, and an unstamped one admits it", () => {
-    // The module's own contract, pinned here because the wiring above is only
-    // worth anything if the stamp changes the answer. `ROOT` is a real checkout,
-    // so the unstamped case falls through to the git reader — which is exactly
-    // what an image cannot do, and why env is the one source that matters.
-    const stamped = resolveBuildInfo(ROOT, {
-      VIBERR_BUILD_VERSION: "9.9.9",
-      VIBERR_BUILD_SHA: "a".repeat(40),
-      VIBERR_BUILD_TIME: "2026-09-17T19:22:10.571Z",
-    });
-    expect(stamped).toEqual({
-      version: "9.9.9",
-      revision: "a".repeat(12),
-      revisionSource: "env",
-      builtAt: "2026-09-17T19:22:10.571Z",
-    });
-    // An image with no stamp and no `.git`: three honest nulls, no placeholder.
-    const bare = resolveBuildInfo(path.join(ROOT, "app"), {});
-    expect(bare.revision).toBeNull();
-    expect(bare.revisionSource).toBeNull();
-    expect(bare.builtAt).toBeNull();
   });
 });

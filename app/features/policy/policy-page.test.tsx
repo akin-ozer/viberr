@@ -101,7 +101,7 @@ describe("HumanAccess", () => {
     // Header counts derive live from the same member array.
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
-    // Grant rows (derived from PROJECT_CAP_MATRIX) — total table, every enforced action.
+    // Grant rows (one per RBAC_DEFINITIONS entry) — the whole table, every enforced action.
     expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(21);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Edit task priority, labels & due date")).toBeTruthy();

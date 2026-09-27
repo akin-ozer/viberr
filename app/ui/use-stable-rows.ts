@@ -40,7 +40,7 @@ function equalJson(a: Json, b: Json): boolean {
 }
 
 /** Deep equality over loader data (plain objects, arrays and primitives). */
-export function sameRow<T>(a: T, b: T): boolean {
+function sameRow<T>(a: T, b: T): boolean {
   // SAFETY: rows are loader data, which single-fetch decodes into plain
   // objects, arrays and primitives only; any other object compares by identity.
   return equalJson(a as Json, b as Json);
@@ -50,7 +50,7 @@ export function sameRow<T>(a: T, b: T): boolean {
  * `next`, with each row replaced by the row of `prev` that has the same key and
  * the same content; `prev` itself when every row was kept in the same order.
  */
-export function shareRows<T>(
+function shareRows<T>(
   prev: T[],
   next: T[],
   keyOf: (row: T) => string,

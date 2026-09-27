@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { MemoryRouter, createRoutesStub } from "react-router";
-import {
-  ExecutionProfile,
-  type DeployedSpecialistView,
-  type LiveAgentRun,
+import { createRoutesStub } from "react-router";
+import type {
+  DeployedSpecialistView,
+  LiveAgentRun,
 } from "./execution-profile";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type {
@@ -1306,13 +1305,12 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
 
 describe("R15-2 safety net (b): the manual delivery control", () => {
   it("renders for a viewer with delivery authority when no live PR stands, and submits deliver-review", async () => {
-    const { container, submitted, getByText } = renderPage({ canDeliver: true });
+    const { container, submitted } = renderPage({ canDeliver: true });
     const btn = findButton(container, "Deliver branch & open PR");
     expect(btn).toBeDefined();
     fireEvent.click(btn!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("deliver-review");
-    expect(getByText).toBeTruthy();
   });
 
   it("ruling 134(c): offers the push control when the open PR does not carry the delivered revision, and it submits deliver-review", async () => {
@@ -1393,122 +1391,6 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(
       findButton(noAuthority.container, "Deliver branch & open PR"),
     ).toBeUndefined();
-  });
-});
-
-/**
- * F20-5 (R20-1) — the server refuses a MANUAL operator run while a decision
- * packet is open (coordination is paused by the packet). The button must say so
- * instead of offering a paid no-op. N20-17 — a closed task's disabled button
- * notes that mentioning @operator still runs it, so the two run paths do not
- * read as silently inconsistent. (C8's separate "Scheduled re-runs" panel is
- * gone — scheduling lives inside the run controls now, pinned below.)
- */
-describe("F20-5 / N20-17: the operator run control's honest off-states", () => {
-  const openPacket: PacketRender = {
-    type: "input",
-    kind: "Decision required",
-    from: "Operator",
-    title: "VIB-151 needs a decision",
-    body: "Choose a path.",
-    observations: [],
-    options: [{ kind: "custom", t: "Rework and re-run", d: "", rec: true }],
-  };
-
-  it("F20-5: an open packet disables Run operator with the resolve-first reason", () => {
-    const { container } = renderPage({ myRole: "admin", task: { packet: openPacket } });
-    const runOperator = findButton(container, "Run operator")!;
-    expect(runOperator).toBeDefined();
-    // Canary: drop the `packetOpen` blockedReason wiring and the button goes
-    // live while the server refuses the run as a paid no-op.
-    expect(runOperator.disabled).toBe(true);
-    expect(container.textContent).toContain(
-      "Open decision. Resolve it before running the operator.",
-    );
-  });
-
-  it("ruling 177 (was N20-17): a closed task's disabled button no longer advertises the @operator side door", () => {
-    // N20-17 disclosed that an @operator comment still ran the operator on a
-    // closed task; ruling 177 closed that door, so the disclosure would lie.
-    // Canary: put the "Mentioning @operator … still runs it" sentence back.
-    const { container } = renderPage({
-      myRole: "admin",
-      task: { displayReadiness: "accepted", stage: "done" },
-    });
-    const runOperator = findButton(container, "Run operator")!;
-    expect(runOperator.disabled).toBe(true);
-    expect(container.textContent).toContain("Task closed. Reopen it to run the operator.");
-    expect(container.textContent).not.toContain("still runs it");
-  });
-});
-
-/**
- * C8's successor (dynamic-dispatch rework 2026-08-29): the standalone
- * "Scheduled re-runs" panel and its "Schedule a re-run" disclosure are DELETED.
- * Scheduling is baked into the two run controls — a pending entry lists under
- * the control that created it ("no additional button", owner directive).
- */
-describe("scheduling lives inside the run controls — no separate panel", () => {
-  const schedule = (id: string, patch: Partial<TaskSchedule> = {}): TaskSchedule => ({
-    id,
-    action: "run-operator",
-    dueAt: new Date(Date.now() + 3_600_000).toISOString(),
-    profileId: null,
-    prompt: "",
-    createdBy: "u-arda",
-    createdByLabel: "Arda",
-    createdAt: "2026-07-01T09:00:00.000Z",
-    status: "pending",
-    firedAt: null,
-    claimedAt: null,
-    retries: 0,
-    ...patch,
-  });
-
-  it("no scheduled-actions panel or disclosure exists, even with a pending entry", () => {
-    const { container, queryByText } = renderPage({
-      myRole: "admin",
-      schedules: [schedule("s-1")],
-    });
-    // Canary: re-add the ScheduledActions panel and these go red.
-    expect(queryByText("Scheduled re-runs")).toBeNull();
-    expect(queryByText("Schedule a re-run")).toBeNull();
-    expect(container.querySelector('[data-testid="scheduled-actions"]')).toBeNull();
-  });
-
-  it("a pending operator re-run lists under the OPERATOR control, with Cancel", () => {
-    const { container } = renderPage({
-      myRole: "admin",
-      schedules: [schedule("s-1", { prompt: "re-check the PR" })],
-    });
-    // The operator control's own list — not the agent control's.
-    const opRun = container.querySelector(".op-run:not(.agent-run)")!;
-    const row = opRun.querySelector(".sched-list .sched-row")!;
-    expect(row.textContent).toContain("operator re-run");
-    expect(row.textContent).toContain("re-check the PR");
-    expect(row.textContent).toContain("by Arda");
-    expect(row.querySelector("button.sched-cancel")).not.toBeNull();
-    expect(container.querySelector(".agent-run .sched-list")).toBeNull();
-  });
-
-  it("a pending agent run lists under the RUN-AN-AGENT control, named by its live deployment", () => {
-    const { container } = renderPage({
-      myRole: "admin",
-      deployedSpecialists: [
-        deployedAgent("developer", "Developer", "Implementation", false),
-      ],
-      schedules: [
-        schedule("s-a", { action: "run-agent", profileId: "developer", prompt: "fix the lint debt" }),
-      ],
-    });
-    const row = container.querySelector(".agent-run .sched-list .sched-row")!;
-    // R22 kept: the entry pins the profile ID only — the row resolves the name
-    // from the LIVE deployment, and no backend/autonomy is stored to show.
-    expect(row.textContent).toContain("Developer run");
-    expect(row.textContent).toContain("fix the lint debt");
-    expect(
-      container.querySelector(".op-run:not(.agent-run) .sched-list"),
-    ).toBeNull();
   });
 });
 
@@ -2097,170 +1979,6 @@ describe("V1: the page hands the collision ceremony the unowned PR", () => {
 });
 
 /**
- * UX19-10 / R22, carried into the reworked controls — a run (or a schedule,
- * which is the same control deferred) pins NO backend and NO autonomy. The
- * operator control DISPLAYS its profile's backend; both controls offer only a
- * prompt and the baked-in DelayPicker, and a deferred delay turns the same
- * button into "Schedule". A schedule fires unattended, so the fired run
- * resolves the LIVE deployed profile — nothing here to freeze hours earlier.
- */
-describe("R22: the run controls carry no backend/autonomy pickers — prompt + DelayPicker only", () => {
-  it("operator control: backend is displayed (not picked), the when-picker offers the five delays", () => {
-    const { container, calls } = renderExec();
-    const op = container.querySelector(".op-run:not(.agent-run)")!;
-    // Canary: re-add either picker and these go red.
-    expect(op.querySelector('select[name="backend"]')).toBeNull();
-    expect(op.querySelector('select[name="autonomy"]')).toBeNull();
-    expect(op.querySelector(".op-backend")!.textContent).toBe("Claude");
-    const when = op.querySelector<HTMLSelectElement>(
-      'select[aria-label="When the operator run starts"]',
-    )!;
-    expect(
-      Array.from(when.querySelectorAll("option")).map((o) => o.textContent),
-    ).toEqual(["Now", "in 5 min", "in 1 hour", "in 6 hours", "in 24 hours"]);
-    // A picked delay flips the button to "Schedule" and defers the SAME run.
-    fireEvent.change(when, { target: { value: "1440" } });
-    const btn = op.querySelector<HTMLButtonElement>("button.btn")!;
-    expect(btn.textContent).toContain("Schedule");
-    fireEvent.click(btn);
-    expect(calls.runOperator).toEqual([{ steer: "", delayMinutes: 1440 }]);
-  });
-
-  it("agent control: AgentSelect + prompt + when-picker; a picked delay schedules the same dispatch", () => {
-    const { container, calls } = renderExec({
-      deployedSpecialists: [
-        deployedAgent("developer", "Developer", "Implementation", false),
-      ],
-    });
-    const cell = container.querySelector<HTMLElement>(".agent-run")!;
-    expect(cell.querySelector('select[name="backend"]')).toBeNull();
-    expect(cell.querySelector('select[name="autonomy"]')).toBeNull();
-    // Pick the agent, type the prompt, defer an hour — one button does it all.
-    fireEvent.focus(cell.querySelector('input[role="combobox"]')!);
-    fireEvent.click(
-      Array.from(cell.querySelectorAll<HTMLButtonElement>('[role="option"]')).find(
-        (o) => o.textContent?.includes("Developer"),
-      )!,
-    );
-    fireEvent.change(
-      cell.querySelector('input[aria-label="Prompt for this agent run (optional)"]')!,
-      { target: { value: "fix the lint debt" } },
-    );
-    const when = cell.querySelector<HTMLSelectElement>(
-      'select[aria-label="When the agent run starts"]',
-    )!;
-    fireEvent.change(when, { target: { value: "60" } });
-    const btn = cell.querySelector<HTMLButtonElement>("button.btn")!;
-    expect(btn.textContent).toContain("Schedule");
-    fireEvent.click(btn);
-    expect(calls.runAgent).toEqual([
-      { profileId: "developer", prompt: "fix the lint debt", delayMinutes: 60 },
-    ]);
-  });
-});
-
-/* -------------------------------- execution profile · dynamic-dispatch UX */
-
-/**
- * The Execution profile panel, rendered on its own. These blocks are about the
- * panel's own vocabulary, disclosure and keyboard contract — none of which the
- * page-level fixture above can express (it carries no engagements).
- */
-
-/** An engagement as the task file stores it — profileId, backend, role. */
-const engagement = (
-  profileId: string,
-  role: string,
-  backend: "claude" | "codex" = "claude",
-): NonNullable<TaskDetail["specialist"]> => ({
-  kind: "agent",
-  profileId,
-  backend,
-  role,
-  name: backend === "claude" ? "Claude Code" : "Codex",
-});
-
-/** A deployed profile as the loader ships it. */
-const deployedAgent = (
-  id: string,
-  name: string,
-  role: string,
-  verdict: boolean,
-): DeployedSpecialistView => ({
-  id,
-  name,
-  role,
-  backend: "claude",
-  model: "claude-sonnet",
-  capabilities: { delivery: true, verdict, askHuman: true, browser: false },
-});
-
-/** Every callback `renderExec` records, so a test can assert what the panel
- *  invoked (one run/release/operator/cancel surface since the rework). */
-interface RecordedExecCalls {
-  owner: string[];
-  runAgent: { profileId: string; prompt: string; delayMinutes: number | null }[];
-  releaseAgent: string[];
-  runOperator: { steer: string; delayMinutes: number | null }[];
-  cancelSchedule: string[];
-}
-
-function renderExec(opts: {
-  task?: Partial<TaskDetail>;
-  deployedSpecialists?: DeployedSpecialistView[];
-  liveAgentRuns?: LiveAgentRun[];
-  schedules?: TaskSchedule[];
-  canRunAgents?: boolean;
-} = {}) {
-  const calls: RecordedExecCalls = {
-    owner: [],
-    runAgent: [],
-    releaseAgent: [],
-    runOperator: [],
-    cancelSchedule: [],
-  };
-  const utils = render(
-    <MemoryRouter>
-      <ExecutionProfile
-        task={detail(opts.task ?? {})}
-        meId="u-arda"
-        myRole="admin"
-        busy={false}
-        onOwner={(action) => calls.owner.push(action)}
-        deployedSpecialists={opts.deployedSpecialists ?? []}
-        stages={[]}
-        workflow={[]}
-        operatorBackend="claude"
-        operatorAutonomy="supervised"
-        runPrincipal={CONNECTED_PRINCIPAL}
-        canRunAgents={opts.canRunAgents ?? true}
-        liveAgentRuns={opts.liveAgentRuns ?? []}
-        operatorRunActive={false}
-        runInFlight={null}
-        onRunAgent={(profileId, prompt, delayMinutes) =>
-          calls.runAgent.push({ profileId, prompt, delayMinutes })
-        }
-        releaseBusy={false}
-        onReleaseAgent={(id) => calls.releaseAgent.push(id)}
-        operatorInFlight={null}
-        onRunOperator={(steer, delayMinutes) =>
-          calls.runOperator.push({ steer, delayMinutes })
-        }
-        schedules={opts.schedules ?? []}
-        scheduleBusy={false}
-        onCancelSchedule={(id) => calls.cancelSchedule.push(id)}
-      />
-    </MemoryRouter>,
-  );
-  return { ...utils, calls };
-}
-
-const engagementsCell = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll<HTMLElement>(".profile-cell")).find((cell) =>
-    cell.querySelector(".val.revs"),
-  )!;
-
-/**
  * UXA-6 lineage, closed by the dynamic-dispatch rework: the four slot-shaped
  * recommendation kinds (assign/run × specialist/reviewer) collapsed into ONE
  * `run_agent` — the vocabulary split UXA-6 kept patching cannot recur because
@@ -2295,251 +2013,46 @@ describe("the run recommendation chip: one collapsed run_agent kind", () => {
 });
 
 /**
- * UX19-4's successor — the whole role-conditional vocabulary machinery
- * (`reviewingAgentsLabel` / `engagementVocabulary`, the heading flips, the
- * engage popovers) is DELETED with the slot cells. What replaced it is one
- * "Engaged agents" LEDGER whose claims are per ROW: "delivers" on the
- * delivering engagement, "gates acceptance" only where a verdict snapshot makes
- * it true (UC-13/F21-6's rule, kept), "running…" only on a live run.
+ * Who may run an agent by hand is the PAGE's answer (`roleCan(myRole,
+ * "run-agents")`); the panel only renders it. So on the real page a run-agents
+ * holder is offered the manual path beside the empty Engaged agents ledger, and
+ * anyone else is told the tier instead of shown a control.
  */
-describe("the Engaged agents ledger marks authority per row", () => {
-  const docs = deployedAgent("docs", "Docs agent", "Documentation", false);
-  const senior = deployedAgent("senior", "Senior reviewer", "Code review", true);
-  const dev = deployedAgent("developer", "Developer", "Implementation", false);
-
-  const rowFor = (container: HTMLElement, name: string) =>
-    Array.from(
-      engagementsCell(container).querySelectorAll<HTMLElement>(".rev-agent"),
-    ).find((r) => r.querySelector(".nm")!.textContent === name)!;
-
-  it("one heading, three honest marks: delivers / gates acceptance / neither", () => {
-    const { container } = renderExec({
-      task: {
-        specialist: engagement("developer", "Implementation", "codex"),
-        reviewers: [
-          engagement("senior", "Code review"),
-          engagement("docs", "Documentation"),
-        ],
-      },
-      deployedSpecialists: [dev, senior, docs],
-    });
-    const cell = engagementsCell(container);
-    expect(cell.querySelector(".lbl")!.textContent).toBe("Engaged agents");
-    // The delivering row owns branch/PR — and only it says so.
-    expect(rowFor(container, "Developer").querySelector(".sub")!.textContent).toContain(
-      "· delivers",
-    );
-    // "gates acceptance" is a claim about verdict AUTHORITY (F21-6): true of
-    // the verdict-holding supporting engagement, absent from the verdict-less
-    // one. Canary: mark it unconditionally and the Docs row assertion fails.
-    expect(rowFor(container, "Senior reviewer").querySelector(".sub")!.textContent).toContain(
-      "· gates acceptance",
-    );
-    const docsSub = rowFor(container, "Docs agent").querySelector(".sub")!.textContent!;
-    expect(docsSub).not.toContain("gates acceptance");
-    expect(docsSub).not.toContain("delivers");
-  });
-
-  it("a live run marks its row 'running…' and blocks a duplicate Now-run of that profile", () => {
-    const { container } = renderExec({
-      task: { specialist: engagement("developer", "Implementation") },
-      deployedSpecialists: [dev],
-      liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
-    });
-    expect(rowFor(container, "Developer").querySelector(".sub")!.textContent).toContain(
-      "· running…",
-    );
-    // The selector's row says it too, and picking it leaves Run disabled while
-    // the delay is "Now" — no second concurrent run of one profile by hand.
-    fireEvent.focus(container.querySelector('input[role="combobox"]')!);
-    const option = container.querySelector<HTMLButtonElement>('[role="option"]')!;
-    expect(option.textContent).toContain("running");
-    fireEvent.click(option);
-    expect(
-      container.querySelector<HTMLButtonElement>(".agent-run button.btn")!.disabled,
-    ).toBe(true);
-  });
+describe("the manual run is offered to run-agents holders only", () => {
+  const developer: DeployedSpecialistView = {
+    id: "developer",
+    name: "Developer",
+    role: "Implementation",
+    backend: "claude",
+    model: "claude-sonnet",
+    capabilities: { delivery: true, verdict: false, askHuman: true, browser: false },
+  };
+  const engagementsCell = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(".profile-cell")).find((cell) =>
+      cell.querySelector(".val.revs"),
+    )!;
+  const picker = (container: HTMLElement) =>
+    container.querySelector('input[aria-label="Choose an agent to run"]');
 
   it("the empty ledger names the operator as the dispatcher — and the manual control only for run-agents holders", () => {
-    const withRun = renderExec();
+    const withRun = renderPage({ myRole: "admin", deployedSpecialists: [developer] });
+    expect(picker(withRun.container)).not.toBeNull();
     expect(engagementsCell(withRun.container).textContent).toContain(
       "None yet. The operator picks who runs at each stage, or run one yourself above.",
     );
     cleanup();
-    const withoutRun = renderExec({ canRunAgents: false });
+    const withoutRun = renderPage({ myRole: "contributor", deployedSpecialists: [developer] });
+    expect(picker(withoutRun.container)).toBeNull();
     expect(engagementsCell(withoutRun.container).textContent).toContain(
       "None yet. The operator picks who runs at each stage.",
+    );
+    expect(engagementsCell(withoutRun.container).textContent).not.toContain(
+      "run one yourself",
     );
     // Below the tier, the run-an-agent cell states the rule instead of a control.
     expect(withoutRun.container.textContent).toContain(
       "The operator dispatches agents as the task moves. Running one by hand needs the run-agents tier.",
     );
-  });
-});
-
-/**
- * UX19-12, reworked — an engagement can still outlive its profile (deleted, or
- * re-deployed on another project), and the ledger row that holds it names the
- * state in the Agents live table's own words plus the recovery. What changed is
- * HOW a ghost cannot be run: the per-row Run buttons are gone, and the run
- * control's selector is built from the DEPLOYED roster alone — a ghost is
- * structurally unpickable, not merely disabled.
- */
-describe("UX19-12: a ghost engagement says so in the ledger and is unpickable in the selector", () => {
-  // Hunt 2026-08-29: the recovery is PER POSTURE — the supporting note offers
-  // the release the row actually renders; the delivering note must not tell
-  // the human to use a control that row deliberately withholds.
-  const GONE_SUPPORTING_NOTE =
-    "Not deployed on this project any more. Release it, or re-deploy the profile on the Agents page.";
-  const GONE_DELIVERING_NOTE =
-    "Not deployed on this project any more. Re-deploy the profile on the Agents page, or hand delivery to another agent.";
-
-  it("supporting ghost row: names the state, and the release recovery stays live", () => {
-    const { container, calls } = renderExec({
-      task: { reviewers: [engagement("rev-9a", "Code review")] },
-      deployedSpecialists: [],
-    });
-    const row = container.querySelector(".rev-agent")!;
-    // Canary: restore a `?? role` name substitution and this reads "Code
-    // review" — the role, printed twice.
-    expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
-    expect(row.textContent).toContain(GONE_SUPPORTING_NOTE);
-    // Letting go of a dead engagement is the recovery the note names.
-    const release = row.querySelector<HTMLButtonElement>(".rev-x")!;
-    expect(release.disabled).toBe(false);
-    fireEvent.click(release);
-    expect(calls.releaseAgent).toEqual(["rev-9a"]);
-  });
-
-  it("delivering ghost row: its OWN recovery copy (no release control to point at), and no release", () => {
-    const { container } = renderExec({
-      task: { specialist: engagement("dev-2f1c", "Implementation", "codex") },
-      deployedSpecialists: [deployedAgent("other", "Other agent", "Docs", false)],
-    });
-    const row = engagementsCell(container).querySelector(".rev-agent")!;
-    expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
-    expect(row.textContent).toContain(GONE_DELIVERING_NOTE);
-    // Canary: collapse the two notes back into one and this row tells the
-    // human to "Release it" beside a deliberately-withheld ✕.
-    expect(row.textContent).not.toContain("Release it");
-    expect(row.querySelector(".rev-x")).toBeNull();
-  });
-
-  it("the run selector offers only DEPLOYED agents — the ghost cannot be picked", () => {
-    const { container } = renderExec({
-      task: { specialist: engagement("dev-2f1c", "Implementation", "codex") },
-      deployedSpecialists: [deployedAgent("other", "Other agent", "Docs", false)],
-    });
-    fireEvent.focus(container.querySelector('input[role="combobox"]')!);
-    const menu = container.querySelector(".agent-select-menu")!;
-    // Canary: build the selector from the engagement roster and the ghost's
-    // id shows up here as a pickable row again.
-    expect(
-      Array.from(menu.querySelectorAll('[role="option"] .ri-nm')).map(
-        (n) => n.textContent,
-      ),
-    ).toEqual(["Other agent"]);
-    expect(menu.textContent).not.toContain("dev-2f1c");
-    expect(menu.textContent).not.toContain("profile no longer here");
-  });
-});
-
-/**
- * UX19-18's successor — the assign/engage popovers (and the menu-role audit
- * they needed) left with the slot cells. The ONE picker that replaced them is
- * the AgentSelect combobox: a real `role="combobox"` + `role="listbox"` pair
- * whose keyboard contract is implemented, not merely declared. This block IS
- * that contract.
- */
-describe("the AgentSelect combobox keeps the keyboard promises it makes", () => {
-  const DEPLOYED = [
-    deployedAgent("developer", "Developer", "Implementation", false),
-    deployedAgent("senior", "Senior reviewer", "Code review", true),
-  ];
-  const open = () => {
-    const view = renderExec({ deployedSpecialists: DEPLOYED });
-    const input = view.container.querySelector<HTMLInputElement>(
-      'input[role="combobox"]',
-    )!;
-    fireEvent.focus(input);
-    return { ...view, input };
-  };
-
-  it("declares the combobox contract and opens on focus with the whole roster", () => {
-    const { container, input } = open();
-    expect(input.getAttribute("aria-label")).toBe("Choose an agent to run");
-    expect(input.getAttribute("aria-expanded")).toBe("true");
-    const menu = container.querySelector('.agent-select-menu[role="listbox"]')!;
-    expect(menu).not.toBeNull();
-    // No sigil, no minimum query — the full deployed roster IS the point.
-    expect(menu.querySelectorAll('[role="option"]')).toHaveLength(2);
-    // Hunt 2026-08-29: a bare focus-open is UNARMED — no active option, no
-    // aria-activedescendant — so tabbing through the control can commit
-    // nothing. Arrowing arms row 0 and wires the descendant.
-    expect(menu.querySelector('[aria-selected="true"]')).toBeNull();
-    expect(input.getAttribute("aria-activedescendant")).toBeNull();
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    expect(input.getAttribute("aria-activedescendant")).toBe(
-      menu.querySelector('[aria-selected="true"]')!.id,
-    );
-  });
-
-  it("ArrowDown arms then moves the active option; Enter picks it, fills the input with the NAME and arms Run", () => {
-    const { container, input, calls } = open();
-    // First arrow ARMS row 0 (hunt 2026-08-29); the second moves to row 1.
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    fireEvent.keyDown(input, { key: "Enter" });
-    // Picking closes the menu and settles the selection as the display name.
-    expect(container.querySelector(".agent-select-menu")).toBeNull();
-    expect(input.value).toBe("Senior reviewer");
-    const run = container.querySelector<HTMLButtonElement>(".agent-run button.btn")!;
-    expect(run.disabled).toBe(false);
-    fireEvent.click(run);
-    // The id is what the dispatch submits — never the free text.
-    expect(calls.runAgent).toEqual([
-      { profileId: "senior", prompt: "", delayMinutes: null },
-    ]);
-  });
-
-  it("typing filters with match highlighting; typing over a settled pick clears the selection", () => {
-    const { container, input, calls } = open();
-    fireEvent.change(input, { target: { value: "sen" } });
-    const options = Array.from(container.querySelectorAll('[role="option"]'));
-    expect(options).toHaveLength(1);
-    expect(options[0]!.querySelector("mark.mention-match")!.textContent).toBe("Sen");
-    fireEvent.click(options[0]!);
-    expect(input.value).toBe("Senior reviewer");
-    // Editing the text invalidates the pick — the selection is a row pick,
-    // never free text. Ruling 147 keeps the start enabled, so the proof is that
-    // it now submits NOTHING until a row is chosen again.
-    fireEvent.change(input, { target: { value: "Senior review" } });
-    fireEvent.click(
-      container.querySelector<HTMLButtonElement>(".agent-run button.btn")!,
-    );
-    expect(calls.runAgent).toEqual([]);
-  });
-
-  it("Escape closes the menu without picking; blur closes it too", () => {
-    const { container, input, calls } = open();
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(container.querySelector(".agent-select-menu")).toBeNull();
-    fireEvent.focus(input);
-    expect(container.querySelector(".agent-select-menu")).not.toBeNull();
-    fireEvent.blur(input);
-    expect(container.querySelector(".agent-select-menu")).toBeNull();
-    expect(calls.runAgent).toEqual([]);
-  });
-
-  it("rows disclose what the pick commits to: role · backend plus capability marks", () => {
-    const { container } = open();
-    const subs = Array.from(
-      container.querySelectorAll('[role="option"] .ri-sub'),
-    ).map((s) => s.textContent);
-    expect(subs[0]).toBe("Implementation · Claude");
-    // Choosing an agent commits a paid run, so authority marks live on the row.
-    expect(subs[1]).toContain("Code review · Claude");
-    expect(subs[1]).toContain("gates acceptance");
   });
 });
 
@@ -3029,7 +2542,7 @@ describe("ruling 368: a recommendation's request in flight", () => {
 
   it("a plain recommendation reads 'Applying…', and a dismissal 'Dismissing…' on its own button", async () => {
     const held = heldAction();
-    const { container, submitted, getByText } = renderPage({
+    const { container, submitted } = renderPage({
       myRole: "admin",
       recommendations: [card("run_agent")],
       held,
@@ -3052,7 +2565,6 @@ describe("ruling 368: a recommendation's request in flight", () => {
     await waitFor(() => expect(dismissing.getAttribute("aria-busy")).toBe("true"));
     expect(dismissing.querySelector("svg.ico.spin")).not.toBeNull();
     expect(findButton(second.container, "Apply")!.getAttribute("aria-busy")).not.toBe("true");
-    void getByText;
     await act(async () => {
       held2.answer();
     });

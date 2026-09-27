@@ -96,6 +96,28 @@ function KindPusher() {
 }
 
 /**
+ * P13-D-10: colour is not the differentiator (both kinds paint
+ * `background: var(--fg)`), so the glyph is the whole signal a failure is not
+ * a success. Canary: give both kinds the same icon.
+ */
+describe("toast kind", () => {
+  it("never draws a failure with the success tick", () => {
+    const { container, getByText } = render(
+      <ToastProvider>
+        <KindPusher />
+      </ToastProvider>,
+    );
+    fireEvent.click(getByText("push success"));
+    fireEvent.click(getByText("push error"));
+    const glyph = (kind: string) =>
+      container.querySelector(`.toast[data-kind="${kind}"] path`)?.getAttribute("d");
+    expect(glyph("success")).toBeTruthy();
+    expect(glyph("error")).toBeTruthy();
+    expect(glyph("error")).not.toBe(glyph("success"));
+  });
+});
+
+/**
  * Interface review 2026-09-24 (acce-3). Every toast used to vanish after 2.6 s
  * whatever it said and whatever the pointer was doing; for most refusals the
  * toast is the only account of what went wrong.

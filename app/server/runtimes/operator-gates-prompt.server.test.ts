@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCodexOperatorPrompt, buildOperatorTurnPrompt } from "./operator-run.server";
-import type { OperatorTaskSnapshot } from "~/server/tasks/operator-actions.server";
+import { operatorSnapshot } from "../../../test-support/operator-snapshot";
 
 /**
  * Ruling 482 (pass 40, F40-52): the operator reads the project's gates from
@@ -12,39 +12,15 @@ import type { OperatorTaskSnapshot } from "~/server/tasks/operator-actions.serve
  * was an agent's sentence about four exit codes.
  */
 
-const SNAPSHOT: OperatorTaskSnapshot = {
+const SNAPSHOT = operatorSnapshot({
   key: "WEB-4",
-  timelineTotal: 0,
   title: "Ship the contact page",
   goal: "Ship the contact page.",
-  priority: "normal",
-  labels: [],
-  dueDate: null,
-  blockedBy: [],
   stage: "review",
   stageName: "Review",
-  previousStage: null,
-  readiness: "ready",
-  waiting: "none",
   validation: "healthy",
-  owner: null,
   specialist: { profileId: "developer", role: "Developer", backend: "claude" },
-  reviewers: [],
-  nextStages: [],
-  reworkStages: [],
-  stageIds: ["triage", "impl", "review", "done"],
-  doneStageId: "done",
-  reviewStageId: "review",
-  workStageId: "impl",
-  deployedSpecialists: [],
-  openPacket: false,
-  packet: null,
-  recentTimeline: [],
-  pr: null,
   branch: "web-4",
-  liveRuns: [],
-  autonomy: "supervised",
-  operatorPolicy: { scope: "operator", note: "", capabilities: {} },
   gates: {
     line: "Gates on a95c337: 3/4 exit 0 (run by Viberr)",
     state: "failed",
@@ -58,7 +34,7 @@ const SNAPSHOT: OperatorTaskSnapshot = {
     ],
     error: null,
   },
-};
+});
 
 describe("the operator and the project's gates (ruling 482)", () => {
   it("a gates-failed turn names the failing gate, its log and the rework, and forbids a report of the gates", () => {

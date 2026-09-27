@@ -38,11 +38,6 @@ describe("PR state mapping matrix (ruling 12)", () => {
     expect(mapPrToCacheState({ state: "open", merged: false })).toBe("review");
     expect(mapPrToCacheState({ state: "closed", merged_at: null })).toBe("closed");
   });
-
-  it("draft PRs read 'in review' like open ones", () => {
-    // draft is carried separately; state mapping treats open===review.
-    expect(mapPrToCacheState({ state: "open" })).toBe("review");
-  });
 });
 
 describe("findPrForBranch", () => {
@@ -515,6 +510,7 @@ describe("findPrForBranch review-state fetch (P13-D-28)", () => {
       openRoutes({ [`GET ${REPO_PATH}/pulls/318/reviews`]: { body: [] } }),
     );
     const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    expect(result.status).toBe("found");
     if (result.status === "found") expect(result.pr.review).toBe("review_required");
   });
 
@@ -625,6 +621,7 @@ describe("findPrForBranch mergeability (P14-LV-07)", () => {
   it("leaves the key ABSENT while GitHub is still computing (unknown ≠ mergeable)", async () => {
     const { client: c } = client(routesFor({ mergeable: null }));
     const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    expect(result.status).toBe("found");
     if (result.status === "found") expect("mergeable" in result.pr).toBe(false);
   });
 
@@ -657,6 +654,7 @@ describe("findPrForBranch mergeability (P14-LV-07)", () => {
       },
     });
     const result = await findPrForBranch(c, REPO, "vib-139-store-scan");
+    expect(result.status).toBe("found");
     if (result.status === "found") expect("mergeable" in result.pr).toBe(false);
   });
 });
@@ -779,6 +777,7 @@ describe("deriveApprovals (R19-B)", () => {
       },
     });
     const result = await findPrForBranch(c, REPO, "vib-402");
+    expect(result.status).toBe("found");
     if (result.status === "found") expect("approvals" in result.pr).toBe(false);
   });
 });

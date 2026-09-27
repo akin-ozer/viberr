@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -15,9 +14,6 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, getPatMetadata, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { getProjectGithubContext } from "./github-context.server";
 import { ensureDefaultBranch } from "./repo-bootstrap.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -311,14 +307,12 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(
       (await ensureDefaultBranch(store.db, contextFor(store, unauthorized), { projectSlug: store.slug }, ACTOR, { dataRoot: store.dataRoot })).status,
     ).toBe("auth_failed");
-    const gh = contextFor(store, fakeGithubFetch({}));
     const { unreachableFetch } = await import("../../../test-support/fake-github");
     const offline = getProjectGithubContext(store.db, store.slug, { fetchImpl: unreachableFetch() });
     if (offline.status !== "ok") throw new Error("context");
     expect(
       (await ensureDefaultBranch(store.db, offline, { projectSlug: store.slug }, ACTOR, { dataRoot: store.dataRoot })).status,
     ).toBe("network_unavailable");
-    void gh;
   });
 });
 

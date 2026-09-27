@@ -518,13 +518,11 @@ export interface DeployedAgentSummary {
 /** The system operator's profile id; every roster carries it. */
 const OPERATOR_PROFILE_ID = "operator";
 
-/** Test overrides; production leaves every key off. `createProjectFileImpl`
- *  stands in for the project.md write (F20-1 fault injection), defaulting to
- *  the real `createProjectFile`. */
+/** The data root and GitHub transport a caller threads through (the
+ *  controller's `create_project` passes both). */
 interface CreateProjectContext {
   dataRoot?: string;
   fetchImpl?: typeof fetch;
-  createProjectFileImpl?: typeof createProjectFile;
 }
 
 export async function createProject(
@@ -766,7 +764,7 @@ async function createProjectImpl(
   fileLeases: [],
   };
 
-  await (ctx.createProjectFileImpl ?? createProjectFile)(
+  await createProjectFile(
     { projectSlug: slug, dataRoot: ctx.dataRoot },
     { frontmatter, description: desc },
   );

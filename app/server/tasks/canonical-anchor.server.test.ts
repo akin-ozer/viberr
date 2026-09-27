@@ -20,7 +20,6 @@ import type {
 } from "~/server/runtimes/adapter.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   configureRunServiceForTests,
   interruptRun,
@@ -134,7 +133,6 @@ beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   specs.length = 0;
-  resetSseBrokerForTests();
   configureRunServiceForTests({
     claude: recordingAdapter("claude"),
     codex: recordingAdapter("codex"),
@@ -160,7 +158,6 @@ afterEach(async () => {
       }
     }
   }
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -478,5 +475,5 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     expect(inputs!.cloned).toBe(false);
     expect(inputs!.delivers).toBe(true);
     expect(inputs!.personaChars).toBeGreaterThan(0);
-  }, 20_000);
+  });
 });

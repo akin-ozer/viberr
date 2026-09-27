@@ -49,7 +49,7 @@ const STOP_WORDS: ReadonlySet<string> = new Set([
 /** The significant words of a title: lowercased, punctuation dropped, short
  *  and empty words dropped. `"Gateway routes for orders, cart and inventory"`
  *  → `{gateway, routes, orders, cart, inventory}`. */
-export function titleTokens(title: string): Set<string> {
+function titleTokens(title: string): Set<string> {
   const words = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
@@ -59,7 +59,7 @@ export function titleTokens(title: string): Set<string> {
 }
 
 /** Jaccard overlap of two titles' significant words, 0…1. */
-export function titleOverlap(a: string, b: string): number {
+function titleOverlap(a: string, b: string): number {
   const A = titleTokens(a);
   const B = titleTokens(b);
   if (A.size === 0 || B.size === 0) return 0;
@@ -83,7 +83,7 @@ export function titleOverlap(a: string, b: string): number {
  * on a card whose whole value is that it is quiet until it is not. A
  * disclosure a person learns to skip is worse than no disclosure.
  */
-export const SIMILAR_TITLE_THRESHOLD = 0.6;
+const SIMILAR_TITLE_THRESHOLD = 0.6;
 
 /** How many echoes a card will show. More than this is not a disclosure, it is
  *  a search result, and the board is where you search. */

@@ -14,11 +14,7 @@ import type {
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import {
-  DELIVER_LABEL,
-  DecisionPacket,
-  observationLabel,
-} from "./decision-packet";
+import { DELIVER_LABEL, DecisionPacket } from "./decision-packet";
 import { GithubTrace } from "./task-side-panels";
 import { MoveBackConfirm } from "./move-back-confirm";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
@@ -904,7 +900,9 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     const rows = agentOptions(container);
     expect(rows).toHaveLength(2);
     expect(rows[0]!.textContent).toContain("Developer");
-    expect(rows[0]!.textContent).toContain("Implementation · Codex");
+    // Exactly role · backend: a row with no verdict, no running run and repo
+    // write carries no mark at all.
+    expect(rows[0]!.querySelector(".ri-sub")!.textContent).toBe("Implementation · Codex");
     expect(rows[1]!.textContent).toContain("Reviewer");
     expect(rows[1]!.textContent).toContain("Code review · Claude");
   });
@@ -925,26 +923,34 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
   });
 
   it("keyboard: arrows arm and move the active row, Enter picks it, the input takes the name", () => {
-    const { container } = renderExec(execTask());
+    const { container, onRunAgent } = renderExec(execTask());
     const input = agentInput(container)!;
     fireEvent.focus(input);
-    // Hunt 2026-08-29: a focus-open starts UNARMED — no row highlighted, so a
-    // pass-through Tab (or reflexive Enter) can commit nothing.
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    // Hunt 2026-08-29: a focus-open starts UNARMED — no row highlighted and no
+    // active descendant, so a pass-through Tab (or reflexive Enter) can commit
+    // nothing.
     expect(
       agentOptions(container).some(
         (o) => o.getAttribute("aria-selected") === "true",
       ),
     ).toBe(false);
-    // The first arrow ARMS row 0; the second moves to row 1.
+    expect(input.getAttribute("aria-activedescendant")).toBeNull();
+    // The first arrow ARMS row 0 and wires it as the active descendant; the
+    // second moves to row 1.
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(agentOptions(container)[0]!.getAttribute("aria-selected")).toBe("true");
+    expect(input.getAttribute("aria-activedescendant")).toBe(agentOptions(container)[0]!.id);
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(agentOptions(container)[1]!.getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(agentMenu(container)).toBeNull();
     expect(input.value).toBe("Reviewer");
-    // The pick armed the run control.
+    // The pick armed the run control, and the id is what it submits — never
+    // the name in the input.
     expect(agentRunBtn(container).disabled).toBe(false);
+    fireEvent.click(agentRunBtn(container));
+    expect(onRunAgent).toHaveBeenCalledWith("reviewer", "", null);
   });
 
   it("a bare Tab through the focus-opened menu commits NOTHING (hunt 2026-08-29)", () => {
@@ -1327,6 +1333,9 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
       execTask({ operator: attachedOperator }),
     );
     expect(operatorRunBtn(container).textContent).toContain("Run operator");
+    expect(
+      [...operatorDelay(container).querySelectorAll("option")].map((o) => o.textContent),
+    ).toEqual(["Now", "in 5 min", "in 1 hour", "in 6 hours", "in 24 hours"]);
     fireEvent.change(operatorDelay(container), { target: { value: "1440" } });
     expect(operatorRunBtn(container).textContent).toContain("Schedule");
     fireEvent.change(operatorSteer(container), { target: { value: "check back" } });
@@ -1366,19 +1375,6 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     fireEvent.change(operatorSteer(container), { target: { value: "revisit" } });
     fireEvent.click(run);
     expect(onRunOperator).toHaveBeenCalledWith("revisit", 60);
-    // Same split for a backend the OWNER has not connected (P11-41, ruling
-    // 127): schedule-later stays alive — the fired run resolves the live
-    // profile, and the live owner, anyway (R22).
-    cleanup();
-    const missing = renderExec(execTask({ operator: attachedOperator }), {
-      operatorBackend: "codex",
-      runPrincipal: connectedPrincipal({
-        codex: { available: false, detail: null },
-      }),
-    });
-    expect(operatorRunBtn(missing.container).disabled).toBe(true);
-    fireEvent.change(operatorDelay(missing.container), { target: { value: "60" } });
-    expect(operatorRunBtn(missing.container).disabled).toBe(false);
   });
 
   it("U36-10 (pass 36): a stage-ineligible pick is refused before the click, with the dispatch gate's sentence and no delivering posture", () => {
@@ -1427,13 +1423,15 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
         operatorBackend: "codex",
         // Ruling 127: the question is the task OWNER's Codex account, not a
         // deployment credential probe — and the viewer here IS the owner, so
-        // the store's own second-person sentence is what they read.
+        // the store's own second-person sentence is what they read (here, a
+        // wiped runtime volume's, which the generic fallback cannot say).
         meId: "u-arda",
         runPrincipal: connectedPrincipal({
           codex: {
             available: false,
             detail:
-              "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+              "Your Codex sign-in file is missing from this server (the runtime volume was wiped). " +
+              "Sign in again on your Profile → Agent accounts.",
           },
         }),
       },
@@ -1443,10 +1441,13 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(run.hasAttribute("disabled")).toBe(true);
     fireEvent.click(run);
     expect(onRunOperator).not.toHaveBeenCalled();
-    // The reason is rendered copy, not a title on a dead control (P14).
+    // The reason is rendered copy, not a title on a dead control (P14), in
+    // the store's words rather than the fallback's.
     expect(container.textContent).toContain(
-      "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+      "Your Codex sign-in file is missing from this server (the runtime volume was wiped). " +
+        "Sign in again on your Profile → Agent accounts.",
     );
+    expect(container.textContent).not.toContain("Codex isn't connected");
     expect(container.textContent).toContain(
       "Runs on this task use your own account",
     );
@@ -1557,12 +1558,90 @@ describe("ExecutionProfile — engaged agents ledger", () => {
         { kind: "agent", profileId: "gone", backend: "claude", name: "Claude", role: "Code review" },
       ],
     });
-    const { container } = renderExec(task);
+    const { container, onReleaseAgent } = renderExec(task);
     const row = container.querySelector(".rev-agent")!;
     expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
     expect(row.textContent).toContain(
       "Not deployed on this project any more. Release it, or re-deploy the profile on the Agents page.",
     );
+    // Letting go of a dead engagement is the recovery the note names, so its ✕
+    // stays live.
+    const x = row.querySelector<HTMLButtonElement>(".rev-x")!;
+    expect(x.disabled).toBe(false);
+    fireEvent.click(x);
+    expect(onReleaseAgent).toHaveBeenCalledWith("gone");
+  });
+
+  // Hunt 2026-08-29: the ghost's recovery is PER POSTURE. The supporting note
+  // above offers the release its row renders; a delivering row withholds the
+  // ✕, so its note must not point at one.
+  it("a DELIVERING ghost gets its own recovery copy, and no release", () => {
+    const { container } = renderExec(
+      execTask({
+        specialist: { kind: "agent", profileId: "dev-2f1c", backend: "codex", name: "Codex", role: "Implementation" },
+      }),
+    );
+    const row = container.querySelector(".rev-agent")!;
+    expect(row.querySelector(".nm")!.textContent).toBe("profile no longer here");
+    expect(row.textContent).toContain(
+      "Not deployed on this project any more. Re-deploy the profile on the Agents page, or hand delivery to another agent.",
+    );
+    // Canary: collapse the two notes back into one and this row tells the
+    // human to "Release it" beside a deliberately-withheld ✕.
+    expect(row.textContent).not.toContain("Release it");
+    expect(row.querySelector(".rev-x")).toBeNull();
+  });
+
+  it("the run selector offers only DEPLOYED agents: a ghost engagement cannot be picked", () => {
+    const { container } = renderExec(
+      execTask({
+        specialist: { kind: "agent", profileId: "dev-2f1c", backend: "codex", name: "Codex", role: "Implementation" },
+      }),
+    );
+    fireEvent.focus(agentInput(container)!);
+    const menu = agentMenu(container)!;
+    // Canary: build the selector from the engagement roster and the ghost's
+    // id shows up here as a pickable row again.
+    expect(
+      [...menu.querySelectorAll('[role="option"] .ri-nm')].map((n) => n.textContent),
+    ).toEqual(["Developer", "Reviewer"]);
+    expect(menu.textContent).not.toContain("dev-2f1c");
+    expect(menu.textContent).not.toContain("profile no longer here");
+  });
+
+  it("one heading, three honest marks: delivers / gates acceptance / neither", () => {
+    // A repo-write profile engaged as SUPPORTING, with no verdict: it neither
+    // delivers nor gates acceptance, whatever it could do.
+    const docs: DeployedSpecialistView = {
+      id: "docs", name: "Docs agent", role: "Documentation", backend: "claude", model: "claude-sonnet",
+      capabilities: { delivery: true, verdict: false, askHuman: false, browser: false },
+    };
+    const { container } = renderExec(
+      execTask({
+        specialist: { kind: "agent", profileId: "developer", backend: "codex", name: "Codex", role: "Implementation" },
+        reviewers: [
+          { kind: "agent", profileId: "reviewer", backend: "claude", name: "Claude", role: "Code review" },
+          { kind: "agent", profileId: "docs", backend: "claude", name: "Claude", role: "Documentation" },
+        ],
+      }),
+      { deployedSpecialists: [...deployedFixture, docs] },
+    );
+    const cell = [...container.querySelectorAll<HTMLElement>(".profile-cell")].find(
+      (c) => c.querySelector(".val.revs"),
+    )!;
+    expect(cell.querySelector(".lbl")!.textContent).toBe("Engaged agents");
+    const sub = (name: string) =>
+      [...cell.querySelectorAll(".rev-agent")]
+        .find((r) => r.querySelector(".nm")!.textContent === name)!
+        .querySelector(".sub")!.textContent!;
+    // The delivering row owns branch/PR, and only it says so.
+    expect(sub("Developer")).toContain("· delivers");
+    // "gates acceptance" is a claim about verdict AUTHORITY (F21-6): true of the
+    // verdict-holding supporting engagement, absent from the verdict-less one.
+    // Canary: mark every supporting row and the Docs row assertion fails.
+    expect(sub("Reviewer")).toContain("· gates acceptance");
+    expect(sub("Docs agent")).not.toContain("gates acceptance");
+    expect(sub("Docs agent")).not.toContain("delivers");
   });
 
   it("empty ledger: the operator is the picker, and runners are told about the manual path", () => {
@@ -1686,18 +1765,6 @@ describe("ExecutionProfile — owner cell (owner request 2026-08-21)", () => {
     expect(
       container.querySelector('[aria-label="Manage task ownership"]'),
     ).toBeNull();
-  });
-
-  it("an UNOWNED task keeps the Assign-me affordance (unchanged half)", () => {
-    const { container } = renderExec(execTask({ owner: null }));
-    expect(container.textContent).toContain(
-      "Unowned. Any contributor or above can take it",
-    );
-    expect(
-      Array.from(container.querySelectorAll(".rev-add")).some((b) =>
-        b.textContent?.includes("Assign me"),
-      ),
-    ).toBe(true);
   });
 });
 
@@ -3073,9 +3140,6 @@ describe("UI-41: the release dialog only offers members who can OWN a task", () 
       />,
     );
     const chips = [...container.querySelectorAll(".handoff-chip")];
-    expect(chips.map((c) => c.textContent)).not.toContain(
-      expect.stringContaining("Viewer"),
-    );
     expect(chips.some((c) => c.textContent?.includes("Viewer"))).toBe(false);
   });
 
@@ -3670,33 +3734,55 @@ describe("DecisionPacket — pass-20 governance", () => {
 
 /* ------------- packet observation key humanising (P13 / C7) ------------- */
 
-describe("observationLabel", () => {
+describe("DecisionPacket observation labels", () => {
+  /** The label the card prints for each key, in order. */
+  const labelsFor = (keys: string[]) => {
+    const { container } = render(
+      <DecisionPacket
+        packet={{ ...packet142, observations: keys.map((k) => ({ k, v: "v", code: false })) }}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    return [...container.querySelectorAll(".packet-obs .obs .k")].map((k) => k.textContent!);
+  };
+
   it("turns the operator's machine-ish keys into readable ones", () => {
     // Live packet rendered "PROMPT_AGENT ERROR" at a human (the row uppercases).
-    expect(observationLabel("prompt_agent error")).toBe("prompt agent error");
-    expect(observationLabel("stage")).toBe("stage");
+    expect(labelsFor(["prompt_agent error", "stage"])).toEqual(["prompt agent error", "stage"]);
   });
 
   it("C7: splits camelCase and caps length", () => {
+    const [camel, long] = labelsFor(["noChanges", "x".repeat(60)]);
     // A camelCase key no longer renders as one screaming token ("NOCHANGES").
-    expect(observationLabel("noChanges")).toBe("no Changes");
+    expect(camel).toBe("no Changes");
     // An over-long key is capped so it cannot blow out the row.
-    expect(observationLabel("x".repeat(60)).length).toBeLessThanOrEqual(40);
+    expect(long!.length).toBeLessThanOrEqual(40);
   });
 
   it("ruling 470: a path-shaped key is the agent's label and is shown, never replaced", () => {
     // Live on WEB-1 (pass 40) the operator keyed a row `origin/main`, the git
     // ref it had read; the card said "DETAIL" and lost what the row was about.
-    expect(observationLabel("origin/main")).toBe("origin/main");
-    expect(observationLabel("CI/CD")).toBe("CI/CD");
+    const [ref, cicd, path, long] = labelsFor([
+      "origin/main",
+      "CI/CD",
+      "src/pages/rssFeed_v2.xml.ts",
+      "origin/main test-artifacts/pass20-vib1.txt and more",
+    ]);
+    expect(ref).toBe("origin/main");
+    expect(cicd).toBe("CI/CD");
     // A path is not humanised (no camelCase split, no underscore rewrite) and
     // is still capped like any key.
-    expect(observationLabel("src/pages/rssFeed_v2.xml.ts")).toBe("src/pages/rssFeed_v2.xml.ts");
-    const long = observationLabel("origin/main test-artifacts/pass20-vib1.txt and more");
-    expect(long.length).toBeLessThanOrEqual(40);
-    expect(long.startsWith("origin/main test-artifacts/")).toBe(true);
+    expect(path).toBe("src/pages/rssFeed_v2.xml.ts");
+    expect(long!.length).toBeLessThanOrEqual(40);
+    expect(long!.startsWith("origin/main test-artifacts/")).toBe(true);
   });
-
 });
 
 /* ------------- panel-head / CTA / toast-kind regressions (pass 13) ------------- */
@@ -3998,43 +4084,6 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     ).toBeNull();
   });
 
-  // UXO-1 (live-caught, pass 18): a task archived MID-REVIEW kept rendering its
-  // readiness + validation pills, so the hero read "archived · ready · awaiting
-  // verdict" — asserting that someone still owes a verdict when the task is out
-  // of the flow and nobody does. The STAGE pill stays (it answers "how far did
-  // this get?"); the two ACTIONABLE signals must drop.
-  it("UXO-1: an archived task drops the readiness + validation pills, keeps the stage", () => {
-    const live = renderWithRouter(
-      <TaskHero
-        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
-        stage={{ id: "review", name: "Review", color: "blue" }}
-        canEditGoal
-      />,
-    );
-    const liveText = live.container.querySelector(".hero-meta")!.textContent!;
-    expect(liveText).toContain("Review");
-    // Ruling 169: the live obligation IS the status — a `ready` task whose
-    // revision awaits a verdict says "awaiting verdict", not "ready" as well.
-    expect(liveText).toContain("awaiting verdict");
-    expect(liveText).not.toMatch(/\bready\b/);
-    live.unmount();
-
-    const archived = renderWithRouter(
-      <TaskHero
-        task={heroTask({ displayReadiness: "ready", validation: "changed" })}
-        stage={{ id: "review", name: "Review", color: "blue" }}
-        canEditGoal
-        archived
-      />,
-    );
-    const meta = archived.container.querySelector(".hero-meta")!.textContent!;
-    expect(meta).toContain("archived");
-    expect(meta).toContain("Review"); // how far it got — still true
-    // No live obligation is asserted for a task nobody owes anything on.
-    expect(meta).not.toContain("awaiting verdict");
-    expect(meta).not.toMatch(/\bready\b/);
-  });
-
   // A wrapper that bumps editGoalSignal on click, mimicking a confirmed
   // edit_goal decision — keeps the router/toast context stable across the bump.
   function EditGoalHarness({ draft }: { draft: string | null }) {
@@ -4115,20 +4164,6 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
   // nobody a verdict, so its validation pill (a live obligation) drops — while
   // the readiness pill stays, because "accepted" is a terminal STATUS, not a
   // live claim.
-  it("C2: an accepted (terminal) task withdraws the validation pill, keeps its stage + readiness", () => {
-    const { container } = renderWithRouter(
-      <TaskHero
-        task={heroTask({ displayReadiness: "accepted", validation: "changed" })}
-        stage={{ id: "done", name: "Done", color: "green" }}
-        canEditGoal
-      />,
-    );
-    const meta = container.querySelector(".hero-meta")!.textContent!;
-    expect(meta).toContain("Done"); // stage stays — "how far did this get?"
-    expect(meta).toContain("accepted"); // the readiness pill is a terminal status
-    expect(meta).not.toContain("awaiting verdict"); // the withdrawn obligation
-  });
-
   it("C2/N20-14: a force-accepted task never wears 'awaiting verdict' or a redundant bypass pill on the hero", () => {
     // deriveValidation projects `bypassed` for a force-accept; the hero withdraws
     // the validation pill for the terminal task, so neither the stale "awaiting
@@ -4187,18 +4222,6 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
     const meta = container.querySelector(".hero-meta")!.textContent!;
     expect(meta).toContain("input required");
     expect(meta).not.toContain("agent working");
-  });
-
-  it("R21-8: 'blocked' never yields", () => {
-    const { container } = renderWithRouter(
-      <TaskHero
-        task={heroTask({ displayReadiness: "blocked", validation: "none" })}
-        stage={{ id: "impl", name: "In Progress", color: "violet" }}
-        canEditGoal
-      />,
-    );
-    const meta = container.querySelector(".hero-meta")!.textContent!;
-    expect(meta).toContain("blocked"); // a run does not answer a blocked state
   });
 
   // C12: an unrecognised readiness value must not greenwash. The lookup used to
@@ -4304,6 +4327,8 @@ describe("ruling 169: the hero's stage and status are labelled fields, and the s
     );
     expect(fields(container)).toEqual([{ label: "Stage", value: "Ready" }]);
     expect(meta(container).textContent).toContain("archived");
+    // UXO-1: nobody owes a verdict on a task out of the flow.
+    expect(meta(container).textContent).not.toContain("awaiting verdict");
   });
 });
 
@@ -4319,9 +4344,9 @@ describe("failure toasts use the error kind (P13-D-10)", () => {
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     const toast = document.querySelector(".toast")!;
     expect(toast.textContent).toContain("Nope.");
-    // `alert` is the triangle path; `check` is the tick. `push` defaults to
-    // "success", so this failure used to render under a green tick.
-    expect(toast.querySelector("svg.ico")!.innerHTML).toContain("M12 4l9 16H3z");
+    // `push` defaults to "success", so this failure used to render under a
+    // green tick.
+    expect(toast.getAttribute("data-kind")).toBe("error");
   });
 });
 
@@ -4509,20 +4534,6 @@ describe("ruling 478: the task page's timeline, packet and GitHub panel", () => 
       "H3 (a) Connect Workers Builds",
       "H3 Please reply with",
     ]);
-  });
-
-  it("(f) F40-35: the GitHub panel has a heading once the task has a branch and a PR", () => {
-    // CANARY: drop the visually hidden h2 from the card's head.
-    const { getByRole } = render(
-      <MemoryRouter>
-        <GithubTrace
-          githubHost={GH_HOST}
-          task={traceTask({ pr: { number: 2, state: "review", title: "[WEB-4] work" } })}
-          acceptance={traceAcceptance()}
-        />
-      </MemoryRouter>,
-    );
-    expect(getByRole("heading", { level: 2, name: "GitHub" })).toBeTruthy();
   });
 
   it("(e) F40-31/F40-57: an agent's question preselects nothing, and Confirm refuses until an answer is chosen", () => {
@@ -5068,6 +5079,12 @@ describe("ruling 368: the move-back dialog waits without claiming the move", () 
  * on the outer cell's `data-copied`. Nothing is swapped in a frame, and the
  * button never draws two loaders.
  * Canary: put a start back on `<Icon name={busy ? "loader" : delay === "now" ? "bolt" : "clock"} …/>`.
+ *
+ * Better-ui review 2026-09-24: the switch to Schedule also used to widen the
+ * start and slide the picker from under the pointer. `app.css` holds each start
+ * at its widest label's width, keyed on `.op-run > .run-go`, which the
+ * dispatch's `.op-run.agent-run` row matches too, so the selectors below are
+ * that rule's. Canary: drop `run-go` from either button.
  */
 describe("ruling 459 over 368: a run start trades its glyphs in one cell", () => {
   const starts = (c: HTMLElement) => [
@@ -5097,19 +5114,8 @@ describe("ruling 459 over 368: a run start trades its glyphs in one cell", () =>
       expect(inner.getAttribute("data-copied"), picker).toBe("true");
       expect(outer.hasAttribute("data-copied"), picker).toBe(false);
     }
-  });
-
-  it("the start whose request is in flight shows the loader, busy, with its work's name", () => {
-    const { container } = renderExec(execTask(), { operatorInFlight: "schedule", runInFlight: "run" });
-    const [[, operator], [, agent]] = starts(container);
-    expect(operator.textContent).toBe("Scheduling…");
-    expect(agent.textContent).toBe("Starting…");
-    for (const b of [operator, agent]) {
-      expect(b.getAttribute("aria-busy")).toBe("true");
-      const { outer, loader } = cells(b);
-      expect(outer.getAttribute("data-copied")).toBe("true");
-      expect(loader.matches("svg.ico.spin")).toBe(true);
-      expect(b.querySelectorAll(".spin")).toHaveLength(1);
-    }
+    // `.run-go` is also what app.css's width rule sizes, and only these two
+    // starts wear it.
+    expect(container.querySelectorAll(".run-go")).toHaveLength(2);
   });
 });

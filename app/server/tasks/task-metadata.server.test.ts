@@ -260,28 +260,6 @@ describe("setTaskMetadata", () => {
     expect(detail?.labels).toEqual(["runtime"]);
     expect(detail?.dueDate).toBe("2026-09-10");
   });
-
-  it("RBAC: a contributor may edit metadata; a viewer may not", async () => {
-    const store = prepared();
-    // selin is a project contributor — the grant holds.
-    await expect(
-      setTaskMetadata(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", priority: "high" },
-        actorOf(store.users.selin),
-        { dataRoot: store.dataRoot },
-      ),
-    ).resolves.toBeTruthy();
-    // elif is a viewer — denied.
-    await expect(
-      setTaskMetadata(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", priority: "low" },
-        actorOf(store.users.elif),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-  });
 });
 
 describe("createTask metadata", () => {

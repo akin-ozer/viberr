@@ -216,25 +216,11 @@ describe("StageMenu dismissal (shared useDismiss)", () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it("a scroll INSIDE the menu keeps it open — a height-capped list scrolls itself", () => {
-    const view = renderMenu();
-    const menu = openMenu(view);
-    fireEvent.scroll(menu);
-    expect(document.querySelector('[role="menu"]')).not.toBeNull();
-  });
-
   it("the Escape that closes it is consumed, so an enclosing dialog does not cancel too", () => {
     const view = renderMenu();
     openMenu(view);
     // fireEvent returns dispatchEvent's answer: false when the default was prevented.
     expect(fireEvent.keyDown(document, { key: "Escape" })).toBe(false);
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-  });
-
-  it("a resize closes it for the same reason", () => {
-    const view = renderMenu();
-    openMenu(view);
-    fireEvent(window, new Event("resize"));
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 

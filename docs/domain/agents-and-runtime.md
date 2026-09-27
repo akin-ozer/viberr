@@ -48,7 +48,9 @@ retry), the **asker** for a controller turn. A task with no owner cannot run age
 **Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
 backend (`MAX_ACCOUNTS_PER_BACKEND`), one `user_backend_credentials` row each. Exactly one
 per (person, backend) is **active**, the one every run on that backend bills: the most
-recently selected (`selected_at`, ties to the newer row; `ACTIVE_FIRST`). Connecting, by a
+recently selected (`selected_at`; `ACTIVE_FIRST`). Every selection is stamped past the
+person's latest one on that backend (`selectionStamp`), so two selections in one millisecond
+still rank in the order they happened. Connecting, by a
 hosted sign-in or a pasted key, adds an account and makes it active; switching
 (`switchBackendAccount`, Profile → Agent accounts' **Use this account**) stamps
 `selected_at` and nothing else, so no vendor process runs and no file moves, and a run
@@ -66,7 +68,7 @@ answer every surface reads: the health of the person's ACTIVE account on that ba
 |---|---|---|
 | `api_key` / `access_token` | always (the sealed box is the credential) | `credential` |
 | `login` | the vendor's own file is in that ACCOUNT's home (`claude-home/accounts/<id>/.credentials.json`, `codex-home/accounts/<id>/auth.json`; for an account connected before ruling 507, the backend home itself) | `file` |
-| `login` on darwin | the account's home exists but holds no file (the Claude binary uses the Keychain) | `presence` |
+| Claude `login` on darwin | the account's home exists but holds no file (the Claude binary uses the Keychain; Codex signs in to its `auth.json` alone, the one file a run copies, so a Codex home without it is `none` on every platform) | `presence` |
 | none, or a `login` whose file is gone | never — `detail` says which, addressed to the person, and adds that another of their accounts on the backend works when one does ("switching to it needs no sign-in") | `none` |
 
 `/resources/health` reports the instance-level number that remains: `backends: { claude:

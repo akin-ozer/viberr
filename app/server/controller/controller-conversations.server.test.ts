@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pollUntil, settle } from "../../../test-support/polling";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import type { RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import {
   setupAppTest,
   type AppTestContext,
@@ -38,13 +40,10 @@ beforeAll(async () => {
 afterAll(() => app.cleanup());
 
 describe("conversation access", () => {
-  it("owner and org admin read; another member gets the not-found shape; only the owner speaks", async () => {
-    const {
-      createConversation,
-      requireConversation,
-      appendMessage,
-      listMessages,
-    } = await import("./controller-conversations.server");
+  it("only the owner speaks in a conversation: an org admin's attempt is refused and appends nothing", async () => {
+    const { createConversation, appendMessage, listMessages } = await import(
+      "./controller-conversations.server"
+    );
     const conversation = createConversation(app.db, {
       userId: ownerId,
       userLabel: "selin@viberr.dev",
@@ -56,33 +55,6 @@ describe("conversation access", () => {
       userId: ownerId,
       text: "How many tasks are open?",
     });
-
-    expect(
-      requireConversation(app.db, conversation.id, {
-        userId: ownerId,
-        orgRole: "member",
-      }).id,
-    ).toBe(conversation.id);
-    expect(
-      requireConversation(app.db, conversation.id, {
-        userId: orgAdminId,
-        orgRole: "admin",
-      }).id,
-    ).toBe(conversation.id);
-    expect(() =>
-      requireConversation(app.db, conversation.id, {
-        userId: otherMemberId,
-        orgRole: "member",
-      }),
-    ).toThrow(/not found/i);
-
-    // A member CLAIMING the admin role does not get it — the check is live.
-    expect(() =>
-      requireConversation(app.db, conversation.id, {
-        userId: otherMemberId,
-        orgRole: "admin",
-      }),
-    ).toThrow(/not found/i);
 
     const { runControllerTurn } = await import("./controller-run.server");
     await expect(
@@ -663,12 +635,11 @@ describe("a working turn streams to its owner", () => {
       dataRoot: app.dataRoot,
     });
     if (result.state !== "started") throw new Error(`turn ${result.state}`);
-    for (let i = 0; i < 200; i += 1) {
+    await pollUntil(() => {
       const state = getRun(app.db, result.runId)?.state;
-      if (state && state !== "running" && state !== "queued") break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      return !!state && state !== "running" && state !== "queued";
+    }, 1_000);
+    await settle();
 
     const lines = owner().filter((e) => e.type === "controller.log-appended");
     expect(lines.map((e) => e.data)).toEqual([
@@ -685,93 +656,75 @@ describe("a working turn streams to its owner", () => {
 
 describe("a failed queued start accounts for the messages behind it", () => {
   it("names how many follow-ups were dropped, under the message it tried, and notes each dropped one", async () => {
-    const { createConversation, appendMessage, listMessages } = await import(
-      "./controller-conversations.server"
-    );
-    const { settleTurnForTests } = await import("./controller-run.server");
-    const { configureRunServiceForTests } = await import(
-      "~/server/runtimes/run-service.server"
-    );
-    const { installFakeRuntime } = await import(
-      "../../../test-support/fake-runtime"
-    );
-    // The queued start must FAIL — that is the path under test. Any adapter
-    // that refuses to start stands in for the real causes (an MCP mount that
-    // fails pre-flight, a full data volume).
-    const throwingAdapter = (backend: "claude" | "codex") => ({
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn, interruptControllerTurn } = await import("./controller-run.server");
+    const { installFakeRuntime, installRunAdapters } = await import("../../../test-support/fake-runtime");
+    // The first turn runs until it is stopped, and every start after it FAILS:
+    // the queued start is the path under test. A start that throws stands in
+    // for the real causes (an MCP mount that fails pre-flight, a full data
+    // volume). One adapter for the whole case, since installing another drops
+    // the first turn's live handle.
+    let starts = 0;
+    const heldThenRefusing = (backend: "claude" | "codex"): RuntimeAdapter => ({
       backend,
-      start(): never {
-        throw new Error("the queued turn could not start");
+      start(spec, callbacks) {
+        starts += 1;
+        if (starts > 1) throw new Error("the queued turn could not start");
+        return {
+          runId: spec.runId,
+          // A real turn reports its provider session, and the queued turn
+          // resumes it; that is the road a queued start takes to its adapter.
+          interrupt: () =>
+            callbacks.onExit({ outcome: "interrupted", effectiveBackend: backend, sessionId: "sess-held" }),
+        };
       },
     });
-    configureRunServiceForTests({
-      claude: throwingAdapter("claude"),
-      codex: throwingAdapter("codex"),
-    });
-    const conversation = createConversation(app.db, {
-      userId: ownerId,
-      userLabel: "selin@viberr.dev",
-      projectSlug: null,
-    });
-    const [a, b, c, d] = ["A", "B", "C", "D"].map((text) =>
-      appendMessage(app.db, {
-        conversationId: conversation.id,
-        author: "user",
-        userId: ownerId,
-        text,
-      }),
-    );
-
-    // A lease whose current turn (A) is settling with B, C, D still queued.
-    const leaseKey = Symbol.for("viberr.controllerLease");
-    // SAFETY: the module creates this Map on first use and only ever stores
-    // lease entries in it; the test seeds one entry and deletes it after.
-    const host = globalThis as {
-      [leaseKey]?: Map<string, unknown>;
-    };
-    const map = host[leaseKey] ?? new Map();
-    host[leaseKey] = map;
-    const queued = (m: typeof b) => ({ messageId: m!.id, seq: m!.seq, text: m!.text, surface: null, timeZone: null });
-    map.set(conversation.id, {
-      runId: "run_busy",
-      messageId: a!.id,
-      queue: [queued(b), queued(c), queued(d)],
-    });
-
+    installRunAdapters({ claude: heldThenRefusing("claude"), codex: heldThenRefusing("codex") });
     try {
-      await settleTurnForTests(
+      const conversation = createConversation(app.db, {
+        userId: ownerId,
+        userLabel: "selin@viberr.dev",
+        projectSlug: null,
+      });
+      const user = { id: ownerId, email: "selin@viberr.dev", name: "Selin Aksoy", orgRole: "member" as const };
+      const send = (text: string) =>
+        runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
+      const queued = async (text: string) => {
+        const turn = await send(text);
+        if (turn.state !== "queued") throw new Error(`${text} was ${turn.state}, not queued`);
+        return turn.messageId;
+      };
+      const a = await send("A");
+      if (a.state !== "started") throw new Error(`turn ${a.state}`);
+      const b = await queued("B");
+      const c = await queued("C");
+      const d = await queued("D");
+
+      // Stopping A settles it, and the settle takes B off the queue.
+      await interruptControllerTurn(
         app.db,
-        conversation.id,
-        {
-          conversationId: conversation.id,
-          text: "A",
-          user: {
-            id: ownerId,
-            email: "selin@viberr.dev",
-            name: "Selin Aksoy",
-            orgRole: "member",
-          },
-          dataRoot: app.dataRoot,
-        },
-        "finished",
-        "run_test",
-        a!.id,
+        { conversationId: conversation.id, runId: a.runId, dataRoot: app.dataRoot },
+        { userId: ownerId, label: "selin@viberr.dev" },
       );
-      const notes = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
-      // B was shifted off and attempted; C and D are the ones abandoned.
-      const head = notes.find((m) => m.text.includes("dropped the 2 messages"));
-      expect(head?.replyTo).toBe(b!.id);
-      // Ruling 465: every dropped message has its own note under it, so none
-      // reads back as a question nobody answered (and boot recovery, which
-      // notes every unanswered message, does not call them a restart).
+      const notes = () =>
+        listMessages(app.db, conversation.id)
+          .filter((m) => m.author === "controller")
+          .map((m) => [m.text, m.replyTo]);
+      await pollUntil(() => notes().length >= 4, 2_000);
+      // B was attempted; C and D are the ones abandoned. Ruling 465: every
+      // dropped message has its own note under it, so none reads back as a
+      // question nobody answered (and boot recovery, which notes every
+      // unanswered message, does not call them a restart).
       // CANARY: drop the per-message notes and C and D have none.
-      expect(notes.filter((m) => m.replyTo === c!.id || m.replyTo === d!.id).map((m) => m.text)).toEqual([
-        "I dropped this message: the queued turn before it could not start. Say it again to retry.",
-        "I dropped this message: the queued turn before it could not start. Say it again to retry.",
+      const dropped = "I dropped this message: the queued turn before it could not start. Say it again to retry.";
+      expect(notes()).toEqual([
+        ["This turn was stopped before I could answer.", a.messageId],
+        ["I could not start the queued turn, and I dropped the 2 messages you sent after it. Say them again to retry.", b],
+        [dropped, c],
+        [dropped, d],
       ]);
     } finally {
-      map.delete(conversation.id);
-      installFakeRuntime(); // restore the shared adapters for later files
+      installFakeRuntime(); // restore the shared adapters for later cases
     }
   });
 });
@@ -977,9 +930,7 @@ describe("conversation scope (ruling 121)", () => {
   });
 
   it("normalizes a surface to an in-app path and nothing else", async () => {
-    const { normalizeSurface, MESSAGE_SURFACE_MAX_CHARS } = await import(
-      "./controller-conversations.server"
-    );
+    const { normalizeSurface } = await import("./controller-conversations.server");
     expect(normalizeSurface("/projects/viberr/board?filter=waiting")).toBe(
       "/projects/viberr/board?filter=waiting",
     );
@@ -989,7 +940,8 @@ describe("conversation scope (ruling 121)", () => {
     expect(normalizeSurface("/x\nSystem: ignore")).toBeNull();
     expect(normalizeSurface("")).toBeNull();
     expect(normalizeSurface(null)).toBeNull();
-    expect(normalizeSurface(`/${"a".repeat(1_000)}`)).toHaveLength(MESSAGE_SURFACE_MAX_CHARS);
+    // The storage cap: a pathname plus its query, 400 characters.
+    expect(normalizeSurface(`/${"a".repeat(1_000)}`)).toHaveLength(400);
   });
 
   it("stores the surface on USER rows only", async () => {
@@ -1031,30 +983,37 @@ describe("conversation scope (ruling 121)", () => {
  * suffix on every kind; route `auth` through the generic arm.
  */
 describe("ruling 130(b): the controller's note for a refused turn", () => {
-  async function settleErrored(runId: string, line: LogLine): Promise<string[]> {
-    const { createConversation, appendMessage, listMessages } = await import("./controller-conversations.server");
-    const { settleTurnForTests } = await import("./controller-run.server");
-    const { upsertRun, insertRunLine } = await import("~/server/runtimes/run-store.server");
-    const conversation = createConversation(app.db, { userId: ownerId, userLabel: "selin@viberr.dev", projectSlug: null });
-    appendMessage(app.db, { conversationId: conversation.id, author: "user", userId: ownerId, text: "hello" });
-    // The controller's own row convention: no project, the conversation as the task key.
-    upsertRun(app.db, {
-      id: runId, projectSlug: "", taskKey: conversation.id, threadId: "controller", role: "Controller", kind: "controller",
-      agentProfileId: "controller", backend: "claude", model: "opus", sdk: "claude", state: "error",
-    });
-    insertRunLine(app.db, { runId, seq: 0, occurredAt: new Date().toISOString(), raw: "", display: line });
-    await settleTurnForTests(
-      app.db,
-      conversation.id,
-      { conversationId: conversation.id, text: "hello", user: { id: ownerId, email: "selin@viberr.dev", name: "Selin Aksoy", orgRole: "member" }, dataRoot: app.dataRoot },
-      "error",
-      runId,
+  /** A turn whose run ends in error on `line`, as an adapter reports a
+   *  refused run; returns the transcript the settle leaves. */
+  async function erroredTurn(line: LogLine): Promise<string[]> {
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { queueFakeRun, drainRunCompletions } = await import("../../../test-support/fake-runtime");
+    const { clearBackendCredentialRefusal, clearBackendQuotaExhaustion } = await import(
+      "~/server/runtimes/backend-quota.server"
     );
-    return listMessages(app.db, conversation.id).map((m) => m.text);
+    const conversation = createConversation(app.db, { userId: ownerId, userLabel: "selin@viberr.dev", projectSlug: null });
+    queueFakeRun({ lines: [line], outcome: "error" });
+    try {
+      const turn = await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "hello",
+        user: { id: ownerId, email: "selin@viberr.dev", name: "Selin Aksoy", orgRole: "member" },
+        dataRoot: app.dataRoot,
+      });
+      if (turn.state !== "started") throw new Error(`turn ${turn.state}`);
+      await drainRunCompletions();
+      return listMessages(app.db, conversation.id).map((m) => m.text);
+    } finally {
+      // The sink records a quota or an auth refusal against the backend off
+      // these lines (D5, F32-4); every case starts without one.
+      clearBackendQuotaExhaustion(app.db, "claude");
+      clearBackendCredentialRefusal(app.db, "claude");
+    }
   }
 
   it("a quota-refused turn names the reset and the account switch, never 'Say it again to retry'", async () => {
-    const texts = await settleErrored("run_quota", {
+    const texts = await erroredTurn({
       t: "1", ev: "err", tag: "run·error·quota", text: "The Claude account is over its usage quota.",
       failure: { kind: "quota", resetsAt: "2026-09-06T19:50:00.000Z", window: "five_hour", windowRejected: true, apiError: null, apiErrorStatus: 429, terminalReason: "api_error", origin: null },
     });
@@ -1066,7 +1025,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
   });
 
   it("an auth-refused turn names the org restriction; an `unknown` failure keeps the retry sentence", async () => {
-    const auth = await settleErrored("run_auth", {
+    const auth = await erroredTurn({
       t: "1", ev: "err", tag: "run·error·auth", text: "refused",
       failure: { kind: "auth", resetsAt: null, window: null, windowRejected: false, apiError: "oauth_org_not_allowed", apiErrorStatus: 403, terminalReason: "api_error", origin: null },
     });
@@ -1076,7 +1035,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     expect(authNote).toContain("Profile → Agent accounts");
     expect(authNote).not.toContain("Say it again to retry");
 
-    const unknown = await settleErrored("run_unknown", { t: "1", ev: "err", tag: "run·error·unknown", text: "The agent run did not complete." });
+    const unknown = await erroredTurn({ t: "1", ev: "err", tag: "run·error·unknown", text: "The agent run did not complete." });
     const unknownNote = unknown.find((t) => t.startsWith("I could not finish this turn"))!;
     expect(unknownNote).toContain("Say it again to retry");
   });
@@ -1085,7 +1044,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     // Canary: route `overloaded` through the generic arm and the note reads
     // "the run did not complete … Say it again to retry" — true, but it hides
     // that nothing the person can change was involved.
-    const texts = await settleErrored("run_overloaded", {
+    const texts = await erroredTurn({
       t: "1", ev: "err", tag: "run·error·overloaded", text: "Claude could not serve this run: the provider was overloaded (HTTP 529).",
       failure: { kind: "overloaded", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: 529, terminalReason: "api_error", origin: "provider" },
     });
@@ -1099,7 +1058,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
   it("ruling 175: a turn the spending cap stopped names the cap and the spend, and who can raise it", async () => {
     // Canary: route `max_budget` through the generic arm and the note reads
     // "the run did not complete" with no figure and nobody to ask.
-    const texts = await settleErrored("run_budget", {
+    const texts = await erroredTurn({
       t: "1", ev: "err", tag: "run·error·max_budget", text: "The run reached its $0.50 spending cap after spending $0.52 and was cut off.",
       failure: { kind: "max_budget", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, spendCapUsd: 0.5, spentUsd: 0.52 },
     });
@@ -1114,30 +1073,38 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
  * U39-19 (pass 39): a conversation is titled by the person's first sentence,
  * not by 79 characters cut mid-word. The live rail's titles, before and after.
  */
-describe("U39-19: deriveTitle", () => {
+describe("U39-19: a conversation is titled by its first sentence", () => {
   it("titles a thread by its first sentence, and clips a long one at a word", async () => {
     // CANARY: return the 79-character slice again.
-    const { deriveTitle } = await import("./controller-conversations.server");
-    expect(deriveTitle("Knowledge base check, please. Since the ax-clone knowledge bases were last written, AX-17 merged.")).toBe(
+    const { createConversation, appendMessage, getConversation } = await import(
+      "./controller-conversations.server"
+    );
+    /** The title a fresh thread takes from its first user message. */
+    const titled = (text: string) => {
+      const c = createConversation(app.db, { userId: ownerId, userLabel: "selin@viberr.dev", projectSlug: null });
+      appendMessage(app.db, { conversationId: c.id, author: "user", userId: ownerId, text });
+      return getConversation(app.db, c.id)!.title;
+    };
+    expect(titled("Knowledge base check, please. Since the ax-clone knowledge bases were last written, AX-17 merged.")).toBe(
       "Knowledge base check, please.",
     );
-    expect(deriveTitle("AX-24 merged a few minutes ago (PR #19). Please bring the rulings knowledge base up to date.")).toBe(
+    expect(titled("AX-24 merged a few minutes ago (PR #19). Please bring the rulings knowledge base up to date.")).toBe(
       "AX-24 merged a few minutes ago (PR #19).",
     );
     // A first sentence too short to name anything falls back to the clip.
-    expect(deriveTitle("Good graph. AX-2 and AX-3 are both building, which is what I was after. One correction about the graph.")).toBe(
+    expect(titled("Good graph. AX-2 and AX-3 are both building, which is what I was after. One correction about the graph.")).toBe(
       "Good graph. AX-2 and AX-3 are both building, which is what I was after. One…",
     );
     // A version number is not a sentence end.
-    expect(deriveTitle("Deployed build 0.19.0 with the new rail. Check the goals.")).toBe(
+    expect(titled("Deployed build 0.19.0 with the new rail. Check the goals.")).toBe(
       "Deployed build 0.19.0 with the new rail.",
     );
     // No sentence end and short: the text itself.
-    expect(deriveTitle("Anyone there?")).toBe("Anyone there?");
+    expect(titled("Anyone there?")).toBe("Anyone there?");
     // A first sentence longer than the rail shows is clipped at a word.
     const long =
       "Separate from the build: I need this board's access model exercised for real, not in a test, by the people who will use it.";
-    const title = deriveTitle(long);
+    const title = titled(long);
     expect(title.endsWith("…")).toBe(true);
     expect(title.length).toBeLessThanOrEqual(80);
     expect(title.slice(0, -1).endsWith(" ")).toBe(false);
@@ -1153,7 +1120,7 @@ describe("U39-19: deriveTitle", () => {
  */
 describe("U39-30: the answer does not wait for the compaction", () => {
   it("is in the transcript while the compaction runs, and only once after it", async () => {
-    // CANARY: drop the `registerRunAnswered` hook and the transcript is empty
+    // CANARY: drop the `onAnswered` hook and the transcript is empty
     // of the reply during the compaction; drop the settle's `replyPosted`
     // check and the reply is posted twice.
     const { createConversation, listMessages } = await import("./controller-conversations.server");
@@ -1360,39 +1327,6 @@ describe("ruling 465: the queue is visible and every reply names its message", (
     expect(turnThree).not.toContain("queued behind this one");
   });
 
-  it("a turn that cannot start names the message it could not answer", async () => {
-    const { createConversation, listMessages } = await import("./controller-conversations.server");
-    const { runControllerTurn } = await import("./controller-run.server");
-    const { configureRunServiceForTests } = await import("~/server/runtimes/run-service.server");
-    const { installFakeRuntime } = await import("../../../test-support/fake-runtime");
-    const throwingAdapter = (backend: "claude" | "codex") => ({
-      backend,
-      start(): never {
-        throw new Error("the turn could not start");
-      },
-    });
-    configureRunServiceForTests({ claude: throwingAdapter("claude"), codex: throwingAdapter("codex") });
-    try {
-      const conversation = createConversation(app.db, {
-        userId: ownerId,
-        userLabel: "selin@viberr.dev",
-        projectSlug: null,
-      });
-      await runControllerTurn(app.db, {
-        conversationId: conversation.id,
-        text: "Start, please.",
-        user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
-        dataRoot: app.dataRoot,
-      }).catch(() => undefined);
-      const [asked, note] = listMessages(app.db, conversation.id);
-      expect(note?.text).toContain("I could not start this turn");
-      // CANARY: drop `replyTo` from the start-failure note.
-      expect(note?.replyTo).toBe(asked!.id);
-    } finally {
-      installFakeRuntime();
-    }
-  });
-
   it("a message queued while a first turn was starting gets its own note when that start fails", async () => {
     // The start awaits (the MCP pre-flight here; a stdio server's spawn or a
     // continuity reset live), and a send from another surface in that window
@@ -1427,7 +1361,8 @@ describe("ruling 465: the queue is visible and every reply names its message", (
       const [one, two] = messages.filter((m) => m.author === "user");
       const notes = messages.filter((m) => m.author === "controller");
       // CANARY: drop the queue drain from `runControllerTurn`'s catch and part
-      // 2 has no note (and the next boot calls it a restart).
+      // 2 has no note (and the next boot calls it a restart); drop `replyTo`
+      // from the start-failure note and part 1's note names no message.
       expect(notes.map((m) => [m.text, m.replyTo])).toEqual([
         ["I could not start this turn: The controller turn could not start.", one!.id],
         ["I dropped this message: the turn before it could not start. Say it again to retry.", two!.id],

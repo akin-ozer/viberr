@@ -165,57 +165,63 @@ const REFUSAL =
 /** A quoted `"error"` (or `'error'`) anywhere in the call = an explicit kind. */
 const ERROR_KIND = /(["'])error\1/;
 
-const STANDALONE_PUSH = /(?<![.\w])push\s*\(/g;
+/** A file's own name for the toast: the house `push`, or another binding. */
+const TOAST_BINDING = /const\s+(\w+)\s*=\s*useToast\(\)/g;
 
-interface Violation {
-  file: string;
+interface ToastCall {
   line: number;
-  message: string;
+  args: string;
 }
 
-function scan(file: string): Violation[] {
-  const src = stripComments(readFileSync(file, "utf8"));
-  const out: Violation[] = [];
-  for (const m of src.matchAll(STANDALONE_PUSH)) {
-    const open = m.index! + m[0].length - 1;
-    const args = extractArgs(src, open);
-    if (ERROR_KIND.test(args)) continue;
-    const bad = stringLiterals(args).find((s) => REFUSAL.test(s));
-    if (bad) {
-      const line = src.slice(0, m.index!).split("\n").length;
-      out.push({ file: path.relative(APP, file), line, message: bad.trim() });
-    }
-  }
-  return out;
+/**
+ * Every standalone call through a toast binding in comment-stripped source:
+ * `push(...)`, plus whatever name the file binds `useToast()` to, so
+ * `const toast = useToast()` cannot take a file out of the scan.
+ */
+function toastCalls(src: string): ToastCall[] {
+  const names = new Set(["push"]);
+  for (const m of src.matchAll(TOAST_BINDING)) names.add(m[1]!);
+  const call = new RegExp(`(?<![.\\w])(?:${[...names].join("|")})\\s*\\(`, "g");
+  return [...src.matchAll(call)].map((m) => ({
+    line: src.slice(0, m.index).split("\n").length,
+    args: extractArgs(src, m.index + m[0].length - 1),
+  }));
+}
+
+/** The refusal-shaped literal a call pushes with no explicit "error" kind. */
+function refusalOnSuccess({ args }: ToastCall): string | undefined {
+  if (ERROR_KIND.test(args)) return undefined;
+  return stringLiterals(args).find((s) => REFUSAL.test(s));
 }
 
 describe("D5: a failure toast passes the error kind (no green tick on a refusal)", () => {
-  const files = ROOTS.flatMap(walk);
+  const calls = ROOTS.flatMap(walk).flatMap((file) =>
+    toastCalls(stripComments(readFileSync(file, "utf8"))).map((c) => ({
+      ...c,
+      file: path.relative(APP, file),
+    })),
+  );
 
   it("finds no refusal-shaped push() left on the default success kind", () => {
-    const violations = files.flatMap(scan);
-    const report = violations
-      .map((v) => `  ${v.file}:${v.line} — push("${v.message}") has no "error" kind`)
-      .join("\n");
-    expect(violations, `\n${report}\n`).toEqual([]);
+    // A scan that finds no calls passes everything (a renamed hook, a moved
+    // tree); the render layer made 85 when this floor was set.
+    expect(calls.length).toBeGreaterThan(50);
+    const violations = calls.flatMap((c) => {
+      const message = refusalOnSuccess(c)?.trim();
+      return message ? [`${c.file}:${c.line} — push("${message}") has no "error" kind`] : [];
+    });
+    expect(violations, `\n  ${violations.join("\n  ")}\n`).toEqual([]);
   });
 
   it("catches a planted violation (the gate actually bites)", () => {
-    // A synthetic source proving the scan flags a refusal pushed as success and
-    // clears the same message once the kind is passed.
-    const bad = `const p = useToast(); p; push("You can't do that yet");`;
-    const good = `push("You can't do that yet", "error");`;
-    const withErrorElsewhere = `push(d.ok ? "Saved" : "Save failed", d.ok ? "success" : "error");`;
-    const notARefusal = `push("Pinned — it stays at the top");`;
-    const flag = (src: string) => {
-      if (ERROR_KIND.test(extractArgs(src, src.indexOf("push(") + 4))) return false;
-      return stringLiterals(
-        extractArgs(src, src.indexOf("push(") + 4),
-      ).some((s) => REFUSAL.test(s));
-    };
-    expect(flag(bad)).toBe(true);
-    expect(flag(good)).toBe(false);
-    expect(flag(withErrorElsewhere)).toBe(false);
-    expect(flag(notARefusal)).toBe(false);
+    // Synthetic sources proving the scan flags a refusal pushed as success,
+    // under the house name or a renamed binding, and clears the same message
+    // once the kind is passed.
+    const flag = (src: string) => toastCalls(src).some((c) => refusalOnSuccess(c) !== undefined);
+    expect(flag(`const push = useToast(); push("You can't do that yet");`)).toBe(true);
+    expect(flag(`const toast = useToast(); toast("You can't do that yet");`)).toBe(true);
+    expect(flag(`push("You can't do that yet", "error");`)).toBe(false);
+    expect(flag(`push(d.ok ? "Saved" : "Save failed", d.ok ? "success" : "error");`)).toBe(false);
+    expect(flag(`push("Pinned — it stays at the top");`)).toBe(false);
   });
 });

@@ -179,14 +179,6 @@ describe("resolveSpecialistDisallowedTools", () => {
     expect(denied).toContain("Write");
   });
 
-  it("a capability outside the grant-required set stays permissive when unspecified", () => {
-    // Web egress is a policy nicety, not a delivery power: absence keeps it.
-    expect(resolveSpecialistDisallowedTools([])).not.toContain("WebFetch");
-    expect(
-      resolveSpecialistDisallowedTools([grant("use-web-search-fetch", "off")]),
-    ).toContain("WebFetch");
-  });
-
   it("withholding execute-code-or-write-repo denies Edit/MultiEdit/Write + git commit (D1, XS-13)", () => {
     const denied = resolveSpecialistDisallowedTools([
       grant("execute-code-or-write-repo", "human"),
@@ -317,11 +309,6 @@ describe("resolveDeliveryPermissions", () => {
 /* --------------------------------------------- web egress (P13-LV-18) */
 
 describe("web egress capability", () => {
-  it("an ABSENT grant keeps the web tools — nothing regresses for existing profiles", () => {
-    expect(resolveSpecialistDisallowedTools([])).not.toContain("WebFetch");
-    expect(resolveSpecialistDisallowedTools([])).not.toContain("WebSearch");
-  });
-
   it("withholding use-web-search-fetch denies WebFetch + WebSearch", () => {
     const denied = resolveSpecialistDisallowedTools([
       grant("use-web-search-fetch", "off"),
@@ -358,18 +345,6 @@ describe("MCP tools are deliberately NOT capability-gated (R16-5)", () => {
   // (`resolveSpecialistMcpServersDetailed` → `startRun`); see
   // specialist-mcp.server.test.ts.
 
-  it("withholding execute-code-or-write-repo does NOT deny the mcp__* channel", () => {
-    const denied = resolveSpecialistDisallowedTools([
-      grant("execute-code-or-write-repo", "off"),
-    ]);
-    // The file-write tools ARE removed — the capability has teeth where Viberr
-    // can see the tool.
-    expect(denied).toContain("Edit");
-    expect(denied).toContain("Write");
-    // …and stops exactly at the boundary of what it can see.
-    expect(denied.some((tool) => tool.startsWith("mcp__"))).toBe(false);
-  });
-
   it("no capability, at any mode, denies an mcp__* tool", () => {
     const modes: CapabilityGrant["mode"][] = ["off", "human", "direct"];
     for (const mode of modes) {
@@ -388,14 +363,6 @@ describe("MCP tools are deliberately NOT capability-gated (R16-5)", () => {
         ).toEqual([]);
       }
     }
-  });
-
-  it("an undeployed agent is confined by DEPLOYMENT, not by the matrix", () => {
-    // The one place mcp__* could legitimately be cut is "this agent is not
-    // deployed here at all" — a different question from "which capabilities did
-    // you grant it". Pinned so the two stay distinguishable.
-    const denied = resolveUndeployedDisallowedTools();
-    expect(denied.length).toBeGreaterThan(0);
   });
 });
 

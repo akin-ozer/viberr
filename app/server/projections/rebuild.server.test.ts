@@ -32,6 +32,7 @@ describe("rebuildProjections (Phase 10 recovery hammer)", () => {
     const summary = rebuildProjections(store.db, { dataRoot: store.dataRoot });
     expect(summary.projects).toBe(1);
     expect(summary.tasks).toBe(1);
+    expect(summary.errors).toBe(0);
     expect(getTaskDetail(store.db, store.slug, "VIB-1")?.title).toBe(
       "Task VIB-1",
     );

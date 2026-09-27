@@ -51,7 +51,7 @@ export interface AuditBrowseRow {
 }
 
 /** Default browse window — recent events, enough to scan without paging. */
-export const AUDIT_BROWSE_DEFAULT_LIMIT = 150;
+const AUDIT_BROWSE_DEFAULT_LIMIT = 150;
 const AUDIT_BROWSE_MAX_LIMIT = 500;
 
 /**

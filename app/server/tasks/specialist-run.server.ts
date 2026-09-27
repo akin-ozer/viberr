@@ -486,8 +486,9 @@ export function resolveDeployedSpecialist(
  * existed nowhere in the repo except that sentence — it never shipped. Both call
  * sites union `kb` only; the fresh and resume paths each mount the reviewer's
  * OWN skills; R18-1 stands. SKILLS ARE DELIBERATELY NOT INHERITED: a reviewer's
- * craft is its own profile's grant. `skill-mount.server.test.ts` pins the
- * absence of any skills-widening claim — do not restore one.
+ * craft is its own profile's grant. `specialist-run.server.test.ts` pins it
+ * ("the reviewer inherits the deliverer's KB and mounts ONLY its own skills");
+ * do not restore a skills-widening claim.
  */
 function deliveringContextGrants(
   frontmatter: Parameters<typeof deliveringEngagement>[0],

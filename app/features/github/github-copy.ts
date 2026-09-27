@@ -10,7 +10,7 @@
  */
 
 export const RECONCILE_START_TOAST = "Updating branch and PR status from GitHub…";
-export const RECONCILE_DONE_TOAST =
+const RECONCILE_DONE_TOAST =
   "Status updated. Every branch and PR maps to its task key";
 
 /** Input distilled from a ProjectReconcileSummary (server maps to this). */

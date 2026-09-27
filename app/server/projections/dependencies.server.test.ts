@@ -137,6 +137,8 @@ describe("tasksReleasedBy (ruling 300)", () => {
      *
      * CANARY: put them back in one array (or push everything to `direct`).
      */
+    // VIB-4 also waits on archived VIB-9, so finishing VIB-1 frees nothing for
+    // it. CANARY: drop the dead-wait filter and VIB-4 joins `direct`.
     expect(tasksReleasedBy(store.db, store.slug, "VIB-1")).toEqual({
       direct: ["VIB-2"],
       downstream: ["VIB-3"],
@@ -145,16 +147,6 @@ describe("tasksReleasedBy (ruling 300)", () => {
       direct: ["VIB-3"],
       downstream: [],
     });
-  });
-
-  it("never counts a task whose OTHER wait can never clear", () => {
-    const store = setupTestStore(ctx);
-    chain(store);
-    // VIB-4 also waits on an ARCHIVED task. Finishing VIB-1 frees nothing for
-    // it, and counting it would inflate the one number a person orders their
-    // queue by. CANARY: drop the dead-wait filter.
-    const freed = tasksReleasedBy(store.db, store.slug, "VIB-1");
-    expect([...freed.direct, ...freed.downstream]).not.toContain("VIB-4");
   });
 
   it("a task nothing waits on releases nothing, and says so as an empty list", () => {

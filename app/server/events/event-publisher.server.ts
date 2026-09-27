@@ -185,22 +185,19 @@ function readTaskFacts(
 
 // -------------------------------------------------------------- lifecycle
 
-interface PublisherState {
-  unsubscribe: () => void;
-}
-
 const PUBLISHER_KEY = Symbol.for("viberr.eventPublisher");
 
-/** The single `globalThis` slot this module owns — the subscription survives an
- *  HMR module reload, which a module-level variable would not. */
+/** The single `globalThis` slot this module owns: it marks the subscription as
+ *  made, which survives an HMR module reload where a module-level variable
+ *  would not. */
 interface PublisherHost {
-  [PUBLISHER_KEY]?: PublisherState;
+  [PUBLISHER_KEY]?: true;
 }
 
 function publisherHost(): PublisherHost {
   // SAFETY: `PUBLISHER_KEY` is a registry symbol under a viberr-namespaced name
-  // that only `startEventPublisher` / `stopEventPublisherForTests` below read or
-  // write, so the slot holds either the state they put there or nothing at all.
+  // that only `startEventPublisher` below reads or writes, so the slot holds
+  // either the mark it put there or nothing at all.
   return globalThis as PublisherHost;
 }
 
@@ -212,7 +209,7 @@ export function startEventPublisher(): void {
   const cache = publisherHost();
   if (cache[PUBLISHER_KEY]) return;
 
-  const unsubscribe = onProjectionEvent((e) => {
+  onProjectionEvent((e) => {
     try {
       const ctx: TranslateContext = {};
       if (e.type === "task.updated") {
@@ -231,12 +228,5 @@ export function startEventPublisher(): void {
       });
     }
   });
-  cache[PUBLISHER_KEY] = { unsubscribe };
-}
-
-/** Test-only: detach from the emitter. */
-export function stopEventPublisherForTests(): void {
-  const cache = publisherHost();
-  cache[PUBLISHER_KEY]?.unsubscribe();
-  cache[PUBLISHER_KEY] = undefined;
+  cache[PUBLISHER_KEY] = true;
 }

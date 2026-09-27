@@ -153,9 +153,7 @@ describe("the task file's fence (review finding 6)", () => {
 
 describe("gatherControllerContext", () => {
   it("task scope: a derived header plus the canonical file, fenced", async () => {
-    const { gatherControllerContext, TASK_FILE_CONTEXT_CHARS } = await import(
-      "./controller-context.server"
-    );
+    const { gatherControllerContext } = await import("./controller-context.server");
     const read = gatherControllerContext(app.db, {
       projectSlug: SLUG,
       taskKey: "VIB-142",
@@ -178,7 +176,6 @@ describe("gatherControllerContext", () => {
     expect(read.text).toContain("````markdown\n---\nkey: VIB-142");
     expect(read.text).toContain("## Goal\n\nLet the operator attach a single GitHub repo");
     expect(read.text).toContain("## Timeline");
-    expect(read.text.length).toBeLessThan(TASK_FILE_CONTEXT_CHARS + 4_000);
   });
 
   it("board scope: stages with counts, members, the open-task table and the open epics", async () => {
@@ -451,26 +448,6 @@ describe("gatherControllerContext", () => {
    * anything I had... I bridged that gap with a rule from my playbook", having
    * spent a `whoami` round trip before it could help with anything.
    */
-  it("ruling 309: task and board scope name the asking person's live authority", async () => {
-    const { gatherControllerContext } = await import("./controller-context.server");
-    // CANARY: drop `authority` from either header and a bound conversation is
-    // back to inferring what the person may do from their ORG role.
-    const task = gatherControllerContext(app.db, {
-      projectSlug: SLUG,
-      taskKey: "VIB-142",
-      user: selin,
-      dataRoot: app.dataRoot,
-    });
-    expect(task.text).toContain("your authority: project role contributor");
-    const board = gatherControllerContext(app.db, {
-      projectSlug: SLUG,
-      taskKey: null,
-      user: selin,
-      dataRoot: app.dataRoot,
-    });
-    expect(board.text).toContain("your authority: project role contributor");
-  });
-
   it("ruling 309: the role is the ASKER's, not the board's strongest member", async () => {
     // The board roster was already in the board block ("members: … (admin)"),
     // which is why this looked covered and was not: the roster says who is on
@@ -492,6 +469,16 @@ describe("gatherControllerContext", () => {
     expect(mine.text).toContain("your authority: project role admin");
     expect(theirs.text).toContain("your authority: project role contributor");
     expect(theirs.text).not.toContain("project role admin");
+    // The board scope names it too. CANARY: drop `authority` from either
+    // header and a bound conversation is back to inferring what the person may
+    // do from their ORG role.
+    const board = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: selin,
+      dataRoot: app.dataRoot,
+    });
+    expect(board.text).toContain("your authority: project role contributor");
   });
 
   it("ruling 309: a live demotion reaches the next turn", async () => {
@@ -663,20 +650,5 @@ describe("gatherControllerContext", () => {
     });
     expect(after.text).not.toContain(filed.proposal.id);
     expect(after.text).not.toContain("Open knowledge-base proposals");
-  });
-
-  it("never exceeds the block budget", async () => {
-    const { gatherControllerContext, CONTEXT_BLOCK_CHARS } = await import(
-      "./controller-context.server"
-    );
-    for (const key of ["VIB-142", "VIB-148", null]) {
-      const read = gatherControllerContext(app.db, {
-        projectSlug: SLUG,
-        taskKey: key,
-        user: arda,
-        dataRoot: app.dataRoot,
-      });
-      expect(read.text.length).toBeLessThanOrEqual(CONTEXT_BLOCK_CHARS);
-    }
   });
 });

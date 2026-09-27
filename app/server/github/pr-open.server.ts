@@ -101,9 +101,8 @@ export function composePrBody(input: {
  * (`<label> · <add> · <del>`, empty columns dropped). Newest-first timeline, so
  * the first event carrying evidence is the latest outcome. Returns null when
  * the task has none, which keeps the "## Evidence" section out of the body.
- * Pure + exported so the formatting is unit-tested.
  */
-export function latestEvidenceLines(
+function latestEvidenceLines(
   timeline: readonly TaskFileEvent[],
 ): string[] | null {
   const withEvidence = timeline.find((e) => e.evidence && e.evidence.length > 0);
@@ -130,7 +129,7 @@ export function latestEvidenceLines(
  * `files` is capped by GitHub at 300 per page; a truncated compare undercounts,
  * so `truncated` marks it and the label reads "300+". Sufficient for a summary.
  */
-export interface DeliveredDiffStats {
+interface DeliveredDiffStats {
   files: number;
   add: number;
   del: number;
@@ -155,7 +154,7 @@ const ghCompareStatsSchema = z
   })
   .catch({});
 
-export async function deliveredDiffStats(
+async function deliveredDiffStats(
   gh: Pick<GithubContext, "client" | "repo">,
   base: string,
   head: string,
@@ -186,7 +185,7 @@ export async function deliveredDiffStats(
 
 /** The two PR-body fragments derived from live compare stats: the one-line
  *  change summary and the delivery evidence rows. */
-export interface DeliveredPrParts {
+interface DeliveredPrParts {
   changeSummary: string;
   evidence: string[];
 }
