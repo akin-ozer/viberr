@@ -14,6 +14,10 @@ import {
 } from "~/server/controller/controller-run.server";
 import { ControllerPage } from "~/features/controller/controller-page";
 import {
+  sendModeOf,
+  waitingMessageAction,
+} from "~/features/controller/waiting-actions.server";
+import {
   getControllerSurface,
   selectedConversationId,
 } from "~/features/controller/controller-query.server";
@@ -87,6 +91,8 @@ export async function action({ request }: Route.ActionArgs) {
         surface: String(formData.get("surface") ?? "") || null,
         // U39-24: the reader's zone; normalized by the engine.
         timeZone: String(formData.get("timeZone") ?? "") || null,
+        // Ruling 527: steer the working turn (the default) or queue behind it.
+        mode: sendModeOf(formData),
       });
       if (result.state === "refused") {
         // U35-4 (pass 35): the refusal is recorded IN the conversation (a
@@ -99,6 +105,14 @@ export async function action({ request }: Route.ActionArgs) {
       }
       return { ok: true as const, conversationId };
     }
+    // Ruling 527: Send now and Retract on a message still waiting.
+    const waiting = waitingMessageAction(db, intent, formData, {
+      id: auth.user.id,
+      email: auth.user.email,
+      name: auth.user.name,
+      orgRole: auth.user.role,
+    });
+    if (waiting) return waiting;
     if (intent === "interrupt") {
       // The Live-run strip's Interrupt, confirmed on the page. The engine
       // decides who may stop a controller turn (its owner or an org admin) and

@@ -40,6 +40,7 @@ import {
   type RunHandle,
   type RunMcpServers,
   type RunSpec,
+  type RunSteering,
   type RunExit,
   type RuntimeAdapter,
 } from "./adapter.server";
@@ -441,6 +442,8 @@ export interface StartRunInput {
    *  completion, or that did not finish. Registered before the run launches,
    *  so a run cannot finish ahead of it. */
   onAnswered?: RunAnsweredCallback;
+  /** Ruling 527: see `RunSpec.steering`. */
+  steering?: RunSteering;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: RunMcpServers;
   /** Tool allowlist confining the run (operator → its governance tools only). */
@@ -1020,6 +1023,7 @@ export async function startRun(
   }
   if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) spec.compactAnchor = input.compactAnchor;
+  if (input.steering) spec.steering = input.steering;
   if (input.attachmentsWritableDir) {
     spec.attachmentsWritableDir = input.attachmentsWritableDir;
   }
@@ -1791,6 +1795,8 @@ export interface ResumeRunInput {
   compactAnchor?: string;
   /** U39-30: see `StartRunInput.onAnswered`. */
   onAnswered?: RunAnsweredCallback;
+  /** Ruling 527: see `RunSpec.steering`. */
+  steering?: RunSteering;
   /** Ruling 372: the instant the resume is decided at. Tests pin it; the
    *  product passes nothing and the service reads its clock ONCE here. */
   nowIso?: string;
@@ -1835,6 +1841,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) target.compactAnchor = input.compactAnchor;
   if (input.onAnswered) target.onAnswered = input.onAnswered;
+  if (input.steering) target.steering = input.steering;
   if (input.outputSchema) target.outputSchema = input.outputSchema;
   if (input.attachmentsWritableDir) {
     target.attachmentsWritableDir = input.attachmentsWritableDir;

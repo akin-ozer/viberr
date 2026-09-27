@@ -610,6 +610,11 @@ CREATE TABLE controller_messages (
   -- which boot recovery never notes as unanswered. 0 on everything written
   -- since.
   unlinked_history INTEGER NOT NULL DEFAULT 0,
+  -- Ruling 527: on a user message sent while a turn worked and read by that
+  -- turn at one of its steps (steering), the id of the user message the turn
+  -- answered. Such a message has no reply of its own: the turn's reply
+  -- answers both. NULL on every other row.
+  steered_into TEXT,
   UNIQUE (conversation_id, seq)
 );
 CREATE TABLE "agent_runs" (

@@ -7516,6 +7516,8 @@ a.card:active, .pj-new:active { transform: scale(.99); }
      rail's small text links were 15 to 16px on a phone. Padding, not a new
      look: the hit area grows and the text stays put. */
   .ctl-all-toggle .linkish { padding-block: .3rem; }
+  /* Ruling 527: so do a waiting message's Send now and Retract. */
+  .ctl-msg-acts .linkish { padding-block: .3rem; }
 }
 
 /* The org-settings Controller tab (admin config of the controller itself).

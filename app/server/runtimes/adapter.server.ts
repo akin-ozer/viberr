@@ -178,6 +178,36 @@ export interface RunSpec {
    *  else. Absent on a refused run and in adapter tests that build a spec by
    *  hand, where the shared `CODEX_HOME` stands in, as before the ruling. */
   accountHome?: string;
+  /** Ruling 527: the channel a controller turn takes its person's steering
+   *  messages through while it works. Only controller turns carry it, and they
+   *  run on Claude (ruling 99), whose adapter reads it from two hooks: at every
+   *  step boundary it asks for what is waiting, and when the model has written
+   *  its final answer it closes it. */
+  steering?: RunSteering;
+}
+
+/**
+ * Ruling 527: steering, from the run's side. The host holds the messages the
+ * person sent while the run works; the adapter only asks for them at a step
+ * boundary and says when asking has stopped.
+ */
+export interface RunSteering {
+  /** At a step boundary (every tool call of a batch answered, before the next
+   *  model request): what the model reads now, or null with nothing waiting.
+   *  What it returns has been read: the host marks those messages steered. */
+  take(): SteeringDelivery | null;
+  /** The model has written its final answer, so nothing handed in from here
+   *  on reaches this run; the host sends what is still waiting to the next
+   *  turn. */
+  close(): void;
+}
+
+/** What one step boundary hands the model. */
+export interface SteeringDelivery {
+  /** The messages, framed for the model. */
+  text: string;
+  /** How many messages it carries (the console line counts them). */
+  count: number;
 }
 
 /** One emitted line: the raw envelope + its projected display line + facts. */

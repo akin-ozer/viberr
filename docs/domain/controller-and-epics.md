@@ -69,7 +69,7 @@ Identity facts:
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). `?all=1` lists everyone's threads about the project for an org admin, and, sealed, for a holder of `delete-controller-conversations` (§2.3, ruling 525). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
-| `/resources/controller` | any signed-in user; project and task scopes require membership; a signed-out request gets a 401, never a login redirect | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
+| `/resources/controller` | any signed-in user; project and task scopes require membership; a signed-out request gets a 401, never a login redirect | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected; `mode=queue` queues it behind a working turn instead of steering it, ruling 527), `POST intent=send-now` / `intent=retract` (`conversationId`, `messageId`) are ruling 527's moves on a message still waiting, for the conversation's owner (409 with a sentence once it is not waiting). |
 | `/resources/controller-unseen` | any signed-in user; a signed-out request gets a 401 with an empty status, never a login redirect | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 448), and the viewer's turns working right now with their scope, phase and step (ruling 457). |
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
@@ -113,7 +113,15 @@ stands, from the lease the server holds (`turn.answering`, `turn.queued`): "answ
 on the message the live turn took, "queued · N ahead" on one waiting behind it (N counts the
 turns before its own, the answering one included); after a restart its reply is the restart
 note. "… is working" sits under the answered message and any reply already posted to it,
-never under a later message. The composer is
+never under a later message. A message sent while a turn works STEERS that turn unless its
+sender queued it (ruling 527): it sits in the turn, under the message the turn answers and
+above the working row and the turn's reply, saying "steering · next step" until the turn
+reads it at a step (`turn.steering`) and "steered" for good after (`steered_into`); it gets
+no reply of its own, the turn's reply answers it. While a turn works the composer offers
+**Steer** (primary, ⌘↵) and **Queue** (⌘⇧↵), and a message still waiting offers its sender
+**Send now** (a queued one, into the running turn) and **Retract** (a queued or steering one
+nothing has read: it leaves the conversation and its text goes back into the composer,
+under what is typed; `waiting-actions.tsx`). The composer is
 disabled when the VIEWER has no Claude connected (ruling 127) or when they do not own the
 active conversation; the two states render different sentences, because only the first one
 is theirs to fix. People are named by display name at render time (`userDisplayName`); the
@@ -161,7 +169,8 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   arrives. The shared not-connected note lives in `not-connected.tsx` for the same
   reason. The transcript reuses the
   page's message vocabulary, reply order and queue states (ruling 465; `MessageState` in
-  `turn-step.tsx`) and the composer takes focus on open (the send hint names the
+  `turn-step.tsx`), ruling 527's steering, Steer and Queue, Send now and Retract (posted to
+  its own resource route) and the composer takes focus on open (the send hint names the
   viewer's own modifier and drops on a coarse pointer) — on a user-initiated open only, so
   a remembered-open reload never starts focus inside the textarea. Escape closes and
   returns focus to the trigger **while focus is inside the panel**. An Escape pressed on a
@@ -346,8 +355,9 @@ starter's runtime home, with the folder Claude keeps beside it, removed as the s
 step cleared, as the record of what was spent: Insights still counts them, and nothing
 opens them (`canReadControllerRunLog` finds no conversation). A turn still working is
 stopped first as the deleter (`interruptRunOnConversationDeletion`, audited
-`runtime.run.interrupted` with `reason: "conversation-deleted"`), the queue behind it goes
-with the lease, and it writes nothing back: its settle purges the lines it wrote on its way
+`runtime.run.interrupted` with `reason: "conversation-deleted"`), the messages waiting on
+it (queued behind it, or sent to steer it, ruling 527) go with the lease, and it writes
+nothing back: its settle purges the lines it wrote on its way
 out, and boot finishes that purge for a turn a restart cut off
 (`purgeOrphanedConversationLogs`). It is permanent. The audit row,
 `controller.conversation.deleted`, names the starter, how the actor held the delete
@@ -371,7 +381,8 @@ Storage is app-owned SQLite, the same family as notifications and sessions:
 `controller_conversations(id, user_id, user_label, project_slug, task_key, title,
 created_at, updated_at, last_message_at, seen_seq)` with `CHECK (task_key IS NULL OR
 project_slug IS NOT NULL)` and `controller_messages(id, conversation_id, seq, author
-user|controller, user_id, text, run_id, surface, created_at, reply_to, unlinked_history)`
+user|controller, user_id, text, run_id, surface, created_at, reply_to, unlinked_history,
+steered_into)`
 with `UNIQUE (conversation_id, seq)` and `ON DELETE CASCADE` to the conversation. `reply_to`
 (ruling 465) is, on a controller row, the user message it answers: a turn's reply (posted
 early or by the settle), every refusal (no Claude, a full queue, a turn that could not
@@ -386,7 +397,10 @@ without a row. A user message it cannot link (lost to a restart or a failed star
 waiting while the walk was out of step) gets `unlinked_history = 1`: earlier history, not
 linked, which boot recovery does not note. A root whose `reply_to` the first version of the
 backfill already linked is walked again when it gains `unlinked_history` (ruling 465's
-dated note of 2026-09-25).
+dated note of 2026-09-25). `steered_into` (ruling 527) is, on a user message a turn read
+at one of its steps, the message that turn answers; it has no backfill (nothing before the
+column could steer a turn). A Retract deletes a user message nothing has read yet, so a
+conversation's `seq` can have gaps.
 
 A conversation's **scope** (ruling 121) is fixed at creation: instance (`project_slug`
 and `task_key` null), board (slug alone) or task (slug + key). `listConversations`
@@ -417,12 +431,28 @@ a notification row: replies stay out of the bell (§8).
 2. If Claude is unavailable, a refusal is written into the transcript and the turn
    returns `{ state: "refused", reason }`; every send door answers that as a 409, and
    the dock's door refuses before creating a new thread.
-3. Single-flight per conversation with a FIFO capped at 8 queued messages
-   (`MAX_QUEUED_MESSAGES`); overflow is refused in-transcript. The lease records the
-   message the current turn answers, and `conversationTurnState` exposes it and the queued
-   ids with their positions (`answering`, `queued: [{ messageId, ahead }]`) on both views,
-   so the transcript names the queue from the server's side (ruling 465); joining the queue
-   publishes `controller.updated`.
+3. Single-flight per conversation with a FIFO capped at 8 waiting messages
+   (`MAX_QUEUED_MESSAGES`, steering and queued together); overflow is refused
+   in-transcript. The lease records the message the current turn answers, and
+   `conversationTurnState` exposes it and the waiting ids (`answering`,
+   `queued: [{ messageId, ahead }]`, `steering`) on both views, so the transcript names
+   the queue from the server's side (ruling 465); joining either publishes
+   `controller.updated`. A message sent while a turn holds the lease **steers** it unless
+   the form says `mode=queue` (ruling 527): the lease keeps it in `steering` until the run's
+   next step boundary asks (`RunSpec.steering.take`, which the Claude adapter calls from the
+   SDK's `PostToolBatch` hook: every tool call of a batch answered, before the next model
+   request). The adapter hands it to the model as that hook's `additionalContext`
+   (`steeringText`: the person sent it while the turn worked, it is part of this turn, and
+   the turn's reply answers it), writes a `run·steered` console line, and the lease marks
+   it `steered_into` the message the turn answers. The SDK's `Stop` hook (the model has
+   written its final answer) closes steering: what still waits, or is sent after, goes to
+   the queue's front, behind any other message that missed a turn and ahead of the ones
+   queued on purpose, and starts the next turn, which takes steering again. The SDK's own
+   mid-turn input is not used (ruling 527(a)). `sendQueuedMessageNow` (Send now) moves a
+   queued message into steering, or to the queue's front once the turn is closed, and
+   `retractWaitingMessage` (Retract) deletes a waiting message nothing has read and
+   answers its text; both are the conversation owner's alone and refuse a message that is
+   not waiting (409).
 4. The run row is `agent_runs.kind = 'controller'`, `project_slug = ''`,
    `task_key = <conversation id>`, so no task-scoped query ever matches it. Model is
    the profile's through `resolveRunModel("claude", …)`, re-read every turn (a resume
@@ -438,7 +468,8 @@ a notification row: replies stay out of the bell (§8).
    runs on (ruling 444: the model is named here, never in the recorded system prompt), a
    digest of the conversation UP TO the message this turn answers (`messagesUpTo`, in reply
    order: every user message up to and including it, every reply to one of those, every
-   unlinked note written before it; the newest 30 of those, `CONTEXT_MESSAGES`, 24 000
+   unlinked note written before it, and every message that steered one of those turns
+   whatever its own `seq`, ruling 527; the newest 30 of those, `CONTEXT_MESSAGES`, 24 000
    chars, each message cut at 600), then, when messages wait behind it, one line: "N more
    messages from <person> are queued behind this one; each is answered in its own turn, in
    order — do not treat them as lost" (ruling 465, F40-10: a queued message used to reach
@@ -544,10 +575,13 @@ a notification row: replies stay out of the bell (§8).
    depends on lost context). The controller's tools stay deferred behind ToolSearch
    (deferred tools only append and keep the cache).
 6. `settleTurn` records the reply (or a failure note naming quota/auth/other) under the
-   message it answers, releases the lease and starts the next queued message. When that
+   message it answers, releases the lease and starts the next queued message; a steering
+   message the turn never read (it stopped or failed first) goes to the queue's front
+   before that (ruling 527). When that
    start fails, the note goes under the message it tried and every message dropped behind
-   it gets its own note (ruling 465). A FIRST turn whose start fails does the same for any
-   message another surface queued while the start awaited.
+   it gets its own note (ruling 465), a message sent to steer it included. A FIRST turn
+   whose start fails does the same for any message another surface queued or sent to
+   steer it while the start awaited.
 
 Everything the run machinery gives every other run applies: raw NDJSON transcript,
 line redaction, token accounting, the run's input disclosure (`recordRunInputs`, on the
@@ -556,8 +590,8 @@ fresh path and every resume; ruling 344), the run-log console (owner or org admi
 apply; rendered on the controller pages, §2.2), the interrupt (`canInterruptControllerRun`,
 §2.2) and boot orphan finalization. Boot also writes an honest "interrupted by a server
 restart" note under every user message no reply answers in a conversation no live turn
-holds and the backfill did not mark earlier history (`recoverControllerConversations`,
-ruling 465): the turn whose run died (its note
+holds, that the backfill did not mark earlier history and that no turn read as steering
+(`recoverControllerConversations`, rulings 465 and 527): the turn whose run died (its note
 carries the run id, which settles that run, and answers the oldest waiting message), a
 message whose run never started, and the messages the lost in-memory queue still held. The task-scoped run stream cannot carry a controller
 run (the wire schema's non-empty-slug rule, and an empty slug would match every `projects`

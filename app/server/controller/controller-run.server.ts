@@ -43,7 +43,11 @@ import {
   type RunPrincipalRefusal,
 } from "~/server/runtimes/run-principal.server";
 import type { UserBackendHealth } from "~/server/runtimes/backend-credentials.server";
-import type { RunMcpServers } from "~/server/runtimes/adapter.server";
+import type {
+  RunMcpServers,
+  RunSteering,
+  SteeringDelivery,
+} from "~/server/runtimes/adapter.server";
 import { namedTurnPhase } from "~/features/runtime/runtime-types";
 import {
   interruptRun,
@@ -60,10 +64,12 @@ import { getRun, listRunsForTaskRows } from "~/server/runtimes/run-store.server"
 import {
   appendMessage,
   getConversation,
+  markSteered,
   messagesUpTo,
   normalizeSurface,
   publishConversationUpdated,
   requireConversation,
+  retractMessage,
   type ControllerConversation,
   type ControllerMessage,
 } from "./controller-conversations.server";
@@ -121,18 +127,28 @@ import {
  * SINGLE-FLIGHT per conversation with a FIFO of queued user messages (the
  * operator-lease shape): a message that lands mid-turn is stored immediately
  * and drives the next turn when the current one settles.
+ *
+ * STEERING (ruling 527): a message sent mid-turn goes INTO the running turn
+ * unless its sender queued it. The lease holds it until the run's next step
+ * boundary asks for it (`RunSteering.take`), which marks it steered; once the
+ * model has written its final answer the run closes steering, and a message
+ * still waiting starts the next turn, ahead of the queue.
  */
 
 const LEASE_KEY = Symbol.for("viberr.controllerLease");
 
-/** A user message waiting behind the turn that holds the lease. */
-interface QueuedMessage {
+/** A user message waiting on the turn that holds the lease: queued behind it,
+ *  or (ruling 527) waiting to steer it. */
+interface WaitingMessage {
   messageId: string;
   /** Ruling 465: the message's `seq`, where its turn's digest stops. */
   seq: number;
   text: string;
   surface: string | null;
   timeZone: string | null;
+  /** Ruling 527: it asked to go into a running turn and missed it, so it
+   *  goes next, ahead of the messages queued on purpose. */
+  next?: boolean;
 }
 
 interface LeaseEntry {
@@ -140,7 +156,13 @@ interface LeaseEntry {
   /** Ruling 465: the user message the current turn answers — what every
    *  reply, failure note and the "answering now" state name. */
   messageId: string | null;
-  queue: QueuedMessage[];
+  queue: WaitingMessage[];
+  /** Ruling 527: the messages the running turn takes at its next step, in the
+   *  order sent. Empty whenever `steerable` is false. */
+  steering: WaitingMessage[];
+  /** Ruling 527: whether the turn can still take steering. False once its
+   *  model has written the final answer; each turn starts it true again. */
+  steerable: boolean;
 }
 
 /** Ruling 465: the user message one turn answers. */
@@ -167,13 +189,15 @@ function leases(): Map<string, LeaseEntry> {
 }
 
 /**
- * Ruling 525: a conversation being deleted gives up its lease, and the queue
- * of messages waiting behind its turn goes with it. They get no notes: they
- * are deleted with the conversation. The turn the lease held is stopped by the
- * deleter, and settles into a conversation that is gone (`settleTurn`).
+ * Ruling 525: a conversation being deleted gives up its lease, and every
+ * message waiting on its turn goes with it, queued behind it or sent to steer
+ * it (ruling 527), so the stopping turn reads none of them. They get no notes:
+ * they are deleted with the conversation. The turn the lease held is stopped
+ * by the deleter, and settles into a conversation that is gone (`settleTurn`).
  */
 export function dropConversationLease(conversationId: string): void {
-  leases().get(conversationId)?.queue.splice(0);
+  const entry = leases().get(conversationId);
+  if (entry) drainWaiting(entry);
   leases().delete(conversationId);
 }
 
@@ -206,11 +230,22 @@ export interface ControllerTurnInput {
    *  Normalized here; the turn's context states it so quoted times match
    *  the page. */
   timeZone?: string | null;
+  /** Ruling 527: what the message does when a turn is already working.
+   *  Absent, it steers that turn. */
+  mode?: SendMode;
   dataRoot?: string;
 }
 
+/**
+ * Ruling 527: a message sent while a turn works either STEERS it (goes into
+ * that turn at its next step; the default) or is QUEUED for a turn of its own
+ * after it. With no turn working both start one.
+ */
+export type SendMode = "steer" | "queue";
+
 export type ControllerTurnResult =
   | { state: "started"; runId: string; messageId: string }
+  | { state: "steering"; messageId: string }
   | { state: "queued"; messageId: string }
   | { state: "refused"; reason: string };
 
@@ -326,18 +361,7 @@ export async function runControllerTurn(
 ): Promise<ControllerTurnResult> {
   const text = input.text.trim();
   if (!text) throw AppError.validation("Say something for the controller to act on.");
-  const conversation = requireConversation(db, input.conversationId, {
-    userId: input.user.id,
-    orgRole: input.user.orgRole,
-  });
-  if (conversation.userId !== input.user.id) {
-    // Admins READ any conversation; only the owner converses — the authority
-    // model is per-owner, so a second speaker would smuggle their authority
-    // into a transcript scoped to someone else's.
-    throw AppError.forbidden(
-      "Only the conversation's owner can talk in it. Start your own conversation with the controller.",
-    );
-  }
+  const conversation = requireOwnConversation(db, input.conversationId, input.user);
 
   const surface = normalizeSurface(input.surface);
   const timeZone = normalizeTimeZone(input.timeZone);
@@ -371,7 +395,7 @@ export async function runControllerTurn(
   const map = leases();
   const held = map.get(conversation.id);
   if (held) {
-    if (held.queue.length >= MAX_QUEUED_MESSAGES) {
+    if (held.queue.length + held.steering.length >= MAX_QUEUED_MESSAGES) {
       const note =
         "The controller is still answering and its queue for this conversation is full. Wait for the current reply.";
       // The message above is already in the transcript and will never be
@@ -386,14 +410,21 @@ export async function runControllerTurn(
       });
       return { state: "refused", reason: note };
     }
-    held.queue.push({ messageId: message.id, seq: message.seq, text, surface, timeZone });
+    const waiting: WaitingMessage = { messageId: message.id, seq: message.seq, text, surface, timeZone };
     // Ruling 465: the queue is part of what every open transcript shows
     // ("queued · N ahead"), and the append above published before the
-    // message joined it.
+    // message joined it. Ruling 527: so is steering.
+    const state = input.mode === "queue" ? queueBehind(held, waiting) : steer(held, waiting);
     publishConversationUpdated(conversation.id, conversation.userId);
-    return { state: "queued", messageId: message.id };
+    return { state, messageId: message.id };
   }
-  const entry: LeaseEntry = { runId: null, messageId: message.id, queue: [] };
+  const entry: LeaseEntry = {
+    runId: null,
+    messageId: message.id,
+    queue: [],
+    steering: [],
+    steerable: true,
+  };
   map.set(conversation.id, entry);
   try {
     const runId = await startTurnRun(
@@ -412,8 +443,9 @@ export async function runControllerTurn(
     // message sent from another surface meanwhile joined this lease's queue.
     // The lease dies here and that queue with it, so each such message gets
     // its own note, as `settleTurn`'s queued-start failure writes them: none
-    // may read back as a question the controller ignored (ruling 465).
-    const dropped = entry.queue.splice(0);
+    // may read back as a question the controller ignored (ruling 465). Ruling
+    // 527: a message sent to steer the turn that never started is one of them.
+    const dropped = drainWaiting(entry);
     map.delete(conversation.id);
     const reason =
       error instanceof AppError
@@ -444,6 +476,151 @@ export async function runControllerTurn(
     });
     throw AppError.internal("The controller turn could not start.");
   }
+}
+
+/** The conversation, when `user` is the one who may talk in it. */
+function requireOwnConversation(
+  db: DatabaseSync,
+  conversationId: string,
+  user: ControllerTurnInput["user"],
+): ControllerConversation {
+  const conversation = requireConversation(db, conversationId, {
+    userId: user.id,
+    orgRole: user.orgRole,
+  });
+  if (conversation.userId !== user.id) {
+    // Admins READ any conversation; only the owner converses — the authority
+    // model is per-owner, so a second speaker would smuggle their authority
+    // into a transcript scoped to someone else's.
+    throw AppError.forbidden(
+      "Only the conversation's owner can talk in it. Start your own conversation with the controller.",
+    );
+  }
+  return conversation;
+}
+
+/** Ruling 527: into the running turn at its next step, or next when that turn
+ *  can take no more. */
+function steer(entry: LeaseEntry, message: WaitingMessage): "steering" | "queued" {
+  if (!entry.steerable) return queueNext(entry, message);
+  entry.steering.push(message);
+  return "steering";
+}
+
+/** Behind everything waiting: a turn of its own, in the order sent. */
+function queueBehind(entry: LeaseEntry, message: WaitingMessage): "queued" {
+  entry.queue.push(message);
+  return "queued";
+}
+
+/**
+ * Ruling 527: a message that asked for the running turn and missed it (it
+ * came after the final answer, or the turn read no step after it) starts the
+ * next turn: after any other that missed, ahead of the messages queued on
+ * purpose, which chose to wait.
+ */
+function queueNext(entry: LeaseEntry, message: WaitingMessage): "queued" {
+  const at = entry.queue.findIndex((q) => !q.next);
+  entry.queue.splice(at < 0 ? entry.queue.length : at, 0, { ...message, next: true });
+  return "queued";
+}
+
+/** Everything a dying lease still holds, steering first (it was next). */
+function drainWaiting(entry: LeaseEntry): WaitingMessage[] {
+  return [...entry.steering.splice(0), ...entry.queue.splice(0)];
+}
+
+/**
+ * Ruling 527: the running turn's side of steering, for this turn alone. `take`
+ * hands the run every message waiting, marked steered into the message this
+ * turn answers; `close` sends what is still waiting to the next turn.
+ */
+function steeringChannel(
+  db: DatabaseSync,
+  conversation: ControllerConversation,
+  entry: LeaseEntry,
+  answering: string,
+): RunSteering {
+  return {
+    take(): SteeringDelivery | null {
+      if (entry.steering.length === 0) return null;
+      const taken = entry.steering.splice(0);
+      markSteered(db, conversation, taken.map((m) => m.messageId), answering);
+      return { text: steeringText(conversation, taken), count: taken.length };
+    },
+    close(): void {
+      entry.steerable = false;
+      const missed = entry.steering.splice(0);
+      if (missed.length === 0) return;
+      for (const m of missed) queueNext(entry, m);
+      publishConversationUpdated(conversation.id, conversation.userId);
+    },
+  };
+}
+
+/**
+ * Ruling 527: what the model reads at the step a steering message reaches it.
+ * The message gets no reply of its own, so the turn's reply is where its
+ * sender hears back.
+ */
+export function steeringText(
+  conversation: Pick<ControllerConversation, "userLabel">,
+  messages: readonly Pick<WaitingMessage, "text" | "surface">[],
+): string {
+  const one = messages.length === 1;
+  const head =
+    `${conversation.userLabel} sent ${one ? "this" : `these ${messages.length} messages`} while you were ` +
+    `working on this turn. ${one ? "It is" : "They are"} part of this turn: take ${one ? "it" : "them"} ` +
+    `into account from here, and answer ${one ? "it" : "them"} in the reply you write for this turn.`;
+  const body = messages
+    .map((m) => (m.surface ? `(sent from ${m.surface})\n${m.text}` : m.text))
+    .join("\n\n---\n\n");
+  return `${head}\n\n${body}`;
+}
+
+/** Ruling 527: a message still waiting on the running turn, as its sender's
+ *  Send now and Retract name it. */
+export interface WaitingMessageRef {
+  conversationId: string;
+  messageId: string;
+  user: ControllerTurnInput["user"];
+}
+
+/**
+ * Ruling 527: Send now on a queued message. It leaves the queue and goes into
+ * the running turn at its next step; a turn that can take no more has it
+ * start the next one instead.
+ */
+export function sendQueuedMessageNow(db: DatabaseSync, input: WaitingMessageRef): "steering" | "queued" {
+  const conversation = requireOwnConversation(db, input.conversationId, input.user);
+  const entry = leases().get(conversation.id);
+  if (entry?.steering.some((m) => m.messageId === input.messageId)) return "steering";
+  const at = entry?.queue.findIndex((m) => m.messageId === input.messageId) ?? -1;
+  if (!entry || at < 0) {
+    throw AppError.conflict("That message is not waiting any more: it is being answered, or already was.");
+  }
+  const [message] = entry.queue.splice(at, 1);
+  const state = steer(entry, message!);
+  publishConversationUpdated(conversation.id, conversation.userId);
+  return state;
+}
+
+/**
+ * Ruling 527: Retract on a message still waiting (queued, or not yet read by
+ * the running turn). The message leaves the lease and the transcript, and its
+ * text comes back for the person to edit and send again.
+ */
+export function retractWaitingMessage(db: DatabaseSync, input: WaitingMessageRef): string {
+  const conversation = requireOwnConversation(db, input.conversationId, input.user);
+  const entry = leases().get(conversation.id);
+  for (const list of entry ? [entry.steering, entry.queue] : []) {
+    const at = list.findIndex((m) => m.messageId === input.messageId);
+    if (at < 0) continue;
+    const [message] = list.splice(at, 1);
+    retractMessage(db, conversation, message!.messageId);
+    return message!.text;
+  }
+  throw AppError.conflict("That message has already been read, so it can't be taken back.");
 }
 
 /**
@@ -517,6 +694,9 @@ async function startTurnRun(
 ): Promise<string> {
   const dataRoot = input.dataRoot;
   entry.messageId = message.id;
+  // Ruling 527: a new turn takes steering until its model writes its answer.
+  entry.steerable = true;
+  const steering = steeringChannel(db, conversation, entry, message.id);
   const config = resolveControllerConfig(dataRoot);
 
   // Org MCP grants: resolved + stdio-pre-flighted ONCE, prompt and mount from
@@ -645,6 +825,7 @@ async function startTurnRun(
     if (config.effort) resumeInput.effort = config.effort;
     if (dataRoot) resumeInput.dataRoot = dataRoot;
     resumeInput.onAnswered = answered;
+    resumeInput.steering = steering;
     const resumed = await resumeRun(db, resumeInput);
     runId = resumed.runId;
   } else {
@@ -671,6 +852,7 @@ async function startTurnRun(
     if (config.effort) startInput.effort = config.effort;
     if (dataRoot) startInput.dataRoot = dataRoot;
     startInput.onAnswered = answered;
+    startInput.steering = steering;
     const started = await startRun(db, startInput);
     runId = started.runId;
   }
@@ -885,6 +1067,9 @@ async function settleTurn(
 
   const map = leases();
   const entry = map.get(conversationId);
+  // Ruling 527: a steering message this turn never read (it stopped, failed,
+  // or ended with no step after the message came) starts the next turn.
+  for (const missed of entry?.steering.splice(0) ?? []) queueNext(entry!, missed);
   const next = entry?.queue.shift();
   if (!entry || !next) {
     map.delete(conversationId);
@@ -914,8 +1099,9 @@ async function settleTurn(
     // is ALREADY in the transcript and has no other scheduler that will ever
     // reach it, so none may read back as a question the controller ignored.
     // Ruling 465: the note sits under the message it tried to start, and each
-    // message dropped behind it gets its own, under it.
-    const dropped = entry.queue.splice(0);
+    // message dropped behind it gets its own, under it (ruling 527: one sent
+    // to steer the turn that never started included).
+    const dropped = drainWaiting(entry);
     // Ruling 525: nor into a conversation deleted while it was starting.
     if (getConversation(db, conversationId)) {
       appendMessage(db, {
@@ -995,6 +1181,12 @@ export interface ConversationTurnState {
    * view, never a guess of its own.
    */
   queued: { messageId: string; ahead: number }[];
+  /**
+   * Ruling 527: the user messages waiting to go into the live turn at its next
+   * step, in the order sent. The transcript shows them inside that turn, as
+   * "steering · next step", until the turn reads them (`steeredInto`).
+   */
+  steering: string[];
 }
 
 /** Nothing running: the shape a caller reads when there is no live turn. */
@@ -1005,6 +1197,7 @@ export const IDLE_TURN: ConversationTurnState = {
   step: null,
   answering: null,
   queued: [],
+  steering: [],
 };
 
 /**
@@ -1027,6 +1220,7 @@ export function conversationTurnState(
   const pending = {
     answering: entry.messageId ?? null,
     queued: entry.queue.map((q, i) => ({ messageId: q.messageId, ahead: i + 1 })),
+    steering: entry.steering.map((m) => m.messageId),
   };
   if (!entry.runId) return { ...IDLE_TURN, ...pending };
   const run = getRun(db, entry.runId);
@@ -1062,7 +1256,10 @@ export function conversationTurnState(
  * links, and the backfill (`backfillControllerReplyLinks`) could not prove its
  * answer, because an earlier restart or failure lost it or the order stopped
  * proving anything. A restart note under it would be false, and it would be
- * written into a thread weeks old.
+ * written into a thread weeks old. Nor is a message that steered a turn
+ * (ruling 527): it was part of that turn, whose own message carries the note.
+ * One still waiting to steer when the server stopped was never read, so it is
+ * unanswered like a queued one.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
   const note = RESTART_NOTE;
@@ -1093,6 +1290,7 @@ export function recoverControllerConversations(db: DatabaseSync): number {
       `SELECT m.id, m.conversation_id FROM controller_messages m
         WHERE m.author = 'user'
           AND m.unlinked_history = 0
+          AND m.steered_into IS NULL
           AND NOT EXISTS (SELECT 1 FROM controller_messages r
                            WHERE r.conversation_id = m.conversation_id
                              AND r.reply_to = m.id)

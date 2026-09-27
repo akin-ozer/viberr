@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RunCallbacks, RuntimeAdapter } from "~/server/runtimes/adapter.server";
+import type { SendMode } from "./controller-run.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
@@ -112,13 +113,14 @@ async function settled(runId: string): Promise<void> {
 }
 
 /** Selin's turn in `conversationId`, played by the fake runtime. */
-async function turn(conversationId: string, text: string) {
+async function turn(conversationId: string, text: string, mode: SendMode = "steer") {
   const { runControllerTurn } = await import("./controller-run.server");
   return runControllerTurn(app.db, {
     conversationId,
     text,
     user: { id: selin.id, email: selin.email, name: "Selin", orgRole: "member" },
     dataRoot: app.dataRoot,
+    mode,
   });
 }
 
@@ -322,13 +324,21 @@ describe("a turn still working when its conversation is deleted (ruling 525)", (
     });
     const working = await turn(conversation.id, "Go through every blocked task.");
     if (working.state !== "started") throw new Error(`turn ${working.state}`);
-    const queued = await turn(conversation.id, "And then the stale ones.");
+    const queued = await turn(conversation.id, "And then the stale ones.", "queue");
     expect(queued.state).toBe("queued");
+    // Ruling 527: and one sent to steer it, which the stopping turn must not
+    // read. CANARY: empty only the queue in `dropConversationLease` and the
+    // turn's channel still hands it over.
+    const steering = await turn(conversation.id, "Skip the archived ones.");
+    expect(steering.state).toBe("steering");
+    const channel = startedRunSpecs().at(-1)?.steering;
+    if (!channel) throw new Error("the turn has no steering channel");
     const transcript = await writeTranscript("sess-delete-live");
     const spawned = startedRunSpecs().length;
 
     const result = await deleteAs(elif, conversation.id, SLUG);
     expect(result.stopped).toBe(1);
+    expect(channel.take()).toBeNull();
     await settled(working.runId);
 
     const run = getRun(app.db, working.runId)!;
@@ -347,8 +357,9 @@ describe("a turn still working when its conversation is deleted (ruling 525)", (
     expect(existsSync(transcript.file)).toBe(false);
     expect(deletionRow(conversation.id)?.details).toMatchObject({
       deletedAs: "project-role",
-      // The question that titled it, the one the turn answered, the queued one.
-      messages: 3,
+      // The question that titled it, the one the turn answered, the queued
+      // one and the steering one.
+      messages: 4,
       turns: 1,
       stoppedTurns: 1,
     });

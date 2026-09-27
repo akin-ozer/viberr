@@ -55,19 +55,45 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
  * nothing (the caller renders this only for one that has none). The words
  * carry it, in the header's own small type (`.fine`, the surface chip's
  * look), so no rule joins the stylesheet every page loads.
+ *
+ * Ruling 527 adds the two steering words: "steering · next step" on a message
+ * waiting for the running turn's next step (`turn.steering`), and "steered"
+ * on one a turn read, for good (`steered`, from the message row). A steered
+ * message has no reply of its own, and the word says why.
  */
 export function MessageState({
   turn,
   messageId,
+  steered = false,
 }: {
-  turn: Pick<ConversationTurnState, "answering" | "queued"> | null;
+  turn: Pick<ConversationTurnState, "answering" | "queued" | "steering"> | null;
   messageId: string;
+  /** Ruling 527: a turn read this message at one of its steps. */
+  steered?: boolean;
 }): React.ReactNode {
+  if (steered) {
+    return (
+      <span
+        className="fine"
+        data-msg-state="steered"
+        title="The turn it sits in read it at one of its steps, and that turn's reply answers it."
+      >
+        steered
+      </span>
+    );
+  }
   if (!turn) return null;
   if (turn.answering === messageId) {
     return (
       <span className="fine" data-msg-state="answering">
         answering now
+      </span>
+    );
+  }
+  if (turn.steering.includes(messageId)) {
+    return (
+      <span className="fine" data-msg-state="steering" title="It goes into the running turn at its next step.">
+        steering · next step
       </span>
     );
   }

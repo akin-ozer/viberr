@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
 import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
@@ -40,7 +41,10 @@ import {
   type RunLogStore,
 } from "~/features/runtime/use-run-log-stream";
 import { namedTurnPhase, type RunView } from "~/features/runtime/runtime-types";
-import type { ConversationTurnState } from "~/server/controller/controller-run.server";
+import type {
+  ConversationTurnState,
+  SendMode,
+} from "~/server/controller/controller-run.server";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
@@ -49,6 +53,7 @@ import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
 import { KnowledgePanel } from "./knowledge-panel";
 import { useOpResultToast, type ActionResult } from "./op-result";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
+import { WaitingActions, withRetracted } from "./waiting-actions";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -91,6 +96,9 @@ function sendForm(
   text: string,
   surface: string,
   conversationId: string | null,
+  /** Ruling 527: what the message does while a turn works; the server
+   *  steers when the form names none. */
+  mode: SendMode = "steer",
 ): FormData {
   const body = new FormData();
   body.set("_csrf", csrf);
@@ -99,9 +107,18 @@ function sendForm(
   body.set("surface", surface);
   // U39-24: the controller quotes times in the zone this page prints them in.
   body.set("timeZone", viewerTimeZone());
+  body.set("mode", mode);
   if (conversationId) body.set("conversationId", conversationId);
   return body;
 }
+
+/**
+ * Ruling 527: Retract hands a message's text back to the composer. The box's
+ * text is the composer's own state (a keystroke re-renders the composer, not
+ * the transcript beside it), so the composer lends its setter here while it is
+ * mounted and the transcript's Retract calls it.
+ */
+type RestoreDraft = RefObject<((text: string) => void) | null>;
 
 export function ControllerPage({
   view,
@@ -129,6 +146,7 @@ export function ControllerPage({
 
   const send = useFetcher<ActionResult>();
   const push = useToast();
+  const restoreDraft: RestoreDraft = useRef(null);
   useFetcherResult(send, (data) => {
     if (!data.ok && data.error) {
       push(data.error, "error");
@@ -204,12 +222,13 @@ export function ControllerPage({
             csrf={csrf}
             conversationId={view.conversation.id}
           >
-            <Transcript view={view} />
+            <Transcript view={view} restoreDraft={restoreDraft} />
             <Composer
               view={view}
               csrf={csrf}
               send={send}
               conversationId={view.conversation.id}
+              restoreDraft={restoreDraft}
             />
           </ConversationRuntime>
         ) : (
@@ -664,14 +683,18 @@ function Transcript({
   examples = [],
   examplesDisabled = false,
   onExample,
+  restoreDraft,
 }: {
   view: ControllerSurfaceView;
   /** Ruling 419(g): ruling 314's examples, on the blank transcript only. */
   examples?: ControllerExample[];
   examplesDisabled?: boolean;
   onExample?: (text: string) => void;
+  /** Ruling 527: where Retract hands a message back. */
+  restoreDraft?: RestoreDraft;
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
+  const csrf = useCsrfToken();
   // Ruling 451(d): a reply that lands while the transcript is up enters the way
   // it does in the dock; history never animates.
   const fresh = useFreshMessageIds(view.messages, view.conversation?.id ?? null);
@@ -729,10 +752,13 @@ function Transcript({
   }
   // Ruling 465 (F40-8): each reply sits under the message it answers, an
   // unanswered message says where it stands, and "is working…" sits under
-  // the message the live turn answers, never under a later one.
-  const ordered = inReplyOrder(view.messages);
+  // the message the live turn answers, never under a later one. Ruling 527:
+  // a message that steered the turn, or waits to, sits in it.
+  const ordered = inReplyOrder(view.messages, view.turn);
   const answered = answeredMessageIds(view.messages);
-  const workingAfter = workingRowAfter(ordered, view.turn.answering);
+  const workingAfter = workingRowAfter(ordered, view.turn);
+  const conversationId = view.conversation.id;
+  const onRetracted = (text: string) => restoreDraft?.current?.(text);
   // Ruling 476(d): the row is what a sighted person watches. The page's one
   // status region (`TurnAnnouncer`) says that the turn started and that it
   // replied; this row, inserted with its sentence already in it, was skipped.
@@ -780,7 +806,17 @@ function Transcript({
                   </span>
                 )}
                 {m.author === "user" && !answered.has(m.id) && (
-                  <MessageState turn={view.turn} messageId={m.id} />
+                  <MessageState turn={view.turn} messageId={m.id} steered={m.steeredInto !== null} />
+                )}
+                {/* Ruling 527: Send now and Retract, for the message's sender. */}
+                {m.author === "user" && view.viewerOwnsActive && (
+                  <WaitingActions
+                    turn={view.turn}
+                    messageId={m.id}
+                    conversationId={conversationId}
+                    csrf={csrf}
+                    onRetracted={onRetracted}
+                  />
                 )}
               </header>
               <div className="md-body">
@@ -801,19 +837,35 @@ function Composer({
   csrf,
   send,
   conversationId,
+  restoreDraft,
 }: {
   view: ControllerSurfaceView;
   csrf: string;
   send: ReturnType<typeof useFetcher<ActionResult>>;
   conversationId: string | null;
+  /** Ruling 527: lent to the transcript's Retract. */
+  restoreDraft?: RestoreDraft;
 }) {
   const [text, setText] = useState("");
   const location = useLocation();
+  // Ruling 527: the transcript's Retract puts a message back in this box.
+  useEffect(() => {
+    if (!restoreDraft) return;
+    restoreDraft.current = (retracted) => setText((cur) => withRetracted(cur, retracted));
+    return () => {
+      restoreDraft.current = null;
+    };
+  }, [restoreDraft]);
   // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55's rule, which P13-D-39 applied to the comment
   // composer and this one missed).
   const sendHint = useModifierHint("↵");
+  const queueHint = useModifierHint("⇧↵");
   const busy = send.state !== "idle";
+  // Ruling 527: while a turn holds the conversation, a message steers it or
+  // queues behind it, and the composer offers both.
+  const live = view.turn.answering !== null;
+  const sending = busy ? (send.formData?.get("mode") === "queue" ? "queue" : "steer") : null;
   // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
   // takes them. `setText("")` used to run at submit, optimistically, and
   // nothing anywhere held the string — an expired CSRF token (refused before
@@ -835,13 +887,14 @@ function Composer({
   });
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
-  const submit = () => {
+  const submit = (mode: SendMode = "steer") => {
     const value = text.trim();
     if (!value || busy || disabled) return;
     pending.current = value;
-    send.submit(sendForm(csrf, value, `${location.pathname}${location.search}`, conversationId), {
-      method: "post",
-    });
+    send.submit(
+      sendForm(csrf, value, `${location.pathname}${location.search}`, conversationId, mode),
+      { method: "post" },
+    );
   };
   return (
     <div className="ctl-composer">
@@ -853,7 +906,8 @@ function Composer({
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();
-            submit();
+            // Ruling 527: ⇧ queues behind a working turn instead of steering it.
+            submit(live && e.shiftKey ? "queue" : "steer");
           }
         }}
         rows={3}
@@ -874,19 +928,35 @@ function Composer({
           {/* A touch screen has no key to name; app.css drops this on a
               coarse pointer (`.kbd-hint`). */}
           <span className="kbd-hint" suppressHydrationWarning>
-            {` · ${sendHint} sends`}
+            {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
           </span>
         </span>
-        <button
-          type="button"
-          className="btn primary sm"
-          onClick={submit}
-          disabled={busy || disabled || !text.trim()}
-          aria-busy={busy || undefined}
-        >
-          {busy && <Icon name="loader" className="spin" />}
-          {busy ? "Sending…" : "Send"}
-        </button>
+        <span className="inline-row">
+          {live && (
+            <button
+              type="button"
+              className="btn sm"
+              title="Wait for its own turn, after the one working now"
+              onClick={() => submit("queue")}
+              disabled={busy || disabled || !text.trim()}
+              aria-busy={sending === "queue" || undefined}
+            >
+              {sending === "queue" && <Icon name="loader" className="spin" />}
+              {sending === "queue" ? "Queueing…" : "Queue"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn primary sm"
+            title={live ? "Go into the turn working now, at its next step" : undefined}
+            onClick={() => submit("steer")}
+            disabled={busy || disabled || !text.trim()}
+            aria-busy={sending === "steer" || undefined}
+          >
+            {sending === "steer" && <Icon name="loader" className="spin" />}
+            {sending === "steer" ? "Sending…" : live ? "Steer" : "Send"}
+          </button>
+        </span>
       </div>
     </div>
   );

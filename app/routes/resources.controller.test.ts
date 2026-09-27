@@ -441,6 +441,53 @@ describe("POST /resources/controller", () => {
     expect(nonMember.data.error).toBe("That project or task is not open to you.");
   });
 
+  it("ruling 527: a send queues when its form says so, and Retract answers at this door", async () => {
+    // CANARY: drop `mode: sendModeOf(formData)` from this route's send and the
+    // second message steers; drop its `waitingMessageAction` branch and
+    // Retract is an unknown action.
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../test-support/backend-credentials"
+    );
+    const { queueFakeRun } = await import("../../test-support/fake-runtime");
+    const { conversationTurnState, interruptControllerTurn } = await import(
+      "~/server/controller/controller-run.server"
+    );
+    await connectFakeBackend(app.db, arda, "claude");
+    try {
+      queueFakeRun({
+        lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
+        sessionId: "sess-dock-527",
+        keepRunning: true,
+      });
+      const sent = z.object({ ok: z.literal(true), conversationId: z.string() });
+      const { conversationId } = sent.parse(
+        await post(arda, { intent: "send", text: "Take your time.", project: SLUG }),
+      );
+      sent.parse(
+        await post(arda, { intent: "send", text: "Queued.", project: SLUG, conversationId, mode: "queue" }),
+      );
+      const turn = conversationTurnState(app.db, conversationId);
+      expect(turn.queued).toHaveLength(1);
+      const messageId = turn.queued[0]!.messageId;
+      const back = z
+        .object({ ok: z.literal(true), retracted: z.string() })
+        .parse(await post(arda, { intent: "retract", conversationId, messageId }));
+      expect(back.retracted).toBe("Queued.");
+      const gone = returnedRefusal.parse(await post(arda, { intent: "retract", conversationId, messageId }));
+      expect(gone.init?.status).toBe(409);
+      await interruptControllerTurn(
+        app.db,
+        { conversationId, runId: turn.runId!, dataRoot: app.dataRoot },
+        { userId: arda, label: "arda@viberr.dev" },
+      );
+      for (let i = 0; i < 400 && conversationTurnState(app.db, conversationId).answering; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    } finally {
+      await disconnectFakeBackend(app.db, arda, "claude");
+    }
+  });
+
   it("rejects an unknown intent", async () => {
     const reply = returnedRefusal.parse(await post(arda, { intent: "delete-everything" }));
     expect(reply.init?.status).toBe(400);
