@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
+  approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -1399,6 +1400,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     }
 
     it("a reply at the cap that committed a new head opens no stuck packet — the operator reacts from a fresh depth", async () => {
+      // A person approves the move out of In Progress here, so the react turn
+      // that stops there is not stranded and the settle adds no nudge to count.
+      approveReviewEntry(store);
       deployOperator();
       writeReviewTask({ stage: "impl", validation: "changed", pr: PR_7 });
       const runId = await finishedRunWith(

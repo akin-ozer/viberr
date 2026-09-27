@@ -63,6 +63,7 @@ import {
 } from "./runtimes/run-recovery.server";
 import { seedDefaultAgentAssets } from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
+import { convertTemplateReviewEntry } from "./seed/review-entry-conversion.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
 import { startDependencyRunner } from "./tasks/dependencies.server";
 import { convertGoalsToEpics } from "./tasks/goal-epic-conversion.server";
@@ -878,6 +879,18 @@ export async function bootServer(): Promise<void> {
     ensureBaseAgentsDeployed(db);
   } catch (error) {
     logger.error("built-in agent backfill failed", {
+      err: toError(error),
+    });
+  }
+
+  // Ruling 519: a board created before the move into Review became automatic
+  // gets the template's `auto` edge in place of its old approval. After the
+  // rescan (the project rows exist) and before the watcher (no concurrent
+  // writer); a converted edge is not converted again.
+  try {
+    await convertTemplateReviewEntry(db);
+  } catch (error) {
+    logger.error("making the move into Review automatic failed", {
       err: toError(error),
     });
   }

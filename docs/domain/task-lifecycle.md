@@ -160,13 +160,19 @@ stage inherits the replaced edge's boundary, removing one merges neighbours with
 **stricter** boundary, a rule into terminal is always `human` and `locked`.
 
 The Standard template (`governed-5`): `Triage → Ready → In Progress → Review → Done` with
-boundaries `auto, auto, approval, human`. Project creation offers three policy presets
-that shape the graph and the operator deployment (`presetWorkflow`, `presetAgents` in
-`app/features/home/project-create.server.ts`): **`strict`** (every pre-work `auto`
-becomes `approval`; operator supervised, `deliver-review-pr` set to `recommend`),
-**`balanced`** (the template as is), **`auto`** ("Autonomous within policy": operator at
-`full`, with an explicit `completion-for-acceptance: direct` grant). The preset is not
-stored; its effect is readable off the graph (`humanGatesPreWorkAdvance`, ruling 28).
+boundaries `auto, auto, auto, human`. The operator moves the task into Review itself
+when the work is ready, and a person's one gate is acceptance (ruling 519). The move into
+Review was an `approval` before; at boot, `convertTemplateReviewEntry` turns a board
+that still carries the template's old approval edge (its `by` words unchanged since
+creation, on a board that is not strict) into the template's `auto` edge, once, with a
+`project.policy.boundary_changed` audit row by the system. Project creation offers three
+policy presets that shape the graph and the operator deployment (`presetWorkflow`,
+`presetAgents` in `app/features/home/project-create.server.ts`): **`strict`** (every
+`auto` short of the last stage becomes `approval`, the move into Review included;
+operator supervised, `deliver-review-pr` set to `recommend`), **`balanced`** (the
+template as is), **`auto`** ("Autonomous within policy": operator at `full`, with an
+explicit `completion-for-acceptance: direct` grant). The preset is not stored; its
+effect is readable off the graph (`humanGatesPreWorkAdvance`, ruling 28).
 
 Agent stage eligibility resolves in three steps (`stageEligible`): a literal id on
 this board; else the structural role the declared id names (`todo`, `backlog` →
@@ -203,7 +209,9 @@ profile's stages.
    authority gate: "Moving KEY back from X to Y needs a reason …". The stage menu, the
    drag and the keyboard move open a confirm that asks for it, an applied recommendation
    passes the card's own words, and a forward move asks nothing. The reason is quoted
-   under the `transition` event and stored as `reason` on the audit row.
+   under the `transition` event and stored as `reason` on the audit row. The operator's
+   own move quotes the reason it gave the same way (ruling 519), so the move into Review
+   it makes by itself says why on the task's history.
    Operator authority skips human RBAC but is forbidden a bare move to terminal, and
    (ruling 151) every declared `approval` or `human` boundary whatever its grant says:
    "The Review to Merge boundary is approved by a human on this board: the operator may
@@ -693,7 +701,9 @@ branch collision, whose `resolve_remote_collision` ceremony re-confirms a cached
 against GitHub before refusing and never strands on either arm, ruling 136), records
 `github.pr.opened` (or "Pushed `<sha>` to PR #N" when a push moved the head of the task's
 open PR), and either re-queues a full-autonomy operator (`delivered`: a new PR or a moved
-head) or ensures a supervised operator left a "Move to Review" recommendation. When the
+head) or ensures a supervised operator left a "Move to Review" recommendation, on a board
+where a person approves that move (where the edge is `auto`, the operator makes the move
+itself and no card is filed, ruling 519). When the
 delivering drive is the operator's own, the `delivered` follow-up is deferred to the end
 of the drive and queued only if the drive stopped without moving or dispatching (ruling
 357). A PR Viberr did not open but adopts (open, head equal to the delivered revision) is

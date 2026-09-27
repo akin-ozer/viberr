@@ -1014,11 +1014,12 @@ async function noteQueuedTriggerFireFailed(
  * Ruling 152(a) (pass 35, G35-5): `ownMoveLandedHere` widens the LAST test,
  * never the guards above it. Since the drive's own transitions queue no
  * re-trigger, a stage the drive itself moved the task onto is a stage nothing
- * else will follow up on — and on the shipped board the operator's own move
- * lands on In Progress, whose outbound boundary is `approval`, so the
- * `auto` test alone left every such move with no follow-up at all: no
- * re-trigger, no resume, and `clearWaitingToHuman` flipped the board to
- * "waiting on you" with no agent engaged and no packet.
+ * else will follow up on — and on the shipped board of the time the operator's
+ * own move landed on In Progress, whose outbound boundary was `approval` (it
+ * still is on a strict board; ruling 519 made it `auto` on the Standard
+ * template), so the `auto` test alone left every such move with no follow-up
+ * at all: no re-trigger, no resume, and `clearWaitingToHuman` flipped the
+ * board to "waiting on you" with no agent engaged and no packet.
  */
 export function operatorLeftTaskStranded(
   task: {
@@ -2382,7 +2383,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           // Ruling 492: `set_goal` drafts the task's goal in `text`, so this
           // field is one of the doors that write a goal.
           text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; else null. " + DONE_SIGNAL_RULE },
-          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." },
+          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning (for a transition_stage that moves the task, shown on the move in its history), or the packet body for open_packet. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For correct_knowledge_doc: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For correct_knowledge_doc: the EVIDENCE that proves the passage wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
           blockedBy: {
