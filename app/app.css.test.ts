@@ -3783,9 +3783,14 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     expect(frames![1]).toMatch(/100%\s*\{[^}]*\bmask-image:\s*none/);
   });
 
-  it("acce-10: a long mono token may break rather than widen the page", () => {
+  it("acce-10: a long token may break rather than widen the page or run under a row's controls", () => {
     for (const selector of [
       ".conn-main .sub.mono", ".rsrc-main .sub.mono", ".rsrc-main b.mono-b", ".pol-note", ".hero-file",
+      // Ruling 515, the same flaw as the owner's clipped address: a Google
+      // client ID ran under the SSO row's pills, and at 320px an address ran
+      // out of the account in use's green line and past "Disconnect <address>?".
+      ".conn-main", ".cred-ok > span:not(.warn-acts)", ".cred-warn > span:not(.warn-acts)",
+      ".confirm-card h3", ".confirm-card p",
     ]) {
       expect(requiredDecls(plain, selector).get("overflow-wrap"), selector).toBe("anywhere");
     }
@@ -6024,5 +6029,21 @@ describe("app.css ruling 510: a task's attachment list folds like a long comment
     expect(decl(".attach-list", "display")).toBe("flex");
     expect(decl(".attach-list", "gap")).toBe(".5rem");
     expect(decl(".attach-file", "margin-top")).toBeUndefined();
+  });
+});
+
+describe("app.css ruling 515: an account's name never runs under its buttons", () => {
+  const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
+
+  it("stacks an account row, its name and facts over its buttons, and keeps the name on one line", () => {
+    // CANARY: drop the block display and the row is the connections list's
+    // flex row again: at the card's 473px its three buttons leave the name
+    // 171px, and "realvega1534@gmail.com" (182px) runs under Use this account.
+    expect(decl(".acct-list .conn-row", "display")).toBe("block");
+    // One line, cut with an ellipsis only where the row is narrower than it.
+    expect(decl(".acct-list .conn-main b", "display")).toBe("block");
+    expect(decl(".acct-list .conn-main b", "white-space")).toBe("nowrap");
+    expect(decl(".acct-list .conn-main b", "overflow")).toBe("hidden");
+    expect(decl(".acct-list .conn-main b", "text-overflow")).toBe("ellipsis");
   });
 });
