@@ -1080,7 +1080,10 @@ A stored link is used only inside the row's own project, and a row with none ope
 task, or the project's board for a project-level row (B-FD6). On the task page the named
 event is marked and focused, the filter tab that hid it opens, and older events load
 until it is among them; a click on a row about the page already on screen brings the
-place back into view (`useHashTarget`, `app/ui/use-hash-target.ts`).
+place back into view (`useHashTarget`, `app/ui/use-hash-target.ts`). The mark lasts until
+the person's next press anywhere on the page or key (a lone modifier aside), which takes
+the hash out of the URL in place, so a reload does not bring it back; the event keeps
+the focus the link gave it (ruling 523).
 
 ## 15. File leases
 
