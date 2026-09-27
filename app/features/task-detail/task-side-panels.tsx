@@ -721,6 +721,20 @@ function GatesRow({
 }
 
 /**
+ * Ruling 520: the marks Current state leads its values with. Hoisted, so a
+ * revalidation that re-renders the panel hands React the same elements and no
+ * `Icon` renders again (ruling 457's no-op revalidation budget).
+ */
+const MARK = {
+  hand: <Icon name="hand" />,
+  clock: <Icon name="clock" />,
+  ring: <Icon name="ring" />,
+  ban: <Icon name="ban" />,
+  activity: <Icon name="activity" />,
+  github: <Icon name="github" />,
+};
+
+/**
  * Ruling 520: the hold's sentence with each entry's label on one line. In the
  * property grid's value column Chromium breaks a key after its hyphen ("VIB-"
  * over "151"), and no CSS property stops that; the words between the labels
@@ -867,7 +881,7 @@ export function CurrentStatePanel({
                 className="prop-fact by-human"
                 title="An edit-goal decision was confirmed; saving the edited goal clears the packet."
               >
-                <Icon name="hand" />
+                {MARK.hand}
                 a goal edit
               </span>
             ) : task.waiting === "human" ? (
@@ -885,7 +899,7 @@ export function CurrentStatePanel({
                 className="prop-fact by-human"
                 title="A human decision is needed: see the decision packet, the stage control, or the acceptance action on this page."
               >
-                <Icon name="hand" />
+                {MARK.hand}
                 a human
               </span>
             ) : task.waiting === "schedule" ? (
@@ -897,7 +911,7 @@ export function CurrentStatePanel({
                 className="prop-fact by-schedule"
                 title="No decision is needed: a scheduled run picks this task back up on its own. The Schedules panel below can change or cancel it."
               >
-                <Icon name="clock" />
+                {MARK.clock}
                 {/* One run of text, so the time stays beside its words
                     rather than a flex gap away from them. */}
                 <span>
@@ -917,7 +931,7 @@ export function CurrentStatePanel({
                 className="prop-fact by-agent"
                 title="Behind the instance's concurrent-run cap; it starts when a slot frees."
               >
-                <Icon name="ring" />
+                {MARK.ring}
                 Agent queued
               </span>
             ) : task.waiting === "agent" ? (
@@ -932,7 +946,7 @@ export function CurrentStatePanel({
                 className="prop-fact"
                 title={task.blockedBy.map((e) => `${e.label} · ${e.state}`).join(" · ")}
               >
-                <Icon name="ban" />
+                {MARK.ban}
                 <span>Other work: {holdSentenceKeepingLabels(task.blockedBy)}</span>
               </span>
             ) : (
@@ -958,7 +972,7 @@ export function CurrentStatePanel({
           >
             {task.lastActivityAt ? (
               <span className="prop-fact">
-                <Icon name="activity" />
+                {MARK.activity}
                 <time dateTime={task.lastActivityAt}>
                   <LocalRelative iso={task.lastActivityAt} />
                 </time>
@@ -1034,7 +1048,7 @@ export function CurrentStatePanel({
           <span className="k">Repo</span>
           <span className="v">
             <span className="prop-fact">
-              <Icon name="github" />
+              {MARK.github}
               <span className="mono">{task.repo}</span>
             </span>
           </span>
