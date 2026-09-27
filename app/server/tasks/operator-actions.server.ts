@@ -4933,6 +4933,33 @@ export async function operatorTransitionStage(
     );
   }
   const name = stageDisplayName(ctx, input.projectSlug, input.toStageId);
+  // Ruling 524 (owner, 2026-09-27: "it shouldn't offer the packet as well"): a
+  // move nobody confirms is never put to a person. The stage the task already
+  // stands at is no move at all, and a card for it would sit beside the move
+  // the operator already made. A jump the board does not declare, when every
+  // step on the way is `auto`, is the operator's to walk one step at a time; a
+  // card would ask a person to approve steps nobody approves. Backward and
+  // approval-crossing jumps still route below (owner ruling 2026-07-26).
+  {
+    const fromStageId = currentStageOf(ctx, input);
+    if (fromStageId === input.toStageId) {
+      return { outcome: "noop", message: `${input.taskKey} is already at ${name}; there is nothing to move.` };
+    }
+    const steps = boundary === null && !isRework
+      ? automaticStepsTo(ctx, input.projectSlug, fromStageId, input.toStageId)
+      : null;
+    if (steps) {
+      const fromName = stageDisplayName(ctx, input.projectSlug, fromStageId);
+      const through = steps.slice(0, -1).map((id) => stageDisplayName(ctx, input.projectSlug, id));
+      return {
+        outcome: "noop",
+        message:
+          `${fromName} to ${name} is not one move on this board: the way goes through ` +
+          `${through.join(", then ")}, and every step on it is automatic. Move ${input.taskKey} to ` +
+          `${through[0]} first; each move's reply names the next.`,
+      };
+    }
+  }
   // Ruling 162 (pass 35, F35-12 (b), owner Q35-17): Merge means mergeable. A
   // move INTO the acceptance stage (the stage with the edge into the terminal
   // one) is refused with the gate's own sentence while the review PR conflicts
@@ -5238,6 +5265,32 @@ function operatorBoundaryFor(
   const from = task.parsed.frontmatter.stage;
   const w = project.parsed.frontmatter.workflow.find((b) => b.from === from && b.to === toStageId);
   return w ? w.boundary : null;
+}
+
+/** Ruling 524: the stages a move from `fromStageId` passes through to reach
+ *  `toStageId` along declared edges, ending with `toStageId`, when every edge
+ *  on the way is `auto`; null when an edge on the way is not, or the edges
+ *  never reach it (a backward move, a stage off the chain). */
+function automaticStepsTo(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  fromStageId: string,
+  toStageId: string,
+): string[] | null {
+  const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return null;
+  const workflow = project.parsed.frontmatter.workflow;
+  const steps: string[] = [];
+  let at = fromStageId;
+  while (at !== toStageId) {
+    const edge = workflow.find((w) => w.from === at);
+    if (!edge || edge.boundary !== "auto" || edge.to === fromStageId || steps.includes(edge.to)) {
+      return null;
+    }
+    steps.push(edge.to);
+    at = edge.to;
+  }
+  return steps;
 }
 
 /**
