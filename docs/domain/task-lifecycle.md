@@ -137,9 +137,17 @@ The task is written with the list, `waiting: none`, a "Waits on other work" note
 its stored readiness at the birth value `input_required`; the `blocked` it shows is the
 derived floor. When every entry is already done the note says so instead ("Created after
 the work it waits on was done …, so nothing holds it; Viberr releases the list at
-once."). The controller's `create_task`, the goal-to-epic conversion (an unstarted
-link's declared wait, respelled by task key) and a packet's `create_task` option all
-come in through this door.
+once."), and `createTask` keeps that promise before it returns: it releases the task
+through the engine as a release at birth (`releaseTask(…, { atBirth: true })`, F39-65,
+L02-1), before anything awaits, so the dependency runner's tick cannot release it first
+as an ordinary hold. The list is cleared, the "Dependencies released" note reads
+"Released: everything this task waits on was done before it was created (…), so nothing
+held it.", the `task.dependencies.released` audit row carries `atBirth: true`, and
+nobody is told the task "can move again". The release's `dependencies-released` turn,
+whose payload carries `atBirth`, is the task's first operator turn in place of `create`,
+and the creation does not wait for that run to start. The controller's `create_task`,
+the goal-to-epic conversion (an unstarted link's declared wait, respelled by task key)
+and a packet's `create_task` option all come in through this door.
 
 ## 4. Stages and the workflow graph
 
@@ -336,9 +344,12 @@ dispatch gated they cannot cause work.
 
 A PERSON emptying the list is the release itself (ruling 131(e)): the same two halves
 the engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies
-released" note naming who cleared it, a stored `blocked` lifted to `ready`, the
-`task.dependencies.released` audit row, a `dependency` notification to the owner and
-supervisors, and the operator re-invoked with `dependencies-released`). A wait that can
+released" note naming who cleared it, a stored `blocked` lifted to `ready`, the hold's
+`waiting: none` settled to `human`, the `task.dependencies.released` audit row, a
+`dependency` notification to the owner and supervisors, and the operator re-invoked with
+`dependencies-released`). The `human` is where `clearWaitingToHuman` settles any task
+nothing holds, so a released task shows as someone's to move even in a project with no
+operator; an operator's drive marks it `agent` when it starts. A wait that can
 NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
 reference to nothing): ONE "Waiting on work that cannot complete" note, one
 notification, `waiting: human`, and the list left for a person to edit. A task that

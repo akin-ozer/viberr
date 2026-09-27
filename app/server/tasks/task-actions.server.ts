@@ -120,6 +120,7 @@ import type { FanOutOutcome } from "./packet-fanout.server";
 import {
   maybeReleaseDependents,
   noteDeadDependency,
+  releaseTask,
   setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
@@ -839,9 +840,9 @@ export async function createTask(
       ),
     ];
   }
+  const waitEntries = resolveDependencies(db, input.projectSlug, blockedBy);
+  const waitAllDone = waitEntries.length > 0 && waitEntries.every((e) => e.state === "done");
   if (blockedBy.length > 0) {
-    const waitEntries = resolveDependencies(db, input.projectSlug, blockedBy);
-    const waitAllDone = waitEntries.every((e) => e.state === "done");
     const waitNote: TaskFileEvent = {
       occurredAt: now,
       type: "note",
@@ -915,6 +916,22 @@ export async function createTask(
     taskKey: key,
     details: createdDetails,
   });
+  // L02-1: the note above promises "Viberr releases the list at once". Only the
+  // goal runner kept that promise, for the links it minted (ruling 358), and
+  // ruling 503 removed it; every other creation waited for the minute tick,
+  // which released the task as an ordinary hold with the false claims F39-65
+  // removed. Nothing has awaited since the task was projected, so the tick
+  // cannot take the file first. The release's own turn hands the task to its
+  // operator, in place of `create`.
+  const releasedAtBirth =
+    waitAllDone &&
+    (await releaseTask(db, ctx, input.projectSlug, key, { atBirth: true }).catch((error) => {
+      logger.warn("a task created on finished work could not be released at creation", {
+        taskKey: key,
+        err: toError(error),
+      });
+      return false;
+    }));
   // Ruling 503(b): the epic's history and its lead hear of a task made in it.
   // The conversion's own tasks are named by its line on the epic instead.
   if (epic && !signer) {
@@ -924,7 +941,7 @@ export async function createTask(
   // A dedicated operator coordinates every active task (ADR-002): auto-invoke
   // it to pick up the new task. Fire-and-forget — it never blocks or fails the
   // create, and it is a no-op when the project has no operator deployed.
-  void autoInvokeOperator(db, ctx, input.projectSlug, key, "create");
+  if (!releasedAtBirth) void autoInvokeOperator(db, ctx, input.projectSlug, key, "create");
 
   return {
     key,
