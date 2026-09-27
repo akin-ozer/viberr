@@ -80,6 +80,9 @@ export async function setupAppTest(): Promise<AppTestContext> {
 
   // cookieFor signs the user in through better-auth, so it needs a known
   // credential — provisioning overwrites the user's credential with this.
+  // Hashed once: scrypt is deliberately slow, and any hash of the password
+  // verifies it, so every sign-in in the file can share one.
+  const passwordHash = hashPassword(APP_TEST_PASSWORD);
   return {
     db,
     dataRoot,
@@ -91,7 +94,7 @@ export async function setupAppTest(): Promise<AppTestContext> {
         id: user.id,
         email: user.email,
         name: user.name,
-        passwordHash: await hashPassword(APP_TEST_PASSWORD),
+        passwordHash: await passwordHash,
       });
       // cookieFor is harness plumbing that mints a session, not a login under
       // test, but it goes through better-auth's sign-in hook and so spends a

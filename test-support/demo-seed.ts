@@ -84,6 +84,16 @@ async function upsertUsers(
   // loop body (both the existing-user `continue` and the insert path do) — so the
   // record is complete on the one line that returns it.
   const ids = {} as SeedUserIds;
+  // Every person but (optionally) arda shares one password, and scrypt is
+  // slow on purpose: hash each distinct password once per seed.
+  const hashes = new Map<string, Promise<string>>();
+  const hashOnce = (password: string): Promise<string> => {
+    const known = hashes.get(password);
+    if (known) return known;
+    const hash = hashPassword(password);
+    hashes.set(password, hash);
+    return hash;
+  };
   for (const person of SEED_PEOPLE) {
     const existing = findUserByEmail(db, person.email);
     if (existing) {
@@ -108,7 +118,7 @@ async function upsertUsers(
           person.handle === "arda"
             ? (options.adminPassword ?? SEED_DEFAULT_PASSWORD)
             : SEED_DEFAULT_PASSWORD;
-        setCredentialPassword(db, existing.id, await hashPassword(recoveryPassword));
+        setCredentialPassword(db, existing.id, await hashOnce(recoveryPassword));
         logger.warn("demo seed re-hashed a legacy/unverifiable credential", {
           email: person.email,
         });
@@ -120,7 +130,7 @@ async function upsertUsers(
       person.handle === "arda"
         ? (options.adminPassword ?? SEED_DEFAULT_PASSWORD)
         : SEED_DEFAULT_PASSWORD;
-    const passwordHash = await hashPassword(password);
+    const passwordHash = await hashOnce(password);
     const created = insertUser(db, {
       id: newId("u"),
       email: person.email,
