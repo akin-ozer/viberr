@@ -49,6 +49,7 @@ import {
   HEARTBEAT_NOTE,
   heartbeatLabel,
   hiddenArguments,
+  roleAfterName,
   roleShort,
   runInputRows,
   runLabel,
@@ -87,6 +88,17 @@ import { editDiff } from "./edit-diff";
 const TWO_DIGITS = { minimumIntegerDigits: 2 } as const;
 /** The tens digit of a base-60 field never passes 5. */
 const BASE_60 = { 1: { max: 5 } } as const;
+/**
+ * Ruling 524(b): a clock's field rolls in 300 ms, eased out (the sheet's
+ * `--ease-out`). number-flow's own roll is a 900 ms spring, and a clock ticks
+ * once a second, so its seconds were mid-roll nine tenths of the time: two
+ * digits half in view in the cell, read as "03:1" over a clipped glyph (owner's
+ * screenshot, 2026-09-27). Now the digit lands and stands for most of each
+ * second.
+ */
+const CLOCK_ROLL = { duration: 300, easing: "cubic-bezier(.23, 1, .32, 1)" } as const;
+/** What every clock field shares: it only counts up, and it rolls in `CLOCK_ROLL`. */
+const CLOCK_FIELD = { trend: 1, willChange: true, spinTiming: CLOCK_ROLL, transformTiming: CLOCK_ROLL } as const;
 
 /**
  * One rolling field of a clock, memoised on its props (all primitives or
@@ -103,16 +115,15 @@ function RunClock({ seconds }: { seconds: number }) {
   return (
     <span className="lw-clock" data-clock={fmtClock(s)}>
       <NumberFlowGroup>
-        {h ? <Roll value={h} suffix=":" trend={1} willChange /> : null}
+        {h ? <Roll value={h} suffix=":" {...CLOCK_FIELD} /> : null}
         <Roll
           value={Math.floor((s % 3600) / 60)}
           format={TWO_DIGITS}
           digits={h ? BASE_60 : undefined}
           suffix=":"
-          trend={1}
-          willChange
+          {...CLOCK_FIELD}
         />
-        <Roll value={s % 60} format={TWO_DIGITS} digits={BASE_60} trend={1} willChange />
+        <Roll value={s % 60} format={TWO_DIGITS} digits={BASE_60} {...CLOCK_FIELD} />
       </NumberFlowGroup>
     </span>
   );
@@ -130,16 +141,16 @@ function WaitClock({ seconds, title }: { seconds: number; title: string }) {
       <NumberFlowGroup>
         {h > 0 ? (
           <>
-            <Roll value={h} suffix="h " trend={1} willChange />
-            <Roll value={m} format={TWO_DIGITS} digits={BASE_60} suffix="m" trend={1} willChange />
+            <Roll value={h} suffix="h " {...CLOCK_FIELD} />
+            <Roll value={m} format={TWO_DIGITS} digits={BASE_60} suffix="m" {...CLOCK_FIELD} />
           </>
         ) : m > 0 ? (
           <>
-            <Roll value={m} suffix="m " trend={1} willChange />
-            <Roll value={s % 60} format={TWO_DIGITS} digits={BASE_60} suffix="s" trend={1} willChange />
+            <Roll value={m} suffix="m " {...CLOCK_FIELD} />
+            <Roll value={s % 60} format={TWO_DIGITS} digits={BASE_60} suffix="s" {...CLOCK_FIELD} />
           </>
         ) : (
-          <Roll value={s} suffix="s" trend={1} willChange />
+          <Roll value={s} suffix="s" {...CLOCK_FIELD} />
         )}
       </NumberFlowGroup>
     </span>
@@ -238,7 +249,7 @@ function AgentPicker({
   const cur = items.find((r) => r.id === value) || items[0]!;
   const curIndex = Math.max(0, items.findIndex((r) => r.id === cur.id));
   const listId = useId();
-  const role = roleShort(cur);
+  const role = roleAfterName(cur.who.name, roleShort(cur));
   /** What the trigger shows, word for word: the name it is announced by. */
   const shown = cur.who.name + (role ? ` · ${role}` : "");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -1919,48 +1930,52 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
           {cur.backend === "codex" ? CODEX_META : CLAUDE_META}
           <SessionIdChip sid={cur.sid} runId={cur.serverRunId} exportable={cur.exportable} />
         </span>
-        <span className="spacer" />
-        {canRetryBackend && (
-          // D04-U6 (pass 32): a run-start is a secondary control here, like
-          // every sibling run-start demoted in pass 30 (execution-profile.tsx);
-          // the page keeps ONE primary.
+        {/* Ruling 524(d): the toggles wrap as one group, pushed right on
+            whichever line they land, while the SDK line beside them takes the
+            row's free space and wraps inside its own box first. */}
+        <span className="logs-tools">
+          {canRetryBackend && (
+            // D04-U6 (pass 32): a run-start is a secondary control here, like
+            // every sibling run-start demoted in pass 30 (execution-profile.tsx);
+            // the page keeps ONE primary.
+            <button
+              type="button"
+              className="btn sm"
+              disabled={retrying}
+              aria-busy={retryingThis || undefined}
+              onClick={() => onRetryBackend!(altBackend!, cur)}
+              title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
+            >
+              <GlyphSwap rest="refresh" alt="loader" on={retryingThis} spinAlt />
+              {retryingThis ? `Retrying on ${altLabel}…` : `Retry on ${altLabel}`}
+            </button>
+          )}
+          {/* UI-57: both toggles carry their state for assistive tech, not just
+              via the `on` class. Ruling 457: opening the raw view loads the
+              shown thread's stored envelopes, which no page payload carries. */}
           <button
             type="button"
-            className="btn sm"
-            disabled={retrying}
-            aria-busy={retryingThis || undefined}
-            onClick={() => onRetryBackend!(altBackend!, cur)}
-            title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
+            className={"fchip" + (raw ? " on" : "")}
+            aria-pressed={raw}
+            onClick={() => store.setRawView(!raw)}
+            title="Show raw stream events"
           >
-            <GlyphSwap rest="refresh" alt="loader" on={retryingThis} spinAlt />
-            {retryingThis ? `Retrying on ${altLabel}…` : `Retry on ${altLabel}`}
+            {"{ } raw"}
           </button>
-        )}
-        {/* UI-57: both toggles carry their state for assistive tech, not just
-            via the `on` class. Ruling 457: opening the raw view loads the
-            shown thread's stored envelopes, which no page payload carries. */}
-        <button
-          type="button"
-          className={"fchip" + (raw ? " on" : "")}
-          aria-pressed={raw}
-          onClick={() => store.setRawView(!raw)}
-          title="Show raw stream events"
-        >
-          {"{ } raw"}
-        </button>
-        <button
-          type="button"
-          className={"fchip" + (follow ? " on" : "")}
-          aria-pressed={follow}
-          onClick={() => {
-            const n = !follow;
-            setFollow(n);
-            if (n && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
-          }}
-        >
-          <Icon name="arrow" />
-          follow
-        </button>
+          <button
+            type="button"
+            className={"fchip" + (follow ? " on" : "")}
+            aria-pressed={follow}
+            onClick={() => {
+              const n = !follow;
+              setFollow(n);
+              if (n && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
+            }}
+          >
+            <Icon name="arrow" />
+            follow
+          </button>
+        </span>
       </div>
 
       {/* Ruling 369: what the prompt cache did for this run, above the stream. */}

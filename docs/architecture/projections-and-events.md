@@ -401,7 +401,9 @@ page's payload carries console lines only on a document load, and only the shown
 display lines; a revalidation or a client navigation carries each thread's window facts
 (`logWindow.loaded: false`), the console fills the thread it shows with ONE
 `/resources/run-log?window=1` request, and the stored envelopes load when the raw view
-opens. A revalidation keeps what a thread holds unless its representative run changed, and
+opens. A window load the store's `dispose` aborted (React's StrictMode rehearsal of a mount,
+on the dev server) is not a failure: the thread is asked for again when it is next shown
+(ruling 524(e)). A revalidation keeps what a thread holds unless its representative run changed, and
 a console on screen whose run did change keeps its lines until the new run's window
 replaces them; a head the loader saw past the cursor (a missed frame, a tab back from
 hidden) is read as a gap, and a gap wider than one window (`RUN_LOG_WINDOW_LINES`, 400)

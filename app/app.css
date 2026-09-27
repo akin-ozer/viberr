@@ -4073,16 +4073,44 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   background: linear-gradient(180deg, color-mix(in srgb, var(--agent-soft), var(--surface) 30%), color-mix(in srgb, var(--agent-soft), var(--surface) 76%));
   box-shadow: var(--shadow-card);
   padding: 1rem 1rem 1rem;
+  /* Ruling 524(d): the card lays itself out by its own width (the `runbar`
+     queries below), the same in the task page's column and the controller's
+     run pane. */
+  container: runbar / inline-size;
 }
-.runbar-head { display: flex; align-items: center; gap: .5rem; }
-.runbar-head h2 { font-size: 1rem; }
+/* Ruling 524(d): the agent's chip takes the next line when the row runs out,
+   rather than "Live run" breaking over two (measured at 390px). */
+.runbar-head { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.runbar-head h2 { font-size: 1rem; white-space: nowrap; }
 .runbar-head .right { margin-left: auto; display: inline-flex; align-items: center; }
 .live-dot { position: relative; width: 9px; height: 9px; border-radius: 50%; background: var(--agent); flex: none; }
 .live-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--agent); animation: livePulse 1.7s ease-out infinite; }
 @keyframes livePulse { 0% { transform: scale(.45); opacity: .8; } 100% { transform: scale(1.2); opacity: 0; } }
 
-.runbar-body { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: .75rem; }
-.run-phase { display: flex; align-items: center; gap: .75rem; flex: 1 1 250px; min-width: 0; }
+/* Ruling 524(d): what the run is doing and what can be done about it share the
+   first row, the figures take the whole second as one strip, and the console
+   the third. The body was a wrapping flex row: the phase, four tiles and the
+   two buttons wrapped to a line of their own, which left the phase's row empty
+   past its step and the buttons' row empty to their left (owner's screenshot,
+   2026-09-27: "lots of empty space everywhere"). The DOM keeps its order
+   (phase, figures, buttons, console): the figures hold nothing to focus, so
+   the focus order is the one the eye follows. */
+.runbar-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "phase actions" "stats stats";
+  align-items: center;
+  gap: .75rem 1rem;
+  margin-top: .75rem;
+}
+/* The console's row takes what the card leaves when the card has a height to
+   fill (the controller's run pane); in a column that sizes the card by its
+   content (the task page) a fraction is the row's content. */
+.runbar-body:has(> .runbar-console) {
+  grid-template-areas: "phase actions" "stats stats" "console console";
+  grid-template-rows: auto auto 1fr;
+}
+.run-phase { grid-area: phase; display: flex; align-items: center; gap: .75rem; min-width: 0; }
 /* Ruling 478(c) (F40-33): the phase's text column is a flex item too, and an
    automatic minimum held it at the step's 44ch (317px) inside a 283px phase
    on a phone: the step ran through the strip's border, took its ellipsis with
@@ -4090,18 +4118,36 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    the phase and the step's own ellipsis shows. */
 .run-phase-text { min-width: 0; }
 .run-phase .ph { font-family: var(--font-display); font-weight: 800; font-size: 1rem; }
-.run-phase .step { margin-top: .125rem; color: var(--muted); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44ch; }
+.run-phase .step { margin-top: .125rem; color: var(--muted); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-spin { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--agent), transparent 70%); border-top-color: var(--agent); animation: runSpin .9s linear infinite; }
 @keyframes runSpin { to { transform: rotate(360deg); } }
-.run-stats { display: flex; gap: .5rem; flex-wrap: wrap; }
-.run-cell {
+/* Ruling 524(d): one segmented strip of four equal cells, not four tiles each
+   as wide as its word: a divider between cells, the figure a step up from its
+   label, and a long model name cut with its ellipsis inside its cell. */
+.run-stats {
+  grid-area: stats;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid color-mix(in srgb, var(--agent), transparent 80%);
   background: color-mix(in srgb, var(--surface), transparent 25%);
-  border-radius: var(--radius-box); padding: .375rem .5rem; min-width: 72px;
+  border-radius: var(--radius-box);
 }
+.run-cell { padding: .5rem .75rem; min-width: 0; }
+.run-cell + .run-cell { border-left: 1px solid color-mix(in srgb, var(--agent), transparent 80%); }
 .run-cell .lbl { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
-.run-cell .val { font-size: .75rem; margin-top: .125rem; color: var(--fg); white-space: nowrap; }
-.run-actions { display: flex; gap: .5rem; margin-left: auto; }
+.run-cell .val { font-size: .88rem; margin-top: .125rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run-actions { grid-area: actions; display: flex; gap: .5rem; }
+/* A narrow card (a phone, a narrow pane): the buttons take the row under the
+   step, and under 24rem the figures go two by two. */
+@container runbar (max-width: 27rem) {
+  .runbar-body { grid-template-columns: minmax(0, 1fr); grid-template-areas: "phase" "actions" "stats"; }
+  .runbar-body:has(> .runbar-console) { grid-template-areas: "phase" "actions" "stats" "console"; grid-template-rows: auto auto auto 1fr; }
+}
+@container runbar (max-width: 24rem) {
+  .run-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-cell:nth-child(3) { border-left: 0; }
+  .run-cell:nth-child(n+3) { border-top: 1px solid color-mix(in srgb, var(--agent), transparent 80%); }
+}
 
 /* agent dropdown */
 /* Interface review 2026-09-24 (layo-13): the picker's menu anchors to the
@@ -4198,8 +4244,13 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 
 /* logs panel */
 .logs-bar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
-.logs-bar .spacer { flex: 1; }
-.logs-meta { font-size: .69rem; color: var(--faint); }
+/* Ruling 524(d): the SDK line gives way before the toggles do. It takes the
+   row's free space and, in a narrow console (the controller's run pane, a
+   phone), wraps inside its own box while "{ } raw" and "follow" keep the row,
+   where the whole line dropped under the state pill and pushed the toggles to
+   a third. When the toggles do wrap, they go as one group, still right-aligned. */
+.logs-meta { font-size: .69rem; color: var(--faint); flex: 1 1 12rem; min-width: 0; }
+.logs-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .5rem; margin-left: auto; }
 .logs-bar .fchip { padding: .25rem .5rem; font-size: .75rem; }
 .logs-bar .fchip .ico { width: 12px; height: 12px; transform: rotate(90deg); }
 
@@ -4266,7 +4317,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .logs-foot .mono { font-size: .69rem; color: var(--placeholder); }
 
 :root[data-theme="dark"] .console { background: #0b0d12; border-color: #262b38; }
-:root[data-theme="dark"] .run-cell { background: color-mix(in srgb, var(--bg), transparent 20%); }
+:root[data-theme="dark"] .run-stats { background: color-mix(in srgb, var(--bg), transparent 20%); }
 
 
 /* ============================================================
@@ -6357,8 +6408,6 @@ a.card:active, .pj-new:active { transform: scale(.99); }
      auto` is for the one-line row). */
   .rq-meta { flex: 1 1 auto; max-width: none; justify-content: flex-start; }
   .rq-meta .wait-tag { margin-left: 0; }
-  /* run console: the action group takes its own line */
-  .run-actions { margin-left: 0; width: 100%; }
   /* home project rows drop the least-load-bearing stat */
   .pj-row .pj-stats .pill { display: none; }
   /* UXA-8: the two WIDE fr-grid tables — GitHub → Execution branches
@@ -6382,8 +6431,10 @@ a.card:active, .pj-new:active { transform: scale(.99); }
      they won here and the collapse never applied — at 390px the transcript
      and composer sat in a 40px sliver beside a 340px sidebar (interface
      review 2026-09-08). One selector more settles it, the `.dock .dock-panel`
-     precedent in the 720px block. */
-  .ctl-wrap .ctl-layout { grid-template-columns: minmax(0, 1fr); }
+     precedent in the 720px block. Ruling 524(a): and one column is no band.
+     The page flows (conversation, run, rail) and scrolls, and each part keeps
+     its own height: the transcript its cap below, the console its 320px. */
+  .ctl-wrap .ctl-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; min-height: 0; }
   /* Ruling 503: the epic page's Details column goes under its main column,
      the task page's way: side by side panels, then one per row. */
   .epic-layout { grid-template-columns: minmax(0, 1fr); }
@@ -6842,13 +6893,17 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    describes it. It used to live in a panel a full viewport below, with the
    conversation in between, reached by a button that read as navigation. */
 .runbar-console {
-  /* The whole row of the body's wrapping flex. Sized by its content it was as
-     wide as its toolbar, since the log lines are contained (`.console >
-     .log-line` below) and add no width: the terminal stopped two-thirds of
-     the way across the card (owner ask 2026-09-25). */
-  flex: 1 0 100%;
+  /* The whole last row of the body's grid (ruling 524(d)). It was the whole
+     row of a wrapping flex: sized by its content it had been as wide as its
+     toolbar, since the log lines are contained (`.console > .log-line` below)
+     and add no width, and the terminal stopped two-thirds of the way across
+     the card (owner ask 2026-09-25). */
+  grid-area: console;
+  /* The row's height, not its content's: centred like the row above it, a
+     console taller than its row spilled over the card at both ends. */
+  align-self: stretch;
   min-width: 0;
-  margin-top: .75rem;
+  margin-top: .25rem;
   border-top: 1px solid color-mix(in srgb, var(--fg), transparent 88%);
   padding-top: .75rem;
 }
@@ -7104,20 +7159,27 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    content scrolls inside its own containers. */
 /* Design pass 2026-09-08: inside a project the controller takes the frame
    every other workspace page has (`.policy-wrap`: fill the shell, scroll
-   inside it, clear the dock), and its spacing sits on the sheet's scale — it
-   was authored at 1.4/1.6/.8/.65/.45rem, steps nothing else uses. */
+   inside it), and its spacing sits on the sheet's scale — it was authored at
+   1.4/1.6/.8/.65/.45rem, steps nothing else uses. */
 .ctl-wrap {
   flex: 1; min-height: 0;
   overflow-y: auto;
-  padding: .125rem 1.5rem var(--dock-clear);
+  /* Ruling 524(a): no room at the foot for the dock's button. The controller
+     routes do not render the dock (`controller-dock-context.ts`), and the
+     80px kept for it were a strip of empty page under every column. */
+  padding: .125rem 1.5rem 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  /* Ruling 524(a): the columns follow the width the page has, beside the
+     shell's rail or not (the `ctl` queries below). */
+  container: ctl / inline-size;
 }
 /* The instance controller (/controller) mounts with no shell around it, so
-   it keeps a frame of its own: centred, and tall enough for the transcript to
-   fill and the composer to anchor. */
-.ctl-wrap.standalone { max-width: 1200px; margin: 0 auto; padding-top: 1.5rem; min-height: 100dvh; }
+   it keeps a frame of its own. Ruling 524(a): centred up to 1920px, where it
+   stopped at 1200px: at 1440 and 1920 the capped page left 120px and 360px of
+   empty margin on each side of a console squeezed under the conversation. */
+.ctl-wrap.standalone { max-width: 1920px; margin: 0 auto; padding-top: 1.5rem; min-height: 100dvh; }
 .ctl-head {
   display: flex;
   align-items: center;
@@ -7156,51 +7218,116 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 }
 /* The "not connected" pill sits with the title it describes; only the action
    group claims the right edge (it used to be the pill, 800px from its noun). */
-/* No `align-items: start`: the row stretches, the transcript fills its column
-   and the composer anchors at the bottom the way a chat surface should,
-   instead of the page ending two-thirds of the way up. */
+/* Ruling 524(a): the page is one band as tall as the screen leaves it. The
+   conversation's column, the run pane and the rail each fill it and scroll
+   themselves, so the composer, the console and the rail all end at its foot,
+   the way a chat surface anchors its composer; a screen shorter than the
+   band's 30rem floor scrolls the page instead. The transcript used to be
+   capped at the viewport less 320px and the rail at its own content, so each
+   column ended at a height of its own over empty page. */
 .ctl-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  grid-template-rows: minmax(0, 1fr);
   gap: 1rem;
   flex: 1;
+  min-height: 30rem;
 }
 .ctl-main {
   display: flex;
   flex-direction: column;
   gap: .75rem;
   min-width: 0;
+  min-height: 0;
 }
-/* Ruling 419(b): the rail is its own scroller, pinned beside the conversation.
-   It used to scroll with the page and stretch the row to its own height: live
+/* Ruling 419(b): the rail is its own scroller beside the conversation. It
+   used to scroll with the page and stretch the row to its own height: live
    on ax-clone six goal chains made the rail 4,539px tall, the main column
    stretched to match, and below the composer and the logs sat ~3,000px of
-   empty column. Capped at the scrollport (under the top bar, clear of the dock
-   button in its corner), the rail scrolls itself and the page ends where the
-   conversation does. */
+   empty column. Ruling 524(a): it is the band's height, and its last panel
+   takes what the panels above it leave, so the rail is a column to the
+   band's foot rather than a short card over empty page. */
 .ctl-side {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
-  position: sticky;
-  top: 0;
-  align-self: start;
-  max-height: calc(100dvh - var(--topbar-h) - var(--dock-clear));
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.ctl-wrap.standalone .ctl-side { top: 1.5rem; max-height: calc(100dvh - 3rem); }
+.ctl-side > :last-child { flex: 1 0 auto; }
+/* With no panel under it, the list uses the height it is given. */
+.ctl-side > .ctl-convs:last-child .ctl-conv-list { max-height: none; }
+/* Ruling 524(a): the run pane: beside the conversation on a wide page (the
+   block after the empty state), under the composer on a narrow one. */
+.ctl-run {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
 .ctl-transcript {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 320px;
-  max-height: calc(100dvh - 320px);
+  min-height: 0;
   overflow-y: auto;
 }
-/* The empty state fills the column the conversation will, centred. */
+/* The empty state fills the column the conversation will, centred. Nothing
+   in it scrolls, so it keeps no scrollbar gutter (ruling 457's rule for the
+   transcript): the gutter held its dashed frame 15px short of the composer's
+   edge under it. */
 .ctl-transcript > .empty-hero { flex: 1; justify-content: center; }
+.ctl-transcript:has(> .empty-hero) { scrollbar-gutter: auto; }
+/* Ruling 524(a): the wide layouts. `width > 1100px` is the collapse's exact
+   complement (the 1100px block stacks the page), so no zoomed width falls
+   between the two with the run pane in the rail's column. */
+@media (width > 1100px) {
+  /* No shell sizes the standalone page, so it is the screen's height, which
+     gives its band a height to fill. */
+  .ctl-wrap.standalone { height: 100dvh; }
+  /* A run takes a column between the conversation and the rail: the
+     conversation first, as the DOM reads, and the agent's console beside
+     it the way Codex and Devin set theirs. */
+  .ctl-layout:has(> .ctl-run:not([data-console="closed"])) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 17rem;
+  }
+  /* The card, or the archive, fills the pane, and the console fills what
+     the strip leaves, where it was a 320px box however tall the screen. */
+  .ctl-run > .runbar, .ctl-run > .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .ctl-run > .runbar > .runbar-body { flex: 1; min-height: 0; }
+  .ctl-run .runbar-console, .ctl-run .runbar-console > .panel { display: flex; flex-direction: column; min-height: 0; }
+  .ctl-run .runbar-console > .panel { flex: 1; }
+  .ctl-run .console { flex: 1; height: auto; min-height: 12rem; }
+  /* Console hidden: the strip keeps its own height under the composer, and
+     the rail comes back beside the conversation, instead of a pane of empty
+     card under three lines of strip. */
+  .ctl-layout:has(> .ctl-run[data-console="closed"]) { grid-template-rows: minmax(0, 1fr) auto; }
+  .ctl-layout > .ctl-run[data-console="closed"] { grid-column: 1; grid-row: 2; }
+  .ctl-layout:has(> .ctl-run[data-console="closed"]) > .ctl-side { grid-column: 2; grid-row: 1 / -1; }
+  /* Too narrow for three columns (a project's page on a laptop): two 28rem
+     columns and the 17rem rail need 75rem. The conversation and the run split
+     the band, and the rail follows under it with its panels side by side. The
+     head's switcher names the thread, since the list is out of view. */
+  @container ctl (max-width: 75rem) {
+    .ctl-layout:has(> .ctl-run:not([data-console="closed"])) {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: 100% auto;
+    }
+    .ctl-layout:has(> .ctl-run:not([data-console="closed"])) > .ctl-side {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+      align-items: start;
+      overflow-y: visible;
+      /* The row overflows the band's box, so the page's own foot padding
+         does not follow it. */
+      padding-bottom: 1.5rem;
+    }
+    .ctl-wrap:has(> .ctl-layout > .ctl-run:not([data-console="closed"])) .ctl-picker { display: block; }
+  }
+}
 .ctl-msgs {
   display: flex;
   flex-direction: column;

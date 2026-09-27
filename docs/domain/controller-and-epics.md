@@ -79,11 +79,15 @@ The page subscribes to the user SSE scope (and the project scope on the project 
 and, while a turn is working, reads the turn's console tail every 5 seconds: the fallback
 for a settle the stream missed, which revalidates the page once the tail says the run
 ended (ruling 457, CTL-2; it used to revalidate root, the workspace layout and the page
-every 5 s to move one step line). New conversation sits in the page head;
-the rail lists the conversations, is `position: sticky` and scrolls
-itself, and below the two-column breakpoint the head carries a native thread picker
-(`ConversationPicker`); the transcript is a capped scroller that never moves the page
-(ruling 419). A blank transcript offers three example asks per scope that send on click
+every 5 s to move one step line). New conversation sits in the page head.
+Above the two-column breakpoint the page is one band as tall as the screen (the standalone
+page up to 1920px wide): the conversation's column, the thread's run pane (§2.2) and the
+rail, which lists the conversations, each fill it and scroll themselves, so the composer
+and the rail end at its foot (ruling 524(a)). Where the three do not fit (a project's page
+on a laptop) the conversation and the run split the band and the rail goes under it. Below
+the breakpoint, and wherever the rail's list is out of view, the head carries a native
+thread picker (`ConversationPicker`); the transcript is a scroller that never moves the
+page, capped in the one-column layout (ruling 419). A blank transcript offers three example asks per scope that send on click
 (`controller-examples.tsx`, shared with the dock; ruling 314), drawn as one framed list of
 rows: the glyph of what each is about, the sentence, and an arrow (ruling 516). A working
 turn shows the run's `phase` and last tool `step` on the row that says it is working
@@ -278,9 +282,11 @@ it the way the task page shows a task's runs, fed by the same projection
 thread resumes the same agent, so the runs group into ONE console entry with `run N of
 M` boundaries between turns.
 
-- **Live run** (above the transcript, only while a turn is `running`): the run's phase
-  and last tool step, elapsed from the run's own `started_at`, turns and tokens off the
-  run row, the model, **View logs** (scrolls to the console and selects the thread) and
+- **Live run** (only while a turn is `running`, in the run pane: the band's middle column
+  beside the conversation, or under the composer in one column, ruling 524(a)): the run's
+  phase and last tool step, elapsed from the run's own `started_at`, turns and tokens off
+  the run row, the model, **Hide console** / **Show console** (the console is disclosed on
+  the card, open by default, ruling 380; hidden, the strip goes under the composer) and
   **Interrupt**. The phase, step, turns and tokens follow the console's tail reads (each
   line, and the 5-second status read), and the loader on the `controller.updated`
   reference a lifecycle flip publishes (the sink routes a controller run's state
@@ -296,7 +302,8 @@ M` boundaries between turns.
   the next message starts a fresh turn. A turn stopped while still queued (no adapter to
   exit) is settled the same way, because the engine fires the run's completion callback
   from its no-live-handle arm.
-- **Agent logs** (below the composer): the grouped console with the `{ } raw` and follow
+- **Agent logs** (inside the Live run card while a turn streams, filling the pane's height;
+  the pane's archive once it settles): the grouped console with the `{ } raw` and follow
   toggles, the session-id chip and the backward paging of `/resources/run-log`, behind
   the owner-or-admin gate that serves the raw view. Live tailing is the controller channel
   of `useRunLogStream`: the sink publishes `controller.log-appended {conversationId,

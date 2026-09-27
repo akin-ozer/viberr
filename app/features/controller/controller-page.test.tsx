@@ -592,24 +592,60 @@ describe("the open conversation's execution", () => {
     expect(screen.getByText("Reading the board.")).toBeTruthy();
     expect(container.textContent).toContain("never in the transcript");
     // CANARY: restore the scroll-to-anchor `onViewLogs` and the console goes
-    // back below the composer — this query null, and the order four items.
+    // back below the composer — this query null.
     expect(
       container.querySelector(".runbar .runbar-console")?.textContent,
     ).toContain("Agent logs");
+    // Ruling 524(a): the run is a pane of the layout's own, between the
+    // conversation and the rail, where the sheet gives it the band's middle
+    // column (under the composer when the page is one column). `data-console`
+    // is what the sheet reads to size it. CANARY: render the card inside
+    // `.ctl-main` again, above the transcript, and both orders fail.
+    const layout = container.querySelector(".ctl-layout")!;
+    expect([...layout.children].map((el) => el.className.split(" ")[0])).toEqual([
+      "ctl-main",
+      "ctl-run",
+      "ctl-side",
+    ]);
     const main = container.querySelector(".ctl-main")!;
     expect([...main.children].map((el) => el.className.split(" ")[0])).toEqual([
-      "runbar",
       "panel",
       "ctl-composer",
     ]);
+    const pane = container.querySelector(".ctl-run")!;
+    expect(pane.getAttribute("data-console")).toBe("open");
 
-    // And it collapses, which is the whole point of a disclosure.
+    // And it collapses, which is the whole point of a disclosure. Hidden, the
+    // pane is the strip alone, which the sheet puts back under the composer.
     fireEvent.click(trigger);
     expect(screen.queryByText("Agent logs")).toBeNull();
+    expect(pane.getAttribute("data-console")).toBe("closed");
     const closed = screen.getByRole("button", { name: "Show console" });
     expect(closed.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(closed);
     expect(screen.getByText("Agent logs")).toBeTruthy();
+    expect(pane.getAttribute("data-console")).toBe("open");
+  });
+
+  it("ruling 524(a): a finished turn's console stays in the run pane as its archive", async () => {
+    // Ruling 380 keeps the settled turn's console on the page. It takes the
+    // pane the live card had, so the conversation keeps its column while the
+    // log is read. CANARY: render the archive inside `.ctl-main` again and the
+    // pane is gone.
+    const { container } = renderPage(
+      view({
+        conversation,
+        viewerOwnsActive: true,
+        runtime: [{ ...run, state: "done", lifecycle: "finished", finished: "10:03:20" }],
+        canInterruptTurn: true,
+      }),
+      "?c=cnv_b",
+    );
+    await screen.findByText("Agent logs");
+    expect(container.querySelector(".runbar")).toBeNull();
+    const pane = container.querySelector(".ctl-run")!;
+    expect(pane.getAttribute("data-console")).toBe("archive");
+    expect(pane.textContent).toContain("Reading the board.");
   });
 
   it("hides Interrupt from a viewer who may not stop the turn", async () => {
@@ -657,6 +693,9 @@ describe("the open conversation's execution", () => {
     await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
     expect(container.querySelector(".runbar")).toBeNull();
     expect(screen.queryByText("Agent logs")).toBeNull();
+    // Ruling 524(a): and no empty pane, so the band keeps two columns.
+    // CANARY: render the `.ctl-run` wrapper unconditionally.
+    expect(container.querySelector(".ctl-run")).toBeNull();
   });
 });
 
