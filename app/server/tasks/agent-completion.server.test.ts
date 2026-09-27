@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
+  approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -181,8 +182,6 @@ function deployOperator(): void {
         extras: [],
         definition: {
           kind: "operator",
-          name: "Operator",
-          role: "Task coordinator",
           backends: ["claude"],
           model: "sonnet",
           autonomy: "supervised",
@@ -351,8 +350,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             // The live deployment the owner just set.
             backends: ["claude"],
             model: "sonnet",
@@ -421,8 +418,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -1065,8 +1060,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -1194,8 +1187,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -1409,6 +1400,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     }
 
     it("a reply at the cap that committed a new head opens no stuck packet — the operator reacts from a fresh depth", async () => {
+      // A person approves the move out of In Progress here, so the react turn
+      // that stops there is not stranded and the settle adds no nudge to count.
+      approveReviewEntry(store);
       deployOperator();
       writeReviewTask({ stage: "impl", validation: "changed", pr: PR_7 });
       const runId = await finishedRunWith(
@@ -3221,8 +3215,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3367,8 +3359,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3532,8 +3522,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3647,8 +3635,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3804,8 +3790,6 @@ describe("unavailable backend through the specialist start path", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",
@@ -3899,8 +3883,6 @@ describe("unavailable backend through the specialist start path", () => {
           extras: [],
           definition: {
             kind: "operator",
-            name: "Operator",
-            role: "Task coordinator",
             backends: ["claude"],
             model: "sonnet",
             autonomy: "supervised",

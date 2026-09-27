@@ -5385,7 +5385,7 @@ export async function operatorAcceptCompletion(
   // Supervised, or `completion-for-acceptance: recommend` → recommend only: post
   // an actionable "accept completion → Done" recommendation card (symmetric with
   // the other stage-transition cards, so the review→done boundary gets the same
-  // clear one-click prompt as impl→review) — never move to Done ourselves. A
+  // clear one-click prompt as an approval boundary's move) — never move to Done ourselves. A
   // maintainer applies it to accept completion into Done.
   //
   // R19-6: this branch is reached ONLY with a granted capability. It used to

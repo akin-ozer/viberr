@@ -8,6 +8,7 @@ import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
+  approveReviewEntry,
   baseTaskFrontmatter,
   writeProject,
   writeTask,
@@ -4574,6 +4575,7 @@ describe("pass 35: operator and task actions", () => {
     it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
       // Canary: delete the ruling-151 throw in the `ctx.operatorAuthorized` arm.
       const store = setupProjectedStore(ctx);
+      approveReviewEntry(store);
       seed(store, { stage: "impl" });
       await expect(
         transitionStage(
@@ -4814,8 +4816,6 @@ describe("pass 35: operator and task actions", () => {
             extras: [],
             definition: {
               kind: "operator" as const,
-              name: "Operator",
-              role: "Task coordinator",
               backends: ["claude" as const],
               model: "sonnet",
               autonomy: "supervised" as const,

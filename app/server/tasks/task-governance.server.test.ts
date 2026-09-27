@@ -8,6 +8,7 @@ import { gitOutSync, withLocalGithub } from "../../../test-support/git-origin";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   actorOf,
+  approveReviewEntry,
   baseTaskFrontmatter,
   writeProject,
   writeTask,
@@ -362,9 +363,11 @@ describe("P3.7 governance & lifecycle fixes", () => {
 
 describe("transitionStage boundary enforcement", () => {
   it("approval boundary (impl→review): low-role forbidden, maintainer ok", async () => {
-    // impl → review is the `approval` human-gate boundary (triage → ready is now
-    // `auto`, tested below).
+    // impl → review as a board declares it an `approval` human gate (the
+    // Standard template's is `auto` since ruling 519; triage → ready is `auto`,
+    // tested below).
     const store = setupProjectedStore(ctx);
+    approveReviewEntry(store);
     withTask(store, { stage: "impl" });
     await expect(
       transitionStage(
@@ -2083,10 +2086,14 @@ describe("resolvePacket kind matrix", () => {
    * re-delivery, so it inherited neither. Live (VIB-1): `stage: impl`,
    * `readiness: ready`, `waiting: human`, empty recommendations, no packet, and
    * PR #270 open on the branch — the strand ruling 110 quotes, reached through
-   * the safe path the delete-first ordering exists to produce.
+   * the safe path the delete-first ordering exists to produce. The card is the
+   * board's where a person approves the move into Review; on the Standard
+   * board the move is `auto` (ruling 519), and the operator the refusal hands
+   * the decision to makes it.
    */
   it("F33-4: a refused collision remedy still leaves the task actionable — the Move-to-review card over the PR it already carries", async () => {
     const store = setupProjectedStore(ctx);
+    approveReviewEntry(store);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
     const github = fakeGithubFetch(ownPrRoutes(270, "open"));

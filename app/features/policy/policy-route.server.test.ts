@@ -128,7 +128,7 @@ describe("loader", () => {
     expect(view.transitions.map((t) => [t.from, t.to, t.boundary, t.locked])).toEqual([
       ["triage", "ready", "auto", false],
       ["ready", "impl", "auto", false],
-      ["impl", "review", "approval", false],
+      ["impl", "review", "auto", false],
       ["review", "done", "human", true],
     ]);
     // Profile roster is the SAME assembly the Agents surface renders.
@@ -482,31 +482,29 @@ describe("set-boundary", () => {
       intent: "set-boundary",
       from: "impl",
       to: "review",
-      boundary: "auto",
+      boundary: "approval",
     })) as PolicyAccepted;
     expect(result).toEqual({
       ok: true,
-      toast: "In Progress → Review: auto-advance · applies to future transitions",
+      toast: "In Progress → Review: human approval · applies to future transitions",
     });
     const { view } = await runLoader(ids.arda);
     const changed = view.transitions.find(
       (t) => t.from === "impl" && t.to === "review",
     )!;
-    expect(changed.boundary).toBe("auto");
+    expect(changed.boundary).toBe("approval");
     // F20-26: the `by` prose is recomputed from the new boundary, so the row no
-    // longer contradicts itself (it used to keep the seed's `approval` copy
-    // beside an Auto-advance selection). Reverting the `rule.by = …` recompute
-    // in setTransitionBoundary makes this go red.
-    expect(changed.by).toBe(
-      "Operator, within policy; no human decision required",
-    );
+    // longer contradicts itself (it used to keep the seed's copy beside the new
+    // selection). Reverting the `rule.by = …` recompute in
+    // setTransitionBoundary makes this go red.
+    expect(changed.by).toBe("Operator transition request, approved by a human");
     const audit = listAuditEvents(app.db, {
       action: "project.policy.boundary_changed",
     });
     // N20-9: the human-readable detail carries stage NAMES, not raw ids, so the
     // rendered audit row matches the toast and the rest of the app.
     expect(audit[0]).toMatchObject({
-      details: { from: "In Progress", to: "Review", boundary: "auto" },
+      details: { from: "In Progress", to: "Review", boundary: "approval" },
     });
 
     // Restore.
@@ -514,7 +512,7 @@ describe("set-boundary", () => {
       intent: "set-boundary",
       from: "impl",
       to: "review",
-      boundary: "approval",
+      boundary: "auto",
     });
   });
 

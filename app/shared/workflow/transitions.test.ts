@@ -74,7 +74,12 @@ function expectWellFormedChain(
 }
 
 const GOVERNED_STAGES = stages("triage", "ready", "impl", "review", "done");
-const GOVERNED_WORKFLOW = GOVERNED_TEMPLATE.workflow;
+/** The Standard chain with a person approving the move into Review, as the
+ *  template had it before ruling 519 and a strict board still does: all three
+ *  gates on one chain, so a rewrite that carries a gate to the wrong edge shows. */
+const GOVERNED_WORKFLOW = GOVERNED_TEMPLATE.workflow.map((w) =>
+  w.from === "impl" && w.to === "review" ? { ...w, boundary: "approval" as const } : w,
+);
 
 describe("spliceStageIntoChain", () => {
   it("the preset's 4 rules round-trip untouched when nothing is inserted", () => {
