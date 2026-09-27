@@ -7582,10 +7582,9 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 }
 /* The control step (ruling 459); .94 was under the .95 floor. */
 .dock-fab:active { transform: scale(.96); }
-/* The working dot rides the button's top-right edge while a turn is in flight. */
-.dock-fab .live-dot { position: absolute; top: 0; right: 0; }
-/* O39-d: a controller reply the viewer has not seen. Still, where the working
-   dot pulses: it is news waiting, not work going on. */
+/* O39-d: a controller reply the viewer has not seen, and since ruling 528 the
+   button's only dot. Still, where the working row's dot pulses: it is news
+   waiting, not work going on. */
 .unseen-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); flex: none; }
 .dock-fab .unseen-dot { position: absolute; top: 1px; right: 1px; box-shadow: 0 0 0 2px var(--bg); }
 .dock-unseen { display: flex; align-items: baseline; gap: 6px; margin: 0 14px 8px; }
@@ -7719,8 +7718,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
      would have taken it. */
   .dock .dock-panel[data-closing] { opacity: 0; transform: none; transition-duration: .12s; }
   .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
-  /* Both dots: the one on the trigger and the one in the panel's working row,
-     which kept pulsing forever inside the sheet. */
+  /* The panel's working row dot, which kept pulsing forever inside the sheet. */
   .dock .live-dot::after { animation: none; }
   .dock[data-open="true"] .dock-fab { transition: none; }
   /* The perched button never slides home either: after a pulled sheet is

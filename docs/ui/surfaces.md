@@ -190,11 +190,12 @@ Intents behind `project.task.tsx` are explained in
   answers (a restart, a 5xx, a dead network) keeps the page (ruling 457): a failed load
   reads as not loaded yet (no dot; the open panel's loading lines until the next load
   answers, as the stream's resync after a restart makes one), and a failed send toasts
-  "The controller could not take that. Try again." with the message kept. The button
-  carries a pulsing dot while a turn works in its scope
-  and a still blue dot when a reply its owner has not seen waits in any scope
-  (`/resources/controller-unseen`, rulings 448 and 457); the open panel links to replies
-  elsewhere. Both transcripts (the dock and the controller pages) read in reply order,
+  "The controller could not take that. Try again." with the message kept. Every open lands
+  on the scope's newest thread, and a thread picked in the panel holds only while it stays
+  open (ruling 528). The button's one dot is a still blue dot when a reply its owner has
+  not seen waits in any scope, a working turn included (`/resources/controller-unseen`,
+  rulings 448, 457 and 528); a turn at work shows in the open panel, never as a dot. The
+  open panel links to replies elsewhere. Both transcripts (the dock and the controller pages) read in reply order,
   each reply under the message it answers, and a message with no reply yet says
   "answering now" or "queued · N ahead" from the server's lease, never from what the page
   sent; "… is working" sits under the answered message (ruling 465). Both transcripts show
