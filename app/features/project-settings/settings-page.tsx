@@ -57,7 +57,6 @@ import {
   PROJECT_ROLES,
   roleCan,
   type ProjectRole,
-  type RbacAction,
 } from "~/shared/rbac";
 import { countLabel } from "~/shared/text/plural";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
@@ -83,25 +82,6 @@ type ActionResult =
 function asProjectRole(raw: string | null): ProjectRole | null {
   return PROJECT_ROLES.find((role) => role === raw) ?? null;
 }
-
-/**
- * The gate a panel here asks for its OWN action id. `roleCan` is the only
- * implementation the product ships and the default every caller gets — the
- * parameter exists so a caller can substitute a different one WITHOUT replacing
- * the module.
- *
- * E3 is why that seam is worth having: `edit-policy`, `manage-members` and
- * `grant-github-scope` are three DIFFERENT server guards that happen to resolve
- * to the same admin tier today. A check that only varies the ROLE therefore
- * cannot tell one id from another — which is exactly how a `myRole === "admin"`
- * literal survived on this page for so long. A gate that answers for exactly one
- * action id pins each panel to the id it really asks for; re-tier any of the
- * three and the pinning still holds.
- */
-export type ProjectActionGate = (
-  role: ProjectRole | null,
-  action: RbacAction,
-) => boolean;
 
 /* F19-33: the panel-head counts and the trailing panel notes below used to be
    styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
@@ -2371,7 +2351,6 @@ export function RepoPanel({
           manageActions={
             <CredentialManageActions
               configured={credential.source === "pat"}
-              canManage={canGrant}
               inFlight={credInFlight}
               replaceHref={
                 instanceAdmin ? replaceTokenHref(credential.connectionId) : null
@@ -2464,18 +2443,21 @@ function DeleteProjectDialog({
   );
 }
 
+/**
+ * Archive and delete. Both check `edit-policy` server-side
+ * (settings-actions.server.ts), and SettingsPage renders this panel only for a
+ * reader who holds that grant (owner ruling Q-V1), so the panel carries no role
+ * gate of its own: everyone who sees it can act on it.
+ */
 export function DangerZone({
   projectName,
-  myRole,
   archived,
   busy,
   inFlight = null,
   onArchive,
   onDelete,
-  gate = roleCan,
 }: {
   projectName: string;
-  myRole: string | null;
   archived: boolean;
   busy: boolean;
   /** Ruling 368: the intent in flight on the danger fetcher, so the control
@@ -2484,18 +2466,8 @@ export function DangerZone({
   inFlight?: string | null;
   onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
-  /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
-  gate?: ProjectActionGate;
 }) {
   const [confirming, setConfirming] = useState(false);
-  // RU-3: archive AND delete both gate on the `edit-policy` action server-side
-  // (settings-actions.server.ts → requireProjectAction(..., "edit-policy", ...)).
-  // Mirror that exact ACTION_ROLES entry through `roleCan` instead of a raw
-  // `=== "admin"` literal so the control's visibility can never drift from the
-  // action the server actually checks — the same way `canGrant` already routes
-  // through the shared helper. (`edit-policy` resolves to admin-only today, so
-  // this is behavior-preserving; it stops being a hardcoded assumption.)
-  const canManageLifecycle = gate(asProjectRole(myRole), "edit-policy");
   const archiving = inFlight === "archive-project";
   const deleting = inFlight === "delete-project";
 
@@ -2505,21 +2477,6 @@ export function DangerZone({
         <Icon name="alert" />
         <h2>Danger zone</h2>
       </div>
-      {/* P14-LV-08: both buttons below were already `disabled` for a
-          non-admin — and live, a contributor clicked them and got nothing at
-          all: no dialog, no toast, no error, no audit row. `disabled` had no
-          styling in app.css (fixed there), and the "why" was parked in a
-          `title` that a disabled element can never show, because no pointer
-          event reaches it. State the authority once, visibly, above the rows
-          it governs. */}
-      {!canManageLifecycle && (
-        <p className="deny-note before">
-          <Icon name="lock" />
-          Archiving and deleting {projectName} need the{" "}
-          <strong>Edit workflow &amp; policy</strong> grant. Ask a project
-          admin.
-        </p>
-      )}
       <div className="dz-row">
         <span className="dz-main">
           <div className="dn">
@@ -2537,12 +2494,8 @@ export function DangerZone({
           // label beside "Delete project" instead of reading as a plain
           // secondary. Restore is a recovery action and stays neutral.
           className={"btn ghost sm" + (archived ? "" : " danger")}
-          // F10-34: destructive project actions are project-admin only. A
-          // viewer/maintainer must not see an actionable control; the server
-          // still enforces edit-policy.
-          disabled={busy || !canManageLifecycle}
+          disabled={busy}
           aria-busy={archiving || undefined}
-          title={canManageLifecycle ? undefined : "Only a project admin can archive this project"}
           onClick={() => onArchive(!archived)}
         >
           {archiving && <Icon name="loader" className="spin" />}
@@ -2566,11 +2519,8 @@ export function DangerZone({
         <button
           type="button"
           className="btn danger sm"
-          // F10-34: project-admin only; disabled for everyone else so the
-          // typed-confirm dialog can never be opened without authority.
-          disabled={busy || !canManageLifecycle}
+          disabled={busy}
           aria-busy={deleting || undefined}
-          title={canManageLifecycle ? undefined : "Only a project admin can delete this project"}
           onClick={() => setConfirming(true)}
         >
           {deleting && <Icon name="loader" className="spin" />}
@@ -2596,15 +2546,12 @@ export function SettingsPage({
   meId,
   myRole,
   instanceAdmin = false,
-  gate = roleCan,
 }: {
   data: SettingsViewData;
   meId: string | null;
   myRole: string | null;
   /** Ruling 480 (F40-45): the reader's instance role is `admin`. */
   instanceAdmin?: boolean;
-  /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
-  gate?: ProjectActionGate;
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
@@ -2636,9 +2583,9 @@ export function SettingsPage({
   // why the literal survived and exactly why it can't stay: re-tier either one
   // and the panels that don't belong to it would have followed along.
   const role = asProjectRole(myRole);
-  const canEditPolicy = gate(role, "edit-policy");
-  const canManageMembers = gate(role, "manage-members");
-  const canGrant = gate(role, "grant-github-scope");
+  const canEditPolicy = roleCan(role, "edit-policy");
+  const canManageMembers = roleCan(role, "manage-members");
+  const canGrant = roleCan(role, "grant-github-scope");
   const slug = data.project.slug;
 
   // Stage rename edit-mode lives here so a fresh add-stage response can
@@ -2872,14 +2819,12 @@ export function SettingsPage({
             Danger zone at all. It used to render for every member with the
             buttons disabled and a "you need the grant" note — honest, but it
             showed a stakeholder a destructive surface they can never use, and
-            named archive/delete as if they were on the table. Anyone who CAN
-            act still sees it unchanged (the in-panel deny note stays for the
-            in-between roles that hold some but not all lifecycle grants). */}
+            named archive/delete as if they were on the table. Archive and
+            delete are both `edit-policy`, so this one check is the whole gate:
+            whoever sees the panel can act on it. */}
         {canEditPolicy && (
         <DangerZone
           projectName={data.project.name}
-          myRole={myRole}
-          gate={gate}
           archived={data.project.archived}
           busy={dangerFetcher.state !== "idle"}
           inFlight={inFlightIntent(dangerFetcher)}

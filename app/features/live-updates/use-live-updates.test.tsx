@@ -410,7 +410,7 @@ describe("useLiveUpdates", () => {
    * payload and ~95 ms of the server's event loop, the one the agents run on.
    * Nothing on a board or on another task's page changes per line.
    */
-  it("a run line never revalidates a surface that is not showing that task", () => {
+  it("a run line revalidates neither the board nor a sibling task page; a domain event still does", () => {
     // The board: project + user, no task open.
     render(<Probe scopes={["project:viberr-core", "user"]} />, { wrapper: DataRouter });
     act(() => {
@@ -432,8 +432,6 @@ describe("useLiveUpdates", () => {
     );
     act(() => {
       FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 21);
-      // A frame that does not parse is dropped, not treated as a match.
-      FakeEventSource.last().emit("run.log-appended", "22", "not json");
       vi.advanceTimersByTime(4_000);
     });
     expect(loaderRuns, "a sibling task page refetched per line").toBe(0);

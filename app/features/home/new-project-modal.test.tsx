@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, useParams } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { NewProjectModal } from "./new-project-modal";
 
@@ -56,7 +56,7 @@ function renderModal(
       ),
       action,
     },
-    { path: "/projects/:slug/board", Component: () => <div>board</div> },
+    { path: "/projects/:slug/board", Component: () => <div>board {useParams().slug}</div> },
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }
@@ -205,6 +205,20 @@ describe("ruling 462: the modal can ask for the repository to be created", () =>
         "WEB initialized. Task store created at projects/website. Created akin-ozer/website on GitHub (private).",
       ),
     );
+  });
+});
+
+describe("F15-04: creating a project lands you in it", () => {
+  it("navigates to the new project's board instead of the home grid", async () => {
+    // CANARY: drop the success effect's `navigate(…/board)` and the stub never
+    // leaves the modal's route.
+    const { container, getByText, findByText } = renderModal(
+      { connections: ["akin-ozer"], connectionHealth: { "akin-ozer": "valid" } },
+      async () => ({ ok: true, key: "NEW", slug: "new-project", storePath: "projects/new-project" }),
+    );
+    fireEvent.change(container.querySelector("#np-name")!, { target: { value: "New Project" } });
+    fireEvent.click(getByText("Create project"));
+    await findByText("board new-project");
   });
 });
 

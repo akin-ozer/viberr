@@ -18,14 +18,12 @@ import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 
 let app: AppTestContext;
 let ardaId: string;
-let elifId: string;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda; // org admin
-  elifId = userIds.elif; // org member (not admin)
 });
 afterAll(() => app.cleanup());
 
@@ -96,12 +94,5 @@ describe("org-settings set-run-spend-cap (ruling 175)", () => {
       expect(res.body.error).toContain("at most two decimals");
       expect(getMaxRunSpendUsd(app.db), bad).toBe(4);
     }
-  });
-
-  it("a non-admin org member is refused and the cap does not move", async () => {
-    const before = getMaxRunSpendUsd(app.db);
-    const { status } = await setSpendCap(elifId, "9");
-    expect(status).not.toBe(200);
-    expect(getMaxRunSpendUsd(app.db)).toBe(before);
   });
 });

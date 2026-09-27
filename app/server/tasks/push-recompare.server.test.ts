@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -23,9 +22,6 @@ import {
   type OperatorAuthority,
 } from "./operator-actions.server";
 import type { TaskActionContext } from "./task-actions.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * Ruling 494 (pass 40, F40-70): a push that moves a task's branch re-compares

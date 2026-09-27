@@ -58,7 +58,7 @@ export function policyViolationText(scope: string, consequence: string): string 
 
 /** The sentence for a refusal on a scope nothing requires: the same fact and
  *  the same consequence, without calling it a violation. */
-export function credentialAdvisoryText(scope: string, consequence: string): string {
+function credentialAdvisoryText(scope: string, consequence: string): string {
   return `**Credential advisory:** the active PAT has no \`${scope}\`, which this project does not require. ${consequence}`;
 }
 
@@ -69,7 +69,7 @@ export function scopeFlagText(scope: string, consequence: string): string {
     : policyViolationText(scope, consequence);
 }
 
-export function policyUpdateText(scope: string): string {
+function policyUpdateText(scope: string): string {
   // The consequence names the ACTUAL scope — no hardcoded pull_request:write
   // copy shown for unrelated scopes (e.g. a `repo` read refusal).
   //

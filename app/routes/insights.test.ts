@@ -46,17 +46,6 @@ describe("/insights loader", () => {
   });
 
   it("refuses a non-admin", async () => {
-    await expect(loadInsights(elifId)).rejects.toBeDefined();
-  });
-
-  /**
-   * D1/F31-1 (pass 31): /insights was the only top-level page with no `meta`
-   * export, so the browser tab (and every bookmark made from it) read the raw
-   * URL while every sibling page read a name. Same "<Page> · Viberr" shape the
-   * other routes use.
-   */
-  it("names the document, like every sibling page (D1)", async () => {
-    const { meta } = await import("~/routes/insights");
-    expect(meta()).toEqual([{ title: "Insights · Viberr" }]);
+    await expect(loadInsights(elifId)).rejects.toMatchObject({ status: 403 });
   });
 });

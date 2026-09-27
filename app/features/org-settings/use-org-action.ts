@@ -30,7 +30,7 @@ export interface OrgActionSuccess {
 
 export type OrgActionData = OrgActionSuccess | { ok: false; error: string };
 
-export const ORG_SETTINGS_ACTION = "/org/settings";
+const ORG_SETTINGS_ACTION = "/org/settings";
 
 export interface OrgAction {
   fetcher: FetcherWithComponents<OrgActionData>;

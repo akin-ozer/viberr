@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
@@ -12,7 +9,6 @@ import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
 import { ToastProvider } from "~/ui/toast";
 import {
-  CONTINUITY_EVENT_TYPE,
   ContinuityRecoveryPanel,
   EXECUTION_PANEL_LABEL,
   deriveContinuityLoss,
@@ -142,7 +138,7 @@ function ev(patch: Partial<TimelineEventRender> = {}): TimelineEventRender {
 
 const continuityEvent = ev({
   id: 9,
-  type: CONTINUITY_EVENT_TYPE,
+  type: "continuity",
   occurredAt: "2026-08-06T09:41:05.000Z",
   actor: { kind: "system", name: "Viberr" },
   text: "Runtime continuity was lost: the Claude session behind Dana's thread no longer has a provider transcript.",
@@ -393,14 +389,6 @@ describe("ContinuityRecoveryPanel", () => {
     ).toContain(EXECUTION_PANEL_LABEL);
   });
 
-  it("the panel it names by heading is really called that (UX19-4)", () => {
-    // Naming a control a reader then cannot find is worse than naming none, so
-    // the string is not allowed to drift out from under this note.
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(path.join(here, "execution-profile.tsx"), "utf8");
-    expect(src).toContain(`<h2>${EXECUTION_PANEL_LABEL}</h2>`);
-  });
-
   it("offers no control the server cannot honour — there is no resume door", () => {
     // `resumeRun` probes the session and, on `missing`, does the fresh start
     // ITSELF; no route intent asks a human to choose. A "Resume session" button
@@ -559,9 +547,14 @@ describe("task detail wiring", () => {
     ).toBeTruthy();
   });
 
-  it("stays away when the task has no continuity break", () => {
-    const { container } = renderPage({ timeline: [ev()] }, [run()]);
-    expect(container.querySelector(".continuity-panel")).toBeNull();
+  it("the panel it names by heading is really called that (UX19-4)", () => {
+    // Naming a control a reader then cannot find is worse than naming none, so
+    // the hint and the heading it points at are read off the same page.
+    const { container, getByRole } = renderPage();
+    expect(container.querySelector(".continuity-panel .hint")!.textContent).toContain(
+      EXECUTION_PANEL_LABEL,
+    );
+    expect(getByRole("heading", { level: 2, name: EXECUTION_PANEL_LABEL })).toBeTruthy();
   });
 
   it("hands the panel the page's own console selector and Ask-operator signal", () => {

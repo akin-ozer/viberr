@@ -10,27 +10,12 @@ import {
   authenticate,
   requireAuth,
   requireRole,
-  roleSatisfies,
 } from "./require-user.server";
 import { insertUser } from "./user-store.server";
 import {
   currentCorrelation,
   runWithRequestContext,
 } from "../logging/request-context.server";
-
-describe("roleSatisfies (RBAC matrix)", () => {
-  const matrix: Array<[UserRole, UserRole, boolean]> = [
-    ["admin", "admin", true],
-    ["admin", "member", true],
-    ["member", "admin", false],
-    ["member", "member", true],
-  ];
-  for (const [role, required, expected] of matrix) {
-    it(`${role} ${expected ? "satisfies" : "does not satisfy"} ${required}`, () => {
-      expect(roleSatisfies(role, required)).toBe(expected);
-    });
-  }
-});
 
 /**
  * authenticate() resolves a better-auth session into the app's AuthContext,

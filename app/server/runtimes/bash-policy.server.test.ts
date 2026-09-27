@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bashDenyPrefixes, deniedPrefixFor, simpleCommands } from "./bash-policy.server";
+import { bashDenyPrefixes, deniedPrefixFor } from "./bash-policy.server";
 
 /**
  * Ruling 101(e), amended by Option D PR 5: the normalizer behind the Claude
@@ -55,23 +55,10 @@ describe("deniedPrefixFor — the shapes a prefix rule misses", () => {
     "grep -r 'gh pr create' docs",
     "git log --grep=push",
     "npm test 2>&1 | tail -5",
+    // `>& git` sends the output to a file named git; the command is `echo done push`.
+    "echo done >& git push",
     "git checkout main",
   ])("%s is not a denied command", (command) => {
     expect(denied(command)).toBeNull();
-  });
-});
-
-describe("simpleCommands", () => {
-  it("keeps a redirection's `&` inside its word", () => {
-    expect(simpleCommands("npm test 2>&1 | tail -5")).toEqual([
-      ["npm", "test", "2>&1"],
-      ["tail", "-5"],
-    ]);
-  });
-
-  it("stops reading shells-in-shells at a depth, leaving the rest to the fence", () => {
-    // Five levels of `sh -c`: the fifth is not read.
-    const nested = "sh -c \"sh -c 'sh -c \\\"sh -c git-status\\\"'\"";
-    expect(() => simpleCommands(nested)).not.toThrow();
   });
 });

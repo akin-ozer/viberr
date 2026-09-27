@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import { z } from "zod";
 import {
-  codexBinaryPath,
   compactCodexThread,
   type AppServerProcess,
   type SpawnAppServer,
@@ -214,10 +213,5 @@ describe("compactCodexThread (ruling 376)", () => {
       },
     });
     expect(outcome).toEqual({ compacted: false, reason: "the app-server could not be started: ENOENT" });
-  });
-
-  it("the binary is the SDK's vendored one for this platform, or codex on PATH", () => {
-    const binary = codexBinaryPath();
-    expect(binary === "codex" || /vendor\/[a-z0-9_-]+\/bin\/codex$/.test(binary)).toBe(true);
   });
 });

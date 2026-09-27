@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -10,18 +9,10 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { saveMcpServer } from "~/server/org/resources.server";
-import {
-  buildOperatorToolkit,
-  OPERATOR_TOOLKIT_INSTRUCTIONS,
-  RELAY_TOOL_DESCRIPTION,
-  SCHEDULE_TOOL_DESCRIPTION,
-} from "./operator-toolkit.server";
+import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());
@@ -30,7 +21,11 @@ const ACTOR = { userId: "u_t", label: "t@test" };
 
 /** The instructions string as the MOUNTED server carries it: `createSdkMcpServer`
  *  hands back the live `McpServer` under `instance`, and `instance.server` is its
- *  `Server` handle, which keeps the instructions in `_instructions`. */
+ *  `Server` handle, which keeps the instructions in `_instructions`. A run reads
+ *  the server's instructions, not the module's constant. The field is `private`
+ *  on the MCP SDK's `Server`, so it is read by parsing the shape we expect; if
+ *  the SDK renames it, the read falls through to `""` and every positive
+ *  assertion on it fails instead of passing on `undefined`. */
 const wiredInstructions = z
   .object({ instance: z.object({ server: z.object({ _instructions: z.string() }) }) })
   .transform((mounted) => mounted.instance.server._instructions)
@@ -149,8 +144,7 @@ describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
  * with no shared generator. They MUST expose the same governed-action vocabulary
  * for the same authority, or an operator would silently be able to do different
  * things on Codex than on Claude. This pins that parity: add a governed action
- * to one list but not the other and this fails — the guard F21-3 already gives
- * OPERATOR_READ_ONLY_DENIED_TOOLS via capability-denylist-markers.test.
+ * to one list but not the other and this fails.
  */
 describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (F27-O3)", () => {
   // get_task / read_default_branch_file are read-only Claude tools with no plan
@@ -270,8 +264,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(granted.allowedTools).toContain("mcp__viberr__relay_to_task");
     const withheld = build(withPolicy({ ...uniform("direct"), "append-typed-events": "off" }));
     expect(withheld.allowedTools).not.toContain("mcp__viberr__relay_to_task");
-    expect(granted.tools.find((t) => t.name === "relay_to_task")!.description).toBe(RELAY_TOOL_DESCRIPTION);
-    expect(RELAY_TOOL_DESCRIPTION).toContain(
+    expect(granted.tools.find((t) => t.name === "relay_to_task")!.description).toContain(
       "never ask anyone to copy, paste or post text between tasks, and never ask a person to confirm a relay landed",
     );
   });
@@ -289,10 +282,9 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
       expect(withheld.allowedTools, mode).not.toContain("mcp__viberr__cancel_task_schedule");
     }
     const desc = (name: string) => direct.tools.find((t) => t.name === name)!.description;
-    expect(desc("schedule_task_action")).toBe(SCHEDULE_TOOL_DESCRIPTION);
-    expect(SCHEDULE_TOOL_DESCRIPTION).toContain("That wait is scheduled, never asked");
-    expect(SCHEDULE_TOOL_DESCRIPTION).toContain("do not ask a person to schedule it or to route it through the controller");
-    expect(SCHEDULE_TOOL_DESCRIPTION).toContain(
+    expect(desc("schedule_task_action")).toContain("That wait is scheduled, never asked");
+    expect(desc("schedule_task_action")).toContain("do not ask a person to schedule it or to route it through the controller");
+    expect(desc("schedule_task_action")).toContain(
       "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn.",
     );
     expect(desc("get_task")).toContain("`schedules` (ruling 487) lists the runs scheduled on this task that have not fired yet");
@@ -476,19 +468,29 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
  * to touch it by another can resolve that either way, and the way that loses is
  * exactly F19-4: describing the empty task folder as "the repo".
  */
-describe("OPERATOR_TOOLKIT_INSTRUCTIONS — reading is expected, writing is not (R19-1)", () => {
+describe("the viberr server's instructions — reading is expected, writing is not (R19-1)", () => {
+  const wired = () =>
+    wiredInstructions.parse(
+      buildOperatorToolkit({
+        db: ctxDb.makeDb(),
+        ctx: { dataRoot: ctxDb.makeTempDir() },
+        projectSlug: "p",
+        taskKey: "P-1",
+        authority: authority([]),
+      }).mcpServers.viberr,
+    );
+
   it("states the write prohibition precisely and stops forbidding reads", () => {
     // Canary: restore the "never write code or touch the repository" sentence
     // and every half fails.
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toContain("never write code");
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toMatch(/cannot edit, create or commit files/);
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toContain("READING the task's repository checkout");
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).not.toMatch(/touch the repository/);
+    const text = wired();
+    expect(text).toContain("never write code");
+    expect(text).toMatch(/cannot edit, create or commit files/);
+    expect(text).toContain("READING the task's repository checkout");
+    expect(text).not.toMatch(/touch the repository/);
     // The claim-grounding rule the packets depend on, restated where the tools
     // that WRITE those packets are described.
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toMatch(
-      /claim you make about the repository must come from reading it/,
-    );
+    expect(text).toMatch(/claim you make about the repository must come from reading it/);
   });
 
   it("does NOT claim the operator cannot push — delivery is its decision (R15-2)", () => {
@@ -499,33 +501,9 @@ describe("OPERATOR_TOOLKIT_INSTRUCTIONS — reading is expected, writing is not 
     // them, and the careful resolution is an operator that stops delivering.
     // Canary: put "or push the repository" back into the constant and this
     // fails.
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).not.toMatch(/or push the repository/);
-    expect(OPERATOR_TOOLKIT_INSTRUCTIONS).toMatch(
-      /delivery is a decision you make and the server executes/,
-    );
-  });
-
-  it("is the string the viberr MCP server actually carries", () => {
-    // Pins the WIRING, not just the constant: a run reads the server's
-    // instructions, not this module's exports. (Reaches into the SDK server's
-    // private field — if the SDK moves it, this fails loudly rather than
-    // passing while the operator reads something else.)
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority([]),
-    });
-    // `_instructions` is `private` on the MCP SDK's `Server`, so no narrowing
-    // reaches it — and reading THAT field is the point of this test: it proves
-    // the run's server carries the instructions, not merely that this module
-    // exports them. Read it the way any other opaque payload is read here, by
-    // parsing the shape we expect; a rename in the SDK falls through to `""`
-    // and fails the assertion below instead of passing on `undefined`.
-    const wired = wiredInstructions.parse(toolkit.mcpServers.viberr);
-    expect(wired).toBe(OPERATOR_TOOLKIT_INSTRUCTIONS);
+    const text = wired();
+    expect(text).not.toMatch(/or push the repository/);
+    expect(text).toMatch(/delivery is a decision you make and the server executes/);
   });
 
   it("loads every viberr tool up front, so the run's first call is not a ToolSearch (Option D PR 4(a))", () => {
@@ -743,61 +721,6 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 282 (pass 37, F37-115): the operator plans ACROSS a board it could
-   * not read. `get_task` takes no arguments — it answers this task and only
-   * this task — and nothing in this toolkit listed the others. So the one actor
-   * that writes `blockedBy`, decides ordering, and is the ONLY author of a
-   * `create_task` option (ruling 269) could not check whether the work it was
-   * about to ask for already had an owner. Two duplicates in one hour: SHOP-39's
-   * title proposed again word for word, and "Gateway routes for orders, cart
-   * and inventory" proposed while SHOP-29 stood.
-   */
-  it("ruling 282: read_board answers one key, lists the board, and denies a key that is not there", async () => {
-    const store = setupTestStore(ctxDb);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
-      goal: "The task the operator is coordinating.",
-    });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
-      goal: "Serve the published batch contract.",
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
-    const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
-    // a shape change fails the assertions rather than reading undefined.
-    const call = async (args: { taskKey?: string }) =>
-      ((await read.handler(args as never, {} as never)) as { content: { text: string }[] })
-        .content[0]!.text;
-
-    // CANARY: remove the tool and the operator is back to planning a board it
-    // can only see one task of, which is what produced both duplicates.
-    const other = await call({ taskKey: "VIB-2" });
-    expect(other).toContain('"key": "VIB-2"');
-    expect(other).toContain("Serve the published batch contract");
-
-    const all = await call({});
-    expect(all).toContain('"key": "VIB-1"');
-    expect(all).toContain('"key": "VIB-2"');
-
-    // The answer the whole tool exists for.
-    expect(await call({ taskKey: "VIB-404" })).toContain(
-      "[noop] No task VIB-404 in this project",
-    );
-  });
-
-  /**
    * Ruling 289 (pass 37, F37-124): the excerpt SAYS it is one.
    *
    * `read_board` returned a bare `.slice` of another task's goal, so a long
@@ -806,7 +729,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * goal draft, sitting in the reader those rulings' own author wrote the same
    * day. The cap stays: this is the SHALLOW read of the tasks beside your own.
    */
-  it("ruling 289: a clipped goal says it is clipped, and a short one is untouched", async () => {
+  it("ruling 289: a clipped goal says it is clipped, a short one is untouched, and no key lists the board", async () => {
     const store = setupTestStore(ctxDb);
     const long = `Deliverable: the thing. ${"detail ".repeat(500)}END-OF-CONTRACT`;
     writeTask(store.dataRoot, store.slug, {
@@ -829,7 +752,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       authority: authority([]),
     });
     const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    const call = async (taskKey: string) => {
+    const call = async (taskKey?: string) => {
       // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
       // a shape change fails the assertions below rather than reading undefined.
       const answer = (await read.handler({ taskKey } as never, {} as never)) as {
@@ -850,6 +773,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const whole = await call("VIB-3");
     expect(whole).toContain("Short and whole.");
     expect(whole).not.toContain("[excerpt");
+
+    // Ruling 282: with no key, the operator's read lists the whole board.
+    const board = await call();
+    for (const key of ["VIB-1", "VIB-2", "VIB-3"]) expect(board).toContain(`"key": "${key}"`);
   });
 
   /**

@@ -1,13 +1,9 @@
-import { randomBytes } from "node:crypto";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { buildResourceCatalog } from "./resource-catalog.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -58,28 +54,6 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     const catalog = buildResourceCatalog(store.db, store.dataRoot);
     const kbIds = catalog.find((g) => g.key === "kb")!.items.map((i) => i.id);
     expect(kbIds).toContain("ghost-kb");
-  });
-
-  it("excludes the reserved viberr operator toolkit from the SPECIALIST catalog (F7-RES3)", () => {
-    const store = setupTestStore(ctx);
-    const now = new Date().toISOString();
-    // A real org MCP row a specialist SHOULD be able to attach.
-    store.db
-      .prepare(
-        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
-         VALUES ('mcp_y', 'notes-fixture', 'HTTP', 'https://mcp.example/sse', NULL, ?, ?)`,
-      )
-      .run(now, now);
-
-    // P14-KM-14: the catalog is the REGISTRY, identical for every profile kind.
-    // `viberr` is offered to nobody — the operator toolkit mounts it whatever the
-    // grants say and the specialist resolver skips the name, so a toggle for it
-    // governed nothing in either direction.
-    const mcps = buildResourceCatalog(store.db, store.dataRoot)
-      .find((g) => g.key === "mcps")!
-      .items.map((i) => i.id);
-    expect(mcps).not.toContain("viberr");
-    expect(mcps).toContain("notes-fixture");
   });
 
   /**

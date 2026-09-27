@@ -22,6 +22,12 @@ export interface AppTestContext {
   cookieFor(userId: string): Promise<{ cookie: string; sessionId: string }>;
   /** Session-bound CSRF token (formData "_csrf" field). */
   csrfFor(sessionId: string): Promise<string>;
+  /** One signed-in session per person for this context, made on first use and
+   *  answered again after: every sign-in is a scrypt verify. */
+  sessionFor(userId: string): Promise<{ cookie: string; csrf: string }>;
+  /** Drops `userId`'s session, for a test that signed them out (a password
+   *  change ends the person's other sessions). */
+  forgetSession(userId: string): void;
   /** Request builder with session cookie + trusted origin headers. */
   request(
     url: string,
@@ -31,6 +37,13 @@ export interface AppTestContext {
 }
 
 export const APP_TEST_PASSWORD = "test-harness-password-000";
+
+/**
+ * Its better-auth hash, made on the file's first sign-in. scrypt is slow on
+ * purpose and any hash of the password verifies it, so every sign-in in the
+ * file shares one, and a file that never signs in makes none.
+ */
+let appTestPasswordHash: Promise<string> | undefined;
 
 export async function setupAppTest(): Promise<AppTestContext> {
   const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-app-test-"));
@@ -69,7 +82,7 @@ export async function setupAppTest(): Promise<AppTestContext> {
     { provisionIdentity },
     { hashPassword },
     { findUserById },
-    { csrfTokenForSession },
+    { getCsrfToken },
   ] = await Promise.all([
     import("~/lib/auth.server"),
     import("~/server/auth/identity.server"),
@@ -78,20 +91,20 @@ export async function setupAppTest(): Promise<AppTestContext> {
     import("~/server/auth/csrf.server"),
   ]);
 
-  // cookieFor signs the user in through better-auth, so it needs a known
-  // credential — provisioning overwrites the user's credential with this.
-  return {
+  const sessions = new Map<string, { cookie: string; csrf: string }>();
+  const context: AppTestContext = {
     db,
     dataRoot,
     async cookieFor(userId: string) {
       const user = findUserById(db, userId);
       if (!user) throw new Error(`cookieFor: no user ${userId}`);
-      // Ensure a better-auth identity with a known password, then sign in.
+      // Ensure a better-auth identity with a known password, then sign in:
+      // provisioning overwrites the user's credential with this one.
       provisionIdentity(db, {
         id: user.id,
         email: user.email,
         name: user.name,
-        passwordHash: await hashPassword(APP_TEST_PASSWORD),
+        passwordHash: await (appTestPasswordHash ??= hashPassword(APP_TEST_PASSWORD)),
       });
       // cookieFor is harness plumbing that mints a session, not a login under
       // test, but it goes through better-auth's sign-in hook and so spends a
@@ -124,7 +137,18 @@ export async function setupAppTest(): Promise<AppTestContext> {
       return { cookie: setCookie.split(";")[0], sessionId: session.id };
     },
     async csrfFor(sessionId: string) {
-      return csrfTokenForSession(sessionId, sessionSecret);
+      return getCsrfToken(sessionId);
+    },
+    async sessionFor(userId: string) {
+      const known = sessions.get(userId);
+      if (known) return known;
+      const { cookie, sessionId } = await context.cookieFor(userId);
+      const made = { cookie, csrf: getCsrfToken(sessionId) };
+      sessions.set(userId, made);
+      return made;
+    },
+    forgetSession(userId: string) {
+      sessions.delete(userId);
     },
     request(url: string, init: RequestInit & { cookie?: string } = {}) {
       const { cookie, ...rest } = init;
@@ -143,4 +167,5 @@ export async function setupAppTest(): Promise<AppTestContext> {
       rmSync(dataRoot, { recursive: true, force: true });
     },
   };
+  return context;
 }

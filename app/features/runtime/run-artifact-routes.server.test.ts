@@ -21,8 +21,9 @@ import type { SeedUserIds } from "../../../test-support/demo-data";
 let app: AppTestContext;
 /**
  * The seeded people these cases call the artifact routes as: arda is project
- * admin on viberr-core; deniz is registered, but a member of NO project — the
- * exact F10-06/33 subject.
+ * admin on viberr-core; murat maintains viberr-core and is no member of
+ * billing-service; deniz is registered, but a member of NO project — the exact
+ * F10-06/33 subject.
  */
 let ids: SeedUserIds;
 
@@ -164,8 +165,8 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
   });
 
   it("the gate keys on the RUN's project, not a project the caller happens to be in", async () => {
-    // Arda is an admin on viberr-core but not a member of billing-service.
-    // A run belonging to billing-service must still be refused for them.
+    // Murat is a maintainer on viberr-core and not a member of billing-service.
+    // A run belonging to billing-service must still be refused for him.
     const { upsertRun } = await import("~/server/runtimes/run-store.server");
     const { assertProjectAction } = await import(
       "~/server/auth/project-authority.server"
@@ -184,22 +185,27 @@ describe("F10-06/F10-33: raw run artifacts require project membership", () => {
       sdk: "claude-agent-sdk",
       state: "finished",
     });
-    // Guard the premise: Deniz is a member of billing-service either way.
+    // Guard the premise: Murat is not a member of billing-service…
     expect(() =>
       assertProjectAction(
         app.db,
         "any-member",
         "billing-service",
-        { userId: ids.deniz, label: "deniz@viberr.dev" },
+        { userId: ids.murat, label: "murat@viberr.dev" },
         "read",
         { allowArchived: true },
       ),
     ).toThrow();
+    // …and the control: a run of the project he IS in opens for him.
+    expect(
+      (await callLoader("resources.run-log", `/resources/run-log?runId=${RUN_ID}`, ids.murat))
+        .status,
+    ).toBe(200);
 
     const res = await callLoader(
       "resources.run-log",
       `/resources/run-log?runId=${foreignRun}`,
-      ids.deniz,
+      ids.murat,
     );
     // F19-28: refused as an unknown slug (404), and the body must not name
     // `billing-service` — the caller addressed a RUN, not that project.

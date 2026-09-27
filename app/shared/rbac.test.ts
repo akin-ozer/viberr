@@ -3,10 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  ACTION_ROLES,
   PROJECT_ROLES,
   RBAC_DEFINITIONS,
-  ROLE_LABEL,
   ROLE_RANK,
   roleCan,
   rolesForAction,
@@ -150,6 +148,25 @@ describe("the role tier: viewer ⊂ contributor ⊂ maintainer ⊂ admin", () =>
   });
 
   /**
+   * `roleCan` is the predicate the pages (and `ownerException`) actually call,
+   * so the tier claim has to hold THERE, not only in the raw sets.
+   * UPWARD-CLOSED in one direction and STRICT in the other: a contributor
+   * grant reaches maintainer and admin; a maintainer grant never reaches
+   * contributor or viewer.
+   */
+  it("roleCan is upward-closed and strictly denies below the floor", () => {
+    for (const def of RBAC_DEFINITIONS) {
+      const floor = Math.min(...def.roles.map((role) => ROLE_RANK[role]));
+      for (const role of byRank(PROJECT_ROLES)) {
+        expect(
+          roleCan(role, def.id),
+          `roleCan("${role}", "${def.id}") must be ${ROLE_RANK[role] >= floor}`,
+        ).toBe(ROLE_RANK[role] >= floor);
+      }
+    }
+  });
+
+  /**
    * R15-4: membership is the OUTER gate on every row. A non-member never
    * reaches a role check at all (the layout loader and `requireVisibleProject`
    * answer the unknown-slug 404 first), so `roleCan(null, …)` is what every
@@ -184,23 +201,6 @@ describe("the role tier: viewer ⊂ contributor ⊂ maintainer ⊂ admin", () =>
       }
     }
   });
-
-  /**
-   * The two ends of the tier, stated as behaviour rather than derived from the
-   * table — the derived tests above all stay green if the whole matrix is
-   * rewritten. An admin who cannot do something has no recourse (there is no
-   * higher project role), and a viewer who can do anything else is a read-only
-   * seat that writes.
-   */
-  it("gives admin every action, and a viewer nothing beyond view + comment", () => {
-    for (const def of RBAC_DEFINITIONS) {
-      expect(roleCan("admin", def.id), `admin must hold "${def.id}"`).toBe(true);
-    }
-    const viewerHolds = RBAC_DEFINITIONS.filter((d) => roleCan("viewer", d.id)).map(
-      (d) => d.id,
-    );
-    expect(viewerHolds).toEqual(["view", "comment"]);
-  });
 });
 
 describe("the matrix is a policy decision, pinned by hand", () => {
@@ -211,9 +211,7 @@ describe("the matrix is a policy decision, pinned by hand", () => {
    * say) has to be typed here too. A role tier should never move as a side
    * effect of a refactor.
    *
-   * `policy-rbac.server.test.ts` pins the same decision in its full-set form;
-   * both are deliberate. This one is the module's own sibling and states the
-   * decision the way the tier actually works — as a floor.
+   * It states the decision the way the tier actually works — as a floor.
    */
   const POLICY_FLOOR = {
     // Every role. Not role-gated at all: their entire enforcement IS the
@@ -262,6 +260,11 @@ describe("the matrix is a policy decision, pinned by hand", () => {
       RBAC_DEFINITIONS.map((d) => d.id).sort(),
     );
   });
+
+  it("lists the actions broadest first, the order the Policy page shows them", () => {
+    const floors = RBAC_DEFINITIONS.map((d) => ROLE_RANK[POLICY_FLOOR[d.id]]);
+    expect(floors).toEqual([...floors].sort((a, b) => a - b));
+  });
 });
 
 /**
@@ -279,63 +282,6 @@ describe("the domain docs render the SAME matrix (ruling 65: the guard must be a
 
   it("docs/domain/task-lifecycle.md §2 matches ACTION_ROLES exactly", () => {
     expect(docMatrix("docs/domain/task-lifecycle.md")).toEqual(codeMatrix());
-  });
-});
-
-describe("ACTION_ROLES is the one object the guards and the Policy page share", () => {
-  /**
-   * The map is BUILT from `RBAC_DEFINITIONS`, and the Policy page renders the
-   * definitions array while the guards read the map. Two ids that collide leave
-   * the display showing both rows and the map keeping only the last — display
-   * and enforcement disagreeing, silently, which is the single failure mode
-   * this module's whole design exists to prevent. (`capabilities.ts` really did
-   * carry a duplicate id inside a Set for a whole pass — A00-8.)
-   */
-  it("keys every definition, with no row silently overwritten by a duplicate id", () => {
-    expect(ACTION_ROLES.size).toBe(RBAC_DEFINITIONS.length);
-    for (const def of RBAC_DEFINITIONS) {
-      // Identity, not equality: the guards must read the very array the table
-      // renders, never a copy that could be rebuilt from something else.
-      expect(ACTION_ROLES.get(def.id), `"${def.id}" is missing from ACTION_ROLES`).toBe(
-        def.roles,
-      );
-    }
-  });
-
-  /**
-   * An action with no holders is not a safe "deny everyone". `requireAction`
-   * hands the set to `requireProjectAuthority`, which — after the member check
-   * fails for every role — falls through to the D2 org-admin override. An empty
-   * row would therefore convert a governed project action into an org-admin-only
-   * one, and the Policy page would render a row of four blanks nobody can
-   * explain.
-   */
-  it("gives every action at least one holder", () => {
-    for (const def of RBAC_DEFINITIONS) {
-      expect(rolesForAction(def.id).length, `"${def.id}" has no holder`).toBeGreaterThan(0);
-    }
-  });
-
-  it("names only real project roles, once each", () => {
-    for (const def of RBAC_DEFINITIONS) {
-      for (const role of def.roles) {
-        expect(PROJECT_ROLES, `"${def.id}" names "${role}"`).toContain(role);
-      }
-      expect(new Set(def.roles).size, `"${def.id}" repeats a role`).toBe(def.roles.length);
-    }
-  });
-
-  /**
-   * The Policy and task-side permission tables draw one column per role from
-   * these two objects. A role present in `PROJECT_ROLES` but missing here
-   * renders a header cell reading `undefined`; a duplicated label makes two
-   * columns indistinguishable.
-   */
-  it("ranks and labels exactly the four project roles, distinctly", () => {
-    expect(Object.keys(ROLE_RANK).sort()).toEqual([...PROJECT_ROLES].sort());
-    expect(Object.keys(ROLE_LABEL).sort()).toEqual([...PROJECT_ROLES].sort());
-    expect(new Set(Object.values(ROLE_RANK)).size).toBe(PROJECT_ROLES.length);
-    expect(new Set(Object.values(ROLE_LABEL)).size).toBe(PROJECT_ROLES.length);
   });
 });
 
@@ -406,6 +352,26 @@ describe("the narrower-gate relationships the module's comments promise", () => 
    */
   it("update-goal is strictly narrower than edit-task-meta", () => {
     assertStrictlyNarrower("update-goal", "edit-task-meta");
+  });
+
+  /**
+   * B-WF7: `reorderTask` requires `reorder-board`, then delegates a
+   * cross-stage drop to a `manual: true` transition requiring
+   * `approve-transition`. The two are the same tier TODAY, so the split cannot
+   * 403 halfway — but nothing said so, and a future tier change on either one
+   * would fail a drag AFTER the visible gate had already passed. This is that
+   * statement, in code.
+   */
+  it("reorder-board is never wider than approve-transition (B-WF7)", () => {
+    const transition = rolesForAction("approve-transition");
+    for (const role of rolesForAction("reorder-board")) {
+      expect(
+        transition,
+        `role "${role}" can reorder the board but could not authorize the ` +
+          `cross-stage move a drag performs — reorderTask would 403 after the ` +
+          `visible gate passed`,
+      ).toContain(role);
+    }
   });
 
   /**

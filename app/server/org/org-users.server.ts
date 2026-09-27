@@ -411,7 +411,7 @@ export async function resetLocalPassword(
  * writes the file through the shared writer and re-projects each project it
  * touched. Returns the slugs it changed.
  */
-export async function pruneUserFromProjects(
+async function pruneUserFromProjects(
   db: DatabaseSync,
   userId: string,
   actor: AuditActor,

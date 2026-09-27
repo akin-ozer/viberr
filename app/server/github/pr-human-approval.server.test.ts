@@ -15,7 +15,6 @@ import {
 } from "~/server/tasks/task-actions.server";
 import {
   derivePrHumanApproval,
-  humanApprovalRefusalNote,
   humanVerdictApproval,
   humanVerdictNote,
   PR_HUMAN_APPROVAL_KEY,
@@ -212,7 +211,9 @@ describe("derivePrHumanApproval — fail closed unless it is confidently a membe
   });
 });
 
-describe("humanVerdictApproval — the binding is re-checked on every READ", () => {
+/** The binding itself (current revision, re-delivery, a non-counted record) is
+ *  proven at the gate, in the R19-B describe below. */
+describe("humanVerdictApproval — the stored record, read and named", () => {
   const counted: PrHumanApproval = {
     login: "muratdev",
     commitSha: DELIVERED,
@@ -221,30 +222,6 @@ describe("humanVerdictApproval — the binding is re-checked on every READ", () 
     name: "Murat Test",
     status: "counted",
   };
-
-  it("satisfies the gate while it binds to the current revision", () => {
-    expect(
-      humanVerdictApproval({ pr: prWith(counted), workRevision: revision() }),
-    ).toMatchObject({ login: "muratdev" });
-  });
-
-  it("a RE-DELIVERY revokes it instantly, with no GitHub round-trip", () => {
-    // The stored record still says `counted` — what changed is the delivered
-    // revision under it. This is why an unreachable GitHub can never leave a
-    // stale approval standing over new work.
-    expect(
-      humanVerdictApproval({ pr: prWith(counted), workRevision: revision("f5eshsha") }),
-    ).toBeNull();
-  });
-
-  it("a non-counted record never satisfies the gate", () => {
-    expect(
-      humanVerdictApproval({
-        pr: prWith({ ...counted, status: "unlinked_handle", userId: null }),
-        workRevision: revision(),
-      }),
-    ).toBeNull();
-  });
 
   it("garbage in the file reads as 'no approval', never as a throw", () => {
     // `prRefSchema` is loose, so a hand-edited string under the approval key is
@@ -257,63 +234,6 @@ describe("humanVerdictApproval — the binding is re-checked on every READ", () 
   it("names the human and the commit — a satisfied gate is never anonymous", () => {
     expect(humanVerdictNote(counted)).toContain("Murat Test (@muratdev)");
     expect(humanVerdictNote(counted)).toContain(DELIVERED.slice(0, 7));
-  });
-});
-
-describe("humanApprovalRefusalNote — fail closed, but never silently", () => {
-  const base: PrHumanApproval = {
-    login: "octocat",
-    commitSha: DELIVERED,
-    at: null,
-    userId: null,
-    name: null,
-    status: "unlinked_handle",
-  };
-
-  it("says an unlinked handle is the problem, and how to fix it", () => {
-    const note = humanApprovalRefusalNote({
-      pr: prWith(base),
-      workRevision: revision(),
-    });
-    expect(note).toContain("@octocat");
-    expect(note).toContain("no Viberr account carries that GitHub handle");
-    // Ruling 154: the way out is a door that exists on every deployment. The
-    // old sentence sent people to a profile card that, without GitHub OAuth,
-    // said there was nothing to connect.
-    expect(note).toContain("Instance settings, Users & access");
-    expect(note).not.toContain("Link it on their profile");
-  });
-
-  it("says a non-member approved it", () => {
-    const note = humanApprovalRefusalNote({
-      pr: prWith({ ...base, status: "not_a_member", userId: "u_deniz", name: "Deniz Test" }),
-      workRevision: revision(),
-    });
-    expect(note).toContain("Deniz Test (@octocat)");
-    expect(note).toContain("not a member of this project");
-  });
-
-  it("says WHICH commit was approved when it is not the delivered one", () => {
-    const note = humanApprovalRefusalNote({
-      pr: prWith({ ...base, commitSha: OLDER, status: "stale_revision" }),
-      workRevision: revision(),
-    });
-    expect(note).toContain(OLDER.slice(0, 7));
-    expect(note).toContain("not the delivered revision");
-  });
-
-  it("explains a previously-counted approval that the delivered revision moved past", () => {
-    const note = humanApprovalRefusalNote({
-      pr: prWith({ ...base, status: "counted", userId: "u_murat", name: "Murat Test" }),
-      workRevision: revision("f5eshsha"),
-    });
-    expect(note).toContain("no longer the delivered revision");
-  });
-
-  it("has nothing to say when there is no approval at all", () => {
-    expect(
-      humanApprovalRefusalNote({ pr: prWith(null), workRevision: revision() }),
-    ).toBeNull();
   });
 });
 
@@ -389,6 +309,7 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
     const reason = refusal();
     expect(reason).toContain("has no approving verdict yet");
     expect(reason).toContain(OLDER.slice(0, 7));
+    expect(reason).toContain("not the delivered revision");
   });
 
   it("STAYS BLOCKED for an unmappable approver, and says why on the surface", () => {
@@ -412,9 +333,31 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
     );
     expect(affordance.canAccept).toBe(false);
     expect(affordance.verdictSatisfiedBy).toBeNull();
+    expect(affordance.blockedReason).toContain("@octocat");
     expect(affordance.blockedReason).toContain(
       "no Viberr account carries that GitHub handle",
     );
+    // Ruling 154: the way out is a door that exists on every deployment. The
+    // old sentence sent people to a profile card that, without GitHub OAuth,
+    // said there was nothing to connect.
+    expect(affordance.blockedReason).toContain("Instance settings, Users & access");
+    expect(affordance.blockedReason).not.toContain("Link it on their profile");
+  });
+
+  it("STAYS BLOCKED for a non-member's approval, and says so", () => {
+    // Mapped, on the delivered commit: only the member check keeps it out.
+    seedDeliveredTask(
+      prWith({
+        login: "deniz",
+        commitSha: DELIVERED,
+        at: null,
+        userId: store.users.deniz.id,
+        name: store.users.deniz.name,
+        status: "not_a_member",
+      }),
+    );
+    expect(refusal()).toContain(`${store.users.deniz.name} (@deniz)`);
+    expect(refusal()).toContain("not a member of this project");
   });
 
   it("re-blocks the moment new work is delivered under a counted approval", () => {

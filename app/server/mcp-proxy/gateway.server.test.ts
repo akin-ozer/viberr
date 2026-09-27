@@ -375,17 +375,8 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     expect(called.content[0]?.text).toBe("whoami: ok");
     expect(upstream.initializes()).toBe(2);
     expect(upstream.calls).toEqual(["whoami", "whoami"]);
-  });
-
-  it("falls back to the legacy SSE transport when the upstream answers that way", async () => {
-    const upstream = await startSseUpstream(SECRET);
-    upstreams.push(upstream);
-    addMcp("legacy", "HTTP", upstream.url, SECRET);
-    const { servers } = mountRun(["legacy"]);
-    const client = await connect(servers.legacy);
-    const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
-    expect(called.content[0]?.text).toBe("whoami: ok");
-    expect(upstream.calls).toEqual(["whoami"]);
+    // Both sessions, the first one the SSE fallback opened included, carried
+    // the stored credential and nothing else.
     expect(new Set(upstream.authorizations)).toEqual(new Set([`Bearer ${SECRET}`]));
   });
 });

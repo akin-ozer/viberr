@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -15,9 +14,6 @@ import {
 } from "~/server/secrets/pat-store.server";
 import { runReconcile, runSetCredential } from "./github-actions.server";
 import { latestProjectReconcileAt } from "~/server/provenance/provenance-query.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);

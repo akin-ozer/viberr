@@ -13,7 +13,6 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { RunCallbacks, RunHandle, RunSpec, RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
 import { insertRunLine, nextSeq } from "~/server/runtimes/run-store.server";
@@ -126,7 +125,6 @@ describe("ruling 131(f): converting the two live holds", () => {
       writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, { stage: "impl", waiting: "none" }) });
     }
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    resetSseBrokerForTests();
     resetOperatorLeasesForTests();
     adapter = new ControlledAdapter();
     configureRunServiceForTests({ claude: adapter, codex: adapter });
@@ -135,7 +133,6 @@ describe("ruling 131(f): converting the two live holds", () => {
 
   afterEach(() => {
     resetOperatorLeasesForTests();
-    resetSseBrokerForTests();
     ctx.cleanup();
   });
 

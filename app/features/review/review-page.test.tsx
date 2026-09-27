@@ -217,23 +217,6 @@ describe("ReviewQueuePage", () => {
     expect(chip.getAttribute("href")).toBe("/projects/viberr-core/policy");
   });
 
-  it("labels a human-waiting row in the working panel 'waiting on a human', never 'agent working'", () => {
-    // R8-3: a review task waiting on a human someone ELSE must accept lands in
-    // "Still in review" — it must read "waiting on a human", not the false
-    // "agent working" (no agent is running on a human-waiting task).
-    const humanNotMine: ReviewRowView = {
-      ...rowAgent,
-      key: "VIB-150",
-      waiting: "human",
-    };
-    const { container } = renderQueue([], [humanNotMine]);
-    const row = container.querySelector(".rq-row")!;
-    expect(row.querySelector(".wait-tag.human")!.textContent).toContain(
-      "waiting on a human",
-    );
-    expect(row.querySelector(".wait-tag.agent")).toBeNull();
-  });
-
   it("writ-3: a row the board marks waitingOnMe reads 'waiting on you' in either panel", () => {
     // The queue tested acceptance alone, so a viewer who owns an open decision
     // on a review task read "waiting on a human" here while the board, one
@@ -388,15 +371,6 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
       "PR #124 · closed",
     );
   });
-
-  it("an OPEN PR with the same gate still shows the process gate", () => {
-    const { container } = renderQueue([], [
-      { ...closedRow, pr: { number: 124, state: "review" } },
-    ]);
-    expect(container.querySelector(".rq-row .sub")!.textContent).toBe(
-      closedRow.blockReason,
-    );
-  });
 });
 
 describe("P13-D-9: the queue stops promising human-only Done unconditionally", () => {
@@ -426,41 +400,32 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
     });
     const chip = getByText("Review → Done · human or operator");
     expect(chip).toBeTruthy();
-    expect(chip.closest("a")!.getAttribute("title")).toContain(
-      "Atlas runs at full autonomy",
-    );
+    const title = chip.closest("a")!.getAttribute("title")!;
+    expect(title).toContain("Atlas runs at full autonomy");
 
     const note = container.querySelector(".pol-note")!.textContent!;
     expect(note).not.toContain("always a human action");
     expect(note).toContain("Atlas");
     expect(note).toContain("full autonomy");
-    expect(note).toContain("Accept completion into Done");
     expect(note).toContain("Direct");
     // It stays an exception, not a licence.
     expect(note).toContain("one exception");
     expect(note).toContain("always in the audit log");
-  });
+    // The exception needs BOTH facts — full autonomy alone never confers it
+    // (`promotable: false`), so the copy must not read as a consequence of the
+    // autonomy setting.
+    expect(note).toContain("separately holds");
+    expect(note).toContain("never implied by the autonomy setting");
 
-  // UXV19-1: this queue named the capability by hand and kept the RETIRED
-  // label ("Completion for human acceptance") after the catalog renamed it —
-  // on the one surface that tells the reader to go verify the claim on Policy,
-  // where only "Accept completion into Done" exists. Both the tooltip and the
-  // footer now render the catalog's own label, by id.
-  // Canary: hardcode "Completion for human acceptance" back into either the
-  // title at review-page.tsx or the footer <strong> and this test fails.
-  it("names the acceptance capability exactly as the catalog does, in the chip AND the footer", () => {
+    // UXV19-1: this queue named the capability by hand and kept the RETIRED
+    // label ("Completion for human acceptance") after the catalog renamed it —
+    // on the one surface that tells the reader to go verify the claim on Policy,
+    // where only "Accept completion into Done" exists. Both the tooltip and the
+    // footer now render the catalog's own label, by id.
+    // Canary: hardcode "Completion for human acceptance" back into either the
+    // title at review-page.tsx or the footer <strong> and this test fails.
     const label = capabilityById("completion-for-acceptance")!.label;
     expect(label).toBe("Accept completion into Done");
-
-    const { container, getByText } = renderQueue([rowHuman], [], 1, {
-      operatorCanAccept: true,
-      operatorName: "Atlas",
-    });
-    const title = getByText("Review → Done · human or operator")
-      .closest("a")!
-      .getAttribute("title")!;
-    const note = container.querySelector(".pol-note")!.textContent!;
-
     for (const copy of [title, note]) {
       expect(copy).toContain(label);
       // The name it was renamed AWAY from must not survive anywhere here: it
@@ -468,19 +433,6 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
       // capability editor.
       expect(copy).not.toContain("Completion for human acceptance");
     }
-    // The exception needs BOTH facts — full autonomy alone never confers it
-    // (`promotable: false`), so the copy must not read as a consequence of the
-    // autonomy setting.
-    expect(note).toContain("full autonomy");
-    expect(note).toContain("separately holds");
-    expect(note).toContain("never implied by the autonomy setting");
-  });
-
-  it("defaults to the strict boundary when the caller passes no acceptance data", () => {
-    const { container } = renderQueue([rowHuman], []);
-    expect(container.querySelector(".pol-note")!.textContent).toContain(
-      "always a human action",
-    );
   });
 });
 

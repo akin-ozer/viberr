@@ -10,8 +10,8 @@ import { defineConfig, devices } from "@playwright/test";
  * derived base URL as VIBERR_E2E_BASE_URL before invoking Playwright.
  *
  * Scope: these specs READ seeded state and exercise UI-owned mutations
- * (theme cookie, mark-all-read, a real file-store mkdir). Still one worker,
- * since they share the seeded store.
+ * (theme cookie, mark-all-read, comments, board moves, epics). Still one
+ * worker, since they share the seeded store.
  */
 
 const baseURL = process.env.VIBERR_E2E_BASE_URL;

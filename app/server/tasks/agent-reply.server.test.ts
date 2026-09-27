@@ -32,6 +32,8 @@ import {
 } from "~/server/runtimes/run-service.server";
 import { installFakeRuntime, queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { pollUntil } from "../../../test-support/polling";
+import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { userBackendHome } from "~/server/runtimes/user-homes.server";
 import { probeSessionContinuity } from "~/server/runtimes/session-export.server";
 import {
@@ -40,7 +42,6 @@ import {
   patchRun,
   upsertRun,
 } from "~/server/runtimes/run-store.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
   agentMentionHandle,
   ambiguousBackendHandle,
@@ -69,19 +70,6 @@ import { promisify } from "node:util";
 
 let ctx: TestDbContext;
 let store: TestStore;
-
-/** Poll until predicate holds (the run's realistic cadence is not a microtask). */
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 6_000,
-): Promise<boolean> {
-  const start = Date.now();
-  for (;;) {
-    if (predicate()) return true;
-    if (Date.now() - start > timeoutMs) return false;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
 
 /** Deploy a `dev` specialist (claude) with no repo (skips the network clone). */
 function deployDevSpecialist(): void {
@@ -172,7 +160,6 @@ beforeEach(async () => {
     goal: "Let the operator attach a repo and run the specialist.",
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
@@ -197,7 +184,6 @@ afterEach(async () => {
       }
     }
   }
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -217,11 +203,6 @@ describe("resolveMentionedAgent", () => {
     expect(target).not.toBeNull();
     expect(target).toMatchObject({ profileId: "dev", name: "dev", role: "developer", backend: "claude" });
     expect(target!.actorRef).toMatchObject({ kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" });
-  });
-
-  it("resolves by backend (@claude)", () => {
-    const target = call("@claude please continue");
-    expect(target).toMatchObject({ profileId: "dev", backend: "claude" });
   });
 
   /**
@@ -652,7 +633,7 @@ describe("resolveMentionedAgent", () => {
       { dataRoot: store.dataRoot },
     );
     // Wait until the run has folded a session id onto its row.
-    await waitFor(() =>
+    await pollUntil(() =>
       listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
         (r) => r.kind !== "operator" && !!r.session_id,
       ),
@@ -1484,7 +1465,7 @@ describe("commentToAgent", () => {
     // The reply lands as an agent-authored comment once the run finishes. The
     // fresh fallback reuses startSpecialistRun's realistic-cadence analyze
     // stream (~7 lines at 1–3.2s each), so allow generous headroom.
-    const posted = await waitFor(() => {
+    const posted = await pollUntil(() => {
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
       return file.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
@@ -1506,56 +1487,6 @@ describe("commentToAgent", () => {
     const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
   }, 30_000);
-
-  it("A8: a comment whose run FAILS to start still posts the comment and reports the reason", async () => {
-    deployDevSpecialist();
-    // A live DELIVERING run holds the single-flight slot, so a fresh @dev run is
-    // refused at start — the exact partial-success shape A8 surfaces instead of a
-    // bare error that reads as "the comment failed".
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-    });
-
-    const result = await commentToAgent(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev take a look" },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-
-    // The run did NOT start, and the call did NOT throw. (Hunt 2026-08-29:
-    // the mention path now refuses a live SAME-PROFILE run up front — before
-    // the resume/fresh split, closing the resume branch's single-flight bypass
-    // — so the reason is that guard's own copy, which also tells the commenter
-    // their comment still reaches the agent.)
-    expect(result.triggered).toBeNull();
-    expect(result.agent).toMatchObject({ profileId: "dev" });
-    expect(result.runNotStarted).toContain(
-      "already has a run in progress on this task",
-    );
-    // The human's comment IS on the timeline (recorded before the start attempt).
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      dataRoot: store.dataRoot,
-    })!;
-    const humanComment = file.parsed.timeline.find(
-      (e) => e.type === "comment" && e.actor.kind === "human",
-    );
-    expect(humanComment?.text).toContain("@dev take a look");
-  });
 
   /**
    * Ruling 203 (F37-23, live on SHOP-6). A8's refusal used to end with a
@@ -1593,6 +1524,10 @@ describe("commentToAgent", () => {
       { dataRoot: store.dataRoot },
     );
     expect(refused.triggered).toBeNull();
+    // A8: the call does not throw; it names the agent and says why no run
+    // started (the live same-profile guard's own copy).
+    expect(refused.agent).toMatchObject({ profileId: "dev" });
+    expect(refused.runNotStarted).toContain("already has a run in progress on this task");
     // The refusal now states what viberr will DO, not what it hopes the agent
     // will notice. CANARY: put the old sentence back and this fails.
     expect(refused.runNotStarted).toContain(
@@ -1643,7 +1578,7 @@ describe("commentToAgent", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await waitFor(() =>
+    await pollUntil(() =>
       listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
         (r) => r.agent_profile_id === "dev" && r.state === "running",
       ),
@@ -1663,14 +1598,14 @@ describe("commentToAgent", () => {
 
     // The run ends. Nothing else happens: no second comment, no operator, no
     // person. CANARY: delete the `deliverDeferredMention` call from
-    // `applyAgentCompletionEffects` and this waitFor times out — which is the
+    // `applyAgentCompletionEffects` and this poll times out — which is the
     // state the promise shipped in.
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: live.id, dataRoot: store.dataRoot },
       actorOf(store.users.arda),
     );
-    await waitFor(
+    await pollUntil(
       () => listRunsForTaskRows(store.db, store.slug, "VIB-1").length > before,
     );
     const started = startedRunSpecs().at(-1)!;
@@ -1821,7 +1756,7 @@ describe("commentToAgent", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await waitFor(() =>
+    await pollUntil(() =>
       listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
         (r) => r.kind !== "operator" && !!r.session_id,
       ),
@@ -1877,14 +1812,14 @@ describe("commentToAgent", () => {
     expect(resumed.session_id).toBe(priorSessionId);
 
     // …and the reply still lands as an agent comment.
-    const posted = await waitFor(() => {
+    const posted = await pollUntil(() => {
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
       return file.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
       );
     });
     expect(posted).toBe(true);
-  }, 20_000);
+  });
 
   /**
    * R15-14. `ask_human` ends the run by contract, and the answer used to travel
@@ -1958,7 +1893,7 @@ describe("commentToAgent", () => {
     // The ASKER was resumed — a new run row carrying its prior session id.
     // Canary: delete the `askedBy` routing in resolvePacket and only the
     // operator is invoked, so no run ever shares this session.
-    const resumedAsker = await waitFor(() =>
+    const resumedAsker = await pollUntil(() =>
       listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
         (r) => r.session_id === priorSessionId && r.id !== "run_r1514_prior",
       ),
@@ -1969,8 +1904,11 @@ describe("commentToAgent", () => {
     ).toBeGreaterThan(priorCount);
 
     // …and it was told the decision AND the human's free-text qualifier, which
-    // is the part an operator-mediated cold restart most often loses.
-    const spec = startedRunSpecs().at(-1);
+    // is the part an operator-mediated cold restart most often loses. The
+    // asker's spec is the one resuming its session: the operator's own turn
+    // may start after it.
+    await pollUntil(() => startedRunSpecs().some((s) => s.resumeSessionId === priorSessionId));
+    const spec = startedRunSpecs().find((s) => s.resumeSessionId === priorSessionId);
     const file = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -1983,7 +1921,7 @@ describe("commentToAgent", () => {
     expect(relayed!.text).toContain("Target the staging config");
     expect(relayed!.text).toContain("staging only, production needs sign-off");
     expect(relayed!.text).toContain("do not re-open the same question");
-    if (spec) expect(spec.prompt).toContain("Target the staging config");
+    expect(spec?.prompt).toContain("Target the staging config");
   }, 30_000);
 
   /**
@@ -2144,7 +2082,7 @@ describe("commentToAgent", () => {
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(file.parsed.timeline.some((e) => e.text.startsWith("The answer names"))).toBe(false);
     expect(
-      await waitFor(
+      await pollUntil(
         () =>
           listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
             (r) => r.session_id === priorSessionId && r.id !== "run_r447_desc",
@@ -2171,12 +2109,12 @@ describe("commentToAgent", () => {
     );
     expect(result.triggered).toBe("started"); // the fresh branch, not a resume
 
-    expect(await waitFor(() => startedRunSpecs().length > 0, 10_000)).toBe(true);
+    expect(await pollUntil(() => startedRunSpecs().length > 0, 10_000)).toBe(true);
     const spec = startedRunSpecs().at(-1)!;
     expect(spec.prompt).toContain(question);
     // …and it knows WHO asked, which is what makes the reply tag a real person.
     expect(spec.prompt).toContain(store.users.arda.name);
-  }, 20_000);
+  });
 
   it("returns the grouped Agent-logs id (logThreadId) for the reply run (BUG 3)", async () => {
     const result = await commentToAgent(
@@ -2274,9 +2212,9 @@ describe("commentToAgent", () => {
     );
     expect(named.agent).toMatchObject({ profileId: "security-reviewer" });
     expect(named.triggered).toBe("started");
-  }, 20_000);
+  });
 
-  it("records a viewer/reviewer @mention but does NOT trigger a run (RBAC)", async () => {
+  it("records a contributor or viewer @mention but does NOT trigger a run (RBAC)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       const before = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
       const result = await commentToAgent(
@@ -2291,8 +2229,6 @@ describe("commentToAgent", () => {
       // Comment recorded; no new run.
       const after = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
       expect(after).toBe(before);
-      const runs = listRunsForTask(store.db, store.slug, "VIB-1");
-      void runs; // (no assertion beyond count — kept for clarity)
     }
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     // Two human comments recorded (one per denied user).
@@ -2329,7 +2265,7 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await waitFor(() =>
+    await pollUntil(() =>
       listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
         (r) => r.kind === "primary" && !!r.session_id,
       ),
@@ -2448,7 +2384,43 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
       path.join(path.dirname(ws), ".viberr-plugins"),
     );
     expect(existsSync(path.join(ws, ".claude"))).toBe(false);
-  }, 20_000);
+  });
+});
+
+describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
+  it("hands the resumed run the rulings index, which its profile never granted", async () => {
+    // The resume builds its own knowledge list (R18-1 parity), and ruling 239
+    // shipped without it: a reviewer resumed mid-thread silently lost the
+    // project's rulings between turns. `dev` grants no knowledge base, so the
+    // index can only arrive through the resume's own `withProjectRulings`.
+    // CANARY: unwrap that call in `resolveResumeConfinement` and the heading
+    // is gone.
+    mkdirSync(path.join(store.dataRoot, "kb", "project-rulings"), { recursive: true });
+    writeFileSync(path.join(store.dataRoot, "kb", "project-rulings", "rulings.md"), "# Rulings\n\nbody");
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    writeProject(store.dataRoot, { ...fm, rulingsKb: "project-rulings" });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // A finished run with a live transcript ⇒ the @mention RESUMES it.
+    upsertRun(store.db, {
+      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
+      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
+      sdk: "claude", sessionId: "claude-session-rulings", agentName: "dev",
+      agentProfileId: "dev", state: "finished",
+    });
+    writeTranscript("claude-session-rulings");
+
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing please" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+    const specs = startedRunSpecs();
+    expect(joinedPrompt(specs[specs.length - 1]?.systemPrompt ?? "")).toContain(
+      "# project-rulings (knowledge base)",
+    );
+  });
 });
 
 /* ------------------------- UC-09: the agent side vs the human side of a @tag */
@@ -2632,7 +2604,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     // The human's words reach the operator's turn, not just the timeline.
     const spec = startedRunSpecs().at(-1);
     expect(spec?.prompt ?? "").toContain("what is holding this up?");
-  }, 20_000);
+  });
 
   /**
    * R15-14, the fallback half. Routing an answered question back to its ASKER is
@@ -2684,7 +2656,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     );
 
     // The decision was handed to the operator instead of being swallowed.
-    const handedOff = await waitFor(() => runs().some((r) => r.kind === "operator"));
+    const handedOff = await pollUntil(() => runs().some((r) => r.kind === "operator"));
     expect(handedOff).toBe(true);
     // Nothing was relayed to a specialist — there was nobody to relay it to.
     expect(runs().some((r) => r.kind !== "operator")).toBe(false);
@@ -2696,7 +2668,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     expect(
       timeline.some((e) => e.text.includes("has been answered by a human")),
     ).toBe(false);
-  }, 20_000);
+  });
 });
 
 /**
@@ -2726,7 +2698,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await waitFor(() =>
+    await pollUntil(() =>
       listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
         (r) => r.agent_profile_id === "dev" && r.state === "running",
       ),
@@ -2767,7 +2739,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     // Ruling 177's note proves we really took the closed-task branch — the
     // early return under test. Without this the test could pass on a task that
     // never closed at all.
-    const closedNoted = await waitFor(() =>
+    const closedNoted = await pollUntil(() =>
       timeline().some((e) => e.title === "Completed after the task closed"),
     );
     expect(closedNoted).toBe(true);
@@ -2781,7 +2753,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     // CANARY: put `appendUndeliveredMentionNote` back below the closed-task
     // return and this is the state that ships — a promise on the record with
     // nothing anywhere contradicting it.
-    const withdrawn = await waitFor(() =>
+    const withdrawn = await pollUntil(() =>
       timeline().some((e) => e.title === "Mention still not delivered"),
     );
     expect(withdrawn).toBe(true);

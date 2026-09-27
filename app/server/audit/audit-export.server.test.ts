@@ -2,8 +2,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
-  auditRowsToCsv,
-  auditRowsToJson,
   queryAuditEventsForExport,
   serializeAuditExport,
   type AuditExportRow,
@@ -27,7 +25,7 @@ const ROW: AuditExportRow = {
 
 describe("CSV serialization", () => {
   it("writes a header and RFC-4180-escaped rows", () => {
-    const csv = auditRowsToCsv([ROW]);
+    const csv = serializeAuditExport([ROW], "csv");
     const lines = csv.split("\r\n");
     expect(lines[0]).toBe(
       "id,occurredAt,actorUserId,actorLabel,action,subjectKind,subjectId,projectSlug,taskKey,details",
@@ -39,9 +37,10 @@ describe("CSV serialization", () => {
   });
 
   it("escapes commas, quotes and newlines in a label", () => {
-    const csv = auditRowsToCsv([
-      { ...ROW, actorLabel: 'a, "b"\nc', detailsJson: null },
-    ]);
+    const csv = serializeAuditExport(
+      [{ ...ROW, actorLabel: 'a, "b"\nc', detailsJson: null }],
+      "csv",
+    );
     expect(csv).toContain('"a, ""b""\nc"');
     // A null details cell is empty, not the string "null".
     expect(csv.trimEnd().endsWith(",")).toBe(true);
@@ -52,43 +51,37 @@ describe("CSV serialization", () => {
   // otherwise land a live formula in an admin's spreadsheet.
   it("neutralizes a formula-leading value with a single quote", () => {
     for (const lead of ["=", "+", "-", "@"]) {
-      const csv = auditRowsToCsv([
-        { ...ROW, actorLabel: `${lead}cmd()`, detailsJson: null },
-      ]);
+      const csv = serializeAuditExport(
+        [{ ...ROW, actorLabel: `${lead}cmd()`, detailsJson: null }],
+        "csv",
+      );
       const cell = csv.split("\r\n")[1]!.split(",")[3];
       expect(cell).toBe(`'${lead}cmd()`);
     }
     // A benign leading char is untouched.
-    const ok = auditRowsToCsv([{ ...ROW, actorLabel: "arda@x.dev" }]);
+    const ok = serializeAuditExport([{ ...ROW, actorLabel: "arda@x.dev" }], "csv");
     expect(ok.split("\r\n")[1]).toContain("arda@x.dev");
   });
 });
 
 describe("JSON serialization", () => {
   it("inlines valid details as a parsed object", () => {
-    const parsed = JSON.parse(auditRowsToJson([ROW]));
+    const parsed = JSON.parse(serializeAuditExport([ROW], "json"));
     expect(parsed[0].details).toEqual({ priority: "high" });
     expect(parsed[0].action).toBe("task.metadata.updated");
   });
 
   it("preserves un-parseable details under detailsRaw", () => {
     const parsed = JSON.parse(
-      auditRowsToJson([{ ...ROW, detailsJson: "{not json" }]),
+      serializeAuditExport([{ ...ROW, detailsJson: "{not json" }], "json"),
     );
     expect(parsed[0].detailsRaw).toBe("{not json");
     expect(parsed[0].details).toBeUndefined();
   });
 
   it("null details serialize as null", () => {
-    const parsed = JSON.parse(auditRowsToJson([{ ...ROW, detailsJson: null }]));
+    const parsed = JSON.parse(serializeAuditExport([{ ...ROW, detailsJson: null }], "json"));
     expect(parsed[0].details).toBeNull();
-  });
-});
-
-describe("serializeAuditExport dispatch", () => {
-  it("routes to csv/json by format", () => {
-    expect(serializeAuditExport([ROW], "csv")).toContain("id,occurredAt");
-    expect(serializeAuditExport([ROW], "json")).toContain('"action"');
   });
 });
 

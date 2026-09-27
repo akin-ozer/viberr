@@ -1,5 +1,4 @@
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -17,7 +16,6 @@ import { DATA_ROOT_LOCK_FILENAME, isProcessAlive } from "./data-root-lock.server
 import { runMigrations } from "./migration-runner.server";
 import {
   closeDb,
-  copyStorePair,
   ensureBackendAccountsTable,
   ensureBaselineColumns,
   getDb,
@@ -25,7 +23,6 @@ import {
   isDatabaseShuttingDown,
   openDatabase,
   openDatabaseReadOnly,
-  READER_SNAPSHOT_DIR,
   readWalIdentity,
   shutdownDatabase,
 } from "./sqlite.server";
@@ -371,66 +368,53 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
-   * Ruling 480: `repo_scopes_json` holds what each repository proved about a
-   * token. Every PAT read names it, so a root that predates it would fail the
-   * credential card and every GitHub call's context. NULL is "nothing stored
-   * yet", and a second boot adds nothing.
+   * A column every reader of its table names, added to an older root's rows.
+   * NULL is "nothing stored yet", and a second boot adds nothing. CANARY: drop
+   * the row's table from BASELINE_COLUMNS and its SELECT fails with "no such
+   * column".
    */
-  it("adds repo_scopes_json to an older root's PATs, empty, idempotently", () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "viberr-patproof-"));
-    try {
-      const db = openDatabase(path.join(dir, "old.sqlite"));
-      db.exec(
-        `CREATE TABLE github_pats (
+  it.each([
+    {
+      // Ruling 480: what each repository proved about a token. Every PAT read
+      // names it, so a root that predates it would fail the credential card and
+      // every GitHub call's context.
+      table: "github_pats",
+      column: "repo_scopes_json",
+      id: "pat_1",
+      oldRoot: `CREATE TABLE github_pats (
            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT NOT NULL,
            encrypted_token TEXT NOT NULL, token_suffix TEXT NOT NULL,
            created_at TEXT NOT NULL, last_validated_at TEXT, validation_json TEXT);
          INSERT INTO github_pats (id, user_id, label, encrypted_token, token_suffix, created_at)
            VALUES ('pat_1', 'u_1', 'connection · akin-ozer', 'v1$x', 'k3ui', '2026-09-20');`,
-      );
-      ensureBaselineColumns(db);
-      ensureBaselineColumns(db);
-      // SAFETY: the SELECT names two columns; `repo_scopes_json` is nullable TEXT.
-      const rows = db
-        .prepare(`SELECT id, repo_scopes_json FROM github_pats`)
-        .all() as { id: string; repo_scopes_json: string | null }[];
-      // CANARY: drop the `github_pats` entry from BASELINE_COLUMNS and this
-      // SELECT fails with "no such column".
-      expect(rows).toEqual([{ id: "pat_1", repo_scopes_json: null }]);
-      db.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  /**
-   * Ruling 463: `reach_json` says which repositories a connection's token
-   * reaches. Every connection reader names it, so a root that predates it
-   * would fail the Instance settings card, the New project dialog and the
-   * controller's read. NULL is the truth for an existing connection ("not
-   * read yet"), and a second boot adds nothing.
-   */
-  it("adds reach_json to an older root's connections, unread, idempotently", () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "viberr-connreach-"));
-    try {
-      const db = openDatabase(path.join(dir, "old.sqlite"));
-      db.exec(
-        `CREATE TABLE github_connections (
+    },
+    {
+      // Ruling 463: which repositories a connection's token reaches. Every
+      // connection reader names it, so a root that predates it would fail the
+      // Instance settings card, the New project dialog and the controller's
+      // read. NULL is the truth for an existing connection ("not read yet").
+      table: "github_connections",
+      column: "reach_json",
+      id: "akin-ozer",
+      oldRoot: `CREATE TABLE github_connections (
            id TEXT PRIMARY KEY, owner TEXT NOT NULL UNIQUE, pat_id TEXT NOT NULL,
            is_default INTEGER NOT NULL DEFAULT 0, repos_count INTEGER, expires_at TEXT,
            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
          INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
            VALUES ('akin-ozer', 'akin-ozer', 'pat_1', 1, 3, '2026-09-20', '2026-09-20');`,
-      );
+    },
+  ])("adds $column to an older root's $table, NULL, idempotently", ({ table, column, id, oldRoot }) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-oldroot-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(oldRoot);
       ensureBaselineColumns(db);
       ensureBaselineColumns(db);
-      // SAFETY: the SELECT names two columns; `reach_json` is nullable TEXT.
+      // SAFETY: the SELECT names two columns; every row's column is nullable TEXT.
       const rows = db
-        .prepare(`SELECT id, reach_json FROM github_connections`)
-        .all() as { id: string; reach_json: string | null }[];
-      // CANARY: drop the `github_connections` entry from BASELINE_COLUMNS and
-      // this SELECT fails with "no such column".
-      expect(rows).toEqual([{ id: "akin-ozer", reach_json: null }]);
+        .prepare(`SELECT id, ${column} AS value FROM ${table}`)
+        .all() as { id: string; value: string | null }[];
+      expect(rows).toEqual([{ id, value: null }]);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -663,14 +647,6 @@ describe("shutdownDatabase", () => {
     expect(() => getDb()).toThrow(/shutting down/i);
   });
 
-  it("closeDb clears the latch, so tests (and only tests) can reopen", () => {
-    getDb();
-    shutdownDatabase();
-    closeDb();
-    expect(isDatabaseShuttingDown()).toBe(false);
-    expect(getDb().isOpen).toBe(true);
-  });
-
   it("is a no-op (never throws) when nothing is open — the shutdown path must be total", () => {
     closeDb();
     expect(() => shutdownDatabase()).not.toThrow();
@@ -823,7 +799,7 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
  * catch it — they cover a torn tail — and `backup` labels the artefact a
  * consistent point-in-time copy, so the reader has to detect the reset itself.
  */
-describe("copyStorePair (ruling 158): the copied pair comes from one moment", () => {
+describe("readWalIdentity (ruling 158): a reset changes the WAL's identity", () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -837,7 +813,7 @@ describe("copyStorePair (ruling 158): the copied pair comes from one moment", ()
     db.exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`);
     const insert = db.prepare(`INSERT INTO t (v) VALUES (?)`);
     for (let i = 0; i < 200; i += 1) insert.run("x".repeat(200));
-    return { dir, dbPath, db };
+    return { dbPath, db };
   }
 
   it("the WAL identity is stable while frames are appended and changes when the log is reset", () => {
@@ -856,43 +832,8 @@ describe("copyStorePair (ruling 158): the copied pair comes from one moment", ()
     db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
     for (let i = 0; i < 50; i += 1) db.prepare(`INSERT INTO t (v) VALUES (?)`).run("y".repeat(200));
     // Canary: without `readWalIdentity` the reader has nothing to compare, and
-    // the copy below is taken and used as if it were a snapshot.
+    // a copy taken across this reset is used as if it were a snapshot.
     expect(readWalIdentity(wal)).not.toBe(before);
-    db.close();
-  });
-
-  it("a pair taken across a reset is not a faithful copy, which is why the copy is pinned", () => {
-    const { dir, dbPath, db } = busyStore();
-    const badDir = path.join(dir, "unpinned");
-    mkdirSync(badDir, { recursive: true });
-    const bad = path.join(badDir, "projection.sqlite");
-    // The old copy order, with the reset landing in the window between them.
-    copyFileSync(dbPath, bad);
-    db.prepare(`PRAGMA wal_checkpoint(TRUNCATE)`).get();
-    for (let i = 0; i < 50; i += 1) db.prepare(`INSERT INTO t (v) VALUES (?)`).run("y".repeat(200));
-    copyFileSync(`${dbPath}-wal`, `${bad}-wal`);
-    let faithful: boolean;
-    try {
-      const opened = openDatabase(bad);
-      // SAFETY: one INTEGER column named in the statement.
-      const row = opened.prepare(`SELECT count(*) AS n FROM t`).get() as { n: number };
-      faithful = row.n === 250;
-      opened.close();
-    } catch {
-      faithful = false;
-    }
-    expect(faithful).toBe(false);
-
-    // Pinned, with no reset in the window: the copy carries every committed
-    // row, the uncheckpointed ones included.
-    const goodDir = path.join(dir, "pinned");
-    mkdirSync(goodDir, { recursive: true });
-    const good = path.join(goodDir, "projection.sqlite");
-    copyStorePair(dbPath, good);
-    const copy = openDatabase(good);
-    // SAFETY: one INTEGER column named in the statement.
-    expect((copy.prepare(`SELECT count(*) AS n FROM t`).get() as { n: number }).n).toBe(250);
-    copy.close();
     db.close();
   });
 });
@@ -980,7 +921,7 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
     try {
       const file = openedFile(reader);
       expect(file).not.toBe(r.dbPath);
-      expect(path.dirname(path.dirname(file))).toBe(path.join(r.stateDir, READER_SNAPSHOT_DIR));
+      expect(path.dirname(path.dirname(file))).toBe(path.join(r.stateDir, "tmp"));
       expect(path.basename(path.dirname(file))).toBe(`reader-${process.pid}`);
       expect(reader.snapshot).not.toBeNull();
       expect(reader.snapshot?.holder?.pid).toBe(process.pid);
@@ -997,7 +938,7 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
       reader.close();
       // Close removes the copy and, it being the last reader, `state/tmp/`
       // itself: nothing of the reader is left beside the store.
-      expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
+      expect(existsSync(path.join(r.stateDir, "tmp"))).toBe(false);
       // The reader never touched the live database's own sidecars (the live
       // handle is still open here; its own clean close is what removes them).
       expect(existsSync(`${r.dbPath}-wal`)).toBe(true);
@@ -1021,7 +962,7 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
     } finally {
       reader.close();
     }
-    expect(existsSync(path.join(r.stateDir, READER_SNAPSHOT_DIR))).toBe(false);
+    expect(existsSync(path.join(r.stateDir, "tmp"))).toBe(false);
   });
 
   it("with a lock naming a pid nothing occupies here, still copies: a reader cannot judge liveness across a pid namespace", () => {
@@ -1076,7 +1017,7 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
     try {
       expect(openedFile(reader)).not.toBe(r.dbPath);
       expect(reader.snapshot).toEqual({
-        dir: path.join(r.stateDir, READER_SNAPSHOT_DIR, `reader-${process.pid}`),
+        dir: path.join(r.stateDir, "tmp", `reader-${process.pid}`),
         holder: null,
       });
     } finally {
@@ -1088,7 +1029,7 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
   it("removes the copy a reader that died mid-read left behind, and leaves a live reader's alone", () => {
     const r = seeded();
     liveLock(r);
-    const tmpRoot = path.join(r.stateDir, READER_SNAPSHOT_DIR);
+    const tmpRoot = path.join(r.stateDir, "tmp");
     const dead = path.join(tmpRoot, `reader-${deadPid()}`);
     mkdirSync(dead, { recursive: true });
     writeFileSync(path.join(dead, "projection.sqlite"), "left behind");

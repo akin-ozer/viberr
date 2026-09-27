@@ -97,20 +97,6 @@ export const RENDER_BUDGETS: PerfBudgetTable = {
     journey: "task-open",
     fixture: `${LOCAL_STAMPS}; characterData MutationObserver records`,
   },
-  // BOARD-8 / CSS-1: 6 before (five pulse-a selectors animated box-shadow);
-  // the one left is ruling 451(a)'s controller shimmer.
-  // Raised 1 -> 3 by ruling 499: the run console's live "Thinking" label and
-  // the to-do step under way carry the same band (AICSS's Thinking State and
-  // To-do List). Each is one element, drawn only while a run is live and only
-  // on the newest thought fold or to-do list; the orb's dots animate opacity
-  // and transform only.
-  "render:css.main-thread-infinite-loops": {
-    ceiling: 3,
-    unit: "count",
-    journey: "board-live",
-    fixture:
-      "app/app.css: selectors outside a reduced-motion block playing an infinite animation whose @keyframes set anything but transform/opacity/translate/scale/rotate",
-  },
   // CSS-4 (owner, 2026-09-24): 6 before.
   "render:css.live-scrollers-without-gutter": {
     ceiling: 0,

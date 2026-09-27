@@ -35,14 +35,25 @@ describe("reviewRowSub", () => {
     ).toContain("Transition request:");
   });
 
-  it("does NOT claim 'agent working' on a human-waiting row with no packet/event (R8-3)", () => {
-    const sub = reviewRowSub({ ...base, waiting: "human" });
-    expect(sub).not.toContain("Agent working");
-    expect(sub).toContain("Needs a human decision");
-  });
-
-  it("keeps the agent-working fallback for a genuinely agent-waiting row", () => {
-    expect(reviewRowSub({ ...base, waiting: "agent" })).toContain("Agent working");
+  // F19-31: this test USED to pin "Agent working — the packet arrives at the
+  // boundary." for a `waiting: "none"` row, which is the defect: the row claims
+  // a live agent run while the board renders no wait tag at all for the very
+  // same stored value. The placeholder is per-`waiting` now, so the test names
+  // which placeholder each value gets instead of pinning one for all three.
+  it("falls back to the placeholder matching the row's `waiting` when it has neither packet nor events", () => {
+    // Nothing is waiting on either side — say exactly that, claim no agent.
+    expect(reviewRowSub({ ...base, waiting: "none" })).toBe(
+      "At the review boundary: no agent is running and no decision is pending.",
+    );
+    // The agent sentence is not deleted, just no longer the catch-all: a row
+    // that really IS waiting on an agent still gets it.
+    expect(reviewRowSub({ ...base, waiting: "agent" })).toBe(
+      "Agent working. The packet arrives at the boundary.",
+    );
+    // R8-3: a human-waiting bare row names a person, not an agent.
+    expect(reviewRowSub({ ...base, waiting: "human" })).toBe(
+      "Waiting at the review boundary. Needs a human decision.",
+    );
   });
 });
 
@@ -60,12 +71,6 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     });
     expect(sub).toBe("PR #103 is open for review on GitHub.");
     expect(sub).not.toContain("closed");
-  });
-
-  it("states a genuinely closed PR and points at the two real escapes", () => {
-    const sub = reviewRowSub({ ...base, pr: { number: 103, state: "closed" } });
-    expect(sub).toContain("closed on GitHub without merging");
-    expect(sub).toContain("archive the task");
   });
 
   it("ruling 135: an unpushed delivered revision outranks the conflict subline and names the push", () => {

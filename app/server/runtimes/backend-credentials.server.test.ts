@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -92,6 +92,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   resetFakeVendorEnv();
   vendors.cleanup();
   ctx.cleanup();
@@ -214,8 +215,10 @@ interface SignedInAccount {
 /**
  * What a confirmed hosted sign-in leaves (ruling 507): the account the driver
  * minted before the vendor ran, recorded as a `login` row, and — unless
- * `file` is false, the state a wiped volume leaves — the vendor's own sign-in
- * file in that account's home, where the binary wrote it.
+ * `file` is false — the vendor's own sign-in file in that account's home,
+ * where the binary wrote it. `file: false` keeps the home: that reads as a
+ * wiped volume everywhere except a Claude home on macOS, which is a Keychain
+ * sign-in, so a Claude test of the wiped volume removes the home as well.
  */
 function signIn(
   backend: RealBackend,
@@ -519,6 +522,9 @@ describe("recordBackendLogin", () => {
 
 describe("switching accounts (ruling 507)", () => {
   it("makes another account the one runs bill, with no vendor process and no file moved", () => {
+    // Both sign-ins and the switch land in one millisecond: the account
+    // selected last wins on its stamp, never on the order of the random ids.
+    vi.useFakeTimers({ toFake: ["Date"] });
     const work = signIn("claude", "claudeai", { email: "work@example.com" });
     const personal = signIn("claude", "claudeai", { email: "personal@example.com" });
     expect(getBackendCredential(db, actor.userId, "claude")?.id).toBe(personal.row.id);
@@ -865,7 +871,10 @@ describe("userBackendHealth", () => {
 
   it("says a working account is one switch away when the one in use cannot run (ruling 507)", async () => {
     await pasteKey("claude");
-    signIn("claude", "claudeai", { email: "wiped@example.com" }, { file: false });
+    const wiped = signIn("claude", "claudeai", { email: "wiped@example.com" }, { file: false });
+    // A wiped volume takes the account's home with it, so no platform can
+    // count the sign-in as present (macOS honours a home without the file).
+    rmSync(wiped.home, { recursive: true, force: true });
     const health = userBackendHealth(db, actor.userId, "claude", { dataRoot, platform: "linux" });
     expect(health.available).toBe(false);
     expect(health.detail).toBe(
@@ -879,7 +888,7 @@ describe("userBackendHealth", () => {
     );
   });
 
-  it("honours a macOS Keychain login as presence — but only when the account's home exists", () => {
+  it("honours a macOS Keychain login as presence — only Claude's, and only when its home exists", () => {
     const target = loginTargetFor(db, actor.userId, "claude");
     recordBackendLogin(db, actor, "claude", "claudeai", {}, target);
     const noHome = userBackendHealth(db, actor.userId, "claude", {
@@ -896,6 +905,13 @@ describe("userBackendHealth", () => {
     expect(withHome.available).toBe(true);
     expect(withHome.verification).toBe("presence");
     expect(withHome.detail).toBeNull();
+
+    // Codex signs in to its auth.json alone, and a run copies only that file:
+    // its home without the file is no sign-in, on macOS too.
+    signIn("codex", "device", {}, { file: false });
+    const codex = userBackendHealth(db, actor.userId, "codex", { dataRoot, platform: "darwin" });
+    expect(codex.available).toBe(false);
+    expect(codex.verification).toBe("none");
   });
 
   it("refuses to probe a home for an id that is not path-safe", () => {

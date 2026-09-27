@@ -4,13 +4,13 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { reviewRowSub, type ReviewRowView } from "./review-helpers";
+import { reviewRowSub } from "./review-helpers";
 
 /**
  * Route-level tests for /projects/:slug/review against the seeded demo
  * store: auth gating, the panel split (project-wide per ruling 10), and
- * the subline precedence contract (packet header → newest event → the
- * boundary placeholder copy).
+ * the sublines the seeded rows get (the precedence itself is
+ * review-helpers.test.ts's).
  */
 
 let app: AppTestContext;
@@ -137,45 +137,5 @@ describe("/projects/:slug/review", () => {
     expect(
       resolveAcceptanceAuthority("no-such-project", { dataRoot: app.dataRoot }),
     ).toEqual({ operatorCanAccept: false, operatorName: "the operator" });
-  });
-
-  // F19-31: this test USED to pin "Agent working — the packet arrives at the
-  // boundary." for a `waiting: "none"` row, which is the defect: the row claims
-  // a live agent run while the board renders no wait tag at all for the very
-  // same stored value. The placeholder is per-`waiting` now, so the test names
-  // which placeholder each value gets instead of pinning one for all three.
-  it("falls back to the placeholder matching the row's `waiting` when it has neither packet nor events", () => {
-    const bare: ReviewRowView = {
-      key: "VIB-999",
-      title: "t",
-      stageName: "Review",
-      atAcceptanceBoundary: true,
-      priority: "normal",
-      labels: [],
-      dueDate: null,
-      waiting: "none",
-      packet: null,
-      goalEditPending: false,
-      latestEventText: null,
-      pr: null,
-      validation: "none",
-      blockReason: null,
-      lastActivityAt: null,
-      quiet: false,
-      continuity: null,
-    };
-    // Nothing is waiting on either side — say exactly that, claim no agent.
-    expect(reviewRowSub(bare)).toBe(
-      "At the review boundary: no agent is running and no decision is pending.",
-    );
-    // The agent sentence is not deleted, just no longer the catch-all: a row
-    // that really IS waiting on an agent still gets it.
-    expect(reviewRowSub({ ...bare, waiting: "agent" })).toBe(
-      "Agent working. The packet arrives at the boundary.",
-    );
-    // R8-3, unchanged: a human-waiting bare row names a person, not an agent.
-    expect(reviewRowSub({ ...bare, waiting: "human" })).toBe(
-      "Waiting at the review boundary. Needs a human decision.",
-    );
   });
 });

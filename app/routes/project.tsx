@@ -121,9 +121,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
  * project-settings/settings-page.tsx) renders that panel only when the reader
  * holds `edit-policy`, so a maintainer, contributor or viewer followed an exact
  * named path to a panel that is not on their Settings page — and nothing
- * anywhere told them who CAN restore it (the in-panel deny note is
- * unreachable, since the gate and the note test the same grant). Name the route
- * only to the reader who has it; everyone else gets the authority instead,
+ * anywhere told them who CAN restore it. Name the route only to the reader
+ * who has it; everyone else gets the authority instead,
  * which is the same shape the four Settings lock notes already use.
  */
 export function ArchivedBanner({ canRestore }: { canRestore: boolean }) {

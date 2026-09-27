@@ -240,6 +240,15 @@ describe("packet option tolerance (F31-C5)", () => {
     ).toBe(true);
     // Nothing else was harmed by the salvage.
     expect(parsed.packet!.title).toBe(FULL.packet!.title);
+
+    // A well-formed row of a kind no door answers drops too: a button that
+    // resolves to nothing is worse than no button.
+    const unknownKind = parseTaskFileContent(
+      serializeTaskFile(FULL).replace("options:", "options:\n  - kind: delete_everything\n    t: nuke"),
+      { fallbackKey: "VIB-142" },
+    );
+    expect(unknownKind.parsed.packet!.options.length).toBe(FULL.packet!.options.length);
+    expect(unknownKind.diagnostics.some((d) => d.code === "packet.invalid_option")).toBe(true);
   });
 
   it("C01-A1: one malformed observation drops only itself — the sibling list has the same tolerance", () => {
@@ -796,7 +805,7 @@ describe("task.md structure injection through metadata the escaper skipped", () 
 /**
  * F37-59: the `timeline.out_of_order` heads-up used to end "display sorts by
  * timestamp". Nothing sorts. `listTaskEvents` is `ORDER BY position ASC` over
- * the verbatim file index the rebuilder writes, `sliceTimeline` takes the first
+ * the verbatim file index the rebuilder writes, `timelineSlice` takes the first
  * N off the front of that array, and the task timeline component only filters
  * it. The panel whose job is to tell a reader the truth about the record was
  * telling them the page had already compensated.

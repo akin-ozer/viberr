@@ -55,7 +55,7 @@ const ROLE_BY_ALIAS: ReadonlyMap<string, StageRole> = new Map([
 ]);
 
 /** The role a DECLARED id names, independent of any board. */
-export function declaredStageRole(stageId: string): StageRole | null {
+function declaredStageRole(stageId: string): StageRole | null {
   return ROLE_BY_ALIAS.get(stageId.trim().toLowerCase()) ?? null;
 }
 
@@ -66,7 +66,7 @@ export function declaredStageRole(stageId: string): StageRole | null {
  * A stage can hold several roles on a short board (a 3-stage `todo/doing/done`
  * has `doing` as both work and review), so this returns a set per stage.
  */
-export function boardStageRoles(
+function boardStageRoles(
   stages: readonly Pick<StageDef, "id">[],
   workflow: readonly Pick<WorkflowBoundary, "from" | "to">[],
 ): Map<string, Set<StageRole>> {

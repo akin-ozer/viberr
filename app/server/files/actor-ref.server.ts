@@ -33,7 +33,7 @@ const AGENT_RE = /^agent:(codex|claude)\/(\S+)(?:\s+\((.+)\))?$/;
 const SYSTEM_RE = /^system:([A-Za-z][\w-]*)$/;
 
 /** Slug-sanitize an id/role for the ref token: whitespace → `-`, never empty. */
-export function roleToSlug(role: string): string {
+function roleToSlug(role: string): string {
   return role.trim().toLowerCase().replace(/\s+/g, "-") || "agent";
 }
 

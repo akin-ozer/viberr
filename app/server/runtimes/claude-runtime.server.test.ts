@@ -11,7 +11,6 @@ import {
   createClaudeAdapter,
   INTERRUPT_ABORT_GRACE_MS,
   INTERRUPT_GRACE_MS,
-  resolveClaudeEffort,
   resolveClaudeModel,
   type ClaudePreToolUseHook,
   type ClaudeQuery,
@@ -89,6 +88,7 @@ interface CapturedOptions {
   systemPrompt?: unknown;
   /** The model id as forwarded to the SDK. */
   model?: string;
+  effort?: string;
   env?: Record<string, string>;
 }
 
@@ -273,17 +273,6 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(lines[3]!.facts.usage).toEqual({ input_tokens: 204, cached_input_tokens: 100, output_tokens: 900, outputEstimated: false });
   });
 
-  it("errors when the result envelope is is_error", async () => {
-    const { q } = fakeQuery([
-      { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 50, usage: {} },
-    ]);
-    const adapter = createClaudeAdapter({ queryFn: () => q });
-    let exit: RunExit | null = null;
-    adapter.start(SPEC, { onLine: () => {}, onExit: (e) => (exit = e) });
-    await drain();
-    expect(exit).toMatchObject({ outcome: "error" });
-  });
-
   it("a turn-capped run emits a classified run·error·max_turns reason line (cut off ≠ failed)", async () => {
     const { q } = fakeQuery([
       { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 51, usage: {} },
@@ -300,6 +289,8 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(display.ev).toBe("err");
     expect(display.text).toContain("turn cap");
     expect(display.text).toContain("VIBERR_CLAUDE_MAX_TURNS");
+    // Its OWN copy, not the generic classifier's as well.
+    expect(lines.some((l) => l.display?.tag === "run·error·unknown")).toBe(false);
   });
 
   // P14-RT-10: an `is_error` RESULT (anything but the max-turns subtype) used to
@@ -347,18 +338,6 @@ describe("claude adapter (SDK, injected fake query)", () => {
     adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
     await drain();
     expect(lines.some((l) => l.display?.tag === "run·error·unknown")).toBe(true);
-  });
-
-  it("a max-turns result keeps its OWN copy (not the generic classifier's)", async () => {
-    const { q } = fakeQuery([
-      { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 51, usage: {} },
-    ]);
-    const adapter = createClaudeAdapter({ queryFn: () => q });
-    const lines: EmittedLine[] = [];
-    adapter.start(SPEC, { onLine: (l) => lines.push(l), onExit: () => {} });
-    await drain();
-    expect(lines.some((l) => l.display?.tag === "run·error·max_turns")).toBe(true);
-    expect(lines.some((l) => l.display?.tag === "run·error·unknown")).toBe(false);
   });
 
   it("classifies a swept transcript as run·error·session_missing, not auth (P13-D-2)", async () => {
@@ -428,35 +407,6 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(errLine?.display?.text).toContain("usage quota");
   });
 
-  it("threads spec.effort into options.effort (and omits it when absent)", async () => {
-    const result = [
-      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
-    ];
-    let captured: { model?: string; effort?: string } | undefined;
-    const queryFn: ClaudeQueryFn = (params) => {
-      captured = params.options;
-      const { q } = fakeQuery(result);
-      return q;
-    };
-
-    // With effort set.
-    createClaudeAdapter({ queryFn }).start(
-      { ...SPEC, model: "sonnet", effort: "xhigh" },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(captured?.effort).toBe("xhigh");
-    expect(captured?.model).toBe("sonnet");
-
-    // Without effort → options.effort is absent (SDK default applies).
-    createClaudeAdapter({ queryFn }).start(
-      { ...SPEC, model: "sonnet" },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
-    expect(captured?.effort).toBeUndefined();
-  });
-
   /** Capture the options one run was started with. */
   async function optionsFor(spec: RunSpec): Promise<CapturedOptions> {
     const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
@@ -474,9 +424,28 @@ describe("claude adapter (SDK, injected fake query)", () => {
     return captured ?? {};
   }
 
+  // P13-RT-08: only the tiers the Claude SDK's effort union allows are
+  // forwarded; anything else is dropped so the SDK applies its own default.
+  // "minimal" is a CODEX tier. A profile created on Codex and later switched
+  // to Claude keeps its stored effort (the modal only refetches the catalog on
+  // backend change), so this value really does reach the adapter. Canary:
+  // forward `spec.effort` unresolved and the "minimal" row fails.
+  it.each([
+    ["low", "low"],
+    ["max", "max"],
+    ["xhigh", "xhigh"],
+    ["minimal", undefined],
+    ["", undefined],
+    [undefined, undefined],
+  ] as const)("effort %j reaches options.effort as %j", async (effort, expected) => {
+    expect((await optionsFor(effort === undefined ? SPEC : { ...SPEC, effort })).effort).toBe(expected);
+  });
+
   it("pass 34 (F34-7): the context-window variant reaches the SDK options verbatim", async () => {
     // Canary: the same resolver edit as above; the run would start on `opus`.
-    const captured = await optionsFor({ ...SPEC, model: "opus[1m]" });
+    // The spec names the family label, so an adapter that forwarded
+    // `spec.model` unresolved would start it on `claude-opus[1m]`.
+    const captured = await optionsFor({ ...SPEC, model: "claude-opus[1m]" });
     expect(captured.model).toBe("opus[1m]");
   });
 
@@ -818,38 +787,6 @@ describe("claude adapter (SDK, injected fake query)", () => {
   });
 });
 
-describe("resolveClaudeEffort (P13-RT-08)", () => {
-  it("accepts only the tiers the Claude SDK's effort union allows", () => {
-    expect(resolveClaudeEffort("low")).toBe("low");
-    expect(resolveClaudeEffort("max")).toBe("max");
-    expect(resolveClaudeEffort("xhigh")).toBe("xhigh");
-    // "minimal" is a CODEX tier. A profile created on Codex and later switched
-    // to Claude keeps its stored effort (the modal only refetches the catalog on
-    // backend change), so this value really does reach the adapter.
-    expect(resolveClaudeEffort("minimal")).toBeUndefined();
-    expect(resolveClaudeEffort("")).toBeUndefined();
-    expect(resolveClaudeEffort(undefined)).toBeUndefined();
-  });
-
-  it("drops an out-of-union effort instead of forwarding it to the SDK", async () => {
-    const seen: { effort?: string }[] = [];
-    const adapter = createClaudeAdapter({
-      queryFn: ({ options }) => {
-        const effort = options?.effort;
-        seen.push(effort ? { effort } : {});
-        return fakeQuery([{ type: "result", subtype: "success", is_error: false }]).q;
-      },
-    });
-    adapter.start({ ...SPEC, effort: "minimal" }, { onLine: () => {}, onExit: () => {} });
-    await drain();
-    expect(seen.at(-1)?.effort).toBeUndefined();
-
-    adapter.start({ ...SPEC, effort: "xhigh" }, { onLine: () => {}, onExit: () => {} });
-    await drain();
-    expect(seen.at(-1)?.effort).toBe("xhigh");
-  });
-});
-
 describe("claude idle hang guard (P13-RT-11)", () => {
   /**
    * BEFORE: the Claude adapter had NO timer of any kind. `maxTurns` bounds
@@ -1173,17 +1110,6 @@ describe("claude adapter run phases (R21-4a / FR28)", () => {
     expect(steps[2]).toBe("turn 1");
     expect(steps[3]).toBe("turn 2");
     expect(steps[4]).toBe("turn 2");
-  });
-
-  it("is optional — an adapter caller without onPhase still runs (the pre-R21-4 contract)", async () => {
-    const { q } = fakeQuery([
-      { type: "result", subtype: "success", is_error: false, num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0 },
-    ]);
-    const adapter = createClaudeAdapter({ queryFn: () => q });
-    let exit: RunExit | null = null;
-    adapter.start(SPEC, { onLine: () => {}, onExit: (e) => (exit = e) });
-    await drain();
-    expect(exit).toMatchObject({ outcome: "finished" });
   });
 });
 

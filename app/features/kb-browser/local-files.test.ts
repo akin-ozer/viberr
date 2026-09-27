@@ -30,14 +30,6 @@ describe("entriesFromFileList", () => {
     expect(sel.skipped).toBe(2);
   });
 
-  it("an all-hidden selection is EMPTY WITH a count, not just empty", () => {
-    const sel = entriesFromFileList([file(".DS_Store"), file("x", ".git/HEAD")]);
-    expect(sel.entries).toHaveLength(0);
-    // The old shape (a bare array) could not express this, which is exactly why
-    // the caller treated it as "nothing happened".
-    expect(sel.skipped).toBe(2);
-  });
-
   it("an empty picker is neither an upload nor a skip", () => {
     expect(entriesFromFileList([])).toEqual({ entries: [], skipped: 0 });
   });

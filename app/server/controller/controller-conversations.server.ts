@@ -443,7 +443,7 @@ export function messagesUpTo(
 }
 
 /** The longest surface string a message keeps (a pathname plus a query). */
-export const MESSAGE_SURFACE_MAX_CHARS = 400;
+const MESSAGE_SURFACE_MAX_CHARS = 400;
 
 /** Ruling 121: a surface is an in-app path (`/…`) and nothing else — a stray
  *  absolute URL, a protocol-relative one or control characters never reach
@@ -601,7 +601,7 @@ const TITLE_SENTENCE_MIN = 20;
  * the ask, so it is the title when it is long enough to name something and
  * short enough to show whole. Otherwise the text is clipped at a word.
  */
-export function deriveTitle(text: string): string {
+function deriveTitle(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   // A sentence ends at . ! or ? (after any closing quote or bracket) followed
   // by a space: "(PR #19)." ends one, "0.19.0" and "e.g" do not.

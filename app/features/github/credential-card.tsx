@@ -226,7 +226,7 @@ export function replaceTokenHref(connectionId: string | undefined): string | nul
  * The attach / re-attach / remove manage row shared by the GitHub view and
  * project Settings (finding #13). `configured` (a real PAT is bound) shows
  * Re-attach + Remove; otherwise a single Attach. admin|maintainer only — the
- * parent gates `canManage`. Remove goes through a confirm.
+ * parent renders it only for them. Remove goes through a confirm.
  *
  * Ruling 480 (F40-45): the configured button said "Rotate credential" and
  * rotated nothing. It binds the connection that matches the repository's owner
@@ -239,14 +239,12 @@ export function replaceTokenHref(connectionId: string | undefined): string | nul
  */
 export function CredentialManageActions({
   configured,
-  canManage,
   inFlight,
   onSet,
   onClear,
   replaceHref = null,
 }: {
   configured: boolean;
-  canManage: boolean;
   /** Ruling 368: the intent the credential fetcher is carrying
    *  (`inFlightIntent`), null while it is idle. The button that started it
    *  shows the work; the other one only waits at the disabled step. */
@@ -260,7 +258,6 @@ export function CredentialManageActions({
   replaceHref?: string | null;
 }) {
   const [confirming, setConfirming] = useState(false);
-  if (!canManage) return null;
   const busy = inFlight !== null;
   const setting = inFlight === "set-credential";
   const clearing = inFlight === "clear-credential";

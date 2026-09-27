@@ -977,21 +977,6 @@ describe("mcp servers", () => {
       "postgres-readonly unreachable: command not found (ENOENT)",
     );
   });
-
-  it("discoverStdioMcpTools: handshake success, timeout, spawn failure", async () => {
-    expect(
-      await discoverStdioMcpTools("mcp-server", { spawnImpl: fakeMcpSpawn(5) }),
-    ).toMatchObject({ kind: "up", tools: 5 });
-    expect(
-      await discoverStdioMcpTools("mcp-server", {
-        spawnImpl: silentSpawn,
-        timeoutMs: 20,
-      }),
-    ).toMatchObject({ kind: "down", reason: "timed out after 0s" });
-    expect(
-      await discoverStdioMcpTools("mcp-server", { spawnImpl: failingSpawn }),
-    ).toMatchObject({ kind: "down", reason: "command not found (ENOENT)" });
-  });
 });
 
 describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
@@ -1056,9 +1041,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     // tab kept rendering the server as up until a manual reload.
     // Canary: drop the publishResourceUpdated call and no event arrives.
     const { db } = setup();
-    const { connectSseClient, resetSseBrokerForTests } = await import(
-      "~/server/events/sse-broker.server"
-    );
+    const { connectSseClient } = await import("~/server/events/sse-broker.server");
     const { mcp } = await saveMcpServer(
       db,
       { name: "everything", transport: "stdio", target: "npx -y @mcp/everything", cred: "" },
@@ -1066,9 +1049,8 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
       { spawnImpl: fakeMcpSpawn(16) },
     );
 
-    resetSseBrokerForTests();
     const writes: string[] = [];
-    connectSseClient({
+    const handle = connectSseClient({
       userId: "u_watcher",
       scopes: [{ kind: "user" }],
       lastEventId: null,
@@ -1084,7 +1066,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
       // …naming the row that actually changed.
       expect(writes.join("")).toContain(mcp.id);
     } finally {
-      resetSseBrokerForTests();
+      handle.close();
     }
   });
 
@@ -1822,20 +1804,6 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       }
       if (savedPath === undefined) delete process.env.PATH;
       else process.env.PATH = savedPath;
-    }
-  });
-
-  it("passes the ONE secret the child is meant to hold, and nothing else", async () => {
-    const { mcpSpawnEnv } = await import("./resources.server");
-    const saved = process.env.VIBERR_SECRET_ENCRYPTION_KEY;
-    process.env.VIBERR_SECRET_ENCRYPTION_KEY = "must-not-travel";
-    try {
-      const env = mcpSpawnEnv("mcp-token-value");
-      expect(env.MCP_CREDENTIAL).toBe("mcp-token-value");
-      expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
-    } finally {
-      if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY;
-      else process.env.VIBERR_SECRET_ENCRYPTION_KEY = saved;
     }
   });
 

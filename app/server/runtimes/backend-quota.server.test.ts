@@ -4,13 +4,12 @@ import {
   backendDispatchHold,
   latestBackendRateLimits,
   parseQuotaResetAt,
-  recordBackendCredentialRefusal,
   recordBackendQuotaExhaustion,
   recordBackendRateLimit,
   retireBackendRecordsFor,
   UNDATED_HOLD_MS,
-  type BackendCredentialRefusal,
   type BackendQuotaExhaustion,
+  type QuotaReset,
 } from "./backend-quota.server";
 
 /**
@@ -89,6 +88,39 @@ describe("parseQuotaResetAt: a time-only Codex refusal (G35-4)", () => {
   });
 });
 
+describe("parseQuotaResetAt: an emitted epoch and a (UTC) clock (D5, ruling 130(d))", () => {
+  it("reads an emitted epoch as exact and a (UTC) clock as its next UTC occurrence, and answers null rather than guessing", () => {
+    const rows: { text: string; observed?: string; expected: QuotaReset | null }[] = [
+      // Claude: a bare unix epoch after a pipe — no interpretation, no timezone.
+      { text: "Claude AI usage limit reached|1750000000", expected: { at: 1_750_000_000, precision: "exact" } },
+      // No date named, and prose that only mentions the limit: null, so the card
+      // falls back to the observed instant instead of inventing a window.
+      { text: "You've hit your usage limit. Upgrade to Plus.", expected: null },
+      // A word in a month's position that is not a month is not a date.
+      { text: "try again at soon 18, 2026", expected: null },
+      {
+        text: "You've hit your session limit · resets 11:50am (UTC)",
+        observed: "2026-09-07T09:00:00.000Z",
+        expected: { at: Date.UTC(2026, 8, 7, 11, 50) / 1000, precision: "clock" },
+      },
+      // Already past today: tomorrow.
+      {
+        text: "resets 11:50am (UTC)",
+        observed: "2026-09-07T12:00:00.000Z",
+        expected: { at: Date.UTC(2026, 8, 8, 11, 50) / 1000, precision: "clock" },
+      },
+      {
+        text: "resets 7pm (UTC)",
+        observed: "2026-09-07T12:00:00.000Z",
+        expected: { at: Date.UTC(2026, 8, 7, 19, 0) / 1000, precision: "clock" },
+      },
+    ];
+    for (const { text, observed, expected } of rows) {
+      expect(parseQuotaResetAt(text, observed), text).toEqual(expected);
+    }
+  });
+});
+
 describe("backendDispatchHold (ruling 152(c))", () => {
   const OBSERVED = "2026-09-06T14:03:00.000Z";
   const nowMs = Date.parse(OBSERVED) + 5 * 60_000;
@@ -154,75 +186,18 @@ describe("backendDispatchHold (ruling 152(c))", () => {
 /**
  * Ruling 165: a change to the named person's credential retires the records
  * observed on the credential it replaces, and the dispatch hold with them.
- * Live (2026-09-07) a Claude card kept "usage window spent · reopens 21:30"
- * after its owner signed the backend into another account.
- *
- * Canaries: drop the `credentialUserId` comparison in `retireBackendRecordsFor`
- * and the ruling-146 case fails; drop either `deleteSetting` and the first case
- * fails on that record.
+ * The exhaustion and the credential refusal are retired through the real
+ * writers in `backend-credentials.server.test.ts` ("a change of the account in
+ * use retires the refusal observed on the previous one"), which record no
+ * reading; the reading is retired here.
  */
 describe("retireBackendRecordsFor (ruling 165)", () => {
   const OBSERVED = "2026-09-07T15:33:00.000Z";
   const nowMs = Date.parse(OBSERVED) + 5 * 60_000;
   const nowIso = new Date(nowMs).toISOString();
   const OWNER = "u_arda";
-  function exhaustion(over: Partial<BackendQuotaExhaustion> = {}): BackendQuotaExhaustion {
-    return {
-      credentialUserId: OWNER,
-      credentialLabel: "Arda",
-      resetsAt: Math.round(nowMs / 1000) + 3600,
-      resetsAtPrecision: "exact",
-      providerText: "Claude AI usage limit reached|1780000000",
-      runId: "run_spent",
-      observedAt: OBSERVED,
-      ...over,
-    };
-  }
-  function refusal(over: Partial<BackendCredentialRefusal> = {}): BackendCredentialRefusal {
-    return {
-      credentialUserId: OWNER,
-      credentialLabel: "Arda",
-      providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
-      runId: "run_refused",
-      observedAt: OBSERVED,
-      ...over,
-    };
-  }
   const rowsOf = (db: Parameters<typeof latestBackendRateLimits>[0]) =>
     new Map(latestBackendRateLimits(db, nowIso).map((row) => [row.backend, row]));
-
-  it("retires the exhaustion and the credential refusal naming the person, on that backend only, and the hold with them", () => {
-    const db = ctx.makeDb();
-    recordBackendQuotaExhaustion(db, "claude", exhaustion());
-    recordBackendCredentialRefusal(db, "claude", refusal());
-    recordBackendQuotaExhaustion(db, "codex", exhaustion());
-    expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).not.toBeNull();
-
-    retireBackendRecordsFor(db, "claude", OWNER);
-
-    const rows = rowsOf(db);
-    expect(rows.get("claude")).toMatchObject({ exhausted: null, credentialRefused: null });
-    // The other backend's record is about a different account of the same
-    // person, and nothing about it changed.
-    expect(rows.get("codex")!.exhausted).not.toBeNull();
-    // The next run on the new credential is the real probe: no hold stands.
-    expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).toBeNull();
-  });
-
-  it("ruling 146: a record naming another person, or nobody, is not this person's to retire", () => {
-    const db = ctx.makeDb();
-    recordBackendQuotaExhaustion(db, "claude", exhaustion({ credentialUserId: "u_murat", credentialLabel: "Murat" }));
-    recordBackendCredentialRefusal(db, "claude", refusal({ credentialUserId: null, credentialLabel: null }));
-
-    retireBackendRecordsFor(db, "claude", OWNER);
-
-    const claude = rowsOf(db).get("claude")!;
-    expect(claude.exhausted?.credentialUserId).toBe("u_murat");
-    expect(claude.credentialRefused).not.toBeNull();
-    expect(claude.credentialRefused?.credentialUserId).toBeNull();
-    // Still nobody's record, so it still holds everyone (ruling 146).
-    expect(backendDispatchHold(db, "claude", { nowMs, credentialUserId: OWNER })).toBeNull();
-  });
 
   /**
    * Ruling 294 (pass 37, F37-129): the utilization READING goes with the
@@ -260,11 +235,5 @@ describe("retireBackendRecordsFor (ruling 165)", () => {
     // A reading about SOMEONE ELSE's account is not this person's to retire,
     // the same line the exhaustion and the refusal take.
     expect(rowsOf(db).get("codex")!.reading?.credentialUserId).toBe("u_murat");
-  });
-
-  it("nothing recorded, nothing to retire, no error", () => {
-    const db = ctx.makeDb();
-    expect(() => retireBackendRecordsFor(db, "codex", OWNER)).not.toThrow();
-    expect(rowsOf(db).get("codex")).toMatchObject({ exhausted: null, credentialRefused: null });
   });
 });

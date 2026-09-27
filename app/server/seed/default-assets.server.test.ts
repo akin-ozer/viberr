@@ -78,7 +78,7 @@ describe("shipped default assets", () => {
       hits = ""; // grep exits 1 when there are no matches — that is the pass case
     }
     expect(hits, `Vite-only ?raw imports found:\n${hits}`).toBe("");
-  }, 20_000);
+  });
 
   it("F15-14: the shipped operator doctrine carries the triage quality gate", () => {
     // The gate the New-task dialog promises ("underspecified goals get flagged")

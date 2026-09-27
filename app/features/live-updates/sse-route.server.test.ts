@@ -39,15 +39,7 @@ beforeAll(async () => {
     )
     .run("viberr-core", userId, "contributor");
 });
-afterAll(async () => {
-  const { resetSseBrokerForTests } = await import(
-    "~/server/events/sse-broker.server"
-  );
-  const { stopEventPublisherForTests } = await import(
-    "~/server/events/event-publisher.server"
-  );
-  stopEventPublisherForTests();
-  resetSseBrokerForTests();
+afterAll(() => {
   app.cleanup();
 });
 afterEach(async () => {
@@ -183,45 +175,6 @@ describe("/resources/events", () => {
     expect(getSseBrokerStats().connections).toBe(0);
     const done = await reader.read();
     expect(done.done).toBe(true);
-  });
-
-  it("replays from the native Last-Event-ID header", async () => {
-    const { publishSseEvent, getSseBrokerStats } = await import(
-      "~/server/events/sse-broker.server"
-    );
-    const head = getSseBrokerStats().headId;
-    publishSseEvent(
-      {
-        type: "task.updated",
-        entityId: "viberr-core/VIB-1",
-        occurredAt: new Date().toISOString(),
-        data: {
-          projectSlug: "viberr-core",
-          taskKey: "VIB-1",
-          stage: "impl",
-          readiness: "ready",
-        },
-      },
-      { projectSlug: "viberr-core", taskKey: "VIB-1" },
-    );
-
-    const { cookie } = await app.cookieFor(userId);
-    const res = await callLoader("/resources/events?scope=project:viberr-core", {
-      cookie,
-      headers: { "Last-Event-ID": String(head) },
-    });
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let text = "";
-    while (!text.includes("task.updated")) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      text += decoder.decode(chunk.value);
-    }
-    expect(text).toContain("event: stream.open");
-    expect(text).toContain("event: task.updated");
-    expect(text).toContain("VIB-1");
-    await reader.cancel();
   });
 
   /** Reads the stream until `until` appears (or it ends), then cancels it. */

@@ -1,13 +1,14 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { PERF_BUDGETS } from "../../../test-support/perf-budgets";
 
 /**
  * Ruling 457: the performance ratchet stays honest. A ceiling no test measures
- * would pass forever, so every budget id must be asserted by some
- * `*.perf.test.ts(x)` under app/, every such file must assert at least one
- * budget, and every bundle budget must name a route the build has.
+ * would pass forever, so every budget id must be passed to `expectWithinBudget`
+ * by some `*.perf.test.ts(x)` under app/, every such file must assert at least
+ * one budget, and every bundle budget must name a route the build has.
  */
 const root = process.cwd();
 
@@ -18,8 +19,12 @@ const perfTests = readdirSync(path.join(root, "app"), { recursive: true })
 
 describe("perf budgets are measured (ruling 457)", () => {
   it("every budget id is asserted by a *.perf.test file", () => {
+    // Inside the call's own parentheses (a ternary may pick the id), so an id
+    // quoted in a comment or a stray string does not count as measured.
+    const asserted = (text: string, id: string) =>
+      new RegExp(`expectWithinBudget\\((?:[^()]|\\([^()]*\\))*?"${escapeRegExp(id)}"`).test(text);
     const orphans = Object.keys(PERF_BUDGETS).filter(
-      (id) => !perfTests.some((t) => t.text.includes(`"${id}"`)),
+      (id) => !perfTests.some((t) => asserted(t.text, id)),
     );
     expect(orphans).toEqual([]);
   });
@@ -59,11 +64,5 @@ describe("perf budgets are measured (ruling 457)", () => {
     });
     expect(missing).toEqual([]);
     expect(Object.values(bundle).every((b) => b.unit === "bytes")).toBe(true);
-  });
-
-  it("the performance page documents the check", () => {
-    const doc = readFileSync(path.join(root, "docs/development/performance.md"), "utf8");
-    expect(doc).toContain("node scripts/measure-routes.mjs --check");
-    expect(doc).toContain("test-support/perf-budgets/");
   });
 });

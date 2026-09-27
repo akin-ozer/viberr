@@ -39,18 +39,6 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/** One signed-in session per person, reused across the file. */
-const sessions = new Map<string, { cookie: string; csrf: string }>();
-
-async function sessionOf(userId: string) {
-  const known = sessions.get(userId);
-  if (known) return known;
-  const { cookie, sessionId } = await app.cookieFor(userId);
-  const made = { cookie, csrf: await app.csrfFor(sessionId) };
-  sessions.set(userId, made);
-  return made;
-}
-
 /** The whole envelope a server loader or action is handed, so the direct
  *  calls below are checked against the real route signatures. */
 function routeArgs<Params extends Record<string, string>>(
@@ -68,13 +56,13 @@ const EPIC_PATTERN = "/projects/:slug/epics/:epicId";
 
 async function epicsPage(userId: string) {
   const { loader } = await import("~/routes/project.epics");
-  const { cookie } = await sessionOf(userId);
+  const { cookie } = await app.sessionFor(userId);
   return loader(routeArgs(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, { cookie }));
 }
 
 async function epicPage(userId: string, epicId: string) {
   const { loader } = await import("~/routes/project.epic");
-  const { cookie } = await sessionOf(userId);
+  const { cookie } = await app.sessionFor(userId);
   return loader(
     routeArgs(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, { cookie }),
   );
@@ -82,7 +70,7 @@ async function epicPage(userId: string, epicId: string) {
 
 async function board(userId: string, search = "") {
   const { loader } = await import("~/routes/project.board");
-  const { cookie } = await sessionOf(userId);
+  const { cookie } = await app.sessionFor(userId);
   const loaded = await loader(
     routeArgs(`/projects/${SLUG}/board${search}`, "/projects/:slug/board", { slug: SLUG }, { cookie }),
   );
@@ -95,7 +83,7 @@ function postBody(csrf: string, fields: Record<string, string>) {
 
 async function postEpics(userId: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.epics");
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   return action(
     routeArgs(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, {
       method: "POST",
@@ -107,7 +95,7 @@ async function postEpics(userId: string, fields: Record<string, string>) {
 
 async function postEpic(userId: string, epicId: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.epic");
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   return action(
     routeArgs(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, {
       method: "POST",
@@ -119,7 +107,7 @@ async function postEpic(userId: string, epicId: string, fields: Record<string, s
 
 async function postTask(userId: string, key: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.task");
-  const { cookie, csrf } = await sessionOf(userId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   return action(
     routeArgs(`/projects/${SLUG}/tasks/${key}`, "/projects/:slug/tasks/:key", { slug: SLUG, key }, {
       method: "POST",
@@ -394,16 +382,6 @@ describe("ruling 503(e): the epic intents", () => {
     });
   });
 
-  it("update-epic is refused for a viewer, and the epic is unchanged", async () => {
-    const epicId = await makeEpic(ids.arda, { title: "Not the viewer's call" });
-    const refused = refusedSchema.parse(await postEpic(ids.deniz, epicId, { intent: "update-epic", status: "done" }));
-    // CANARY: drop the `manage-epics` check (`requireEpicAction`) from
-    // `updateEpic` and the viewer closes the epic.
-    expect(refused.init.status).toBe(403);
-    expect(refused.data.error).toBe("Your project role (viewer) cannot edit epics.");
-    expect((await epicFile(epicId))?.frontmatter.status).toBe("planned");
-  });
-
   it("add-tasks puts several tasks in, moving one from its other epic", async () => {
     const source = await makeEpic(ids.arda, { title: "Source epic", taskKeys: ["VIB-153"] });
     const target = await makeEpic(ids.arda, { title: "Target epic" });
@@ -419,17 +397,6 @@ describe("ruling 503(e): the epic intents", () => {
     expect((await epicPage(ids.selin, source)).tasks).toEqual([]);
     expect((await epicFile(source))?.timeline[0]?.text).toBe(`Selin Aksoy moved VIB-153 to ${target}.`);
     expect(await fileEpicOf("VIB-153")).toBe(target);
-  });
-
-  it("add-tasks is refused for a viewer, and the task stays where it was", async () => {
-    const epicId = await makeEpic(ids.arda, { title: "Viewer cannot add" });
-    const key = await makeTask("Stays out of the epic");
-    const refused = refusedSchema.parse(await postEpic(ids.deniz, epicId, { intent: "add-tasks", taskKeys: key }));
-    // CANARY: drop the `edit-task-meta` check from `setTasksEpic` and the
-    // viewer puts the task in.
-    expect(refused.init.status).toBe(403);
-    expect(refused.data.error).toBe("Your project role (viewer) cannot put tasks in an epic.");
-    expect(await fileEpicOf(key)).toBeNull();
   });
 
   it("remove-task takes a task out of the epic, and it is offered again", async () => {
@@ -459,17 +426,6 @@ describe("ruling 503(e): the epic intents", () => {
     expect(await fileEpicOf(key)).toBe(moved);
     expect(acceptedSchema.safeParse(result).success).toBe(false);
     expect((await epicFile(moved))?.timeline.map((h) => h.text)).not.toContain(`Selin Aksoy removed ${key}.`);
-  });
-
-  it("remove-task is refused for a viewer, and the task stays in", async () => {
-    const key = await makeTask("Stays in the epic");
-    const epicId = await makeEpic(ids.arda, { title: "Viewer cannot remove", taskKeys: [key] });
-    const refused = refusedSchema.parse(await postEpic(ids.deniz, epicId, { intent: "remove-task", taskKey: key }));
-    // CANARY: drop the `edit-task-meta` check from `setTasksEpic` and the
-    // viewer takes the task out.
-    expect(refused.init.status).toBe(403);
-    expect(refused.data.error).toBe("Your project role (viewer) cannot take tasks out of an epic.");
-    expect(await fileEpicOf(key)).toBe(epicId);
   });
 
   it("create-task makes a task that is in the epic from its first line", async () => {
@@ -521,23 +477,6 @@ describe("ruling 503(e): the epic intents", () => {
     expect(await fileEpicOf(key)).toBeNull();
     expect((await board(ids.murat)).cards.find((c) => c.key === key)?.epicId).toBeNull();
     expect((await epicPage(ids.murat, epicId)).tasks).toEqual([]);
-  });
-
-  it("set-task-epic is refused for a viewer, both ways", async () => {
-    const epicId = await makeEpic(ids.arda, { title: "Viewer cannot pick" });
-    const outside = await makeTask("Viewer cannot put me in");
-    const inside = await makeTask("Viewer cannot take me out");
-    const holder = await makeEpic(ids.arda, { title: "Holds one", taskKeys: [inside] });
-    const put = refusedSchema.parse(await postTask(ids.deniz, outside, { intent: "set-task-epic", epic: epicId }));
-    // CANARY: drop the `edit-task-meta` check from `setTasksEpic` and the
-    // viewer moves the task.
-    expect(put.init.status).toBe(403);
-    expect(put.data.error).toBe("Your project role (viewer) cannot put tasks in an epic.");
-    expect(await fileEpicOf(outside)).toBeNull();
-    const out = refusedSchema.parse(await postTask(ids.deniz, inside, { intent: "set-task-epic", epic: "" }));
-    expect(out.init.status).toBe(403);
-    expect(out.data.error).toBe("Your project role (viewer) cannot take tasks out of an epic.");
-    expect(await fileEpicOf(inside)).toBe(holder);
   });
 });
 

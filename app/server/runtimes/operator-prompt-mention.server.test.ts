@@ -3,7 +3,7 @@ import {
   buildCodexOperatorPrompt,
   buildOperatorTurnPrompt,
 } from "./operator-run.server";
-import type { OperatorTaskSnapshot } from "~/server/tasks/operator-actions.server";
+import { operatorSnapshot } from "../../../test-support/operator-snapshot";
 
 /**
  * NEW-4: when a human addresses the operator directly, the turn instruction
@@ -11,41 +11,7 @@ import type { OperatorTaskSnapshot } from "~/server/tasks/operator-actions.serve
  * the timeline but the mention is what actually notifies them.
  */
 
-const SNAPSHOT: OperatorTaskSnapshot = {
-  key: "VIB-1",
-  // Ruling 302: the window's own size, always present.
-  timelineTotal: 0,
-  title: "Add the file listing",
-  goal: "Ship the file-listing deliverable.",
-  priority: "normal",
-  labels: [],
-  dueDate: null,
-  blockedBy: [],
-  stage: "impl",
-  stageName: "In Progress",
-  previousStage: null,
-  readiness: "ready",
-  waiting: "none",
-  validation: "changed",
-  owner: null,
-  specialist: null,
-  reviewers: [],
-  nextStages: [],
-  reworkStages: [],
-  stageIds: ["triage", "impl", "review", "done"],
-  doneStageId: "done",
-  reviewStageId: "review",
-  workStageId: "impl",
-  deployedSpecialists: [],
-  openPacket: false,
-  packet: null,
-  recentTimeline: [],
-  pr: null,
-  branch: null,
-  liveRuns: [],
-  autonomy: "supervised",
-  operatorPolicy: { scope: "operator", note: "", capabilities: {} },
-};
+const SNAPSHOT = operatorSnapshot();
 
 describe("operator turn instruction — @tag the human (NEW-4)", () => {
   const comment = "can you summarize what you did in this whole session?";
@@ -63,17 +29,6 @@ describe("operator turn instruction — @tag the human (NEW-4)", () => {
     expect(prompt.toLowerCase()).toContain("notified");
   });
 
-  it("Codex prompt carries the same tag directive", () => {
-    const prompt = buildCodexOperatorPrompt(
-      SNAPSHOT,
-      "manual",
-      comment,
-      undefined,
-      "Arda",
-    );
-    expect(prompt).toContain('tag them "@Arda"');
-  });
-
   it("without a known commenter name, no tag clause is emitted (no '@undefined')", () => {
     const prompt = buildOperatorTurnPrompt(SNAPSHOT, "manual", comment);
     expect(prompt).toContain("A human addressed you directly");
@@ -89,11 +44,7 @@ describe("operator turn instruction — @tag the human (NEW-4)", () => {
  * delegated agent ask. The triage-turn guidance carries that instruction.
  */
 describe("operator triage gate — disclose a substituted delegated ask (R20-9)", () => {
-  const TRIAGE: OperatorTaskSnapshot = {
-    ...SNAPSHOT,
-    stage: "triage",
-    stageName: "Triage",
-  };
+  const TRIAGE = operatorSnapshot({ stage: "triage", stageName: "Triage" });
 
   it("Claude triage prompt tells the operator to disclose gathering on the agent's behalf", () => {
     const prompt = buildOperatorTurnPrompt(TRIAGE, "create");

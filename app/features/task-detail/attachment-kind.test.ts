@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  attachmentKind,
-  BINARY_SNIFF_CHARS,
-  fileFamily,
-  looksBinary,
-} from "./attachment-kind";
+import { attachmentKind, fileFamily, looksBinary } from "./attachment-kind";
 
 const NUL = String.fromCharCode(0);
 
@@ -43,7 +38,7 @@ describe("attachmentKind (ruling 363)", () => {
     expect(looksBinary("")).toBe(false);
     // The window is the head, git's 8,000 — a NUL past it is not what a
     // reader sees first, and the card already says the file is shown in part.
-    expect(looksBinary("a".repeat(BINARY_SNIFF_CHARS) + NUL)).toBe(false);
-    expect(looksBinary("a".repeat(BINARY_SNIFF_CHARS - 1) + NUL)).toBe(true);
+    expect(looksBinary("a".repeat(8_000) + NUL)).toBe(false);
+    expect(looksBinary("a".repeat(8_000 - 1) + NUL)).toBe(true);
   });
 });

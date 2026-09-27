@@ -24,6 +24,13 @@ describe("resolveBuildInfo (gap 18)", () => {
       path.join(dir, "package.json"),
       JSON.stringify({ name: "viberr", version: "9.9.9" }),
     );
+    // A readable checkout too, so the stamp has to BEAT git, not fill its gap.
+    mkdirSync(path.join(dir, ".git", "refs", "heads"), { recursive: true });
+    writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(
+      path.join(dir, ".git", "refs", "heads", "main"),
+      "0123456789abcdef0123456789abcdef01234567\n",
+    );
     const info = resolveBuildInfo(dir, {
       VIBERR_BUILD_VERSION: "1.4.0",
       VIBERR_BUILD_SHA: "abcdef1234567890abcdef1234567890abcdef12",

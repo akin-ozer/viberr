@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -18,15 +17,11 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { interruptRun } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, upsertRun } from "~/server/runtimes/run-store.server";
 import type { Engagement } from "~/schemas/task-file.schema";
 import { reconcileTask } from "./github-reconciler.server";
 import { readReviewRelay } from "./pr-review-relay.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
@@ -118,7 +113,6 @@ beforeEach(() => {
   updateUserFields(store.db, store.users.selin.id, { githubHandle: "selindev" });
   updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
   updateUserFields(store.db, store.users.deniz.id, { githubHandle: "denizdev" });
-  resetSseBrokerForTests();
 });
 
 afterEach(async () => {
@@ -135,7 +129,6 @@ afterEach(async () => {
     }
   }
   await drainRunCompletions();
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 

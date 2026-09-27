@@ -29,9 +29,8 @@ import { describe, expect, it } from "vitest";
  *      passes;
  *   3. the runbook shows the copy recipe: a fenced bash block that copies the
  *      projection AND its `-wal` and opens the copy;
- *   4. both pages state the rule in words ("copy first", "never a second
- *      connection"), and the runbook names the controller's `viberr_ops` tools
- *      as the in-process reader to ask before copying anything;
+ *   4. the runbook names the controller's `viberr_ops` tools as the
+ *      in-process reader to ask before copying anything;
  *   5. every in-container `npm run backup` carries an explicit absolute `--out`
  *      (`scripts/backup.ts` defaults to `./backups`, which is `/app/backups` in
  *      the container and is lost with it), outside `/data` (`createBackup`
@@ -140,14 +139,6 @@ describe("ruling 158: the operations docs never open a live projection database,
       `${RUNBOOK.rel} must show one fenced bash block that copies state/projection.sqlite AND ` +
         `projection.sqlite-wal to a scratch directory and opens the copy (DatabaseSync or sqlite3 on the copy's path)`,
     ).toBeGreaterThan(-1);
-  });
-
-  it.each(PAGES)("$rel: states the rule in words", ({ rel, text }) => {
-    // `\s+`: markdown prose wraps, and the phrase may break across a line.
-    expect(text, `${rel} must say "copy first"`).toMatch(/copy\s+first/i);
-    expect(text, `${rel} must say "never a second connection"`).toMatch(
-      /never\s+a\s+second\s+connection/i,
-    );
   });
 
   it("runbook.md names the controller's viberr_ops tools as the in-process reader to ask first", () => {

@@ -253,9 +253,8 @@ export function indexDecisionInbox(
  * plus the LIVE task decision state (F7-NOTIF1): packet/approval rows are
  * reconciled against task_projections at read time — same-database join,
  * no per-mutation notification writes — so `waitingOnYou` reflects whether
- * the decision is actually still open. Home's per-project decisions counter
- * (home-query.server.ts) applies the same open-packet/pending-rec +
- * non-terminal-stage rule; keep them in step. */
+ * the decision is actually still open. Home's per-project decision counts
+ * come from `indexDecisionInbox` below, so the two cannot disagree. */
 export function listNotifications(
   db: DatabaseSync,
   userId: string,

@@ -62,6 +62,9 @@ npm run deploy         # Docker deployment: stamp the build from git, build, up,
 - Reverse a numbered ruling silently; say so and get it re-ruled.
 - Add `vi.mock`, Tailwind, inline hex colours, `console.log` in server code, or a second
   definition of something that has one home.
+- Add a test that fails the authoring gate in `docs/development/testing.md` §0 (ruling 512):
+  it names the contract it owns and the edit that breaks it, lives at the one boundary that
+  owns that contract, and needs no export, flag or `*ForTests` hook that only a test calls.
 - Run `npx shadcn add` (or paste a shadcn/ReUI component). A registry component is a design
   reference, read the way `design/html-app` is — never an install. Ruling 166 permits only
   UNSTYLED primitive packages, rendered with class names `app/app.css` already defines and

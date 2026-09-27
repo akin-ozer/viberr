@@ -179,11 +179,6 @@ describe("loader — runtime projection shape", () => {
     expect(run.state).toBe("running");
   });
 
-  it("VIB-166: no runtime threads (the seed fabricates NO run history — R7-2)", async () => {
-    const { runtime } = await runLoader("VIB-166", ids.arda);
-    expect(runtime).toEqual([]);
-  });
-
   /**
    * UI-30: raw run logs, the `{ } raw` wire envelopes and the provider session
    * id were served to ANY signed-in user, while `/resources/run-log` and

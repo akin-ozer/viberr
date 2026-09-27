@@ -18,7 +18,6 @@ import {
   finalizeOrphanedRuns,
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
-  abandonedWaitNote,
   settleAbandonedWaits,
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
@@ -558,6 +557,15 @@ describe("settleAbandonedWaits (ruling 213)", () => {
     expect(note!.text).toContain("No agent run has ever been started on it");
     expect(note!.text).not.toContain("the run finished just before the stop");
     expect(note!.text).not.toMatch(/follow-up that would have moved the task did not run/);
+    // Ruling 337(b): it states the board fact and claims no turn that may not
+    // run — the note is written BEFORE `runOperator` is called, so a refusal
+    // would leave it promising one (the unconditional promise ruling 198
+    // removed from the sibling orphan sweep).
+    // CANARY: restore "the operator is re-invoked to decide what happens next".
+    expect(note!.text).toContain("The board has stopped claiming an agent");
+    expect(note!.text).toContain("Viberr is invoking the operator");
+    expect(note!.text).toContain("if no operator can run, this task is waiting on a person");
+    expect(note!.text).not.toMatch(/the operator is re-invoked/);
   });
 
   /**
@@ -637,23 +645,6 @@ describe("settleAbandonedWaits (ruling 213)", () => {
         `${key} had a reason for the quiet and was swept anyway`,
       ).toBeUndefined();
     }
-  });
-
-  it("ruling 337(b): the note states the board fact and does not claim a turn that may not run", async () => {
-    // It asserted "the operator IS re-invoked" and is written BEFORE
-    // `runOperator` is called, so a refusal left a note claiming a turn that
-    // never happened — the unconditional promise ruling 198 removed from the
-    // sibling orphan sweep.
-    // CANARY: restore "the operator is re-invoked to decide what happens next".
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const note = abandonedWaitNote(store.db, store.slug, "VIB-1");
-    expect(note).toContain("The board has stopped claiming an agent");
-    expect(note).toContain("Viberr is invoking the operator");
-    expect(note).toContain("if no operator can run, this task is waiting on a person");
-    expect(note).not.toMatch(/the operator is re-invoked/);
   });
 
   it("does not re-claim a task the orphan sweep already took (ruling 215)", async () => {

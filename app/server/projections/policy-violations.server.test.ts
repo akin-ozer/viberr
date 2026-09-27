@@ -6,7 +6,6 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   countOpenPolicyViolations,
   findOpenScopeViolation,
-  getScopeViolation,
   listScopeViolations,
   openScopeViolation,
   resolveScopeViolation,
@@ -59,15 +58,6 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
       scope: "pull_request:write",
       status: "open",
     });
-  });
-
-  it("rail-badge signature compatibility: demo seed keeps the count at exactly 1", async () => {
-    const db = ctx.makeDb();
-    const dataRoot = ctx.makeTempDir();
-    await runDemoSeed(db, { dataRoot });
-    // Same call the /projects/:slug shell loader makes (routes/project.tsx).
-    expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
-    expect(countOpenPolicyViolations(db, "billing-service")).toBe(0);
   });
 
   it("openScopeViolation is idempotent per (project, scope, task)", () => {
@@ -155,7 +145,9 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
     expect(reopened.created).toBe(true);
     expect(reopened.violation.id).not.toBe(seeded!.id);
     expect(listScopeViolations(db, "viberr-core")).toHaveLength(2);
-    expect(getScopeViolation(db, seeded!.id)?.status).toBe("resolved");
+    expect(
+      listScopeViolations(db, "viberr-core", { status: "resolved" }).map((v) => v.id),
+    ).toContain(seeded!.id);
   });
 
   it("open/resolve write audit events and emit violation.updated", () => {

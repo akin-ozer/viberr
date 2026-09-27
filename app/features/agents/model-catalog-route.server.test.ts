@@ -8,8 +8,9 @@ import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 
 /**
  * Route-level tests for GET /resources/model-catalog: requires auth,
- * returns the curated catalog shape per backend, and defaults an unknown
- * backend to claude so the modal always renders.
+ * answers the backend asked for (the curated lists themselves are
+ * model-catalog.server.test.ts's), and defaults an unknown backend to claude
+ * so the modal always renders.
  *
  * Ruling 127 gave this route BOTH arms to answer, and which one it takes is a
  * fact about the person asking: Claude's live `supportedModels()` list is what
@@ -76,31 +77,6 @@ describe("resources/model-catalog", () => {
     // SAFETY: the assertion above has already failed the test unless `thrown`
     // is the redirect Response `requireUser` throws for a signed-out request.
     expect((thrown as Response).status).toBe(302);
-  });
-
-  it("returns the curated claude catalog for a signed-in user", async () => {
-    const res = await runLoader("?backend=claude", ardaId);
-    const body: ModelCatalogBody = await res.json();
-    expect(body.data.models.map((m) => m.value)).toEqual([
-      "sonnet",
-      "opus",
-      "haiku",
-    ]);
-    expect(body.data.defaultModel).toBe("sonnet");
-    expect(body.data.defaultEffort).toBe("high");
-    expect(body.data.efforts).toContain("xhigh");
-  });
-
-  it("returns the curated codex catalog", async () => {
-    const res = await runLoader("?backend=codex", ardaId);
-    const body: ModelCatalogBody = await res.json();
-    // Sol is still OFFERED, but F20-33 makes Terra the default (Sol 400s on a
-    // ChatGPT-plan Codex account, so a model-less operator must not fall back to it).
-    expect(body.data.models.map((m) => m.value)).toContain("gpt-5.6-sol");
-    expect(body.data.defaultModel).toBe("gpt-5.6-terra");
-    // Codex CLI 0.153 (SDK 0.153.4): `max` is offered; GPT-6 Astra is listed, not default.
-    expect(body.data.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
-    expect(body.data.models.map((m) => m.value)).toContain("gpt-6-astra");
   });
 
   it("defaults an unknown/missing backend to claude", async () => {

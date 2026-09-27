@@ -19,7 +19,7 @@ import { normalizeEmail } from "./user-store.server";
  */
 
 /** Provider id better-auth uses for email+password credential accounts. */
-export const CREDENTIAL_PROVIDER = "credential";
+const CREDENTIAL_PROVIDER = "credential";
 
 function nowIso(): string {
   return new Date().toISOString();

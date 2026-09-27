@@ -790,12 +790,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       evidence: true,
     };
 
-    it("mounts report_outcome — the grant is not silently inert", () => {
-      const tools = toolkitTools(EVIDENCE_ONLY, "oc_u11a");
-      expect(tools.report_outcome).toBeDefined();
-    });
-
     it("advertises evidence but NOT verdict — the tool grants no judgment", () => {
+      // The tool is mounted at all: an inert grant leaves `tool` undefined and
+      // the schema read below throws.
       const tool = toolkitTools(EVIDENCE_ONLY, "oc_u11b").report_outcome!;
       const keys = Object.keys(tool.inputSchema["shape"] ?? tool.inputSchema);
       expect(keys).toContain("evidence");

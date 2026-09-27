@@ -181,9 +181,9 @@ const PEV_META: AuditKindTable = {
  * `runtime.run.started` case). `AuditLogEntryView` carries no action name —
  * only the display kind and the rendered text — and threading one through
  * would mean editing the projection, its row type and the loader for a purely
- * visual fold. The co-located test pins this pattern against the projection's
- * OWN template text, so rewording that sentence fails the test rather than
- * silently un-compacting the column.
+ * visual fold. The route test (activity-route.server.test.ts) pins this pattern
+ * to the sentence the projection actually renders, so rewording that sentence
+ * fails the test rather than silently un-compacting the column.
  *
  * The pattern matches the projection's WHOLE trailing sentence, anchored at the
  * end, and that anchoring is load-bearing rather than tidiness. `entry.text`
@@ -215,7 +215,7 @@ export function isRuntimeSessionOpen(entry: AuditLogEntryView): boolean {
 /** A run shorter than this renders verbatim: one row replaced by one summary
  *  row is no saving — the timeline compaction's own `folded.length <= 1` rule,
  *  and it keeps the FIRST session of a quiet project fully legible. */
-export const AUDIT_COMPACT_MIN = 2;
+const AUDIT_COMPACT_MIN = 2;
 
 export type AuditFeedRow =
   | { compacted: false; entry: AuditLogEntryView }
@@ -230,13 +230,12 @@ export type AuditFeedRow =
  */
 export function compactAuditEntries(
   entries: AuditLogEntryView[],
-  min: number = AUDIT_COMPACT_MIN,
 ): AuditFeedRow[] {
   const rows: AuditFeedRow[] = [];
   let run: AuditLogEntryView[] = [];
   const flush = () => {
     if (run.length === 0) return;
-    if (run.length < min) {
+    if (run.length < AUDIT_COMPACT_MIN) {
       for (const entry of run) rows.push({ compacted: false, entry });
     } else {
       rows.push({ compacted: true, key: `sessions:${run[0]!.id}`, entries: run });

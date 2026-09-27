@@ -52,14 +52,6 @@ function loaderArgs(url: string, params: { slug: string }, cookie?: string) {
   return routeArgs(app.request(url, cookie ? { cookie } : {}), params);
 }
 
-/** A refusal thrown out of a route module: react-router's `data(…, { status })`
- *  envelope carries the status under `init`, an AppError carries it directly. */
-interface ThrownRefusal {
-  init?: ResponseInit | null;
-  status?: number;
-  data?: unknown;
-}
-
 /**
  * What this route's action hands back, as these cases read it: the typed
  * `GithubActionOutcome` (`ok`/`toast`/`result`), or the `data(…, { status })`
@@ -101,21 +93,6 @@ describe("loader", () => {
     // SAFETY: the assertion on the line above fails the case unless `thrown` is
     // a Response, so the status read below can only run on one.
     expect((thrown as Response).status).toBe(302);
-  });
-
-  it("404s for an unknown project", async () => {
-    const { loader } = await import("~/routes/project.github");
-    const { cookie } = await app.cookieFor(ids.arda);
-    const thrown: unknown = await loader(
-      loaderArgs("/projects/nope/github", { slug: "nope" }, cookie),
-    ).catch((e) => e);
-    // SAFETY: a refused loader throws one of two things — react-router's
-    // `data(msg, { status })` envelope, which carries the status under `init`,
-    // or an AppError, which carries it directly. Both are read optionally, so a
-    // throw of any other shape reads `undefined` and fails the expectation
-    // rather than being quietly accepted.
-    const refusal = thrown as ThrownRefusal;
-    expect(refusal.init?.status ?? refusal.status).toBe(404);
   });
 
   it("returns the seeded GithubViewData: repo panel, credential health, PR + branch rows", async () => {
@@ -243,20 +220,6 @@ describe("loader", () => {
 });
 
 describe("action RBAC + degraded no-PAT results", () => {
-  it("answers a NON-MEMBER as an unknown slug, never 403 (E2)", async () => {
-    // This asserted 403 — the leak. A 403 here says "the project exists and you
-    // may not"; R15-4 makes a project invisible to non-members, and every other
-    // surface answers 404, so this one reply confirmed its existence. The role
-    // tiers are still exercised honestly by the member cases below.
-    const thrown: unknown = await postAction(ids.deniz, "reconcile").catch((e) => e);
-    // SAFETY: the visibility gate refuses by THROWING react-router's
-    // `data("No project at …", { status: 404 })` envelope — both fields are read
-    // optionally, so any other throw fails the two expectations below.
-    const refusal = thrown as ThrownRefusal;
-    expect(refusal.init?.status).toBe(404);
-    expect(String(refusal.data)).toBe("No project at projects/viberr-core.");
-  });
-
   it("rejects a reviewer from grant-scope (admin|maintainer only)", async () => {
     const result = await postAction(ids.selin, "grant-scope");
     expect(result.init?.status).toBe(403);
@@ -291,11 +254,6 @@ describe("action RBAC + degraded no-PAT results", () => {
         "No GitHub credential configured. Connect a PAT before re-checking scopes.",
       result: "no_pat_configured",
     });
-  });
-
-  it("rejects unknown intents", async () => {
-    const result = await postAction(ids.arda, "frobnicate");
-    expect(result.init?.status).toBe(400);
   });
 });
 

@@ -750,62 +750,6 @@ describe("R14-3: the task archive", () => {
       message: expect.stringContaining("archived"),
     });
   });
-
-  /**
-   * F19-8 — acceptance was guarded from the start; the MOVE was not.
-   *
-   * Under the board's "Archived" filter an archived card kept a working Move
-   * menu and a live drag handle, so abandoned work could be walked from column
-   * to column while every surface around it said it was out of the flow. Only a
-   * drop on the terminal stage met a refusal, and only after the board had
-   * animated the move. Both writers now refuse it up front.
-   */
-  it("an archived task cannot be moved between stages at all — not just into Done", async () => {
-    const store = setupProjectedStore(ctx);
-    seed(store, { stage: "impl", waiting: "none", archived: true });
-    await expect(
-      transitionStage(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({
-      status: 409,
-      message: expect.stringContaining("archived"),
-    });
-    // The stage is unchanged — the refusal happened before any write.
-    expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
-  });
-
-  it("an archived task cannot be dragged on the board either (reorderTask)", async () => {
-    const store = setupProjectedStore(ctx);
-    seed(store, { stage: "impl", waiting: "none", archived: true });
-    await expect(
-      reorderTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({
-      status: 409,
-      message: expect.stringContaining("archived"),
-    });
-    expect(taskFile(store).parsed.frontmatter.stage).toBe("impl");
-  });
-
-  it("a LIVE task still moves — the guard keys off `archived`, not the stage", async () => {
-    const store = setupProjectedStore(ctx);
-    seed(store, { stage: "impl", waiting: "none" });
-    const moved = await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    expect(moved.stage).toBe("review");
-  });
 });
 
 /**

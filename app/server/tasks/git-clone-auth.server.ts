@@ -27,7 +27,7 @@ import {
  * (`GIT_CONFIG_COUNT`/`_KEY_n`/`_VALUE_n`), never in `process.env` and never in
  * `filteredSpawnEnv()`, so an agent's own git keeps its hooks.
  */
-export const SERVER_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
+const SERVER_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
   ["core.hooksPath", "/dev/null"],
   ["core.fsmonitor", "false"],
 ];
@@ -36,7 +36,7 @@ export const SERVER_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
  * `env` with `entries` appended to its `GIT_CONFIG_COUNT` list (after any
  * entries it already carries), as a new object.
  */
-export function withGitConfig(
+function withGitConfig(
   env: NodeJS.ProcessEnv,
   entries: ReadonlyArray<readonly [string, string]>,
 ): NodeJS.ProcessEnv {

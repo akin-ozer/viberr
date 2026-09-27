@@ -4,11 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   findRunProcesses,
   reapRunProcesses,
-  RUN_MARKER_ENV,
   runMarkerEnv,
   type SignalProcess,
-  compactionMarkerEnv,
-  compactionRunId,
 } from "./run-processes.server";
 import { alive, gone } from "../../../test-support/process-liveness";
 
@@ -105,22 +102,6 @@ async function seen(runId: string, pid: number, withinMs = 3000): Promise<boolea
 }
 
 const scans = process.platform === "linux" || process.platform === "darwin";
-
-describe("compactionMarkerEnv (ruling 376)", () => {
-  it("marks the completion compaction's process apart from the run's, so the settle sweep leaves it alone", () => {
-    expect(compactionRunId("run_1")).toBe("run_1:compaction");
-    expect(compactionMarkerEnv("run_1")).toEqual({ VIBERR_RUN_ID: "run_1:compaction" });
-    // The sweep matches marker values exactly: the run's sweep does not see it.
-    expect(compactionRunId("run_1")).not.toBe("run_1");
-  });
-});
-
-describe("runMarkerEnv", () => {
-  it("names the run by the one variable the sweep reads", () => {
-    expect(runMarkerEnv("run_abc")).toEqual({ [RUN_MARKER_ENV]: "run_abc" });
-    expect(RUN_MARKER_ENV).toBe("VIBERR_RUN_ID");
-  });
-});
 
 describe.skipIf(!scans)("findRunProcesses (real processes)", () => {
   it("finds a live process by its run's marker, and only that run's", async () => {

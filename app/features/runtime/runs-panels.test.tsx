@@ -86,6 +86,12 @@ describe("LiveRunPanel", () => {
     // Ruling 366(e): the digits roll (`@number-flow/react`), and the plain
     // figure rides the wrapper's `data-clock` for anyone reading the DOM.
     expect(container.querySelector(".run-cell .lw-clock")!.getAttribute("data-clock")).toBe("06:42");
+    // The Runtime cell names the model the run is on, for the task page's
+    // strip and the controller's alike.
+    const runtime = [...container.querySelectorAll(".run-cell")].find(
+      (c) => c.querySelector(".lbl")?.textContent === "Runtime",
+    );
+    expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
   });
 
   /**
@@ -566,9 +572,9 @@ describe("AgentLogsPanel", () => {
   /**
    * Ruling 366: a call's heartbeats are one wait row — the orb while the call
    * is still open, the clock once anything landed after it — and a Viberr
-   * tool's chip is marked as the product's own. Canary: drop `foldWaits` from
-   * the pipeline and two `.log-line.wait` rows never appear (the heartbeats
-   * render as plain meta rows).
+   * tool's chip is marked as the product's own. Canary: drop the wait branch
+   * from `createConsoleFolder` and two `.log-line.wait` rows never appear (the
+   * heartbeats render as plain meta rows).
    */
   it("folds heartbeats into a wait row: orb while live, clock once ended, the chip marked as Viberr's", () => {
     const beat = (n: number, elapsed: number): StreamedLine => ({

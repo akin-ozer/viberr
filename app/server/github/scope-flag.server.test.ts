@@ -7,10 +7,9 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
-  credentialAdvisoryText,
   flagScopeViolation,
-  policyUpdateText,
   policyViolationText,
+  resolveScopeViolationWithEvent,
   scopeFlagText,
 } from "./scope-flag.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -184,11 +183,28 @@ describe("F39-5: advisory scopes are not violations", () => {
     expect(event.text).not.toContain("advisory");
   });
 
-  it("the clearing note matches the flag that opened it", () => {
-    expect(policyUpdateText("checks:read")).toContain("Credential update");
-    expect(policyUpdateText("checks:read")).toContain("advisory is resolved");
-    expect(policyUpdateText("repo")).toContain("Policy update");
-    expect(policyUpdateText("repo")).toContain("violation is resolved");
+  it("the clearing note matches the flag that opened it", async () => {
+    const store = seed();
+    /** Flag `scope`, resolve it, and return the note the resolution wrote. */
+    const clear = async (scope: string) => {
+      const { violation } = await flagScopeViolation(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", scope, detail: scopeFlagText(scope, "x") },
+        { dataRoot: store.dataRoot },
+      );
+      await resolveScopeViolationWithEvent(store.db, violation.id, undefined, {
+        dataRoot: store.dataRoot,
+      });
+      return topEvent(store).text;
+    };
+    // CANARY: word `policyUpdateText` the same for both kinds and the advisory
+    // resolves as a "violation" it never was.
+    const advisory = await clear("checks:read");
+    expect(advisory).toContain("Credential update");
+    expect(advisory).toContain("advisory is resolved");
+    const required = await clear("repo");
+    expect(required).toContain("Policy update");
+    expect(required).toContain("violation is resolved");
   });
 
   it("the timeline writer and the credential card read the SAME advisory list", () => {
@@ -201,8 +217,5 @@ describe("F39-5: advisory scopes are not violations", () => {
       { scope: "checks:read", taskKey: "VIB-1" },
     ]);
     expect(advisories.map((a) => a.id)).toEqual(["checks_read"]);
-    // And the sentences are recognisably the same fact.
-    expect(credentialAdvisoryText("checks:read", "x")).toContain("checks:read");
-    expect(policyViolationText("repo", "x")).toContain("repo");
   });
 });

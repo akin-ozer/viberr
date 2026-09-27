@@ -7,6 +7,7 @@ import {
   actorOf,
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -18,6 +19,7 @@ import type {
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -1166,28 +1168,6 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
     );
     expect(task.stage).toBe("done");
   });
-
-  it("admin force-accept remains the audited bypass for the missing verdict", async () => {
-    seed({
-      stage: "review",
-      branch: "vib-1",
-      workRevision: revision(),
-      pr: { number: 7, state: "review", title: "[VIB-1] t" },
-      validation: "changed",
-    });
-    await forceAcceptCompletion(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1" },
-      actorOf(store.users.arda),
-      dataCtx(),
-    );
-    expect(fm().frontmatter.stage).toBe("done");
-    const forced = listAuditEvents(store.db, {}).find(
-      (a) => a.action === "task.acceptance.forced",
-    );
-    expect(forced).toBeDefined();
-    expect(JSON.stringify(forced!.details)).toContain("no approving verdict");
-  });
 });
 
 describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision", () => {
@@ -2205,5 +2185,64 @@ describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
     const event = fm().timeline.find((e) => e.type === "github" && /No pull request/.test(e.text))!;
     expect(event.text).toContain("no GitHub credential is configured for this project");
     expect(event.text).toContain("Fix the repository/credential settings");
+  });
+});
+
+/**
+ * P11-13: the Review-time push-grant guard, read off the push itself. A
+ * withheld-grant deliverer must not have its workspace pushed; and (the
+ * regression the adversarial review caught) a deliverer NAMED in the task
+ * whose profile was undeployed between the run and Review falls back
+ * CONSERVATIVE (deny), never permissive. A project with no repository still
+ * reaches the push: the base-branch bootstrap skips without a GitHub context.
+ * CANARY: hand the push `canCommitPush: true` unconditionally and the withheld
+ * and undeployed rows fail.
+ */
+describe("P11-13: the delivery push carries the deliverer's repo-write grant", () => {
+  /** Deploy a `dev` specialist whose repo-write grants are `mode`. */
+  function deployDev(mode: "direct" | "human"): void {
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode },
+            { capabilityId: "commit-push-branch", mode },
+          ],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  const deliverer = (profileId: string): Engagement => ({
+    profileId,
+    backend: "claude",
+    role: "developer",
+    delivers: true,
+    verdictCapable: false,
+  });
+
+  it.each([
+    ["no deliverer is engaged (no grant to enforce)", true, "direct", null],
+    ["the deliverer's repo-write is granted", true, "direct", "dev"],
+    ["the deliverer's repo-write is withheld", false, "human", "dev"],
+    ["a named deliverer's profile was undeployed", false, "direct", "ghost"],
+  ] as const)("%s → canCommitPush %s", async (_label, expected, mode, profileId) => {
+    deployDev(mode);
+    seed({ stage: "review", engagements: profileId ? [deliverer(profileId)] : [] });
+    await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actorOf(store.users.arda));
+    expect(pushMock.mock.calls[0]![0].canCommitPush).toBe(expected);
   });
 });

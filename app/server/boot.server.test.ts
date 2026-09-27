@@ -4,10 +4,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { lockPath } from "../../test-support/data-root-lock";
 import { createTestDbContext } from "../../test-support/test-db";
-import {
-  HERMETIC_TOOLCHAIN,
-  primeHermeticToolchain,
-} from "../../test-support/toolchain";
+import { HERMETIC_TOOLCHAIN } from "../../test-support/toolchain";
 import { logger } from "./logging/logger.server";
 import type {
   MaintenancePassOptions,
@@ -421,31 +418,17 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
   });
 
   it("reports free space at the one moment an operator is reading this log", () => {
-    expect(integrityFields()).toHaveProperty("disk");
+    expect(integrityFields().disk).toMatchObject({
+      free: expect.any(String),
+      total: expect.any(String),
+      status: expect.stringMatching(/^(ok|low|critical)$/),
+    });
   });
 
   it("ruling 182: carries the host toolchain, resolved here so the first health request does not pay for the probe", () => {
     // The suite's primed reading (setup-env), not a live probe — what matters
     // is that the boot line reads the ONE memoized toolchain.
     expect(integrityFields()).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
-  });
-
-  it("ruling 185: no sandbox WARN survives — there is no sandbox to be unavailable", () => {
-    // Canary: re-add either warn (the ruling-182 refusal or the ruling-184
-    // child-process limit) and this fails. Both existed only because Viberr
-    // asked the Codex CLI to confine a run; it no longer does, so a boot line
-    // about the sandbox would be a claim about nothing.
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
-    try {
-      logBootIntegrity(bootCtx.makeDb());
-      expect(warn.mock.calls.find(([msg]) => /codex sandbox/i.test(msg))).toBeUndefined();
-      expect(warn.mock.calls.find(([msg]) => /child process/i.test(msg))).toBeUndefined();
-    } finally {
-      warn.mockRestore();
-      info.mockRestore();
-      primeHermeticToolchain();
-    }
   });
 });
 
@@ -486,6 +469,35 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
  * the `notifications.kind: ownership` entry is never reported.
  */
 describe("projectionCheckGaps (ruling 140)", () => {
+  it("F21-1 / ruling 225: reads the baseline's own task_projections CHECKs", async () => {
+    // The positive control behind every `toEqual([])` on a fresh database in
+    // this file: a probe whose pattern stopped matching the baseline's CHECK
+    // would answer `[]` there too, and a missing enum member would ship
+    // unseen. CANARY: reformat either CHECK in `0001_baseline.sql` past the
+    // probe's pattern, or drop its arm here, and this reports nothing.
+    const { projectionCheckGaps } = await import("./boot.server");
+    const ctx = createTestDbContext();
+    try {
+      const db = ctx.makeDb();
+      expect(projectionCheckGaps(db)).toEqual([]);
+      // SAFETY: the baseline creates `task_projections`, so its CREATE TABLE
+      // row is present and `sql` is non-null for a table.
+      const { sql } = db
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_projections'`)
+        .get() as { sql: string };
+      // The table as a root carries it whose CHECKs predate `bypassed` and
+      // `schedule` (sqlite cannot ALTER a CHECK in place).
+      db.exec("DROP TABLE task_projections;");
+      db.exec(sql.replace(/,\s*'bypassed'/, "").replace(/,\s*'schedule'/, ""));
+      expect(projectionCheckGaps(db)).toEqual([
+        "task_projections.validation: bypassed",
+        "task_projections.waiting: schedule",
+      ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   it("reports a notifications CHECK that lacks a declared kind, beside the validation gaps", async () => {
     const { projectionCheckGaps } = await import("./boot.server");
     const ctx = createTestDbContext();

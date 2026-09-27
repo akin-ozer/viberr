@@ -19,7 +19,6 @@ import {
 } from "~/server/secrets/pat-store.server";
 import { validatePat } from "~/server/secrets/pat-validator.server";
 import {
-  CONNECTION_REQUIRED_SCOPES,
   createConnection,
   ensureConnectionFresh,
   getDefaultConnection,
@@ -104,6 +103,14 @@ describe("createConnection", () => {
       expect(result.message).toContain("Validation failed");
       expect(result.message).toContain("repo");
       expect(result.message).toContain("Nothing was saved.");
+      // B-GH2/B-GH6: the refusal NAMES the one minimum the project scope chips
+      // use. The sentence hard-coded "repo · workflow · pull_request:write" for
+      // three passes after the owner dropped `workflow` — telling people to
+      // widen a token Viberr no longer wants.
+      expect(result.message).toContain(
+        `Minimum scopes: ${DEFAULT_REQUIRED_SCOPES.join(" · ")}.`,
+      );
+      expect(result.message).not.toContain("workflow");
     }
     expect(listConnections(db)).toHaveLength(0);
     expect(
@@ -384,42 +391,6 @@ describe("PAT-validation rate limit", () => {
       { fetchImpl: validTransport().fetchImpl },
     );
     expect(other.status).toBe("saved");
-  });
-});
-
-/**
- * B-GH2/B-GH6: the connection gate and the project scope chips must agree on
- * what "the minimum" is, and the refusal copy must NAME that same set. The
- * sentence hard-coded "repo · workflow · pull_request:write" for three passes
- * after the owner dropped `workflow` — telling people to widen a token Viberr
- * no longer wants.
- */
-describe("required-scope set (single source)", () => {
-  it("is the same tuple the project chips use", () => {
-    expect(CONNECTION_REQUIRED_SCOPES).toBe(DEFAULT_REQUIRED_SCOPES);
-  });
-
-  it("names the live minimum in the insufficient-scope refusal, never `workflow`", async () => {
-    const db = makeDbWithUser();
-    const gh = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "x" },
-        headers: { "x-oauth-scopes": "gist" },
-      },
-    });
-    const result = await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_missing_scopes_0002", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: gh.fetchImpl },
-    );
-    expect(result.status).toBe("validation_failed");
-    if (result.status !== "validation_failed") return;
-    expect(result.message).toContain(
-      `Minimum scopes: ${CONNECTION_REQUIRED_SCOPES.join(" · ")}.`,
-    );
-    // Fails on main: the copy shipped the dropped scope.
-    expect(result.message).not.toContain("workflow");
   });
 });
 

@@ -538,7 +538,7 @@ export function finalizeOrphanedRuns(
  * file, which its own commit message quoted the controller on: "One writer
  * fixed, its neighbour still inventing." This is the neighbour.
  */
-export function abandonedWaitNote(
+function abandonedWaitNote(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,

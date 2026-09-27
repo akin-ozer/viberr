@@ -31,23 +31,6 @@ describe("ruling 436: a default-branch read comes in pages the CLI will carry", 
    * been saved to …". Viberr's cap was 60,000, the CLI's MCP limit is 25,000
    * tokens, and the controller has no Read tool for the saved file.
    */
-  it("takes whole lines up to the page, and the pages rebuild the file", () => {
-    // CANARY: take every line from fromLine on, uncapped.
-    const text = goLines(1_930);
-    const pages: string[] = [];
-    let from = 1;
-    for (;;) {
-      const page = pageOfText(text, from);
-      if (!page.ok) throw new Error("walked past the end");
-      expect(page.text.length).toBeLessThanOrEqual(DEFAULT_BRANCH_READ_PAGE_CHARS);
-      pages.push(page.text.replace(/\n$/, ""));
-      if (!page.more) break;
-      from = page.toLine + 1;
-    }
-    expect(pages.length).toBeGreaterThan(1);
-    expect(pages.join("\n") + "\n").toBe(text);
-  });
-
   it("gives a small file back verbatim, cuts an overlong line, and refuses past the end", () => {
     expect(pageOfText("the guide\n")).toEqual({
       ok: true, text: "the guide\n", fromLine: 1, toLine: 1, totalLines: 1, more: false, lineCut: false,
@@ -310,6 +293,8 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
       if (fromLine) request.fromLine = fromLine;
       const read = await withLocalGithub(origins, () => readProjectDefaultBranchFile(db, request));
       if (read.kind !== "found") throw new Error(`read ${read.kind}`);
+      // CANARY: take every line from fromLine on, uncapped.
+      expect(read.text.length).toBeLessThanOrEqual(DEFAULT_BRANCH_READ_PAGE_CHARS);
       expect(read.totalLines).toBe(10_000);
       seen.push(read.text.replace(/\n$/, ""));
       if (!read.more) break;

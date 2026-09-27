@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  boardStageRoles,
-  declaredStageRole,
-  resolveDeclaredStages,
-  stageEligible,
-} from "./stage-eligibility";
+import { resolveDeclaredStages, stageEligible } from "./stage-eligibility";
 
 /**
  * R14-1 — a profile's declared stage ids must land on ANY board.
@@ -58,41 +53,6 @@ const RENAMED = {
   ],
 };
 
-describe("declaredStageRole", () => {
-  it("maps the known vocabulary and nothing else", () => {
-    expect(declaredStageRole("impl")).toBe("work");
-    expect(declaredStageRole("doing")).toBe("work");
-    expect(declaredStageRole("Review")).toBe("review"); // case-insensitive
-    expect(declaredStageRole("done")).toBe("terminal");
-    expect(declaredStageRole("triage")).toBe("entry");
-    expect(declaredStageRole("bikeshedding")).toBeNull();
-  });
-});
-
-describe("boardStageRoles", () => {
-  it("reads the standard 5-stage board", () => {
-    const roles = boardStageRoles(STANDARD.stages, STANDARD.workflow);
-    expect([...(roles.get("triage") ?? [])]).toContain("entry");
-    expect([...(roles.get("ready") ?? [])]).toContain("ready");
-    expect([...(roles.get("impl") ?? [])]).toContain("work");
-    expect([...(roles.get("review") ?? [])]).toContain("review");
-    expect([...(roles.get("done") ?? [])]).toContain("terminal");
-  });
-
-  it("collapses work onto the review stage when the board is too short to separate them", () => {
-    // `todo → doing → done`: the graph makes `todo` both entry and work, which
-    // would leave an implementation agent eligible only for the inbox. `doing`
-    // is where work happens on such a board, so it holds both roles.
-    const roles = boardStageRoles(LEGACY_THREE.stages, LEGACY_THREE.workflow);
-    expect([...(roles.get("doing") ?? [])]).toEqual(
-      expect.arrayContaining(["review", "work"]),
-    );
-    expect([...(roles.get("done") ?? [])]).toContain("terminal");
-    // No stage sits between entry and work, so nothing fills the `ready` role.
-    for (const set of roles.values()) expect(set.has("ready")).toBe(false);
-  });
-});
-
 describe("resolveDeclaredStages", () => {
   it("prefers a literal id match", () => {
     expect(resolveDeclaredStages(["ready", "impl"], STANDARD.stages, STANDARD.workflow)).toEqual([
@@ -108,6 +68,16 @@ describe("resolveDeclaredStages", () => {
     ]);
   });
 
+  it("maps every alias, case-insensitively, onto the role its stage fills", () => {
+    expect(
+      resolveDeclaredStages(
+        ["Review", "done", "triage", "ready", "doing"],
+        RENAMED.stages,
+        RENAMED.workflow,
+      ),
+    ).toEqual(["inbox", "planned", "build", "qa", "shipped"]);
+  });
+
   it("maps a standard-template profile onto the legacy 3-stage board", () => {
     // The LL-1 case. `impl` is the work role, which a 3-stage board spreads
     // across both non-terminal stages (`todo` by the graph, `doing` by the
@@ -120,6 +90,8 @@ describe("resolveDeclaredStages", () => {
     expect(resolveDeclaredStages(["ready", "impl"], LEGACY_THREE.stages, LEGACY_THREE.workflow)).not.toContain(
       "done",
     );
+    // No stage sits between entry and work there, so nothing fills `ready`.
+    expect(resolveDeclaredStages(["ready"], LEGACY_THREE.stages, LEGACY_THREE.workflow)).toEqual([]);
   });
 
   it("returns nothing when the declaration means nothing here", () => {

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { isAppError } from "../errors/app-error.server";
 import { ERROR_CODES } from "../errors/error-codes";
-import { DEFAULT_MIGRATIONS_DIR, runMigrations } from "./migration-runner.server";
+import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
 
 let tempDirs: string[] = [];
@@ -62,7 +62,7 @@ describe("openDatabase", () => {
 describe("runMigrations", () => {
   it("applies the real app migrations", () => {
     const db = makeDb();
-    const result = runMigrations(db, DEFAULT_MIGRATIONS_DIR);
+    const result = runMigrations(db);
 
     // The 13-file chain was squashed into a single pre-prod baseline.
     expect(result.applied).toContain("0001_baseline.sql");
@@ -90,15 +90,15 @@ describe("runMigrations", () => {
 
   it("is idempotent", () => {
     const db = makeDb();
-    runMigrations(db, DEFAULT_MIGRATIONS_DIR);
-    const second = runMigrations(db, DEFAULT_MIGRATIONS_DIR);
+    runMigrations(db);
+    const second = runMigrations(db);
     expect(second.applied).toEqual([]);
     expect(second.alreadyApplied).toContain("0001_baseline.sql");
   });
 
   it("enforces the schema it created (role check, unique email, fk cascade)", () => {
     const db = makeDb();
-    runMigrations(db, DEFAULT_MIGRATIONS_DIR);
+    runMigrations(db);
     const now = new Date().toISOString();
 
     const insertUser = db.prepare(

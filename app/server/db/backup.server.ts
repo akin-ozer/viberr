@@ -74,7 +74,7 @@ import { openDatabase, openDatabaseReadOnly } from "./sqlite.server";
  * (gap 22).
  */
 
-export const BACKUP_FORMAT = "viberr-backup/1";
+const BACKUP_FORMAT = "viberr-backup/1";
 const MANIFEST_NAME = "MANIFEST.json";
 const README_NAME = "README.txt";
 const PROJECTION_NAME = "projection.sqlite";

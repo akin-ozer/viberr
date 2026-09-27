@@ -15,12 +15,8 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
-  ambiguousMentionNote,
-  fanOutMentions,
   mentionNonDeliveryNote,
-  nonMemberMentionNote,
   notifyMentionedUsers,
-  RESERVED_HANDLES,
   resolveMentionTargets,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
@@ -81,7 +77,7 @@ describe("notifyMentionedUsers", () => {
   /**
    * Ruling 497: a mention is about its comment, so the row opens on it (the
    * comment writers all pass its time). Canary: drop the `href` line in
-   * `fanOutMentions` and the row opens the task's top.
+   * `notifyMentionedUsers` and the row opens the task's top.
    */
   it("links the row to the comment it quotes when the writer passes the comment's time", () => {
     const store = setupTestStore(ctx);
@@ -143,16 +139,7 @@ describe("notifyMentionedUsers", () => {
     expect(notificationRows(store)).toHaveLength(0);
   });
 
-  it("skips exactly the reserved handles plus the controller's (ruling 99)", () => {
-    // Derived from the one home in ~/ui/mention-spans; this pins its members.
-    expect([...RESERVED_HANDLES].sort()).toEqual([
-      "agent",
-      "claude",
-      "codex",
-      "controller",
-      "operator",
-    ]);
-    // A person whose handles spell a reserved word is still never the target.
+  it("a person whose handle spells a reserved word (controller, claude) is never the target (ruling 99)", () => {
     const users = [
       { id: "u_ctl", email: "controller@viberr.test", name: "Controller" },
       { id: "u_cla", email: "claude@viberr.test", name: "Claude" },
@@ -189,6 +176,9 @@ describe("notifyMentionedUsers", () => {
     expect(String(row!.text).length).toBeLessThan(300);
     expect(row!.text).toContain("mentioned you");
     expect(row!.text).toContain("…");
+    // Ruling 233: the head window stands when the mention is inside it, with no
+    // leading ellipsis: the quote opens on the comment.
+    expect(String(row!.text)).toContain("mentioned you — “@arda done.");
   });
 
   /**
@@ -225,20 +215,6 @@ describe("notifyMentionedUsers", () => {
     expect(text).toContain("…");
     // The head the old clip showed is text addressed to somebody else.
     expect(text).not.toContain(head);
-  });
-
-  it("keeps the head window when the mention is already inside it (ruling 233)", () => {
-    const store = setupTestStore(ctx);
-    const report = `@arda done. ${"evidence ".repeat(80)}`;
-    notifyMentionedUsers(store.db, {
-      text: report,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-    });
-    const [row] = notificationRows(store);
-    // Unchanged by ruling 233: no leading ellipsis, opens on the comment.
-    expect(String(row!.text)).toContain("mentioned you — “@arda done.");
   });
 
   /**
@@ -292,15 +268,19 @@ describe("mention disambiguation (B-FD2)", () => {
   it("an ambiguous FIRST-NAME mention notifies nobody and is reported back", () => {
     const store = setupTestStore(ctx);
     addSecondArda(store);
-    const result = fanOutMentions(store.db, {
-      text: "@arda can you take acceptance?",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-    });
-    expect(result.mentioned).toEqual([]);
-    expect(result.ambiguous).toEqual(["arda"]);
+    const text = "@arda can you take acceptance?";
+    expect(
+      notifyMentionedUsers(store.db, {
+        text,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([]);
     expect(notificationRows(store)).toHaveLength(0);
+    expect(mentionNonDeliveryNote(store.db, text, store.slug)).toContain(
+      "@arda matches more than one person",
+    );
   });
 
   it("the full display name and its dashed form each route to exactly one Arda", () => {
@@ -359,16 +339,17 @@ describe("mention disambiguation (B-FD2)", () => {
   it("ambiguity is judged before the author exclusion", () => {
     const store = setupTestStore(ctx);
     addSecondArda(store);
-    // One Arda writing "@arda" must NOT be silently redirected to the other.
-    const result = fanOutMentions(store.db, {
-      text: "@arda take it from here",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-      excludeUserId: store.users.arda.id,
-    });
-    expect(result.mentioned).toEqual([]);
-    expect(result.ambiguous).toEqual(["arda"]);
+    // One Arda writing "@arda" must NOT be silently redirected to the other:
+    // with the exclusion applied first, this would read [u_arda_second].
+    expect(
+      notifyMentionedUsers(store.db, {
+        text: "@arda take it from here",
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+        excludeUserId: store.users.arda.id,
+      }),
+    ).toEqual([]);
   });
 
   it("resolveMentionTargets is pure and keeps users-table order", () => {
@@ -394,14 +375,6 @@ describe("mention disambiguation (B-FD2)", () => {
       ambiguous: ["arda"],
       nonMembers: [],
     });
-  });
-
-  it("the non-delivery note names the handle and both unambiguous forms", () => {
-    expect(ambiguousMentionNote([])).toBe("");
-    const note = ambiguousMentionNote(["arda"]);
-    expect(note).toContain("@arda");
-    expect(note).toContain("nobody was notified");
-    expect(note).toContain("email handle");
   });
 
   it("the appended disclosure closes an unclosed ``` fence so the note renders as prose", () => {
@@ -480,18 +453,21 @@ describe("mentions stay inside the project (F33-9)", () => {
     const store = setupTestStore(ctx);
     project(store);
     const handle = localPartOf(store.users.deniz.email);
-    const result = fanOutMentions(store.db, {
-      text: `@${handle} can you look at this sandbox probe?`,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-    });
-    expect(result.mentioned).toEqual([]);
-    expect(result.nonMembers).toEqual([handle]);
-    expect(result.ambiguous).toEqual([]);
+    const text = `@${handle} can you look at this sandbox probe?`;
+    expect(
+      notifyMentionedUsers(store.db, {
+        text,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([]);
     // The whole point: no inbox row exists to leak the project, the task or the
     // comment text to someone who cannot open any of them.
     expect(notificationRows(store)).toHaveLength(0);
+    const note = mentionNonDeliveryNote(store.db, text, store.slug);
+    expect(note).toContain(`@${handle} is not a member of this project`);
+    expect(note).not.toContain("more than one person");
   });
 
   it("the human comment path writes the non-delivery next to the comment", async () => {
@@ -527,30 +503,34 @@ describe("mentions stay inside the project (F33-9)", () => {
   it("the full-name form is refused too — it is membership, not the handle spelling", () => {
     const store = setupTestStore(ctx);
     project(store);
-    const result = fanOutMentions(store.db, {
-      text: `@${store.users.deniz.name} can you look at this?`,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-    });
-    expect(result.mentioned).toEqual([]);
+    expect(
+      notifyMentionedUsers(store.db, {
+        text: `@${store.users.deniz.name} can you look at this?`,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([]);
     expect(notificationRows(store)).toHaveLength(0);
   });
 
   it("members in the same comment are still notified", () => {
     const store = setupTestStore(ctx);
     project(store);
-    const result = fanOutMentions(store.db, {
-      text: `@${localPartOf(store.users.selin.email)} over to you — @${localPartOf(
-        store.users.deniz.email,
-      )} FYI.`,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-    });
-    expect(result.mentioned).toEqual([store.users.selin.id]);
-    expect(result.nonMembers).toEqual([localPartOf(store.users.deniz.email)]);
+    const deniz = localPartOf(store.users.deniz.email);
+    const text = `@${localPartOf(store.users.selin.email)} over to you — @${deniz} FYI.`;
+    expect(
+      notifyMentionedUsers(store.db, {
+        text,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([store.users.selin.id]);
     expect(notificationRows(store)).toHaveLength(1);
+    expect(mentionNonDeliveryNote(store.db, text, store.slug)).toContain(
+      `@${deniz} is not a member of this project`,
+    );
   });
 
   it("a non-member sharing a member's first name keeps the handle AMBIGUOUS, not deliverable", () => {
@@ -565,26 +545,18 @@ describe("mentions stay inside the project (F33-9)", () => {
       name: "Arda Outsider",
       role: "member",
     });
-    const result = fanOutMentions(store.db, {
-      text: "@arda take it from here",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      from: OPERATOR_FROM,
-    });
-    expect(result.mentioned).toEqual([]);
-    expect(result.ambiguous).toEqual(["arda"]);
-    expect(result.nonMembers).toEqual([]);
-  });
-
-  it("the note names the handle and says the person is not a member", () => {
-    expect(nonMemberMentionNote([])).toBe("");
-    const one = nonMemberMentionNote(["elif"]);
-    expect(one).toContain("@elif");
-    expect(one).toContain("is not a member of this project");
-    expect(one).toContain("nobody was notified");
-    expect(nonMemberMentionNote(["elif", "deniz"])).toContain(
-      "@elif, @deniz are not members",
-    );
+    const text = "@arda take it from here";
+    expect(
+      notifyMentionedUsers(store.db, {
+        text,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        from: OPERATOR_FROM,
+      }),
+    ).toEqual([]);
+    const note = mentionNonDeliveryNote(store.db, text, store.slug);
+    expect(note).toContain("@arda matches more than one person");
+    expect(note).not.toContain("not a member");
   });
 
   it("mentionNonDeliveryNote reports BOTH reasons a tag reached nobody", () => {
@@ -603,7 +575,19 @@ describe("mentions stay inside the project (F33-9)", () => {
       store.slug,
     );
     expect(note).toContain("@arda matches more than one person");
+    // The ambiguous half names both unambiguous forms of the remedy.
+    expect(note).toContain("mention the full name (“@First Last”) or the email handle");
     expect(note).toContain(`@${deniz} is not a member of this project`);
+    // Two non-members read as one plural sentence.
+    insertUser(store.db, {
+      id: "u_outsider_2",
+      email: "outsider2@viberr.test",
+      name: "Out Sider",
+      role: "member",
+    });
+    expect(
+      mentionNonDeliveryNote(store.db, `@${deniz} and @outsider2 please look`, store.slug),
+    ).toContain(`@${deniz}, @outsider2 are not members of this project, so nobody was notified`);
     // Nothing to say when every handle routed.
     expect(
       mentionNonDeliveryNote(
@@ -612,20 +596,6 @@ describe("mentions stay inside the project (F33-9)", () => {
         store.slug,
       ),
     ).toBe("");
-  });
-
-  it("a MACHINE author's comment carries the non-member disclosure", () => {
-    const store = setupTestStore(ctx);
-    project(store);
-    const deniz = localPartOf(store.users.deniz.email);
-    const text = `@${deniz} the reviewer approved — acceptance is yours.`;
-    // An agent cannot retag itself, so the comment is the only surface that can
-    // say the tag went nowhere (the withAmbiguityDisclosure rationale, widened).
-    expect(withAmbiguityDisclosure(store.db, text, store.slug)).toContain(
-      "is not a member of this project",
-    );
-    // …and without the slug the caller gets the app-wide answer it asked for.
-    expect(withAmbiguityDisclosure(store.db, text)).toBe(text);
   });
 
   it("a store with no projected project resolves app-wide (membership unknown)", () => {
@@ -1022,7 +992,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       if (NO_FANOUT_BY_DESIGN.has(file)) continue;
       const src = readFileSync(path.join(APP, file), "utf8");
       expect(
-        /\b(notifyMentionedUsers|fanOutMentions)\s*\(/.test(src),
+        /\bnotifyMentionedUsers\s*\(/.test(src),
         `${file} appends comments but never calls the shared mention fan-out`,
       ).toBe(true);
     }

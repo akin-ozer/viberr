@@ -307,6 +307,7 @@ describe("comment composer @-mention autocomplete", () => {
   it("marks the input as a combobox controlling the listbox", async () => {
     const { ce, editor } = await renderComposer();
     expect(ce.getAttribute("role")).toBe("combobox");
+    expect(ce.getAttribute("aria-expanded")).toBe("false");
     await setText(editor, "@de");
     await waitFor(() => expect(ce.getAttribute("aria-expanded")).toBe("true"));
     const controls = ce.getAttribute("aria-controls")!;
@@ -473,13 +474,6 @@ describe("Timeline empty state (UI-40)", () => {
     evidence: null,
     attachments: null,
   };
-
-  it("says the task never started only when there are NO events at all", () => {
-    const { getByText } = renderTimeline([]);
-    expect(
-      getByText(/No activity yet\. This task hasn't started its operator loop\./),
-    ).toBeTruthy();
-  });
 
   it("blames the FILTER when the task has history but the tab matched nothing", () => {
     const { getByText, queryByText } = renderTimeline([typedEvent], true);

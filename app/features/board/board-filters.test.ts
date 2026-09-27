@@ -413,10 +413,4 @@ describe("boardEmptyCopy — the first empty board teaches (R15-10)", () => {
       }),
     ).toBe(bare);
   });
-
-  it("omitting boardTotal keeps the pre-R15-10 bare behavior", () => {
-    expect(
-      boardEmptyCopy({ total: 0, filterLabel: null, query: "", isEntryColumn: true }),
-    ).toBe(bare);
-  });
 });

@@ -34,8 +34,8 @@ import type {
  * the Reconcile and Re-check scopes route actions (POST + CSRF, toast copy from
  * the server). Row clicks navigate to task detail.
  *
- * Panels are presentational (props + callbacks) so jsdom tests render them
- * without a router; GithubViewPage wires fetchers/navigation.
+ * Panels are presentational (props + callbacks); GithubViewPage wires
+ * fetchers/navigation.
  */
 
 type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
@@ -49,7 +49,7 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
    surface. The count is `right sub fine`, the same three classes seven
    other panel heads use; the note is `pol-note after last`. */
 
-export function RepositoryPanel({
+function RepositoryPanel({
   data,
   onOpenTask,
   canSeeCredential,
@@ -201,7 +201,7 @@ export function RepositoryPanel({
   );
 }
 
-export function PullRequestsPanel({
+function PullRequestsPanel({
   prs,
   defaultBranch,
   onOpenTask,
@@ -302,7 +302,7 @@ export function PullRequestsPanel({
   );
 }
 
-export function BranchesPanel({
+function BranchesPanel({
   branches,
   onOpenTask,
 }: {
@@ -577,7 +577,6 @@ export function GithubViewPage({
   const manageActions = canGrant ? (
     <CredentialManageActions
       configured={data.credential.source === "pat"}
-      canManage={canGrant}
       inFlight={inFlightIntent(credFetcher)}
       replaceHref={
         instanceAdmin ? replaceTokenHref(data.credential.connectionId) : null

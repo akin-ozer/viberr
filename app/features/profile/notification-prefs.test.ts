@@ -3,13 +3,7 @@ import {
   NOTIFICATION_KINDS,
   type NotificationKind,
 } from "~/shared/mapping/notification.server";
-import {
-  DEFAULT_NOTIF_PREFS,
-  NOTIF_PREF_CATEGORIES,
-  PROFILE_NTF,
-  mergeNotifPrefs,
-  notifCategoryForKind,
-} from "./notification-prefs";
+import { PROFILE_NTF, mergeNotifPrefs, notifCategoryForKind } from "./notification-prefs";
 
 /**
  * Rulings 131 and 140 (pass 34): the two new notification kinds route through
@@ -27,9 +21,8 @@ describe("notification routing — the pass-34 kinds", () => {
   it("every kind routes to a category that has a profile row and a default", () => {
     for (const kind of NOTIFICATION_KINDS) {
       const category = notifCategoryForKind(kind);
-      expect(NOTIF_PREF_CATEGORIES).toContain(category);
       expect(PROFILE_NTF.map((row) => row.id)).toContain(category);
-      expect(DEFAULT_NOTIF_PREFS[category]).toEqual({ app: true });
+      expect(mergeNotifPrefs(null)[category]).toEqual({ app: true });
     }
   });
 

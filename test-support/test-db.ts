@@ -1,9 +1,6 @@
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import {
-  DEFAULT_MIGRATIONS_DIR,
-  runMigrations,
-} from "~/server/db/migration-runner.server";
+import { runMigrations } from "~/server/db/migration-runner.server";
 import { openDatabase } from "~/server/db/sqlite.server";
 import { createTempDirs } from "./temp-dirs";
 
@@ -32,7 +29,7 @@ export function createTestDbContext(): TestDbContext {
     makeDb(): DatabaseSync {
       const dir = tempDirs.make("viberr-test-");
       const db = openDatabase(path.join(dir, "state", "test.sqlite"));
-      runMigrations(db, DEFAULT_MIGRATIONS_DIR);
+      runMigrations(db);
       openDbs.push(db);
       return db;
     },

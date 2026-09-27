@@ -21,7 +21,6 @@ import {
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import {
   conversationMatchesScope,
-  describeDockScope,
   dockTaskExists,
   getControllerDock,
   unavailableDockView,
@@ -369,25 +368,6 @@ describe("getControllerDock — replies the viewer has not seen (O39-d)", () => 
     });
     expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([newer.id]);
   });
-
-  /**
-   * The dock loads this view with the panel CLOSED too: its working poll keeps
-   * the button's dot honest while a turn runs. That load is nobody reading,
-   * and marking it seen erased the one reply O39-d exists to announce — the
-   * one that lands while a person has closed the dock and stayed on the page.
-   */
-  it("a load with the panel closed marks nothing seen", async () => {
-    const { appendMessage, listUnseenReplies } = await import("~/server/controller/controller-conversations.server");
-    const store = storeWithTwoProjects();
-    const selin = store.users.selin;
-    const asked = thread(store, selin, { projectSlug: SLUG, taskKey: null });
-    appendMessage(store.db, { conversationId: asked.id, author: "controller", text: "Done." });
-    // CANARY: mark seen on every load again and the reply is gone before the
-    // person ever opens the dock.
-    const polled = dock(store, selin, { projectSlug: SLUG, taskKey: null, conversationId: asked.id });
-    expect(polled.messages.map((m) => m.text)).toContain("Done.");
-    expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([asked.id]);
-  });
 });
 
 describe("unavailableDockView — the benign refusal", () => {
@@ -441,26 +421,9 @@ describe("unavailableDockView — the benign refusal", () => {
     expect(JSON.stringify(view)).not.toContain("Viberr Core");
     expect(view.scope.projectSlug).toBe(SLUG);
   });
-
-  it("answers the same benign shape for a project and a task that do not exist", () => {
-    const store = storeWithTwoProjects();
-    const gone = unavailableDockView(
-      store.db,
-      { id: store.users.selin.id },
-      { projectSlug: "no-such-project", taskKey: "NOPE-1" },
-      store.dataRoot,
-    );
-    expect(gone.unavailable).toBe(true);
-    expect(gone.scope.kind).toBe("task");
-    expect(gone.threads).toEqual([]);
-    expect(gone.conversation).toBeNull();
-    expect(gone.scope.contextLine).toBe(
-      "Not available here: this project or task is not open to you.",
-    );
-  });
 });
 
-describe("describeDockScope — the pill and the one-line disclosure", () => {
+describe("getControllerDock's scope — the pill and the one-line disclosure", () => {
   /**
    * The panel header is the person's only cue about WHICH controller context
    * they are typing into, and the context line is the ruling-121 disclosure of
@@ -470,8 +433,10 @@ describe("describeDockScope — the pill and the one-line disclosure", () => {
    */
   it("labels the three scopes, points each at its full surface, and discloses whose authority it acts with", () => {
     const store = storeWithTwoProjects();
+    const scopeOf = (binding: { projectSlug: string | null; taskKey: string | null }) =>
+      dock(store, store.users.selin, { ...binding, conversationId: null }).scope;
 
-    const instance = describeDockScope(store.db, { projectSlug: null, taskKey: null });
+    const instance = scopeOf({ projectSlug: null, taskKey: null });
     expect(instance).toMatchObject({
       kind: "instance",
       projectSlug: null,
@@ -482,7 +447,7 @@ describe("describeDockScope — the pill and the one-line disclosure", () => {
     });
     expect(instance.contextLine).toContain("your projects and org role");
 
-    const board = describeDockScope(store.db, { projectSlug: SLUG, taskKey: null });
+    const board = scopeOf({ projectSlug: SLUG, taskKey: null });
     expect(board).toMatchObject({
       kind: "board",
       projectSlug: SLUG,
@@ -494,7 +459,7 @@ describe("describeDockScope — the pill and the one-line disclosure", () => {
     });
     expect(board.contextLine).toContain("Viberr Core board");
 
-    const task = describeDockScope(store.db, { projectSlug: SLUG, taskKey: "VIB-101" });
+    const task = scopeOf({ projectSlug: SLUG, taskKey: "VIB-101" });
     expect(task).toMatchObject({
       kind: "task",
       projectSlug: SLUG,
@@ -520,9 +485,10 @@ describe("describeDockScope — the pill and the one-line disclosure", () => {
    */
   it("degrades to the slug when the project is not in the projection", () => {
     const store = storeWithTwoProjects();
-    const scope = describeDockScope(store.db, {
+    const { scope } = dock(store, store.users.selin, {
       projectSlug: "deleted-project",
       taskKey: "GONE-9",
+      conversationId: null,
     });
     expect(scope.kind).toBe("task");
     expect(scope.projectName).toBe("deleted-project");

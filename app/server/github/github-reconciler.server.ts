@@ -151,7 +151,7 @@ export type OperatorWake = (
  * a PR still unknown is read again after each later delay, and one GitHub has
  * answered for is left alone.
  */
-export const SIBLING_RECHECK_DELAYS_MS: readonly number[] = [0, 5_000, 20_000];
+const SIBLING_RECHECK_DELAYS_MS: readonly number[] = [0, 5_000, 20_000];
 
 export interface GithubActionContext {
   dataRoot?: string;
@@ -1932,16 +1932,6 @@ export const RECONCILE_POLL_TASK_BUDGET = 20;
  * again, never correctness.
  */
 const reconcileCursors = new Map<string, string>();
-
-/** The cursor map is module-global, so a second budgeted test in the same file
- *  would otherwise inherit the first one's resume point. */
-export function resetReconcileCursorsForTests(): void {
-  reconcileCursors.clear();
-  // F19-19: the per-task lock keys off the data root, which is unique per test
-  // store — but a leaked chain would still hold a settled promise, so drop them
-  // with the cursors.
-  taskReconcileChain.clear();
-}
 
 /** One branched task the pass may visit. `terminal` is sqlite's 0/1 answer to
  *  the archived-or-merged test the SELECT computes. */

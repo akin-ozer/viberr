@@ -144,9 +144,8 @@ export function isDeadDependencyState(state: DependencyState): boolean {
   return state === "failed" || state === "missing";
 }
 
-/** Ruling 355: the labels of the entries that can never complete — client-safe,
- *  so the pre-click control and the server doors read one predicate. */
-export function deadDependencyLabels(entries: readonly DependencyRender[]): string[] {
+/** Ruling 355: the labels of the entries that can never complete. */
+function deadDependencyLabels(entries: readonly DependencyRender[]): string[] {
   return entries.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
 }
 

@@ -13,7 +13,6 @@ import type {
 import {
   assertEffortForBackend,
   assertModelForBackend,
-  claudeProbeOptions,
   curatedCatalog,
   effortsFor,
   defaultEffortFor,
@@ -343,19 +342,19 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
       // so it reads the account of the person who asked (ruling 127).
       expect(env.CLAUDE_CONFIG_DIR).toBe(VIEWER_CREDENTIAL.homeDir);
       expect(env.ANTHROPIC_API_KEY).toBe(VIEWER_CREDENTIAL.secrets[0]);
+      // The host-isolation options a run gets.
+      expect(seen!.settingSources).toEqual([]);
+      expect(seen!.skills).toEqual([]);
+      expect(seen!.plugins).toEqual([]);
+      // Isolation is off in the suite: where no agent is launched the probe
+      // spawns as before (R-launcher-1 below is the launched arm).
+      expect(seen!.spawnClaudeCodeProcess).toBeUndefined();
     } finally {
       delete process.env.VIBERR_CATALOG_PROBE_MARKER;
       delete process.env.MY_DEPLOY_SECRET;
       delete process.env.GITHUB_TOKEN;
       delete process.env.DATABASE_URL;
     }
-  });
-
-  it("carries the same host-isolation options a run gets", () => {
-    const options = claudeProbeOptions(VIEWER_CREDENTIAL);
-    expect(options.settingSources).toEqual([]);
-    expect(options.skills).toEqual([]);
-    expect(options.plugins).toEqual([]);
   });
 });
 
@@ -459,10 +458,6 @@ describe("the live probe runs as the viewer's own OS user (R-launcher-1)", () =>
     } finally {
       ctx.cleanup();
     }
-  });
-
-  it("where no agent is launched the probe spawns as before", () => {
-    expect(claudeProbeOptions(VIEWER_CREDENTIAL).spawnClaudeCodeProcess).toBeUndefined();
   });
 });
 

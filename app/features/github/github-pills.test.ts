@@ -144,13 +144,6 @@ describe("checksPill / reviewPill (P13-D-28)", () => {
 // Design pass 2026-09-08: the second pill tier lives in this vocabulary, not in
 // the components — a fill is a problem or a demand, an outline describes.
 describe("the quiet tier marks the settled facts, never the states that want a person", () => {
-  it("settled facts are quiet", () => {
-    expect(syncPill("merged").quiet).toBe(true);
-    expect(syncPill("synced").quiet).toBe(true);
-    expect(prStatePill("merged").quiet).toBe(true);
-    expect(reviewPill("approved").quiet).toBe(true);
-    expect(connectionPill({ status: "connected" }).quiet).toBe(true);
-  });
   it("demands keep their fill", () => {
     for (const view of [
       syncPill("behind_main"),

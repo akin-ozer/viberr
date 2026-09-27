@@ -1,7 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -35,9 +34,6 @@ import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
 } from "./update-branch-operator.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 /**
  * N19-9, decision half. The owner ruled this operator-decided: the operator

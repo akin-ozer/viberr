@@ -65,12 +65,7 @@ describe("dependency references — the task key and nothing else", () => {
   });
 });
 
-import {
-  deadDependencyLabels,
-  holdEntriesSentence,
-  holdRefusal,
-  type DependencyRender,
-} from "./dependencies";
+import { holdEntriesSentence, holdRefusal, type DependencyRender } from "./dependencies";
 
 const entry = (label: string, state: DependencyRender["state"]): DependencyRender => ({
   ref: label,
@@ -107,13 +102,10 @@ describe("ruling 355: holdRefusal names an entry that can never complete", () =>
     expect(s).not.toContain("releases it when every entry is done");
   });
 
-  it("deadDependencyLabels reads the entries' states", () => {
-    const entries = [
-      { ref: "JC-3", label: "JC-3", state: "failed" as const, taskKey: "JC-3" },
-      { ref: "JC-4", label: "JC-4", state: "open" as const, taskKey: "JC-4" },
-      { ref: "JC-40", label: "JC-40", state: "missing" as const, taskKey: null },
-    ];
-    expect(deadDependencyLabels(entries)).toEqual(["JC-3", "JC-40"]);
+  it("a missing entry can never complete either", () => {
+    expect(holdRefusal("JC-9", [entry("JC-40", "missing")], "running an agent on it")).toContain(
+      "JC-40 can never complete",
+    );
   });
 });
 

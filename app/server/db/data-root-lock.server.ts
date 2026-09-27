@@ -100,15 +100,6 @@ export type LockVerdict = "stale" | "held" | "unknown-holder";
  */
 export type LockOwnership = "held" | "stolen" | "unverifiable";
 
-/** Injected fs probes for {@link verifyLockOwnership}; tests substitute these to
- *  simulate a steal without touching a real descriptor (mirrors the `isAlive`
- *  injection used by `acquireDataRootLock`). */
-export interface LockOwnershipProbes {
-  fstat: (fd: number) => { ino: bigint; dev: bigint };
-  stat: (path: string) => { ino: bigint; dev: bigint };
-  readHolder: (path: string) => LockHolder | null;
-}
-
 export interface DataRootLock {
   /** Absolute path of the lock file. */
   path: string;
@@ -125,7 +116,7 @@ export interface DataRootLock {
    */
   abandon(): void;
   /** Re-verify this process still owns the file at `path`. See {@link verifyLockOwnership}. */
-  verifyOwnership(probes?: LockOwnershipProbes): LockOwnership;
+  verifyOwnership(): LockOwnership;
 }
 
 export interface AcquireDataRootLockOptions {
@@ -401,18 +392,6 @@ export function judgeDataRootLock(stateDir: string): DataRootLockJudgement {
   return { verdict: "present", holder: parseHolder(raw) };
 }
 
-const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {
-  fstat: (fd) => {
-    const s = fstatSync(fd, { bigint: true });
-    return { ino: s.ino, dev: s.dev };
-  },
-  stat: (p) => {
-    const s = statSync(p, { bigint: true });
-    return { ino: s.ino, dev: s.dev };
-  },
-  readHolder,
-};
-
 /**
  * Re-verify that the file at `lock.path` is STILL the one this process opened
  * (F18-5). The B-FD1 lock keeps an fd open for the process lifetime; if a store
@@ -430,27 +409,25 @@ const DEFAULT_OWNERSHIP_PROBES: LockOwnershipProbes = {
  *     does; a bootId-less injected/legacy self trusts the inode match). A null
  *     read is a torn/racing read, not proof → `unverifiable`.
  *
- * Pure + injectable so a test can simulate every branch (mirrors `classifyLock`).
+ * Every branch is reachable on a real lock: a closed descriptor, a deleted or
+ * replaced file, a file another boot rewrote in place, an empty file.
  */
-export function verifyLockOwnership(
-  lock: Pick<DataRootLock, "fd" | "path" | "holder">,
-  probes: LockOwnershipProbes = DEFAULT_OWNERSHIP_PROBES,
-): LockOwnership {
+function verifyLockOwnership(lock: Pick<DataRootLock, "fd" | "path" | "holder">): LockOwnership {
   let held: { ino: bigint; dev: bigint };
   try {
-    held = probes.fstat(lock.fd);
+    held = fstatSync(lock.fd, { bigint: true });
   } catch {
     return "stolen";
   }
   let onDisk: { ino: bigint; dev: bigint };
   try {
-    onDisk = probes.stat(lock.path);
+    onDisk = statSync(lock.path, { bigint: true });
   } catch {
     return "stolen"; // ENOENT — the lock file was deleted while we held it.
   }
   if (held.ino !== onDisk.ino || held.dev !== onDisk.dev) return "stolen";
   if (lock.holder.bootId) {
-    const onDiskHolder = probes.readHolder(lock.path);
+    const onDiskHolder = readHolder(lock.path);
     if (!onDiskHolder) return "unverifiable";
     if (onDiskHolder.bootId !== lock.holder.bootId) return "stolen";
   }
@@ -578,8 +555,8 @@ export function acquireDataRootLock(
       unlinkOnRelease = false;
       release();
     };
-    const verifyOwnership = (probes?: LockOwnershipProbes): LockOwnership =>
-      verifyLockOwnership({ fd, path: lockPath, holder: self }, probes);
+    const verifyOwnership = (): LockOwnership =>
+      verifyLockOwnership({ fd, path: lockPath, holder: self });
     const lock: DataRootLock = {
       path: lockPath,
       holder: self,

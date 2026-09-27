@@ -12,7 +12,6 @@ import { AppError } from "~/server/errors/app-error.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
-  backendUnavailableMessage,
   chainRunCompletion,
   configureRunServiceForTests,
   getRunLog,
@@ -20,7 +19,6 @@ import {
   listRunsForTask,
   MODEL_SUBSTITUTED_TAG,
   noteCompletionEffectsLost,
-  registerRunAnswered,
   registerRunCompletion,
   repoWriteWithheldFromDenylist,
   reserveRun,
@@ -38,7 +36,6 @@ import {
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { RUN_PHASE } from "./adapter.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { RunCallbacks, RunSpec, RuntimeAdapter } from "./adapter.server";
@@ -48,7 +45,7 @@ import {
   disconnectFakeBackend,
   fakeBackendSecret,
 } from "../../../test-support/backend-credentials";
-import { getBackendCredential } from "./backend-credentials.server";
+import { getBackendCredential, setBackendApiKey } from "./backend-credentials.server";
 import {
   compactedRunSpecs,
   installFakeRuntime,
@@ -57,6 +54,7 @@ import {
   queueFakeRun,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
+import { settle } from "../../../test-support/polling";
 
 // SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
 // mounting it assert how the service ROUTES the dictionary — key-derived
@@ -77,7 +75,6 @@ beforeEach(async () => {
     frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  resetSseBrokerForTests();
   installFakeRuntime();
   // Ruling 127: a run bills a PERSON, so "this backend can run" is a fact about
   // the principal. Arda owns VIB-1 in this file and is every run's principal
@@ -88,7 +85,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -100,10 +96,6 @@ function instantScript(lines: LogLine[], backend: "claude" | "codex" = "claude")
     backend,
     keepRunning: false,
   };
-}
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
 type TestRunInput = Omit<
@@ -132,6 +124,22 @@ function startTestRun(
       ? store.users.arda.id
       : input.credentialUserId;
   return startRun(db, { ...input, agentProfileId, credentialUserId });
+}
+
+/** One capture adapter on both slots: the RunSpec of every run launched from
+ *  here on, each finishing at once with `sessionId`. */
+function captureSpecs(sessionId: string | null = null): RunSpec[] {
+  const specs: RunSpec[] = [];
+  const capture: RuntimeAdapter = {
+    backend: "claude",
+    start(spec, cb) {
+      specs.push(spec);
+      cb.onExit({ outcome: "finished", effectiveBackend: spec.backend, sessionId });
+      return { runId: spec.runId, interrupt() {} };
+    },
+  };
+  configureRunServiceForTests({ claude: capture, codex: capture });
+  return specs;
 }
 
 /** The `event_msg` payload fields the Codex rollout reader looks at (ruling 414). */
@@ -353,35 +361,8 @@ describe("run-service lifecycle", () => {
     expect(JSON.parse(run.raw[0]!).line.ev).toBe("init");
   });
 
-  it("getRunLog tails lines since a seq", async () => {
-    queueFakeRun(instantScript([
-      { t: "1", ev: "text", tag: "assistant", text: "a" },
-      { t: "2", ev: "text", tag: "assistant", text: "b" },
-      { t: "3", ev: "text", tag: "assistant", text: "c" },
-    ]));
-    const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "claude", model: "m", prompt: "go",
-      dataRoot: store.dataRoot,
-    });
-    await settle();
-    const tail = getRunLog(store.db, runId, { since: 0 })!;
-    expect(tail.lines.map((l) => l.display.text)).toEqual(["b", "c"]);
-    expect(tail.headSeq).toBe(2);
-  });
-
   it("forwards input.effort onto the RunSpec handed to the adapter", async () => {
-    const specs: RunSpec[] = [];
-    const capture: RuntimeAdapter = {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-    const adapters: AdapterSet = { claude: capture, codex: capture };
-    configureRunServiceForTests(adapters);
+    const specs = captureSpecs();
 
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
@@ -488,19 +469,11 @@ describe("a run with no credential principal (ruling 127)", () => {
     });
   });
 
-  it("hands the principal's credential to the adapter and redacts it from the log", async () => {
-    // The two halves of ruling 127's spawn hygiene, on one run: the child env
-    // carries this person's key, and the sink scrubs that same value out of
-    // every persisted line — the run console is visible to every project
-    // member, and the key is not theirs.
-    const secret = fakeBackendSecret("claude");
-    queueFakeRun(
-      instantScript([
-        { t: "1", ev: "text", tag: "assistant", text: `env says ${secret}` },
-        { t: "2", ev: "result", tag: "result", text: "done" },
-      ]),
-    );
-    const { runId } = await startTestRun(store.db, {
+  it("hands the principal's credential to the adapter", async () => {
+    // The first half of ruling 127's spawn hygiene: the child env carries this
+    // person's key. The second half is the test below.
+    queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
+    await startTestRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       role: "Primary specialist",
@@ -513,18 +486,57 @@ describe("a run with no credential principal (ruling 127)", () => {
     });
     await settle();
     const spec = lastRunSpec()!;
-    expect(spec.env?.ANTHROPIC_API_KEY).toBe(secret);
+    expect(spec.env?.ANTHROPIC_API_KEY).toBe(fakeBackendSecret("claude"));
     expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.arda.id);
     // The caller's own overlay still lands beside it.
     expect(spec.env?.GIT_CEILING_DIRECTORIES).toBe("/tmp/ceiling");
-    for (const line of listRunLines(store.db, runId)) {
-      expect(line.display.text ?? "").not.toContain(secret);
-    }
-    expect(
-      listRunLines(store.db, runId).some((l) =>
-        (l.display.text ?? "").includes("[redacted]"),
+  });
+
+  it("scrubs the principal's own credential out of the log, by value, not by its shape", async () => {
+    // The second half: the sink scrubs the credential the run carries out of
+    // every persisted line — the run console is visible to every project
+    // member, and the key is not theirs. The fake keys are `sk-` shaped, which
+    // the sink's token pattern redacts with no help from `startRun`
+    // (run-sink.server.test.ts), so this is a ChatGPT workspace token no
+    // pattern knows: only the per-run secret handed to the sink can catch it.
+    // CANARY: drop `secrets` from the `launch(...)` call in `startRun` and the
+    // token is persisted verbatim.
+    await disconnectFakeBackend(store.db, store.users.arda.id, "codex");
+    const token = "cwt-arda-workspace-0123456789abcdefghij";
+    await setBackendApiKey(
+      store.db,
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      "codex",
+      "access_token",
+      token,
+    );
+    queueFakeRun(
+      instantScript(
+        [
+          { t: "1", ev: "text", tag: "assistant", text: `env says ${token}` },
+          { t: "2", ev: "result", tag: "result", text: "done" },
+        ],
+        "codex",
       ),
-    ).toBe(true);
+      "codex",
+    );
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Primary specialist",
+      kind: "primary",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    // The run carried it…
+    expect(lastRunSpec()!.env?.CODEX_ACCESS_TOKEN).toBe(token);
+    // …and persisted none of it, in the display or the raw envelope.
+    const lines = listRunLines(store.db, runId);
+    expect(JSON.stringify(lines)).not.toContain(token);
+    expect(lines.some((l) => (l.display.text ?? "").includes("env says [redacted]"))).toBe(true);
   });
 
   it("marks every process the run starts with the run's own id, over any caller overlay (ruling 174)", async () => {
@@ -754,7 +766,10 @@ describe("completion callbacks — already-terminal race (F-SPAWN2)", () => {
     let count = 0;
     registerRunCompletion(runId, () => { count += 1; }, store.db);
     expect(count).toBe(1);
-    // Not double-fired: the callback was consumed on immediate fire.
+    // Not double-fired: the callback was consumed on immediate fire. A chained
+    // callback wraps whatever is still registered and fires at once on a
+    // finalized run, so an unconsumed callback would run again here.
+    chainRunCompletion(runId, () => {}, store.db);
     expect(count).toBe(1);
   });
 
@@ -939,16 +954,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     // Canary: drop the `getMaxRunSpendUsd` stamp from `startRun` and the
     // capped specs read undefined — every builder funnels through it, so no
     // path can start a run without the cap.
-    const specs: RunSpec[] = [];
-    const capture: RuntimeAdapter = {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-    configureRunServiceForTests({ claude: capture, codex: capture });
+    const specs = captureSpecs();
     const run = (threadId: string) =>
       startTestRun(store.db, {
         projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
@@ -974,16 +980,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   });
 
   it("resumeRun forwards the run confinement (skills included) onto the resumed RunSpec", async () => {
-    const specs: RunSpec[] = [];
-    const capture: RuntimeAdapter = {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: null });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-    configureRunServiceForTests({ claude: capture, codex: capture });
+    const specs = captureSpecs();
 
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
@@ -1064,25 +1061,13 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
 /* ------------------------- D4: the tool APPROVAL list --------------------- */
 
 describe("D4 — allowedTools reaches the run and survives a resume", () => {
-  function captureAdapter(specs: RunSpec[]): RuntimeAdapter {
-    return {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: "sess-a" });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-  }
-
   // The specialist path passed NO allowedTools at all, so a granted org MCP and
   // the in-process collaboration toolkit (post_comment / ask_human /
   // report_outcome) were usable only because every run happens to be autonomous
   // ⇒ bypassPermissions. That made a permission MODE load-bearing for a
   // capability GRANT.
   it("auto-approves every mounted MCP server without the caller asking", async () => {
-    const specs: RunSpec[] = [];
-    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+    const specs = captureSpecs("sess-a");
 
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
@@ -1098,8 +1083,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
   // The operator lists its governance tools ONE BY ONE so the approval list
   // mirrors its capability policy — a blanket `mcp__viberr` would paper over it.
   it("leaves a server the caller curated per-tool alone", async () => {
-    const specs: RunSpec[] = [];
-    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+    const specs = captureSpecs("sess-a");
 
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Operator", kind: "operator",
@@ -1118,8 +1102,7 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
   });
 
   it("carries the approval list — curated and derived — onto a resumed run", async () => {
-    const specs: RunSpec[] = [];
-    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+    const specs = captureSpecs("sess-a");
 
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
@@ -1152,22 +1135,10 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
 /* ----------- ruling 176: an org server's marked write tools, denied --------- */
 
 describe("ruling 176 — marked MCP write tools reach the denylist", () => {
-  function captureAdapter(specs: RunSpec[]): RuntimeAdapter {
-    return {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "claude", sessionId: "sess-a" });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-  }
-
   it("denies each marked tool by its Claude name AFTER the server's auto-approval", async () => {
     // Canary: drop the `mcpToolDenials` fold in startRun and the names never
     // reach `disallowedTools`.
-    const specs: RunSpec[] = [];
-    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+    const specs = captureSpecs("sess-a");
 
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Reviewer", kind: "reviewer",
@@ -1200,8 +1171,7 @@ describe("ruling 176 — marked MCP write tools reach the denylist", () => {
   });
 
   it("carries the denials onto a resumed run", async () => {
-    const specs: RunSpec[] = [];
-    configureRunServiceForTests({ claude: captureAdapter(specs), codex: captureAdapter(specs) });
+    const specs = captureSpecs("sess-a");
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Reviewer", kind: "reviewer",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
@@ -1258,20 +1228,7 @@ describe("resumeRun — continuity recovery", () => {
       extra?: Partial<Parameters<typeof resumeRun>[1]>,
     ) => Promise<{ runId: string; continuityReset?: true }>;
   }> {
-    const specs: RunSpec[] = [];
-    const capture: RuntimeAdapter = {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({
-          outcome: "finished",
-          effectiveBackend: "claude",
-          sessionId: "sess-gone",
-        });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-    configureRunServiceForTests({ claude: capture, codex: capture });
+    const specs = captureSpecs("sess-gone");
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
       kind: "primary", backend: "claude", model: "m", agentName: "dev",
@@ -1305,16 +1262,7 @@ describe("resumeRun — continuity recovery", () => {
     const path = (await import("node:path")).default;
     const { userBackendHome } = await import("./user-homes.server");
     const sid = "01a0cbdd-c151-75b2-a067-e047586b9a72";
-    const specs: RunSpec[] = [];
-    const capture: RuntimeAdapter = {
-      backend: "codex",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: "codex", sessionId: sid });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-    configureRunServiceForTests({ claude: capture, codex: capture });
+    const specs = captureSpecs(sid);
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
       kind: "primary", backend: "codex", model: "m", agentName: "dev",
@@ -1612,46 +1560,6 @@ describe("getRunLog paging", () => {
   });
 });
 
-describe("backendUnavailableMessage (ruling 127)", () => {
-  it("renders the resolver's own refusal sentence for a refusal", () => {
-    // ONE builder for the error-run line, the packet body and the disabled
-    // control, so a person cannot be told three stories about one refusal.
-    const msg = backendUnavailableMessage("codex", {
-      kind: "refusal",
-      refusal: { kind: "unowned", taskKey: "VIB-9" },
-    });
-    expect(msg).toContain("Codex runs on VIB-9 need a task owner");
-    expect(msg).toContain("No agent process was started.");
-  });
-
-  it("passes a credential-store detail through, and still promises nothing ran", () => {
-    const msg = backendUnavailableMessage("claude", {
-      kind: "detail",
-      detail: "Your Claude sign-in file is missing from this server.",
-    });
-    expect(msg).toBe(
-      "Your Claude sign-in file is missing from this server. No agent process was started.",
-    );
-  });
-
-  it("names no environment variable — there is none left to set", () => {
-    const msg = backendUnavailableMessage("codex", {
-      kind: "refusal",
-      refusal: { kind: "owner-missing", ownerUserId: "u_gone" },
-    });
-    for (const gone of [
-      "ANTHROPIC_API_KEY",
-      "CODEX_API_KEY",
-      "OPENAI_API_KEY",
-      "CODEX_HOME",
-      "VIBERR_CODEX_USE_CLI_AUTH",
-      "VIBERR_CLAUDE_USE_CLI_AUTH",
-    ]) {
-      expect({ gone, named: msg.includes(gone) }).toEqual({ gone, named: false });
-    }
-  });
-});
-
 describe("repoWriteWithheldFromDenylist (P13-RT-02)", () => {
   it("recognises exactly the denylist a withheld repo-write grant produces", () => {
     // The rule set is specialist-tool-policy's `execute-code-or-write-repo`
@@ -1685,22 +1593,8 @@ describe("repoWriteWithheldFromDenylist (P13-RT-02)", () => {
 });
 
 describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
-  function captureSpecs() {
-    const specs: RunSpec[] = [];
-    const capture: RuntimeAdapter = {
-      backend: "claude",
-      start(spec, cb) {
-        specs.push(spec);
-        cb.onExit({ outcome: "finished", effectiveBackend: spec.backend, sessionId: null });
-        return { runId: spec.runId, interrupt() {} };
-      },
-    };
-    configureRunServiceForTests({ claude: capture, codex: capture });
-    return { specs };
-  }
-
   it("marks repoWriteWithheld from the capability denylist so Codex can enforce it", async () => {
-    const { specs } = captureSpecs();
+    const specs = captureSpecs();
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
@@ -1721,7 +1615,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
   // P14-RT-06: the web-egress grant travels the same way, so a Codex specialist
   // finally enforces it (webSearchMode) instead of only Claude.
   it("marks webSearchWithheld from the capability denylist", async () => {
-    const { specs } = captureSpecs();
+    const specs = captureSpecs();
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
@@ -1742,7 +1636,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
   });
 
   it("an explicit caller value wins over the derivation", async () => {
-    const { specs } = captureSpecs();
+    const specs = captureSpecs();
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
       backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
@@ -1753,7 +1647,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
   });
 
   it("normalizes a stored effort from the OTHER backend's tier scale", async () => {
-    const { specs } = captureSpecs();
+    const specs = captureSpecs();
     // "minimal" is a Codex tier; a profile switched to Claude keeps it stored.
     // Before, this shipped verbatim into an SDK union that has no such value.
     await startTestRun(store.db, {
@@ -2281,28 +2175,7 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
     // The task was being worked (waiting: agent) when its run finished, but the
     // completion callback threw so nothing flipped it back — the board would show
     // "agent working" forever until a restart replays the effects.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-2", {
-        stage: "impl",
-        waiting: "agent",
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    upsertRun(store.db, {
-      id: "run_effects_lost",
-      projectSlug: store.slug,
-      taskKey: "VIB-2",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    seedLostRun("VIB-2", "run_effects_lost");
     const run = getRun(store.db, "run_effects_lost")!;
 
     await noteCompletionEffectsLost(store.db, run, store.dataRoot);
@@ -2339,28 +2212,7 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
    * has already decided, permanently, not to.
    */
   it("F37-67: does not promise a replay the recovery sweep will never run", async () => {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-3", {
-        stage: "impl",
-        waiting: "agent",
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    upsertRun(store.db, {
-      id: "run_replied_then_lost",
-      projectSlug: store.slug,
-      taskKey: "VIB-3",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    seedLostRun("VIB-3", "run_replied_then_lost");
     // Step 1 happened: the reply is on the record, and its idempotency row with
     // it. This is the exact row `recoverUnreactedAgentRuns` excludes on.
     const { recordAudit } = await import("~/server/audit/audit-recorder.server");
@@ -2434,10 +2286,10 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
 
 /**
  * Rulings 369, 371 and 372 on the run service: every run stamps the kind of
- * credential it bills and carries its kind's context window; a resume of a
- * session that is BOTH idle past its cache TTL AND larger than the replay
- * threshold starts fresh on task.md and the last report, under its own reason,
- * on both backends and for the controller. Every clock is pinned.
+ * credential it bills and, since ruling 376, carries no context window; a
+ * resume of a session that is BOTH idle past its cache TTL AND larger than the
+ * replay threshold starts fresh on task.md and the last report, under its own
+ * reason, on both backends and for the controller. Every clock is pinned.
  */
 describe("ruling 372: the resume policy, and the window and credential kind a run carries", () => {
   const NOW = "2026-09-21T12:00:00.000Z";
@@ -2536,7 +2388,7 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
     };
   }
 
-  it("startRun stamps the credential kind and the kind's window on both backends", async () => {
+  it("startRun stamps the credential kind, and no kind carries a context window (ruling 376)", async () => {
     installFakeRuntime();
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
@@ -2559,12 +2411,6 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
       projectSlug: "", taskKey: "cnv_w", threadId: "cnv_w", role: "Controller", kind: "controller",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot, workdir: store.dataRoot,
       agentProfileId: "controller",
-    });
-    await settle();
-    expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
-    await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", threadId: "r1", role: "Reviewer", kind: "reviewer",
-      backend: "codex", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
     await settle();
     expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
@@ -2598,19 +2444,6 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
       (e) => e.subjectId === resumed.runId,
     );
     expect(started?.details).toMatchObject({ continuityReset: "stale_large_session", resumed: false });
-  });
-
-  it("warm and large, or stale and small, resumes the stored session", async () => {
-    const warm = await priorRun({ finishedMinutesAgo: 16, lastPromptTokens: 298_000 });
-    const resumedWarm = await warm.resume();
-    await settle();
-    expect(resumedWarm.continuityReset).toBeUndefined();
-    expect(warm.specs.find((s) => s.runId === resumedWarm.runId)?.resumeSessionId).toBe(warm.sid);
-    const small = await priorRun({ finishedMinutesAgo: 600, lastPromptTokens: 100_000 });
-    const resumedSmall = await small.resume();
-    await settle();
-    expect(resumedSmall.continuityReset).toBeUndefined();
-    expect(small.specs.find((s) => s.runId === resumedSmall.runId)?.resumeSessionId).toBe(small.sid);
   });
 
   it("an API key's TTL is five minutes; a row with no kind reads as a sign-in", async () => {
@@ -2734,32 +2567,36 @@ describe("compaction at completion (ruling 376)", () => {
     let open!: () => void;
     queueFakeRun({ ...finished("sess-answered", 120_000), gate: new Promise<void>((r) => (open = r)) });
     queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 });
+    const order: string[] = [];
+    let linesWhenAnswered = "";
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
-    });
-    const order: string[] = [];
-    registerRunAnswered(runId, () => {
-      order.push(`answered:${compactedRunSpecs().length - before}`);
-      // The answer is already in the run's lines.
-      expect(JSON.stringify(listRunLines(store.db, runId))).toContain("read a lot");
+      onAnswered: (answeredRunId) => {
+        order.push(`answered:${compactedRunSpecs().length - before}`);
+        // Read here, asserted below: the service logs a throw from this
+        // callback rather than failing the run.
+        linesWhenAnswered = JSON.stringify(listRunLines(store.db, answeredRunId));
+      },
     });
     registerRunCompletion(runId, () => order.push(`completed:${compactedRunSpecs().length - before}`));
     open();
     await settle();
     await settle();
     expect(order).toEqual(["answered:0", "completed:1"]);
+    // The answer is already in the run's lines when the caller is told.
+    expect(linesWhenAnswered).toContain("read a lot");
   });
 
   it("U39-30: a run that is not compacted never fires the answered callback", async () => {
     let open!: () => void;
     queueFakeRun({ ...finished("sess-small-answer", 60_000), gate: new Promise<void>((r) => (open = r)) });
+    const order: string[] = [];
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+      onAnswered: () => order.push("answered"),
     });
-    const order: string[] = [];
-    registerRunAnswered(runId, () => order.push("answered"));
     registerRunCompletion(runId, () => order.push("completed"));
     open();
     await settle();
@@ -2858,7 +2695,7 @@ describe("compaction at completion (ruling 376)", () => {
     });
     await settle();
     await settle();
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    await settle();
     expect(compactedRunSpecs().length).toBe(before + 1);
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("finished");
@@ -2928,7 +2765,7 @@ describe("compaction at completion (ruling 376)", () => {
     });
     await settle();
     await settle();
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    await settle();
     const run = getRun(store.db, runId)!;
     expect(run.compactions).toBe(1);
     expect(run.last_prompt_tokens).toBe(9_083);

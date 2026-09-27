@@ -82,32 +82,31 @@ import {
 /**
  * Ruling 498: the operator's `correct_knowledge_doc`, which ruling 378 built as
  * `propose_ruling` for the project's rulings alone and ruling 483 widened into
- * `propose_kb_correction`. Exported so the Codex plan's field descriptions can
- * be checked against the same duties.
+ * `propose_kb_correction`.
  */
-export const KB_CORRECTION_TOOL_DESCRIPTION =
+const KB_CORRECTION_TOOL_DESCRIPTION =
   "Correct a KNOWLEDGE BASE when work on this task has PROVEN a passage of it wrong or unachievable: the project's settled rulings (omit `kb`), or any knowledge base a run on this task was given, yours or an engaged agent's (a dossier's platform fact, a runbook step). The correction is WRITTEN into the document at once (ruling 498): every run that reads the document from then on reads your text, and a person undoes it from the project's Controller page if they disagree. Use it when your own answer to a human would otherwise be \"this needs a ruling change before X\" or \"the knowledge base is out of date\": a gate command the host cannot run, a convention a review has settled differently, a version or path an agent measured, an environment fact agents keep re-deriving. " +
   "When an agent's report says a knowledge-base passage is wrong and no correction of it is on the timeline, make it for them with their evidence: an agent on Codex has no tool to make one itself. " +
   "Read the document first (read_knowledge_doc) and send `replaces` EXACTLY as it stands there, list marker and emphasis included, and `text` as the document should read instead, in its own form: the corrected fact, not the story of how you found it (that goes in `evidence`). Replace the smallest passage that is wrong, with enough of the line that it stands once. Bring evidence: the command and its output, or the run and verdict that showed it. A refusal writes nothing and says what to fix. Never write back a correction a person undid: the refusal names them, so put your evidence to them instead. " +
   "It is also how a MISSING convention gets written (ruling 418): when a reviewer blocks on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings say nothing about it, write the convention into the rulings document it belongs to, with the verdict as the evidence, alongside the rework you dispatch: omit `replaces` to add it at the end of the document, or send the passage it belongs after as `replaces` and that passage followed by the convention as `text`. One convention per class, never one per finding.";
 
 /**
- * Ruling 487 (F40-65): the operator's `schedule_task_action`. Exported so a
- * test pins the doctrine it carries: a wait on a clock is scheduled, never
- * asked, and a hold a pending schedule explains needs no packet.
+ * Ruling 487 (F40-65): the operator's `schedule_task_action`. The doctrine it
+ * carries: a wait on a clock is scheduled, never asked, and a hold a pending
+ * schedule explains needs no packet.
  */
-export const SCHEDULE_TOOL_DESCRIPTION =
+const SCHEDULE_TOOL_DESCRIPTION =
   "Schedule a future run on THIS task (ruling 487): your own re-run, or a deployed agent's run with a directive, between 1 minute and 28 days out. " +
   "Use it whenever the task has to wait for a moment in time: a deployed cron run to read, a provider window to reopen, a deploy to land. That wait is scheduled, never asked: do not ask a person to schedule it or to route it through the controller, and do not ask anyone to confirm it. " +
   "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn. The entry is the record, get_task lists it under `schedules`, and Viberr does not treat the task as stranded while it is pending. " +
   "It is the run you could start now, with a date on it: an agent you could not dispatch now (not deployed, held by a dependency, not eligible at the task's stage) cannot be scheduled either. It fires on the profile deployed when it fires, and the reply names the schedule id.";
 
 /**
- * Ruling 488 (F40-67): the operator's `relay_to_task`. Exported so a test pins
- * the doctrine it carries: text meant for another task is relayed, never
- * handed to a person to post by hand.
+ * Ruling 488 (F40-67): the operator's `relay_to_task`. The doctrine it
+ * carries: text meant for another task is relayed, never handed to a person
+ * to post by hand.
  */
-export const RELAY_TOOL_DESCRIPTION =
+const RELAY_TOOL_DESCRIPTION =
   "Post on ANOTHER task in this project (ruling 488): results a goal or a person told this task to post there, numbers another task depends on, a finding its owner must see. " +
   "It lands on that task's timeline as your comment, headed \"From <this task> (operator):\", its operator is woken with it the way an @operator comment wakes it, and this task's timeline gets one line, \"Relayed to <task>: <first line>\". " +
   "Use it instead of handing text to a person: never ask anyone to copy, paste or post text between tasks, and never ask a person to confirm a relay landed, since the line on this task is the record. " +
@@ -207,7 +206,7 @@ type TransitionInput = Parameters<typeof operatorTransitionStage>[2];
  * decision to make. Contradicting them here would risk an operator that stops
  * delivering — so the push is named as the SERVER's action, which is what it is.
  */
-export const OPERATOR_TOOLKIT_INSTRUCTIONS =
+const OPERATOR_TOOLKIT_INSTRUCTIONS =
   "Viberr coordination tools. You are the task operator. Use these tools to coordinate the task. " +
   "You never write code: you cannot edit, create or commit files in the repository checkout, and " +
   "the file-writing and shell tools are withheld from this run — delivery is a decision you make " +

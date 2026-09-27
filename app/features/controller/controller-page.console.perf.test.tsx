@@ -23,9 +23,6 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
  * nothing. Thirty seconds of a steady turn pass.
  */
 
-// jsdom's Element carries no `scrollIntoView`; the transcript calls it on mount.
-Element.prototype.scrollIntoView = () => {};
-
 class FakeEventSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;

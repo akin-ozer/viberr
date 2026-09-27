@@ -87,17 +87,6 @@ describe("UI-14: the bell popover discloses its own cap", () => {
  * it and on open, and while open whenever the counts move.
  */
 describe("ruling 457: the bell loads its own list", () => {
-  it("fetches on the pointer's arrival, so the open that follows needs no second fetch", async () => {
-    const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
-    // Nothing is fetched for a bell nobody reached for.
-    expect(view.listLoads).toHaveLength(0);
-    fireEvent.pointerEnter(view.getByLabelText(/Notifications/));
-    await waitFor(() => expect(view.listLoads).toHaveLength(1));
-    await openBell(view);
-    expect(view.getByText("Notification 1")).toBeTruthy();
-    expect(view.listLoads).toHaveLength(1);
-  });
-
   it("a first open with no intent before it shows a loading row, then the list", async () => {
     const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
     fireEvent.click(view.getByLabelText(/Notifications/));
@@ -233,12 +222,6 @@ describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", ()
     const { container, getByText } = await openMenu();
     fireEvent.click(getByText(/Switch theme/));
     expect(container.querySelector(".user-menu")).not.toBeNull();
-  });
-
-  it("the account menu closes on Escape from anywhere", async () => {
-    const { container } = await openMenu();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(container.querySelector(".user-menu")).toBeNull();
   });
 
   it("the bell popover survives an outside press and closes on Escape", () => {

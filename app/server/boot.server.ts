@@ -140,7 +140,7 @@ type BootIntegrityFields = {
   build: BuildInfo;
   disk: { free: string; total: string; status: DiskStatus } | null;
   /** Ruling 182: what this host can run, probed once here so the first health
-   *  request does not pay for it; the sandbox verdict also gets its own WARN. */
+   *  request does not pay for it. */
   toolchain: Toolchain;
   /** F21-1 / ruling 140: absent on a healthy schema — see
    *  `projectionCheckGaps` (table-qualified CHECK gaps). */
@@ -164,7 +164,7 @@ function countRows(db: DatabaseSync, sql: string): number {
  *
  * The CHECK is a hand-written mirror of `VALIDATION_VALUES` in
  * `db/migrations/0001_baseline.sql`, and the repository pins the two together
- * (`app/server/db/projection-validation-check.test.ts`). That pin cannot reach a
+ * (`boot.server.test.ts` "projectionCheckGaps"). That pin cannot reach a
  * database that already exists: migrations are squashed and forward-only, so
  * widening the baseline's CHECK changes what a FRESH `projection.sqlite` gets and
  * nothing else. A deployed root carries whatever CHECK shipped the day it was
@@ -421,7 +421,7 @@ export function logBootIntegrity(db: DatabaseSync): void {
         }
       : null,
     // Ruling 182: resolved here, once, so the probe's cost lands in boot and
-    // the sandbox verdict is on the one line an operator reads after a deploy.
+    // the toolchain is on the one line an operator reads after a deploy.
     toolchain: cachedToolchain(),
   };
   // Named only when some are actually gone: a healthy boot has nothing to list,

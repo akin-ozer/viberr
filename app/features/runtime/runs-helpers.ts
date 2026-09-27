@@ -2,14 +2,10 @@ import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
 import { useClock } from "~/ui/use-clock";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
-import type { ConsoleEntry } from "./log-noise";
 // Ruling 457: count plurals are spelled inline here, not through `countLabel`
 // (why: shared/text/plural.ts).
 import {
   ARGUMENT_CLIP,
-  isRunBoundary,
-  isRunInputsLine,
-  isWaitLine,
   waitClock,
   type JsonValue,
   type LogLine,
@@ -125,43 +121,6 @@ export function fmtTok(n: number): string {
   // long run; "4526k" is not a number a person reads.
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   return n >= 100000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
-}
-
-/**
- * P19-G11: put each run's `run·inputs` disclosure at the HEAD of its own block.
- *
- * The line is written the instant `startRun` returns, before the provider has
- * emitted anything — chronologically it IS first. But it is appended by a
- * different writer than the sink, so its sequence number is only first if the
- * provider's stream has not already produced a line by then (true for a real
- * subprocess, not guaranteed for an instant one). Restoring it to the head of
- * its block makes the console's answer to "what was this run given?" the same
- * every time, instead of depending on a start-up race.
- *
- * Blocks are the run boundaries the console already renders (UI-53 concatenates
- * every run of one agent group into one stream), so a resumed group keeps each
- * run's inputs with the run it belongs to. Nothing is dropped or merged: this
- * only ever moves a line earlier within the block it is already in.
- */
-export function hoistRunInputs<T extends { display: LogLine }>(
-  rows: readonly T[],
-): T[] {
-  if (!rows.some((r) => isRunInputsLine(r.display))) return [...rows];
-  const out: T[] = [];
-  let blockStart = 0;
-  for (const row of rows) {
-    if (isRunBoundary(row.display)) {
-      out.push(row);
-      blockStart = out.length;
-      continue;
-    }
-    if (isRunInputsLine(row.display)) {
-      out.splice(blockStart, 0, row);
-      continue;
-    }
-    out.push(row);
-  }
-  return out;
 }
 
 /** One expanded row of the run-input disclosure: a console tag + its text. */
@@ -361,102 +320,18 @@ export function runInputRows(
  *
  * These helpers fold that structure back out. They are pure, so what a reader
  * is shown about a run is unit-testable against the stored lines rather than
- * only reachable by rendering a panel — the same contract `runInputRows` and
- * `collapseTelemetry` already hold.
+ * only reachable by rendering a panel — the same contract `runInputRows`
+ * already holds. The folds themselves (telemetry runs, thought runs, a call's
+ * heartbeats) are `createConsoleFolder`'s (console-fold.ts).
  *
  * ONE RULE ABOVE ALL: every one of them is a NO-OP under `raw`. The
  * `{ } raw` toggle's whole contract is "what the provider sent", so grouping,
- * chips and blocks must never reshape it (see `collapseTelemetry`).
+ * chips and blocks must never reshape it.
  */
-
-/**
- * A console block: a real row, a folded telemetry run (`collapseTelemetry`), or
- * a folded THOUGHT run. Additive over `ConsoleEntry` so the existing pipeline
- * keeps its meaning and only the new kind has to be handled.
- */
-export type ConsoleBlock<T> =
-  | ConsoleEntry<T>
-  | { kind: "thought"; lines: T[] }
-  /** Ruling 366: one tool call's heartbeats, drawn as one wait row. */
-  | { kind: "wait"; lines: T[] };
 
 /** True when a line is the model narrating its own reasoning. */
 export function isThoughtLine(line: LogLine): boolean {
   return line.ev === "think";
-}
-
-/**
- * Fold consecutive reasoning lines into one collapsible block.
- *
- * Consecutive only: a thought run broken by a tool call is two blocks, because
- * that IS the shape of the work — collapsing across the call would tell the
- * reader the agent thought once when it thought, acted, and thought again.
- *
- * A single thought line is left as an ordinary row: wrapping one line in a
- * "1 step" disclosure adds a click and hides a line for nothing.
- */
-export function groupThoughts<T extends { display: LogLine }>(
-  entries: readonly ConsoleEntry<T>[],
-  raw: boolean,
-): ConsoleBlock<T>[] {
-  if (raw) return [...entries];
-  const out: ConsoleBlock<T>[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== "line" || !isThoughtLine(entry.line.display)) {
-      out.push(entry);
-      continue;
-    }
-    const last = out[out.length - 1];
-    if (last && last.kind === "thought") {
-      last.lines.push(entry.line);
-      continue;
-    }
-    out.push({ kind: "thought", lines: [entry.line] });
-  }
-  // Unfold the runs that never grew past one line.
-  return out.map((block): ConsoleBlock<T> =>
-    block.kind === "thought" && block.lines.length === 1
-      ? { kind: "line", line: block.lines[0]! }
-      : block,
-  );
-}
-
-/**
- * Ruling 366: fold one call's heartbeats into one wait row.
- *
- * Keyed on the call, not on adjacency alone: two calls back to back that each
- * heartbeat (a `run_agent` answered, then a `deliver_for_review` that waits on
- * the push) are two waits, because that is the shape of the work. A single
- * heartbeat still folds — unlike a lone thought, it is not a line worth reading
- * as itself, it is thirty seconds of a call still open.
- *
- * Runs after `groupThoughts`, on its blocks: a heartbeat is a `meta` line, so
- * the thought fold passes it through untouched. A NO-OP under `raw`, like every
- * fold before it.
- */
-export function foldWaits<T extends { display: LogLine }>(
-  blocks: readonly ConsoleBlock<T>[],
-  raw: boolean,
-): ConsoleBlock<T>[] {
-  if (raw) return [...blocks];
-  const out: ConsoleBlock<T>[] = [];
-  for (const block of blocks) {
-    if (block.kind !== "line" || !isWaitLine(block.line.display)) {
-      out.push(block);
-      continue;
-    }
-    const last = out[out.length - 1];
-    if (
-      last &&
-      last.kind === "wait" &&
-      last.lines[0]!.display.progress?.call === block.line.display.progress?.call
-    ) {
-      last.lines.push(block.line);
-      continue;
-    }
-    out.push({ kind: "wait", lines: [block.line] });
-  }
-  return out;
 }
 
 /**

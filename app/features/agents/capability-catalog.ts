@@ -10,7 +10,7 @@ import {
  * 2026-07-19). The former hand-maintained CAP_MODAL_CATALOG /
  * OPERATOR_CAP_CATALOG pair is now a projection: `kinds` + `group` on the
  * unified entry decide which editor shows which toggle, so the two views can
- * never drift from the catalog (asserted in capability-catalog.test.ts).
+ * never drift from the catalog.
  *
  * Grouping + per-capability default modes drive the create/edit-profile
  * modal accordion and the CapabilityMatrixModal row groups. Capabilities a

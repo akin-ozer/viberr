@@ -1,20 +1,14 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import {
-  deleteOrgUser,
-  pruneUserFromProjects,
-} from "~/server/org/org-users.server";
+import { insertUser } from "~/server/auth/user-store.server";
+import { deleteOrgUser } from "~/server/org/org-users.server";
 import { setMemberRole } from "~/features/policy/policy-actions.server";
 import { removeMember } from "./settings-actions.server";
 import { countLiveAdmins, listMembershipViews } from "./membership.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -68,15 +62,13 @@ describe("UI-29: deleting an org user prunes their project memberships", () => {
     ).toBeUndefined();
   });
 
-  it("pruning a user who is a member of nothing is a no-op", async () => {
+  it("deleting a user who is a member of nothing prunes nothing", async () => {
     const store = setupProjectedStore(ctx);
-    const pruned = await pruneUserFromProjects(
-      store.db,
-      store.users.deniz.id,
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-    expect(pruned).toEqual([]);
+    const result = await deleteOrgUser(store.db, store.users.deniz.id, ACTOR, {
+      dataRoot: store.dataRoot,
+    });
+    expect(result.projectsPruned).toEqual([]);
+    expect(result.toast).not.toContain("dropped from");
   });
 });
 
@@ -155,15 +147,26 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
     );
     ghostAdmin(store);
     rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // An org admin who is not a member passes `manage-members` through the D2
+    // override, so the only thing left to refuse the removal is the guard
+    // itself (a project member below admin would be refused by RBAC first).
+    const orgAdmin = insertUser(store.db, {
+      id: "u_orgadmin",
+      email: "orgadmin@viberr.test",
+      name: "Org Admin",
+      role: "admin",
+    });
 
+    // Were the ghost counted, murat would be one of two admins and the removal
+    // would land.
     await expect(
       removeMember(
         store.db,
         { projectSlug: store.slug, targetUserId: store.users.murat.id },
-        { userId: store.users.selin.id, label: "selin" },
+        { userId: orgAdmin.id, label: orgAdmin.email },
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/is the only admin/);
   });
 
   it("F18-6: a GHOST admin that is the project's ONLY admin IS removable by a live org admin (no deadlock)", async () => {

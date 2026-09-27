@@ -1,10 +1,11 @@
 import { RouterContextProvider } from "react-router";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { fakeGithubFetch, type FakeResponseSpec } from "../../../test-support/fake-github";
 import { callToolText } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -581,52 +582,58 @@ describe("viberr_controller.get_github_state", () => {
    * operator asked the owner to push a README.
    */
   it("ruling 468: an empty repository says the first commit is Viberr's; one with commits says nothing", async () => {
-    const { primeRepoAccessForTests, invalidateRepoAccess } = await import(
-      "~/features/github/github-query.server"
+    const { invalidateRepoAccess } = await import("~/features/github/github-query.server");
+    const { createPat, deletePat, setProjectCredential } = await import(
+      "~/server/secrets/pat-store.server"
     );
-    primeRepoAccessForTests(app.db, SLUG, {
-      status: "connected",
-      repo: REPO,
-      remoteDefaultBranch: "main",
-      private: false,
-      empty: true,
-    });
-    try {
+    const actor = { userId: ids.orgAdmin, label: "arda@viberr.dev" };
+    const pat = createPat(app.db, { userId: ids.orgAdmin, label: "ruling 468", token: "ghp_ruling468probe0000" }, actor);
+    setProjectCredential(app.db, { projectSlug: SLUG, patId: pat.id }, actor);
+    // GitHub as the probe reads it: `size: 0` is only the cue, the commits
+    // read's 409 is the proof, and `permissions` says whether the token could
+    // push that first commit.
+    const empty: FakeResponseSpec = { status: 409, body: { message: "Git Repository is empty." } };
+    let commits = empty;
+    let push = true;
+    vi.stubGlobal(
+      "fetch",
+      fakeGithubFetch({
+        [`GET /repos/${REPO}`]: () => ({
+          body: { full_name: REPO, default_branch: "main", private: false, size: 0, permissions: { pull: true, push } },
+        }),
+        [`GET /repos/${REPO}/commits`]: () => commits,
+      }).fetchImpl,
+    );
+    /** One read of the tool, past the 30 s memo, so every read probes GitHub. */
+    const read = async () => {
+      invalidateRepoAccess(app.db, SLUG);
       // SAFETY: as above — the permitted path is `json()` over the handler's literal.
-      const state = JSON.parse(await callTool(ids.owner, "get_github_state")) as GithubStateReply & {
+      return JSON.parse(await callTool(ids.owner, "get_github_state")) as GithubStateReply & {
         contents: string | null;
       };
+    };
+    try {
+      const state = await read();
       // CANARY: drop `contents` from the reply and the model is told nothing.
       expect(state.connection).toBe("connected");
       expect(state.contents).toBe(
         "empty: viberr will create the first commit on main before the first task branch",
       );
-      primeRepoAccessForTests(app.db, SLUG, {
-        status: "connected",
-        repo: REPO,
-        remoteDefaultBranch: "main",
-        private: false,
-      });
-      // SAFETY: as above.
-      const full = JSON.parse(await callTool(ids.owner, "get_github_state")) as { contents: string | null };
-      expect(full.contents).toBeNull();
+      commits = { body: [{ sha: "a".repeat(40) }] };
+      expect((await read()).contents).toBeNull();
       // R-repo-2 (ruling 468's dated note): a token that can only read gets
       // the first commit refused, so the model is told the token is the fix.
-      primeRepoAccessForTests(app.db, SLUG, {
-        status: "connected",
-        repo: REPO,
-        remoteDefaultBranch: "main",
-        private: false,
-        empty: true,
-        readOnly: true,
-      });
-      // SAFETY: as above.
-      const readOnly = JSON.parse(await callTool(ids.owner, "get_github_state")) as { contents: string | null };
+      commits = empty;
+      push = false;
       // CANARY: drop the read-only arm and the model hears a promise.
-      expect(readOnly.contents).toBe(
+      expect((await read()).contents).toBe(
         "empty, and this token can only read it: viberr cannot create the first commit on main until the token is granted write access (the fix is the token, not a pushed commit)",
       );
     } finally {
+      vi.unstubAllGlobals();
+      // The binding goes with the token, so the next read is the store's own
+      // `no_pat_configured` again.
+      deletePat(app.db, pat.id, actor);
       invalidateRepoAccess(app.db, SLUG);
     }
   });

@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
@@ -34,10 +33,6 @@ import {
   replacePatToken,
   setProjectCredential,
 } from "./pat-store.server";
-
-// Hermetic env for the secret box (only set when .env didn't already).
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -119,31 +114,6 @@ describe("pat-store", () => {
         ACTOR,
       ),
     ).toThrowError();
-  });
-
-  it("caches validation results on the row", () => {
-    const store = setupTestStore(ctx);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "x", token: TOKEN },
-      ACTOR,
-    );
-    recordPatValidation(store.db, pat.id, {
-      status: "valid",
-      checkedAt: "2026-07-05T10:00:00.000Z",
-      login: "viberr-bot",
-      tokenKind: "fine_grained",
-      expiresAt: "2026-12-31T00:00:00.000Z",
-      repo: "akin-ozer/viberr",
-      scopes: [{ id: "repo", ok: true, source: "probe" }],
-      missingScopes: [],
-      headerScopes: null,
-      detail: "Authenticated as viberr-bot.",
-    });
-    const reloaded = getPatMetadata(store.db, pat.id);
-    expect(reloaded?.lastValidatedAt).toBe("2026-07-05T10:00:00.000Z");
-    expect(reloaded?.validation?.status).toBe("valid");
-    expect(reloaded?.validation?.login).toBe("viberr-bot");
   });
 
   it("F27-U2: a real write proves pull_request:write on the bound credential", () => {

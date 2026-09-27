@@ -10,7 +10,7 @@ import {
   stopKbWatcher,
 } from "./kb-watch.service.server";
 import { reindexKnowledgeBaseByDir, saveKnowledgeBase } from "~/server/org/resources.server";
-import { getSseBrokerStats, resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { getSseBrokerStats } from "~/server/events/sse-broker.server";
 
 /** node:sqlite hands back an untyped column bag, so the one column these tests
  *  read is fetched through a single place rather than re-named per call site. */
@@ -59,7 +59,6 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     expect(kb.dir).toBe("notes");
     // Add a second file, then re-index by dir (what the watcher does).
     writeFileSync(path.join(dataRoot, "kb", "notes", "b.md"), "more");
-    resetSseBrokerForTests();
     const before = getSseBrokerStats().bufferedEvents;
     const result = reindexKnowledgeBaseByDir(db, "notes", { dataRoot });
     expect(result).toEqual({ name: "Notes", docCount: 2 });
@@ -69,7 +68,6 @@ describe("reindexKnowledgeBaseByDir (R-D watcher re-index)", () => {
     // manual reload. Canary: drop the publishResourceUpdated call in
     // reindexKnowledgeBaseByDir.
     expect(getSseBrokerStats().bufferedEvents).toBe(before + 1);
-    resetSseBrokerForTests();
   });
 
   it("skips a 'manual' KB (pinned to explicit re-scan)", async () => {

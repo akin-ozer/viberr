@@ -39,21 +39,6 @@ import { toError } from "~/shared/errors";
  */
 
 /**
- * THE list of store text-doc extensions now lives in an isomorphic module: the
- * store browser needs it too and runs in the browser, so it cannot import this
- * `.server` file. Re-exported here because this injector is the reason the list
- * exists — `isInjectableKbDoc` below is its primary consumer, and callers that
- * already import the injector should not have to learn a second module.
- *
- * C5/pass-16: the set MUST cover everything the in-app editor can author. It
- * didn't — `.json`/`.yaml`/`.yml` were offered by the "New document" flow,
- * written to disk, counted in the browser, and then invisible to every run.
- * C5-followup: the first fix left three hand-maintained copies "separate but
- * equal", which is how the divergence happened in the first place. One set now.
- */
-export { STORE_TEXT_EXTENSIONS };
-
-/**
  * Would this file name reach a run? P14-KM-13: the org-settings row counted
  * EVERY non-dot file as a "doc", so a KB holding nothing but PDFs advertised a
  * healthy count while injecting zero bytes. The count and the injector must
@@ -479,7 +464,7 @@ export function readKbDoc(
  * mounts no in-process Viberr tools at all, and its channel is the folder path
  * the index prints, which is a real path on the machine the run executes on.
  */
-export const KB_INDEX_NOTE =
+const KB_INDEX_NOTE =
   "\n\n---\n# How to read a knowledge base\n\n" +
   "Each knowledge base below is listed as an INDEX: every document it holds, " +
   "its size, and its sections. The text is NOT in this prompt — read the " +
@@ -594,7 +579,7 @@ export function readKbDocForRun(
  * serialisation answer: it works today and rots, and it taxes every run that
  * legitimately did not need it."
  */
-export const KB_RULINGS_NOTE =
+const KB_RULINGS_NOTE =
   "\n\n---\n# The project's rulings are binding on you\n\n" +
   "One of the knowledge bases above is this project's settled RULINGS. Its index " +
   "tells you what exists; it does not tell you when a rule applies, and a rule you " +

@@ -7,7 +7,7 @@ import { ERROR_CODES } from "../errors/error-codes";
 import { errorMessage } from "../../shared/errors";
 
 /** Repo-root-relative default location of SQL migrations. */
-export const DEFAULT_MIGRATIONS_DIR = path.resolve(
+const DEFAULT_MIGRATIONS_DIR = path.resolve(
   process.cwd(),
   "db/migrations",
 );

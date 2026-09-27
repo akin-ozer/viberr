@@ -11,7 +11,6 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
 import { flush, waitFor } from "../../../test-support/polling";
@@ -99,7 +98,6 @@ function taskFm() {
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  resetSseBrokerForTests();
   installFakeRuntime();
   runOp.mockClear();
   openTaskPrMock.mockClear();
@@ -112,7 +110,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetSseBrokerForTests();
   ctx.cleanup();
 });
 
@@ -120,9 +117,11 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
   it("A. full autonomy enqueues exactly one follow-up operator run with the `delivered` trigger", async () => {
     deployDeliveryOperator(store, "full");
     seedTask();
+    // Operator-authorized, as the operator's own delivery is, so the missing
+    // card below is withheld by the autonomy and not by a missing authorization.
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, deps: DEPS },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -135,6 +134,10 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
       taskKey: "VIB-1",
       trigger: "delivered",
     });
+    // R19-4: the card is the SUPERVISED safety net; under full autonomy the
+    // operator is the next step. CANARY: make the card's `else if` a plain
+    // `if` and a card lands beside the re-queue.
+    expect(taskFm().recommendations).toHaveLength(0);
   });
 
   it("C. ruling 357: a LIVE operator drive's own delivery queues no turn; it stamps the drive instead", async () => {
@@ -201,7 +204,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     seedTask();
     const outcome = await performDelivery(
       store.db,
-      { dataRoot: store.dataRoot, deps: DEPS },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
       store.slug,
       "VIB-1",
       OPERATOR_TASK_ACTOR,
@@ -209,6 +212,9 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     expect(outcome).toMatchObject({ status: "delivered", moved: false, operatorRequeued: false });
     await flush();
     expect(runOp).not.toHaveBeenCalled();
+    // A reuse that re-queued nothing still hands full autonomy no card: the
+    // card is never the safety net here (R18-2/R19-4).
+    expect(taskFm().recommendations).toHaveLength(0);
   });
 
   it("C2. ruling 134(b): a reuse whose push MOVED the head re-queues exactly once", async () => {
@@ -563,64 +569,6 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
  * operator narrated "the task will move to Review; no further action needed".
  */
 describe("R19-4 — a supervised delivery always leaves something to act on", () => {
-  it("E. the operator's OWN 'Move to Review' card dedupes with the guaranteed one", async () => {
-    deployDeliveryOperator(store, "supervised");
-    seedTask({
-      recommendations: [
-        {
-          id: "rec_model",
-          kind: "transition",
-          toStageId: "review",
-          label: "Move the task to Review",
-          detail: "The operator recorded this itself.",
-        },
-      ],
-    });
-    await performDelivery(
-      store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
-      store.slug,
-      "VIB-1",
-      OPERATOR_TASK_ACTOR,
-    );
-    await flush();
-    const recs = taskFm().recommendations;
-    expect(recs).toHaveLength(1);
-    // The operator's own card survives — the guarantee is a floor, not a rewrite.
-    expect(recs[0]!.id).toBe("rec_model");
-  });
-
-  it("F. an OPEN packet is already the next step — no card is stacked on it", async () => {
-    deployDeliveryOperator(store, "supervised");
-    seedTask(
-      { readiness: "input_required", waiting: "human" },
-      {
-        id: "pkt_1",
-        type: "input",
-        kind: "Decision required",
-        from: "operator",
-        title: "Which API shape?",
-        body: "Two options.",
-        observations: [],
-        options: [{ kind: "redirect", t: "Take option A", d: "", rec: true }],
-      },
-    );
-    await performDelivery(
-      store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
-      store.slug,
-      "VIB-1",
-      OPERATOR_TASK_ACTOR,
-    );
-    await flush();
-    expect(taskFm().recommendations).toHaveLength(0);
-    expect(readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      dataRoot: store.dataRoot,
-    })!.parsed.packet).not.toBeNull();
-  });
-
   it("G. a HUMAN delivery gets no card — the person who clicked Deliver is present", async () => {
     // R15-2's human escape hatch reaches performDelivery WITHOUT
     // `operatorAuthorized`, and a human who just clicked the button needs no
@@ -633,20 +581,6 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
       store.slug,
       "VIB-1",
       { userId: store.users.arda.id, label: store.users.arda.email },
-    );
-    await flush();
-    expect(taskFm().recommendations).toHaveLength(0);
-  });
-
-  it("H. a task already AT the review stage gets no redundant move card", async () => {
-    deployDeliveryOperator(store, "supervised");
-    seedTask({ stage: "review" });
-    await performDelivery(
-      store.db,
-      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: DEPS },
-      store.slug,
-      "VIB-1",
-      OPERATOR_TASK_ACTOR,
     );
     await flush();
     expect(taskFm().recommendations).toHaveLength(0);

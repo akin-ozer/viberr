@@ -1,17 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import {
-  DueDatePill,
-  LabelChips,
-  PriorityFlag,
-  formatDueDate,
-  isOverdue,
-} from "./task-meta";
+import { DueDatePill, LabelChips, PriorityFlag } from "./task-meta";
 
 /**
  * The shared task-metadata renderers (priority flag, label chips, due-date
- * pill) and their pure helpers. The overdue branch is time-dependent, so every
+ * pill). The overdue branch is time-dependent, so every
  * pill test passes an explicit `today` — the component only reaches for the
  * viewer's local clock when no `today` is given (see DueDatePill's hydration note).
  */
@@ -95,19 +89,19 @@ describe("DueDatePill", () => {
     expect(container.textContent).toContain("overdue");
     expect(container.querySelector(".pill.blocked")).not.toBeNull();
   });
-});
 
-describe("pure helpers", () => {
-  it("formatDueDate renders a fixed Mon D vocabulary, tolerating garbage", () => {
-    expect(formatDueDate("2026-08-23")).toBe("Aug 23");
-    expect(formatDueDate("2026-01-01")).toBe("Jan 1");
-    expect(formatDueDate("garbage")).toBe("garbage");
+  it("reads `due` on the day itself — today is not overdue", () => {
+    const { container } = render(<DueDatePill dueDate="2026-08-23" today="2026-08-23" />);
+    expect(container.textContent).toContain("due Aug 23");
+    expect(container.querySelector(".pill.blocked")).toBeNull();
   });
 
-  it("isOverdue compares plain dates lexically", () => {
-    expect(isOverdue("2026-08-20", "2026-08-23")).toBe(true);
-    expect(isOverdue("2026-08-23", "2026-08-23")).toBe(false); // today is not overdue
-    expect(isOverdue("2026-08-25", "2026-08-23")).toBe(false);
-    expect(isOverdue(null, "2026-08-23")).toBe(false);
+  it("prints an unpadded day, and a date it cannot read as written", () => {
+    const { container, rerender } = render(
+      <DueDatePill dueDate="2026-01-01" today="2025-12-01" />,
+    );
+    expect(container.textContent).toContain("due Jan 1");
+    rerender(<DueDatePill dueDate="garbage" today="2026-09-01" />);
+    expect(container.textContent).toContain("due garbage");
   });
 });

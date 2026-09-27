@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -26,9 +25,6 @@ import {
   validatePat,
   validatePatToken,
 } from "./pat-validator.server";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -373,43 +369,6 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
       source: "probe",
       note: "repository readable but not writable",
     });
-  });
-
-  it("F21-11: a drifted key does not fabricate a verdict either — push:true still proves write", async () => {
-    const gh = fakeGithubFetch({
-      "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": {
-        body: { full_name: REPO, permissions: { push: true, triage: "yes" } },
-      },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-    });
-    const result = await validatePatToken(FINE, {
-      repo: REPO,
-      requiredScopes: ["repo"],
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result.status).toBe("valid");
-    expect(result.scopes[0]).toMatchObject({ ok: true, source: "probe" });
-  });
-
-  it("F21-11: an all-drifted block proves nothing — assumed, exactly like no block", async () => {
-    // Nothing decoded, so nothing was asserted: `null` is the honest answer and
-    // the chip says the write is unverified rather than refusing on a guess.
-    const gh = fakeGithubFetch({
-      "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": {
-        body: { full_name: REPO, permissions: { push: "yes", pull: "yes" } },
-      },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-    });
-    const result = await validatePatToken(FINE, {
-      repo: REPO,
-      requiredScopes: ["repo"],
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result.status).toBe("valid");
-    expect(result.scopes[0]).toMatchObject({ ok: true, source: "assumed" });
-    expect(result.scopes[0]!.note).toContain("write is unverified");
   });
 
   it("no permissions block → readable-but-unverified, reported as ASSUMED (never a false 'proven')", async () => {
@@ -1045,6 +1004,7 @@ describe("repoWritable over repoPermissionsSchema (the shared write verdict)", (
     [{ maintain: true }, true],
     [{ admin: true, push: false }, true], // admin outranks a push: false
     [{ maintain: true, push: false }, true],
+    [{ push: true, triage: "yes" }, true], // a drifted neighbour cannot void a grant
     [{ push: false }, false], // the PROVEN read-only repo
     [{ admin: false, maintain: false, push: false }, false],
     [{ push: false, triage: "yes", pull: 1 }, false], // a drifted neighbour cannot void it

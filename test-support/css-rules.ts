@@ -1,7 +1,9 @@
 /**
  * The stylesheet parser the `app/app.css` gates share: `app.css.test.ts` (the
  * integrity gate) and `app.css.perf.test.ts` (ruling 457's CSS ratchets). It
- * reads the one sheet the app has, comments already stripped by the caller.
+ * reads the one sheet the app has, comments already stripped by the caller,
+ * and answers the questions both ask of a rule: which selectors it names, and
+ * what the rules naming one selector leave it.
  */
 
 export type Balanced = { body: string; end: number };
@@ -65,4 +67,53 @@ export function cssRules(css: string, parent = "", at: string[] = []): CssRule[]
     if (decls.size) out.push({ selector, decls, at });
   }
   return out;
+}
+
+/** Split a list on TOP-LEVEL commas: a function's arguments, a `transition`'s
+ *  layers, a selector list (`:not(a, b)` stays one selector). */
+export function splitArgs(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+const SELECTOR_PARTS = new WeakMap<CssRule, readonly string[]>();
+
+/** The selectors a rule names, one per entry of its selector list. Split once
+ *  per rule: the integrity gate asks every rule this hundreds of times. */
+export function selectorParts(rule: CssRule): readonly string[] {
+  let parts = SELECTOR_PARTS.get(rule);
+  if (!parts) SELECTOR_PARTS.set(rule, (parts = Object.freeze(splitArgs(rule.selector))));
+  return parts;
+}
+
+/** What `rules` leave `selector`: the declarations of every rule that names it
+ *  exactly, later ones winning. Empty when none does. */
+export function declsFor(rules: readonly CssRule[], selector: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const rule of rules) {
+    if (selectorParts(rule).includes(selector)) for (const [prop, value] of rule.decls) out.set(prop, value);
+  }
+  return out;
+}
+
+/** `declsFor` a selector the sheet must style: with no rule naming it this
+ *  throws, so a check that reads nothing off it cannot pass. (`cssRules` keeps
+ *  only rules that declare something, so an empty answer means no rule.) */
+export function requiredDecls(rules: readonly CssRule[], selector: string): Map<string, string> {
+  const decls = declsFor(rules, selector);
+  if (decls.size === 0) throw new Error(`${selector} must have a rule`);
+  return decls;
 }

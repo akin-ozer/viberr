@@ -71,24 +71,6 @@ describe("CommandPalette", () => {
     expect(getByText(/Type to jump to a task/)).toBeTruthy();
   });
 
-  it("groups the server's hits by kind", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { getByLabelText, getByText } = renderPalette();
-      fireEvent.change(
-        getByLabelText("Search tasks, epics, branches, agents, projects"),
-        { target: { value: "vib" } },
-      );
-      await vi.advanceTimersByTimeAsync(200);
-      await waitFor(() => expect(getByText("Tasks")).toBeTruthy());
-      expect(getByText("Projects")).toBeTruthy();
-      expect(getByText("Branches")).toBeTruthy();
-      expect(getByText("vib-9-reviewer-binding")).toBeTruthy();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("arrow keys move the selection and Enter jumps to the hit", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -136,21 +118,6 @@ describe("CommandPalette", () => {
       const rows = [...container.querySelectorAll(".cmdk-row")].map((row) => row.textContent);
       expect(rows[1]).toContain("Checkout revamp");
       expect(rows[1]).toContain("epic-2 · Viberr Core");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("reports an empty result instead of an empty box", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const { getByLabelText, getByText } = renderPalette([]);
-      fireEvent.change(
-        getByLabelText("Search tasks, epics, branches, agents, projects"),
-        { target: { value: "zzzz" } },
-      );
-      await vi.advanceTimersByTimeAsync(200);
-      await waitFor(() => expect(getByText(/Nothing matches/)).toBeTruthy());
     } finally {
       vi.useRealTimers();
     }

@@ -34,7 +34,7 @@ function indented(value: string): string {
 }
 
 /** One entry, as the filing wrote it. */
-export function legacyProposalEntry(input: LegacyProposalInput): string {
+function legacyProposalEntry(input: LegacyProposalInput): string {
   const filedBy = input.filedBy === undefined ? "Platform Engineer" : input.filedBy;
   const stamp = [input.taskKey, input.filedOn ?? "2026-09-25", ...(filedBy ? [filedBy] : [])].join(
     ", ",

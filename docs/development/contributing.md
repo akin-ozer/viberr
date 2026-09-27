@@ -129,7 +129,6 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 | `README.md`, `docs/operations/deployment.md` | `store-volume-wiring.test.ts` | the first shell block that runs Compose is the install: it runs `docker compose up`, with no `.env` copy and no `docker volume create` (ruling 504) |
 | `docs/architecture/codebase-map.md` | `app/features/shell/nav.test.ts` | contains `` `nav.ts` order: `` and the rail labels in order |
 | `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 458(c)) |
-| `vitest.config.ts` | `vitest-config.test.ts` | `testTimeout: 20_000` |
 | `tools/oxlint/anti-slop/` | `anti-slop-vendor-sync.test.ts` | matches `tools/oxlint/anti-slop.manifest.json`; re-pin with `node scripts/anti-slop-manifest.mjs` |
 | `app/server/runtimes/humanizer/`, `THIRD_PARTY_NOTICES.md` | `humanizer.server.test.ts` | holds only upstream's `SKILL.md` (matching `HUMANIZER_SKILL_SHA256`) and its `LICENSE`, and the notices name the repository, the commit and the licence; re-vendor from upstream and move the pin and `HUMANIZER_SOURCE` with it (ruling 502) |
 
@@ -156,9 +155,10 @@ and [../ui/surfaces.md](../ui/surfaces.md).
 
 ## 7. Definition of done for a change
 
-1. The five gates pass locally.
-2. New behaviour has a test through the real writers or the route harness; no
-   `vi.mock`.
+1. The six gates pass locally ([testing.md](testing.md) §1).
+2. New behaviour has ONE owning test at the boundary that owns it ([testing.md](testing.md)
+   §0, ruling 512), through the real writers or the route harness: no `vi.mock` and no
+   production seam that only a test calls.
 3. Audit and typed events exist for any new governed action.
 4. Docs that describe the changed behaviour are updated in the same PR, in present
    tense: correct the body where it is wrong rather than stacking a dated update note on

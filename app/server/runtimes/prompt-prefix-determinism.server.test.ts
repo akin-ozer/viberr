@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -15,9 +14,6 @@ import {
 } from "./operator-run.server";
 import { joinedPrompt } from "./prompt-prefix.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
-
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
 
 const temp = createTempDirs();
 afterAll(temp.cleanup);

@@ -13,7 +13,7 @@ import {
   type FakeVendorBinaries,
 } from "../../../test-support/fake-vendor-binary";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
+import { mergeNotifPrefs } from "./notification-prefs";
 
 type ProfileAction = typeof import("~/routes/profile").action;
 
@@ -91,8 +91,7 @@ async function postAction(
   userId: string,
   fields: Record<string, string>,
 ): Promise<ActionOutcome> {
-  const { cookie, sessionId } = await app.cookieFor(userId);
-  const csrf = await app.csrfFor(sessionId);
+  const { cookie, csrf } = await app.sessionFor(userId);
   const { action } = await import("~/routes/profile");
   const body = new URLSearchParams({ _csrf: csrf, ...fields });
   return unwrap(
@@ -119,7 +118,7 @@ describe("/profile loader", () => {
   });
 
   it("widens the session user: memberships by id, derived role, prefs defaults", async () => {
-    const { cookie } = await app.cookieFor(ardaId);
+    const { cookie } = await app.sessionFor(ardaId);
     const { profile } = await runLoader(cookie);
 
     expect(profile.user.id).toBe(ardaId);
@@ -138,14 +137,14 @@ describe("/profile loader", () => {
     expect(profile.accessRole).toBe("admin");
 
     // Pref defaults (nothing stored yet).
-    expect(profile.prefs.notifs).toEqual(DEFAULT_NOTIF_PREFS);
+    expect(profile.prefs.notifs).toEqual(mergeNotifPrefs(null));
     expect(profile.prefs.tlDefault).toBe("all");
     // Ruling 148(c): there is no motion preference any more.
     expect("motion" in profile.prefs).toBe(false);
   });
 
   it("membership role comes from the projection, per user (never hardcoded)", async () => {
-    const { cookie } = await app.cookieFor(murId);
+    const { cookie } = await app.sessionFor(murId);
     const { profile } = await runLoader(cookie);
     expect(profile.memberships).toEqual([
       { slug: "viberr-core", name: "Viberr Core", role: "maintainer" },
@@ -186,7 +185,7 @@ describe("/profile action", () => {
       on: "0",
     });
     expect(data.ok).toBe(true);
-    const { cookie } = await app.cookieFor(ardaId);
+    const { cookie } = await app.sessionFor(ardaId);
     const { profile } = await runLoader(cookie);
     expect(profile.prefs.notifs.packets.app).toBe(false);
     expect(profile.prefs.notifs.approvals.app).toBe(true);
@@ -266,6 +265,8 @@ describe("/profile action", () => {
         ),
       ),
     );
+    // The file's cached session for Murat is one of the other sessions.
+    app.forgetSession(murId);
     expect(result.ok).toBe(true);
     expect(result.toast).toBe("Password updated. Other sessions were signed out");
 
@@ -334,7 +335,7 @@ describe("/profile action", () => {
   // `{ok:false,error}` toast path was unreachable. The rejection is now a
   // 403 RESULT the client's existing error handlers surface as a toast.
   it("rejects a forged CSRF token as a 403 result (not a thrown boundary)", async () => {
-    const { cookie } = await app.cookieFor(ardaId);
+    const { cookie } = await app.sessionFor(ardaId);
     const { action } = await import("~/routes/profile");
     const body = new URLSearchParams({ _csrf: "forged", intent: "identity" });
     // SAFETY: every branch of this action returns either a plain `{ ok }`
@@ -391,7 +392,7 @@ describe("/profile agent accounts (ruling 127)", () => {
   }
 
   async function backendsOf(userId: string) {
-    const { cookie } = await app.cookieFor(userId);
+    const { cookie } = await app.sessionFor(userId);
     const { profile } = await runLoader(cookie);
     return profile.backends;
   }
@@ -535,12 +536,13 @@ describe("/profile agent accounts (ruling 127)", () => {
     const { recordBackendLogin, loginTargetFor } = await import(
       "~/server/runtimes/backend-credentials.server"
     );
-    // ORDER MATTERS, and it is the whole reason this test exists separately
-    // from the retirement one. Connecting FIRST means `retireBackendRecordsFor`
-    // has already run and has nothing to delete, so the reading recorded after
-    // it survives in the store and only the `connectedAt` comparison can
-    // suppress it. Recording the reading first would be deleted by the connect
-    // and the test would pass with the gate removed.
+    // ORDER MATTERS, and it is the whole reason this test exists apart from
+    // the store's own retirement tests (backend-credentials.server.test.ts).
+    // Connecting FIRST means `retireBackendRecordsFor` has already run and has
+    // nothing to delete, so the reading recorded after it survives in the store
+    // and only the `connectedAt` comparison can suppress it. Recording the
+    // reading first would be deleted by the connect and the test would pass
+    // with the gate removed.
     recordBackendLogin(
       app.db,
       { userId: ardaId, label: "arda@viberr.dev" },
@@ -567,46 +569,14 @@ describe("/profile agent accounts (ruling 127)", () => {
       expect(claude.usage ?? null).toBeNull();
     } finally {
       quota.retireBackendRecordsFor(app.db, "claude", ardaId);
-      await reset();
-    }
-  });
-
-  it("ruling 165: the viewer's own notice is gone once they connect a different account on that backend", async () => {
-    // Live (2026-09-07): "usage window spent · reopens 21:30" stayed on the
-    // Claude card after the owner signed it into another account, while the
-    // runs on the new account went through. Canary: drop the
-    // `retireBackendRecordsFor` call from `recordBackendLogin`.
-    const quota = await import("~/server/runtimes/backend-quota.server");
-    const { recordBackendLogin, loginTargetFor } = await import(
-      "~/server/runtimes/backend-credentials.server"
-    );
-    quota.recordBackendQuotaExhaustion(app.db, "claude", {
-      credentialUserId: ardaId,
-      credentialLabel: "Arda Test",
-      resetsAt: Math.floor((Date.now() + 60 * 60_000) / 1000),
-      resetsAtPrecision: "exact",
-      providerText: "Claude AI usage limit reached|1780000000",
-      runId: "run_spent",
-      observedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-    });
-    try {
-      expect((await backendsOf(ardaId))[0]!.lastRefusal?.kind).toBe("quota");
-      recordBackendLogin(
-        app.db,
-        { userId: ardaId, label: "arda@viberr.dev" },
-        "claude",
-        "claudeai",
-        { email: "another@example.com" },
-        loginTargetFor(app.db, ardaId, "claude"),
-      );
-      expect((await backendsOf(ardaId))[0]!.lastRefusal).toBeNull();
-    } finally {
-      quota.clearBackendQuotaExhaustion(app.db, "claude");
+      // The connect left an account on Arda's Claude card, and the ruling 507
+      // cases below count her accounts.
       app.db
         .prepare(
           `DELETE FROM user_backend_credentials WHERE user_id = ? AND backend = 'claude'`,
         )
         .run(ardaId);
+      await reset();
     }
   });
 
