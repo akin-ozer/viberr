@@ -46,7 +46,7 @@ import { NEW_CONVERSATION_PARAM } from "./conversation-param";
  * page with the root error page (the hazard ruling 121(f) named). A scope the
  * person cannot reach therefore answers a benign, empty `unavailable` view,
  * and a selection that cannot be honoured falls back to the scope's newest
- * thread and reports `staleSelection` so the client forgets the stored id.
+ * thread and reports `staleSelection` so the client forgets the id it asked for.
  */
 
 const SLUG = "viberr-core";
@@ -211,11 +211,11 @@ describe("getControllerDock — the dock lists one place's threads", () => {
 
   /**
    * `c` absent means "the newest thread here"; `c=new` means "an empty
-   * composer". The distinction matters twice: the panel opens where the person
-   * left off, and `new` must NOT be reported stale — `staleSelection` is what
-   * makes the client DELETE its stored selection for this scope, so treating
-   * the deliberate "new" as a failed lookup would wipe the person's choice on
-   * every load.
+   * composer". The distinction matters twice: every open of the panel asks for
+   * the newest thread (ruling 528), and `new` must NOT be reported stale —
+   * `staleSelection` is what makes the client drop its selection for this
+   * scope, so treating the deliberate "new" as a failed lookup would wipe the
+   * person's choice on every load.
    */
   it("opens the scope's newest thread by default, and `new` opens none without calling it stale", () => {
     const store = storeWithTwoProjects();

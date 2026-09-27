@@ -217,7 +217,7 @@ describe("GET /resources/controller", () => {
     expect(loaderView.parse(await get(arda, `?project=${SLUG}&task=VIB-142&c=${older.id}`)).view.conversation?.id).toBe(older.id);
     // A thread from another scope is not an error either: the view falls back
     // to this scope's newest thread and flags the stale selection so the dock
-    // forgets the stored id (review finding 2).
+    // forgets the id it asked for (review finding 2).
     const foreign = loaderView.parse(await get(arda, `?project=${SLUG}&task=VIB-142&c=${board.id}`));
     expect(foreign.view.staleSelection).toBe(true);
     expect(foreign.view.conversation?.id).toBe(newer.id);

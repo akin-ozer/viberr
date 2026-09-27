@@ -3,6 +3,7 @@ import { useMemo, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
+import { z } from "zod";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
 import {
@@ -51,6 +52,12 @@ function footerCount(container: HTMLElement): string | null {
 
 afterEach(cleanup);
 
+/** The timings a number-flow element carries as properties, in milliseconds. */
+const rollTimings = z.object({
+  transformTiming: z.object({ duration: z.number() }),
+  spinTiming: z.object({ duration: z.number() }).optional(),
+});
+
 function mkRun(patch: Partial<RunView>): RunView {
   return {
     id: "primary", serverRunId: "run_1", role: "Primary specialist", kind: "primary",
@@ -92,6 +99,45 @@ describe("LiveRunPanel", () => {
       (c) => c.querySelector(".lbl")?.textContent === "Runtime",
     );
     expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
+  });
+
+  it("ruling 524(b): the Elapsed clock's digits land well inside its one-second tick", () => {
+    // number-flow's own roll is a 900 ms spring, so the seconds were mid-roll
+    // nine tenths of every second: two glyphs half in view, read as "03:1"
+    // (owner's screenshot, 2026-09-27). A roll that ends inside half a tick
+    // leaves the digit standing for most of it. CANARY: drop
+    // `transformTiming` from the clock's fields and the 900 ms comes back.
+    const { container } = render(
+      <LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+    );
+    const fields = [...container.querySelectorAll(".run-cell .lw-clock[data-clock] number-flow-react")];
+    expect(fields.length).toBeGreaterThan(1);
+    for (const field of fields) {
+      // The element rolls its digits with `spinTiming`, falling back to
+      // `transformTiming`, and moves them with `transformTiming`; both are
+      // properties number-flow sets on it.
+      const { transformTiming, spinTiming } = rollTimings.parse(field);
+      expect(transformTiming.duration).toBeLessThanOrEqual(500);
+      expect((spinTiming ?? transformTiming).duration).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it("ruling 524(c): a controller turn's card names it once", () => {
+    // The turn is "Controller" in the role "Controller", and the card's head
+    // read "Controller · Controller". A renamed controller keeps its role.
+    // CANARY: append `who.role` after the name unconditionally again.
+    const turn = (name: string) =>
+      mkRun({ id: "controller", kind: "controller", role: "Controller", who: { kind: "agent", backend: "claude", name, role: "Controller" } });
+    const chip = (run: RunView) => {
+      const { container, unmount } = render(
+        <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+      );
+      const text = container.querySelector(".who-chip .nm")!.textContent;
+      unmount();
+      return text;
+    };
+    expect(chip(turn("Controller"))).toBe("Controller");
+    expect(chip(turn("Atlas"))).toBe("Atlas · Controller");
   });
 
   /**
@@ -1202,6 +1248,20 @@ describe("ruling 478(d): the agent log stream picker", () => {
     // Label in name (WCAG 2.5.3): the name carries what a voice-control user
     // reads on screen, word for word.
     expect(getByRole("button", { name: `Agent log stream: ${visible}` })).toBe(trigger);
+  });
+
+  it("ruling 524(c): the operator's stream is named once", () => {
+    // The trigger read "Operator · operator": the name, then a role that is
+    // the same word. A renamed operator keeps it. CANARY: print `roleShort`
+    // after every name again.
+    const { container, rerender } = render(
+      <Logs runtime={[op, dev, rev]} sel="op" onSel={() => {}} linesByThread={{ op: [], primary: [], c0: [] }} />,
+    );
+    const shown = () => container.querySelector(".rsel-btn .rsel-nm")!.textContent;
+    expect(shown()).toBe("Operator");
+    const atlas = { ...op, who: { kind: "agent" as const, name: "Atlas" } };
+    rerender(<Logs runtime={[atlas, dev, rev]} sel="op" onSel={() => {}} linesByThread={{ op: [], primary: [], c0: [] }} />);
+    expect(shown()).toBe("Atlas · operator");
   });
 
   it("arrows move focus through the streams without switching the console; Enter switches it", () => {

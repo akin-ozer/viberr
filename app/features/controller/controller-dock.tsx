@@ -6,7 +6,6 @@ import {
   useMatches,
   useRouteLoaderData,
 } from "react-router";
-import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type { SendMode } from "~/server/controller/controller-run.server";
 import type { loader as projectLoader } from "~/routes/project";
@@ -36,10 +35,10 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  *
  * Same controller, same authority: sending here is the same turn the full
  * page sends, through `/resources/controller`. The panel keeps the page
- * usable (no scrim, no focus trap, no scroll lock), reopens the newest thread
- * of the current scope, remembers the selected thread per scope and its
- * open/closed state for the life of the tab, and shows one line naming what
- * the controller knows here.
+ * usable (no scrim, no focus trap, no scroll lock), opens on the newest thread
+ * of the current scope every time (ruling 528), keeps a thread the person
+ * picks only while it stays open, remembers its open/closed state for the
+ * life of the tab, and shows one line naming what the controller knows here.
  *
  * Live (ruling 457): the dock's two resources, the open panel's view and the
  * status every page's button reads (unseen replies, turns working), ride no
@@ -58,7 +57,6 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  */
 
 const OPEN_KEY = "viberr.dock.open";
-const SELECTED_KEY = "viberr.dock.selected";
 const WORKING_POLL_MS = 5_000;
 /** The dock's `c` value that means "start with no conversation": the same
  *  `"new"` as `NEW_CONVERSATION_PARAM` (conversation-param.ts), spelled here
@@ -114,19 +112,6 @@ function writeSession(key: string, value: string): void {
     window.sessionStorage.setItem(key, value);
   } catch {
     // Nothing to do: the dock simply forgets across reloads.
-  }
-}
-/** The stored selection map, parsed at the storage boundary: a scope key to
- *  a conversation id (or "new"). Anything else reads as empty. */
-const selectedSchema = z.record(z.string(), z.string());
-function readSelected() {
-  const raw = readSession(SELECTED_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = selectedSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : {};
-  } catch {
-    return {};
   }
 }
 
@@ -186,6 +171,10 @@ function DockShell({ context }: { context: DockContext }) {
   const openedByUser = useRef(false);
   const dockRef = useRef<HTMLDivElement>(null);
   const [threadsOpen, setThreadsOpen] = useState(false);
+  // Ruling 528: per scope, the thread the person picked, started with New or
+  // sent in, held while the panel stays open. Every open starts with none,
+  // which asks for the scope's newest thread wherever it was written: kept per
+  // tab, it hid a conversation started on the full page or on another device.
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
   const restored = useRef(false);
@@ -211,8 +200,7 @@ function DockShell({ context }: { context: DockContext }) {
     //
     // The panel starts closed and nothing else opens it, so an `open` that is
     // already true here can ONLY be that click - and it is the newer decision,
-    // so it wins. (`selected` needs no such guard: every writer of it is
-    // inside the panel, which cannot have been open yet.)
+    // so it wins.
     setOpen((clicked) => clicked || stored);
     // A click that beat this read is the person's own open, and keeps its
     // entrance. The ref is read here, not in the updater, so render stays
@@ -223,15 +211,11 @@ function DockShell({ context }: { context: DockContext }) {
     // first run set, and a restored panel would replay its entrance.
     const fromStore = stored && !openedByUser.current;
     setRestoredOpen((was) => was || fromStore);
-    setSelected(readSelected());
     restored.current = true;
   }, []);
   useEffect(() => {
     if (restored.current) writeSession(OPEN_KEY, open ? "1" : "0");
   }, [open]);
-  useEffect(() => {
-    if (restored.current) writeSession(SELECTED_KEY, JSON.stringify(selected));
-  }, [selected]);
 
   const selectedId = selected[context.key] ?? null;
   // O39-d: `seen` only while the panel is open: the view is loaded only then
@@ -251,10 +235,10 @@ function DockShell({ context }: { context: DockContext }) {
     return data && dockScopeKey(data.scope) === context.key ? data : null;
   }, [view.data, context.key]);
 
-  // The server could not honour the stored selection - another user's thread
-  // after an account switch in this tab, a re-baselined database, a thread from
-  // another scope - and answered this scope's newest thread instead. Forget the
-  // id rather than asking for it again on every load (review finding 2).
+  // The server could not honour the selection - a picked thread it can no
+  // longer show in this scope - and answered this scope's newest thread
+  // instead. Forget the id rather than asking for it again on every load
+  // (review finding 2).
   const stale = current?.staleSelection ?? false;
   useEffect(() => {
     if (!stale) return;
@@ -270,7 +254,7 @@ function DockShell({ context }: { context: DockContext }) {
   // in. A turn runs one to five minutes, and a person who moved to another
   // page learned nothing when its answer landed. Ruling 457: the same small
   // status also names the viewer's turns working right now, which is what the
-  // button's working dot and the open panel's step line read.
+  // button's announcer and the open panel's step line read.
   //
   // Loaded when the dock mounts (the first page, and every return from a page
   // it stays off, where the controller page may have marked a reply read),
@@ -288,7 +272,8 @@ function DockShell({ context }: { context: DockContext }) {
   // The transcript the open panel shows is being read.
   const unseen = (status.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
   const liveTurns = status.data?.working ?? [];
-  // The button's dot: a turn of the viewer's is working in THIS scope.
+  // A turn of the viewer's is working in THIS scope: the button's announcer
+  // says so, and the status is polled until it settles.
   const working = liveTurns.some((t) => dockScopeKey(t) === context.key);
   // The open panel's working row: the view says whether the shown thread's
   // turn works; the status moves its step (ruling 250) between view loads.
@@ -314,9 +299,9 @@ function DockShell({ context }: { context: DockContext }) {
     return () => window.removeEventListener(CONTROLLER_UPDATED_EVENT, onUpdated);
   }, [open, load, loadStatus]);
 
-  // Poll while a turn is working — open or not, so the working dot on the
-  // button stays honest after the panel is closed, and the settle a paused
-  // stream missed still lands. Ruling 457 (CTL-2): the poll reads the small
+  // Poll while a turn is working — open or not, so the settle a paused stream
+  // missed still lands, and with it the button's unread dot after the panel
+  // is closed. Ruling 457 (CTL-2): the poll reads the small
   // status, not the whole transcript: the step line moves from it, and the
   // view is reloaded only when the status and the view disagree about whether
   // the shown turn works (it started elsewhere, or it settled).
@@ -777,16 +762,21 @@ function DockShell({ context }: { context: DockContext }) {
           }
           openedByUser.current = true;
           setRestoredOpen(false);
+          // Ruling 528: a fresh open asks for the scope's newest thread; what
+          // was picked while the panel was last open stayed with that open.
+          setSelected({});
           setOpen(true);
         }}
       >
         <Icon name="cpu" />
-        {working && <span className="live-dot" aria-hidden="true" />}
-        {!working && unseen.length > 0 && <span className="unseen-dot" aria-hidden="true" />}
+        {/* Ruling 528: the one dot is a reply the viewer has not read. A
+            working turn shows in the open panel, never as a dot here. */}
+        {unseen.length > 0 && <span className="unseen-dot" aria-hidden="true" />}
       </button>
-      {/* The dot is decorative, and the panel's own status row is unmounted
-          while the dock is closed — so the one programmatic form of "a turn is
-          running" lives here, outside the panel (review finding 26). */}
+      {/* The button carries no working dot (ruling 528), and the panel's
+          working row is visual only and unmounted while the dock is closed —
+          so the one programmatic form of "a turn is running" lives here,
+          outside the panel (review finding 26, ruling 476(d)). */}
       <span className="vh" role="status" aria-live="polite">
         {working
           ? `${current?.controllerName ?? "Controller"} is working`

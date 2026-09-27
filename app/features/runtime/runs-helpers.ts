@@ -83,8 +83,21 @@ function interruptedByClause(run: RunView): string {
   return "";
 }
 
+/**
+ * Ruling 524(c): the role a run's name is followed by, or null when it adds
+ * nothing. A controller turn is named "Controller" in the role "Controller",
+ * and the card's head read "Controller · Controller"; an operator named
+ * "Operator" read "Operator · operator" in the picker. A renamed deployment
+ * keeps its role ("Atlas · operator").
+ */
+export function roleAfterName(name: string, role: string | null | undefined): string | null {
+  if (!role) return null;
+  return role.trim().toLowerCase() === name.trim().toLowerCase() ? null : role;
+}
+
 export function runLabel(run: RunView): string {
-  return run.who.name + (run.who.role ? " · " + run.who.role : "");
+  const role = roleAfterName(run.who.name, run.who.role);
+  return run.who.name + (role ? " · " + role : "");
 }
 
 export function roleShort(run: RunView): string | null {

@@ -41,7 +41,7 @@ import {
  * ruling 121(f) named for CSRF and fixed there. A selection that is stale,
  * unreadable or out of scope is therefore not an error: the view answers the
  * scope's newest thread and reports `staleSelection`, and the client drops the
- * stored id. A scope the person cannot reach answers `unavailable`. Neither
+ * id it asked for. A scope the person cannot reach answers `unavailable`. Neither
  * leaks anything: both are the same benign shape for a missing project and a
  * forbidden one, and the page routes still 404 on their own.
  */
@@ -75,7 +75,7 @@ export interface ControllerDockView {
    *  project, unknown task). The panel says so instead of the page dying. */
   unavailable: boolean;
   /** The `c` the client asked for could not be honoured; it dropped back to
-   *  this scope's newest thread and the client forgets the stored id. */
+   *  this scope's newest thread and the client forgets the id it asked for. */
   staleSelection: boolean;
   scope: ControllerDockScope;
   conversation: ControllerConversation | null;
@@ -193,9 +193,9 @@ export function getControllerDock(
       }) ||
       !conversationMatchesScope(found, binding)
     ) {
-      // Not an error — see the module note. The stored id belongs to another
-      // user, another scope, or a database that was re-baselined; fall back to
-      // this scope's newest thread and tell the client to forget it.
+      // Not an error — see the module note. The id names a thread that is
+      // gone, another user's or another scope's; fall back to this scope's
+      // newest thread and tell the client to forget it.
       staleSelection = true;
       conversation = rows[0] ?? null;
     } else {

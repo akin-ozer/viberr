@@ -212,41 +212,40 @@ export function ControllerPage({
       </header>
       <TurnAnnouncer view={view} />
       <div className="ctl-layout">
-        <div className="ctl-main">
-          {view.conversation ? (
-            // Keyed by conversation: the log selection and the stream cursors
-            // belong to ONE thread, and switching threads starts them over.
-            <ConversationRuntime
-              key={view.conversation.id}
+        {view.conversation ? (
+          // Keyed by conversation: the log selection and the stream cursors
+          // belong to ONE thread, and switching threads starts them over. It
+          // renders the conversation's column and the run pane beside it.
+          <ConversationRuntime
+            key={view.conversation.id}
+            view={view}
+            csrf={csrf}
+            conversationId={view.conversation.id}
+          >
+            <Transcript view={view} restoreDraft={restoreDraft} />
+            <Composer
               view={view}
               csrf={csrf}
+              send={send}
               conversationId={view.conversation.id}
-            >
-              <Transcript view={view} restoreDraft={restoreDraft} />
-              <Composer
-                view={view}
-                csrf={csrf}
-                send={send}
-                conversationId={view.conversation.id}
-                restoreDraft={restoreDraft}
-              />
-            </ConversationRuntime>
-          ) : (
-            <>
-              <Transcript
-                view={view}
-                examples={controllerExamples(projectSlug ? { kind: "board" } : { kind: "instance" })}
-                examplesDisabled={!view.available || send.state !== "idle"}
-                onExample={(text) =>
-                  send.submit(sendForm(csrf, text, `${location.pathname}${location.search}`, null), {
-                    method: "post",
-                  })
-                }
-              />
-              <Composer view={view} csrf={csrf} send={send} conversationId={null} />
-            </>
-          )}
-        </div>
+              restoreDraft={restoreDraft}
+            />
+          </ConversationRuntime>
+        ) : (
+          <div className="ctl-main">
+            <Transcript
+              view={view}
+              examples={controllerExamples(projectSlug ? { kind: "board" } : { kind: "instance" })}
+              examplesDisabled={!view.available || send.state !== "idle"}
+              onExample={(text) =>
+                send.submit(sendForm(csrf, text, `${location.pathname}${location.search}`, null), {
+                  method: "post",
+                })
+              }
+            />
+            <Composer view={view} csrf={csrf} send={send} conversationId={null} />
+          </div>
+        )}
         {/* Ruling 419(a)/(b): the conversations lead the rail, and on a
             desktop the rail is its own scroller beside the conversation
             (app.css `.ctl-side`), so a long panel under the list neither
@@ -340,15 +339,19 @@ function LiveTurnStep({ turn, runtime }: { turn: ConversationTurnState; runtime:
  *   (`canInterruptTurn`; the engine re-checks). Interrupt confirms first (D6):
  *   a stopped turn settles with "This turn was stopped before I could answer."
  *   and nothing it was about to apply is applied.
- * - The **Agent logs** console below the composer: every turn of the thread as
- *   one grouped stream with `run N of M` boundaries, tailed live through the
- *   controller channel of `useRunLogStream` (`controller.log-appended` on the
- *   owner's user stream) and paged backwards through `/resources/run-log`,
- *   behind the same owner-or-admin gate that serves the raw view.
+ * - The **Agent logs** console: every turn of the thread as one grouped stream
+ *   with `run N of M` boundaries, tailed live through the controller channel
+ *   of `useRunLogStream` (`controller.log-appended` on the owner's user
+ *   stream) and paged backwards through `/resources/run-log`, behind the same
+ *   owner-or-admin gate that serves the raw view. Disclosed on the strip while
+ *   a turn streams (ruling 380), the settled-runs archive after.
  *
- * Wraps the transcript and composer so the strip sits above the conversation
- * and the console below it, with one owner for the selection and the stream.
- * Renders neither panel for a thread that has not run yet.
+ * Ruling 524(a): it renders the conversation's column (`.ctl-main`, the
+ * transcript and composer it wraps) and then the run pane (`.ctl-run`, the
+ * strip or the archive), both cells of the page's grid, so a wide screen puts
+ * the run beside the conversation and a narrow one under the composer, in the
+ * order the DOM reads. One owner for the selection and the stream. Renders no
+ * pane for a thread that has not run yet.
  */
 function ConversationRuntime({
   view,
@@ -412,23 +415,31 @@ function ConversationRuntime({
 
   return (
     <TurnStoreContext.Provider value={runLog}>
+      <div className="ctl-main">{children}</div>
+      {/* Ruling 524(a): the run pane. While a turn streams it holds the strip
+          with its console on it; after, the archive of the settled runs. One
+          console either way, never two (ruling 380). `data-console` tells the
+          sheet which, so a hidden console hands its column back to the
+          conversation instead of leaving it empty under the strip. */}
       {runtime.length > 0 && (
-        <LiveRunPanel
-          store={runLog}
-          runtime={runtime}
-          onViewLogs={onViewLogs}
-          onInterrupt={(id) => setConfirmInterrupt(id)}
-          canInterrupt={view.canInterruptTurn}
-          interrupting={stopping}
-          interruptingRunId={stopping ? String(stop.formData?.get("runId") ?? "") : null}
-          consoleOpen={consoleOpen}
-          console={<AgentLogsPanel {...logProps} />}
-        />
+        <div className="ctl-run" data-console={live ? (consoleOpen ? "open" : "closed") : "archive"}>
+          {live ? (
+            <LiveRunPanel
+              store={runLog}
+              runtime={runtime}
+              onViewLogs={onViewLogs}
+              onInterrupt={(id) => setConfirmInterrupt(id)}
+              canInterrupt={view.canInterruptTurn}
+              interrupting={stopping}
+              interruptingRunId={stopping ? String(stop.formData?.get("runId") ?? "") : null}
+              consoleOpen={consoleOpen}
+              console={<AgentLogsPanel {...logProps} />}
+            />
+          ) : (
+            <AgentLogsPanel {...logProps} />
+          )}
+        </div>
       )}
-      {children}
-      {/* The archive. While a turn streams its console lives on the card above,
-          so this is the settled-runs view — one panel either way, never two. */}
-      {runtime.length > 0 && !live && <AgentLogsPanel {...logProps} />}
       {/* D6: stopping a turn discards what it was about to apply, which is
           ruling 149's destructive class, so the commit keeps the shared
           `danger` default. Ruling 150 puts the same red on the trigger: the
@@ -643,7 +654,7 @@ function Transcript({
       <WorkingSentence name={view.controllerName} />
       {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
           the person is waiting. Both are on the run row already and both
-          already render in the live-run panel further down this page;
+          already render in the run pane beside the conversation;
           the conversation showed one static line for turns measured in
           minutes. `phase` is null while it is the generic "Working" —
           the sentence above already says that. */}
