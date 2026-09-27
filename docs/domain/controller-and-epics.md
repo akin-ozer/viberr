@@ -280,8 +280,8 @@ M` boundaries between turns.
 - **Live run** (above the transcript, only while a turn is `running`): the run's phase
   and last tool step, elapsed from the run's own `started_at`, turns and tokens off the
   run row, the model and the effort it was handed (Runtime, `opus[1m] · max`; the model
-  alone when no effort was set, ruling 526(d)), **View logs** (scrolls to the console and selects the thread) and
-  **Interrupt**. The phase, step, turns and tokens follow the console's tail reads (each
+  alone when no effort was set, ruling 526(d)), **View logs** (scrolls to the console and
+  selects the thread) and **Interrupt**. The phase, step, turns and tokens follow the console's tail reads (each
   line, and the 5-second status read), and the loader on the `controller.updated`
   reference a lifecycle flip publishes (the sink routes a controller run's state
   changes there instead of the task-scoped `run.state-changed`). The transcript's working

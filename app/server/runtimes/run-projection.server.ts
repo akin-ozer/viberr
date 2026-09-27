@@ -252,7 +252,6 @@ function projectRow(
     backend,
     sdk: row.sdk || SDK_LABEL[backend] || "",
     model: row.model,
-    effort: row.effort,
     sid: row.session_id,
     // P11-43: the Export link 404s when the provider kept no on-disk transcript.
     // Compute REAL exportability here (does the transcript actually exist?) so
@@ -284,6 +283,9 @@ function projectRow(
   };
   if (failureKind) view.failureKind = failureKind;
   if (failureOrigin) view.failureOrigin = failureOrigin;
+  // Ruling 526(d): absent when the run was handed no effort, so those runs add
+  // nothing to the task loader's console payload (ruling 457).
+  if (row.effort) view.effort = row.effort;
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
   // (ruling 127): without it the panel states the failure and offers nothing,
