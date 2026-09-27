@@ -17,16 +17,17 @@ db/migrations/       0001_baseline.sql — the whole SQLite schema, squashed
 scripts/             operational CLIs run with tsx (seed, seed-demo, rescan, store-check, backup,
                      restore, secret-keys, deploy, e2e) plus two node scripts (anti-slop-manifest.mjs,
                      measure-routes.mjs); no docker-entrypoint.sh: the image declares no ENTRYPOINT
-e2e/                 Playwright specs (8) + the login fixture (auth.setup.ts)
+e2e/                 Playwright specs (9) + the login fixture (auth.setup.ts)
 test-support/        vitest setup and harnesses: hermetic env + <dialog> polyfill, test app/db/store,
                      fake runtime, fake GitHub fetch, a local git origin, fake vendor binaries
                      (writeFakeVendorBinaries, the sign-in driver's real child process), backend
                      credentials (connectFakeBackend / disconnectFakeBackend, ruling 127), the demo seed
                      and data, a custom 3-stage board, a raw audit reader, MCP tool-meta and
-                     strict-schema checks, the hermetic toolchain reading, and the performance
-                     ratchet (ruling 457): perf-verdict / perf-budgets(/) / perf-ratchet, the
-                     counters (perf-counters, render-counter), the revalidation and dock harnesses,
-                     the console fixture, a static-import walker and the app.css rule parser
+                     strict-schema checks, the operator prompt's task snapshot, the hermetic
+                     toolchain reading, and the performance ratchet (ruling 457): perf-verdict /
+                     perf-budgets(/) / perf-ratchet, the counters (perf-counters, render-counter),
+                     the revalidation and dock harnesses, the console fixture, a static-import
+                     walker and the app.css rule parser
 tools/oxlint/        the vendored anti-slop lint plugin (15 rules) and its pinned manifest
 tools/viberr-launch/ the setuid agent launcher (C) the image compiles, root:node 4750 (ruling 460)
 design/              the HTML/JSX prototype the UI was ported from, the design system, a PRD mirror
