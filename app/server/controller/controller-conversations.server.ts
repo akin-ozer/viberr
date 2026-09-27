@@ -616,7 +616,9 @@ export function retractMessage(
  * (ruling 17's posture, and an epic's: a done or cancelled epic stays
  * readable, ruling 503). The conversation becomes instance-scoped, which is a real
  * scope, and carries a message saying why so its author is not left wondering
- * where the board went.
+ * where the board went. Ruling 525 lets a PERSON delete a conversation (its
+ * starter, an org admin, or a project admin one about their project); deleting a
+ * project is nobody's decision about anyone's conversation, so it still releases.
  */
 export function releaseProjectConversations(
   db: DatabaseSync,

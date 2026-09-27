@@ -703,6 +703,23 @@ export function codexRolloutRunStats(
 }
 
 /**
+ * Where a session's transcript is on disk, or null: {@link locateTranscript}
+ * without the read it makes for the size. Ruling 525's purge of a deleted
+ * controller conversation needs only the path.
+ */
+export function transcriptFile(
+  backend: RealBackend,
+  userId: string | null,
+  sessionId: string,
+  dataRoot?: string,
+): string | null {
+  if (!sessionId || !userId) return null;
+  return backend === "codex"
+    ? locateCodex(userId, sessionId, dataRoot)
+    : locateClaude(userId, sessionId, dataRoot);
+}
+
+/**
  * Locate the resumable transcript for a session id + backend, or null when the
  * provider kept no on-disk session.
  */
@@ -714,11 +731,7 @@ export function locateTranscript(
   sessionId: string,
   dataRoot?: string,
 ): LocatedTranscript | null {
-  if (!sessionId || !userId) return null;
-  const filePath =
-    backend === "codex"
-      ? locateCodex(userId, sessionId, dataRoot)
-      : locateClaude(userId, sessionId, dataRoot);
+  const filePath = transcriptFile(backend, userId, sessionId, dataRoot);
   if (!filePath) return null;
   const { lineCount, bytes } = fileStats(filePath);
   return {

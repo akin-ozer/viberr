@@ -73,6 +73,7 @@ import {
   type ControllerConversation,
   type ControllerMessage,
 } from "./controller-conversations.server";
+import { purgeDeletedConversationLogs } from "./controller-purge.server";
 import { inReplyOrder } from "~/shared/controller-thread";
 import {
   cachedToolchain,
@@ -185,6 +186,19 @@ function leases(): Map<string, LeaseEntry> {
     host[LEASE_KEY] = map;
   }
   return map;
+}
+
+/**
+ * Ruling 525: a conversation being deleted gives up its lease, and every
+ * message waiting on its turn goes with it, queued behind it or sent to steer
+ * it (ruling 527), so the stopping turn reads none of them. They get no notes:
+ * they are deleted with the conversation. The turn the lease held is stopped
+ * by the deleter, and settles into a conversation that is gone (`settleTurn`).
+ */
+export function dropConversationLease(conversationId: string): void {
+  const entry = leases().get(conversationId);
+  if (entry) drainWaiting(entry);
+  leases().delete(conversationId);
 }
 
 /** Newest prior controller run for a conversation (session resume anchor). */
@@ -437,19 +451,23 @@ export async function runControllerTurn(
       error instanceof AppError
         ? error.userMessage
         : "The controller turn could not start.";
-    appendMessage(db, {
-      conversationId: conversation.id,
-      author: "controller",
-      text: startFailedNote(reason),
-      replyTo: message.id,
-    });
-    for (const lost of dropped) {
+    // Ruling 525: a conversation deleted while its turn was starting has no
+    // transcript to say so in.
+    if (getConversation(db, conversation.id)) {
       appendMessage(db, {
         conversationId: conversation.id,
         author: "controller",
-        text: DROPPED_AFTER_START,
-        replyTo: lost.messageId,
+        text: startFailedNote(reason),
+        replyTo: message.id,
       });
+      for (const lost of dropped) {
+        appendMessage(db, {
+          conversationId: conversation.id,
+          author: "controller",
+          text: DROPPED_AFTER_START,
+          replyTo: lost.messageId,
+        });
+      }
     }
     if (error instanceof AppError) throw error;
     logger.error("controller turn start failed", {
@@ -688,6 +706,11 @@ async function startTurnRun(
     db,
     mcpDetail,
   );
+  // Ruling 525: the pre-flight is the wait a deletion can land in. A
+  // conversation deleted meanwhile starts no turn, and so spends nothing.
+  if (!getConversation(db, conversation.id)) {
+    throw AppError.notFound("Conversation not found.");
+  }
 
   const { mcpServers, allowedTools, toolManifest: manifest } = buildControllerMounts(db, {
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
@@ -985,6 +1008,9 @@ function postReply(
   /** Ruling 465: the user message this run answered. */
   replyTo: string,
 ): boolean {
+  // Ruling 525: an answer that lands after its conversation was deleted has
+  // nowhere to go, and its settle purges it.
+  if (!getConversation(db, conversationId)) return false;
   if (replyPosted(db, conversationId, runId)) return false;
   const text = fullReplyTextForRun(db, runId);
   const reply = text ? normalizeEscapedNewlines(text).trim() : "";
@@ -1004,8 +1030,16 @@ async function settleTurn(
   answering: string | null,
 ): Promise<void> {
   const conversation = getConversation(db, conversationId);
+  if (!conversation) {
+    // Ruling 525: the conversation was deleted while this turn ran. The
+    // deletion stopped it and took the lease; the lines the turn wrote as it
+    // exited go now, after its process has written its last one.
+    leases().delete(conversationId);
+    purgeDeletedConversationLogs(db, conversationId, input.dataRoot);
+    return;
+  }
   // U39-30: a reply the answered hook already posted is this turn's reply.
-  if (conversation && !replyPosted(db, conversationId, runId)) {
+  if (!replyPosted(db, conversationId, runId)) {
     let reply: string | null = null;
     if (state === "finished") {
       reply = fullReplyTextForRun(db, runId);
@@ -1037,7 +1071,7 @@ async function settleTurn(
   // or ended with no step after the message came) starts the next turn.
   for (const missed of entry?.steering.splice(0) ?? []) queueNext(entry!, missed);
   const next = entry?.queue.shift();
-  if (!entry || !next || !conversation) {
+  if (!entry || !next) {
     map.delete(conversationId);
     return;
   }
@@ -1068,19 +1102,22 @@ async function settleTurn(
     // message dropped behind it gets its own, under it (ruling 527: one sent
     // to steer the turn that never started included).
     const dropped = drainWaiting(entry);
-    appendMessage(db, {
-      conversationId,
-      author: "controller",
-      text: queuedStartFailedNote(dropped.length),
-      replyTo: next.messageId,
-    });
-    for (const lost of dropped) {
+    // Ruling 525: nor into a conversation deleted while it was starting.
+    if (getConversation(db, conversationId)) {
       appendMessage(db, {
         conversationId,
         author: "controller",
-        text: DROPPED_AFTER_QUEUED_START,
-        replyTo: lost.messageId,
+        text: queuedStartFailedNote(dropped.length),
+        replyTo: next.messageId,
       });
+      for (const lost of dropped) {
+        appendMessage(db, {
+          conversationId,
+          author: "controller",
+          text: DROPPED_AFTER_QUEUED_START,
+          replyTo: lost.messageId,
+        });
+      }
     }
     map.delete(conversationId);
   }

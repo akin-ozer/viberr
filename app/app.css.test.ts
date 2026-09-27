@@ -6222,3 +6222,24 @@ describe("app.css ruling 520: Current state on the property grid", () => {
     expect(decl(".prop-fact .working::after", "animation")).toBe(decl(".wait-tag .working::after", "animation"));
   });
 });
+
+describe("app.css ruling 525: deleting a controller conversation from the rail", () => {
+  it("draws a sealed row in the box a conversation row draws, with none of its hover or press", () => {
+    // Somebody else's thread, listed to a project admin to delete, is a <div>,
+    // so it cannot be a `.ctl-conv` (that presses, and ruling 459's F31 finds
+    // a press on a div). CANARY: set `.ctl-conv-sealed`'s padding to `.5rem`
+    // and it sits out of line with the rows above and below it.
+    const row = requiredDecls(plain, ".ctl-conv");
+    const sealed = requiredDecls(plain, ".ctl-conv-sealed");
+    for (const p of ["display", "flex-direction", "gap", "padding", "border-radius", "border"]) {
+      expect(sealed.get(p), p).toBe(row.get(p));
+    }
+    // It answers the pointer only at its delete.
+    const pointer = RULES.flatMap((r) => selectorParts(r)).filter((s) => /\.ctl-conv-sealed:(hover|active)\b/.test(s));
+    expect(pointer).toEqual([]);
+    // Its words stop short of that delete, as a deletable link's do.
+    expect(requiredDecls(plain, ".ctl-conv-row.deletable > .ctl-conv-sealed").get("padding-right")).toBe(
+      requiredDecls(plain, ".ctl-conv-row.deletable > .ctl-conv").get("padding-right"),
+    );
+  });
+});

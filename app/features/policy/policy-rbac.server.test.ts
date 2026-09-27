@@ -45,6 +45,8 @@ import {
 } from "~/features/project-settings/settings-actions.server";
 import { createAgentProfile } from "~/features/agents/agent-profile-actions.server";
 import { createEpic } from "~/server/tasks/epic-actions.server";
+import { createConversation } from "~/server/controller/controller-conversations.server";
+import { deleteControllerConversation } from "~/server/controller/controller-deletion.server";
 import {
   setMemberRole,
   setTransitionBoundary,
@@ -255,6 +257,7 @@ interface MatrixDriver {
 function matrixDrivers() {
   let taskN = 0;
   let inviteN = 0;
+  let conversationId = "";
   return {
     // `view` and `comment` are the two rows NO role tier narrows: every role
     // holds them, so their entire enforcement is the membership gate (they never
@@ -599,6 +602,30 @@ function matrixDrivers() {
           await createAgentProfile(store.db, { projectSlug: store.slug, form: {} }, actor, {
             dataRoot: store.dataRoot,
           });
+        },
+      },
+    ],
+    "delete-controller-conversations": [
+      {
+        // Ruling 525: somebody ELSE's conversation about the board. Its starter
+        // is none of the actors, so their own path (a starter may always
+        // delete) never stands in for the grant. A fresh one before each
+        // actor, since an allowed delete takes it away and the next attempt
+        // would only find nothing to delete, whose 404 reads as allowed.
+        label: "deleteControllerConversation (another person's, about the board)",
+        reset: () => {
+          conversationId = createConversation(store.db, {
+            userId: "u_asker",
+            userLabel: "asker@viberr.test",
+            projectSlug: store.slug,
+          }).id;
+        },
+        run: async (actor) => {
+          deleteControllerConversation(
+            store.db,
+            { conversationId, projectSlug: store.slug, dataRoot: store.dataRoot },
+            actor,
+          );
         },
       },
     ],

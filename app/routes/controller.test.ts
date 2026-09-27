@@ -18,6 +18,7 @@ let app: AppTestContext;
 let selin: string; // conversation owner (contributor on viberr-core)
 let murat: string; // another member of viberr-core
 let arda: string; // org admin
+let elif: string; // project admin on viberr-core, no org admin
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
@@ -27,6 +28,7 @@ beforeAll(async () => {
   selin = userIds.selin;
   murat = userIds.murat;
   arda = userIds.arda;
+  elif = userIds.elif;
   const { connectFakeBackend } = await import("../../test-support/backend-credentials");
   await connectFakeBackend(app.db, selin, "claude");
 });
@@ -195,6 +197,77 @@ describe.each<Surface>(["instance", "project"])("ruling 527: steering and the qu
     await settled(runId);
     for (let i = 0; i < 400 && conversationTurnState(app.db, conversationId).answering; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  });
+});
+
+/**
+ * Ruling 525: the rail's Delete posts `delete-conversation` with the thread the
+ * page has open. Deleting another thread answers a toast; deleting the open one
+ * answers a redirect to where a bare visit lands, replacing the history entry
+ * that named it, since its URL now answers 404. Canary: drop the `open` branch
+ * and the page is left on a thread that is gone.
+ */
+describe.each<Surface>(["instance", "project"])("POST intent=delete-conversation on the %s surface", (surface) => {
+  const page = surface === "instance" ? "/controller" : `/projects/${SLUG}/controller`;
+
+  async function selinsThread(): Promise<string> {
+    const { createConversation } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    return createConversation(app.db, {
+      userId: selin,
+      userLabel: "selin@viberr.dev",
+      projectSlug: surface === "project" ? SLUG : null,
+    }).id;
+  }
+
+  async function gone(conversationId: string): Promise<boolean> {
+    const { getConversation } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    return getConversation(app.db, conversationId) === null;
+  }
+
+  it("deletes a thread the page is not showing, and says so", async () => {
+    const other = await selinsThread();
+    const open = await selinsThread();
+    const reply = okResult.parse(
+      await post(surface, selin, { intent: "delete-conversation", conversationId: other, open }),
+    );
+    expect(reply.toast).toBe("Conversation deleted.");
+    expect(await gone(other)).toBe(true);
+    expect(await gone(open)).toBe(false);
+  });
+
+  it("moves the page off the thread it deletes, in place of the entry that named it", async () => {
+    for (const all of [false, true]) {
+      const open = await selinsThread();
+      const fields = { intent: "delete-conversation", conversationId: open, open };
+      const reply = await post(surface, selin, all ? { ...fields, all: "1" } : fields);
+      if (!(reply instanceof Response)) throw new Error("expected a redirect");
+      expect(reply.status).toBe(302);
+      expect(reply.headers.get("Location")).toBe(all ? `${page}?all=1` : page);
+      expect(reply.headers.get("X-Remix-Replace")).toBe("true");
+      expect(await gone(open)).toBe(true);
+    }
+  });
+
+  it("refuses a member who may not, and the thread stays", async () => {
+    const thread = await selinsThread();
+    const reply = refusal.parse(
+      await post(surface, murat, { intent: "delete-conversation", conversationId: thread }),
+    );
+    // On the project page a maintainer is told who may; on the instance page,
+    // which no project role reaches, the thread is not found, as for reading.
+    expect(reply.init?.status).toBe(surface === "project" ? 403 : 404);
+    expect(await gone(thread)).toBe(false);
+    if (surface === "project") {
+      const done = okResult.parse(
+        await post(surface, elif, { intent: "delete-conversation", conversationId: thread }),
+      );
+      expect(done.toast).toBe("Conversation deleted.");
+      expect(await gone(thread)).toBe(true);
     }
   });
 });

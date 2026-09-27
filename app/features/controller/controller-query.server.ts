@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { TaskLinks } from "~/shared/task-key-links";
 import { data } from "react-router";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
-import { getProject } from "~/server/projections/board-query.server";
+import { getProject, listProjectMembers } from "~/server/projections/board-query.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import {
   canAccessConversation,
@@ -16,9 +16,12 @@ import {
   type ListConversationsInput,
 } from "~/server/controller/controller-conversations.server";
 import { resolveControllerName } from "~/server/controller/controller-profile.server";
+import { mayDeleteConversation } from "~/server/controller/controller-deletion.server";
+import { roleCan, ROLE_LABEL } from "~/shared/rbac";
 import {
   conversationTurnState,
   IDLE_TURN,
+  liveTurnConversationIds,
   type ConversationTurnState,
 } from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
@@ -33,8 +36,10 @@ import { listKbCorrections } from "~/server/org/kb-corrections.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
- * conversations (org admins may ask for everyone's), the active transcript,
- * live turn state, and — on the project surface — the knowledge-base panel.
+ * conversations (org admins may ask for everyone's, and so, ruling 525, may a
+ * project admin on their project's page, as threads they can delete but not
+ * read), the active transcript, live turn state, and — on the project surface
+ * — the knowledge-base panel.
  * The goal chains it also carried became epics (ruling 503), which the Epics
  * pages read (`features/epics/epics-query.server.ts`).
  *
@@ -75,8 +80,13 @@ export interface ControllerSurfaceView {
    *  tasks wrote, newest first. Project surface only. */
   corrections: KbCorrectionsView | null;
   viewerOwnsActive: boolean;
-  /** Org admin reading every conversation (?all=1). */
+  /** Reading every conversation of this scope (?all=1): an org admin, or
+   *  (ruling 525) a holder of `delete-controller-conversations` on this page's
+   *  project. */
   showingAll: boolean;
+  /** Ruling 525: who the "Show everyone's" link says the viewer is reading
+   *  as ("org admin", "project admin"); null when they may not. */
+  showAllAs: string | null;
   viewerIsOrgAdmin: boolean;
 }
 
@@ -138,6 +148,14 @@ export interface ConversationListItem {
   /** O39-d: the viewer's own thread holds a controller reply they have not
    *  seen. Never set on someone else's thread (?all=1). */
   unread: boolean;
+  /** The viewer may open it: its starter, or an org admin. Ruling 525: a
+   *  project admin's everyone's list also holds threads they may only
+   *  delete, which carry no title and open nothing. */
+  readable: boolean;
+  /** Ruling 525: the viewer may delete it (`mayDeleteConversation`). */
+  canDelete: boolean;
+  /** Ruling 525: a turn of it is running, which deleting it stops first. */
+  working: boolean;
 }
 
 /**
@@ -256,8 +274,19 @@ export function getControllerSurface(
   },
 ): ControllerSurfaceView {
   const admin = isOrgAdmin(db, viewer.id);
-  const showingAll = Boolean(input.all && admin);
   const scope = input.projectSlug ?? null;
+  // Ruling 525: the viewer's role on this page's project decides whether they
+  // may delete other people's threads about it, and so list them.
+  const projectRole = scope
+    ? (listProjectMembers(db, scope).find((m) => m.userId === viewer.id)?.role ?? null)
+    : null;
+  const deletesOthers = roleCan(projectRole, "delete-controller-conversations");
+  const showAllAs = admin
+    ? "org admin"
+    : deletesOthers && projectRole
+      ? `project ${ROLE_LABEL[projectRole].toLowerCase()}`
+      : null;
+  const showingAll = Boolean(input.all && showAllAs);
   const listInput: ListConversationsInput = { projectSlug: scope };
   if (!showingAll) listInput.userId = viewer.id;
   const rows = listConversations(db, listInput);
@@ -296,6 +325,7 @@ export function getControllerSurface(
     markConversationSeen(db, conversation.id, viewer.id);
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
+  const working = new Set(liveTurnConversationIds());
   // Ruling 419(f): a person is named on this page the way the rest of the app
   // names them. A conversation stores its owner's EMAIL at creation (the
   // controller's prompt keeps it: an address is unambiguous to a model), and
@@ -326,16 +356,25 @@ export function getControllerSurface(
     }),
     controllerName: resolveControllerName(input.dataRoot),
     projectName: scope ? (getProject(db, scope)?.name ?? scope) : null,
-    conversations: rows.map((c) => ({
-      id: c.id,
-      title: c.title || "New conversation",
-      ownerLabel: nameOf(c.userId, c.userLabel),
-      own: c.userId === viewer.id,
-      lastMessageAt: c.lastMessageAt,
-      projectSlug: c.projectSlug,
-      taskKey: c.taskKey,
-      unread: c.userId === viewer.id && unseen.has(c.id),
-    })),
+    conversations: rows.map((c) => {
+      const readable = c.userId === viewer.id || admin;
+      const ownerLabel = nameOf(c.userId, c.userLabel);
+      return {
+        id: c.id,
+        // Ruling 525: a title is its starter's first words, which a project
+        // admin who may delete the thread may not read (ruling 99(d)).
+        title: readable ? c.title || "New conversation" : `${ownerLabel}'s conversation`,
+        ownerLabel,
+        own: c.userId === viewer.id,
+        lastMessageAt: c.lastMessageAt,
+        projectSlug: c.projectSlug,
+        taskKey: c.taskKey,
+        unread: c.userId === viewer.id && unseen.has(c.id),
+        readable,
+        canDelete: mayDeleteConversation(c, { userId: viewer.id, orgAdmin: admin, projectRole }),
+        working: working.has(c.id),
+      };
+    }),
     conversation,
     messages,
     taskLinks: taskKeyLinks(
@@ -359,6 +398,7 @@ export function getControllerSurface(
     corrections: scope ? projectCorrections(db, scope, admin) : null,
     viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
     showingAll,
+    showAllAs,
     viewerIsOrgAdmin: admin,
   };
 }

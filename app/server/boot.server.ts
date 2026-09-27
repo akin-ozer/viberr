@@ -68,6 +68,7 @@ import { startScheduleRunner } from "./tasks/schedule.server";
 import { startDependencyRunner } from "./tasks/dependencies.server";
 import { convertGoalsToEpics } from "./tasks/goal-epic-conversion.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
+import { purgeOrphanedConversationLogs } from "./controller/controller-purge.server";
 import { backfillMcpGrantScopes } from "./org/mcp-oauth.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
 import { recoverProjectGates } from "./tasks/project-gates.server";
@@ -991,6 +992,15 @@ export async function bootServer(): Promise<void> {
     recoverControllerConversations(db);
   } catch (error) {
     logger.warn("controller conversation recovery failed", {
+      err: toError(error),
+    });
+  }
+  // Ruling 525: and finish the purge for a deleted conversation whose running
+  // turn a restart cut off before it settled.
+  try {
+    purgeOrphanedConversationLogs(db);
+  } catch (error) {
+    logger.warn("deleted controller conversation purge failed", {
       err: toError(error),
     });
   }
