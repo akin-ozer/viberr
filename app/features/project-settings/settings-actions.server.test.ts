@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -112,7 +113,7 @@ describe("addStage", () => {
     expect(edges(workflowOf(store))).toEqual([
       ["triage", "ready", "auto"],
       ["ready", "impl", "auto"],
-      ["impl", "review", "approval"],
+      ["impl", "review", "auto"],
       ["review", stageId, "human"],
       [stageId, "done", "human"],
     ]);
@@ -178,6 +179,9 @@ describe("addStage names the stage (name-first)", () => {
 describe("removeStage", () => {
   it("re-joins the neighbours and leaves no orphan rule", async () => {
     const store = setupProjectedStore(ctx);
+    // A person approves the move into Review on this board (the Standard
+    // template's is `auto` since ruling 519), so the merge has a gate to keep.
+    approveReviewEntry(store);
     await removeStage(
       store.db,
       { projectSlug: store.slug, stageId: "impl" },
@@ -260,9 +264,11 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
 
   it("F20-13: removing a stage that collapses two edges to a stricter hop discloses it (toast + audit)", async () => {
     const store = setupProjectedStore(ctx);
-    // Default chain: ready→impl (auto) + impl→review (approval). Removing In
-    // Progress merges them to the STRICTER `approval` — a tightening the toast
-    // and audit must name, not swallow.
+    // A chain where a person approves the move into Review (the Standard
+    // template's is `auto` since ruling 519): ready→impl (auto) + impl→review
+    // (approval). Removing In Progress merges them to the STRICTER `approval`
+    // — a tightening the toast and audit must name, not swallow.
+    approveReviewEntry(store);
     const { toast } = await removeStage(
       store.db,
       { projectSlug: store.slug, stageId: "impl" },
@@ -372,6 +378,9 @@ describe("recolorStage (ruling 364)", () => {
 describe("reorderStages", () => {
   it("re-points the chain at the new column order, each stage keeping its entry gate", async () => {
     const store = setupProjectedStore(ctx);
+    // A person approves the move into Review here, so Review's entry gate
+    // differs from its neighbours' and a gate that moved with the wrong edge shows.
+    approveReviewEntry(store);
     await reorderStages(
       store.db,
       {

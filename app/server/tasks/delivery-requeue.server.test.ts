@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -166,6 +167,9 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
   });
 
   it("B. supervised does NOT re-trigger — but LEAVES an actionable next step (R19-4)", async () => {
+    // VC-1's board: a person approves the move into Review (the Standard
+    // template's is `auto` since ruling 519, and files no card).
+    approveReviewEntry(store);
     deployDeliveryOperator(store, "supervised");
     seedTask();
     const outcome = await performDelivery(
@@ -567,6 +571,8 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
  * the server GUARANTEES an actionable next step. Live: VC-1 was left
  * `waiting:human` with no recommendation, no packet and no chip while the
  * operator narrated "the task will move to Review; no further action needed".
+ * That holds on a board where a person approves the move into Review; where
+ * the move is `auto`, the operator makes it itself (ruling 519).
  */
 describe("R19-4 — a supervised delivery always leaves something to act on", () => {
   it("G. a HUMAN delivery gets no card — the person who clicked Deliver is present", async () => {
@@ -593,6 +599,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
       created: false,
       url: "http://x/pull/7",
     });
+    approveReviewEntry(store); // VC-1's board, as in B
     deployDeliveryOperator(store, "supervised");
     seedTask();
     await performDelivery(

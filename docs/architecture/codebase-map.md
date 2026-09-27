@@ -148,7 +148,9 @@ for the operator), `icon` (one stroke icon set), `pill` (the one
 readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` ``,
 `@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `collapsible`
 (a box taller than 340px clamps behind Show more: a long comment, a task's long attachment
-list, ruling 510), `code-view` +
+list, ruling 510; its `FoldToggle` counts what it hides beyond the box and keeps its place
+on Show less, and `useFirstRow` counts the tiles on a wrapping strip's first line, so a
+timeline entry's pictures fold with its text, ruling 522), `code-view` +
 `code-language` + `code-highlight` (the ruling-363 reader: numbered lines, Shiki tokens by
 filename grammar, loaded on first use) + `log-grammar` (upstream's log grammar with whole
 numbers and levels by severity, in the grammar's own chunk, ruling 508), `mention-spans`, `toast` (bottom-center; success 5 s, paused on hover or focus; errors stay until dismissed, ruling 455),

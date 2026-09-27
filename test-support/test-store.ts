@@ -7,16 +7,19 @@ import {
   taskFilePath,
 } from "~/server/files/file-store-root.server";
 import { serializeProjectFile } from "~/server/files/project-file.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { serializeTaskFile } from "~/server/files/task-file.server";
 import type {
   ProjectFrontmatter,
   ProjectRole,
+  WorkflowBoundary,
 } from "~/schemas/project-file.schema";
 import type {
   ParsedTaskFile,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
+import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import type { TestDbContext } from "./test-db";
 
 /**
@@ -126,6 +129,29 @@ export function writeProject(
   writeFileAtomic(
     projectFilePath(frontmatter.slug, dataRoot),
     serializeProjectFile({ frontmatter, unknownFrontmatter: {}, description }),
+  );
+}
+
+/**
+ * The Standard board with a person approving the move into Review: the
+ * template before ruling 519, and a strict board still. For a suite whose
+ * contract needs an `approval` boundary to cross, or a work stage the operator
+ * does not leave on its own (so the settle-time backstop stays quiet there).
+ */
+export const REVIEW_APPROVAL_WORKFLOW: WorkflowBoundary[] = GOVERNED_TEMPLATE.workflow.map((w) =>
+  w.from === "impl" && w.to === "review"
+    ? { ...w, boundary: "approval" as const, by: defaultTransitionBy("approval") }
+    : w,
+);
+
+/** Puts `REVIEW_APPROVAL_WORKFLOW` on the store's project.md, keeping the rest
+ *  of the file. A suite that reads the projection reprojects after. */
+export function approveReviewEntry(store: Pick<TestStore, "dataRoot" | "slug">): void {
+  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(
+    store.dataRoot,
+    { ...file.parsed.frontmatter, workflow: REVIEW_APPROVAL_WORKFLOW },
+    file.parsed.description,
   );
 }
 

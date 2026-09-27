@@ -65,7 +65,9 @@ import {
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import {
+  approveReviewEntry,
   baseTaskFrontmatter,
+  REVIEW_APPROVAL_WORKFLOW,
   setupTestStore,
   writeProject,
   writeTask,
@@ -3807,6 +3809,8 @@ describe("pending trigger queue", () => {
     writeProject(store3.dataRoot, {
       ...project.parsed.frontmatter,
       repo: null,
+      // A person approves the move into Review (see the task below).
+      workflow: REVIEW_APPROVAL_WORKFLOW,
       agents: [
         {
           profileId: "operator",
@@ -3827,7 +3831,8 @@ describe("pending trigger queue", () => {
     ctx3 = createTestDbContext();
     store3 = setupTestStore(ctx3);
     seedOperatorProject();
-    // A work stage (impl → review is an APPROVAL boundary), so nothing here is
+    // A work stage whose way out is an APPROVAL boundary on this board (the
+    // Standard template's is `auto` since ruling 519), so nothing here is
     // "stranded" and the only re-runs are the queued triggers under test.
     writeTask(store3.dataRoot, store3.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -4908,6 +4913,9 @@ describe("runOperator — authority, ordering, orphans", () => {
     it("the lease release fires the follow-up for a drive that delivered and stopped, and none for one that kept going", async () => {
       // CANARY: drop the `deliveredFollowUpFor` call from releaseOperatorLease
       // (the second drive never starts).
+      // In Progress's way out is a person's approval here, so a drive that
+      // stops there is not stranded and the settle adds no drive of its own.
+      approveReviewEntry(store5);
       deployAgents([operatorAgent()]);
       seed("impl");
       await drive({ trigger: "manual" });
@@ -4960,6 +4968,9 @@ describe("runOperator — authority, ordering, orphans", () => {
     const hopsNow = () => ownOperatorRunForTests(store5.slug, "VIB-1")?.reactHops;
 
     it("a chain's drive carries its count; a person's packet answer restarts it; two chain triggers keep the deeper", async () => {
+      // A person approves the move out of In Progress here: the drives that
+      // stop there are not stranded, so the only drives are the ones queued.
+      approveReviewEntry(store5);
       deployAgents([operatorAgent()]);
       seed("impl");
       await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 7 });
@@ -5000,6 +5011,9 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
 
     it("the drive's own follow-ups carry the count: the delivered follow-up and the stranded resume", async () => {
+      // In Progress's way out is a person's approval here, so the delivered
+      // follow-up that stops there is not stranded.
+      approveReviewEntry(store5);
       deployAgents([operatorAgent()]);
       seed("impl");
       await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 7 });

@@ -7195,16 +7195,20 @@ export async function transitionStage(
     type: "transition",
     actor: ctx.operatorAuthorized ? { kind: "operator" } : humanActorRef(db, actor),
     title: null,
-    text: ctx.operatorAuthorized
-      ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
-      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.` +
-        // Ruling 381: on the event itself, not in a separate note, so the
-        // operator reads the move and the reason as one fact — and quoted, the
-        // way a packet decision quotes the resolver's words. Appending it as a
-        // bare clause ran the person's own sentence on after a full stop
-        // ("…to In Progress. the retry path is still unhandled"), which reads
-        // as a typo rather than as an instruction.
-        (movedReason ? `\n\n${quoteLines(movedReason)}` : ""),
+    text:
+      (ctx.operatorAuthorized
+        ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
+        : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`) +
+      // Ruling 381: on the event itself, not in a separate note, so the
+      // operator reads the move and the reason as one fact — and quoted, the
+      // way a packet decision quotes the resolver's words. Appending it as a
+      // bare clause ran the person's own sentence on after a full stop
+      // ("…to In Progress. the retry path is still unhandled"), which reads
+      // as a typo rather than as an instruction. Ruling 519: the operator's
+      // own move quotes its reason the same way, because the move into Review
+      // it now makes by itself used to reach a person as a card that carried
+      // that reason.
+      (movedReason ? `\n\n${quoteLines(movedReason)}` : ""),
     toAgent: false,
     evidence: null,
   };
@@ -9011,6 +9015,8 @@ const DELIVERY_NEXT_STEP_AUDIT_ACTION = "github.delivery.next_step";
  *    counting it would strand the task exactly as before;
  *  - a task already AT or PAST the review stage needs no move — B-FD5's
  *    acceptance predicate is what surfaces it there;
+ *  - the edge into the review stage is `auto` (ruling 519): nobody confirms
+ *    that move, the operator makes it;
  *  - an archived task or archived (read-only, R6-3) project takes no new cards.
  *
  * Idempotent (NFR16): the suppression re-runs INSIDE the file lock, so a retry,
@@ -9039,6 +9045,18 @@ async function recordDeliveredNextStep(
     const stageIdx = project.stages.findIndex((s) => s.id === fm.stage);
     const reviewIdx = project.stages.findIndex((s) => s.id === reviewStageId);
     if (stageIdx < 0 || reviewIdx < 0 || stageIdx >= reviewIdx) return;
+    // Ruling 519: an `auto` edge into the review stage is a move nobody
+    // confirms. The operator makes it itself: its drive goes on after the
+    // delivery, and a drive that stops at a stage with an `auto` way out is
+    // re-invoked by the settle-time backstop. A card here would ask a person to
+    // confirm what is not theirs to confirm, and ring their bell for it.
+    if (
+      project.workflow.some(
+        (w) => w.from === fm.stage && w.to === reviewStageId && w.boundary === "auto",
+      )
+    ) {
+      return;
+    }
     // F36-6 (pass 36): the card is a VERDICT-AWARE offer. "Review stage" here
     // is the stage with an edge into the terminal one (Merge Approval on a
     // board with a verdict stage before it), so a task sitting AT its verdict

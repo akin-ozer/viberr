@@ -643,9 +643,9 @@ describe("loadProjectContext", () => {
     expect(active.memberRoles.get(store.users.elif.id)).toBe("viewer");
     expect(active.memberRoles.has(store.users.deniz.id)).toBe(false);
     expect(
-      active.workflow.find((w) => w.from === "impl" && w.to === "review")
+      active.workflow.find((w) => w.from === "review" && w.to === "done")
         ?.boundary,
-    ).toBe("approval");
+    ).toBe("human");
     expect(active.stages.map((s) => s.id)).toEqual([
       "triage",
       "ready",
