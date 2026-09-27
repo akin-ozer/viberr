@@ -19,7 +19,7 @@ import { setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
-import { recordRepoAccess } from "~/server/github/repo-health.server";
+import { readRepoHealth, recordRepoAccess } from "~/server/github/repo-health.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { listOrgUsers } from "~/server/org/org-users.server";
@@ -534,6 +534,40 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
       to: REPO_OK,
       probed: true,
       defaultBranch: "develop",
+    });
+  });
+
+  it("ruling 517: the repair's probe is the reading the board shows from then on", async () => {
+    // The board and Home read the last reading taken of the project's
+    // repository. A repair probes the new repository and used to keep that
+    // answer to itself, so "akin-ozer/akin-website · repo not found" stayed on
+    // the board of a project that no longer pointed there.
+    const store = setupTestStore(ctx);
+    await misconfigure(store, "akin-ozer/akin-website");
+    bindCredential(store);
+    recordRepoAccess(store.db, store.slug, {
+      status: "repo_not_found",
+      repo: "akin-ozer/akin-website",
+    });
+    const gh = fakeGithubFetch({
+      [`GET /repos/${REPO_OK}`]: {
+        body: { full_name: REPO_OK, default_branch: "main", private: true },
+      },
+    });
+    await repairProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: REPO_OK },
+      admin(store),
+      { dataRoot: store.dataRoot },
+      { fetchImpl: gh.fetchImpl },
+    );
+    // CANARY: drop the repair's `recordRepoAccess` and this reads null: the
+    // old reading is about another repository, and no reading replaced it.
+    expect(readRepoHealth(store.db, store.slug)?.result).toEqual({
+      status: "connected",
+      repo: REPO_OK,
+      remoteDefaultBranch: "main",
+      private: true,
     });
   });
 
