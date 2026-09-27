@@ -135,6 +135,22 @@ describe("cardProblems: everything wrong, most severe first", () => {
     expect(cardProblems(task({ displayReadiness: "blocked", waiting: "human", waitingOnMe: true }))).toEqual([]);
   });
 
+  it("a decision the viewer owes beside a working agent is the first chip, in the seat's words (ruling 529)", () => {
+    // CANARY: drop the `waitingOnMe` arm from `cardProblems` and CALC-1's card
+    // says only "agent working" while its owner's decision waits.
+    const owed = task({ waiting: "agent", liveRun: "running", waitingOnMe: true, validation: "failing" });
+    expect(cardStatus(owed)!.kind).toBe("agent");
+    expect(cardProblems(owed).map((p) => [p.key, p.label, p.tone])).toEqual([
+      ["you", "waiting on you", "blue"],
+      ["validation", "validation failing", undefined],
+    ]);
+    expect(cardProblems(task({ waiting: "agent", liveRun: "queued", waitingOnMe: true })).map((p) => p.key)).toEqual(["you"]);
+    // R8-3: a card names only the viewer who can act, and a human wait already
+    // says it from the seat.
+    expect(cardProblems(task({ waiting: "agent", liveRun: "running", waitingOnMe: false }))).toEqual([]);
+    expect(cardProblems(task({ waiting: "human", waitingOnMe: true }))).toEqual([]);
+  });
+
   it("merge pending is amber, and the only chip a clean accepted card carries (R16-6)", () => {
     const accepted = task({ displayReadiness: "accepted", pr: { number: 9, state: "accepted", title: "t" }, validation: "bypassed" });
     expect(cardProblems(accepted)).toEqual([{ key: "merge", label: "merge pending", icon: "pr", tone: "amber" }]);
