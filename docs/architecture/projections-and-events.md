@@ -319,7 +319,10 @@ load that brought it started. That is the watermark: the server publishes an eve
 its write commits, so a load the browser sent after receiving the event was answered from
 data that holds it. A route re-runs when it owes something it reads, when a navigation
 changed a param or search param its loader reads, or on a navigation to the URL already
-on screen. The flush revalidates once, and only if a route on screen still owes a live
+on screen, its hash included: the press that ends a link's mark takes the hash away
+(ruling 523), the one hash change React Router hands the loaders, and re-runs only what a
+route still owes.
+The flush revalidates once, and only if a route on screen still owes a live
 event, and it waits for a load in flight to land first, but not for a submission: another
 member's change reaches the page while the person's own slow action (an upload, a GitHub
 sync) still runs (ruling 457, RV-6). So:
@@ -328,6 +331,7 @@ sync) still runs (ruling 457, RV-6). So:
 |---|---|
 | A keystroke, chip or view toggle in the board filter | nothing (no loader reads `q`, `filter`, `label`, `view`) |
 | `?events` on a task page (show older) | the task loader |
+| The press that ends a link's mark (the hash taken away, ruling 523) | nothing |
 | `?c=` / `?all=` on a controller page | that controller page |
 | Any search param on Activity | Activity |
 | A navigation inside a project | the new page; the workspace layout only when the slug changed; never root |

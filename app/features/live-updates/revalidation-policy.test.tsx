@@ -304,6 +304,29 @@ describe("live events (RF-4, RF-7)", () => {
     expect(harness.calls["routes/project"]).toBe(1);
     expect(harness.calls["routes/project.task"]).toBe(1);
   });
+
+  it("taking the hash away from the URL on screen reloads nothing (ruling 523)", async () => {
+    const harness = await tab({ path: TASK_PAGE });
+    // A notification's link lands on an event: React Router loads nothing for
+    // a hash it adds.
+    await act(async () => {
+      await harness.router.navigate(`${TASK_PAGE}#event-2026-09-27T09:00:00.000Z`);
+    });
+    await settle();
+    // The person's next press takes it away, in place (`useHashTarget`).
+    await act(async () => {
+      await harness.router.navigate(TASK_PAGE, { replace: true, preventScrollReset: true });
+    });
+    await settle();
+    // CANARY: compare the path and search alone and root, the layout and the
+    // task page all reload on a click that only clears a mark.
+    expect(harness.calls).toEqual({
+      root: 0,
+      "routes/project": 0,
+      "routes/project.board": 0,
+      "routes/project.task": 0,
+    });
+  });
 });
 
 describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
