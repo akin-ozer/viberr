@@ -11,12 +11,24 @@
  * `remote: Repository not found`, and nothing on the surface people work on
  * connected the two.
  *
- * This module is the memory that closes it. It stores nothing new: every writer
- * is a place that ALREADY held a `RepoAccessResult` — the GitHub page's cached
- * probe and project creation's own probe — so the board and the home card read
- * a row instead of calling GitHub on a hot render path. That constraint is the
- * whole design: a board that phones GitHub on every render would be a worse
- * defect than the one being fixed.
+ * This module is the memory that closes it. Every writer is a place that
+ * already takes a `RepoAccessResult`: the GitHub page's cached probe, project
+ * creation's own probe, a repository repair's probe, and the reconcile poller's
+ * re-check of a failing reading. So the board and the home card read a row
+ * instead of calling GitHub on a hot render path. That constraint is the whole
+ * design: a board that phones GitHub on every render would be a worse defect
+ * than the one being fixed.
+ *
+ * Ruling 517: a reading is OF a repository, and a failing one is taken again.
+ * Live on 2026-09-27 a board kept saying "akin-ozer/akin-website · repo not
+ * found", a repository the owner's account does not have. The row is keyed by
+ * project and only the first two writers above wrote it, so a repair in
+ * Project settings, which probes the new repository, left the old
+ * repository's verdict on the board (and Home printed that verdict beside the
+ * new name), and a repository created on GitHub, or a token given access to
+ * it, changed nothing until someone opened the GitHub page. So a reading of
+ * any repository but the one the project points at now reads as no reading,
+ * and the poller takes every failing reading again (`recheckUnreachableRepos`).
  *
  * The row is an OBSERVATION, not canonical state, so it lives in its own
  * app-owned table rather than a `projects` column: `projects` is a projection of
@@ -25,8 +37,10 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { connectionPill } from "~/features/github/github-pills";
 import { logger } from "~/server/logging/logger.server";
-import type { RepoAccessResult } from "./repo-access-check.server";
+import type { GithubContextOptions } from "./github-context.server";
+import { checkRepoAccess, type RepoAccessResult } from "./repo-access-check.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -99,7 +113,6 @@ export function recordRepoAccess(
   }
 }
 
-/** The remembered probe for one project, or null when none was ever taken. */
 /** Drop a project's cached probe. This table is app-owned OBSERVATION keyed by
  *  slug, so a rebuild deliberately does not clear it — which meant a deleted
  *  project's last verdict outlived it and a NEW project reusing the slug was
@@ -110,6 +123,8 @@ export function deleteRepoHealth(db: DatabaseSync, projectSlug: string): void {
   );
 }
 
+/** The remembered probe for one project, or null when none was taken of the
+ *  repository it points at now. */
 export function readRepoHealth(
   db: DatabaseSync,
   projectSlug: string,
@@ -118,9 +133,23 @@ export function readRepoHealth(
 }
 
 /**
+ * Ruling 517: whether a reading was taken of `repo`, the repository the project
+ * points at now. GitHub compares repository names without case, and so does
+ * this. A renamed repository's `connected` reading carries GitHub's new name and
+ * so reads as no reading, which every surface draws the way it draws
+ * `connected`: saying nothing.
+ */
+function readingIsOf(result: RepoAccessResult, repo: string | null): boolean {
+  const of = result.status === "no_repo_configured" ? null : result.repo;
+  if (of === null || repo === null) return of === repo;
+  return of.toLowerCase() === repo.toLowerCase();
+}
+
+/**
  * The remembered probes for a set of projects, in one query — the home page
  * renders every project the viewer can see, and one round trip per card is the
- * shape this table exists to avoid.
+ * shape this table exists to avoid. A project whose reading was taken of
+ * another repository (ruling 517) is left out, as one nobody probed is.
  */
 export function readRepoHealthMany(
   db: DatabaseSync,
@@ -138,14 +167,16 @@ export function readRepoHealthMany(
           project_slug: z.string(),
           result_json: z.string(),
           checked_at: z.string(),
+          repo: z.string().nullable(),
         }),
       )
       .parse(
         db
           .prepare(
-            `SELECT project_slug, result_json, checked_at
-               FROM project_github_health
-              WHERE project_slug IN (${placeholders})`,
+            `SELECT h.project_slug, h.result_json, h.checked_at, p.repo
+               FROM project_github_health h
+               JOIN projects p ON p.slug = h.project_slug
+              WHERE h.project_slug IN (${placeholders})`,
           )
           .all(...projectSlugs),
       );
@@ -156,6 +187,7 @@ export function readRepoHealthMany(
       // mirrors the union arm for arm, and `result` is typed as one — so a new
       // arm on the type that this schema lacks is a typecheck failure here.
       const result: RepoAccessResult = parsed.data;
+      if (!readingIsOf(result, row.repo)) continue;
       out.set(row.project_slug, { result, checkedAt: row.checked_at });
     }
   } catch (error) {
@@ -164,4 +196,60 @@ export function readRepoHealthMany(
     });
   }
   return out;
+}
+
+/**
+ * Whether a reading is one the board's banner and Home's pill show: the
+ * `risk`/`blocked` arms of `connectionPill`, where a repository IS configured
+ * and GitHub will not serve it. Both surfaces make this test themselves
+ * (`repoAccessNotice` in `board-page.tsx`, `RepoLine` in `project-cards.tsx`).
+ * It is written a third time here rather than moved beside `connectionPill`
+ * for all three to share, because that module sits in a chunk every page
+ * loads: moved there, it cost Home 14 B, the board 36 B and the task page
+ * 27 B gzip, and those ceilings only move down (ruling 457).
+ */
+function shownUnreachable(result: RepoAccessResult): boolean {
+  const { kind } = connectionPill(result);
+  return kind === "risk" || kind === "blocked";
+}
+
+/**
+ * Ruling 517: take every failing reading again, from the reconcile poller's
+ * tick (every five minutes, and once at boot).
+ *
+ * Only a reading the surfaces show as unreachable is taken again: a healthy
+ * project spends no GitHub call here, and a surface's warning can go or change
+ * but never appear. An answer that GitHub could not be reached is not
+ * recorded, so an outage never hides a failure that is still true. Archived
+ * projects are left alone, as the poller leaves them.
+ */
+export async function recheckUnreachableRepos(
+  db: DatabaseSync,
+  options: GithubContextOptions = {},
+): Promise<void> {
+  const slugs = z
+    .array(z.object({ slug: z.string() }))
+    .parse(
+      db
+        .prepare(
+          `SELECT h.project_slug AS slug
+             FROM project_github_health h
+             JOIN projects p ON p.slug = h.project_slug
+            WHERE p.archived = 0`,
+        )
+        .all(),
+    )
+    .map((row) => row.slug);
+  for (const [slug, reading] of readRepoHealthMany(db, slugs)) {
+    if (!shownUnreachable(reading.result)) continue;
+    try {
+      const fresh = await checkRepoAccess(db, slug, options);
+      if (fresh.status !== "network_unavailable") recordRepoAccess(db, slug, fresh);
+    } catch (error) {
+      logger.warn("repository health could not be re-checked", {
+        projectSlug: slug,
+        err: toError(error),
+      });
+    }
+  }
 }

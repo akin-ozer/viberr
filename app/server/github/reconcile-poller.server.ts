@@ -10,6 +10,7 @@ import {
   type GithubActionContext,
   type ProjectReconcileSummary,
 } from "./github-reconciler.server";
+import { recheckUnreachableRepos } from "./repo-health.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -264,6 +265,16 @@ export async function pollGithubReconcile(
     nudged = await nudgeMergePendingTasks(db, ctx);
   } catch (error) {
     logger.warn("merge-pending nudge failed", {
+      err: toError(error),
+    });
+  }
+  // Ruling 517: a remembered "GitHub won't serve this repository" is taken
+  // again, so the board's banner leaves once GitHub serves it. A project whose
+  // clone fails has no branched task, so the reconcile above never reaches it.
+  try {
+    await recheckUnreachableRepos(db, ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {});
+  } catch (error) {
+    logger.warn("repository re-check failed", {
       err: toError(error),
     });
   }

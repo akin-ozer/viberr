@@ -24,6 +24,7 @@ import {
 } from "./reconcile-poller.server";
 import * as reconciler from "./github-reconciler.server";
 import { listNotifications } from "~/server/projections/notifications.server";
+import { readRepoHealth, recordRepoAccess } from "./repo-health.server";
 
 /** The registry symbol `reconcile-poller.server.ts` parks its interval handle
  *  under, and the shape of that process-global slot — mirrored here so the test
@@ -245,6 +246,70 @@ describe("pollGithubReconcile (P11-14)", () => {
         .get() as { n: number }
     ).n;
     expect(nudges).toBe(0);
+  });
+});
+
+/**
+ * Ruling 517. The board's banner and Home's pill read the last repository
+ * reading, and only the GitHub page and project creation took one, so creating
+ * the repository on GitHub, or giving the token access to it, left "repo not
+ * found" on the board until someone opened the GitHub page. A project whose
+ * clone fails has no branched task, so the reconcile pass never reached it.
+ */
+describe("ruling 517: the poller takes a failing repository reading again", () => {
+  function failingProject(): TestStore {
+    const store = setupProjectedStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_poller0517" },
+      actor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    recordRepoAccess(store.db, store.slug, {
+      status: "repo_not_found",
+      repo: "akin-ozer/viberr",
+    });
+    return store;
+  }
+
+  it("records GitHub's answer once it serves the repository, and asks nothing about a healthy one", async () => {
+    const store = failingProject();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}`]: {
+        body: { full_name: "akin-ozer/viberr", default_branch: "main", private: true },
+      },
+    });
+
+    await pollGithubReconcile(store.db, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    // CANARY: drop `recheckUnreachableRepos` from the poll and the reading
+    // stays "repo not found" for a repository GitHub now serves.
+    expect(readRepoHealth(store.db, store.slug)?.result).toEqual({
+      status: "connected",
+      repo: "akin-ozer/viberr",
+      remoteDefaultBranch: "main",
+      private: true,
+    });
+
+    // CANARY: take every reading again and a healthy project spends a GitHub
+    // call on every tick; only a failing one is asked about.
+    await pollGithubReconcile(store.db, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    expect(gh.callsTo(`GET ${REPO_PATH}`)).toHaveLength(1);
+  });
+
+  it("keeps the failing reading while GitHub cannot be reached", async () => {
+    const store = failingProject();
+    await pollGithubReconcile(store.db, {
+      dataRoot: store.dataRoot,
+      fetchImpl: unreachableFetch(),
+    });
+    // CANARY: record the `network_unavailable` answer and an outage quietly
+    // takes the banner off a repository that is still missing; nothing takes
+    // a quiet reading again.
+    expect(readRepoHealth(store.db, store.slug)?.result).toEqual({
+      status: "repo_not_found",
+      repo: "akin-ozer/viberr",
+    });
   });
 });
 
