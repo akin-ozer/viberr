@@ -347,7 +347,8 @@ export interface AnnounceReleaseInput {
 
 /**
  * The announcing half of a release: the release note naming what was waited
- * on, the `task.dependencies.released` audit row, the `dependency`
+ * on, the hold's `waiting: none` settled to `human`, the
+ * `task.dependencies.released` audit row, the `dependency`
  * notification to the owner and supervisors, and the operator re-invoked with
  * the `dependencies-released` trigger. Shared by the engine and by a human
  * clearing the list (the same release, the same two halves).
@@ -367,6 +368,12 @@ export async function announceRelease(
       : `Released: everything this task waited on is done (${list}). The task can move again; the base branch has changed since the hold, so the work re-reads it before continuing.`;
   const at = new Date().toISOString();
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    // The hold wrote `waiting: none` (ruling 131(a): a held task owes nobody
+    // anything) and nothing took it back, so in a project with no operator a
+    // released task owed nobody its next move for good. It settles where
+    // `clearWaitingToHuman` settles a task nothing holds: on a person, until a
+    // run takes it. A drive in flight keeps its `agent`.
+    if (parsed.frontmatter.waiting === "none") parsed.frontmatter.waiting = "human";
     parsed.timeline.unshift({
       occurredAt: at,
       type: "note",

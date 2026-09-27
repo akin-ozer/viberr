@@ -389,7 +389,7 @@ describe("the release engine", () => {
     await eventually(() => expect(runOperator).toHaveBeenCalled());
   });
 
-  it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
+  it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, waiting back on a person, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
     // Canaries: delete the `autoInvokeOperator` call in `announceRelease`
     // (no re-invoke); treat `failed` as satisfied in `dependenciesSatisfied`
     // (the archived case below releases).
@@ -435,7 +435,10 @@ describe("the release engine", () => {
     expect(note.text).toContain("everything this task waited on is done (VIB-2, VIB-5, VIB-1)");
     expect(note.text).toContain("the base branch has changed since the hold");
     expect(note.actor).toEqual({ kind: "system", systemId: "dependency-release" });
-    expect(getTaskSummary(store.db, store.slug, "VIB-10")!.readiness).toBe("ready");
+    // The hold's `waiting: none` goes with it: the task is someone's to move
+    // again, and the stub operator runs no drive to say so, as in a project
+    // with none. CANARY: drop the settle in `announceRelease` and it stays `none`.
+    expect(getTaskSummary(store.db, store.slug, "VIB-10")).toMatchObject({ readiness: "ready", waiting: "human" });
     // SAFETY: `kind`, `user_id` are NOT NULL on `notifications`.
     const notifs = store.db
       .prepare(`SELECT user_id, kind, actor_json FROM notifications WHERE task_key = 'VIB-10' AND kind = 'dependency'`)

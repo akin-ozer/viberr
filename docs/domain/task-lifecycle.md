@@ -344,9 +344,12 @@ dispatch gated they cannot cause work.
 
 A PERSON emptying the list is the release itself (ruling 131(e)): the same two halves
 the engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies
-released" note naming who cleared it, a stored `blocked` lifted to `ready`, the
-`task.dependencies.released` audit row, a `dependency` notification to the owner and
-supervisors, and the operator re-invoked with `dependencies-released`). A wait that can
+released" note naming who cleared it, a stored `blocked` lifted to `ready`, the hold's
+`waiting: none` settled to `human`, the `task.dependencies.released` audit row, a
+`dependency` notification to the owner and supervisors, and the operator re-invoked with
+`dependencies-released`). The `human` is where `clearWaitingToHuman` settles any task
+nothing holds, so a released task shows as someone's to move even in a project with no
+operator; an operator's drive marks it `agent` when it starts. A wait that can
 NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
 reference to nothing): ONE "Waiting on work that cannot complete" note, one
 notification, `waiting: human`, and the list left for a person to edit. A task that
