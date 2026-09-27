@@ -217,9 +217,14 @@ export function CompletionPacket({
               <span className="cmp-add mono">+{change.add}</span>
               <span className="cmp-del mono">−{change.del}</span>
               {!small ? (
-                <span className="cmp-over">
-                  Over {COMPLETION_SMALL_CHANGE_LINES} lines, so this is Operator&apos;s summary
-                </span>
+                <>
+                  <span className="cmp-sep" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="cmp-over">
+                    Over {COMPLETION_SMALL_CHANGE_LINES} lines, so this is Operator&apos;s summary
+                  </span>
+                </>
               ) : null}
             </p>
           ) : null}

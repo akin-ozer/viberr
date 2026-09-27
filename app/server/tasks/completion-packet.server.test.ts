@@ -219,7 +219,7 @@ describe("ruling 521: what the task page is told", () => {
         verdict("security", "rev_1", "approve", "2026-09-27T09:40:00.000Z"),
       ],
     });
-    const view = completionView(parsed().frontmatter, { canSee: () => true, nameOf })!;
+    const view = completionView(parsed().frontmatter, { canSee: () => true, nameOf, ruleReviewers: [] })!;
     expect(view.subjectSha).toBe("aaaaaaa");
     expect(view.change).toEqual({ files: 2, add: 30, del: 10, small: true });
     expect(view.verdicts).toEqual([
@@ -253,6 +253,28 @@ describe("ruling 521: what the task page is told", () => {
     ]);
   });
 
+  it("counts the reviewer a project rule requires as required, whether or not anyone engaged it", () => {
+    // CANARY: leave `ruleReviewers` out of the required set and QA, which the
+    // project requires and nobody engaged, is missing while acceptance waits
+    // on its approval.
+    seed({
+      engagements: [
+        { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+      ],
+      verdicts: [verdict("reviewer", "rev_1", "approve", "2026-09-27T09:30:00.000Z")],
+    });
+    const view = completionView(parsed().frontmatter, {
+      canSee: () => true,
+      nameOf,
+      ruleReviewers: ["qa", "reviewer"],
+    })!;
+    expect(view.verdicts.map((v) => [v.name, v.result, v.required])).toEqual([
+      ["Code Reviewer", "approve", true],
+      ["QA", "pending", true],
+    ]);
+  });
+
   it("shows only the screenshots the viewer may see, and says when the packet describes earlier work", async () => {
     // CANARY: pass the packet's screenshots through without `canSee` and a
     // viewer who may not see the attachments is handed their names.
@@ -263,14 +285,14 @@ describe("ruling 521: what the task page is told", () => {
       screenshots: [{ name: "after.png", caption: "After" }, { name: "before.png" }],
     });
     const fm = parsed().frontmatter;
-    const member = completionView(fm, { canSee: (name) => name === "after.png", nameOf })!;
+    const member = completionView(fm, { canSee: (name) => name === "after.png", nameOf, ruleReviewers: [] })!;
     expect(member.packet).toMatchObject({
       summary: "The attach flow works.",
       screenshots: [{ name: "after.png", caption: "After" }],
       hiddenScreenshots: 1,
       staleFor: null,
     });
-    expect(completionView(fm, { canSee: null, nameOf })!.packet).toMatchObject({
+    expect(completionView(fm, { canSee: null, nameOf, ruleReviewers: [] })!.packet).toMatchObject({
       screenshots: [],
       hiddenScreenshots: 2,
     });
@@ -279,6 +301,6 @@ describe("ruling 521: what the task page is told", () => {
       ...fm,
       workRevision: { ...fm.workRevision!, id: "rev_2", headSha: "c".repeat(40) },
     };
-    expect(completionView(redelivered, { canSee: null, nameOf })!.packet?.staleFor).toBe("aaaaaaa");
+    expect(completionView(redelivered, { canSee: null, nameOf, ruleReviewers: [] })!.packet?.staleFor).toBe("aaaaaaa");
   });
 });

@@ -50,7 +50,7 @@ import {
   refreshAndReview,
   releaseOwner,
   requestPacketMaintainerDecision,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   resolvePacket,
   setOwner,
   attachTaskFile,
@@ -463,13 +463,21 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? countTaskAttachments(params.slug, params.key)
     : 0;
 
+  // P14-LV-06: the acceptance affordance, with the project's required-reviewer
+  // rules from the same read of project.md (the completion packet below).
+  const standing = acceptanceStanding({
+    projectSlug: params.slug,
+    taskKey: params.key,
+    viewerUserId: user.id,
+  });
+
   // Ruling 521: the completion packet, with each reviewer's verdict on the
   // work under review and the change's size, built from what this loader has
-  // already read (the task file, the reviewers' and the deployed agents'
-  // names). A screenshot rides the attachments' own bar: a viewer who may not
-  // see the attachments sees none of it, and one that has left the store is
-  // counted, not drawn. Checked by name rather than against the list above,
-  // which stops at the newest 100.
+  // already read (the task file, the project's rules, the reviewers' and the
+  // deployed agents' names). A screenshot rides the attachments' own bar: a
+  // viewer who may not see the attachments sees none of it, and one that has
+  // left the store is counted, not drawn. Checked by name rather than against
+  // the list above, which stops at the newest 100.
   const completion =
     taskFile && !archived
       ? completionView(taskFile.parsed.frontmatter, {
@@ -485,6 +493,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
               profileId
             );
           },
+          ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
         })
       : null;
 
@@ -522,11 +531,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // recommendation card — so a withdrawn recommendation left the promised
     // decision with no control at all. Acceptance is a standing authority at the
     // review boundary; both surfaces now read it from the same predicate.
-    acceptance: resolveAcceptanceAffordance({
-      projectSlug: params.slug,
-      taskKey: params.key,
-      viewerUserId: user.id,
-    }),
+    acceptance: standing.affordance,
     timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,

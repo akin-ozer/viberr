@@ -136,7 +136,7 @@ describe("ruling 521: the completion packet", () => {
       }),
     );
     expect(large.container.querySelector(".cmp-stat")?.textContent).toBe(
-      "9 files changed+412−87Over 200 lines, so this is Operator's summary",
+      "9 files changed+412−87·Over 200 lines, so this is Operator's summary",
     );
     expect(screen.getByText("Policy gate")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Show the diff" }).getAttribute("aria-expanded")).toBe("false");

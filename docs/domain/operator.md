@@ -441,7 +441,7 @@ refusals the plan collected before it (`withEarlierRefusals`, ruling 446).
 ## 5. Tools and the governed actions behind them
 
 A withheld capability means the tool is **not built**; the model cannot reach it. The
-`viberr` server holds up to 22 tools.
+`viberr` server holds up to 23 tools.
 
 | Tool (`viberr`) | Action | Capability |
 |---|---|---|
@@ -467,6 +467,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
+| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; refuses (`noop`) while nothing is delivered, an empty or oversized summary, a large change without `changes`, and a screenshot that is not an image or not among the attachments, listing the images it has; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`) | `completion-for-acceptance` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
 Every action returns `OperatorActionResult` with `outcome: done | recommended |
@@ -550,7 +551,19 @@ Details that matter:
   task. An acceptance withdraws the decision it does not answer, and the operator's own
   answers none, so accepting would bury the follow-up read the doctrine had it offer; the
   card is not filed either, the fold into the acceptance stage included. Every other open
-  decision is withdrawn as before.
+  decision is withdrawn as before. Ruling 521: last of all, the operator's own offer
+  (inside a drive, `ctx.operatorRun`, on either backend and through `transition_stage` to
+  the terminal stage) and the fold's card (`requirePacket`) are refused (`noop`) by
+  `completionPacketRefusal` until the completion packet describes the review subject:
+  "Write the completion packet for revision `abc1234` first (write_completion_packet),
+  then offer KEY for acceptance: …", with "The packet on file describes earlier work, so
+  write it again for what is delivered now." when a new delivery replaced it. A task with
+  nothing delivered is not refused over it (the gate speaks for that), and neither is a
+  person's acceptance. After a person's move a fold refused this way wakes the operator,
+  and after its own move the reply carries the sentence; either way the drive writes the
+  packet and offers the task itself. `get_task` carries `completionPacket` (`state`:
+  `current | stale | none | not_applicable`, `changedLines`, `changesSummaryRequired`,
+  `screenshotCandidates`, the newest 20 image attachments, and a `note` saying what to do).
 - **Delivery.** `deliver_for_review` runs `performDelivery`, with NO cached-state
   short-circuit (ruling 134): rework on a task whose PR is already open is pushed to
   that PR and the tool result names what moved ("pushed `<sha>` to the open review PR
@@ -730,6 +743,15 @@ configuration, ruling 85). `toStage` is refused off `move_stage`, and a `move_st
 option that names no stage, an unknown stage, the terminal stage or the stage the task
 already stands at is refused where it is authored. Every kind whose resolution needs a
 payload is refused at authoring without it.
+
+An `accept_completion` option is the operator's offer to accept (ruling 521). After the
+pass 32 check (a task at the acceptance boundary with a healthy verdict),
+`operatorOpenPacket` refuses it with `completionPacketRefusal` until the completion packet
+describes the review subject (§5). The task page draws that packet inside the decision,
+between the observations and the options: Operator's summary, each reviewer's verdict on
+the revision under review (one on earlier work marked stale), the screenshots it picked
+and the change (whole up to 200 lines, else its summary with the diff one press away). So
+the tool tells the operator not to repeat the verdicts as observations.
 
 Who may resolve: `accept_completion` is guarded by `requireAcceptCompletion` (admin,
 maintainer, or the live task owner); `force_accept` by `force-accept-completion` (admin);

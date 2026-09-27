@@ -8887,7 +8887,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
    card that stands alone takes the decision title's size. */
 .cmp-title { margin: 0; font-family: var(--font-display); font-size: .75rem; font-weight: 700; line-height: 1.35; }
 .cmp-card .cmp-title { font-size: .88rem; }
-.cmp-by, .cmp-sha { font-size: .75rem; color: var(--faint); }
+.cmp-by, .cmp-sha, .cmp-when { font-size: .75rem; color: var(--faint); }
 .cmp-sha { margin-left: auto; }
 .cmp-k {
   margin: .5rem 0 0; font-size: .69rem; font-weight: 700; letter-spacing: .05em;
@@ -8895,7 +8895,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 }
 .cmp-summary { font-size: .75rem; line-height: 1.5; color: var(--fg); }
 .cmp-summary p, .cmp-summary ul, .cmp-summary ol { margin: .375rem 0; }
-.cmp-summary :is(h1, h2, h3, h4, h5, h6) { font-size: .75rem; }
+:is(.cmp-summary, .cmp-reason) :is(h1, h2, h3, h4, h5, h6) { font-size: .75rem; }
 .cmp-none { margin: 0; max-width: 70ch; font-size: .75rem; color: var(--muted); }
 .cmp-stale {
   display: flex; align-items: flex-start; gap: .5rem; margin: 0;
@@ -8903,7 +8903,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
   background: var(--amber-light); color: var(--amber-dark); font-size: .75rem;
 }
 .cmp-stale > .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; }
-.cmp-verdicts { display: flex; flex-direction: column; gap: .625rem; margin: 0; padding: 0; list-style: none; }
+.cmp-verdicts { display: flex; flex-direction: column; gap: .75rem; margin: 0; padding: 0; list-style: none; }
 .cmp-verdict { display: flex; align-items: flex-start; gap: .5rem; }
 .cmp-verdict > .ico { width: 14px; height: 14px; flex: none; margin-top: .0625rem; color: var(--faint); }
 .cmp-verdict-main { flex: 1; min-width: 0; }
@@ -8920,11 +8920,9 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .cmp-verdict[data-result="request_changes"] > .ico,
 .cmp-verdict[data-result="request_changes"] .cmp-verdict-word { color: var(--danger); }
 .cmp-verdict[data-result="pending"] .cmp-verdict-word { color: var(--muted); font-weight: 400; }
-.cmp-when { font-size: .75rem; color: var(--faint); }
 .cmp-verdict-line .pill { align-self: center; }
 .cmp-reason { margin-top: .125rem; font-size: .75rem; line-height: 1.5; color: var(--muted); }
 .cmp-reason p, .cmp-reason ul, .cmp-reason ol { margin: .25rem 0; }
-.cmp-reason :is(h1, h2, h3, h4, h5, h6) { font-size: .75rem; }
 .cmp-verdict-main .md-collapse-toggle { margin-top: .25rem; }
 .cmp-earlier { margin: .25rem 0 0; font-size: .75rem; color: var(--muted); }
 .cmp-stale-tag {
@@ -8940,7 +8938,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 }
 .cmp-add { color: var(--success-dark); }
 .cmp-del { color: var(--danger); }
+.cmp-sep { color: var(--placeholder); }
 .cmp-over { color: var(--faint); }
-.cmp-over::before { content: "·"; margin-right: .5rem; }
 .chg-inline > .chg-slot { margin-top: .5rem; }
 .chg-inline .chg-fail, .chg-inline .chg-stale { font-size: .75rem; }

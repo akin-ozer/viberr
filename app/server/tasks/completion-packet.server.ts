@@ -8,6 +8,7 @@ import {
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   activeWorkRevision,
+  requiredReviewers,
   reviewSubjectId,
   type CompletionPacket,
   type TaskFrontmatter,
@@ -359,14 +360,17 @@ export interface CompletionView {
  * The completion packet as the task page shows it, from the task file the
  * loader has already read. `canSee` answers whether the viewer may see a
  * named attachment and it is still there (null for a viewer who may see no
- * attachments); `nameOf` names a reviewer. Neither reads a store file, so the
- * task page's revalidation budget is untouched (ruling 457).
+ * attachments); `nameOf` names a reviewer; `ruleReviewers` are the profiles
+ * the project's rules require on every delivered task (ruling 178). None of
+ * them reads a store file, so the task page's revalidation budget is
+ * untouched (ruling 457).
  */
 export function completionView(
   fm: TaskFrontmatter,
   opts: {
     canSee: ((name: string) => boolean) | null;
     nameOf: (profileId: string) => string;
+    ruleReviewers: readonly string[];
   },
 ): CompletionView | null {
   const subject = reviewSubjectId(fm);
@@ -389,11 +393,14 @@ export function completionView(
     };
   }
 
-  const required = new Set(
-    fm.engagements.filter((e) => !e.delivers && e.verdictCapable).map((e) => e.profileId),
-  );
-  // Required reviewers first, in engagement order; then anyone else who gave a
-  // verdict on this task, newest first.
+  // Acceptance waits on the task's engaged reviewers and on the project's
+  // rules, whether or not anyone engaged a rule's reviewer (ruling 178).
+  const required = new Set([
+    ...requiredReviewers(fm).map((e) => e.profileId),
+    ...opts.ruleReviewers,
+  ]);
+  // Required reviewers first, the engaged ones in engagement order and then
+  // the rules'; then anyone else who gave a verdict on this task, newest first.
   const order: string[] = [...required];
   for (const v of [...fm.verdicts].sort((a, b) => b.at.localeCompare(a.at))) {
     if (!order.includes(v.profileId)) order.push(v.profileId);

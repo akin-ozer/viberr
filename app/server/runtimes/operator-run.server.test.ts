@@ -1538,8 +1538,11 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // comment on another task of the project, in-Viberr like `post_comment`,
     // so it joins the fallback and it is 11. Ruling 503's `set_epic` puts this
     // task in an epic, in-Viberr like `set_dependencies`, so it is 12.
-    expect(tools).toHaveLength(12);
+    // Ruling 521's `write_completion_packet` writes the task's own file, so
+    // it is 13.
+    expect(tools).toHaveLength(13);
     expect(tools).toContain("set_epic");
+    expect(tools).toContain("write_completion_packet");
     expect(tools).toContain("relay_to_task");
     expect(tools).not.toContain("schedule_task_action");
     expect(tools).toContain("set_dependencies");

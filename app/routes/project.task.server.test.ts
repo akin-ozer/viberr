@@ -353,4 +353,27 @@ describe("ruling 521: the completion packet", () => {
       change: { files: 9, add: 412, del: 87, small: false },
     });
   });
+
+  it("counts the reviewer a project rule requires, though nobody engaged it on the task", async () => {
+    // CANARY: hand `completionView` no rule reviewers and Reviewer reads as
+    // not required while acceptance waits on its approval (ruling 178).
+    const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    const { updateProjectFile, resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const task = { projectSlug: "viberr-core", taskKey: "VIB-142", dataRoot: app.dataRoot };
+    await updateTaskFile(task, (parsed) => {
+      parsed.frontmatter.engagements = parsed.frontmatter.engagements.filter((e) => e.delivers);
+    });
+    const project = { projectSlug: "viberr-core", dataRoot: app.dataRoot };
+    await updateProjectFile(project, (parsed) => {
+      parsed.frontmatter.requiredReviewers = [{ stageId: "review", profileId: "reviewer" }];
+    });
+    rebuildPath(app.db, resolveProjectFilePath(project), { dataRoot: app.dataRoot });
+    rebuildPath(app.db, resolveTaskFilePath(task), { dataRoot: app.dataRoot });
+
+    const { verdicts } = (await loadTask("VIB-142")).completion!;
+    expect(verdicts.map((v) => [v.name, v.result, v.required])).toEqual([
+      ["Reviewer", "approve", true],
+    ]);
+  });
 });
