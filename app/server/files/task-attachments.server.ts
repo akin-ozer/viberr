@@ -296,6 +296,21 @@ export function resolveTaskAttachment(
   return resolveStoreSegment(taskAttachmentsDir(slug, key, dataRoot), name);
 }
 
+/** True when the task's attachments store holds a file by this name. An
+ *  unsafe name (the resolver throws) and a missing one both read false. */
+export function taskAttachmentExists(
+  slug: string,
+  key: string,
+  name: string,
+  dataRoot?: string,
+): boolean {
+  try {
+    return statSync(resolveTaskAttachment(slug, key, name, dataRoot)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** Extension → inline content type (`INLINE_TYPES`). Anything absent there is
  *  served as a download (`application/octet-stream`), never rendered on the
  *  app origin. */

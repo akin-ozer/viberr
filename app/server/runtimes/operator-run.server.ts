@@ -86,6 +86,7 @@ import {
   operatorSnapshot,
   operatorTransitionStage,
   operatorResolvePacket,
+  operatorWriteCompletionPacket,
   resolveOperatorAuthority,
   AGENT_REPORT_CAP_TOOLLESS,
   CREATE_TASK_BASE_NOTE,
@@ -2205,6 +2206,10 @@ const OPERATOR_PLAN_TOOLS = [
   // Server-owned merge+push; a conflict opens a packet, never a force.
   "update_branch_from_base",
   "accept_completion",
+  // Ruling 521: the plan mirror of `write_completion_packet`, the packet every
+  // acceptance offer carries. `text` is the summary, `reason` the summary of
+  // the code changes, `screenshots` the images that show the result.
+  "write_completion_packet",
   // F-P6 (pass 25): the plan mirror of Claude's `flag_context_conflict` — a
   // Codex operator holding `append-typed-events` can raise the R19-2 KB-vs-repo
   // conflict as the same typed `quality` event + notification, not just a plain
@@ -2267,6 +2272,8 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // updateBranchGate below, not the plain gate.
   update_branch_from_base: ["update-task-branch"],
   accept_completion: ["completion-for-acceptance"],
+  // Ruling 521: the packet exists only to go with an acceptance offer.
+  write_completion_packet: ["completion-for-acceptance"],
   // F-P6 (pass 25): same gate as Claude's `flag_context_conflict` tool.
   flag_context_conflict: ["append-typed-events"],
   // Ruling 131(b): the wait is the hold packet's replacement, so it rides the
@@ -2381,8 +2388,8 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
           // Ruling 492: `set_goal` drafts the task's goal in `text`, so this
           // field is one of the doors that write a goal.
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; else null. " + DONE_SIGNAL_RULE },
-          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 521), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE },
+          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet. For write_completion_packet: your summary of the code changes by area, naming the files that matter, required when the snapshot's `completionPacket.changesSummaryRequired` is true (more than 200 changed lines), else null so the diff is shown whole. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For correct_knowledge_doc: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For correct_knowledge_doc: the EVIDENCE that proves the passage wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
           blockedBy: {
@@ -2417,6 +2424,20 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           taskKey: {
             type: ["string", "null"],
             description: "For relay_to_task ONLY (ruling 488): ANOTHER task in this project to post `text` on, e.g. WEB-8. It lands there as your comment, that task's operator is woken with it, and this task's timeline records the relay, so never ask a person to copy text between tasks or to confirm it landed. Refused: another project, this task, a task that does not exist, a closed task. Null for every other tool.",
+          },
+          // Ruling 521: the images write_completion_packet puts on the packet.
+          screenshots: {
+            type: ["array", "null"],
+            description: "For write_completion_packet ONLY (ruling 521): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. Null when nothing visible changed, and for every other tool.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                name: { type: "string" },
+                caption: { type: ["string", "null"] },
+              },
+              required: ["name", "caption"],
+            },
           },
           completeness: {
             type: ["boolean", "null"],
@@ -2532,7 +2553,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "completeness", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "screenshots", "completeness", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
       },
     },
   },
@@ -2566,6 +2587,12 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 417: lease_files — `.optional()` so plans persisted before the
   // field existed still replay across a restart-resume.
   paths: z.array(z.string()).nullable().optional(),
+  // Ruling 521: write_completion_packet's images — `.optional()` for the same
+  // replay reason.
+  screenshots: z
+    .array(z.strictObject({ name: z.string(), caption: z.string().nullable() }))
+    .nullable()
+    .optional(),
   // Ruling 421: run_agent's completeness question — `.optional()` for the same
   // replay reason.
   completeness: z.boolean().nullable().optional(),
@@ -3298,6 +3325,21 @@ async function executeCodexPlan(
           break;
         case "accept_completion":
           record(a.tool, await operatorAcceptCompletion(db, ctx, base, authority));
+          break;
+        case "write_completion_packet":
+          // Ruling 521: `text` is the summary, `reason` the summary of the
+          // code changes.
+          if (a.text) {
+            const packet: Parameters<typeof operatorWriteCompletionPacket>[2] = {
+              ...base,
+              summary: a.text,
+            };
+            if (a.reason) packet.changes = a.reason;
+            if (a.screenshots?.length) {
+              packet.screenshots = a.screenshots.map((s) => ({ name: s.name, caption: s.caption }));
+            }
+            record(a.tool, await operatorWriteCompletionPacket(db, ctx, packet, authority));
+          } else skippedMalformed(a.tool, "the summary");
           break;
         case "resolve_packet": {
           // The reason falls back to the step's prose; neither present leaves
@@ -4414,7 +4456,7 @@ export function buildOperatorSystemPrompt(
       policyLines +
       "\n\n" +
       OPERATOR_POLICY_SCOPE_NOTE +
-      "\n\nUse only the governance tools offered for this run. Tool results enforce the policy; stop after a recommendation. Reach Done only through `accept_completion`.",
+      "\n\nUse only the governance tools offered for this run. Tool results enforce the policy; stop after a recommendation. Reach Done only through `accept_completion`, and write the completion packet (`write_completion_packet`) before any acceptance offer (ruling 521).",
   );
   // R26-1 (owner ruling): the operator sees the task's triage metadata in its
   // get_task snapshot (`priority`, `labels`, `dueDate`). Advisory, not a gate — it

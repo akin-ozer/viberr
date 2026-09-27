@@ -267,6 +267,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 521 (owner, 2026-09-27): before every acceptance offer carried
+    // the completion packet (`write_completion_packet`).
+    "c966e35ad36af27b8d5f60595da3e0a980495912af5ddca5db6c68d59493df71",
     // Ruling 503 (owner, 2026-09-26): before goal links left `set_dependencies`
     // and the done-signal paragraph read the task's `epic` instead of
     // `goalChain`.

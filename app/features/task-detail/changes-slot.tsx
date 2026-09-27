@@ -1,4 +1,4 @@
-import { useId, useState, type ComponentType } from "react";
+import { useEffect, useId, useState, type ComponentType } from "react";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import type { ChangesBodyProps } from "./changes-panel";
@@ -14,6 +14,10 @@ import type { ChangesBodyProps } from "./changes-panel";
  * The body stays mounted once opened, so hiding the panel keeps unsent notes.
  * A chunk that fails to arrive (offline, a stale deploy) says so and lets the
  * button try again, never the page's error boundary.
+ *
+ * Ruling 521: the completion packet carries the same reader `inline`, as a
+ * toggle and the body with no panel around it, and open from the first paint
+ * when the change is small enough to read whole (`defaultOpen`).
  */
 
 let bodyModule: Promise<typeof import("./changes-panel")> | null = null;
@@ -38,14 +42,20 @@ export function ChangesPanel({
   prNumber,
   revisionSha,
   delivererName,
+  inline = false,
+  defaultOpen = false,
   ...body
 }: ChangesBodyProps & {
   prNumber: number;
   /** The deliverer's display name, for the lede; null when none. */
   delivererName: string | null;
+  /** Ruling 521: the toggle and the reader alone, for the completion packet. */
+  inline?: boolean;
+  /** Ruling 521: open, and the reader fetched, as the page mounts. */
+  defaultOpen?: boolean;
 }) {
   const id = useId();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [Body, setBody] = useState<ComponentType<ChangesBodyProps> | null>(null);
   const [chunk, setChunk] = useState<"idle" | "loading" | "failed">("idle");
   const fetchBody = () => {
@@ -60,19 +70,14 @@ export function ChangesPanel({
     );
   };
   const loading = open && chunk === "loading";
+  // An open-from-the-start reader fetches its chunk once the page is live.
+  useEffect(() => {
+    if (defaultOpen) fetchBody();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return (
-    <section className="panel chg-panel" aria-labelledby={`${id}-h`} data-comment-anchor="changes">
-      <div className="panel-head">
-        <Icon name="pr" />
-        <h2 id={`${id}-h`}>Changes</h2>
-        <span className="right mono faint">{revisionSha.slice(0, 7)}</span>
-      </div>
-      <p className="chg-lede">
-        The delivered revision on PR #{prNumber}. Read each file and leave a note on any
-        line: the notes go to {delivererName ? `@${delivererName}` : "the delivering agent"}{" "}
-        as one comment.
-      </p>
+  const reader = (
+    <>
       <button
         type="button"
         className="btn sm"
@@ -89,7 +94,15 @@ export function ChangesPanel({
         }}
       >
         <GlyphSwap rest="chevron" alt="loader" on={loading} spinAlt />
-        {!open ? "Show changes" : chunk === "failed" ? "Try again" : "Hide changes"}
+        {!open
+          ? inline
+            ? "Show the diff"
+            : "Show changes"
+          : chunk === "failed"
+            ? "Try again"
+            : inline
+              ? "Hide the diff"
+              : "Hide changes"}
       </button>
       <div id={`${id}-body`} className="chg-slot" hidden={!open}>
         {Body ? (
@@ -105,6 +118,23 @@ export function ChangesPanel({
           </p>
         ) : null}
       </div>
+    </>
+  );
+
+  if (inline) return <div className="chg-panel chg-inline">{reader}</div>;
+  return (
+    <section className="panel chg-panel" aria-labelledby={`${id}-h`} data-comment-anchor="changes">
+      <div className="panel-head">
+        <Icon name="pr" />
+        <h2 id={`${id}-h`}>Changes</h2>
+        <span className="right mono faint">{revisionSha.slice(0, 7)}</span>
+      </div>
+      <p className="chg-lede">
+        The delivered revision on PR #{prNumber}. Read each file and leave a note on any
+        line: the notes go to {delivererName ? `@${delivererName}` : "the delivering agent"}{" "}
+        as one comment.
+      </p>
+      {reader}
     </section>
   );
 }

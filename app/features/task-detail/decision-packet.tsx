@@ -860,9 +860,13 @@ export function DecisionPacket({
   escalating = false,
   onAsk,
   onEditGoal,
+  completion = null,
 }: {
   packet: PacketRender;
   busy: boolean;
+  /** Ruling 521: the completion packet, drawn between the evidence and the
+   *  options when one of them offers the task for acceptance. */
+  completion?: ReactNode;
   /** Whether the viewer may RESOLVE this packet (admin|maintainer, or the task
    *  owner for non-completion options — M2). "Ask operator" stays open to all
    *  (commenting is app-wide). */
@@ -1242,6 +1246,8 @@ export function DecisionPacket({
               );
             })}
         </div>
+
+        {completion}
 
         {/* Ruling 319: stated ABOVE the options, because it changes what
             picking one of them means. */}

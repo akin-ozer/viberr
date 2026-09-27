@@ -189,6 +189,13 @@ import {
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "./required-reviewers.server";
+import {
+  completionPacketFact,
+  completionPacketRefusal,
+  writeCompletionPacket,
+  type CompletionPacketFact,
+  type CompletionPacketInput,
+} from "./completion-packet.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { liveMergeable } from "~/features/github/github-pills";
 import { correctKnowledgeDoc, type KbCorrectionRequest } from "./kb-correction-actions.server";
@@ -1391,6 +1398,10 @@ export async function operatorOpenPacket(
           "Offer archive_task to close a task that needs no work, edit_goal to scope real work, or transition_stage / run_agent to move it toward review. Only a human admin can force-accept from here.",
       };
     }
+    // Ruling 521: a decision that offers acceptance is the operator's offer,
+    // so it carries the completion packet the page draws inside it.
+    const packetRefusal = completionPacketRefusal(fm, input.taskKey);
+    if (packetRefusal) return { outcome: "noop", message: packetRefusal };
   }
   // Ruling 244 (pass 37, F37-73): the same rule the `accept_completion` arm
   // above applies, applied to its sibling. `resolve_remote_collision` clears a
@@ -2725,6 +2736,11 @@ export interface OperatorTaskSnapshot {
    *  instead. Optional only so hand-built
    *  fixtures need not restate it; `operatorSnapshot` always sets it. */
   notAcceptableReason?: string | null;
+  /** Ruling 521: the completion packet a person reads before accepting, and
+   *  what writing it takes (the change's size, the images you may pick).
+   *  Optional only so hand-built fixtures need not restate it;
+   *  `operatorSnapshot` always sets it. */
+  completionPacket?: CompletionPacketFact;
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
@@ -3628,6 +3644,9 @@ export function operatorSnapshot(
     // recommended for acceptance with `pr.mergeable: conflicting` already on
     // the file; the operator's snapshot simply did not carry the fact.
     notAcceptableReason: acceptanceRefusalFor({ projectSlug, taskKey }, ctx),
+    // Ruling 521: whether an acceptance offer may go out yet, and what the
+    // packet it needs must carry.
+    completionPacket: completionPacketFact(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot }),
     // The task branch, so recovery copy can NAME what an `archive_task`
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".
@@ -5088,7 +5107,15 @@ export async function foldAcceptanceRecommendation(
   const atBoundary =
     stage === roles.reviewId || workflow.some((w) => w.from === stage && w.to === terminalId);
   if (!atBoundary) return null;
-  const result = await operatorAcceptCompletion(db, ctx, input, authority);
+  // Ruling 521: the card the fold files is the operator's offer too, so it
+  // waits for the completion packet. Refused here, a person's move re-invokes
+  // the operator, whose turn writes the packet and then offers.
+  const result = await operatorAcceptCompletion(
+    db,
+    ctx,
+    { ...input, requirePacket: true },
+    authority,
+  );
   if (result.outcome === "recommended") {
     return { recommended: true, message: result.message };
   }
@@ -5299,7 +5326,13 @@ function followUpOptionRefusal(packet: TaskPacket | null, taskKey: string): stri
 export async function operatorAcceptCompletion(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    /** Ruling 521: refuse unless the completion packet describes the work on
+     *  offer. Implied by a live operator drive; the fold sets it. */
+    requirePacket?: boolean;
+  },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   // R19-6 — FIRST, before any read, card or audit row. This function's only
@@ -5374,11 +5407,19 @@ export async function operatorAcceptCompletion(
   // full-autonomy acceptance nor a card a person could apply first withdraws
   // the follow-up read the operator offered. Read fresh: the no-change probe
   // above may have waited on GitHub.
+  const fresh = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   {
-    const refusal = followUpOptionRefusal(
-      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet ?? null,
-      input.taskKey,
-    );
+    const refusal = followUpOptionRefusal(fresh?.parsed.packet ?? null, input.taskKey);
+    if (refusal) return { outcome: "noop", message: refusal };
+  }
+  // Ruling 521: the operator's offer carries its completion packet. Checked
+  // after every acceptance gate, so an offer the gates refuse is refused with
+  // their sentence, not with a request for a summary nobody can use yet. A
+  // live drive (`ctx.operatorRun`) is the operator's own call, on either
+  // backend and through `transition_stage` to the terminal stage too; the fold
+  // asks for it outright, since a person's move reaches it with no drive.
+  if (fresh && (input.requirePacket === true || ctx.operatorRun !== undefined)) {
+    const refusal = completionPacketRefusal(fresh.parsed.frontmatter, input.taskKey);
     if (refusal) return { outcome: "noop", message: refusal };
   }
 
@@ -5523,4 +5564,23 @@ export async function operatorAcceptCompletion(
     outcome: "done",
     message: `Accepted completion: ${input.taskKey} moved to ${stageDisplayName(ctx, input.projectSlug, doneStageId)}.`,
   };
+}
+
+/**
+ * Ruling 521: write the completion packet, the operator's summary of the
+ * finished work for the person who accepts it (`completion-packet.server.ts`).
+ * It rides the acceptance grant, since it exists only to go with an
+ * acceptance offer: an operator that may not offer acceptance has nothing to
+ * write one for.
+ */
+export async function operatorWriteCompletionPacket(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: CompletionPacketInput,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const refusal = completionCapabilityRefusal(authority, input.taskKey);
+  if (refusal) return { outcome: "denied", message: refusal };
+  const result = await writeCompletionPacket(db, ctx, input);
+  return { outcome: result.written ? "done" : "noop", message: result.message };
 }
