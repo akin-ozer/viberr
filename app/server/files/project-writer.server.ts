@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { freshestContent, rememberWrite } from "./write-cache.server";
+import { freshestContent, writeAndRemember } from "./write-cache.server";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import type {
   ParsedProjectFile,
@@ -7,7 +7,6 @@ import type {
 } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import { writeFileAtomic } from "./atomic-file.server";
 import { withFileLock } from "./file-mutex.server";
 import { projectDir, projectFilePath } from "./file-store-root.server";
 import { parseStoreFile } from "./parse-memo.server";
@@ -53,22 +52,6 @@ export function readProjectFile(
   return { parsed, diagnostics, content, absPath };
 }
 
-/**
- * Read-your-own-writes repair for cached bind mounts (P11-51) — the same
- * VirtioFS stale-read hazard the task writer already guards against, applied to
- * project.md. On Docker Desktop a read milliseconds after this process's own
- * atomic rename can return the PREVIOUS content; for project.md that risks
- * resurrecting stale member/agent/policy edits or, worst case, rewinding the
- * `nextTaskNumber` counter (partially mitigated by the dir-scan in
- * allocateTaskKey, but a rewind would still churn keys). Remember what THIS
- * process last wrote per path; when a locked read disagrees and the file's
- * mtime has not advanced past our write (no EXTERNAL writer since), trust our
- * own write. An external edit bumps mtime and wins as before.
- */
-function rememberProjectWrite(absPath: string, content: string): void {
-  rememberWrite(absPath, content);
-}
-
 /** The content a locked read-modify-write acts on, with the diagnostics of
  *  whichever content won — the write guard below judges THAT content.
  *  (`FreshTaskFile`'s project sibling.) */
@@ -77,7 +60,10 @@ interface FreshProjectFile {
   diagnostics: FileDiagnostic[];
 }
 
-/** See write-cache.server — the shared VirtioFS read-your-own-writes repair.
+/** See write-cache.server — the shared VirtioFS read-your-own-writes repair
+ *  (P11-51). For project.md a stale read would resurrect old member, agent or
+ *  policy edits, or rewind the `nextTaskNumber` counter (the dir-scan in
+ *  allocateTaskKey only partly covers that, and a rewind still churns keys).
  *  Carries the diagnostics of whichever content won, so the trust gate below
  *  judges the bytes that are actually about to be re-serialized. */
 function repairStaleProjectRead(
@@ -147,8 +133,7 @@ export async function updateProjectFile(
     const base = fresh.parsed;
     const next = mutate(base) ?? base;
     const serialized = serializeProjectFile(next);
-    writeFileAtomic(absPath, serialized);
-    rememberProjectWrite(absPath, serialized);
+    writeAndRemember(absPath, serialized);
     return next;
   });
 }
@@ -174,8 +159,7 @@ export async function createProjectFile(
       description: input.description,
     };
     const serialized = serializeProjectFile(parsed);
-    writeFileAtomic(absPath, serialized);
-    rememberProjectWrite(absPath, serialized);
+    writeAndRemember(absPath, serialized);
     return parsed;
   });
 }
@@ -217,8 +201,7 @@ export async function allocateTaskKey(ref: ProjectFileRef): Promise<string> {
     const next = Math.max(fm.nextTaskNumber ?? 1, scanned + 1);
     fm.nextTaskNumber = next + 1;
     const serialized = serializeProjectFile(parsed);
-    writeFileAtomic(absPath, serialized);
-    rememberProjectWrite(absPath, serialized);
+    writeAndRemember(absPath, serialized);
     return `${fm.taskPrefix}-${next}`;
   });
 }

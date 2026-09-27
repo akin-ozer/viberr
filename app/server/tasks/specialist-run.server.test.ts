@@ -46,7 +46,6 @@ import {
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { resetWriteCacheForTests } from "~/server/files/write-cache.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -707,10 +706,6 @@ describe("startSpecialistRun", () => {
         }),
         packet,
       });
-      // The re-seed lands within the write cache's slack of the previous
-      // dispatch's own write, which the locked read would otherwise "repair"
-      // back to the old content.
-      resetWriteCacheForTests();
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     };
     const fm = () =>

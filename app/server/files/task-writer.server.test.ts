@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { staleViewOf } from "../../../test-support/stale-mount";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -27,7 +28,9 @@ import {
  * rename can return the PREVIOUS content — the next read-modify-write then
  * silently erases the earlier write (the reviewer's reply comment vanished
  * this way). updateTaskFile repairs a provably-stale read from the
- * in-process write cache, while a genuine EXTERNAL edit (newer mtime) wins.
+ * in-process write cache, while a genuine EXTERNAL edit wins. What counts as
+ * provably stale, and how soon another writer may land, is write-cache's own
+ * test (ruling 513); these two prove the writer reads through it.
  */
 
 const ctx = createTestDbContext();
@@ -53,17 +56,15 @@ describe("updateTaskFile stale-read repair", () => {
     });
     const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     const absPath = resolveTaskFilePath(ref);
-    const preContent = readFileSync(absPath, "utf8");
+    const stale = staleViewOf(absPath);
 
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift(comment("REVIEWER FINDINGS — must survive"));
     });
 
-    // Simulate the VirtioFS stale cache: disk "reverts" to the pre-write
-    // content with an mtime OLDER than our write.
-    writeFileSync(absPath, preContent);
-    const past = (Date.now() - 10_000) / 1000;
-    utimesSync(absPath, past, past);
+    // The VirtioFS stale cache: the mount goes on serving the file our write
+    // replaced, pre-write bytes and all.
+    stale.serve();
 
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift(comment("VERDICT — second write"));
@@ -74,7 +75,7 @@ describe("updateTaskFile stale-read repair", () => {
     expect(texts).toContain("VERDICT — second write");
   });
 
-  it("a genuine external edit (newer mtime) wins over the write cache", async () => {
+  it("a genuine external edit wins over the write cache", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-2", { title: "External edit probe" }),
@@ -86,8 +87,9 @@ describe("updateTaskFile stale-read repair", () => {
       parsed.timeline.unshift(comment("app write"));
     });
 
-    // A human edits task.md directly AFTER our write: content differs from
-    // the cache and mtime is newer — disk must win, no resurrection.
+    // A human edits task.md directly AFTER our write: disk must win, no
+    // resurrection. (The stamp well past ours keeps this about the writer;
+    // an edit landing straight after ours is write-cache's own row.)
     const external = readFileSync(absPath, "utf8").replace(
       "app write",
       "app write (hand-edited)",

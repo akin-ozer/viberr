@@ -493,15 +493,6 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     await new Promise((r) => setTimeout(r, 0));
     const { runDemoSeed } = await import("../../../test-support/demo-seed");
     await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-    // The seed rewrites the task files behind the in-process write cache, and
-    // it can land inside that cache's mtime slack of the previous test's own
-    // write — whereupon the next locked read "repairs" VIB-142 back to that
-    // test's resolved packet and refuses the fresh one as already resolved.
-    // Forget those writes so every test here reads the seed it was promised.
-    const { resetWriteCacheForTests } = await import(
-      "~/server/files/write-cache.server"
-    );
-    resetWriteCacheForTests();
   });
 
   /**
