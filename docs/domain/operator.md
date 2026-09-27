@@ -82,14 +82,14 @@ from the workflow graph, never a stored preset).
 
 | Trigger | Posture | Fired from |
 |---|---|---|
-| `create` | coordinate (triage) | `createTask` |
+| `create` | coordinate (triage) | `createTask`, except for a task it releases at birth, which the release hands over |
 | `transition` | coordinate | a human or system stage move (never the drive's own move, see below); the stranded-drive backstop's nudge |
 | `goal-updated` | re-scope | `updateTaskGoal` |
 | `agent-reply` | react | the agent completion pipeline |
 | `pr-diverged` | recover | the GitHub reconciler on an out-of-band PR change |
 | `delivered` | proceed | a full-autonomy delivery that opened a new PR or moved the head of the task's open PR, made outside a drive (rulings 48 and 134); for a delivery a drive made itself, the drive's lease release, only when the drive stopped right after delivering (`deliveredFollowUpFor`, ruling 357) |
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer, or when the answer names another actor (ruling 447). The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
-| `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
+| `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot. A release at birth (`createTask`, when every entry was done before the task existed) carries `atBirth`, and the doctrine says instead that nothing held the task and there is nothing to bring up to date (F39-65) |
 | `head-unpushed` | deliver | a person's refused acceptance whose cause is an unpushed reviewed revision, which only the operator can push (ruling 235) |
 | `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332), or the reconciler's flip of an open PR to conflicting (ruling 475(b)); the instruction names both origins |
 | `gates-failed` | rework | Viberr's own run of the project's gates on the revision under review finished with a gate that did not exit 0 (ruling 482). The turn names each failing gate, its command and its log's attachment name, tells the operator to `run_agent` the deliverer with them and deliver the fix, and forbids asking an agent to re-run the gates to report them |

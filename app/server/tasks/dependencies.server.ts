@@ -421,9 +421,13 @@ export async function announceRelease(
       clearedBy: input.clearedBy ?? null,
     };
     if (input.atBirth) dependencyRelease.atBirth = true;
-    await autoInvokeOperator(db, ctx, projectSlug, taskKey, "dependencies-released", {
+    const turn = autoInvokeOperator(db, ctx, projectSlug, taskKey, "dependencies-released", {
       dependencyRelease,
     });
+    // L02-1: a release at birth runs inside `createTask`, which hands a new
+    // task to its operator without waiting for the run to start (a first clone
+    // can take minutes). `autoInvokeOperator` records its own failures.
+    if (!input.atBirth) await turn;
   } catch (error) {
     logger.warn("dependency release could not re-invoke the operator", {
       taskKey,

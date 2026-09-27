@@ -137,9 +137,17 @@ The task is written with the list, `waiting: none`, a "Waits on other work" note
 its stored readiness at the birth value `input_required`; the `blocked` it shows is the
 derived floor. When every entry is already done the note says so instead ("Created after
 the work it waits on was done …, so nothing holds it; Viberr releases the list at
-once."). The controller's `create_task`, the goal-to-epic conversion (an unstarted
-link's declared wait, respelled by task key) and a packet's `create_task` option all
-come in through this door.
+once."), and `createTask` keeps that promise before it returns: it releases the task
+through the engine as a release at birth (`releaseTask(…, { atBirth: true })`, F39-65,
+L02-1), before anything awaits, so the dependency runner's tick cannot release it first
+as an ordinary hold. The list is cleared, the "Dependencies released" note reads
+"Released: everything this task waits on was done before it was created (…), so nothing
+held it.", the `task.dependencies.released` audit row carries `atBirth: true`, and
+nobody is told the task "can move again". The release's `dependencies-released` turn,
+whose payload carries `atBirth`, is the task's first operator turn in place of `create`,
+and the creation does not wait for that run to start. The controller's `create_task`,
+the goal-to-epic conversion (an unstarted link's declared wait, respelled by task key)
+and a packet's `create_task` option all come in through this door.
 
 ## 4. Stages and the workflow graph
 

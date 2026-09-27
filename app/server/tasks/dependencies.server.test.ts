@@ -8,6 +8,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { flush } from "../../../test-support/polling";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
@@ -15,7 +16,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
-import { setTaskArchived, transitionStage } from "./task-actions.server";
+import { createTask, setTaskArchived, transitionStage } from "./task-actions.server";
 import type { StartAgentRunInput, StartAgentRunResult } from "./specialist-run.server";
 import {
   announceRelease,
@@ -312,41 +313,80 @@ describe("ruling 331: a failed auto-invocation names its cause and claims nothin
 /** Ruling 131(e): the release engine. */
 describe("the release engine", () => {
   /**
-   * F39-65: a chain link minted by the completion it waits on is released by
-   * its mint (ruling 358). Nothing held it, so the operator's release turn is
-   * told there is nothing from before a hold to bring up to date.
+   * L02-1 (test audit, 2026-09-27): the goal runner was the one caller that
+   * released a task at birth (ruling 358, F39-65), for the links it minted, and
+   * ruling 503 deleted it. A task created waiting only on finished work (the
+   * controller's `create_task`, a packet's `create_task` option) stayed held
+   * until the runner's minute tick, which released it as an ordinary hold: the
+   * note said the base "has changed since the hold", its people were told it
+   * "can move again", and the operator was told the base CHANGED, under a
+   * creation note promising "Viberr releases the list at once". The creation is
+   * the release's only caller, so a test that calls `releaseTask` with
+   * `atBirth` itself cannot catch this.
    */
-  it("F39-65: a release at birth reaches the operator as one, and tells nobody the task can move again", async () => {
+  it("L02-1: a task created waiting only on done work is released by its creation, as a release at birth", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-11", {
-        stage: "impl",
-        waiting: "none",
-        readiness: "blocked",
-        blockedBy: ["VIB-2"],
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const runOperator = runOperatorStub();
-    expect(
-      await releaseTask(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug, "VIB-11", { atBirth: true }),
-    ).toBe(true);
-    await eventually(() =>
-      expect(runOperator.mock.calls.some((c) => c[1].trigger === "dependencies-released")).toBe(true),
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
+    // VIB-2 is done. Selin creates the task and owns it; Arda and Murat
+    // supervise it.
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Follows finished work", blockedBy: ["VIB-2"] },
+      actorOf(store.users.selin),
+      ctxWith,
     );
-    // CANARY: drop the payload's `atBirth` and the release turn tells a task
-    // born a moment ago that the base "CHANGED since the hold".
-    const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released")!;
-    expect(release[1].dependencyRelease).toEqual({ entries: ["VIB-2"], clearedBy: null, atBirth: true });
-    const note = file(store, "VIB-11").timeline.find((e) => e.title === "Dependencies released")!;
-    expect(note.text).toBe("Released: everything this task waits on was done before it was created (VIB-2), so nothing held it.");
-    // SAFETY: COUNT(*) always answers one row, and `n` is its number.
-    const told = store.db
-      .prepare(`SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-11' AND kind = 'dependency'`)
-      .get() as { n: number };
-    expect(told.n).toBe(0);
+    // The dependency runner's next tick, whatever the creation left held.
+    await releaseDependents(store.db, ctxWith, store.slug);
+    const turns = () => runOperator.mock.calls.filter((c) => c[1].taskKey === created.key).map((c) => c[1]);
+    await eventually(() => expect(turns().some((t) => t.trigger === "dependencies-released")).toBe(true));
+    // SAFETY: `title` is a nullable TEXT column on `notifications`.
+    const notices = store.db
+      .prepare(`SELECT title FROM notifications WHERE task_key = ? AND kind = 'dependency'`)
+      .all(created.key) as { title: string | null }[];
+    // CANARY: drop the release from `createTask` and the tick releases the task
+    // as an ordinary hold, which all four then say. Drop the payload's
+    // `atBirth` and the operator alone is told the base CHANGED since the hold.
+    expect({
+      note: file(store, created.key).timeline.filter((e) => e.title === "Dependencies released").map((e) => e.text),
+      notices: notices.map((n) => n.title),
+      operator: turns().filter((t) => t.trigger === "dependencies-released").map((t) => t.dependencyRelease),
+      audit: listAuditEvents(store.db, { action: "task.dependencies.released" })
+        .filter((e) => e.taskKey === created.key)
+        .map((e) => e.details),
+    }).toEqual({
+      note: ["Released: everything this task waits on was done before it was created (VIB-2), so nothing held it."],
+      notices: [],
+      operator: [{ entries: ["VIB-2"], clearedBy: null, atBirth: true }],
+      audit: [{ entries: ["VIB-2"], clearedBy: null, atBirth: true }],
+    });
+    // The creation answers with the task as it stands: held by nothing.
+    expect(created.task.blockedBy).toEqual([]);
+    expect(created.task.readiness).toBe("input_required");
+    // One hand-off. CANARY: fire `create` as well and the operator gets the new
+    // task twice, since a task no longer held does not refuse `create`. The
+    // flush lets that second fire-and-forget call land before the count.
+    await flush();
+    expect(turns().map((t) => t.trigger)).toEqual(["dependencies-released"]);
+  });
+
+  it("L02-1: a creation released at birth does not wait for the operator's run to start", async () => {
+    // CANARY: await the at-birth hand-off in `announceRelease` and this
+    // creation never returns, so the controller's `create_task`, a packet's
+    // resolution and the boot-time conversion would wait out a first clone
+    // that can take minutes.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => new Promise<never>(() => {}));
+    const created = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Follows finished work", blockedBy: ["VIB-2"] },
+      actorOf(store.users.selin),
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+    );
+    expect(created.task.blockedBy).toEqual([]);
+    await eventually(() => expect(runOperator).toHaveBeenCalled());
   });
 
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {

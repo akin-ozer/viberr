@@ -573,7 +573,7 @@ matrix the human surfaces use; the tier in brackets is the floor)
 
 | Tool | What it does |
 |---|---|
-| `create_task` | A task at the entry stage [contributor, `create-task`]; takes `blockedBy` (validated before a key is allocated; the task is born held), `owner` (a member email or `me`, seated in the creating write before the first operator run; ruling 140(a)), `dueDate`, `priority: urgent` as the urgent flag, and `epic`, the epic it is born in (checked before a key is allocated; ruling 503) |
+| `create_task` | A task at the entry stage [contributor, `create-task`]; takes `blockedBy` (validated before a key is allocated; the task is born held, and released at once when every entry is already done), `owner` (a member email or `me`, seated in the creating write before the first operator run; ruling 140(a)), `dueDate`, `priority: urgent` as the urgent flag, and `epic`, the epic it is born in (checked before a key is allocated; ruling 503) |
 | `move_task` | A stage move [`approve-transition`]; a move into the terminal stage is refused and pointed at the task page; a move to an EARLIER stage requires `reason`, which lands on the transition entry (ruling 381) |
 | `comment_on_task` | A comment signed `_Posted by the controller for <name>._` [member; refused on an archived project]; @mentions of people notify; an @mention of an agent starts nothing and the line is stamped saying so (ruling 252) |
 | `set_task_owner` | Seat the asker, another member, or release [`own-task`; takeover needs the acceptance tier]; the person whose seat changed is notified (ruling 140(b)) |
