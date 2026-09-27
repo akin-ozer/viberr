@@ -15,7 +15,8 @@ import {
   deleteMemberProjectNotifications,
   deleteProjectNotifications,
 } from "~/server/projections/notifications.server";
-import { deleteRepoHealth } from "~/server/github/repo-health.server";
+import { deleteRepoHealth, recordRepoAccess } from "~/server/github/repo-health.server";
+import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { logger } from "~/server/logging/logger.server";
 import { interruptRun } from "~/server/runtimes/run-service.server";
 import { clearProjectCredential } from "~/server/secrets/pat-store.server";
@@ -94,8 +95,10 @@ const repoProbeSchema = z
   .object({
     default_branch: z.string().min(1).nullable().catch(null),
     permissions: repoPermissionsSchema.nullable().catch(null),
+    // Ruling 517: the repair records what it read, as the other probes do.
+    private: z.boolean().nullable().catch(null),
   })
-  .catch({ default_branch: null, permissions: null });
+  .catch({ default_branch: null, permissions: null, private: null });
 
 /** `SELECT COUNT(*) AS n` — an aggregate with no GROUP BY, so sqlite answers
  *  with exactly one row carrying the single integer column `n`. */
@@ -870,6 +873,7 @@ export async function repairProjectRepo(
   const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   let probed = false;
   let defaultBranch: string | null = null;
+  let reading: RepoAccessResult | null = null;
   if (gh.status === "ok") {
     const res = await gh.client.request("GET", `/repos/${repo}`, repoProbeSchema);
     if (res.ok) {
@@ -884,6 +888,12 @@ export async function repairProjectRepo(
       }
       probed = true;
       defaultBranch = res.data.default_branch;
+      reading = {
+        status: "connected",
+        repo,
+        remoteDefaultBranch: defaultBranch,
+        private: res.data.private ?? false,
+      };
     } else if (res.kind === "network") {
       throw AppError.validation(
         `GitHub is unreachable (${res.message}). The repair was NOT applied. Try again when it is.`,
@@ -910,6 +920,11 @@ export async function repairProjectRepo(
   reprojectProject(db, ctx, input.projectSlug);
   // The 30 s memoized repo-access probe still describes the OLD repo.
   invalidateRepoAccess(db, input.projectSlug);
+  // Ruling 517: and so does the reading the board's banner and Home's pill
+  // show. The probe above is a reading of the new one; an unprobed repair
+  // leaves the old reading, which no surface shows for a repository the
+  // project no longer points at.
+  if (reading) recordRepoAccess(db, input.projectSlug, reading);
   const details: AuditDetails = { from, to: repo, probed };
   if (defaultBranch) details.defaultBranch = defaultBranch;
   if (footprint > 0) details.footprintTasks = footprint;

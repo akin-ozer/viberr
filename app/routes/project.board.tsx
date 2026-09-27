@@ -111,8 +111,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     defaultBranch: board.project.defaultBranch,
     // U33-2: the LAST recorded repository probe, never a fresh one — the board
     // is the surface people live on and it must not call GitHub to render. The
-    // row is written where the answer was already known (project creation and
-    // the GitHub page's cached probe); null means nothing has ever looked.
+    // row is written where the answer was already known (project creation, the
+    // GitHub page's cached probe, a repair) and by the poller's re-check of a
+    // failing one (ruling 517); null means nothing has looked at the repository
+    // the project points at now.
     repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
     // Ruling 503: the project's epics once (one statement), for the epic
     // filter and the New-task Epic pick; a card carries only its epic's id,

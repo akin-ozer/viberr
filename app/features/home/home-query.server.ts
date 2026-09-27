@@ -87,9 +87,10 @@ export interface HomeProjectCard {
   accent: string;
   /**
    * U33-2: the LAST recorded repository probe for this project, or null when
-   * nothing has ever looked. Read from `project_github_health` in one query for
-   * the whole list — the card says a repository is unreachable WITHOUT this page
-   * calling GitHub, which is the constraint the table exists for.
+   * nothing has looked at the repository it points at now (ruling 517). Read
+   * from `project_github_health` in one query for the whole list — the card
+   * says a repository is unreachable WITHOUT this page calling GitHub, which is
+   * the constraint the table exists for.
    */
   repoAccess: RepoAccessResult | null;
 }
