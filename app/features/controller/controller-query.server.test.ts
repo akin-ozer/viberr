@@ -384,3 +384,73 @@ describe("getControllerSurface — the project's knowledge-base corrections (rul
     expect(on(store.users.arda, null)).toBeNull();
   });
 });
+
+/**
+ * Ruling 525: a project admin may delete other people's conversations about
+ * the project, so the project page lists them for them ("Show everyone's"),
+ * each with its Delete. They are listed, not opened: a conversation's words
+ * stay its starter's and the org admins' (ruling 99(d)), so each is titled by
+ * whose it is and none is readable.
+ */
+describe("getControllerSurface — other people's threads for a project admin (ruling 525)", () => {
+  it("lists them sealed, with a Delete, only on their project's page and only when asked", async () => {
+    // CANARY: title an unreadable row by `c.title` and the starter's first
+    // words reach a page that may not show them.
+    const { createConversation, appendMessage } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { writeProject } = await import("../../../test-support/test-store");
+    const { rebuildAll } = await import("~/server/projections/rebuilder.server");
+    // Murat administers the project and is no org admin.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      members: file.parsed.frontmatter.members.map((m) =>
+        m.userId === store.users.murat.id ? { ...m, role: "admin" as const } : m,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const thread = (owner: { id: string; email: string }, projectSlug: string | null, text: string) => {
+      const c = createConversation(store.db, { userId: owner.id, userLabel: owner.email, projectSlug });
+      appendMessage(store.db, { conversationId: c.id, author: "user", userId: owner.id, text });
+      return c;
+    };
+    const selins = thread(store.users.selin, store.slug, "Why is the payments migration stalled?");
+    const murats = thread(store.users.murat, store.slug, "Which tasks wait on review?");
+    const selinsElsewhere = thread(store.users.selin, null, "How much did last week cost?");
+    const page = (user: { id: string; email: string }, projectSlug: string | null, all: boolean) =>
+      getControllerSurface(store.db, user, { projectSlug, conversationId: null, all, dataRoot: store.dataRoot });
+
+    const own = page(store.users.murat, store.slug, false);
+    expect(own.showAllAs).toBe("project admin");
+    expect(own.conversations.map((c) => c.id)).toEqual([murats.id]);
+
+    const everyone = page(store.users.murat, store.slug, true);
+    expect(everyone.showingAll).toBe(true);
+    const row = (id: string) => everyone.conversations.find((c) => c.id === id);
+    expect(row(selins.id)).toMatchObject({
+      title: `${store.users.selin.name}'s conversation`,
+      ownerLabel: store.users.selin.name,
+      own: false,
+      readable: false,
+      canDelete: true,
+      working: false,
+    });
+    expect(row(murats.id)).toMatchObject({ readable: true, canDelete: true, own: true });
+    expect(row(selinsElsewhere.id)).toBeUndefined();
+    expect(JSON.stringify(everyone.conversations)).not.toContain("payments");
+    // The instance page reaches no project role, so it lists his own alone.
+    expect(page(store.users.murat, null, true)).toMatchObject({ showAllAs: null, showingAll: false });
+
+    // Below admin there is nobody else's to list; an org admin reads them all.
+    expect(page(store.users.selin, store.slug, true)).toMatchObject({ showAllAs: null, showingAll: false });
+    const org = page(store.users.arda, store.slug, true);
+    expect(org.showAllAs).toBe("org admin");
+    expect(org.conversations.find((c) => c.id === selins.id)).toMatchObject({
+      title: "Why is the payments migration stalled?",
+      readable: true,
+      canDelete: true,
+    });
+  });
+});

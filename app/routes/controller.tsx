@@ -1,5 +1,5 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
-import { data } from "react-router";
+import { data, replace } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/controller";
 import { appErrorResponse } from "~/server/auth/form-action.server";
@@ -7,6 +7,7 @@ import { requireAuth } from "~/server/auth/require-user.server";
 import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { createConversation } from "~/server/controller/controller-conversations.server";
+import { deleteControllerConversation } from "~/server/controller/controller-deletion.server";
 import {
   interruptControllerTurn,
   runControllerTurn,
@@ -22,7 +23,8 @@ import { isDocumentNavigation } from "~/server/http/single-fetch.server";
  * /controller — the instance controller surface (ruling 99). Every signed-in
  * user converses; what the controller answers and applies is gated per tool
  * call on THAT user's own authority. Conversations belong to their owner
- * (org admins may read everyone's with ?all=1).
+ * (org admins may read everyone's with ?all=1), who may delete them, as may
+ * an org admin (ruling 525).
  */
 
 export function meta() {
@@ -116,6 +118,23 @@ export async function action({ request }: Route.ActionArgs) {
             ? "Turn interrupted. The transcript records that it was stopped."
             : "That turn had already ended.",
       };
+    }
+    if (intent === "delete-conversation") {
+      // Ruling 525: the rail's Delete, confirmed on the page. The engine
+      // decides who may (here, its starter or an org admin), stops a running
+      // turn and purges what the turns logged.
+      const conversationId = String(formData.get("conversationId") ?? "");
+      deleteControllerConversation(
+        db,
+        { conversationId, projectSlug: null },
+        { userId: auth.user.id, label: auth.user.email },
+      );
+      // The thread on screen is gone, and its URL would now answer 404: land
+      // where a bare visit does (U33-8), in place of the entry that named it.
+      if (String(formData.get("open") ?? "") === conversationId) {
+        return replace(formData.get("all") === "1" ? "/controller?all=1" : "/controller");
+      }
+      return { ok: true as const, toast: "Conversation deleted." };
     }
     return data({ ok: false as const, error: "Unknown action." }, { status: 400 });
   } catch (cause) {

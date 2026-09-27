@@ -65,8 +65,8 @@ Identity facts:
 
 | Surface | Who | Notes |
 |---|---|---|
-| `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). |
-| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
+| `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 525). |
+| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). `?all=1` lists everyone's threads about the project for an org admin, and, sealed, for a holder of `delete-controller-conversations` (§2.3, ruling 525). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
 | `/resources/controller` | any signed-in user; project and task scopes require membership; a signed-out request gets a 401, never a login redirect | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
@@ -121,7 +121,8 @@ a non-owner gets a 404-shaped refusal so "not yours" and "never existed" look th
 Only the owner may send. Org admins reading project-scoped transcripts for projects
 they are not members of is intended (ruling 100). Deleting a project releases its
 conversations to instance scope with a message naming the deleted project, rather than
-leaving them bound to a slug a new project could reuse (ruling 274).
+leaving them bound to a slug a new project could reuse (ruling 274). A person deletes a
+conversation; the product never does on its own (§2.3).
 
 ### 2.1 The dock (ruling 121)
 
@@ -310,6 +311,48 @@ M` boundaries between turns.
   speaks no engagement vocabulary for a controller run (no "supporting" role, and a
   finished turn's footer says to send a message).
 - Neither panel renders for a thread that has not run yet.
+
+### 2.3 Deleting a conversation (ruling 525)
+
+**Who.** A conversation's starter may always delete it, and an org admin may delete any.
+A conversation about a project (bound to its board or anchored to one of its tasks) may
+also be deleted by whoever holds `delete-controller-conversations` there: a row of the
+role matrix (`app/shared/rbac.ts`) that the admin role holds, so a person gets it the way
+they get any other row, by being given that role on the project, and an org admin passes
+it as the audited D2 override. A conversation about no project has no
+project role to hold, so it stays its starter's and the org admins'. The engine
+(`deleteControllerConversation`, `controller-deletion.server.ts`) re-decides every
+delete: a stranger to an instance conversation gets the 404 shape, a project member
+without the row gets the guard's 403 ("Only project admins can delete another person's
+controller conversation."), audited as `project.authority.denied`. Each page deletes only
+the scope it lists (ruling 121): the instance page its instance threads, a project page
+its board's and its tasks'.
+
+**What.** The conversation and its messages, and what its turns said and did: their
+console lines (`run_log_lines`), raw NDJSON and the provider's session transcript in the
+starter's runtime home, with the folder Claude keeps beside it, removed as the starter
+(ruling 485) (`controller-purge.server.ts`). The turns' run rows stay, with their tool
+step cleared, as the record of what was spent: Insights still counts them, and nothing
+opens them (`canReadControllerRunLog` finds no conversation). A turn still working is
+stopped first as the deleter (`interruptRunOnConversationDeletion`, audited
+`runtime.run.interrupted` with `reason: "conversation-deleted"`), the queue behind it goes
+with the lease, and it writes nothing back: its settle purges the lines it wrote on its way
+out, and boot finishes that purge for a turn a restart cut off
+(`purgeOrphanedConversationLogs`). It is permanent. The audit row,
+`controller.conversation.deleted`, names the starter, how the actor held the delete
+(`starter`, `org-admin` or `project-role`) and how many messages and turns went, never the
+title or a word of it; it is on the org Audit log and the export, not on a project's
+Activity feed, since whether a person had a conversation is theirs to know.
+
+**The rail.** Each row the viewer may delete carries the row ✕ (`.stg-x`, destructive),
+drawn always, which asks first: "Delete this conversation?" (or "Delete <name>'s
+conversation?"), naming the thread, what goes, that a working turn stops first and that it
+cannot be undone, committed by "Delete conversation". Deleting a thread the page is not
+showing answers a toast; deleting the one on screen answers a redirect to where a bare
+visit lands, replacing the history entry that named it. A project admin's "Show
+everyone's (project admin)" lists the other threads about the project SEALED: titled
+"<name>'s conversation", with its task and when it was last active, never a link, and left
+out of the phone's thread picker, because its words stay its starter's (ruling 99(d)).
 
 ## 3. Conversations and turns
 
@@ -509,7 +552,8 @@ message whose run never started, and the messages the lost in-memory queue still
 run (the wire schema's non-empty-slug rule, and an empty slug would match every `projects`
 firehose), so `run-events.server.ts` routes a controller run's frames to the conversation
 owner instead: `controller.log-appended` per stored line, and the `controller.updated`
-reference for a lifecycle change. Insights labels them `controller (instance)`.
+reference for a lifecycle change. Insights labels them `controller (instance)`, a deleted
+conversation's turns included (§2.3).
 
 ## 4. The `viberr_controller` toolkit
 

@@ -2516,7 +2516,12 @@ function stopRunProcess(
   input: { projectSlug: string; taskKey: string; runId: string },
   actorUserId: string,
   auditActor: { userId: string; label: string } | typeof SYSTEM_ACTOR,
-  auditDetails: { reason?: "task-closed"; cause?: "accept" | "force-accept" | "archive"; closedBy?: string } = {},
+  auditDetails: {
+    reason?: "task-closed" | "conversation-deleted";
+    cause?: "accept" | "force-accept" | "archive";
+    closedBy?: string;
+    deletedBy?: string;
+  } = {},
 ): void {
   const state = getState();
   const slot = state.handles.get(input.runId);
@@ -2687,6 +2692,36 @@ export function interruptRunOnClosure(
     cause: closure.cause,
     by: closure.byUserId,
   });
+  return "interrupted";
+}
+
+/**
+ * Ruling 525: a controller conversation that is deleted ends its live turns
+ * first, so nothing answers into it and nothing it was about to apply is
+ * applied. No authority check here: the person's was spent on the deletion
+ * (`deleteControllerConversation`), and the stop is that act's consequence,
+ * audited under the SYSTEM actor with the person who deleted it in the
+ * details, the shape a closing task's stop has (ruling 177). Idempotent like
+ * `interruptRun`: a turn someone already stopped is left to finish stopping.
+ */
+export function interruptRunOnConversationDeletion(
+  db: DatabaseSync,
+  runId: string,
+  deletedBy: string,
+): "interrupted" | "already-terminal" | "not-found" {
+  const run = getRun(db, runId);
+  if (!run || run.kind !== "controller") return "not-found";
+  if (run.state !== "running" && run.state !== "queued") return "already-terminal";
+  if (run.interrupted_by) return "already-terminal";
+  stopRunProcess(
+    db,
+    run,
+    { projectSlug: run.project_slug, taskKey: run.task_key, runId },
+    deletedBy,
+    SYSTEM_ACTOR,
+    { reason: "conversation-deleted", deletedBy },
+  );
+  logger.info("run interrupted — its conversation was deleted", { runId, by: deletedBy });
   return "interrupted";
 }
 

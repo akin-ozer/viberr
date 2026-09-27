@@ -2,6 +2,7 @@ import {
   createContext,
   Fragment,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -232,7 +233,7 @@ export function ControllerPage({
             (app.css `.ctl-side`), so a long panel under the list neither
             buries the list nor stretches the page beside it. */}
         <aside className="ctl-side">
-          <ConversationList view={view} />
+          <ConversationList view={view} csrf={csrf} />
           {/* Ruling 498: what the board's agents changed in its knowledge,
               where the owner looks; with ruling 483's proposals that
               documents still hold. */}
@@ -455,7 +456,9 @@ function ConversationPicker({ view }: { view: ControllerSurfaceView }) {
       {/* The blank composer is a place too: a person who pressed New is not
           reading any thread, and the select must not claim they are. */}
       {!active && <option value="">New conversation</option>}
-      {view.conversations.map((c) => (
+      {/* Ruling 525: a thread the viewer may delete but not read opens
+          nothing, so it is not a place to switch to. */}
+      {view.conversations.filter((c) => c.readable).map((c) => (
         <option key={c.id} value={c.id}>
           {/* O39-d: a native option holds text only. */}
           {c.unread ? "New reply · " : ""}
@@ -466,13 +469,42 @@ function ConversationPicker({ view }: { view: ControllerSurfaceView }) {
   );
 }
 
-function ConversationList({ view }: { view: ControllerSurfaceView }) {
+function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: string }) {
   const [params] = useSearchParams();
   // U33-8: what is OPEN, not what the URL asked for. With no `?c=` the loader
   // opens this scope's newest thread (the dock's rule), and the rail has to
   // mark the row the transcript is actually showing.
   const active = view.conversation?.id ?? null;
   const href = (c: ConversationListItem) => conversationHref(params, view.showingAll, c.id);
+  // Ruling 525: each row the viewer may delete carries its Delete, confirmed
+  // first. Deleting the open thread answers with a redirect to where a bare
+  // visit lands, which carries no result to toast: the fetcher keeps the data
+  // it had, so an unchanged result is that redirect, and it is said here. A
+  // refusal is a new result, which `useOpResultToast` says.
+  const remove = useFetcher<ActionResult>();
+  useOpResultToast(remove);
+  const push = useToast();
+  const [confirm, setConfirm] = useState<ConversationListItem | null>(null);
+  const leaving = useRef<{ before: ActionResult | undefined } | null>(null);
+  useEffect(() => {
+    if (remove.state !== "idle" || !leaving.current) return;
+    if (remove.data === leaving.current.before) push("Conversation deleted.");
+    leaving.current = null;
+  }, [remove.state, remove.data, push]);
+  const deleting = remove.state !== "idle";
+  const onDelete = (c: ConversationListItem) => {
+    if (deleting) return;
+    const body = new FormData();
+    body.set("_csrf", csrf);
+    body.set("intent", "delete-conversation");
+    body.set("conversationId", c.id);
+    // What the server needs to know to move the page off a thread it deletes.
+    if (active) body.set("open", active);
+    if (view.showingAll) body.set("all", "1");
+    leaving.current = c.id === active ? { before: remove.data } : null;
+    remove.submit(body, { method: "post" });
+  };
+  const deletingId = deleting ? String(remove.formData?.get("conversationId") ?? "") : null;
   return (
     <section className="panel ctl-convs">
       {/* Ruling 419(a): New moved to the page head, where it is reachable
@@ -481,7 +513,7 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
         <Icon name="message" />
         <h2>Conversations</h2>
       </div>
-      {view.viewerIsOrgAdmin && (
+      {view.showAllAs && (
         <p className="fine xs dim ctl-all-toggle">
           {view.showingAll ? (
             <Link className="linkish" to="?">
@@ -489,7 +521,7 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
             </Link>
           ) : (
             <Link className="linkish" to="?all=1">
-              Show everyone&apos;s (org admin)
+              Show everyone&apos;s ({view.showAllAs})
             </Link>
           )}
         </p>
@@ -498,15 +530,9 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
         <p className="empty sm">No conversations yet. Say something below.</p>
       ) : (
         <ul className="ctl-conv-list">
-          {view.conversations.map((c) => (
-            <li key={c.id}>
-              <Link
-                className={`ctl-conv${c.id === active ? " on" : ""}${c.unread ? " unread" : ""}`}
-                // Interface review 2026-09-24 (acce-9): set by hand, since
-                // NavLink matches the pathname and ignores ?c=.
-                aria-current={c.id === active ? "page" : undefined}
-                to={href(c)}
-              >
+          {view.conversations.map((c) => {
+            const face = (
+              <>
                 <span className="ctl-conv-title">
                   {/* O39-d: a reply this person has not opened yet. */}
                   {c.unread && <span className="unseen-dot" aria-hidden="true" />}
@@ -517,19 +543,107 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
                   {c.unread && <span className="vh">, new reply</span>}
                 </span>
                 <span className="fine xs dim">
-                  {!c.own && `${c.ownerLabel} · `}
+                  {/* A thread the viewer cannot read is titled by its owner. */}
+                  {!c.own && c.readable && `${c.ownerLabel} · `}
                   {c.lastMessageAt ? (
                     <LocalDayDotTime iso={c.lastMessageAt} />
                   ) : (
                     "empty"
                   )}
                 </span>
-              </Link>
-            </li>
-          ))}
+              </>
+            );
+            return (
+              <li key={c.id} className={"ctl-conv-row" + (c.canDelete ? " deletable" : "")}>
+                {c.readable ? (
+                  <Link
+                    className={`ctl-conv${c.id === active ? " on" : ""}${c.unread ? " unread" : ""}`}
+                    // Interface review 2026-09-24 (acce-9): set by hand, since
+                    // NavLink matches the pathname and ignores ?c=.
+                    aria-current={c.id === active ? "page" : undefined}
+                    to={href(c)}
+                  >
+                    {face}
+                  </Link>
+                ) : (
+                  // Ruling 525: listed so it can be deleted, never opened.
+                  <div className="ctl-conv sealed">{face}</div>
+                )}
+                {c.canDelete && (
+                  <button
+                    type="button"
+                    className="stg-x destructive ctl-conv-del"
+                    title="Delete conversation"
+                    aria-label={`Delete ${c.title}`}
+                    disabled={deleting}
+                    aria-busy={deletingId === c.id || undefined}
+                    onClick={() => setConfirm(c)}
+                  >
+                    <Icon name="x" />
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
+      {confirm && (
+        <DeleteConversationConfirm
+          conversation={confirm}
+          busy={deleting}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => onDelete(confirm)}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * Ruling 525: what deleting a conversation does, said before it is done. It
+ * is permanent, so the commit keeps the shared `danger` (ruling 149), and the
+ * sentence names whose it is when it is not the reader's own.
+ */
+function DeleteConversationConfirm({
+  conversation: c,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  conversation: ConversationListItem;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const what = c.readable ? (
+    <>&ldquo;{c.title}&rdquo;</>
+  ) : (
+    <>
+      {/* The head already says whose it is. */}
+      This conversation {c.taskKey ? `about ${c.taskKey}` : "about this board"}
+      {c.lastMessageAt && (
+        <>
+          , last active <LocalDayDotTime iso={c.lastMessageAt} />,
+        </>
+      )}
+    </>
+  );
+  return (
+    <ConfirmDialog
+      screenLabel="Delete conversation dialog"
+      title={c.own ? "Delete this conversation?" : `Delete ${c.ownerLabel}'s conversation?`}
+      body={
+        <>
+          {what} goes for good{c.own ? "" : `, for ${c.ownerLabel} too`}: its messages and the
+          logs of its turns.{c.working && " The turn it is working on stops first."} This cannot
+          be undone.
+        </>
+      }
+      confirmLabel="Delete conversation"
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

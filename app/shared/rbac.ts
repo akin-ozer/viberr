@@ -115,6 +115,17 @@ export const RBAC_DEFINITIONS = [
   { id: "release-any-ownership", label: "Release any task owner", roles: [A] },
   { id: "manage-members", label: "Manage members & roles", roles: [A] },
   { id: "manage-agents", label: "Manage agent profiles", roles: [A] },
+  // Ruling 525: deleting a controller conversation somebody else started,
+  // when it is about this project (bound to its board or anchored to one of
+  // its tasks). The person who started one may always delete it and an org
+  // admin may delete any, so neither needs this row, and a conversation about
+  // no project has no project role to hold it.
+  {
+    id: "delete-controller-conversations",
+    label: "Delete anyone's controller conversations",
+    covers: "the ones about this project's board and tasks; everyone may delete their own",
+    roles: [A],
+  },
   // Ruling 309(a): also the gate on archiving and restoring a project
   // (`setProjectArchived`), which the label named nowhere — so "who can
   // unarchive this?" had no answer on the page that exists to answer it.
