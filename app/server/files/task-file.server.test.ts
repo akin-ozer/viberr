@@ -240,6 +240,15 @@ describe("packet option tolerance (F31-C5)", () => {
     ).toBe(true);
     // Nothing else was harmed by the salvage.
     expect(parsed.packet!.title).toBe(FULL.packet!.title);
+
+    // A well-formed row of a kind no door answers drops too: a button that
+    // resolves to nothing is worse than no button.
+    const unknownKind = parseTaskFileContent(
+      serializeTaskFile(FULL).replace("options:", "options:\n  - kind: delete_everything\n    t: nuke"),
+      { fallbackKey: "VIB-142" },
+    );
+    expect(unknownKind.parsed.packet!.options.length).toBe(FULL.packet!.options.length);
+    expect(unknownKind.diagnostics.some((d) => d.code === "packet.invalid_option")).toBe(true);
   });
 
   it("C01-A1: one malformed observation drops only itself — the sibling list has the same tolerance", () => {

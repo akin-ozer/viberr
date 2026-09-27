@@ -264,6 +264,8 @@ describe("requestContextMiddleware (ruling 458(d))", () => {
     expect(response instanceof Response ? response.headers.get(REQUEST_ID_HEADER) : null).toBe(
       "req_mw",
     );
+    // The binding ends with the request: nothing after it inherits its id.
+    expect(currentRequestId()).toBeNull();
   });
 });
 

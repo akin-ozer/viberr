@@ -1315,9 +1315,9 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
  *
  * The phrase was invented five times, in five files, and every one of them
  * said that a person should resolve the history without naming the act that
- * does. Each door's own suite pins that it prints this sentence (workspace
- * delivery, update-branch, the packet outcome, delivery-decision), so a sixth
- * site inventing a sixth sentence fails there.
+ * does. Each door's own suite pins that it prints this sentence: workspace
+ * delivery, update-branch, the packet outcome (react-progress) and
+ * delivery-decision.
  */
 describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
   it("names the act and the thing that causes the divergence", async () => {

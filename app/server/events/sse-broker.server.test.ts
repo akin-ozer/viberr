@@ -318,6 +318,9 @@ describe("ring buffer replay (Last-Event-ID)", () => {
     // And 10, the newest id the ring let go of, can: 11 onwards is replayed.
     const edge = connect("u1", [{ kind: "user" }], { lastEventId: base + 10 });
     expect(edge.names().filter((n) => n === "projection.rebuilt")).toHaveLength(RING_BUFFER_SIZE);
+    // 9, one short of the edge, is gone: the ring holds exactly RING_BUFFER_SIZE.
+    const past = connect("u1", [{ kind: "user" }], { lastEventId: base + 9 });
+    expect(past.names()).toEqual(["stream.open", "stream.resync"]);
   });
 
   it("sends stream.resync when the id is from a previous server life", () => {

@@ -900,7 +900,9 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     const rows = agentOptions(container);
     expect(rows).toHaveLength(2);
     expect(rows[0]!.textContent).toContain("Developer");
-    expect(rows[0]!.textContent).toContain("Implementation · Codex");
+    // Exactly role · backend: a row with no verdict, no running run and repo
+    // write carries no mark at all.
+    expect(rows[0]!.querySelector(".ri-sub")!.textContent).toBe("Implementation · Codex");
     expect(rows[1]!.textContent).toContain("Reviewer");
     expect(rows[1]!.textContent).toContain("Code review · Claude");
   });
@@ -1421,13 +1423,15 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
         operatorBackend: "codex",
         // Ruling 127: the question is the task OWNER's Codex account, not a
         // deployment credential probe — and the viewer here IS the owner, so
-        // the store's own second-person sentence is what they read.
+        // the store's own second-person sentence is what they read (here, a
+        // wiped runtime volume's, which the generic fallback cannot say).
         meId: "u-arda",
         runPrincipal: connectedPrincipal({
           codex: {
             available: false,
             detail:
-              "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+              "Your Codex sign-in file is missing from this server (the runtime volume was wiped). " +
+              "Sign in again on your Profile → Agent accounts.",
           },
         }),
       },
@@ -1437,10 +1441,13 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(run.hasAttribute("disabled")).toBe(true);
     fireEvent.click(run);
     expect(onRunOperator).not.toHaveBeenCalled();
-    // The reason is rendered copy, not a title on a dead control (P14).
+    // The reason is rendered copy, not a title on a dead control (P14), in
+    // the store's words rather than the fallback's.
     expect(container.textContent).toContain(
-      "Codex isn't connected. Connect it on your Profile → Agent accounts.",
+      "Your Codex sign-in file is missing from this server (the runtime volume was wiped). " +
+        "Sign in again on your Profile → Agent accounts.",
     );
+    expect(container.textContent).not.toContain("Codex isn't connected");
     expect(container.textContent).toContain(
       "Runs on this task use your own account",
     );

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, useParams } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { NewProjectModal } from "./new-project-modal";
 
@@ -56,7 +56,7 @@ function renderModal(
       ),
       action,
     },
-    { path: "/projects/:slug/board", Component: () => <div>board</div> },
+    { path: "/projects/:slug/board", Component: () => <div>board {useParams().slug}</div> },
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }
@@ -218,7 +218,7 @@ describe("F15-04: creating a project lands you in it", () => {
     );
     fireEvent.change(container.querySelector("#np-name")!, { target: { value: "New Project" } });
     fireEvent.click(getByText("Create project"));
-    await findByText("board");
+    await findByText("board new-project");
   });
 });
 

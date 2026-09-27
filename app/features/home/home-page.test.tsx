@@ -252,6 +252,8 @@ describe("StageMeter (per-project stages, ruling 15)", () => {
     const meter = container.querySelector(".pj-meter")!;
     const segments = meter.querySelectorAll("span");
     expect(segments.length).toBe(2); // "doing" has 0 tasks → no segment
+    // Each band's width is its stage's share of the tasks.
+    expect([...segments].map((s) => s.style.flexGrow)).toEqual(["2", "3"]);
     expect(meter.getAttribute("title")).toBe("2 to do · 0 in progress · 3 done");
   });
 

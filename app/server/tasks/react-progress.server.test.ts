@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WorkRevision } from "~/schemas/task-file.schema";
+import { DIVERGED_BRANCH_REMEDY, type WorkRevision } from "~/schemas/task-file.schema";
 import { serverOutcomeSentence } from "~/shared/packet-server-outcome";
 import {
   headMovedSince,
@@ -101,6 +101,12 @@ describe("ruling 489: the operator reads what the delivery option did, in Viberr
         reason: "the remote branch diverged",
       }),
     ).toBe("the delivery did not complete (the remote branch diverged); nothing reached the review PR.");
+  });
+
+  it("a diverged own PR gets ruling 321's one remedy sentence", () => {
+    expect(
+      serverOutcomeSentence({ kind: "resolve_remote_collision", outcome: "own_pr_diverged", prNumber: 5 }),
+    ).toContain(DIVERGED_BRANCH_REMEDY);
   });
 });
 

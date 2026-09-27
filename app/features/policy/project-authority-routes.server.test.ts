@@ -298,15 +298,17 @@ describe("R15-4 on the ACTION side of every project-scoped route", () => {
       expect(String(body)).not.toMatch(/member/i);
     });
 
-    it(`${route.name}: a member reaches the intent switch`, async () => {
-      const result = z
-        .object({
-          init: z.object({ status: z.number() }),
-          data: z.object({ error: z.string() }),
-        })
-        .parse(await post(route, ids.arda, { intent: "no-such-intent" }));
-      expect(result.init.status).toBe(400);
-      expect(result.data.error).toBe("Unknown action.");
+    it(`${route.name}: a member, and an org admin who is none (the D2 override), reach the intent switch`, async () => {
+      for (const userId of [ids.arda, ids.orgAdmin]) {
+        const result = z
+          .object({
+            init: z.object({ status: z.number() }),
+            data: z.object({ error: z.string() }),
+          })
+          .parse(await post(route, userId, { intent: "no-such-intent" }));
+        expect(result.init.status, userId).toBe(400);
+        expect(result.data.error, userId).toBe("Unknown action.");
+      }
     });
   }
 

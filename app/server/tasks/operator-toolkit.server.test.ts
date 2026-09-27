@@ -729,7 +729,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * goal draft, sitting in the reader those rulings' own author wrote the same
    * day. The cap stays: this is the SHALLOW read of the tasks beside your own.
    */
-  it("ruling 289: a clipped goal says it is clipped, and a short one is untouched", async () => {
+  it("ruling 289: a clipped goal says it is clipped, a short one is untouched, and no key lists the board", async () => {
     const store = setupTestStore(ctxDb);
     const long = `Deliverable: the thing. ${"detail ".repeat(500)}END-OF-CONTRACT`;
     writeTask(store.dataRoot, store.slug, {
@@ -752,7 +752,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       authority: authority([]),
     });
     const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    const call = async (taskKey: string) => {
+    const call = async (taskKey?: string) => {
       // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
       // a shape change fails the assertions below rather than reading undefined.
       const answer = (await read.handler({ taskKey } as never, {} as never)) as {
@@ -773,6 +773,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const whole = await call("VIB-3");
     expect(whole).toContain("Short and whole.");
     expect(whole).not.toContain("[excerpt");
+
+    // Ruling 282: with no key, the operator's read lists the whole board.
+    const board = await call();
+    for (const key of ["VIB-1", "VIB-2", "VIB-3"]) expect(board).toContain(`"key": "${key}"`);
   });
 
   /**

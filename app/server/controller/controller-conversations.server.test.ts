@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pollUntil, settle } from "../../../test-support/polling";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import {
@@ -634,12 +635,11 @@ describe("a working turn streams to its owner", () => {
       dataRoot: app.dataRoot,
     });
     if (result.state !== "started") throw new Error(`turn ${result.state}`);
-    for (let i = 0; i < 200; i += 1) {
+    await pollUntil(() => {
       const state = getRun(app.db, result.runId)?.state;
-      if (state && state !== "running" && state !== "queued") break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      return !!state && state !== "running" && state !== "queued";
+    }, 1_000);
+    await settle();
 
     const lines = owner().filter((e) => e.type === "controller.log-appended");
     expect(lines.map((e) => e.data)).toEqual([
@@ -710,9 +710,7 @@ describe("a failed queued start accounts for the messages behind it", () => {
         listMessages(app.db, conversation.id)
           .filter((m) => m.author === "controller")
           .map((m) => [m.text, m.replyTo]);
-      for (let i = 0; i < 400 && notes().length < 4; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      await pollUntil(() => notes().length >= 4, 2_000);
       // B was attempted; C and D are the ones abandoned. Ruling 465: every
       // dropped message has its own note under it, so none reads back as a
       // question nobody answered (and boot recovery, which notes every

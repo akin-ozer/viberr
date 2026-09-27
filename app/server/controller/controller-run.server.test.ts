@@ -348,53 +348,13 @@ describe("controller mounts (ruling 107)", () => {
 
 describe("the turn carries the context read (ruling 121)", () => {
   it("names the task binding in the system prompt, and the board one, and the instance one", async () => {
-    const { buildControllerSystemPrompt } = await import("./controller-run.server");
-    const { resolveControllerConfig } = await import("./controller-profile.server");
-    const config = resolveControllerConfig(app.dataRoot);
-    const base = {
-      id: "cnv_x",
-      userId: user.id,
-      userLabel: user.email,
-      title: "",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      lastMessageAt: null,
-    };
-    const asker = { ...user, orgRole: "admin" as const };
-    const task = buildControllerSystemPrompt(app.db, {
-      conversation: { ...base, projectSlug: "viberr-core", taskKey: "VIB-142" },
-      user: asker,
-      config,
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const task = (await build({ projectSlug: "viberr-core", taskKey: "VIB-142" })).prompt;
     expect(task).toContain(
       "This conversation is anchored to task `VIB-142` in project `viberr-core`: tools default to both, and every turn opens with the task's canonical file as a server read.",
     );
-    const board = buildControllerSystemPrompt(app.db, {
-      conversation: { ...base, projectSlug: "viberr-core", taskKey: null },
-      user: asker,
-      config,
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const board = (await build({ projectSlug: "viberr-core" })).prompt;
     expect(board).toContain("bound to the project `viberr-core`: tools default to it, and every turn opens with a board snapshot");
-    const instance = buildControllerSystemPrompt(app.db, {
-      conversation: { ...base, projectSlug: null, taskKey: null },
-      user: asker,
-      config,
-      mountedMcps: [],
-      unresolvedMcps: [],
-      toolkit: [],
-      deniedTools: [],
-      dataRoot: app.dataRoot,
-    }).prompt;
+    const instance = (await build({})).prompt;
     expect(instance).toContain("instance-scoped: name the project when acting on a board.");
   });
 
@@ -899,9 +859,8 @@ describe("ruling 283: read_knowledge_doc is mounted exactly when the turn holds 
       kb: ["ctl-rulings"],
       dataRoot: app.dataRoot,
     });
-    // Canary: drop the `kb` dep from `buildControllerToolkit` (or gate the tool
-    // on org-admin, as `read_store_doc` is) and this allow-list entry vanishes
-    // while the prompt keeps promising the index.
+    // Canary: drop the `kb` dep from `buildControllerToolkit` and this
+    // allow-list entry vanishes while the prompt keeps promising the index.
     expect(mounts.allowedTools).toContain("mcp__viberr_controller__read_knowledge_doc");
   });
 

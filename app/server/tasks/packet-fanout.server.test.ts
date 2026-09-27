@@ -159,7 +159,7 @@ describe("siblingPacketsSharingCause", () => {
 });
 
 describe("siblingOptionIndex", () => {
-  it("will not match two retries that name different backends", () => {
+  it("matches a retry by kind and backend, never across backends", () => {
     const chosen: PacketOption = {
       kind: "retry_other_backend",
       t: "Retry on Codex",
@@ -171,6 +171,9 @@ describe("siblingOptionIndex", () => {
       { kind: "retry_other_backend", t: "Retry on Claude", d: "", rec: false, backend: "claude" },
     ]);
     expect(siblingOptionIndex(sibling, chosen)).toBeNull();
+    // …while the same backend matches, by kind, wherever it sits on the sibling.
+    const same = packet([{ kind: "redirect", t: "Redirect", d: "", rec: false }, { ...chosen }]);
+    expect(siblingOptionIndex(same, chosen)).toBe(1);
   });
 
   it("ignores profileId, which names each task's OWN agent", () => {

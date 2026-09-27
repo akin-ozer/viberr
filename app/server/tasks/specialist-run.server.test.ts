@@ -22,6 +22,7 @@ import {
 } from "~/server/runtimes/agent-isolation.server";
 import { createLocalOrigin, withLocalGithub, type LocalOrigin } from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { pollUntil } from "../../../test-support/polling";
 import {
   actorOf,
   baseTaskFrontmatter,
@@ -1821,15 +1822,11 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
       actorOf(store.users.arda),
     );
-    let replied = false;
-    for (let i = 0; i < 120 && !replied; i++) {
-      const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
-      replied = !!file?.parsed.timeline.some(
+    const replied = () =>
+      !!readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })?.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
       );
-      if (!replied) await new Promise((r) => setTimeout(r, 25));
-    }
-    expect(replied).toBe(true);
+    expect(await pollUntil(replied, 3_000)).toBe(true);
   });
 });
 
@@ -4096,8 +4093,52 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       });
       expect(assembled).not.toContain("deliverer-craft");
       expect(assembled).not.toContain("SENTINEL-DELIVERER-SKILL");
+
+      // A resumed turn builds the grants a second time and holds the same
+      // boundary. Canary: drop `withDeliveringGrants` from
+      // resolveResumeConfinement, or union the deliverer's skills into its mount.
+      const resumed = await resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic", backend: "claude", delivers: false },
+      );
+      expect(joinedPrompt(resumed.systemPrompt ?? "")).toContain("SENTINEL-DELIVERER-KB");
+      expect(resumed.skills).toEqual(["critic-craft"]);
     });
   });
+
+  /** Deploys the one reviewer, critic, on acme/widgets. */
+  function deployCritic(): void {
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      repo: "acme/widgets",
+      agents: [
+        {
+          profileId: "critic", capabilities: [], extras: [],
+          definition: {
+            kind: "specialist", name: "critic", role: "reviewer",
+            backends: ["claude"], model: "sonnet",
+            resources: { skills: [], mcps: [], kb: [] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** Starts `profileId`'s run on VIB-1 and interrupts it; answers its id. */
+  async function runAndStop(profileId: string): Promise<string> {
+    const run = await startAgentRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId },
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+      actorOf(store.users.arda));
+    return run.runId;
+  }
 
   describe("P8 — per-engagement workspace isolation", () => {
     it("a SUPPORTING run gets its OWN checkout, so its writes never reach the delivering tree", async () => {
@@ -4336,22 +4377,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       writeFileSync(path.join(ws, "later.md"), "later\n");
       await exec("git", ["-C", ws, "add", "-A"]);
       await exec("git", ["-C", ws, "commit", "-q", "-m", "later"]);
-      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-        .parsed.frontmatter;
-      writeProject(store.dataRoot, {
-        ...fm,
-        repo: "acme/widgets",
-        agents: [
-          {
-            profileId: "critic", capabilities: [], extras: [],
-            definition: {
-              kind: "specialist", name: "critic", role: "reviewer",
-              backends: ["claude"], model: "sonnet",
-              resources: { skills: [], mcps: [], kb: [] },
-            },
-          },
-        ],
-      });
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-1", {
           stage: "impl",
@@ -4366,17 +4391,11 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
           },
         }),
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      deployCritic();
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const run = await startAgentRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      await runAndStop("critic");
 
       const criticWs = path.join(path.dirname(ws), "support", "critic", path.basename(ws));
       expect((await exec("git", ["-C", criticWs, "rev-parse", "HEAD"])).stdout.trim()).toBe(reviewed);
@@ -4415,37 +4434,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       resetAgentIsolationForTests();
       vi.restoreAllMocks();
     });
-
-    function deployCritic(): void {
-      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-        .parsed.frontmatter;
-      writeProject(store.dataRoot, {
-        ...fm,
-        repo: "acme/widgets",
-        agents: [
-          {
-            profileId: "critic", capabilities: [], extras: [],
-            definition: {
-              kind: "specialist", name: "critic", role: "reviewer",
-              backends: ["claude"], model: "sonnet",
-              resources: { skills: [], mcps: [], kb: [] },
-            },
-          },
-        ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    }
-
-    async function runAndStop(profileId: string): Promise<string> {
-      const run = await startAgentRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId },
-        actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
-      return run.runId;
-    }
 
     /** A delivering checkout and one finished review, whose supporting
      *  checkout is returned. */
@@ -4624,12 +4612,14 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
       await withLocalGithub(origins, () => runAndStop("dev"));
-      await origin.advance({ message: "base moved" });
+      const moved = await origin.advance({ message: "base moved" });
       const runId = await withLocalGithub(origins, () => runAndStop("dev"));
 
+      // The moved base reached the checkout: a refresh that failed, or never
+      // fetched, reads "not refreshed" or leaves origin/* behind.
       const recorded = listRunLines(store.db, runId).find((l) => l.display.tag === RUN_INPUTS_TAG)
         ?.display.inputs?.workspaceRefresh;
-      expect(recorded).toBeTruthy();
+      expect(recorded).toBe(`fast-forwarded \`main\` to \`origin/main\` at \`${moved.slice(0, 7)}\``);
       expect(lastRunSpec()?.prompt).toContain(`Before this run Viberr ${recorded}.`);
     });
   });

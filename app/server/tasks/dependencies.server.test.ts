@@ -713,11 +713,11 @@ const recordDispatch =
   };
 
 describe("F37-68 / ruling 241: a reviewer question the hold refused survives the wait", () => {
-  function seedQueued(store: TestStore, held: string[]): void {
+  function seedQueued(store: TestStore, held: string[], waiting: "human" | "agent" = "human"): void {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-11", {
         stage: "review",
-        waiting: "human",
+        waiting,
         ownerUserId: store.users.arda.id,
         blockedBy: held,
         engagements: [
@@ -742,7 +742,8 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
   it("a start that fails after the release says so, and does not leave the question queued", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
-    seedQueued(store, ["VIB-2"]);
+    // Seeded on an agent, so the failure arm's own write is what reads `human` below.
+    seedQueued(store, ["VIB-2"], "agent");
     await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-11", blockedBy: [] },

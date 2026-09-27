@@ -16,7 +16,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
-import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { clearProjectCredential, createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   pollGithubReconcile,
   startGithubReconcilePoller,
@@ -278,11 +278,20 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
     const alerts = () =>
       policyRows(store).filter((r) => r.title === "GitHub sync is failing for this project");
 
+    // A revoked token fails the task's compare as `auth_failed`, the case the
+    // alert's copy names; the network arm crosses the threshold below, so the
+    // streak holds only if both arms count.
+    const revoked = () =>
+      fakeGithubFetch({
+        ...happyRoutes("vib-1"),
+        [`GET ${REPO_PATH}/compare/main...vib-1`]: { status: 401, body: { message: "Bad credentials" } },
+      }).fetchImpl;
+
     // The failure streak is process-global and keyed by slug: a clean pass
     // first clears whatever an earlier poll in this file left behind.
     await poll(fakeGithubFetch(happyRoutes("vib-1")).fetchImpl);
-    await poll(unreachableFetch());
-    await poll(unreachableFetch());
+    await poll(revoked());
+    await poll(revoked());
     // Below the threshold: nothing yet.
     expect(alerts()).toHaveLength(0);
 
@@ -305,6 +314,29 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
 
     // A clean pass clears the streak again, so later tests start from zero.
     await poll(fakeGithubFetch(happyRoutes("vib-1")).fetchImpl);
+  });
+
+  it("a project whose credential was removed counts toward the alert too", async () => {
+    const store = setupProjectedStore(ctx);
+    seedBranchedTask(store, "VIB-1");
+    const poll = () =>
+      pollGithubReconcile(store.db, {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(happyRoutes("vib-1")).fetchImpl,
+      });
+    const alerts = () =>
+      policyRows(store).filter((r) => r.title === "GitHub sync is failing for this project");
+
+    await poll();
+    clearProjectCredential(store.db, store.slug, { userId: store.users.arda.id, label: "arda@viberr.test" });
+    for (let pass = 0; pass < 3; pass += 1) await poll();
+    expect(alerts().map((r) => r.userId).sort()).toEqual(
+      [store.users.arda.id, store.users.murat.id].sort(),
+    );
+
+    // Bound again, a clean pass clears the streak for later tests.
+    seedBranchedTask(store, "VIB-1");
+    await poll();
   });
 })
 

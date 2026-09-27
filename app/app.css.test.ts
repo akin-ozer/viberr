@@ -317,6 +317,11 @@ describe("app.css select treatment (P16-UI-05)", () => {
     expect(base![1]).toMatch(/border-radius:\s*var\(--radius-button\)/);
     expect(base![1]).toMatch(/background:\s*var\(--surface\)/);
     expect(base![1]).toMatch(/color:\s*var\(--fg\)/);
+    // The one variant left (the KB destination picker) sizes the base, and
+    // never redraws its box.
+    const variant = declsFor(RULES.filter((r) => r.at.length === 0), ".fm-toolbar select");
+    expect(variant.size).toBeGreaterThan(0);
+    expect([variant.has("border"), variant.has("background")]).toEqual([false, false]);
   });
 });
 
@@ -1332,6 +1337,10 @@ describe("app.css owns the shared idioms — hoisting is not an escape hatch (F1
     // A scan that finds no note passes everything.
     expect(found).toBeGreaterThan(0);
     expect(styled.sort()).toEqual([]);
+    // …and the modifiers the notes use in place of a margin are in the sheet.
+    const sheet = RULES.filter((r) => r.at.length === 0);
+    expect(requiredDecls(sheet, ".pol-note.after").get("margin-top")).toBe(".75rem");
+    expect(requiredDecls(sheet, ".pol-note.last").get("margin-bottom")).toBe("0");
   });
 });
 
@@ -1363,6 +1372,8 @@ describe("app.css owns the shared idioms — hoisting is not an escape hatch (F1
 // `cssRules` (test-support/css-rules.ts): every rule in the sheet, nesting
 // resolved, with the at-rule context it sits under.
 const RULES = cssRules(CODE);
+/** The rules outside any at-rule: what every viewport and preference gets. */
+const plain = RULES.filter((r) => r.at.length === 0);
 
 /* ----------------------------------------------------- colour resolution */
 
@@ -3205,10 +3216,7 @@ describe("app.css controller layout (ruling 419)", () => {
     // Fixed/Security." in a list item scrolled /controller's transcript at
     // 375px 433px in 315, and the dock's 442 in 388.
     // CANARY: drop the prose rule, or the reset on code blocks and tables.
-    const wrap = (selector: string) =>
-      RULES.filter((r) => r.at.length === 0 && r.selector.split(",").map((s) => s.trim()).includes(selector))
-        .flatMap((r) => r.decls.get("overflow-wrap") ?? [])
-        .at(-1);
+    const wrap = (selector: string) => declsFor(plain, selector).get("overflow-wrap");
     const prose = [".md-body p", ".md-body li", ".md-body blockquote", ".md-body h1", ".md-body h2", ".md-body h3", ".md-body h4", ".md-body h5", ".md-body h6"];
     for (const selector of prose) expect(wrap(selector), selector).toBe("anywhere");
     for (const scroller of [".md-body pre", ".md-table-wrap"]) expect(wrap(scroller), scroller).toBe("normal");
@@ -3249,7 +3257,6 @@ describe("app.css controller layout (ruling 419)", () => {
  * the components' own suites pin the keys and attributes that trigger it.
  */
 describe("app.css ruling 451: motion from transitions.dev", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
   const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
   const declared = new Set([...CODE.matchAll(/@keyframes\s+([-\w]+)/g)].map((m) => m[1]!));
   /** The keyframes names an `animation` value plays, one per layer. */
@@ -3414,11 +3421,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
 
   it("every motion this ruling adds has a reduced-motion answer that does not move", () => {
     // CANARY: drop `.refused` from the closing reduced-motion block.
-    const answer = (selector: string) => {
-      const hit = reduced.filter((r) => selectorParts(r).includes(selector));
-      expect(hit.length, `${selector} needs a reduced-motion rule`).toBeGreaterThan(0);
-      return requiredDecls(reduced, selector);
-    };
+    const answer = (selector: string) => requiredDecls(reduced, selector);
     for (const selector of [
       ".run-phase .ph[data-fresh]", ".run-phase .step[data-fresh]", ".ctl-working-step[data-fresh]", ".copy-done",
       '.signin-step[data-state="done"] .signin-mark .ico', ".cap-mbody", ".ctl-msg[data-fresh]",
@@ -3447,7 +3450,6 @@ describe("app.css console rows skip off-screen work (ruling 457, CSS-6)", () => 
 });
 
 describe("app.css ruling 453: the Apple design pass", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
 
   it("(a) every transform transition answers a press on the sheet's ease-out, never plain `ease`", () => {
     // CANARY: put `.btn` back on `transform .15s ease`. Plain `ease` starts
@@ -3560,7 +3562,6 @@ describe("app.css ruling 453: the Apple design pass", () => {
 });
 
 describe("app.css ruling 454: the dock sheet under a finger", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
   const sheetWidth = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
 
   it("marks the panel a sheet only at sheet width — the flag the script reads instead of the viewport", () => {
@@ -3639,7 +3640,6 @@ describe("app.css ruling 454: the dock sheet under a finger", () => {
  */
 describe("interface review 2026-09-24: the rules the fixes rest on", () => {
   const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
-  const plain = RULES.filter((r) => r.at.length === 0);
   const mobile = within(/max-width: 720px/);
   const collapse = within(/max-width: 1100px/);
   const reduce = within(/prefers-reduced-motion:\s*reduce/);
@@ -3745,6 +3745,12 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     ]) {
       expect(requiredDecls(plain, selector).get("outline") ?? "", selector).not.toMatch(/^(0|none)$/);
     }
+    // A select takes the ring the text inputs take, not one of its own.
+    for (const prop of ["border-color", "box-shadow"]) {
+      expect(requiredDecls(plain, "select:focus").get(prop), prop).toBe(
+        requiredDecls(plain, ".field input:focus").get(prop),
+      );
+    }
     // The two rules that replaced the ring with a box-shadow (which forced
     // colors drops) are gone.
     expect(CODE).not.toMatch(/\.cal-day[^{]*:focus-visible/);
@@ -3844,7 +3850,6 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
  */
 describe("interface review 2026-09-24: the MEDIUM fixes", () => {
   const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
-  const plain = RULES.filter((r) => r.at.length === 0);
   const collapse = within(/max-width: 1100px/);
   const wide = within(/min-width: 900px/);
 
@@ -3958,12 +3963,8 @@ describe("interface review 2026-09-24: the MEDIUM fixes", () => {
 describe("app.css ruling 478: the task page at phone width", () => {
   const PHONE = "@media (max-width: 720px)";
   /** The declarations `selector` gets from its own rules in `at` (plain when empty). */
-  const declsAt = (selector: string, at: string[]) => {
-    const rules = RULES.filter((r) => r.at.join("|") === at.join("|"));
-    const where = at.join(" ") || "the plain sheet";
-    expect(rules.some((r) => selectorParts(r).includes(selector)), `${selector} must have a rule in ${where}`).toBe(true);
-    return declsFor(rules, selector);
-  };
+  const declsAt = (selector: string, at: string[]) =>
+    requiredDecls(RULES.filter((r) => r.at.join("|") === at.join("|")), selector);
 
   it("(b) F40-32: a file row's name takes its own line on a phone and shows whole", () => {
     // WEB-3 at 375px: both files read "WEB-3…", the name left 48px beside a
@@ -3995,7 +3996,6 @@ describe("app.css ruling 478: the task page at phone width", () => {
 });
 
 describe("better-ui review 2026-09-24: the small leftovers", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
 
   it("the GitHub bar's neutral pill keeps a fill of its own and clears AA on the bar, in both themes", () => {
     // CANARY: delete `.gh-bar .pill.neutral`. The sweep stays green, because it
@@ -4071,7 +4071,6 @@ describe("app.css ruling 459: the better-ui pass — concentric radius", () => {
   // surfaces.md), wherever the layers share a visible, even inset. The scale
   // is locked, so the answer is the nearest step or a changed inset, and the
   // house counts the container's border as part of the inset.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
   const root = requiredDecls(plain, ":root");
   /** A length in px: a `var(--radius-*)` through the token block, rem at 16px. */
@@ -4226,7 +4225,6 @@ describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
   // the 24 grid carries its own blank bearing, so the side it sits on takes
   // the text side less 2px (surfaces.md); a glyph drawn off the centre of its
   // box is fixed in the SVG, so no component has to nudge it.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const decls = (selector: string) => requiredDecls(plain, selector);
   /** A length in px, rem at 16px. */
   const px = (value: string | undefined): number => {
@@ -4480,7 +4478,6 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
   // Shadows for elevation, borders for structure; images wear a neutral
   // 1px outline, pure black at 10% on light and pure white at 10% on dark
   // (better-ui, surfaces.md). The values are the skill's, exactly.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
   const more = RULES.filter((r) => r.at.some((a) => /prefers-contrast:\s*more/.test(a)));
   const light = requiredDecls(plain, ":root");
@@ -4665,7 +4662,6 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
   // High-frequency hovers change colour, not position (better-ui, SKILL.md and
   // animations.md). The press block states the rest: the press belongs to the
   // element pressed, and only a control that can act presses.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
   // Top-level commas only: `:not(:disabled, [aria-disabled="true"])` is one part.
   /** A state selector with its states taken off: `:active`, `:hover`, and the
@@ -4932,7 +4928,6 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
   // already on screen at first paint moves only on a later change, and UI the
   // keyboard opens appears at once. Every motion keeps a reduced-motion answer
   // that the cascade actually reaches.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
   const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
   const wide = RULES.filter((r) => r.at.some((a) => /min-width:\s*900px/.test(a)));
@@ -5079,7 +5074,6 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
   // per surface, so no typed letter, font arrow or CSS-border caret stands in
   // for a glyph; one SVG recoloured per state, never by an unrelated rule; and
   // one glyph per meaning.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const isReduced = (r: CssRule) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a));
   const reduced = RULES.filter(isReduced);
   const wide = RULES.filter((r) => r.at.some((a) => /min-width:\s*900px/.test(a)));
@@ -5375,7 +5369,6 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
   // glyphs in the DOM and cross-fades them with opacity, scale and blur. Every
   // swap here takes ruling 451(c)'s trim of the recipe for a 13-20px glyph:
   // scale .25, a 2px blur, .2s on the sheet's --ease-out.
-  const plain = RULES.filter((r) => r.at.length === 0);
   const isReduced = (r: CssRule) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a));
   const reduced = RULES.filter(isReduced);
   const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
@@ -5939,7 +5932,6 @@ describe("app.css ruling 459: the dock's deferred half", () => {
  * table and fenced block are one card each.
  */
 describe("app.css ruling 500: the task page's agent components", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 
   it("frames the task composer as the controller's: the card radius and the 4px ring", () => {
@@ -5969,7 +5961,6 @@ describe("app.css ruling 500: the task page's agent components", () => {
 });
 
 describe("app.css ruling 501: the Details panel's properties", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
   const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
   const decl = (rules: CssRule[], selector: string, prop: string) => declsFor(rules, selector).get(prop);
 
@@ -6012,7 +6003,6 @@ describe("app.css ruling 501: the Details panel's properties", () => {
 });
 
 describe("app.css ruling 510: a task's attachment list folds like a long comment", () => {
-  const plain = RULES.filter((r) => r.at.length === 0);
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 
   it("clips and fades any fold's box, and fades it where the keyboard check says plain sight ends", () => {

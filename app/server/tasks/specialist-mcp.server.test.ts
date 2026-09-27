@@ -188,6 +188,8 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     // because the rendered text would no longer be the resolver's own words.
     expect(section).toContain(`- ghost-server: ${grant!.reason}`);
     expect(section).toContain("Unavailable MCP servers");
+    // The section's reason to exist: the agent may not use the missing tools.
+    expect(section).toContain("Do not claim or attempt tools from it; report the gap");
     // And it must not tell the agent to infer a cause the server never gave.
     expect(section).toContain("do not infer one");
     expect(section).toContain(

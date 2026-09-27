@@ -519,6 +519,13 @@ describe("ruling 503(e): the board's epic filter", () => {
     );
   });
 
+  it("picking an epic in the select filters the board to it", () => {
+    const { container } = renderBoard(three(), { epics: EPICS });
+    const select = container.querySelector<HTMLSelectElement>(".board-epic-filter select")!;
+    fireEvent.change(select, { target: { value: "epic-1" } });
+    expect(subtitle(container)).toBe("1 of 3 tasks · 0 waiting on a human in this project");
+  });
+
   it("`none` shows the tasks in no epic, and Clear resets it", () => {
     const { container, getByTitle } = renderBoard(three(), { search: "epic=none", epics: EPICS });
     expect(subtitle(container)).toBe("1 of 3 tasks · 0 waiting on a human in this project");

@@ -260,6 +260,11 @@ describe("the matrix is a policy decision, pinned by hand", () => {
       RBAC_DEFINITIONS.map((d) => d.id).sort(),
     );
   });
+
+  it("lists the actions broadest first, the order the Policy page shows them", () => {
+    const floors = RBAC_DEFINITIONS.map((d) => ROLE_RANK[POLICY_FLOOR[d.id]]);
+    expect(floors).toEqual([...floors].sort((a, b) => a - b));
+  });
 });
 
 /**

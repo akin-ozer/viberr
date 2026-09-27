@@ -234,11 +234,6 @@ describe("resolveOperatorAuthority", () => {
     expect(a.autonomyClampedFrom).toBeNull();
     expect(a.policy.get("dispatch-agents")).toBe("direct");
     expect(a.policy.get("stage-transitions")).toBe("recommend");
-    // No override at all (every schedule, boot and plain drive) = run at the
-    // configured level; not a clamp.
-    const omitted = resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug);
-    expect(omitted.autonomy).toBe("full");
-    expect(omitted.autonomyClampedFrom).toBeNull();
   });
 });
 
@@ -257,6 +252,11 @@ describe("R19-A — per-run autonomy is clamped to project policy", () => {
     expect(a.configuredAutonomy).toBe("supervised");
     expect(a.autonomy).toBe("supervised");
     expect(a.autonomyClampedFrom).toBe("full");
+    // No override at all (every schedule, boot and plain drive) runs at the
+    // configured level, and is not a clamp.
+    const omitted = resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug);
+    expect(omitted.autonomy).toBe("supervised");
+    expect(omitted.autonomyClampedFrom).toBeNull();
   });
 
   it("the clamp actually withholds the power: recommend is NOT promoted to direct", () => {

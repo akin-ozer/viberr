@@ -77,6 +77,13 @@ describe("signS3Put", () => {
     // x-amz-content-sha256 is the real hash of the body, not UNSIGNED-PAYLOAD.
     expect(signed.headers["x-amz-content-sha256"]).toMatch(/^[0-9a-f]{64}$/);
     expect(signed.headers["x-amz-date"]).toBe("20260823T000000Z");
+    // A real clock is not midnight: its time of day reaches x-amz-date, its
+    // milliseconds do not.
+    const later = signS3Put(CONFIG, "exports/log.csv", body, {
+      contentType: "text/csv; charset=utf-8",
+      isoNow: "2026-08-23T11:22:33.444Z",
+    });
+    expect(later.headers["x-amz-date"]).toBe("20260823T112233Z");
 
     // Signing the same inputs again is byte-identical (no clock/nonce inside).
     const again = signS3Put(CONFIG, "exports/log.csv", body, {

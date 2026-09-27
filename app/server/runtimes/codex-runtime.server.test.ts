@@ -1581,6 +1581,8 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
     expect(options?.codexPathOverride).toBe(launcher);
     expect(options?.env?.VIBERR_LAUNCH_EXEC).toBe(vendor.binary);
     expect(path.isAbsolute(options?.env?.VIBERR_LAUNCH_EXEC ?? "")).toBe(true);
+    // The SDK's own layout (its resolveNativePackage): <package>/vendor/<triple>/bin/codex.
+    expect(vendor.binary).toMatch(/\/vendor\/[a-z0-9_-]+\/bin\/codex$/);
     expect(options?.env?.VIBERR_LAUNCH_UID).toBe("20001");
     expect(options?.env?.VIBERR_LAUNCH_HOME).toBe(shared);
     // The run's own env still reaches the CLI through the launcher.

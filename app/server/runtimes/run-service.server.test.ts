@@ -2695,7 +2695,7 @@ describe("compaction at completion (ruling 376)", () => {
     });
     await settle();
     await settle();
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    await settle();
     expect(compactedRunSpecs().length).toBe(before + 1);
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("finished");
@@ -2765,7 +2765,7 @@ describe("compaction at completion (ruling 376)", () => {
     });
     await settle();
     await settle();
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    await settle();
     const run = getRun(store.db, runId)!;
     expect(run.compactions).toBe(1);
     expect(run.last_prompt_tokens).toBe(9_083);

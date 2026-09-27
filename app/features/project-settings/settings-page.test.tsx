@@ -1298,6 +1298,9 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(dangerHeading(container)).toBeNull();
     expect(container.querySelector(".danger-panel")).toBeNull();
     expect(container.textContent).not.toContain("Delete project");
+    // Nor the credential row: grant-github-scope starts at maintainer, so a
+    // gate written as "not a viewer" shows here.
+    expect(container.querySelector(".cred-card")).toBeNull();
   });
 
   it("an admin still gets it, with both controls live", () => {

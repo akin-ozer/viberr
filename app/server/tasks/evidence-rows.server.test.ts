@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { pollUntil } from "../../../test-support/polling";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -267,6 +268,10 @@ describe("the agent's channel: attach-evidence-references is a REAL grant", () =
       ),
     ).toBe(true);
     expect(resolveAgentCollab(reviewer.frontmatter.capabilities).evidence).toBe(true);
+    // A `human` grant withholds the channel; only an explicit `direct` arms it.
+    expect(
+      resolveAgentCollab([{ capabilityId: "attach-evidence-references", mode: "human" }]).evidence,
+    ).toBe(false);
   });
 });
 
@@ -357,13 +362,12 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
       actor: { userId: store.users.arda.id, label: store.users.arda.email },
       threadId: "th-ev",
     });
-    for (let i = 0; i < 200; i++) {
-      const row = store.db
-        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
-        .get(started.runId);
-      if (row?.state === "finished") break;
-      await new Promise((r) => setTimeout(r, 25));
-    }
+    await pollUntil(
+      () =>
+        store.db.prepare(`SELECT state FROM agent_runs WHERE id = ?`).get(started.runId)?.state ===
+        "finished",
+      5_000,
+    );
     return started.runId;
   }
 

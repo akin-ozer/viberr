@@ -309,6 +309,7 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
     const reason = refusal();
     expect(reason).toContain("has no approving verdict yet");
     expect(reason).toContain(OLDER.slice(0, 7));
+    expect(reason).toContain("not the delivered revision");
   });
 
   it("STAYS BLOCKED for an unmappable approver, and says why on the surface", () => {
@@ -332,6 +333,7 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
     );
     expect(affordance.canAccept).toBe(false);
     expect(affordance.verdictSatisfiedBy).toBeNull();
+    expect(affordance.blockedReason).toContain("@octocat");
     expect(affordance.blockedReason).toContain(
       "no Viberr account carries that GitHub handle",
     );
@@ -354,6 +356,7 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
         status: "not_a_member",
       }),
     );
+    expect(refusal()).toContain(`${store.users.deniz.name} (@deniz)`);
     expect(refusal()).toContain("not a member of this project");
   });
 

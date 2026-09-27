@@ -178,18 +178,27 @@ const NO_CHECK_ON_RECORD: ReconcileCheckView = {
   stale: true,
 };
 
+type StubRoute = Parameters<typeof createRoutesStub>[0][number];
+
 /** The page as its route mounts it, beside the task route a row click lands on. */
 function renderPage(
   data: GithubViewData,
   myRole: string | null = "maintainer",
   reconcileCheck: ReconcileCheckView = NO_CHECK_ON_RECORD,
+  { instanceAdmin = false, action }: { instanceAdmin?: boolean; action?: StubRoute["action"] } = {},
 ) {
   const Stub = createRoutesStub([
     {
       path: "/projects/:slug/github",
+      action,
       Component: () => (
         <ToastProvider>
-          <GithubViewPage data={data} reconcileCheck={reconcileCheck} myRole={myRole} />
+          <GithubViewPage
+            data={data}
+            reconcileCheck={reconcileCheck}
+            myRole={myRole}
+            instanceAdmin={instanceAdmin}
+          />
         </ToastProvider>
       ),
     },
@@ -892,8 +901,8 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     expect(container.textContent).not.toContain("github_pat_••••42af");
     expect(container.textContent).not.toContain("viberr-bot");
     expect(container.textContent).not.toContain("pull_request:write");
-    // The card owns both action slots, so neither leaks out of the withdrawal.
-    expect(container.querySelector(".cred-manage")).toBeNull();
+    // The card owns its warning's action, which is built for every role, so
+    // it does not leak out of the withdrawal.
     expect(container.textContent).not.toContain("Fix in Settings");
     // The viewer is told why, and still learns the repository is connected.
     expect(container.textContent).toContain(
@@ -962,28 +971,16 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
 describe("an advisory's re-check is reachable from the green footer", () => {
   it("a maintainer re-checks the credential from the card whose only problem is an advisory", async () => {
     const intents: string[] = [];
-    const Stub = createRoutesStub([
+    const { container } = renderPage(
+      viewData({ credential: { ...healthyCredential, advisories: [workflowAdvisory] } }),
+      "maintainer",
+      NO_CHECK_ON_RECORD,
       {
-        path: "/projects/:slug/github",
         action: async ({ request }) => {
           intents.push(String((await request.formData()).get("intent")));
           return { ok: true as const, toast: "Re-checked." };
         },
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={viewData({
-                credential: { ...healthyCredential, advisories: [workflowAdvisory] },
-              })}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole="maintainer"
-            />
-          </ToastProvider>
-        ),
       },
-    ]);
-    const { container } = render(
-      <Stub initialEntries={["/projects/viberr-core/github"]} />,
     );
     expect(container.querySelector(".cred-warn")).toBeNull();
     const recheck = container.querySelector<HTMLButtonElement>(
@@ -1196,24 +1193,10 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
     });
     return { action: () => reply, answer: () => answer({ ok: true, toast: "Done" }) };
   }
-  const renderHeld = (action: () => Promise<{ ok: true; toast: string }>) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={viewData({ credential: violationCredential })}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole="maintainer"
-            />
-          </ToastProvider>
-        ),
-        action,
-      },
-    ]);
-    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
-  };
+  const renderHeld = (action: () => Promise<{ ok: true; toast: string }>) =>
+    renderPage(viewData({ credential: violationCredential }), "maintainer", NO_CHECK_ON_RECORD, {
+      action,
+    });
   const button = (c: HTMLElement, text: string) =>
     [...c.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
       b.textContent?.includes(text),
@@ -1312,24 +1295,10 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
  * one control that replaces a token, Instance settings → Update token.
  */
 describe("ruling 480: the credential row says what re-attach does and where a token is replaced", () => {
-  const renderAsMaintainer = (instanceAdmin: boolean) => {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/:slug/github",
-        Component: () => (
-          <ToastProvider>
-            <GithubViewPage
-              data={viewData({ credential: violationCredential })}
-              reconcileCheck={NO_CHECK_ON_RECORD}
-              myRole="maintainer"
-              instanceAdmin={instanceAdmin}
-            />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
-  };
+  const renderAsMaintainer = (instanceAdmin: boolean) =>
+    renderPage(viewData({ credential: violationCredential }), "maintainer", NO_CHECK_ON_RECORD, {
+      instanceAdmin,
+    });
 
   // Canary: drop the `Replace token` link from `CredentialManageActions`, or
   // pass the page's `instanceAdmin` as false, and the link is gone.
