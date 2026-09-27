@@ -8,6 +8,7 @@ import {
 } from "react-router";
 import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
+import type { SendMode } from "~/server/controller/controller-run.server";
 import type { loader as projectLoader } from "~/routes/project";
 import type { DockStatus } from "~/routes/resources.controller-unseen";
 import {
@@ -566,13 +567,15 @@ function DockShell({ context }: { context: DockContext }) {
    * the click — reading `text` there would post the EMPTY box, which is exactly
    * the failure `pending.current` exists to make impossible for typed messages.
    */
-  const submit = (override?: string) => {
+  const submit = (override?: string, mode: SendMode = "steer") => {
     const value = (override ?? text).trim();
     if (!value || busy || disabled || !current) return;
     const body = new FormData();
     body.set("_csrf", csrf);
     body.set("intent", "send");
     body.set("text", value);
+    // Ruling 527: steer a working turn, or queue behind it.
+    body.set("mode", mode);
     body.set("surface", context.surface);
     // U39-24: the controller quotes times in the zone this page prints them in.
     body.set("timeZone", viewerTimeZone());
@@ -715,6 +718,7 @@ function DockShell({ context }: { context: DockContext }) {
               text={text}
               onText={setText}
               onSubmit={submit}
+              csrf={csrf}
               onPick={pick}
               onLeave={leaveDock}
               composerRef={composerRef}

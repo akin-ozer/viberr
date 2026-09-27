@@ -119,6 +119,9 @@ export interface ControllerMessage {
   /** Ruling 465: on a controller row, the user message it answers; null on
    *  user rows and on a note that answers no message. */
   replyTo: string | null;
+  /** Ruling 527: on a user message a running turn read at one of its steps,
+   *  the user message that turn answered; null on every other row. */
+  steeredInto: string | null;
   createdAt: string;
 }
 
@@ -163,6 +166,8 @@ const messageRowSchema = z
     // Ruling 465: optional at the boundary so a root the healer has not
     // reached yet still reads (as "not linked").
     reply_to: z.string().nullable().optional(),
+    // Ruling 527: optional for the same reason.
+    steered_into: z.string().nullable().optional(),
     created_at: z.string(),
   })
   .transform(
@@ -176,6 +181,7 @@ const messageRowSchema = z
       runId: r.run_id,
       surface: r.surface,
       replyTo: r.reply_to ?? null,
+      steeredInto: r.steered_into ?? null,
       createdAt: r.created_at,
     }),
   );
@@ -417,7 +423,8 @@ export function listMessages(
  * message up to and including it, every reply to one of those (a reply to an
  * earlier message can land after `answered` was queued), and every unlinked
  * note written before it. A later message, and a refusal a later message got,
- * are not in it.
+ * are not in it. Ruling 527: a message that steered one of those turns is in
+ * it too, whatever its own `seq`: it was part of that turn.
  */
 export function messagesUpTo(
   db: DatabaseSync,
@@ -435,10 +442,22 @@ export function messagesUpTo(
             OR (m.author = 'controller' AND m.reply_to IN (
                   SELECT u.id FROM controller_messages u
                    WHERE u.conversation_id = ? AND u.author = 'user' AND u.seq <= ?))
+            OR (m.author = 'user' AND m.steered_into IN (
+                  SELECT u.id FROM controller_messages u
+                   WHERE u.conversation_id = ? AND u.author = 'user' AND u.seq <= ?))
           )
         ORDER BY m.seq DESC LIMIT ?`,
     )
-    .all(conversationId, answered.seq, answered.seq, conversationId, answered.seq, limit);
+    .all(
+      conversationId,
+      answered.seq,
+      answered.seq,
+      conversationId,
+      answered.seq,
+      conversationId,
+      answered.seq,
+      limit,
+    );
   return rows.map((row) => messageRowSchema.parse(row)).reverse();
 }
 
@@ -530,6 +549,51 @@ export function appendMessage(
   return messageRowSchema.parse(
     db.prepare(`SELECT * FROM controller_messages WHERE id = ?`).get(id),
   );
+}
+
+/**
+ * Ruling 527: these user messages were read by the running turn that answers
+ * `into`, at one of its steps. They get no reply of their own; the turn's
+ * reply answers them with it, and the transcript shows them in that turn.
+ */
+export function markSteered(
+  db: DatabaseSync,
+  conversation: ControllerConversation,
+  messageIds: readonly string[],
+  into: string,
+): void {
+  const mark = db.prepare(
+    `UPDATE controller_messages SET steered_into = ?
+      WHERE id = ? AND conversation_id = ? AND author = 'user'`,
+  );
+  for (const id of messageIds) mark.run(into, id, conversation.id);
+  publishConversationUpdated(conversation.id, conversation.userId);
+}
+
+/**
+ * Ruling 527: take back a user message nothing has read yet. The engine calls
+ * this only for a message its lease still holds (queued behind the turn, or
+ * waiting for the turn's next step), which no reply names and no turn has
+ * read. The row goes: nothing answered or acted on it, and the person gets its
+ * text back in their composer.
+ */
+export function retractMessage(
+  db: DatabaseSync,
+  conversation: ControllerConversation,
+  messageId: string,
+): void {
+  db.prepare(
+    `DELETE FROM controller_messages WHERE id = ? AND conversation_id = ? AND author = 'user'`,
+  ).run(messageId, conversation.id);
+  // The conversation's clock names its newest message, and that was this one.
+  db.prepare(
+    `UPDATE controller_conversations
+        SET updated_at = ?,
+            last_message_at = (SELECT MAX(created_at) FROM controller_messages
+                                WHERE conversation_id = ?)
+      WHERE id = ?`,
+  ).run(new Date().toISOString(), conversation.id, conversation.id);
+  publishConversationUpdated(conversation.id, conversation.userId);
 }
 
 /**

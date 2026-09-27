@@ -156,6 +156,50 @@ describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s
 });
 
 /**
+ * Ruling 527 on both pages: a send while a turn works steers it unless its
+ * form says `mode=queue`, and the owner's Send now and Retract act on a
+ * message still waiting. Canary: drop `mode: sendModeOf(formData)` from the
+ * send, or the `waitingMessageAction` branch, and the replies below differ.
+ */
+describe.each<Surface>(["instance", "project"])("ruling 527: steering and the queue on the %s surface", (surface) => {
+  it("queues or steers as the form says; the owner may Send now and Retract, a stranger may not", async () => {
+    const { conversationTurnState } = await import("~/server/controller/controller-run.server");
+    const { conversationId, runId } = await workingTurn(surface);
+    const send = (text: string, extra: Record<string, string> = {}) =>
+      post(surface, selin, { intent: "send", text, conversationId, ...extra });
+    await send("Queued on purpose.", { mode: "queue" });
+    await send("Steering it.");
+    const turn = conversationTurnState(app.db, conversationId);
+    expect(turn.queued).toHaveLength(1);
+    expect(turn.steering).toHaveLength(1);
+    const queued = turn.queued[0]!.messageId;
+    const steering = turn.steering[0]!;
+
+    const now = okResult.parse(await post(surface, selin, { intent: "send-now", conversationId, messageId: queued }));
+    expect(now.toast).toBe("It goes into the running turn at its next step.");
+    expect(conversationTurnState(app.db, conversationId).steering).toEqual([steering, queued]);
+    const back = z
+      .object({ ok: z.literal(true), retracted: z.string(), toast: z.string() })
+      .parse(await post(surface, selin, { intent: "retract", conversationId, messageId: steering }));
+    expect(back.retracted).toBe("Steering it.");
+    // Only the owner: another member gets the not-found shape.
+    const stranger = refusal.parse(await post(surface, murat, { intent: "retract", conversationId, messageId: queued }));
+    expect(stranger.init?.status).toBe(404);
+    // One not waiting any more (this one is gone) is a 409 sentence, not a throw.
+    const gone = refusal.parse(await post(surface, selin, { intent: "retract", conversationId, messageId: steering }));
+    expect(gone.init?.status).toBe(409);
+    expect(gone.data.error).toBe("That message has already been read, so it can't be taken back.");
+
+    // Clean up: stop the turn; the message still waiting runs its own and settles.
+    await post(surface, selin, { intent: "interrupt", conversationId, runId });
+    await settled(runId);
+    for (let i = 0; i < 400 && conversationTurnState(app.db, conversationId).answering; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  });
+});
+
+/**
  * Ruling 498: the Knowledge base panel's Undo posts `kb-correction-undo`, and
  * the route undoes the correction itself, no controller turn, for an org admin
  * only: the undo edits an org knowledge base. Canary: drop the org-admin check

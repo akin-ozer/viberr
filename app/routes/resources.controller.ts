@@ -16,6 +16,10 @@ import {
 import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
 import { NEW_CONVERSATION_PARAM } from "~/features/controller/conversation-param";
 import {
+  sendModeOf,
+  waitingMessageAction,
+} from "~/features/controller/waiting-actions.server";
+import {
   conversationMatchesScope,
   dockTaskExists,
   getControllerDock,
@@ -39,6 +43,8 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  *                               Claude connected for the asker, ruling 127)
  *                               answers 409 { ok:false, error } and creates no
  *                               thread for a new conversation (U35-4)
+ *   POST intent=send-now|retract → ruling 527's moves on a message still
+ *                               waiting in the person's own conversation
  *
  * The scope is authorized HERE, in the route, through the same chokepoint the
  * page routes use (`assertProjectAction` "any-member", so the org-admin
@@ -148,6 +154,19 @@ export async function action({ request }: Route.ActionArgs) {
   const csrfFailure = await csrfError(request, auth.sessionId, formData);
   if (csrfFailure) return csrfFailure;
   const intent = String(formData.get("intent") ?? "");
+  // Ruling 527: the conversation's owner is the whole authority for these
+  // (the engine checks it); they create nothing in the scope the dock is on.
+  try {
+    const waiting = waitingMessageAction(db, intent, formData, {
+      id: auth.user.id,
+      email: auth.user.email,
+      name: auth.user.name,
+      orgRole: auth.user.role,
+    });
+    if (waiting) return waiting;
+  } catch (cause) {
+    return appErrorResponse(cause);
+  }
   if (intent !== "send") {
     return data({ ok: false as const, error: "Unknown action." }, { status: 400 });
   }
@@ -211,6 +230,8 @@ export async function action({ request }: Route.ActionArgs) {
       },
       surface,
       timeZone,
+      // Ruling 527: steer the working turn (the default) or queue behind it.
+      mode: sendModeOf(formData),
     });
     if (result.state === "refused") {
       // The refusal note is in the transcript (a reload still shows it); the

@@ -11,6 +11,7 @@ import {
 import { splitClaudeVariant } from "~/shared/model-ids";
 import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { wholeThousands } from "~/shared/text/thousands";
+import { countLabel } from "~/shared/text/plural";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -23,6 +24,7 @@ import {
   type RunCallbacks,
   type RunHandle,
   type RunSpec,
+  type RunSteering,
   type RuntimeAdapter,
 } from "./adapter.server";
 import { COMPLETION_COMPACT_INSTRUCTIONS } from "./context-policy.server";
@@ -184,11 +186,16 @@ export interface ClaudeQueryOptions {
    *  is wrapped, with a reason the model reads. It only ever denies.
    *  Ruling 371/373: the `SessionStart` hook on the `compact` source that hands
    *  the run its anchor back after a compaction, and the `PreCompact` hook that
-   *  names the wait on the strip. */
+   *  names the wait on the strip.
+   *  Ruling 527: the `PostToolBatch` hook that hands a controller turn the
+   *  steering messages waiting for it, and the `Stop` hook that closes its
+   *  steering once the model has written its final answer. */
   hooks?: {
     PreToolUse?: { matcher: string; hooks: ClaudePreToolUseHook[] }[];
     SessionStart?: { matcher: string; hooks: ClaudeSessionStartHook[] }[];
     PreCompact?: { hooks: ClaudePreCompactHook[] }[];
+    PostToolBatch?: { hooks: ClaudePostToolBatchHook[] }[];
+    Stop?: { hooks: ClaudeStopHook[] }[];
   };
 }
 
@@ -206,6 +213,26 @@ export type ClaudeSessionStartHook = (
  *  Viberr's hook only observes. */
 export type ClaudePreCompactHook = (
   input: { hook_event_name: string; trigger?: string },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<Record<string, never>>;
+
+/** Ruling 527: the SDK's `PostToolBatch` callback, fired once when every tool
+ *  call of a batch has answered and before the next model request, narrowed to
+ *  the one answer Viberr gives: text the model reads beside those results. */
+export type ClaudePostToolBatchHook = (
+  input: { hook_event_name: string },
+  toolUseId: string | undefined,
+  options: { signal: AbortSignal },
+) => Promise<{
+  hookSpecificOutput?: { hookEventName: "PostToolBatch"; additionalContext: string };
+}>;
+
+/** Ruling 527: the SDK's `Stop` callback, fired when the model ends its turn;
+ *  Viberr's hook only observes (an `additionalContext` here would keep the
+ *  turn going past its final answer). */
+export type ClaudeStopHook = (
+  input: { hook_event_name: string },
   toolUseId: string | undefined,
   options: { signal: AbortSignal },
 ) => Promise<Record<string, never>>;
@@ -985,6 +1012,10 @@ interface AssembleContext {
   spawn: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
   phase: (name: string, step: string | null) => void;
   emitPolicyDenied: (command: string, reason: string, toolUseId: string | undefined) => void;
+  /** Ruling 527: the run's steering channel and the console's record of each
+   *  delivery. Null on the completion compaction, whose single request is
+   *  past the turn's final answer. */
+  steering: { channel: RunSteering; onDelivered: (count: number) => void } | null;
   abortController: AbortController;
 }
 
@@ -1248,6 +1279,35 @@ function assembleClaudeOptions(
     return {};
   };
   options.hooks = { ...options.hooks, PreCompact: [{ hooks: [preCompactHook] }] };
+  // Ruling 527: a message the person sends while a controller turn works
+  // reaches the model at the turn's next step boundary, beside the results of
+  // the tool calls it was waiting on. The SDK's own mid-turn input (a `next`
+  // priority user message) is not used: measured on SDK 0.3.280, one that
+  // lands while the model writes its final answer starts a second model turn
+  // inside the same run, after the result, and neither closing the input nor
+  // `cancelAsyncMessage` at the result stopped it. Here the host keeps the
+  // messages until a boundary asks, and `Stop` says when no boundary will
+  // come again, so every message is read by this turn or starts the next one.
+  const steering = ctx.steering;
+  if (steering) {
+    const deliverHook: ClaudePostToolBatchHook = async () => {
+      const delivery = steering.channel.take();
+      if (!delivery) return {};
+      steering.onDelivered(delivery.count);
+      return {
+        hookSpecificOutput: { hookEventName: "PostToolBatch", additionalContext: delivery.text },
+      };
+    };
+    const closeHook: ClaudeStopHook = async () => {
+      steering.channel.close();
+      return {};
+    };
+    options.hooks = {
+      ...options.hooks,
+      PostToolBatch: [{ hooks: [deliverHook] }],
+      Stop: [{ hooks: [closeHook] }],
+    };
+  }
   // The subprocess kill switch: the interrupt/idle watchdogs abort this
   // when the cooperative `interrupt()` goes unanswered (see `armForcedStop`).
   options.abortController = ctx.abortController;
@@ -1278,6 +1338,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           spawnClaudeCli(request, deps.spawnCli, deps.signalProcess, spec.agent ?? null).process,
         phase,
         emitPolicyDenied: () => {},
+        steering: null,
         abortController: new AbortController(),
       });
       options.resume = sessionId;
@@ -1529,6 +1590,25 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         cb.onLine({ raw: JSON.stringify(envelope), display, facts, occurredAt });
       };
 
+      /** Ruling 527: the console's record of a steering delivery, at the step
+       *  it happened. The SDK echoes nothing for a hook's context, so without
+       *  this line the log would show the model reacting to words it never
+       *  shows arriving. */
+      const emitSteered = (count: number) => {
+        const occurredAt = new Date().toISOString();
+        cb.onLine({
+          raw: "",
+          display: {
+            t: occurredAt.slice(11, 19),
+            ev: "meta",
+            tag: "run·steered",
+            text: `${countLabel(count, "new message")} from the person went into this turn here`,
+          },
+          facts: {},
+          occurredAt,
+        });
+      };
+
       /** Persist a redaction-safe classified reason line, then settle error. */
       const settleError = (cause: unknown) => {
         if (settled) return;
@@ -1661,6 +1741,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           },
           phase,
           emitPolicyDenied,
+          steering: spec.steering ? { channel: spec.steering, onDelivered: emitSteered } : null,
           abortController,
         });
 

@@ -3,6 +3,7 @@ import { createRoutesStub, Link, Outlet, useRevalidator } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerDock } from "~/features/controller/controller-dock";
 import type { ControllerDockView } from "~/features/controller/controller-dock-query.server";
+import type { WaitingActionResult } from "~/features/controller/waiting-actions";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
@@ -38,7 +39,9 @@ export interface DockStubOptions {
   unseen?: () => UnseenReplyView[];
   /** Ruling 457: the viewer's turns working right now (none by default). */
   working?: () => LiveTurnView[];
-  action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
+  action?: (
+    form: FormData,
+  ) => { ok: true; conversationId: string } | { ok: false; error: string } | WaitingActionResult;
   /** Ruling 457: asked on every request the dock makes; false while the
    *  server can't be reached (a restart, a dead network), when the request
    *  gets no answer. Reachable when absent. */

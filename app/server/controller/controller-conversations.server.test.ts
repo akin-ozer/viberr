@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pollUntil, settle } from "../../../test-support/polling";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RuntimeAdapter } from "~/server/runtimes/adapter.server";
+import type { ControllerTurnInput } from "./controller-run.server";
+import type { FakeRun } from "../../../test-support/fake-runtime";
 import {
   setupAppTest,
   type AppTestContext,
@@ -315,16 +317,25 @@ describe("conversation access", () => {
     // SAFETY: the module creates this Map on first use and only ever stores
     // lease entries in it; the test seeds one entry and deletes it after.
     const host = globalThis as {
-      [leaseKey]?: Map<string, { runId: string | null; queue: unknown[] }>;
+      [leaseKey]?: Map<
+        string,
+        { runId: string | null; queue: unknown[]; steering: unknown[]; steerable: boolean }
+      >;
     };
     const map = host[leaseKey] ?? new Map();
     host[leaseKey] = map;
+    // Ruling 527: steering counts against the same bound.
     map.set(conversation.id, {
       runId: "run_busy",
-      queue: Array.from({ length: 8 }, (_, i) => ({
+      queue: Array.from({ length: 6 }, (_, i) => ({
         messageId: `m_${i}`,
         text: "queued",
       })),
+      steering: Array.from({ length: 2 }, (_, i) => ({
+        messageId: `s_${i}`,
+        text: "steering",
+      })),
+      steerable: true,
     });
 
     try {
@@ -539,6 +550,7 @@ describe("stopping a turn", () => {
       step: null,
       answering: null,
       queued: [],
+      steering: [],
     });
   });
 
@@ -687,10 +699,10 @@ describe("a failed queued start accounts for the messages behind it", () => {
         projectSlug: null,
       });
       const user = { id: ownerId, email: "selin@viberr.dev", name: "Selin Aksoy", orgRole: "member" as const };
-      const send = (text: string) =>
-        runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
+      const send = (text: string, mode?: "queue") =>
+        runControllerTurn(app.db, { conversationId: conversation.id, text, user, mode, dataRoot: app.dataRoot });
       const queued = async (text: string) => {
-        const turn = await send(text);
+        const turn = await send(text, "queue");
         if (turn.state !== "queued") throw new Error(`${text} was ${turn.state}, not queued`);
         return turn.messageId;
       };
@@ -820,6 +832,40 @@ describe("boot recovery", () => {
     const before = messages.length;
     recoverControllerConversations(app.db);
     expect(listMessages(app.db, conversation.id)).toHaveLength(before);
+  });
+
+  it("ruling 527: a message that steered a turn is part of it, so only the turn's own message is noted", async () => {
+    const { createConversation, appendMessage, listMessages, markSteered } = await import(
+      "./controller-conversations.server"
+    );
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    const { recoverControllerConversations } = await import("./controller-run.server");
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    const asked = appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: ownerId,
+      text: "Tidy the agents.",
+    });
+    const steered = appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: ownerId,
+      text: "I deleted the calculator one already.",
+    });
+    markSteered(app.db, conversation, [steered.id], asked.id);
+    // The server stopped mid-turn; boot's orphan finalizer left its run so.
+    upsertRun(app.db, controllerRun("run_ctrl_steered", conversation.id, "error"));
+
+    recoverControllerConversations(app.db);
+    const notes = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+    // CANARY: drop `steered_into IS NULL` from the unanswered arm and the
+    // steering message gets a restart note of its own.
+    expect(notes.map((m) => [m.replyTo, m.runId])).toEqual([[asked.id, "run_ctrl_steered"]]);
   });
 });
 
@@ -1254,7 +1300,13 @@ describe("ruling 465: the queue is visible and every reply names its message", (
       projectSlug: null,
     });
     const send = (text: string) =>
-      runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
+      runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text,
+        user,
+        mode: "queue",
+        dataRoot: app.dataRoot,
+      });
 
     queueFakeRun({
       lines: [{ t: "1", ev: "text", tag: "assistant", text: "reading part one" }],
@@ -1350,25 +1402,290 @@ describe("ruling 465: the queue is visible and every reply names its message", (
         projectSlug: null,
       });
       const user = { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" as const };
-      const send = (text: string) =>
-        runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
-      // Both sends begin before the first start reaches the adapter.
-      const [first, second] = await Promise.allSettled([send("Part 1."), send("Part 2.")]);
+      const send = (text: string, mode?: "queue") =>
+        runControllerTurn(app.db, { conversationId: conversation.id, text, user, mode, dataRoot: app.dataRoot });
+      // All three sends begin before the first start reaches the adapter.
+      // Ruling 527: part 3 is sent to steer the turn that is starting.
+      const [first, second, third] = await Promise.allSettled([
+        send("Part 1."),
+        send("Part 2.", "queue"),
+        send("Part 3."),
+      ]);
       expect(first.status).toBe("rejected");
       expect(second.status === "fulfilled" ? second.value.state : second.status).toBe("queued");
+      expect(third.status === "fulfilled" ? third.value.state : third.status).toBe("steering");
 
       const messages = listMessages(app.db, conversation.id);
-      const [one, two] = messages.filter((m) => m.author === "user");
+      const [one, two, three] = messages.filter((m) => m.author === "user");
       const notes = messages.filter((m) => m.author === "controller");
       // CANARY: drop the queue drain from `runControllerTurn`'s catch and part
       // 2 has no note (and the next boot calls it a restart); drop `replyTo`
-      // from the start-failure note and part 1's note names no message.
+      // from the start-failure note and part 1's note names no message; drop
+      // the steering half of `drainWaiting` and part 3 has none.
+      const dropped = "I dropped this message: the turn before it could not start. Say it again to retry.";
       expect(notes.map((m) => [m.text, m.replyTo])).toEqual([
         ["I could not start this turn: The controller turn could not start.", one!.id],
-        ["I dropped this message: the turn before it could not start. Say it again to retry.", two!.id],
+        [dropped, three!.id],
+        [dropped, two!.id],
       ]);
     } finally {
       installFakeRuntime();
     }
+  });
+});
+
+/**
+ * Ruling 527: a message sent while a turn works steers that turn unless its
+ * sender queued it. The run asks for what is waiting at each step boundary
+ * (`RunSpec.steering`, which the Claude adapter's hooks call; the adapter's
+ * own suite owns those); a message that misses the turn starts the next one,
+ * ahead of the messages queued on purpose.
+ */
+describe("ruling 527: a message sent while a turn works steers it", () => {
+  const user = { id: "", email: "selin@viberr.dev", name: "Selin", orgRole: "member" as const };
+  const answer = (text: string, gate?: Promise<void>): FakeRun => {
+    const run: FakeRun = {
+      lines: [
+        { t: "1", ev: "text", tag: "assistant", text },
+        { t: "2", ev: "result", tag: "result", text: "done" },
+      ],
+      sessionId: "sess-527",
+    };
+    if (gate) run.gate = gate;
+    return run;
+  };
+  /** A gate a test opens when it is done with the run behind it. */
+  function gate() {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { opened, open };
+  }
+  async function conversationFor() {
+    const { createConversation } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    const send = async (text: string, mode?: "queue") => {
+      const result = await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text,
+        user: { ...user, id: ownerId },
+        mode,
+        dataRoot: app.dataRoot,
+      });
+      if (result.state === "refused") throw new Error(`refused: ${result.reason}`);
+      return result;
+    };
+    return { conversation, send };
+  }
+
+  it("goes into the running turn at its next step, and that turn's reply answers it", async () => {
+    const { listMessages } = await import("./controller-conversations.server");
+    const { conversationTurnState } = await import("./controller-run.server");
+    const { queueFakeRun, lastRunSpec, startedRunSpecs } = await import("../../../test-support/fake-runtime");
+    const { conversation, send } = await conversationFor();
+    const running = gate();
+    queueFakeRun(answer("Both handled: the agent and its KB are gone.", running.opened));
+    const first = await send("Clean up the calculator agent.");
+    if (first.state !== "started") throw new Error(`turn ${first.state}`);
+    const queued = await send("QUEUED: then list what is left.", "queue");
+    const steering = await send("STEER: I deleted its KB already.");
+    expect([queued.state, steering.state]).toEqual(["queued", "steering"]);
+    expect(conversationTurnState(app.db, conversation.id)).toMatchObject({
+      answering: first.messageId,
+      steering: [steering.messageId],
+      queued: [{ messageId: queued.messageId, ahead: 1 }],
+    });
+
+    // The run's next step takes it. CANARY: drop `markSteered` from the
+    // channel's `take` and the message reads back as never answered (and the
+    // next boot notes it as a restart).
+    const channel = lastRunSpec()!.steering!;
+    const delivery = channel.take();
+    expect(delivery).toEqual({
+      count: 1,
+      text:
+        "selin@viberr.dev sent this while you were working on this turn. It is part of this turn: take it " +
+        "into account from here, and answer it in the reply you write for this turn.\n\n" +
+        "STEER: I deleted its KB already.",
+    });
+    expect(channel.take()).toBeNull();
+    const byId = () => new Map(listMessages(app.db, conversation.id).map((m) => [m.id, m]));
+    expect(byId().get(steering.messageId)!.steeredInto).toBe(first.messageId);
+    expect(conversationTurnState(app.db, conversation.id).steering).toEqual([]);
+
+    queueFakeRun(answer("Two agents are left."));
+    const specsBefore = startedRunSpecs().length;
+    running.open();
+    const replies = () => listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+    expect(
+      await pollUntil(
+        () => replies().length >= 2 && conversationTurnState(app.db, conversation.id).answering === null,
+      ),
+    ).toBe(true);
+    // The steering message has no turn or reply of its own. CANARY: leave it
+    // in the lease after `take` and the settle queues it for a third turn.
+    expect(replies().map((m) => [m.text, m.replyTo])).toEqual([
+      ["Both handled: the agent and its KB are gone.", first.messageId],
+      ["Two agents are left.", queued.messageId],
+    ]);
+    expect(startedRunSpecs()).toHaveLength(specsBefore + 1);
+    // The queued message was sent first, but the turn it steered is behind
+    // it, so its turn's digest has it. CANARY: drop the `steered_into` arm of
+    // `messagesUpTo` and that turn reads a reply to a message it never saw.
+    expect(startedRunSpecs()[specsBefore]!.prompt).toContain("Person: STEER: I deleted its KB already.");
+  });
+
+  it("what the turn never read goes next, ahead of the queue: after its answer is written, and after it stops", async () => {
+    const { listMessages } = await import("./controller-conversations.server");
+    const { conversationTurnState, interruptControllerTurn } = await import("./controller-run.server");
+    const { queueFakeRun, lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { conversation, send } = await conversationFor();
+    const turnOf = () => conversationTurnState(app.db, conversation.id);
+    const firstGate = gate();
+    queueFakeRun(answer("First answer.", firstGate.opened));
+    const first = await send("First.");
+    if (first.state !== "started") throw new Error(`turn ${first.state}`);
+    const queued = await send("Queued on purpose.", "queue");
+    const late = await send("Steer, too late.");
+    const firstChannel = lastRunSpec()!.steering!;
+
+    // The model wrote its final answer: the run closes steering. CANARY: drop
+    // the move in the channel's `close` and the message waits on a turn that
+    // will never read it.
+    firstChannel.close();
+    const later = await send("Steer, later still.");
+    // CANARY: make `steer` ignore `steerable` and this reads "steering".
+    expect(later.state).toBe("queued");
+    expect(turnOf()).toMatchObject({
+      steering: [],
+      queued: [
+        { messageId: late.messageId, ahead: 1 },
+        { messageId: later.messageId, ahead: 2 },
+        { messageId: queued.messageId, ahead: 3 },
+      ],
+    });
+    expect(firstChannel.take()).toBeNull();
+
+    // The next turn takes steering again. CANARY: drop `entry.steerable =
+    // true` from `startTurnRun` and this one queues.
+    const lateGate = gate();
+    queueFakeRun(answer("Late answer.", lateGate.opened));
+    firstGate.open();
+    expect(await pollUntil(() => turnOf().answering === late.messageId)).toBe(true);
+    const steersLate = await send("Steers the late turn.");
+    expect(steersLate.state).toBe("steering");
+    const lateChannel = lastRunSpec()!.steering!;
+    expect(lateChannel).not.toBe(firstChannel);
+    expect(lateChannel.take()?.count).toBe(1);
+
+    // A turn stopped before reading a steering message leaves it next: after
+    // the one that missed a turn before it, ahead of the one queued on
+    // purpose. CANARY: drop the settle's move of the unread steering and it
+    // is lost with the lease.
+    const stopped = await send("Steers a turn that stops.");
+    expect(stopped.state).toBe("steering");
+    const lateRun = turnOf().runId;
+    queueFakeRun({ ...answer("After the stop."), keepRunning: true });
+    await interruptControllerTurn(
+      app.db,
+      { conversationId: conversation.id, runId: lateRun!, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    lateGate.open();
+    expect(await pollUntil(() => turnOf().answering === later.messageId)).toBe(true);
+    expect(turnOf()).toMatchObject({
+      steering: [],
+      queued: [
+        { messageId: stopped.messageId, ahead: 1 },
+        { messageId: queued.messageId, ahead: 2 },
+      ],
+    });
+    const byId = new Map(listMessages(app.db, conversation.id).map((m) => [m.id, m]));
+    expect(byId.get(steersLate.messageId)!.steeredInto).toBe(late.messageId);
+    expect(byId.get(stopped.messageId)!.steeredInto).toBeNull();
+
+    // Let the rest drain so the lease is gone when the next test starts.
+    await interruptControllerTurn(
+      app.db,
+      { conversationId: conversation.id, runId: turnOf().runId!, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    expect(await pollUntil(() => turnOf().answering === null)).toBe(true);
+  });
+
+  it("Send now and Retract act on a message still waiting, and only for its owner", async () => {
+    const { listMessages } = await import("./controller-conversations.server");
+    const { conversationTurnState, retractWaitingMessage, sendQueuedMessageNow, interruptControllerTurn } =
+      await import("./controller-run.server");
+    const { queueFakeRun, lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { conversation, send } = await conversationFor();
+    const turnOf = () => conversationTurnState(app.db, conversation.id);
+    const owner = { ...user, id: ownerId };
+    const target = (messageId: string, who: ControllerTurnInput["user"] = owner) => ({
+      conversationId: conversation.id,
+      messageId,
+      user: who,
+    });
+    queueFakeRun({ ...answer("Working on it."), keepRunning: true });
+    const first = await send("First.");
+    if (first.state !== "started") throw new Error(`turn ${first.state}`);
+    const one = await send("Queued one.", "queue");
+    const two = await send("Queued two.", "queue");
+
+    // Send now: out of the queue, into the running turn.
+    expect(sendQueuedMessageNow(app.db, target(two.messageId))).toBe("steering");
+    expect(turnOf()).toMatchObject({
+      steering: [two.messageId],
+      queued: [{ messageId: one.messageId, ahead: 1 }],
+    });
+
+    // Only the owner, even an org admin is refused. CANARY: drop
+    // `requireOwnConversation` from `retractWaitingMessage`.
+    const admin = { id: orgAdminId, email: "arda@viberr.dev", name: "Arda", orgRole: "admin" as const };
+    expect(() => retractWaitingMessage(app.db, target(one.messageId, admin))).toThrow(
+      "Only the conversation's owner can talk in it.",
+    );
+
+    // Retract: the message leaves the transcript and its text comes back.
+    expect(retractWaitingMessage(app.db, target(one.messageId))).toBe("Queued one.");
+    expect(listMessages(app.db, conversation.id).map((m) => m.id)).not.toContain(one.messageId);
+    expect(turnOf().queued).toEqual([]);
+
+    // Once the turn has read a message it stays. CANARY: search `take`n
+    // messages in `retractWaitingMessage` and a read message is deleted.
+    lastRunSpec()!.steering!.take();
+    expect(() => retractWaitingMessage(app.db, target(two.messageId))).toThrow(
+      "That message has already been read, so it can't be taken back.",
+    );
+    expect(() => sendQueuedMessageNow(app.db, target(two.messageId))).toThrow(
+      "That message is not waiting any more",
+    );
+    expect(listMessages(app.db, conversation.id).map((m) => m.id)).toContain(two.messageId);
+
+    // Send now on a turn that has written its answer: it goes next instead.
+    const three = await send("Queued three.", "queue");
+    const four = await send("Queued four.", "queue");
+    lastRunSpec()!.steering!.close();
+    expect(sendQueuedMessageNow(app.db, target(four.messageId))).toBe("queued");
+    expect(turnOf().queued).toEqual([
+      { messageId: four.messageId, ahead: 1 },
+      { messageId: three.messageId, ahead: 2 },
+    ]);
+
+    // Drain: retract what is left and stop the turn.
+    retractWaitingMessage(app.db, target(three.messageId));
+    retractWaitingMessage(app.db, target(four.messageId));
+    await interruptControllerTurn(
+      app.db,
+      { conversationId: conversation.id, runId: turnOf().runId!, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    expect(await pollUntil(() => turnOf().answering === null)).toBe(true);
   });
 });

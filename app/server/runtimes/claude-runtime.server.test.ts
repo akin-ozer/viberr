@@ -6,7 +6,13 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { resetEnvCacheForTests } from "../config/env.server";
-import { RUN_PHASE, type EmittedLine, type RunExit, type RunSpec } from "./adapter.server";
+import {
+  RUN_PHASE,
+  type EmittedLine,
+  type RunExit,
+  type RunSpec,
+  type RunSteering,
+} from "./adapter.server";
 import {
   createClaudeAdapter,
   INTERRUPT_ABORT_GRACE_MS,
@@ -1965,6 +1971,44 @@ describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)"
       signal: new AbortController().signal,
     });
     expect(phases).toContain(RUN_PHASE.compacting);
+  });
+
+  it("ruling 527: a steered run hands the model what waits after each tool batch, logs it, and closes when the model stops", async () => {
+    const text = "selin@viberr.dev sent this while you were working on this turn.\n\nThe KB is gone too.";
+    const waiting = [{ text, count: 1 }];
+    let closes = 0;
+    const steering: RunSteering = {
+      take: () => waiting.shift() ?? null,
+      close: () => {
+        closes += 1;
+      },
+    };
+    const { options, lines } = await sent({ ...SPEC, kind: "controller", steering });
+    const signal = { signal: new AbortController().signal };
+    const deliver = options.hooks?.PostToolBatch?.[0]?.hooks[0];
+    // CANARY: drop the hook's `additionalContext` and the model never reads
+    // the message the host has already marked steered.
+    expect(await deliver!({ hook_event_name: "PostToolBatch" }, undefined, signal)).toEqual({
+      hookSpecificOutput: { hookEventName: "PostToolBatch", additionalContext: text },
+    });
+    // The SDK echoes nothing for a hook's context, so the console says where it went in.
+    expect(lines.at(-1)?.display).toMatchObject({
+      ev: "meta",
+      tag: "run·steered",
+      text: "1 new message from the person went into this turn here",
+    });
+    // Nothing waiting: the boundary adds nothing, and logs nothing.
+    const logged = lines.length;
+    expect(await deliver!({ hook_event_name: "PostToolBatch" }, undefined, signal)).toEqual({});
+    expect(lines).toHaveLength(logged);
+    // CANARY: drop the `Stop` hook and a message sent during the final answer
+    // waits on a turn that will never read it.
+    await options.hooks?.Stop?.[0]?.hooks[0]!({ hook_event_name: "Stop" }, undefined, signal);
+    expect(closes).toBe(1);
+    // A run with no steering carries neither hook.
+    const plain = await sent({ ...SPEC, kind: "controller" });
+    expect(plain.options.hooks?.PostToolBatch).toBeUndefined();
+    expect(plain.options.hooks?.Stop).toBeUndefined();
   });
 
   it("skills, servers, the approval list and the denylist reach the SDK in name order, deduplicated", async () => {

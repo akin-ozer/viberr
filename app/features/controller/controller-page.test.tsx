@@ -44,7 +44,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     conversation: null,
     messages: [],
     taskLinks: {},
-    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] },
     runtime: [],
     canInterruptTurn: false,
     proposals: [],
@@ -163,8 +163,8 @@ describe("the project controller page (ruling 121)", () => {
           lastMessageAt: "2026-09-01T10:00:00.000Z",
         },
         messages: [
-          { id: "m1", conversationId: "cnv_t", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: "/projects/viberr-core/board?filter=waiting", replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
-          { id: "m2", conversationId: "cnv_t", seq: 2, author: "controller", userId: null, text: "In review.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
+          { id: "m1", conversationId: "cnv_t", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: "/projects/viberr-core/board?filter=waiting", replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:00.000Z" },
+          { id: "m2", conversationId: "cnv_t", seq: 2, author: "controller", userId: null, text: "In review.", runId: "run_1", surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:05.000Z" },
         ],
         viewerOwnsActive: true,
       }),
@@ -434,7 +434,7 @@ describe("the open conversation's execution", () => {
     view({
       conversation,
       viewerOwnsActive: true,
-      turn: { working: true, runId: "run_ctl", phase: null, step: null, answering: null, queued: [] },
+      turn: { working: true, runId: "run_ctl", phase: null, step: null, answering: null, queued: [], steering: [] },
       runtime: [run],
       canInterruptTurn: true,
       ...over,
@@ -456,6 +456,7 @@ describe("the open conversation's execution", () => {
           step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
           answering: null,
           queued: [],
+          steering: [],
         },
       }),
       "?c=cnv_b",
@@ -521,7 +522,7 @@ describe("the open conversation's execution", () => {
           lastMessageAt: "2026-09-01T10:00:05.000Z",
         },
         messages: [
-          { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
+          { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:05.000Z" },
         ],
         taskLinks: { "VIB-142": "/projects/viberr-core/tasks/VIB-142" },
         viewerOwnsActive: true,
@@ -540,7 +541,7 @@ describe("the open conversation's execution", () => {
     // and the row reads "Controller is working… Working · npm test".
     renderPage(
       working({
-        turn: { working: true, runId: "run_ctl", phase: null, step: "Bash · npm test", answering: null, queued: [] },
+        turn: { working: true, runId: "run_ctl", phase: null, step: "Bash · npm test", answering: null, queued: [], steering: [] },
       }),
       "?c=cnv_b",
     );
@@ -559,6 +560,7 @@ describe("the open conversation's execution", () => {
           step: "Cloning acme/widgets",
           answering: null,
           queued: [],
+          steering: [],
         },
       }),
       "?c=cnv_b",
@@ -777,7 +779,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
             lastMessageAt: "2026-09-01T10:00:00.000Z",
           },
           messages: [
-            { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
+            { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:00.000Z" },
           ],
           viewerOwnsActive: true,
         }),
@@ -870,6 +872,7 @@ describe("ruling 451: the page's conversation motion", () => {
     runId: null,
     surface: null,
     replyTo: null,
+    steeredInto: null,
     createdAt: "2026-09-01T10:00:00.000Z",
   });
 
@@ -913,7 +916,7 @@ describe("ruling 451: the page's conversation motion", () => {
   });
 
   it("(a) the working sentence carries its own words, and a new step is a new line", async () => {
-    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [] });
+    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [], steering: [] });
     const { update } = renderLive(
       view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }),
     );
@@ -935,7 +938,7 @@ describe("ruling 451: the page's conversation motion", () => {
   it("ruling 459: the step on screen when the page opens stands still; the next one is marked to rise", async () => {
     // CANARY: set TurnStep's `data-fresh` unconditionally and the step a
     // person finds on opening the page mid-turn rises as if it had just changed.
-    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [] });
+    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [], steering: [] });
     const at = (step: string) =>
       view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn(step) });
     const { update } = renderLive(at("Bash · npm test"));
@@ -1008,6 +1011,7 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
     runId: author === "user" ? null : `run_${id}`,
     surface: null,
     replyTo,
+    steeredInto: null,
     createdAt: "2026-09-24T20:00:00.000Z",
   });
 
@@ -1030,6 +1034,7 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
           step: null,
           answering: "p2",
           queued: [{ messageId: "p3", ahead: 1 }],
+          steering: [],
         },
       }),
       "?c=cnv_b",
@@ -1062,6 +1067,154 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
     const texts = [...document.querySelectorAll(".ctl-msgs > .ctl-msg .md-body")].map((el) => el.textContent?.trim());
     expect(texts).toEqual(["Old question.", "Old answer."]);
     expect(document.querySelector("[data-msg-state]")).toBeNull();
+  });
+
+  /**
+   * Ruling 527: a message sent while a turn works steers it unless it was
+   * queued. It sits in the turn it steers, says whether it is still waiting
+   * for the turn's next step or was read, and a message still waiting offers
+   * its sender Send now (queued) and Retract.
+   */
+  describe("ruling 527: steering", () => {
+    const steer = (id: string, seq: number, text: string, into: string | null) => ({
+      ...msg(id, seq, "user", text),
+      steeredInto: into,
+    });
+    const rows = () =>
+      [...document.querySelectorAll(".ctl-msgs > .ctl-msg, .ctl-msgs > .ctl-working")].map((el) => {
+        if (el.classList.contains("ctl-working")) return "WORKING";
+        const text = (el.querySelector(".md-body")?.textContent ?? "").trim();
+        const state = el.querySelector("[data-msg-state]")?.textContent;
+        const acts = [...el.querySelectorAll(".ctl-msg-acts button")].map((b) => b.textContent);
+        return [text, state ?? null, ...acts].join(" | ");
+      });
+    const live = {
+      working: true,
+      runId: "run_live",
+      phase: null,
+      step: null,
+      answering: "p1",
+      queued: [{ messageId: "q", ahead: 1 }],
+      steering: ["s"],
+    };
+
+    it("puts a steering message in the turn it steers, above the working row, and keeps it there once read", async () => {
+      renderPage(
+        view({
+          conversation,
+          viewerOwnsActive: true,
+          messages: [
+            msg("p1", 1, "user", "Tidy the agents."),
+            msg("q", 2, "user", "Then list them."),
+            steer("s", 3, "The KB is gone too.", null),
+          ],
+          turn: live,
+        }),
+        "?c=cnv_b",
+      );
+      await screen.findByText("The KB is gone too.");
+      // CANARY: drop `view.turn` from the page's `inReplyOrder` and the
+      // steering message sits under the queued one, below the working row.
+      expect(rows()).toEqual([
+        "Tidy the agents. | answering now",
+        "The KB is gone too. | steering · next step | Retract",
+        "WORKING",
+        "Then list them. | queued · 1 ahead | Send now | Retract",
+      ]);
+
+      // The turn read it and replied; the queued message's turn is working.
+      cleanup();
+      renderPage(
+        view({
+          conversation,
+          viewerOwnsActive: true,
+          messages: [
+            msg("p1", 1, "user", "Tidy the agents."),
+            msg("q", 2, "user", "Then list them."),
+            steer("s", 3, "The KB is gone too.", "p1"),
+            msg("r1", 4, "controller", "Done, and the KB was already gone.", "p1"),
+          ],
+          turn: { ...live, answering: "q", queued: [], steering: [] },
+        }),
+        "?c=cnv_b",
+      );
+      await screen.findByText("Done, and the KB was already gone.");
+      // CANARY: drop `steered` from the page's <MessageState> and the steered
+      // message (no reply of its own) says nothing of where its answer is.
+      expect(rows()).toEqual([
+        "Tidy the agents. | ",
+        "The KB is gone too. | steered",
+        "Done, and the KB was already gone. | ",
+        "Then list them. | answering now",
+        "WORKING",
+      ]);
+    });
+
+    it("hides Send now and Retract from a viewer who does not own the conversation", async () => {
+      renderPage(
+        view({
+          conversation,
+          viewerOwnsActive: false,
+          messages: [msg("p1", 1, "user", "Tidy the agents."), msg("q", 2, "user", "Then list them.")],
+          turn: { ...live, steering: [] },
+        }),
+        "?c=cnv_b",
+      );
+      await screen.findByText("Then list them.");
+      expect(document.querySelector(".ctl-msg-acts")).toBeNull();
+    });
+
+    it("Retract puts the message back under what is typed; Send now asks the server; the composer steers or queues", async () => {
+      const posted: Record<string, string>[] = [];
+      const { container } = renderPage(
+        view({
+          conversation,
+          viewerOwnsActive: true,
+          messages: [msg("p1", 1, "user", "Tidy the agents."), msg("q", 2, "user", "Then list them.")],
+          turn: { ...live, steering: [] },
+        }),
+        "?c=cnv_b",
+        async ({ request }) => {
+          const form = Object.fromEntries([...(await request.formData()).entries()].map(([k, v]) => [k, String(v)]));
+          posted.push(form);
+          if (form.intent === "retract") return { ok: true, retracted: "Then list them.", toast: "Taken back into your composer." };
+          if (form.intent === "send-now") return { ok: true, toast: "It goes into the running turn at its next step." };
+          return { ok: true, conversationId: "cnv_b" };
+        },
+      );
+      await screen.findByText("Then list them.");
+      const box = composer(container);
+      fireEvent.change(box, { target: { value: "And the scheduler." } });
+
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retract" })));
+      await screen.findByText("Taken back into your composer.");
+      // CANARY: replace the box instead of `withRetracted` and what was typed is lost.
+      expect(box.value).toBe("And the scheduler.\n\nThen list them.");
+
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send now" })));
+      await screen.findByText("It goes into the running turn at its next step.");
+      expect(posted).toEqual([
+        { _csrf: "tok", intent: "retract", conversationId: "cnv_b", messageId: "q" },
+        { _csrf: "tok", intent: "send-now", conversationId: "cnv_b", messageId: "q" },
+      ]);
+
+      // A working turn: Steer is the primary send, Queue waits for a turn of its own.
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Queue" })));
+      await waitFor(() => expect(posted).toHaveLength(3));
+      fireEvent.change(box, { target: { value: "One more." } });
+      // CANARY: drop the shift check and ⌘⇧↵ steers.
+      await act(async () => fireEvent.keyDown(box, { key: "Enter", metaKey: true, shiftKey: true }));
+      await waitFor(() => expect(posted).toHaveLength(4));
+      fireEvent.change(box, { target: { value: "Last one." } });
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Steer" })));
+      await waitFor(() => expect(posted).toHaveLength(5));
+      expect(posted.slice(2).map((p) => [p.intent, p.mode, p.text])).toEqual([
+        ["send", "queue", "And the scheduler.\n\nThen list them."],
+        ["send", "queue", "One more."],
+        ["send", "steer", "Last one."],
+      ]);
+    });
   });
 });
 
@@ -1096,9 +1249,10 @@ describe("ruling 476: the controller page", () => {
     runId: author === "user" ? null : `run_${id}`,
     surface: null,
     replyTo,
+    steeredInto: null,
     createdAt: "2026-09-24T20:00:00.000Z",
   });
-  const idle: ControllerSurfaceView["turn"] = { working: false, runId: null, phase: null, step: null, answering: null, queued: [] };
+  const idle: ControllerSurfaceView["turn"] = { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] };
   const busy = (answering: string): ControllerSurfaceView["turn"] => ({ ...idle, working: true, runId: "run_live", answering });
   const at = (messages: ReturnType<typeof msg>[], turn: ControllerSurfaceView["turn"] = idle) =>
     view({ conversation, messages, turn, viewerOwnsActive: true });

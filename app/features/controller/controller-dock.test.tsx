@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
@@ -52,7 +52,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     conversation: null,
     messages: [],
     taskLinks: {},
-    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] },
     threads: [],
     viewerOwnsActive: false,
     ...over,
@@ -639,8 +639,8 @@ describe("the controller dock (ruling 121)", () => {
           conversation: conversationFixture(),
           viewerOwnsActive: true,
           turn: working
-            ? { working: true, runId: "run_1", phase: null, step, answering: null, queued: [] }
-            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
+            ? { working: true, runId: "run_1", phase: null, step, answering: null, queued: [], steering: [] }
+            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] },
         }),
       working: () =>
         working ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step }] : [],
@@ -709,6 +709,7 @@ describe("the controller dock (ruling 121)", () => {
       runId: null,
       surface: null,
       replyTo: null,
+      steeredInto: null,
       createdAt: "2026-09-01T10:00:00.000Z",
     };
     const second: ControllerDockView["messages"][number] = {
@@ -756,7 +757,7 @@ describe("the controller dock (ruling 121)", () => {
         taskView({
           conversation: conversationFixture(),
           messages: [
-            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
           taskLinks: { "VIB-2": "/projects/viberr/tasks/VIB-2", "VIB-1": "/projects/viberr/tasks/VIB-1" },
           viewerOwnsActive: true,
@@ -926,10 +927,10 @@ describe("the controller dock (ruling 121)", () => {
             lastMessageAt: "2026-09-01T10:00:00.000Z",
           },
           messages: [
-            { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
-            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
+            { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:00.000Z" },
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
-          turn: { working: true, runId: "run_2", phase: null, step: null, answering: null, queued: [] },
+          turn: { working: true, runId: "run_2", phase: null, step: null, answering: null, queued: [], steering: [] },
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
@@ -969,6 +970,7 @@ describe("the controller dock (ruling 121)", () => {
       runId: author === "user" ? null : `run_${id}`,
       surface: null,
       replyTo,
+      steeredInto: null,
       createdAt: at,
     });
     mount({
@@ -999,6 +1001,7 @@ describe("the controller dock (ruling 121)", () => {
             step: null,
             answering: "p2",
             queued: [{ messageId: "p3", ahead: 1 }],
+            steering: [],
           },
           threads: [{ id: "cnv_a", title: "Dossier", lastMessageAt: at, unread: false }],
           viewerOwnsActive: true,
@@ -1017,6 +1020,90 @@ describe("the controller dock (ruling 121)", () => {
     );
     // CANARY: drop <MessageState> from the dock's header.
     expect(states).toEqual([null, null, "answering now", "queued · 1 ahead"]);
+  });
+
+  it("ruling 527: steering sits in its turn, Retract fills the composer, and Queue waits behind the turn", async () => {
+    const at = "2026-09-27T16:00:00.000Z";
+    const msg = (id: string, seq: number, text: string) => ({
+      id,
+      conversationId: "cnv_a",
+      seq,
+      author: "user" as const,
+      userId: "u1",
+      text,
+      runId: null,
+      surface: null,
+      replyTo: null,
+      steeredInto: null,
+      createdAt: at,
+    });
+    const { sends } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: {
+            id: "cnv_a",
+            userId: "u1",
+            userLabel: "arda@viberr.dev",
+            projectSlug: "viberr",
+            taskKey: "VIB-1",
+            title: "Agents",
+            createdAt: at,
+            updatedAt: at,
+            lastMessageAt: at,
+          },
+          messages: [msg("p1", 1, "Tidy the agents."), msg("q", 2, "Then list them."), msg("s", 3, "The KB is gone too.")],
+          turn: {
+            working: true,
+            runId: "run_live",
+            phase: null,
+            step: null,
+            answering: "p1",
+            queued: [{ messageId: "q", ahead: 1 }],
+            steering: ["s"],
+          },
+          threads: [{ id: "cnv_a", title: "Agents", lastMessageAt: at, unread: false }],
+          viewerOwnsActive: true,
+        }),
+      working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
+      action: (form) =>
+        form.get("intent") === "retract"
+          ? { ok: true, retracted: "Then list them.", toast: "Taken back into your composer." }
+          : { ok: true, conversationId: "cnv_a" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText("The KB is gone too.");
+    const rows = [...document.querySelectorAll<HTMLElement>(".dock-msgs > .ctl-msg, .dock-msgs > .ctl-working")];
+    // CANARY: drop `turn` from the dock's `inReplyOrder` and the steering
+    // message sits below the queued one.
+    expect(
+      rows.map((el) =>
+        el.classList.contains("ctl-working")
+          ? "WORKING"
+          : `${el.querySelector(".md-body")?.textContent?.trim()} | ${el.querySelector("[data-msg-state]")?.textContent}`,
+      ),
+    ).toEqual([
+      "Tidy the agents. | answering now",
+      "The KB is gone too. | steering · next step",
+      "WORKING",
+      "Then list them. | queued · 1 ahead",
+    ]);
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message to the controller");
+    await waitFor(() => expect(composer.hasAttribute("disabled")).toBe(false));
+    fireEvent.change(composer, { target: { value: "And the scheduler." } });
+    // CANARY: drop the dock's `onRetracted` and the message is gone from both places.
+    fireEvent.click(within(rows[3]!).getByRole("button", { name: "Retract" }));
+    await screen.findByText("Taken back into your composer.");
+    expect(composer.value).toBe("And the scheduler.\n\nThen list them.");
+    // CANARY: drop `mode` from the dock's send and the server steers it.
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    await waitFor(() => expect(sends).toHaveLength(2));
+    expect(sends.map((f) => [f.get("intent"), f.get("messageId") ?? f.get("mode")])).toEqual([
+      ["retract", "q"],
+      ["send", "queue"],
+    ]);
+    expect(sends[1]!.get("text")).toBe("And the scheduler.\n\nThen list them.");
   });
 });
 
@@ -1090,6 +1177,7 @@ describe("ruling 368: the dock's send in flight", () => {
           text="Move it along"
           onText={() => {}}
           onSubmit={() => {}}
+          csrf=""
           onPick={() => {}}
           onLeave={() => {}}
           composerRef={{ current: null }}
@@ -1395,9 +1483,10 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
     runId: author === "user" ? null : `run_${id}`,
     surface: null,
     replyTo,
+    steeredInto: null,
     createdAt: at,
   });
-  const idle = { working: false, runId: null, phase: null, step: null, answering: null, queued: [] };
+  const idle = { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] };
 
   function body(messages: ReturnType<typeof msg>[], working: boolean) {
     const turn = working ? { ...idle, working: true, runId: "run_live", answering: "p1" } : idle;
@@ -1413,6 +1502,7 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
           text=""
           onText={() => {}}
           onSubmit={() => {}}
+          csrf=""
           onPick={() => {}}
           onLeave={() => {}}
           composerRef={{ current: null }}

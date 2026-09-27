@@ -510,6 +510,11 @@ const BASELINE_COLUMNS: readonly {
         ddl: "unlinked_history INTEGER NOT NULL DEFAULT 0",
         backfillWith: backfillControllerReplyLinks,
       },
+      // Ruling 527: the turn a steering message went into. The steering mark,
+      // the turn digest and boot recovery name it, so a root that predates it
+      // would fail all three. No backfill: nothing before the column could
+      // steer a turn, so NULL is true of every older row.
+      { name: "steered_into", ddl: "steered_into TEXT" },
     ],
   },
   // Ruling 463: which repositories a connection's token reaches. Every

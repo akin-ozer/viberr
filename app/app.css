@@ -8948,3 +8948,15 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .cmp-over { color: var(--faint); }
 .chg-inline > .chg-slot { margin-top: .5rem; }
 .chg-inline .chg-fail, .chg-inline .chg-stale { font-size: .75rem; }
+
+/* ---------- appended: ruling 527, steering and the queue in a conversation ---------- */
+/* While a turn works the composer offers Queue beside Steer; the pair stays
+   one group at the foot's end. */
+.ctl-composer-sends { display: inline-flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+/* Send now and Retract on a waiting message: text buttons in the header's own
+   small type. */
+.ctl-msg-acts { display: inline-flex; gap: .5rem; }
+@media (pointer: coarse) {
+  /* WCAG 2.5.8, as U39-27: the hit area grows, the text stays put. */
+  .ctl-msg-acts .linkish { padding-block: .3rem; }
+}

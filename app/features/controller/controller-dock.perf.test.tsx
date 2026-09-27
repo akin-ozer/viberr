@@ -51,6 +51,7 @@ function boardView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     runId: i % 2 === 0 ? null : `run_${i}`,
     surface: null,
     replyTo: null,
+    steeredInto: null,
     createdAt: "2026-09-01T10:00:00.000Z",
   }));
   return {
@@ -70,7 +71,7 @@ function boardView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     conversation: CONVERSATION,
     messages,
     taskLinks: { "VIB-1": "/projects/viberr/tasks/VIB-1" },
-    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] },
     threads: [{ id: "cnv_a", title: "Plan the release", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
     viewerOwnsActive: true,
     ...over,
@@ -224,8 +225,8 @@ describe("a working turn (ruling 457, CTL-2)", () => {
       view: () =>
         boardView({
           turn: started
-            ? { working: true, runId: "run_live", phase: null, step: "Reading VIB-1", answering: null, queued: [] }
-            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
+            ? { working: true, runId: "run_live", phase: null, step: "Reading VIB-1", answering: null, queued: [], steering: [] }
+            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] },
         }),
       working: () =>
         started

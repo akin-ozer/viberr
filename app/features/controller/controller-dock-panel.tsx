@@ -5,7 +5,11 @@ import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/cont
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
 import type { ControllerDockView } from "./controller-dock-query.server";
-import type { ConversationTurnState } from "~/server/controller/controller-run.server";
+import type {
+  ConversationTurnState,
+  SendMode,
+} from "~/server/controller/controller-run.server";
+import { WaitingActions, withRetracted } from "./waiting-actions";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
 import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
@@ -79,8 +83,11 @@ export interface DockPanelBodyProps {
   disabled: boolean;
   text: string;
   onText: (text: string) => void;
-  /** Sends the box, or the example the person clicked (ruling 314). */
-  onSubmit: (override?: string) => void;
+  /** Sends the box, or the example the person clicked (ruling 314); ruling
+   *  527's `queue` waits behind a working turn instead of steering it. */
+  onSubmit: (override?: string, mode?: SendMode) => void;
+  /** Ruling 527: the waiting messages' Send now and Retract post with it. */
+  csrf: string;
   /** Opens a thread of this scope in place. */
   onPick: (id: string) => void;
   /** A link out of the dock was followed: close without animating. */
@@ -101,6 +108,7 @@ export function DockPanelBody({
   text,
   onText,
   onSubmit,
+  csrf,
   onPick,
   onLeave,
   composerRef,
@@ -109,6 +117,10 @@ export function DockPanelBody({
   // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55; the page's composer shares the rule).
   const sendHint = useModifierHint("↵");
+  const queueHint = useModifierHint("⇧↵");
+  // Ruling 527: while a turn holds the thread, a message steers it or queues
+  // behind it, and the composer offers both.
+  const live = (turn?.answering ?? null) !== null;
   const threads = current?.threads ?? [];
   const unavailable = current?.unavailable ?? false;
   const working = turn?.working ?? false;
@@ -125,9 +137,10 @@ export function DockPanelBody({
   // Ruling 465: the page's order and vocabulary — each reply under the
   // message it answers, "answering now" / "queued · N ahead" on a message
   // with no reply yet, and "is working…" under the message the turn answers.
-  const ordered = inReplyOrder(messages);
+  // Ruling 527: steering sits in the turn it steers, as on the page.
+  const ordered = inReplyOrder(messages, turn);
   const answered = answeredMessageIds(messages);
-  const workingAfter = workingRowAfter(ordered, turn?.answering ?? null);
+  const workingAfter = turn ? workingRowAfter(ordered, turn) : null;
 
   // Scroll the transcript's own box, never the page underneath. This body
   // mounts on every open, and a fresh scroll container starts at scrollTop 0,
@@ -259,7 +272,18 @@ export function DockPanelBody({
                       </span>
                       <LocalDayDotTime iso={m.createdAt} />
                       {m.author === "user" && !answered.has(m.id) && (
-                        <MessageState turn={turn} messageId={m.id} />
+                        <MessageState turn={turn} messageId={m.id} steered={m.steeredInto !== null} />
+                      )}
+                      {/* Ruling 527: Send now and Retract, for the sender. */}
+                      {m.author === "user" && current.viewerOwnsActive && conversationId && (
+                        <WaitingActions
+                          turn={turn}
+                          messageId={m.id}
+                          conversationId={conversationId}
+                          csrf={csrf}
+                          action="/resources/controller"
+                          onRetracted={(retracted) => onText(withRetracted(text, retracted))}
+                        />
                       )}
                     </header>
                     <div className="md-body">
@@ -288,7 +312,8 @@ export function DockPanelBody({
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
-                onSubmit();
+                // Ruling 527: ⇧ queues behind a working turn.
+                onSubmit(undefined, live && e.shiftKey ? "queue" : "steer");
               }
             }}
             rows={2}
@@ -312,19 +337,33 @@ export function DockPanelBody({
             <span className="fine xs dim">
               Acts with your permissions
               <span className="kbd-hint" suppressHydrationWarning>
-                {` · ${sendHint} sends`}
+                {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
               </span>
             </span>
-            <button
-              type="button"
-              className="btn primary sm"
-              onClick={() => onSubmit()}
-              disabled={busy || disabled || !text.trim()}
-              aria-busy={busy || undefined}
-            >
-              {busy && <Icon name="loader" className="spin" />}
-              {busy ? "Sending…" : "Send"}
-            </button>
+            <span className="ctl-composer-sends">
+              {live && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  title="Wait for its own turn, after the one working now"
+                  onClick={() => onSubmit(undefined, "queue")}
+                  disabled={busy || disabled || !text.trim()}
+                >
+                  Queue
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn primary sm"
+                title={live ? "Go into the turn working now, at its next step" : undefined}
+                onClick={() => onSubmit(undefined, "steer")}
+                disabled={busy || disabled || !text.trim()}
+                aria-busy={busy || undefined}
+              >
+                {busy && <Icon name="loader" className="spin" />}
+                {busy ? "Sending…" : live ? "Steer" : "Send"}
+              </button>
+            </span>
           </div>
         </div>
       </div>
