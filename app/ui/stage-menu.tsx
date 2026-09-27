@@ -20,6 +20,11 @@ import { useDismiss } from "./use-dismiss";
  * `onReorder` adds "Move up" / "Move down" after the stages: the board card's
  * keyboard and single-pointer path to a slot within its lane, which the drag
  * alone offered. Task detail passes nothing.
+ *
+ * `align` is the trigger edge the menu hangs from: its right edge on a board
+ * card, whose trigger ends the card's head; its left edge in a property row
+ * (ruling 520), whose value starts the row's value column, so the menu opens
+ * over the values rather than over the labels.
  */
 
 export interface StageOption {
@@ -36,6 +41,7 @@ export function StageMenu({
   onReorder,
   canMoveUp = false,
   canMoveDown = false,
+  align = "end",
 }: {
   stages: StageOption[];
   currentStageId: string;
@@ -46,6 +52,8 @@ export function StageMenu({
   onReorder?: (dir: -1 | 1) => void;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
+  /** Ruling 520: the trigger edge the menu lines up with. */
+  align?: "start" | "end";
 }) {
   const [open, setOpen] = useState(false);
   // `side` is null until the placement effect has measured the open menu.
@@ -94,7 +102,7 @@ export function StageMenu({
     if (!el) return;
     const r = el.getBoundingClientRect();
     const width = Math.max(r.width, 190);
-    const left = r.right - width;
+    const left = align === "start" ? r.left : r.right - width;
     // Clamp into the viewport with an 8px gutter.
     const clampedLeft = Math.min(
       Math.max(8, left),
@@ -246,6 +254,7 @@ export function StageMenu({
             role="menu"
             aria-label="Move to stage"
             data-side={pos.side ?? "bottom"}
+            data-align={align}
             style={{
               position: "fixed",
               top: pos.top,

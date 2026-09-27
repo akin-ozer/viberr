@@ -280,6 +280,17 @@ describe("StageMenu placement (layo-8)", () => {
     expect(activeName()).toBe("Triage");
   });
 
+  it("ruling 520: a property row's menu hangs from the trigger's left edge, a card's from its right", () => {
+    // CANARY: drop the `align` arm and the task page's menu opens 166px left
+    // of its trigger, over the row's label.
+    placeAt(100);
+    expect(openMenu(renderMenu({ align: "start" })).style.left).toBe("400px");
+    cleanup();
+    // The board card's trigger ends the card's head: the menu's right edge
+    // meets the trigger's (the 24px trigger, the menu's 190px floor).
+    expect(openMenu(renderMenu()).style.left).toBe(`${400 + 24 - 190}px`);
+  });
+
   it("clamps into the viewport and caps its height when neither side fits", () => {
     // A 300px-tall viewport with the trigger mid-way: 122px below, 126 above.
     placeAt(140, 300);

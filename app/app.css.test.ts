@@ -5983,9 +5983,9 @@ describe("app.css ruling 501: the Details panel's properties", () => {
     expect(decl(plain, ".prop-btn", "border")).toBe("1px solid transparent");
     expect(decl(plain, '.prop-btn:hover:where(:not([aria-busy="true"]))', "background")).toBe("var(--tint-hover)");
     expect(decl(plain, '.prop-btn[aria-expanded="true"]', "border-color")).toBe("var(--blue)");
-    // Its padding runs past the row's edge, so the value it holds lines up
-    // with the values of the panels above it.
-    expect(decl(plain, ".prop-btn", "margin-right")).toBe("-.375rem");
+    // Its padding and border run past the value column's left edge (ruling
+    // 520), so the value it holds starts where the text values start.
+    expect(decl(plain, ".prop-btn", "margin-left")).toBe("calc(-.375rem - 1px)");
     expect(decl(plain, ".prop-btn", "padding")).toBe(".25rem .375rem");
   });
 
@@ -6059,5 +6059,71 @@ describe("app.css ruling 515: an account's name never runs under its buttons", (
     expect(decl(".acct-list .conn-main b", "white-space")).toBe("nowrap");
     expect(decl(".acct-list .conn-main b", "overflow")).toBe("hidden");
     expect(decl(".acct-list .conn-main b", "text-overflow")).toBe("ellipsis");
+  });
+});
+
+describe("app.css ruling 520: Current state on the property grid", () => {
+  const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
+
+  it("sets the side column's facts on one grid: one label column, one value edge, no rule between rows", () => {
+    // CANARY: give `.kv.props .kv-row .v` back `justify-content: flex-end` and
+    // the values right-align again, no two starting at the same x (the
+    // owner's screenshot of Current state).
+    const grid = requiredDecls(plain, ".kv.props .kv-row");
+    expect(grid.get("display")).toBe("grid");
+    expect(grid.get("grid-template-columns")).toBe("5.5rem minmax(0, 1fr)");
+    expect(grid.get("border-bottom")).toBe("0");
+    expect(decl(".kv.props .kv-row .v", "justify-content")).toBe("flex-start");
+    // A held entry's key stays whole in the narrower value column.
+    expect(decl(".prop-fact .hold-ref", "white-space")).toBe("nowrap");
+    // A value's lines start as far down the row as a one-line value's does,
+    // so a wrapped one keeps its first line on its label's. CANARY: drop the
+    // padding and a wrapped hold's first line rides 6px over its label.
+    const rem = (value: string | undefined) => Number(/^(-?[\d.]+)rem$/.exec(value ?? "")?.[1]);
+    const v = requiredDecls(plain, ".kv.props .kv-row .v");
+    const labelBox = rem(decl(".kv.props .kv-row .k", "min-height"));
+    expect(rem(v.get("padding-block"))).toBe((labelBox - rem(v.get("line-height"))) / 2);
+    // A ghost trigger's padding and border hang outside those lines.
+    expect(decl(".prop-btn", "margin-block")).toBe("calc(-.25rem - 1px)");
+    expect(decl(".kv.props .stage-menu-btn", "margin-block")).toBe(decl(".prop-btn", "margin-block"));
+    // The PR card's facts close the card above Current state: the same label
+    // column, so their words start on the same value line.
+    const facts = requiredDecls(plain, ".pr-facts .kv-row");
+    expect(facts.get("grid-template-columns")).toBe(grid.get("grid-template-columns"));
+    expect(facts.get("column-gap")).toBe(grid.get("column-gap"));
+    expect(decl(".pr-facts .kv-row .v", "text-align")).toBeUndefined();
+    // A ghost trigger's padding and border hang past the edge, so the words
+    // it holds start on it: the stage, and "Assign me" (a `.prop-btn`).
+    expect(decl(".kv.props .stage-menu-btn", "margin-left")).toBe(decl(".prop-btn", "margin-left"));
+  });
+
+  it("draws the stage trigger as a ghost, as every other value is: no chrome at rest, the hover fill, a blue edge while open", () => {
+    // CANARY: drop the rest rule and Stage is a bordered pill again, the one
+    // boxed value in the panel.
+    expect(decl(".kv.props .stage-menu-btn", "border-color")).toBe("transparent");
+    expect(decl(".kv.props .stage-menu-btn", "background")).toBe("transparent");
+    expect(decl(".kv.props .stage-menu-btn:hover:where(:not(:disabled))", "background")).toBe("var(--tint-hover)");
+    expect(decl(".kv.props .stage-menu-btn.open", "border-color")).toBe("var(--blue)");
+    // The caret points down at the menu, and up while it is open, as the PR
+    // card's fold does.
+    expect(decl(".kv.props .stage-menu-btn .sm-caret", "transform")).toBe(decl(".pr-fold .ico", "transform"));
+    expect(decl(".kv.props .stage-menu-btn.open .sm-caret", "transform")).toBe(
+      decl('.pr-fold[aria-expanded="true"] .ico', "transform"),
+    );
+  });
+
+  it("puts a wait's tone on its mark, never on its words, and pulses Agent work with the house's dot", () => {
+    // CANARY: put back `.by-agent { color: var(--agent-dark) }` and "Agent
+    // work" is violet words at the one weight the row's other values drop.
+    for (const who of [".by-human", ".by-agent"]) expect(decl(who, "color"), who).toBeUndefined();
+    expect(decl(".prop-fact.by-human > .ico", "color")).toBe("var(--blue-pressed)");
+    expect(decl(".prop-fact.by-agent > .ico", "color")).toBe("var(--agent-dark)");
+    // The board card's pulse (ruling 365(b)), on its ::after (ruling 457).
+    const house = declsFor(plain, ".wait-tag .working");
+    const dot = declsFor(plain, ".prop-fact .working");
+    for (const p of ["position", "width", "height", "border-radius", "background"]) {
+      expect(dot.get(p), p).toBe(house.get(p));
+    }
+    expect(decl(".prop-fact .working::after", "animation")).toBe(decl(".wait-tag .working::after", "animation"));
   });
 });
