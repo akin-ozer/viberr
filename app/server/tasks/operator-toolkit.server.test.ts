@@ -782,6 +782,85 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
+   * Ruling 569: a task that waited on others could learn only THAT they
+   * finished. Live on AWSC-8 the research task's operator told its researcher
+   * "neither you nor I can read that" about sample-04's 90/100, which lived only
+   * in AWSC-7's verdict. CANARIES: drop `outcome` from the single-task read and
+   * the finished task reads like an unfinished one; stop filtering on the
+   * current subject and a verdict on an earlier delivery reads as the result.
+   */
+  it("ruling 569: read_board(taskKey) carries a finished task's outcome, and nothing stale", async () => {
+    const store = setupTestStore(ctxDb);
+    const deliveredAt = "2026-09-28T20:15:47.701Z";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "done",
+        deliveredAt,
+        completionPacket: {
+          subject: `files:${deliveredAt}`,
+          summary: "The Judge approved the files and scored them 90/100.",
+          changes: null,
+          screenshots: [],
+          at: "2026-09-28T20:31:34.480Z",
+        },
+        verdicts: [
+          {
+            profileId: "estimate-judge",
+            revisionId: `files:${deliveredAt}`,
+            result: "approve",
+            reason: "## Verdict: approve, score 90/100\n\n| Mapping | 40 |",
+            at: "2026-09-28T20:31:15.082Z",
+            rounds: 1,
+          },
+          {
+            profileId: "estimate-judge",
+            revisionId: "files:2026-09-28T19:00:00.000Z",
+            result: "request_changes",
+            reason: "STALE-VERDICT-ON-AN-EARLIER-DELIVERY",
+            at: "2026-09-28T19:10:00.000Z",
+            rounds: 1,
+          },
+        ],
+      }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "triage" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    const call = async (taskKey: string) => {
+      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`.
+      const answer = (await read.handler({ taskKey } as never, {} as never)) as {
+        content: { text: string }[];
+      };
+      // SAFETY: readBoardTask answers one task's JSON; only `outcome` is read here.
+      return JSON.parse(answer.content[0]!.text) as { outcome?: unknown };
+    };
+    expect((await call("VIB-2")).outcome).toEqual({
+      completion: "The Judge approved the files and scored them 90/100.",
+      verdicts: [
+        {
+          agent: "estimate-judge",
+          result: "approve",
+          report: "## Verdict: approve, score 90/100\n\n| Mapping | 40 |",
+        },
+      ],
+    });
+    // A task with no outcome yet carries no empty one.
+    expect(await call("VIB-3")).not.toHaveProperty("outcome");
+  });
+
+  /**
    * Ruling 285 (pass 37, F37-120): the coordinator could not read a report it
    * was handed half of. Its prompt clips an agent report at 4,000 characters,
    * `get_task` clips every `recentTimeline` entry at 1,500, and nothing in the
