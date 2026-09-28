@@ -30,6 +30,7 @@ import {
 } from "./adapter.server";
 import { withProviderText } from "~/shared/provider-marker";
 import {
+  codexUsageTail,
   SESSION_DAMAGED_RE,
   SESSION_MISSING_RE,
   SESSION_STORE_UNREADABLE_MARK,
@@ -76,7 +77,9 @@ import { errorMessage, toError } from "~/shared/errors";
  * (thread.started → thread_id; turn.started/completed with usage incl.
  * cached_input_tokens; item.started/updated/completed variants; turn.failed;
  * error). Each event is persisted as raw_json via `JSON.stringify(event)`
- * and projected through the shared normalizer. Tokens only, no dollar cost.
+ * and projected through the shared normalizer. Tokens only, no dollar cost. A
+ * run is one turn, whose usage the SDK streams only as it ends, so a run's
+ * Turns and Tokens come off the rollout after each model call (ruling 541).
  *
  * Interrupt: the SDK's `TurnOptions.signal` (AbortSignal) — we pass an
  * AbortController and abort it. Resume: `codex.resumeThread(threadId)`.
@@ -129,6 +132,14 @@ import { errorMessage, toError } from "~/shared/errors";
  * the `contextCompaction` item and the `login` markers `backend-login` reads.
  * `--help` after a value flag now exits 2 where 0.153.4 exited 0, which is the
  * CLI's argument parser, not a flag it lost.
+ *
+ * Ruling 541, measured on the 0.156.0 binary: the rollout carries a top-level
+ * `token_usage_record` per model call (the call's usage, the turn's running
+ * total and the thread's), written before the tool the call asked for runs,
+ * which the live Turns and Tokens read (`codexUsageTail`); and a resumed
+ * thread's `turn.completed.usage` is the THREAD's running total, where ruling
+ * 369(g) had measured the turn's on runs stored before this bump. A bump
+ * re-checks both.
  */
 export const CODEX_SDK_VERIFIED_VERSION = "0.156.0";
 
@@ -1169,6 +1180,12 @@ export function createCodexAdapter(
         const thread = spec.resumeSessionId
           ? codex.resumeThread(spec.resumeSessionId, threadOptions)
           : codex.startThread(threadOptions);
+        // Ruling 541: a Viberr run is ONE Codex turn, whose usage the SDK
+        // streams once, at its end, so the strip read Turns 0 and Tokens
+        // "pending" for the whole run. The rollout records each model call
+        // the moment it completes; it is read on every event below. Opened
+        // before the CLI spawns, so a resumed thread's earlier runs stay out.
+        const usageTail = sharedHome ? codexUsageTail(sharedHome, spec.resumeSessionId ?? null) : null;
 
         try {
           armIdle();
@@ -1177,17 +1194,43 @@ export function createCodexAdapter(
           // decision-plan schema so the caller can parse + execute it.
           if (spec.outputSchema) turnOptions.outputSchema = spec.outputSchema;
           const { events } = await thread.runStreamed(spec.prompt, turnOptions);
-          let turnCount = 0;
+          // The model calls the rollout has recorded: a Codex run's Turns.
+          let calls = 0;
           for await (const event of events) {
             armIdle(); // reset the inactivity window on every event
             const occurredAt = new Date().toISOString();
-            const { display, facts } = projectEnvelope(
+            let { display, facts } = projectEnvelope(
               "codex",
               event,
               occurredAt,
             );
             if (facts.sessionId) sessionId = facts.sessionId;
             const type = event.type;
+            const live = usageTail?.read(sessionId) ?? null;
+            if (type === "turn.completed") {
+              // A new thread's figure is its one turn's total and stands. A
+              // resumed thread's is the THREAD's running total, every earlier
+              // run's calls included, so the run stores its turn's own from
+              // the rollout; the raw line keeps the CLI's. The last call's
+              // record is on disk before the SDK streams this event (100 of
+              // 100 runs of the pinned CLI).
+              if (live && spec.resumeSessionId) {
+                ({ display, facts } = projectEnvelope(
+                  "codex",
+                  { ...event, usage: live.usage },
+                  occurredAt,
+                ));
+              }
+            } else if (live && live.calls > calls) {
+              // Provider figures, not an estimate: the sink folds them as the
+              // run's usage from the first call on.
+              const { input_tokens, cached_input_tokens, output_tokens } = live.usage;
+              facts.usage = { input_tokens, cached_input_tokens, output_tokens, outputEstimated: false };
+            }
+            if (live) {
+              calls = live.calls;
+              facts.turns = calls;
+            }
             if (type === "turn.started" || type === "item.started") {
               // Ruling 394: something is in flight again.
               workAfterLastTurn = true;
@@ -1195,10 +1238,6 @@ export function createCodexAdapter(
             if (type === "turn.completed") {
               sawTurnCompleted = true;
               workAfterLastTurn = false;
-              // Running turn count so the live Turns counter climbs across a
-              // multi-turn run (codex reports no cumulative num_turns).
-              turnCount += 1;
-              facts.turns = turnCount;
             }
             // Item-level errors are explicitly non-fatal in the SDK. Only the
             // two top-level failure events poison the terminal outcome.
@@ -1225,7 +1264,7 @@ export function createCodexAdapter(
             const update = stepUpdateForLine(emitted);
             if (update?.kind === "tool") lastStep = update.step;
             else if (update?.kind === "answered" && lastStep) lastStep = answeredStep(lastStep);
-            phase(RUN_PHASE.working, lastStep ?? `turn ${turnCount + 1}`);
+            phase(RUN_PHASE.working, lastStep ?? `turn ${calls + 1}`);
           }
           phase(RUN_PHASE.finishing, null);
           // Thread id lands after the first turn — capture it as the session.

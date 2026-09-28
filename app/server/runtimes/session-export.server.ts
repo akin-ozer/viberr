@@ -1,4 +1,14 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, type Dirent } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync,
+  type Dirent,
+} from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { RealBackend } from "./runtime-registry.server";
@@ -146,8 +156,13 @@ function codexTranscriptByFilename(
   sessionId: string,
   dataRoot?: string,
 ): string | null {
-  const stack: string[] = codexSessionDirs(userId, dataRoot);
-  if (stack.length === 0) return null;
+  return rolloutByFilename(codexSessionDirs(userId, dataRoot), sessionId);
+}
+
+/** The walk behind {@link codexTranscriptByFilename}, over the given
+ *  `sessions` roots (a missing root is skipped). */
+function rolloutByFilename(roots: readonly string[], sessionId: string): string | null {
+  const stack = [...roots];
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: Dirent[];
@@ -700,6 +715,116 @@ export function codexRolloutRunStats(
   }
   stats.compactions = stats.compactionEvents.length;
   return stats;
+}
+
+// ------------------------------------------------------- live usage (541)
+
+/**
+ * Ruling 541: one `token_usage_record` line of a Codex rollout. The pinned CLI
+ * (0.156.0) writes one the moment a model call completes, before the tool the
+ * call asked for runs (the `token_count` event waits for the tool's output),
+ * with that call's usage, the turn's running total and the thread's. Only the
+ * turn total is read: a Viberr run is one turn, and the thread total also
+ * counts every earlier run of a resumed thread.
+ */
+const codexUsageRecordSchema = z.object({
+  type: z.literal("token_usage_record"),
+  payload: z.object({
+    turn_token_usage: z.object({
+      input_tokens: z.number(),
+      cached_input_tokens: z.number(),
+      cache_write_input_tokens: z.number().catch(0),
+      output_tokens: z.number(),
+    }),
+  }),
+});
+
+/** What a record's line holds, verbatim, for a scan that parses no other line. */
+const USAGE_RECORD_MARK = '"token_usage_record"';
+
+/** Ruling 541: what a live Codex run's rollout says the run has used so far. */
+export interface CodexLiveUsage {
+  /** The model calls the run has made, one record each: a Codex run's Turns. */
+  calls: number;
+  /** The run's turn total over those calls (the newest record's). */
+  usage: z.infer<typeof codexUsageRecordSchema>["payload"]["turn_token_usage"];
+}
+
+/** Ruling 541: a live Codex run's rollout, read as the CLI writes it. */
+export interface CodexUsageTail {
+  /** The run's records so far, reading only what the CLI wrote since the last
+   *  call; null before the first. `sessionId` is the thread the run streamed,
+   *  once it has named it. */
+  read(sessionId: string | null): CodexLiveUsage | null;
+}
+
+/**
+ * Ruling 541: follow the rollout of the run about to start in `codexHome`.
+ *
+ * A new thread's rollout is found by its id once the stream has named it (the
+ * CLI creates the file right after `thread.started`). A resumed thread's is
+ * found now, before the CLI appends to it, and read from where it ends: what
+ * it already holds belongs to the thread's earlier runs.
+ */
+export function codexUsageTail(codexHome: string, resumeSessionId: string | null): CodexUsageTail {
+  const roots = [path.join(codexHome, "sessions")];
+  let file: string | null = null;
+  let offset = 0;
+  let live: CodexLiveUsage | null = null;
+  if (resumeSessionId) {
+    file = rolloutByFilename(roots, resumeSessionId);
+    try {
+      if (file) offset = statSync(file).size;
+    } catch {
+      file = null;
+    }
+  }
+  return {
+    read(sessionId) {
+      if (!file && !resumeSessionId && sessionId) file = rolloutByFilename(roots, sessionId);
+      if (!file) return live;
+      const chunk = bytesFrom(file, offset);
+      // Only whole lines: the CLI may be mid-write on the last one, which is
+      // read again, whole, next time.
+      const end = chunk.lastIndexOf(0x0a);
+      if (end === -1) return live;
+      offset += end + 1;
+      for (const line of chunk.toString("utf8", 0, end).split("\n")) {
+        if (!line.includes(USAGE_RECORD_MARK)) continue;
+        let json: unknown;
+        try {
+          json = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const record = codexUsageRecordSchema.safeParse(json);
+        if (!record.success) continue;
+        live = { calls: (live?.calls ?? 0) + 1, usage: record.data.payload.turn_token_usage };
+      }
+      return live;
+    },
+  };
+}
+
+/** The bytes `file` holds past `offset` (none when it cannot be read). */
+function bytesFrom(file: string, offset: number): Buffer {
+  let fd: number | null = null;
+  try {
+    fd = openSync(file, "r");
+    const size = fstatSync(fd).size;
+    const out = Buffer.alloc(Math.max(0, size - offset));
+    let got = 0;
+    while (got < out.length) {
+      const n = readSync(fd, out, got, out.length - got, offset + got);
+      if (n === 0) break;
+      got += n;
+    }
+    return out.subarray(0, got);
+  } catch {
+    return Buffer.alloc(0);
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }
 
 /**

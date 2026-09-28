@@ -143,9 +143,9 @@ describe("LiveRunPanel", () => {
   /**
    * F35-1: the Tokens cell tells an estimate from a total. While the row holds
    * the Claude adapter's live estimate it prints `~n` with the tooltip; a
-   * Codex run before its turn ends prints "pending"; a provider total prints
-   * plain. Canary: print `fmtTok(run.tokens)` unconditionally and both the
-   * tilde and the tooltip are gone.
+   * Codex run before its first model call completes prints "pending"; a
+   * provider total prints plain. Canary: print `fmtTok(run.tokens)`
+   * unconditionally and both the tilde and the tooltip are gone.
    */
   it("prints an estimated token figure as ~n with a tooltip, null as pending, a total plain", () => {
     const cell = (run: RunView) => {
