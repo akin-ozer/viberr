@@ -29,7 +29,7 @@ only in `users.role`.
 | Login | `POST /login` `intent=login`: origin check (no session yet), pre-checks on `users` (unknown, disabled, no password) that each consume a throttle token, then better-auth `/sign-in/email`. Success records `users.last_login_at` and audits `auth.login.success`; failures audit `auth.login.failure` / `auth.login.rate_limited`. Unknown email and OAuth-only accounts share one error string. |
 | Throttle | App-level token buckets replace better-auth's limiter on the two sign-in paths: 10 attempts per `email\|ip` per 15 minutes (continuous refill), 30 social starts per `provider\|ip` per minute, 10 PAT validations per actor per 5 minutes. `X-Forwarded-For` is honoured only when `VIBERR_TRUST_PROXY=N` (Nth hop from the right); otherwise the ip is the literal `local`. Per-process, in memory. |
 | Forced reset | `users.pwreset_required` is set by the boot-generated bootstrap password, by admin-created temp passwords and by admin resets. `requireAuth` redirects to `/login` until `intent=set-password` completes it (audit `auth.password.forced_reset_completed`; other sessions are deliberately left alive). There is no self-service "forgot password". |
-| Bootstrap admin | `seedInitialAdmin` runs only while `users` is empty: boot uses `VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` or `admin@viberr.dev` with a random one-time password logged once as `VIBERR BOOTSTRAP ADMIN` (reset forced); the seed CLI uses the known dev default. Audit `org.user.created {bootstrap: true}`. |
+| Bootstrap admin | `seedInitialAdmin` runs only while `users` is empty: boot uses `VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` or `admin@viberr.dev` with a random one-time password logged once as `VIBERR BOOTSTRAP ADMIN` (reset forced); the seed CLI uses the known dev default. Audit `org.user.created {bootstrap: true}`. The account is recognised afterwards as the first one the instance holds, made by nobody with a password of its own (`bootstrapAdminOf`), and until another enabled account exists Home's setup checklist asks an admin for one (ruling 532). |
 | Disabled users | The auth guard deletes the session of a disabled or vanished user and treats the request as signed out; `isOrgAdmin` requires `disabled = 0`. |
 | Background loads | Every route a page loads in the background answers a request with no session, or with a forced reset pending, with a 401 (`authenticate`, then the route's own refusal), never `requireUser`'s login redirect: the dock's two (`/resources/controller`, `/resources/controller-unseen`), the bell's list (`/resources/notifications`), the attention watcher's read (`/resources/attention`), the SSE stream (`/resources/events`), the Agent accounts poll (`/resources/backend-login`), the palette's search (`/resources/search`), the model catalog (`/resources/model-catalog`), the run console's log reads (`/resources/run-log`) and the task page's Changes read. A fetcher follows a redirect as a navigation, and the redirect's returnTo named the resource, so signing in again opened a page of raw JSON; a plain `fetch` follows it silently and got the login page instead of its answer (ruling 457; test audit L14-29 found the last six). Each answer is one the page can hold, so the tab stays where it is; its next real navigation asks for the sign-in with the page's own path as the returnTo. |
 | Logout | `POST /logout` with CSRF, audit `auth.logout`, better-auth `signOut`, redirect to `/login`. |
@@ -180,7 +180,11 @@ name: the header crumb, the user menu, and the server and agent sentences (the
 spending-cap refusals and remedies, the controller's credential and grant-request
 replies, the unlinked GitHub approval note). Tabs ride `?tab=`, in this order:
 `connections` (the default), `users`, `sso`, `resources`, `controller`. Below the
-tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
+tabs sit the run-concurrency and spending-cap rows, then the Audit log card. Home's
+setup checklist (ruling 532) links into two dialogs here: `?tab=connections&add` opens
+the New GitHub connection dialog, and `?tab=users&add=admin` opens Allow access with
+Admin chosen, for the person who signed in as the bootstrap admin to make an account of
+their own.
 
 - **GitHub connections**: owner + PAT. Nothing is saved unless the PAT validates
   against `repo` + `pull_request:write` and the owner exists; the first connection
@@ -529,7 +533,10 @@ Preferences other than theme live in `user_prefs`.
 The panel holds one `cred-card` per backend, and it is where a person connects the
 provider account their agent runs bill: runs on tasks they own, and their own controller
 turns. There is no deployment-wide Claude or Codex credential, so this panel is the only
-place either backend is connected.
+place either backend is connected. Until the person holds one that can bill a run, Home's
+setup checklist carries a **Claude or Codex** step for them, whatever their role (ruling
+532), whose link, `/profile#agent-accounts`, brings this panel to rest below the
+overlay's pinned head, ringed and focused.
 
 **Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
 backend; one is **in use**, the one their runs bill. A connected card leads with it

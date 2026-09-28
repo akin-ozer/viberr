@@ -236,7 +236,9 @@ docker compose up
 
 That is the whole install (ruling 504): no `.env` to write, no volume to create. Open
 http://localhost:3000 and sign in as `admin@viberr.dev` with the one-time password the log
-prints under `VIBERR BOOTSTRAP ADMIN`; you choose your own at first sign-in. The two
+prints under `VIBERR BOOTSTRAP ADMIN`; you choose your own at first sign-in. Home then lists
+what the instance still needs, each a link to where it is done: a GitHub connection, an
+account of your own, your Claude or Codex account and the first project. The two
 secrets are generated into the store on first boot, and Compose creates the store volume
 `viberr-data`. Add `-d` to run in the background (`docker compose logs app` then shows the
 password), `--build` after pulling a new version, or use `npm run deploy`, which stamps the

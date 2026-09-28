@@ -15,8 +15,12 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // shorter than the afternoon's greeting) and counted the data root, a temp
   // path as long as the host makes it (71 bytes on macOS, 26 on Linux); on the
   // pinned clock with the path measured as empty the same payload is 3,182.
+  // Raised by 136 for ruling 532: the setup checklist's four steps. The demo
+  // seed gives arda no GitHub connection and no Claude or Codex account, so
+  // the checklist is open (two steps done), and it rides the loader it shows
+  // on; an instance with every step done sends `null`.
   "payload:home.loader-bytes": {
-    ceiling: 3182,
+    ceiling: 3318,
     unit: "bytes",
     journey: "fresh-load",
     fixture:

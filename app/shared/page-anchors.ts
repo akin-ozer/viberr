@@ -47,6 +47,10 @@ export function correctionAnchor(id: string): string {
   return `correction-${id}`;
 }
 
+/** Ruling 532: Profile's Agent accounts panel, which Home's setup checklist
+ *  opens to connect Claude or Codex. */
+export const AGENT_ACCOUNTS_ANCHOR = "agent-accounts";
+
 /** The element id a URL's hash names; a hash that is not valid percent-encoding
  *  names nothing (it is read while rendering, so it must not throw). */
 export function hashTarget(hash: string): string {

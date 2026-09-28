@@ -37,10 +37,12 @@ import {
   type ProfileActionData,
 } from "~/features/profile/profile-page";
 import { applyThemePreference } from "~/features/shell/theme-preference";
+import { AGENT_ACCOUNTS_ANCHOR } from "~/shared/page-anchors";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { PageOverlay } from "~/ui/page-overlay";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { revealTarget, scrollingBox, useHashTarget } from "~/ui/use-hash-target";
 
 /**
  * /profile — URL-addressable PageOverlay route (phase-4 shell decision,
@@ -267,6 +269,12 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const location = useLocation();
   const csrf = useCsrfToken();
   const push = useToast();
+  // Ruling 532: Home's setup checklist opens `#agent-accounts`. Here, above
+  // the overlay, the reveal runs after the overlay's own effect has opened
+  // its dialog (effects run child first), so the panel it scrolls to and
+  // focuses is on screen.
+  const accountsTargeted =
+    useHashTarget(isAgentAccountsAnchor, true, revealUnderHead) !== null;
   const themeFetcher = useFetcher<{ ok: boolean; error?: string }>();
   // The segment the page is on: the choice a save is carrying, else `theme`,
   // which the root loader confirms only once that save revalidates it (the
@@ -354,9 +362,27 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
           backends: backendsFetcher,
         }}
         submitWith={submitWith}
+        accountsTargeted={accountsTargeted}
       />
     </PageOverlay>
   );
+}
+
+function isAgentAccountsAnchor(id: string): boolean {
+  return id === AGENT_ACCOUNTS_ANCHOR;
+}
+
+/** Ruling 532: the overlay pins its head over the top of what it scrolls
+ *  (`.page-overlay .board-head`), so the panel comes to rest below it, where
+ *  its title shows, instead of under it. */
+function revealUnderHead(id: string): boolean {
+  const target = document.getElementById(id);
+  if (!target) return false;
+  revealTarget(target);
+  const head = target.closest("dialog")?.querySelector(".board-head");
+  const box = scrollingBox(target);
+  if (head && box) box.scrollTop -= head.getBoundingClientRect().height;
+  return true;
 }
 
 /** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */

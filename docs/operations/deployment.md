@@ -220,6 +220,9 @@ end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`).
 
 **First run, as the first admin.** After `docker compose up -d`, sign in as the bootstrap
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
+Home's setup checklist (ruling 532) lists it with the instance's other gaps, each a link
+to where it is closed: a GitHub connection, an account of your own beside the bootstrap
+admin, and the first project.
 Until somebody does, the instance runs no agents: an agent started on a task whose owner
 has nothing connected is refused before any process starts, with an honest
 `run·unavailable` error run and a blocked recovery packet naming the owner and the
@@ -390,6 +393,9 @@ is the two-second check, and the same URL over `http://` shows the throttle.
   as `VIBERR BOOTSTRAP ADMIN`, which must be changed at first sign-in).
 - Boot writes the shipped agent assets (each built-in agent's definition and expertise
   skill, the base profile templates) into a store that lacks them.
+- Home's setup checklist lists what is still missing, until nothing is (ruling 532): for
+  an org admin a GitHub connection, an account other than the bootstrap admin, their own
+  Claude or Codex account and the first project; for everyone else the last two.
 - Connect an agent backend for yourself on **Profile → Agent accounts** before expecting
   any agent to run (ruling 127). Nothing in `.env` does it, and an instance with nobody
   connected refuses every agent run honestly rather than starting one. See

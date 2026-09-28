@@ -10,6 +10,7 @@ import { inFlightIntent } from "~/ui/in-flight";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { utcDayKey } from "~/shared/dates/format";
+import { AGENT_ACCOUNTS_ANCHOR } from "~/shared/page-anchors";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type {
   BackendLoginPollAnswer,
@@ -1332,15 +1333,23 @@ export function AgentAccountsPanel({
   backends,
   fetcher,
   submit,
+  targeted = false,
 }: {
   backends: ProfileBackend[];
   fetcher: AccountsFetcher;
   submit: (fields: Record<string, string>) => void;
+  /** Ruling 532: the URL names this panel, so it wears the landing ring. */
+  targeted?: boolean;
 }) {
   useAccountsToast(fetcher);
   const error = accountsError(fetcher);
   return (
-    <div className="panel">
+    <div
+      className="panel"
+      id={AGENT_ACCOUNTS_ANCHOR}
+      tabIndex={-1}
+      data-targeted={targeted || undefined}
+    >
       <div className="panel-head">
         <Icon name="cpu" />
         <h2>Agent accounts</h2>

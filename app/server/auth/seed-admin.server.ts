@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { newId } from "~/shared/ids/new-id.server";
+import type { UserRecord } from "~/shared/mapping/user.server";
 import { recordAudit, SYSTEM_ACTOR } from "../audit/audit-recorder.server";
 import { logger } from "../logging/logger.server";
 import { provisionIdentity } from "./identity.server";
@@ -17,6 +18,20 @@ import { countUsers, insertUser } from "./user-store.server";
  */
 
 export const DEFAULT_SEED_ADMIN_EMAIL = "admin@viberr.dev";
+
+/**
+ * Ruling 532: the account this bootstrap made, in `users` as `listUsers`
+ * orders it (oldest first). It is the first row an instance ever holds, made by
+ * nobody (`created_by` null) with a password of its own (`idp` local); an
+ * account an admin makes names its maker, and one a GitHub or Google sign-in
+ * makes carries that provider. The email is no test: the environment names it,
+ * and the environment may have changed since the table was empty. Null once
+ * that account is gone.
+ */
+export function bootstrapAdminOf(users: readonly UserRecord[]): UserRecord | null {
+  const first = users[0];
+  return first && first.createdBy === null && first.idp === "local" ? first : null;
+}
 
 export interface SeedAdminResult {
   created: boolean;

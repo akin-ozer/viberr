@@ -5472,11 +5472,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   padding: 3rem 2rem;
   display: flex; flex-direction: column; align-items: center; text-align: center; gap: .5rem;
 }
-/* The medallion. `.plus` is what the new-project hero calls it; `.glyph` is the
-   same treatment for an empty state whose mark is not a plus — nothing here is
-   about addition, so a hero that draws an analytics or inbox icon should not
-   have to wear a class called "plus". One rule, two honest names. */
-.empty-hero .plus, .empty-hero .glyph {
+/* The medallion (`.glyph`: an empty state's mark is its page's own icon).
+   Home's hero, which called it `.plus`, gave way to the setup checklist
+   (ruling 532). */
+.empty-hero .glyph {
   display: grid; place-items: center;
   width: 46px; height: 46px;
   border-radius: var(--radius-box);
@@ -5486,14 +5485,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 }
 .empty-hero h2 { font-size: 1.25rem; letter-spacing: var(--track-section); }
 .empty-hero p { margin: 0; color: var(--muted); font-size: .88rem; max-width: 46ch; line-height: 1.55; }
-.empty-steps { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; justify-content: center; }
-.empty-steps .st { display: flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--faint); }
-.empty-steps .st .n {
-  display: grid; place-items: center;
-  width: 20px; height: 20px; border-radius: 50%;
-  border: 1px solid var(--border);
-  font-family: var(--font-mono); font-size: .69rem; color: var(--muted);
-}
 .empty-hero .btn { margin-top: 1rem; }
 
 /* ---------- Modal fields ---------- */
@@ -5751,6 +5742,16 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
    gutter narrows. */
 @media (max-width: 560px) {
   .pj-row .pj-meter { display: none; }
+  /* Ruling 532: the setup step that leads puts its action on a row of its
+     own under the sentence, as wide as the text and as tall as a full
+     button, where a thumb finds it; the other rows keep theirs beside the
+     title. */
+  .setup-step[data-state="lead"] { grid-template-columns: auto minmax(0, 1fr); row-gap: .75rem; }
+  .setup-step[data-state="lead"] > .btn { grid-column: 2; min-height: 38px; }
+  /* Its meter yields like the project row's: at 320px the title broke over
+     three lines beside it, and the count says what it draws. One class more
+     than the base rule, which the sheet declares later. */
+  .setup-head > .setup-meter { display: none; }
   .pj-row .pj-name { min-width: 0; }
   .pj-row .pj-link { padding-right: 4.4rem; }
   /* U39-16: a notification row's trailing controls (Mark read, the dot, the
@@ -9145,3 +9146,65 @@ a.pr-branch:hover { background: var(--tint-hover); }
   border: 1px solid transparent;
 }
 .ctl-conv-sealed .ctl-conv-title { color: var(--muted); font-weight: 400; }
+
+/* ---------- appended: ruling 532, the setup checklist ---------- */
+/* Home's first section while any of the viewer's setup steps is open: a card
+   of numbered rows, the hosted sign-in's steps (ruling 127) at the size of a
+   page section. A step's mark is its number, blue while the step leads and a
+   green check once it is done: a pass is the success green, not the teal of
+   "ready". The meter beside the count fills from the left in the project
+   card's stage-meter language (`.pj-meter`) and is decoration: the count
+   says it. */
+.setup {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.setup-head { display: flex; align-items: center; gap: .75rem; padding: 1rem 1rem .75rem; }
+.setup-head h2 { font-size: 1rem; }
+.setup-count {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: .75rem; color: var(--faint);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.setup-meter { display: flex; gap: 2px; width: 5rem; height: 6px; flex: none; }
+.setup-meter > span { flex: 1; border-radius: 2px; background: var(--tint-press); }
+.setup-meter > .on { background: var(--success); }
+.setup-steps { list-style: none; margin: 0; padding: 0; }
+/* Every row is as tall as one with a small button (30px) in its padding, so
+   a checked row does not shrink under the open ones. */
+.setup-step {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; column-gap: .75rem;
+  min-height: calc(30px + 1.5rem);
+  padding: .75rem 1rem;
+  border-top: 1px solid var(--hairline);
+}
+/* The leading step's sentence runs under its title, so the mark keeps the
+   title's line and the action stays centred on the row. */
+.setup-step[data-state="lead"] { align-items: start; }
+.setup-step[data-state="lead"] > :last-child { align-self: center; }
+.setup-mark {
+  display: grid; place-items: center;
+  width: 24px; height: 24px;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--surface); color: var(--faint);
+  font-family: var(--font-mono); font-size: .75rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.setup-mark .ico { width: 14px; height: 14px; }
+.setup-step[data-state="lead"] .setup-mark { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-pressed); }
+.setup-step[data-state="done"] .setup-mark { border-color: transparent; background: var(--success-soft); color: var(--success-dark); }
+.setup-text { display: flex; flex-direction: column; gap: .125rem; min-width: 0; padding-top: .125rem; }
+.setup-title { font-size: .88rem; font-weight: 600; line-height: 1.4; color: var(--fg); }
+.setup-step[data-state="done"] .setup-title { font-weight: 500; color: var(--muted); }
+.setup-sentence { font-size: .75rem; line-height: 1.5; color: var(--muted); }
+.setup-fact { max-width: 12rem; font-size: .75rem; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+.setup-wait { font-size: .75rem; color: var(--faint); text-align: right; }
+/* Profile's Agent accounts panel when the checklist's link opened it
+   (`#agent-accounts`): ringed the way ruling 497's places are while the URL
+   names it, and, like them, a region focused by script that paints no ring
+   once the person's next press ends the mark (ruling 523). */
+.panel[data-targeted] { outline: 2px solid var(--blue); outline-offset: 2px; }
+.panel:focus-visible:not([data-targeted]) { outline: none; }

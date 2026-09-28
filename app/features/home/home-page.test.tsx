@@ -66,6 +66,7 @@ function baseData(projects: HomeProjectCard[]): HomePageData {
     },
     greet: "Good evening",
     projects,
+    setup: null,
     prefs: { view: "grid", stars: {} },
     org: {
       connectionOwners: ["akin-ozer"],
@@ -851,5 +852,53 @@ describe("acce-8: the project link is named by what it shows", () => {
     expect(
       getByRole("link", { name: /^Viberr Core.*akin-ozer\/viberr.*3 tasks.*2 waiting on you/ }),
     ).toBe(link);
+  });
+});
+
+/**
+ * Ruling 532: the setup checklist. The first step the viewer can take leads
+ * with its sentence and the primary action; every other open step keeps its
+ * own action, each going where that thing is done; a project with no GitHub
+ * connection says what it waits on.
+ */
+describe("ruling 532: the setup checklist", () => {
+  const steps: HomePageData["setup"] = [
+    { id: "github", state: "todo" },
+    { id: "account", state: "done" },
+    { id: "agents", state: "todo" },
+    { id: "project", state: "blocked" },
+  ];
+
+  it("leads with the first step open and sends each action to its place", () => {
+    const { getByRole } = renderHome({ ...baseData([]), setup: steps });
+    const list = within(getByRole("region", { name: "Finish setting up" }));
+    expect(list.getByText("1 of 4").textContent).toBe("1 of 4 done");
+    // CANARY: give every open step the primary action and "Connect" wears it
+    // too; drop `add=1` and the settings page opens on no dialog.
+    const github = list.getByRole("link", { name: "Connect GitHub" });
+    expect(github.getAttribute("href")).toBe("/org/settings?tab=connections&add=1");
+    expect(github.classList.contains("primary")).toBe(true);
+    expect(list.getByText("Agents push branches and open pull requests through a GitHub token.")).toBeTruthy();
+    const agents = list.getByRole("link", { name: "Connect" });
+    expect(agents.getAttribute("href")).toBe("/profile#agent-accounts");
+    expect(agents.classList.contains("primary")).toBe(false);
+    // The check is drawn aria-hidden, so the words say which steps are done.
+    expect(list.getByText("Your own account").closest("li")?.textContent).toBe("Done: Your own account");
+    expect(list.getByText("After GitHub")).toBeTruthy();
+    expect(list.queryByRole("button", { name: "New project" })).toBeNull();
+  });
+
+  it("opens the New project dialog from the first project step", async () => {
+    const { getByRole, findByRole } = renderHome({
+      ...baseData([]),
+      setup: [
+        { id: "agents", state: "done", backends: ["codex"] },
+        { id: "project", state: "todo" },
+      ],
+    });
+    // CANARY: render the project step's action as a link to a page and no
+    // dialog opens.
+    fireEvent.click(getByRole("button", { name: "New project" }));
+    expect(await findByRole("dialog", { name: /New project/ })).toBeTruthy();
   });
 });
