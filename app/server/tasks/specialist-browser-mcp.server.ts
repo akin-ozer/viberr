@@ -249,8 +249,11 @@ export function attachmentsDropSection(attachmentsDir: string): string {
     // and an agent reworking that task was standing next to the evidence its
     // directive was summarising, told only where to put things.
     `This is a real directory at \`${attachmentsDir}\`, and it is TWO-WAY.\n\n` +
-    "READING: on a task that has run before, it already holds the files those " +
-    "runs attached. List it before you act on a claim about evidence, and read " +
+    // Ruling 530: a person's own upload lands here too (ruling 379), and on a
+    // board that delivers results it is usually the input the goal names.
+    "READING: it holds the files people attached to this task, such as an input " +
+    "the goal asks you to work from, and, on a task that has run before, the files " +
+    "those runs attached. List it before you act on a claim about evidence, and read " +
     "the ones your directive or the task timeline actually cites, by name -- " +
     "not the whole folder, which can be dozens of files. A report saying a " +
     "thing was proved and the file proving it are different objects, and only " +
@@ -262,9 +265,16 @@ export function attachmentsDropSection(attachmentsDir: string): string {
     "directory, and never commit it. " +
     "Every file that appears there is posted on your reply on the task page, " +
     "and images render inline. Cite the exact filename in your reply and " +
-    "evidence references. Use it for things humans need to SEE — screenshots, " +
-    "captures, small reports; code and large artifacts belong in the " +
-    "repository and the pull request, not here. The browser tool's own " +
+    "evidence references. Use it for things humans need to SEE: screenshots, " +
+    "captures, reports. On a task that changes the repository, code and large " +
+    "artifacts belong in the repository and the pull request, not here. " +
+    // Ruling 530: on a board that delivers results, what the person asked for
+    // is the delivery, and it lands on the task, never in a pull request.
+    "On a task whose deliverable is a result rather than a change to the " +
+    "repository (an estimate, a report, a dataset; its goal says which), the " +
+    "result's files go here and never into a commit: they are what the person " +
+    "reads and the reviewer judges. " +
+    "The browser tool's own " +
     "machine-stamped working files (page-….yml snapshots, console-….log dumps) " +
     "are cleaned up after your run UNLESS you cite the exact filename — cite " +
     "one only when a human genuinely needs to read it."

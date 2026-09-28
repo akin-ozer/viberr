@@ -1197,8 +1197,11 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   authority; ruling 159: every path the prompt hands the agent is ABSOLUTE, so the
   "Posting files on the task thread" section, the browser section and the workspace
   contract's write exception all name `taskAttachmentsDir` in full and say it is outside
-  the checkout and never committed; the workspace contract also lets the run READ its
-  knowledge-base folders, its profile's plus the project's rulings KB,
+  the checkout and never committed; that section also says the folder holds what people
+  attached to the task (an input the goal names) beside earlier runs' files, and that on a
+  task whose deliverable is a result rather than a change to the repository the result's
+  files go there and never into a commit, ruling 530; the workspace contract also lets
+  the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
   `knowledgeBaseReadDirs`, ruling 422), resolve delivery permissions, compute the
   denylist (or the "everything off" list when the profile vanished, ruling 26), write the
   redacted `run·inputs` line (with the toolkit's `toolNames`, ruling 339), flag a

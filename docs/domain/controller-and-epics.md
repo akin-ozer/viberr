@@ -14,7 +14,7 @@
 > `app/routes/resources.controller.ts`, `app/routes/resources.controller-unseen.ts`, `app/root.tsx`
 > (the dock mount), `app/features/org-settings/controller-admin-panel.tsx`,
 > `db/migrations/0001_baseline.sql` (the two controller tables).
-> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 483, 492, 502 and 503 in
+> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 483, 492, 502, 503 and 530 in
 > [decisions.md](../architecture/decisions.md) set most of what is here.
 > Verified against `main` @ `7d9fbf72` (2026-09-23); §7 rewritten for ruling 503 (2026-09-26).
 
@@ -60,6 +60,42 @@ Identity facts:
   the asker.
 - Its actor reference in task files is the bare `controller`; it renders as an agent
   named "Controller". `@controller` is a reserved mention handle.
+
+### 1.1 What a board delivers (ruling 530)
+
+Before it designs a project, the controller settles what the board delivers, and its
+doctrine, guide and handbook all say so. A **software** board's tasks change the
+project's repository and ship as pull requests; its bring-up is the guide's toolchain and
+gate steps. On a **results** board the board itself is the workflow: a person files a
+task with an input (an inventory, a brief, a dataset, a question), the agents do the
+steps on that task and ask what they need, and the result comes back on it. The
+controller reads which one from the person's words: a task to file and the result that
+comes back on it mean results, an app, a site or a tool to build means software, and
+words that only name the work ("our invoice processing") fit both, so it asks before it
+creates anything.
+
+The guide's "A board that delivers results" says how one is built, out of the board's
+own pieces:
+
+- One task is one piece of the person's work. Its deliverable is the files its
+  delivering agent saves on the task; its done signal is the required reviewer's approval
+  of them (a verdict binds to `files:<deliveredAt>`, ruling 388). No pull request is
+  opened and acceptance merges nothing ([task-lifecycle.md](task-lifecycle.md)).
+- Each step is an agent with its skill and knowledge bases, deployed at the stages where
+  the step happens. The agent that makes the final result delivers the task, and the
+  operator's playbook skill names it, because only the delivering agent's saved files are
+  the delivery.
+- What a task on the board is goes into the rulings knowledge base; research lands in
+  knowledge bases and skills; the workflow improves by running sample inputs as ordinary
+  tasks, the expected answers given only to the judging agent, and changing skills,
+  knowledge bases, instructions, stages or reviewers where the scores point.
+- Nothing is planned as software to do the agents' work: no repository foundation,
+  toolchain, pipeline, generator, validator or CLI, no gates (a files-only delivery owes
+  none, ruling 482), and no Developer and Reviewer to build them, unless the person asked
+  for that software.
+
+Every project still needs a repository: every run works in a checkout of one, though on a
+results board nothing the person asked for is committed to it.
 
 ## 2. Surfaces and access
 
