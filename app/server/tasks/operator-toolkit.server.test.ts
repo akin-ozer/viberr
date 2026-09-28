@@ -860,6 +860,124 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(await call("VIB-3")).not.toHaveProperty("outcome");
   });
 
+  it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {
+    // Live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000 of
+    // 5,382: a verdict stores 2,000 characters and points at the timeline
+    // (ruling 292), which another task's reader cannot open. CANARY: return
+    // the stored reason and the report stops at the cut; drop the opening
+    // match and an earlier round's report can stand in for this one.
+    const store = setupTestStore(ctxDb);
+    const deliveredAt = "2026-09-28T20:15:47.701Z";
+    const report = `## Verdict: approve, score 90/100\n\n${"The table and the findings. ".repeat(140)}\n\nSENTINEL-PAST-THE-STORED-CUT`;
+    const stored =
+      `${report.slice(0, 2000)}\n\n[cut here - the reviewer's justification ran to ` +
+      `${report.length} characters and this is its first 2,000. Its full report is on this task's timeline, whole.]`;
+    const judge = {
+      kind: "agent" as const,
+      backend: "claude" as const,
+      profileId: "estimate-judge",
+      roleHint: "Estimate Judge",
+    };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "done",
+        deliveredAt,
+        verdicts: [
+          {
+            profileId: "estimate-judge",
+            revisionId: `files:${deliveredAt}`,
+            result: "approve",
+            reason: stored,
+            at: "2026-09-28T20:31:15.087Z",
+            rounds: 1,
+          },
+        ],
+      }),
+      timeline: [
+        {
+          occurredAt: "2026-09-28T20:31:15.082Z",
+          type: "comment",
+          actor: judge,
+          title: "Review verdict",
+          text: report,
+          toAgent: false,
+          evidence: null,
+        },
+        {
+          occurredAt: "2026-09-28T19:10:00.000Z",
+          type: "comment",
+          actor: judge,
+          title: "Review verdict",
+          text: "An earlier round's report, on an earlier delivery.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`,
+    // and readBoardTask's outcome carries `verdicts[].report` (asserted below).
+    const answer = (await read.handler({ taskKey: "VIB-2" } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    // SAFETY: one task's JSON, whose `outcome.verdicts` this test wrote.
+    const parsed = JSON.parse(answer.content[0]!.text) as {
+      outcome: { verdicts: { report: string }[] };
+    };
+    expect(parsed.outcome.verdicts[0]!.report).toBe(report);
+
+    // A verdict whose own report is not on the timeline keeps what it stored,
+    // and an earlier round's report is never taken for it.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        stage: "done",
+        deliveredAt,
+        verdicts: [
+          {
+            profileId: "estimate-judge",
+            revisionId: `files:${deliveredAt}`,
+            result: "approve",
+            reason: stored,
+            at: "2026-09-28T20:31:15.087Z",
+            rounds: 1,
+          },
+        ],
+      }),
+      timeline: [
+        {
+          occurredAt: "2026-09-28T19:10:00.000Z",
+          type: "comment",
+          actor: judge,
+          title: "Review verdict",
+          text: "An earlier round's report, on an earlier delivery.",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: as above.
+    const other = (await read.handler({ taskKey: "VIB-3" } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    // SAFETY: as above.
+    const otherParsed = JSON.parse(other.content[0]!.text) as {
+      outcome: { verdicts: { report: string }[] };
+    };
+    expect(otherParsed.outcome.verdicts[0]!.report).toBe(stored);
+  });
+
   /**
    * Ruling 285 (pass 37, F37-120): the coordinator could not read a report it
    * was handed half of. Its prompt clips an agent report at 4,000 characters,

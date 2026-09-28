@@ -1,5 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
-import { reviewSubjectId, type TaskFrontmatter } from "~/schemas/task-file.schema";
+import {
+  reviewSubjectId,
+  VERDICT_REPORT_TITLE,
+  type ReviewVerdict,
+  type TaskFileEvent,
+  type TaskFrontmatter,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { currentCompletionPacket } from "./completion-packet.server";
@@ -74,6 +80,36 @@ function outcomeExcerpt(text: string, what: string): string {
   );
 }
 
+/** Whitespace-insensitive, for matching a stored reason to the report it
+ *  was cut from (the report went through the reply's newline repair). */
+function flat(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Ruling 569, amended: the verdict's whole report. A verdict stores the first
+ * 2,000 characters of its justification and a line saying the whole report is
+ * on the task's timeline (ruling 292), which a reader on another task cannot
+ * open; live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000
+ * of 5,382 and asked Arda to paste the rest. The report is the agent's "Review
+ * verdict" comment (ruling 317), the newest at or before the verdict's stamp,
+ * and it must open with what the verdict stored, so an earlier round's report
+ * never stands in for this one. Without it the stored text is all there is.
+ */
+function verdictReport(timeline: readonly TaskFileEvent[], v: ReviewVerdict): string {
+  const opening = flat(v.reason).slice(0, 120);
+  const report = timeline.find(
+    (e) =>
+      e.type === "comment" &&
+      e.title === VERDICT_REPORT_TITLE &&
+      e.actor.kind === "agent" &&
+      e.actor.profileId === v.profileId &&
+      e.occurredAt <= v.at &&
+      flat(e.text).startsWith(opening),
+  );
+  return report?.text ?? v.reason;
+}
+
 /**
  * Ruling 569: what a task came to, for a reader on another task. Its completion
  * summary when one describes what it delivered, and the verdicts on that
@@ -95,7 +131,7 @@ interface TaskOutcome {
   verdicts: { agent: string; result: string; report: string }[];
 }
 
-function taskOutcome(fm: TaskFrontmatter): TaskOutcome | null {
+function taskOutcome(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): TaskOutcome | null {
   const subject = reviewSubjectId(fm);
   const packet = currentCompletionPacket(fm);
   const verdicts = subject ? fm.verdicts.filter((v) => v.revisionId === subject) : [];
@@ -105,7 +141,7 @@ function taskOutcome(fm: TaskFrontmatter): TaskOutcome | null {
     verdicts: verdicts.map((v) => ({
       agent: v.profileId,
       result: v.result,
-      report: outcomeExcerpt(v.reason, "report"),
+      report: outcomeExcerpt(verdictReport(timeline, v), "report"),
     })),
   };
 }
@@ -142,7 +178,7 @@ export function readBoardTask(
     waitsOn: row.blockedBy.map((e) => `${e.label} (${e.state})`),
     goal: goalExcerpt(file?.parsed.goal ?? null),
   };
-  const outcome = file ? taskOutcome(file.parsed.frontmatter) : null;
+  const outcome = file ? taskOutcome(file.parsed.frontmatter, file.parsed.timeline) : null;
   if (outcome) read.outcome = outcome;
   return JSON.stringify(read, null, 1);
 }
