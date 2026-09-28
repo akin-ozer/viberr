@@ -29,6 +29,11 @@ import {
   type DependencyReleasePayload,
 } from "~/shared/dependencies";
 import {
+  archivedEntryRefusal,
+  cycleEntryRefusal,
+  doneEntriesRefusal,
+} from "~/shared/dependency-candidates";
+import {
   deadDependencies,
   dependenciesSatisfied,
   listHeldTasks,
@@ -142,13 +147,11 @@ export function validateDependencyRefs(
     }
     const row = taskRow(db, slug, ref.task);
     if (!row) throw AppError.validation(`${spelled} is not a task in this project.`);
-    if (row.archived) throw AppError.validation(`${spelled} is archived; a task cannot wait on abandoned work.`);
+    if (row.archived) throw AppError.validation(archivedEntryRefusal(spelled));
     const cycle = cyclePath(db, slug, ref, input.self);
     if (cycle) {
       const selfName = input.self ? formatDependencyRef(input.self) : "this task";
-      throw AppError.validation(
-        `Waiting on ${spelled} would close a cycle: ${[selfName, ...cycle].join(" waits on ")}.`,
-      );
+      throw AppError.validation(cycleEntryRefusal(spelled, [selfName, ...cycle]));
     }
     if (!out.includes(spelled)) out.push(spelled);
   }
@@ -243,11 +246,7 @@ export async function setTaskDependencies(
   // one already on the list that finished since is the engine's to release.
   const alreadyDone = resolveDependencies(db, input.projectSlug, added).filter((e) => e.state === "done");
   if (alreadyDone.length > 0) {
-    const one = alreadyDone.length === 1;
-    throw AppError.validation(
-      `${alreadyDone.map((e) => e.label).join(", ")} ${one ? "is" : "are"} already done, so waiting on ` +
-        `${one ? "it" : "them"} holds nothing. Leave ${one ? "it" : "them"} off the list.`,
-    );
+    throw AppError.validation(doneEntriesRefusal(alreadyDone.map((e) => e.label)));
   }
   if (JSON.stringify(next) === JSON.stringify(previous)) {
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false, blockedBy: next, added, removed };

@@ -162,6 +162,7 @@ export function TaskDetailPage({
   attachmentProducers = {},
   attachmentsBase = null,
   changesUrl = null,
+  dependencyCandidatesUrl = null,
   completion = null,
   runtime: loadedRuntime,
   deployedSpecialists,
@@ -221,6 +222,10 @@ export function TaskDetailPage({
   /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
    *  read, built by the route component. Null hides the panel. */
   changesUrl?: string | null;
+  /** Ruling 548: `/projects/<slug>/tasks/<KEY>/dependency-candidates`, the
+   *  Blocked by picker's read, built by the route component. Null offers no
+   *  list; a key typed in full still goes in. */
+  dependencyCandidatesUrl?: string | null;
   /** Ruling 521: the completion packet as the loader read it (Operator's
    *  summary and screenshots, each reviewer's verdict, the change's size);
    *  null while nothing is delivered. */
@@ -1041,6 +1046,7 @@ export function TaskDetailPage({
           canEdit={canEditMeta}
           labelSuggestions={labelSuggestions}
           epics={epics}
+          dependencyCandidatesUrl={dependencyCandidatesUrl}
         />
       </div>
 

@@ -90,6 +90,12 @@ export default [
   // Ruling 484: the task page's Changes panel read (the delivered revision's
   // files and patches), loaded by the panel itself, member-only.
   route("projects/:slug/tasks/:key/changes", "routes/task-changes.ts"),
+  // Ruling 548: the Blocked by picker's list of the project's other tasks,
+  // loaded by the picker itself, member-only.
+  route(
+    "projects/:slug/tasks/:key/dependency-candidates",
+    "routes/task-dependency-candidates.ts",
+  ),
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),

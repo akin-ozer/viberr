@@ -3456,7 +3456,11 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     // from any box (the five this check found first were new-project-modal,
     // create-profile-modal, execution-profile and settings-page's invite and
     // repair boxes), or its onAnimationEnd.
-    /** Every JSX opening tag in a source, braces, strings and comments skipped. */
+    /** Every JSX opening tag in a source, braces, strings and comments skipped.
+     *  A line comment inside an attribute's braces is skipped too: read as code,
+     *  the apostrophe in "the project's epics" (task-details-panel.tsx, ruling
+     *  548's review) opened a string that ran the Epic row's tag on for 333
+     *  lines, into the wait editor's alert below it. */
     const openingTags = (src: string): { tag: string; line: number }[] => {
       const out: { tag: string; line: number }[] = [];
       for (const m of src.matchAll(/<([A-Za-z][\w.]*)[\s>]/g)) {
@@ -3464,7 +3468,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
         let i = m.index! + 1;
         for (; i < src.length; i++) {
           const c = src[i]!;
-          if (c === "/" && src[i + 1] === "/" && depth === 0) i = src.indexOf("\n", i);
+          if (c === "/" && src[i + 1] === "/") i = src.indexOf("\n", i);
           else if (c === "/" && src[i + 1] === "*") i = src.indexOf("*/", i) + 1;
           else if ((c === '"' || c === "'" || c === "`") && (depth > 0 || c === '"')) {
             const close = src.indexOf(c, i + 1);

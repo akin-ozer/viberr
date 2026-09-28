@@ -6,6 +6,7 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
 import { toISODate } from "~/ui/calendar";
+import type { DependencyCandidatesView } from "~/routes/task-dependency-candidates";
 import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
@@ -289,8 +290,13 @@ describe("ruling 131: the Current-state Waiting-on row names the other work", ()
   });
 });
 
-/** The Details panel, capturing every form it posts. */
-function renderCapturing(patch: Partial<TaskDetail>, canEdit: boolean) {
+/** The Details panel, capturing every form it posts. `candidates` is what the
+ *  Blocked by picker's read answers (ruling 548). */
+function renderCapturing(
+  patch: Partial<TaskDetail>,
+  canEdit: boolean,
+  candidates: DependencyCandidatesView = { ok: true, tasks: [] },
+) {
   const task = detail(patch);
   const posted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -298,7 +304,12 @@ function renderCapturing(patch: Partial<TaskDetail>, canEdit: boolean) {
       path: "/",
       Component: () => (
         <ToastProvider>
-          <TaskDetailsPanel task={task} canEdit={canEdit} labelSuggestions={["qa", "codex"]} />
+          <TaskDetailsPanel
+            task={task}
+            canEdit={canEdit}
+            labelSuggestions={["qa", "codex"]}
+            dependencyCandidatesUrl="/projects/viberr-core/tasks/VIB-151/dependency-candidates"
+          />
         </ToastProvider>
       ),
       action: async ({ request }) => {
@@ -307,6 +318,7 @@ function renderCapturing(patch: Partial<TaskDetail>, canEdit: boolean) {
         return { ok: true };
       },
     },
+    { path: "/projects/:slug/tasks/:key/dependency-candidates", loader: () => candidates },
   ]);
   return { ...render(<Stub initialEntries={["/"]} />), posted };
 }
@@ -334,28 +346,148 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
     expect(kv(bare, "Blocked by")).toBe("Nothing");
   });
 
-  it("edits through its OWN form and intent: the submitted list is the field's text, and an empty field clears", async () => {
-    // Canary: remove the dependency editor from the Blocked by trigger, or
-    // route it through the metadata form's intent.
-    const view = renderCapturing({ blockedBy: entries }, true);
-    fireEvent.click(trigger(view, "Blocked by"));
-    const form = view.container.querySelector<HTMLFormElement>("form[data-dependency-form]")!;
-    expect(form).toBeTruthy();
-    const input = form.querySelector<HTMLInputElement>('input[name="blockedBy"]')!;
-    // Prefilled with the CANONICAL refs, not the display labels.
-    expect(input.value).toBe("JC-3, JC-6, JC-7");
-    fireEvent.change(input, { target: { value: "JC-7, JC-12" } });
-    fireEvent.click(form.querySelector('button[type="submit"]')!);
-    await waitFor(() => expect(view.posted).toHaveLength(1));
-    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, JC-12" });
-    expect(view.posted[0]!.priority).toBeUndefined();
-    // A saved wait closes its editor.
-    await waitFor(() => expect(view.container.querySelector("form[data-dependency-form]")).toBeNull());
-  });
-
   it("an archived task offers no dependency editor", () => {
     const { queryByRole } = renderCapturing({ blockedBy: entries, archived: true }, true);
     expect(queryByRole("button", { name: /^Blocked by/ })).toBeNull();
+  });
+});
+
+/**
+ * Ruling 548: the wait's editor works the way the Owner row releases its
+ * owner. Each entry is the row's chip with a remove cross, the field finds the
+ * project's tasks from the picker's own read, and Save still posts the FULL
+ * list through the wait's own form and intent (ruling 131). Which tasks the
+ * read bars, and why, is the read model's suite.
+ */
+describe("ruling 548: the Blocked by editor finds tasks and takes entries out by their cross", () => {
+  const entries = [
+    { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3" },
+    { ref: "JC-6", label: "JC-6", state: "failed" as const, taskKey: "JC-6" },
+    { ref: "JC-7", label: "JC-7", state: "open" as const, taskKey: "JC-7" },
+  ];
+  const CANDIDATES: DependencyCandidatesView = {
+    ok: true,
+    tasks: [
+      { key: "JC-90", title: "Refund flow", stage: "Review", bar: null },
+      { key: "JC-80", title: "Invoice export", stage: "Review", bar: null },
+      { key: "JC-12", title: "Pricing table", stage: "Review", bar: null },
+      { key: "JC-9", title: "Search index", stage: "Triage", bar: null },
+      { key: "JC-8", title: "Checkout flow", stage: "Done", bar: "done" },
+      { key: "JC-6", title: "Old importer", stage: "Triage", bar: "archived" },
+      { key: "JC-5", title: "Search facets", stage: "Triage", bar: "cycle", chain: ["VIB-151", "JC-5", "VIB-151"] },
+      { key: "JC-3", title: "Login form", stage: "Done", bar: "done" },
+    ],
+  };
+
+  /** The editor, opened: its dialog and its field, once the picker's chunk
+   *  is in. */
+  async function openEditor(view: ReturnType<typeof renderCapturing>) {
+    fireEvent.click(trigger(view, "Blocked by"));
+    const dialog = view.getByRole("dialog", { name: "Blocked by" });
+    return { dialog, field: await within(dialog).findByRole("combobox", { name: "What this task waits on" }) };
+  }
+  const chips = (dialog: HTMLElement) => [...dialog.querySelectorAll(".wait-chip")].map((c) => c.textContent);
+  const options = (dialog: HTMLElement) =>
+    within(dialog).queryAllByRole("option").map((o) => o.textContent);
+
+  it("posts the full list once a cross takes an entry out and a picked task joins it", async () => {
+    // CANARY: drop the picker's focus as it mounts and the editor opens on
+    // Cancel; drop the note and the archived JC-6 is refused only after Save;
+    // bar the done JC-3 the wait holds and, taken out, it cannot go back in
+    // although the writer would keep it; drop the hidden list and Save posts
+    // no wait at all.
+    const view = renderCapturing({ blockedBy: entries }, true, CANDIDATES);
+    const { dialog, field } = await openEditor(view);
+    expect(document.activeElement).toBe(field);
+    // Archived JC-6 is refused on every Save while it is listed (ruling 355).
+    expect(within(dialog).getByText("JC-6 can never complete: take it out to save.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove JC-6" }));
+    expect(within(dialog).queryByText(/can never complete/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove JC-3" }));
+    fireEvent.mouseDown(await within(dialog).findByRole("option", { name: /^JC-3 / }));
+    fireEvent.mouseDown(within(dialog).getByRole("option", { name: /^JC-12 / }));
+    expect(chips(dialog)).toEqual(["JC-7", "JC-3 · done", "JC-12"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, JC-3, JC-12" });
+    expect(Object.keys(view.posted[0]!).sort()).toEqual(["_csrf", "blockedBy", "intent"]);
+    await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  });
+
+  it("finds tasks by key or title, lists a barred one only once typed, and adds none the writer would refuse", async () => {
+    // CANARY: offer the barred tasks with nothing typed and JC-8 and JC-5 join
+    // the first list; drop the bar check from the pick and JC-5 goes in; list
+    // the free matches before the key typed and Enter on "jc-8" adds JC-80;
+    // highlight a match for a key already listed and Enter adds JC-90.
+    const view = renderCapturing({}, true, CANDIDATES);
+    const { dialog, field } = await openEditor(view);
+    const status = within(dialog).getByRole("status");
+    await waitFor(() =>
+      expect(options(dialog)).toEqual([
+        "JC-90 Refund flow Review",
+        "JC-80 Invoice export Review",
+        "JC-12 Pricing table Review",
+        "JC-9 Search index Triage",
+      ]),
+    );
+    fireEvent.change(field, { target: { value: "search" } });
+    expect(options(dialog)).toEqual(["JC-9 Search index Triage", "JC-5 Search facets waits on VIB-151"]);
+    const barred = within(dialog).getByRole("option", { name: /^JC-5 / });
+    expect(barred.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.mouseDown(barred);
+    expect(chips(dialog)).toEqual([]);
+    // The writer's own sentence (the read carries the cycle it would close).
+    expect(status.textContent).toBe("Waiting on JC-5 would close a cycle: VIB-151 waits on JC-5 waits on VIB-151.");
+    // A key typed in full is that task, barred or not, never the next match.
+    fireEvent.change(field, { target: { value: "jc-8" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(chips(dialog)).toEqual([]);
+    expect(status.textContent).toBe("JC-8 is already done, so waiting on it holds nothing. Leave it off the list.");
+    // Enter adds the best match of what is typed.
+    fireEvent.change(field, { target: { value: "jc-9" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(chips(dialog)).toEqual(["JC-9"]);
+    // Typed again, the key already listed highlights nothing.
+    fireEvent.change(field, { target: { value: "jc-9" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(chips(dialog)).toEqual(["JC-9"]);
+    expect(status.textContent).toBe("JC-9 is already on the list.");
+    // A pasted list goes in key by key; a key the writer refuses stays typed.
+    fireEvent.change(field, { target: { value: "JC-12, JC-8, " } });
+    expect(chips(dialog)).toEqual(["JC-9", "JC-12"]);
+    expect(field).toHaveProperty("value", "JC-8, ");
+  });
+
+  it("takes the last entry out on Backspace, posts nothing for an unchanged Save, and an empty list for a cleared one", async () => {
+    // CANARY: drop the unchanged check and the first Save posts a no-op; keep
+    // the pointer's highlight once it leaves the list and the Enter below adds
+    // JC-12 instead of saving.
+    const view = renderCapturing({ blockedBy: [entries[2]!] }, true, CANDIDATES);
+    fireEvent.click(within((await openEditor(view)).dialog).getByRole("button", { name: "Save" }));
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(view.posted).toHaveLength(0);
+    const { dialog, field } = await openEditor(view);
+    fireEvent.mouseMove(await within(dialog).findByRole("option", { name: /^JC-12 / }));
+    fireEvent.mouseLeave(within(dialog).getByRole("listbox"));
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(chips(dialog)).toEqual(["JC-7"]);
+    fireEvent.keyDown(field, { key: "Backspace" });
+    expect(chips(dialog)).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    // Ruling 131: an empty list clears the wait, which for a person IS the release.
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "" });
+  });
+
+  it("takes a key typed in full when the project's tasks cannot be loaded, and leaves it to Save to check", async () => {
+    // CANARY: refuse every key while the list is missing and the wait can
+    // only be cleared, never edited, until the read comes back.
+    const view = renderCapturing({}, true, { ok: false, reason: "The project's tasks could not be loaded." });
+    const { dialog, field } = await openEditor(view);
+    await within(dialog).findByText(/could not be loaded\. A key typed in full still goes in/);
+    fireEvent.change(field, { target: { value: "jc-40" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(chips(dialog)).toEqual(["JC-40"]);
   });
 });
 

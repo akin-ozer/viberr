@@ -9208,3 +9208,22 @@ a.pr-branch:hover { background: var(--tint-hover); }
    once the person's next press ends the mark (ruling 523). */
 .panel[data-targeted] { outline: 2px solid var(--blue); outline-offset: 2px; }
 .panel:focus-visible:not([data-targeted]) { outline: none; }
+
+/* ---------- appended: ruling 548, the Blocked by picker ---------- */
+/* The wait's editor gives each entry the Owner row's release cross (`.own-x`),
+   sized to the chip, and finds the project's tasks under the field: the key
+   in the code face, the title in the muted ink and, quietest, its stage, or
+   for a task the writer would refuse as a new entry the reason, the row
+   dimmed. The editor is wider than the labels' so a title has room. */
+.kv-row[data-prop="deps"] .prop-pop { width: 21rem; }
+.dep-field { display: flex; flex-direction: column; gap: .5rem; }
+.wait-chip .own-x { width: 16px; height: 16px; margin-right: -.125rem; }
+/* The crosses keep WCAG 2.2's 24px of clear space (2.5.8) from the chips and
+   the field wrapped under them. */
+.dep-field .label-input { row-gap: .375rem; }
+.wait-chip .own-x .ico { width: 10px; height: 10px; }
+.dep-opt .label-opt-name { flex: none; }
+.dep-opt-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.dep-opt-hint { flex: none; font-size: .69rem; color: var(--faint); white-space: nowrap; }
+.dep-opt[aria-disabled="true"] { cursor: default; }
+.dep-opt[aria-disabled="true"] > * { color: var(--placeholder); }
