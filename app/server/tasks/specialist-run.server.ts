@@ -414,12 +414,12 @@ async function mcpServersFor(
 /** Rulings 483 and 498: the collaboration note a Claude run with a knowledge
  *  base gets. */
 export const KB_CORRECTION_NOTE_CLAUDE =
-  "- `correct_knowledge_doc` — when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say. It is written at once, for every later run to read, and a person undoes it if they disagree.";
+  "- `correct_knowledge_doc` — when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say. It is written at once, for every later run to read, and a person undoes it if they disagree. The task's entry quotes the passage only when every agent on the project is given that knowledge base.";
 
 /** Rulings 483 and 498: the same channel on Codex, which mounts no Viberr
  *  tools. */
 export const KB_CORRECTION_NOTE_CODEX =
-  "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read.";
+  "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read. For a knowledge base some agents on this project are not given, name only the document and what is wrong, and quote none of it: your report is on the task, where they read it.";
 
 /**
  * Ruling 488 (F40-67): the relay, named where a specialist reads its channels.

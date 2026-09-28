@@ -911,7 +911,11 @@ with its own (which also relays a Codex agent's reported correction), both throu
 [file-formats.md §8](../architecture/file-formats.md)). Nobody approves it first: the owner
 chose it on 2026-09-26 ("No human can approve all of these while inspecting them
 thoroughly"). The task records it in one `kb_correction` event (the document, the id, the
-passage before and after) and notifies nobody. The record is the
+passage before and after) and notifies nobody. Ruling 568: the event quotes the passages only
+for the project's rulings or a knowledge base every deployed specialist is given; otherwise it
+names the document and the id, says which agents are not given it, and points to the panel
+below, and an undo's event follows the same rule, because a task's timeline is read by every
+agent that can be engaged on it. The record is the
 `task.kb_correction.merged` audit row, which carries both passages, so an undo is the same
 edit in reverse.
 
