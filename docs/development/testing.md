@@ -540,10 +540,12 @@ comment quotes the same title).
 | `06-activity-hydration.spec.ts` | 2 | clean hydration in `Pacific/Auckland`: the activity page and the task page (VIB-142 with its open accept card); both assert zero `pageerror` and a timestamp-only SSR first pass |
 | `07-accessibility.spec.ts` | 37 generated | axe WCAG 2.2 AA on 13 surfaces and 4 dialogs × 2 themes, plus the mobile rail overlay and login in both themes |
 | `08-controller-dock.spec.ts` | 4 | the dock follows the surface you stand on and stays off the controller pages; at 375 px it is a bottom sheet with no sideways scroll; a dock the tab remembers open comes back after a reload without its entrance; a click on the trigger while the dock closes turns it back open |
-| `09-epics.spec.ts` | 4 | a new epic opens on its own page (the chain's first test creates `epic-1`), tasks join and leave it from its page and from their own, and the epic page and its dialogs pass axe (ruling 503) |
+| `09-epics.spec.ts` | 5 | a new epic opens on its own page (the chain's first test creates `epic-1`), tasks join and leave it from its page and from their own, the epic page reads in one column at 375 px (ruling 560), and the epic page and its dialogs pass axe (ruling 503) |
+| `10-notification-anchors.spec.ts` | 1 | with Chrome's scroll anchoring off, a notification about an event on another task lands on it in view after the page's long comments fold (rulings 497, 547) |
+| `11-label-editor-press.spec.ts` | 2 | one press on the Labels editor's Save, made where Save stood with the label list open, saves: after a pick and with a label half typed (ruling 561) |
 
-The tree holds 67 tests plus the setup project (counted from the spec files on
-2026-09-27; Playwright counts the setup itself, so its own total reads 68). `npm run e2e`
+The tree holds 71 tests plus the setup project (counted from the spec files on
+2026-09-28; Playwright counts the setup itself, so its own total reads 72). `npm run e2e`
 on 2026-09-27 read `68 passed (43.8s)`, 64 s end to end with the image build.
 Two gates run a real CLI entrypoint: e2e runs `npm run seed:demo`, and
 `app/server/seed/default-assets.server.test.ts` runs `npm run seed` inside `npm test`.

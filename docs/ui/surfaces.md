@@ -596,7 +596,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   editor (`edit-task-meta`). For an editor the value is a ghost trigger (the hover fill,
   a blue edge while open, named "<label> <value>") that opens its editor under the row:
   Priority a menu (Urgent, High, Normal, Low, each flag in its pill's tone, the current
-  one checked; arrows, Home, End), Labels the label picker with Cancel and Save, Due date
+  one checked; arrows, Home, End), Labels the label picker with Cancel and Save (a press
+  that leaves its field lands where it began: the field keeps its height until the press
+  is over, ruling 561), Due date
   the calendar (a pick saves; "Clear due date" when one is set), Blocked by the wait's own
   form (ruling 131), a picker since ruling 548: each entry the row's chip with the Owner
   row's remove cross (Backspace in the empty field takes the last), then a field that finds
