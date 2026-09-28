@@ -322,6 +322,17 @@ describe("ruling 196: the runtime image installs what a run reaches for", () => 
     expect(text).toMatch(/npm install -g pnpm@\d+\.\d+\.\d+/);
   });
 
+  it("ruling 566: installs poppler-utils, in a layer after chromium", () => {
+    // Live on the AWS calculator board three of four result runs could not
+    // render a PDF export, and one that decoded it by hand was killed past 5 GB
+    // of output. CANARY: delete the install line and this fails; move it before
+    // chromium and the second expectation fails (the chromium layer re-fetches).
+    const text = dockerfile();
+    const poppler = text.search(/apt-get install -y --no-install-recommends poppler-utils/);
+    expect(poppler).toBeGreaterThan(-1);
+    expect(poppler).toBeGreaterThan(text.search(/install -y --no-install-recommends chromium/));
+  });
+
   it("does NOT install docker, and says why", () => {
     const text = dockerfile();
     // CANARY: add a docker install here and this fails. The daemon socket is a

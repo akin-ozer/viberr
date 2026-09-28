@@ -56,6 +56,7 @@ import {
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
 import { commentToAgent, deliverDeferredMention } from "./task-actions.server";
+import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -1173,6 +1174,94 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     );
     expect(texts).toContain("**Decision:** Keep the defaults.");
     expect(listRunsForTaskRows(store.db, store.slug, "VIB-1").filter((r) => r.agent_profile_id === "rev")).toHaveLength(1);
+  });
+
+  it("ruling 565: the answer to an agent still running on the task waits for that run, and says so", async () => {
+    // Live on AWSC-5 the Cloud Solutions Architect raised its packet and kept
+    // working; the answer was refused by the single-flight guard, fell through
+    // to the operator with no note, and the operator wrote that it had gone
+    // "straight to" the architect. The completion delivers it (ruling 203), so
+    // it is owed, not lost. CANARY: return `result.triggered !== null` alone
+    // and the operator is handed the answer and nothing says it waits.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        { profileId: "rev", capabilities: [], extras: [], definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } },
+        { profileId: "operator", capabilities: [], extras: [], definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" } },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: false },
+        ],
+      }),
+      packet: {
+        id: "pkt_565",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/rev (reviewer)",
+        askedBy: "rev",
+        title: "Which instance class?",
+        body: "The mapping keeps the default until you answer.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Keep the default", d: "", rec: true },
+          { kind: "custom", t: "Take the cheaper one", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const startedAt = new Date(Date.now() - 60_000).toISOString();
+    upsertRun(store.db, {
+      id: "run_rev_live",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "rev-thread",
+      role: "reviewer",
+      kind: "reviewer",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "run_rev_live-session",
+      agentName: "rev",
+      agentProfileId: "rev",
+      state: "running",
+      startedAt,
+    });
+    const runOp = vi.fn<typeof runOperator>(async () => ({
+      runId: null,
+      queued: true,
+      backend: "claude" as const,
+      autonomy: "supervised" as const,
+    }));
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+    );
+    const texts = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.startsWith("@rev Your question") && t.includes("has been answered by a human"))).toBe(true);
+    expect(texts).toContain(
+      "The answer waits for rev, who asked: its run on this task is still going, and Viberr starts it on the answer as soon as that run finishes.",
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    expect(runOp).not.toHaveBeenCalled();
+    // The live run's completion owes it exactly this comment.
+    const owed = await deliverDeferredMention(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "rev", runStartedAt: startedAt },
+    );
+    expect(owed.pending).toBe(1);
   });
 
   it("F37-62: the RESUME door refuses a CLOSED task, like every other dispatch door", async () => {

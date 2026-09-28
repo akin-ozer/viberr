@@ -253,6 +253,11 @@ export interface RunInputs {
     denied: string[];
     /** Viberr collaboration tools mounted for this run. */
     toolkit: string[];
+    /** Ruling 564: where Edit, MultiEdit and Write may write on a Claude run
+     *  that posts files while its grants withhold repo-write (the attachments
+     *  folder, then the temp directory). Absent when the tools are unconfined
+     *  or denied. */
+    fileWriteRoots?: string[];
   };
   /** The turn's directive and who wrote it (null → no directive this turn). */
   directive: { from: string | null; chars: number } | null;

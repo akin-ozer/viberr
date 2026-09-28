@@ -615,6 +615,7 @@ import {
   resolvedResourceInputs,
   type ResolvedResourceInputs,
 } from "~/server/runtimes/run-inputs.server";
+import { fileWriteRoots } from "~/server/runtimes/file-tool-policy.server";
 import {
   joinedPrompt,
   sortedBy,
@@ -2299,6 +2300,11 @@ async function dispatchAgentRun(
         unresolvedResources,
         deniedTools: disallowedTools,
         toolkit: toolkit?.toolNames ?? null,
+        // Ruling 564: what the Claude adapter's hook confines the file tools to.
+        fileWriteRoots:
+          backend === "claude"
+            ? fileWriteRoots(disallowedTools, runInput.attachmentsWritableDir)
+            : null,
       }),
       promptChars: prompt.length,
       anchor,
@@ -3997,6 +4003,10 @@ export async function resolveResumeConfinement(
         unresolvedResources: resumeUnresolved,
         deniedTools: disallowedTools,
         toolkit: toolkit?.toolNames ?? null,
+        fileWriteRoots:
+          input.backend === "claude"
+            ? fileWriteRoots(disallowedTools, attachmentsWritableDir)
+            : null,
       }),
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;

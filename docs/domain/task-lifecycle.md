@@ -637,7 +637,9 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   the `packet-resolved` trigger rather than back to the agent that asked
   (`answerNamesAnotherActor`, ruling 447), and so does one for an asker that cannot run
   on the task now, such as a mapping agent whose question was answered after the task
-  moved on to Estimate (ruling 562).
+  moved on to Estimate (ruling 562). An asker still running when its question is
+  answered is not one of those: the answer waits for that run, a note says so, and the
+  run's completion starts the asker on it (ruling 565).
 - `edit_goal` is the only kind that keeps its packet open until the goal is saved; the
   confirm stamps `decided` beside `awaiting`, so the card, the hero, the queue and the
   rail all read the packet as decided after a reload, and the editor prefill is

@@ -285,7 +285,7 @@ export function attachmentsDropSection(attachmentsDir: string): string {
     "thing was proved and the file proving it are different objects, and only " +
     "one of them is evidence.\n\n" +
     "POSTING: " +
-    `to put a file in front of the humans on this task, copy it into that directory ` +
+    `to put a file in front of the humans on this task, write or copy it into that directory ` +
     "during your run. That is an ABSOLUTE path to a real directory outside the " +
     "repository checkout: do not create a folder of that name inside your working " +
     "directory, and never commit it. " +

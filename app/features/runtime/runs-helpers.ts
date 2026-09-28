@@ -288,7 +288,13 @@ export function runInputRows(
           ? `capability grants deny (on this Codex run only a withheld web search binds, through the CLI's search toggle; the repo-write and command-level entries are advisory, and the server-owned delivery gate is the boundary): ${inputs.tools.denied.join(", ")}`
           : `denied by its capability grants: ${inputs.tools.denied.join(", ")}`
         : "no built-in tools denied",
-    ].join(" · "),
+      // Ruling 564: kept, and confined by a hook rather than denied.
+      inputs.tools.fileWriteRoots?.length
+        ? `Edit, MultiEdit and Write write only into ${inputs.tools.fileWriteRoots.join(" and ")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
   });
 
   // Ruling 175: what the run may spend, stated even when nothing caps it, and

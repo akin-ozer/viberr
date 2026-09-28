@@ -260,6 +260,26 @@ describe("runInputRows (P19-G11)", () => {
     );
   });
 
+  it("ruling 564: a run whose file tools are confined says where they write", () => {
+    // Canary: drop the `fileWriteRoots` clause from `runInputRows` and the row
+    // reads as if the run had no way to write its files.
+    const row = runInputRows(
+      {
+        ...emptyInputs,
+        tools: {
+          denied: ["NotebookEdit", "Bash(git commit:*)"],
+          toolkit: [],
+          fileWriteRoots: ["/data/projects/p/tasks/P-1/attachments", "/tmp"],
+        },
+      },
+      "claude",
+    ).find((r) => r.tag === "tools")!.text;
+    expect(row).toBe(
+      "viberr tools: none · denied by its capability grants: NotebookEdit, Bash(git commit:*) · " +
+        "Edit, MultiEdit and Write write only into /data/projects/p/tasks/P-1/attachments and /tmp",
+    );
+  });
+
   it("ruling 175: states the spending cap, honest that Codex has no budget option, and 'none' when unset", () => {
     const spend = (inputs: RunInputs, backend: "claude" | "codex") =>
       runInputRows(inputs, backend).find((r) => r.tag === "spend")?.text;
