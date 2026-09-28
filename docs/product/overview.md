@@ -16,7 +16,10 @@ that carries state, execution context, decisions, timeline and evidence. A
 dedicated **operator** agent coordinates each active task, **specialist** agents
 do the stage work in isolated git workspaces, GitHub carries the branches and
 review PRs, and humans govern through policy, comments, decision packets and
-explicit acceptance. Above the per-task operators sits one instance-wide
+explicit acceptance. A board's tasks usually change its repository, but a board can
+also deliver results: each task is one piece of a person's work (an estimate from an
+inventory, a report from a brief), and its result comes back saved on the task, with
+no pull request (ruling 530). Above the per-task operators sits one instance-wide
 **controller**: a conversational agent every signed-in user can address, from its
 own page or from a dock on every page, which acts strictly within that user's own
 permissions and can plan work into **epics**, the named bodies of work that tasks join
@@ -63,7 +66,8 @@ and governed AI delivery through a familiar board/task surface.
 - Claude and Codex backends via the official SDKs, each person connecting their own account (hosted sign-in or a pasted key) on Profile → Agent accounts; per-run isolated workspaces cut from a per-project mirror; governed skills, knowledge bases (delivered as an index) and MCP mounting, with admin-marked MCP write tools; a project rulings knowledge base every run reads and the operator may propose changes to; a governed headless browser; a read-only GitHub API tool; file attachments as evidence, by agents and people; an instance spending cap per Claude run; prompt-cache measurement and end-of-run session compaction.
 - One GitHub repository per project (bootstrapped when empty); task-key branches; server-side delivery and PR opening; reconciliation every 5 minutes; PR adoption and branch-collision safety; base refreshes that keep the reviewed revision; branch cleanup; human approval on the PR counting as a verdict.
 - Board, review queue (with collision chips between open PRs), task detail (packet, execution profile, live run strip with its console, timeline), agents, policy, GitHub, activity, settings, org settings (connections, users, SSO, resources, controller, audit), notifications, profile, ⌘K palette, insights.
-- The instance controller with a governed toolkit, a built-in read-only diagnostics MCP, and a dock on every signed-in page.
+- The instance controller with a governed toolkit, a built-in read-only diagnostics MCP, and a dock on every signed-in page. Before it designs a project it settles whether the board delivers software or results, and builds a results board out of stages, agents, skills, knowledge bases and reviewers rather than an app (ruling 530).
+- Boards that deliver results: a task's deliverable can be the files its delivering agent saves on it, judged by the required reviewer and accepted without a pull request (rulings 385, 388 and 391), with no gates owed (ruling 482).
 - Epics (ruling 503): a project's Epics page and one page per epic (description, status, lead, dates, progress bar, tasks, history), task membership edited from the task page, the epic page, the board's New task and the controller, and an epic filter on the board.
 - Operations: single-writer lock, self-healing projection DB, boot recovery of stranded work, retention and disk-pressure maintenance, backup/restore, key rotation, audit export (download, S3, and export-before-purge).
 

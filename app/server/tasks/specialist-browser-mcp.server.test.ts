@@ -231,7 +231,7 @@ describe("attachmentsDropSection — ruling 159, an absolute path outside the ch
     // CANARY: restore the write-only framing.
     expect(text).toContain("TWO-WAY");
     expect(text).toContain("READING");
-    expect(text).toContain("it already holds the files those runs attached");
+    expect(text).toContain("on a task that has run before, the files those runs attached");
     // The half that keeps it from eating a context: cite, do not sweep.
     expect(text).toContain("by name");
     expect(text).toContain("not the whole folder");
@@ -240,6 +240,22 @@ describe("attachmentsDropSection — ruling 159, an absolute path outside the ch
     // The posting half survives intact.
     expect(text).toContain("POSTING");
     expect(text).toContain("images render inline");
+  });
+
+  /**
+   * Ruling 530: on a board that delivers results, a task's input is usually a
+   * person's attachment and its deliverable is the result's files. The section
+   * named only earlier runs' files, and sent every large artifact to the
+   * repository and the pull request, which is where an estimate the board was
+   * asked to make would have gone.
+   */
+  it("ruling 530: names a person's attachment as input to read, and keeps a result that is the deliverable out of every commit", () => {
+    const text = attachmentsDropSection("/data/projects/p/tasks/P-1/attachments");
+    // CANARY: drop the result sentence, and an agent on a results board reads
+    // only that large artifacts belong in the pull request.
+    expect(text).toContain("it holds the files people attached to this task, such as an input the goal asks you to work from");
+    expect(text).toContain("On a task that changes the repository, code and large artifacts belong in the repository and the pull request");
+    expect(text).toContain("the result's files go here and never into a commit");
   });
 
   it("never prints a bare store-relative path as the instruction", () => {

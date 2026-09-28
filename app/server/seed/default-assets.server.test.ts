@@ -35,6 +35,13 @@ const divergenceFieldsSchema = z.object({
   path: z.string(),
 });
 const roots: string[] = [];
+/** One `## heading` section of a shipped markdown asset, to the next heading ("" when absent). */
+function markdownSection(text: string, heading: string): string {
+  const start = text.indexOf(`\n## ${heading}\n`);
+  if (start < 0) return "";
+  const end = text.indexOf("\n## ", start + 1);
+  return end < 0 ? text.slice(start) : text.slice(start, end);
+}
 afterAll(() => {
   for (const dir of roots) rmSync(dir, { recursive: true, force: true });
 });
@@ -271,13 +278,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const doctrine = shipped();
     expect(PRIOR_SHIPPED_HASHES[guideRel]).not.toContain(sha256Hex(guide));
     expect(PRIOR_SHIPPED_HASHES[OPERATOR_REL]).not.toContain(sha256Hex(doctrine));
-    // One section of the guide, from its heading to the next one.
-    const section = (heading: string): string => {
-      const start = guide.indexOf(`\n## ${heading}\n`);
-      if (start < 0) return "";
-      const end = guide.indexOf("\n## ", start + 1);
-      return end < 0 ? guide.slice(start) : guide.slice(start, end);
-    };
+    const section = (heading: string): string => markdownSection(guide, heading);
     const creating = section("Creating a task");
     expect(creating, "the guide's Creating a task section").toContain(DONE_SIGNAL_RULE);
     expect(creating, "the guide's Creating a task section").toContain("create both tasks in the same turn");
@@ -858,6 +859,48 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(handbook).toContain("ruling 503");
   });
 
+  /**
+   * Ruling 530: a board may deliver results, not only software. Asked for a
+   * board that turns an inventory into a calculator.aws estimate, the
+   * controller followed the guide's toolchain and gate bullets and planned a
+   * TypeScript estimate pipeline in the repository (aws-cost-calculator CALC-2
+   * and CALC-4), when the owner wanted the board's agents to make the estimate.
+   */
+  it("ruling 530: the controller's doctrine, guide and handbook settle what a board delivers and build a results board out of the board itself", async () => {
+    // CANARY: drop the doctrine's paragraph, the guide's first bring-up bullet
+    // or its results section, or put the gate bullets back on every board, and
+    // the controller plans software for a person who asked for results.
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
+    const dataRoot = seededStore();
+    seedDefaultAgentAssets(dataRoot);
+    const definition = read("controller.definition.md");
+    const guide = read("controller-guide.skill.md");
+    const handbook = readFileSync(
+      path.join(dataRoot, "kb", "controller-handbook", "handbook.md"),
+      "utf8",
+    );
+    expect(definition).toContain("settle what its board delivers (ruling 530)");
+    expect(definition).toContain(
+      "never plan an application, a pipeline or a toolchain to do what the agents would do on each task",
+    );
+    // Asked to "set up a project for our supplier invoice processing", a
+    // controller told only to ask "when the words fit both" built a results
+    // board without asking; words that only name the work fit both.
+    expect(definition).toContain("words that only name the work");
+    const bringUp = markdownSection(guide, "Bringing up a new project");
+    const settle = bringUp.indexOf("**Settle what the board delivers before you design it** (ruling 530)");
+    expect(settle, "the bring-up section opens by settling what the board delivers").toBeGreaterThan(-1);
+    expect(settle).toBeLessThan(bringUp.indexOf("**Read the GitHub connections"));
+    expect(bringUp).toContain("Words that only name the work");
+    expect(bringUp).toContain("**On a software board, verify the toolchain before you promise a gate.**");
+    expect(bringUp).toContain("**On a software board, declare the project's gates");
+    const results = markdownSection(guide, "A board that delivers results");
+    expect(results).toContain("the done signal is the required reviewer's approval of those files");
+    expect(results).toContain("**Plan no software to do the agents' work.**");
+    expect(handbook).not.toContain("Viberr manages AI software delivery");
+    expect(handbook).toContain("A board delivers software");
+  });
+
   it("a GitHub read needs membership, not maintainer", () => {
     const skill = read("controller-guide.skill.md");
     expect(skill).not.toContain("reading GitHub state at depth need maintainer");
@@ -960,6 +1003,18 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
       ],
     } satisfies Record<string, readonly string[]>;
+    // Ruling 530: the controller's versions that planned every board as software.
+    const beforeResultsBoards = {
+      [path.join("agents", "definitions", "controller.md")]: [
+        "a92a8bbfbdbdd69429784ea8ab1a6738987cb490e053ab1d968a4d66514cd21c",
+      ],
+      [path.join("skills", "controller-guide", "SKILL.md")]: [
+        "a7accbb828fcaec17870ef180e4367f3238d3f25bae0e74d2ddcb4220dda6fed",
+      ],
+      [path.join("kb", "controller-handbook", "handbook.md")]: [
+        "4977e270597f5dc9e70b54824c5e1d26246a1af4310bb94c6d590f877b6b0dd5",
+      ],
+    } satisfies Record<string, readonly string[]>;
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
     // What this build ships, as the store's own manifest recorded it: that
@@ -971,6 +1026,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       ...Object.entries(outgoing),
       ...Object.entries(beforeEpics),
       ...Object.entries(beforeOneOperator),
+      ...Object.entries(beforeResultsBoards),
     ]) {
       expect(shipped[rel], rel).toBeDefined();
       for (const hash of hashes) {

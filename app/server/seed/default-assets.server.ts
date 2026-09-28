@@ -101,10 +101,13 @@ const CONTROLLER_HANDBOOK_MD = `# Controller handbook
 
 ## What this instance is
 
-Viberr manages AI software delivery. Projects are boards of tasks; each task is a
+Viberr manages the work AI agents do. Projects are boards of tasks; each task is a
 markdown file that carries its own state, timeline, decisions and evidence. Agents
 do the execution work; humans keep flow, review and acceptance. Every active task
 has its own operator agent that coordinates specialists through the workflow.
+A board delivers software, where each task changes the project's repository and
+ships as a pull request, or results, where each task is one piece of a person's
+work and the result comes back on that task (ruling 530).
 
 ## The pieces you manage
 
@@ -188,6 +191,12 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
+    // Ruling 530 (owner, 2026-09-27): before the doctrine said to settle what
+    // a board delivers, software or results, and never to plan an application
+    // to do what a results board's agents do on each task. Asked for a board
+    // that makes AWS estimates, the controller planned a TypeScript estimate
+    // pipeline in the repository (aws-cost-calculator CALC-2 and CALC-4).
+    "a92a8bbfbdbdd69429784ea8ab1a6738987cb490e053ab1d968a4d66514cd21c",
     // Ruling 503 (owner, 2026-09-26): before goal chains became epics. The
     // doctrine named `get_goal`, goal links as waits and a chained-goals
     // paragraph (links started by the server, the Goals panel).
@@ -212,6 +221,13 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 530 (owner, 2026-09-27): before "Bringing up a new project"
+    // opened by settling what the board delivers, scoped its toolchain and
+    // gate bullets to a software board, and "A board that delivers results"
+    // said how the board itself becomes the workflow. Those two bullets were
+    // CALC-2's plan: a repository foundation whose measured commands "can be
+    // declared as the project's gates".
+    "a7accbb828fcaec17870ef180e4367f3238d3f25bae0e74d2ddcb4220dda6fed",
     // Ruling 503 (owner, 2026-09-26): before "Chained goals" became "Epics"
     // and the done-signal rule's last sentence named a read TASK in the
     // delivery task's epic instead of a read link.
@@ -481,6 +497,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // Ruling 503 (owner, 2026-09-26): before "Goals decompose one outcome into
     // links" became the epics bullet.
     "2568ef5c92b776804b9beb20d40686071e04ea790fa78c9faef70e4708c9cdd5",
+    // Ruling 530 (owner, 2026-09-27): before "Viberr manages AI software
+    // delivery" gave way to a board that delivers software or results.
+    "4977e270597f5dc9e70b54824c5e1d26246a1af4310bb94c6d590f877b6b0dd5",
   ],
   [path.join("agents", "profiles", "developer.md")]: [
     "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",
