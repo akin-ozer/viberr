@@ -1819,7 +1819,8 @@ runtime's answer for a missing grant.
   any absent tool its own role description mentions (word-bounded; `go` excluded), so the
   persona and the measurement do not contradict each other in silence. The image ships
   `make`, `curl` and a pinned `pnpm` (from npm, not corepack) and deliberately no Docker
-  (`Dockerfile`, ruling 196).
+  (`Dockerfile`, ruling 196), and `poppler-utils` so a PDF an agent delivers or judges
+  can be rendered and looked at (`pdftoppm`, ruling 566).
 
 ## 7. Workspaces and git
 

@@ -164,7 +164,9 @@ linux binaries (inside the production `node_modules` from the `prod-deps` stage)
 the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
 agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 196), Debian
 `chromium` with `fonts-liberation` for the governed browser
-(`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), and `uv`/`uvx` for Python stdio MCP
+(`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), `poppler-utils` (`pdftoppm`, `pdftotext`,
+`pdfinfo`) so an agent can look at the pages of a PDF it delivers or judges (ruling 566),
+and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
 volume; uv manages its own CPython, so there is no system `python3`).
 
@@ -369,9 +371,10 @@ server (`npm run dev`) keeps using `./docker-data` as its own store from then on
 longer shares the container's.
 
 **The image fetches its Debian packages over HTTPS.** The runtime stage installs from
-`deb.debian.org` in three `apt-get` layers (`git` + `ca-certificates`, then `make` +
-`curl`, then `chromium` + `fonts-liberation`), each refreshing a package index of about
-10 MB before fetching its archives (roughly 25 MB, 1 MB and 192 MB). The base image names
+`deb.debian.org` in four `apt-get` layers (`git` + `ca-certificates`, then `make` +
+`curl`, then `chromium` + `fonts-liberation`, then `poppler-utils`), each refreshing a
+package index of about 10 MB before fetching its archives (roughly 25 MB, 1 MB, 192 MB
+and a few MB, a 15.2 MB layer once installed). The base image names
 that mirror over plain HTTP, and on a connection that shapes port 80 (measured on the
 owner's Mac: 20–50 KB/s to every Debian mirror over HTTP, 3.6 MB/s to the same host over
 HTTPS) the first index alone took over three minutes, and a `docker compose up -d --build`

@@ -166,6 +166,19 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium
 
+# Ruling 566: an agent that delivers or judges a PDF checks it the way a person
+# would, by looking at its pages. Live on the AWS calculator board (2026-09-28)
+# three of four result runs could not render calculator.aws's PDF export
+# ("pdftoppm is not installed"), the Estimate Judge approved with the layout
+# unchecked, and a Calculator Builder that tried to decode the PDF by hand was
+# killed once its output passed 5 GB. poppler-utils is `pdftoppm`, `pdftotext`
+# and `pdfinfo`, a 15 MB layer (measured). Its own layer, after chromium, so
+# adding it re-fetched nothing.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 # STDIO MCP SERVERS. `specialist-mcp.server.ts` spawns a registered stdio
 # server's command verbatim — there is no allow-list — so whatever the command
 # names has to exist HERE. Node-based servers (`npx -y @modelcontextprotocol/
