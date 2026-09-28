@@ -329,6 +329,42 @@ describe("canonicalTaskAnchor", () => {
     expect(anchor).toContain("Human 1");
     for (const line of anchor.split("\n")) expect(line.length).toBeLessThan(1600);
   });
+
+  it("ruling 563: a clipped timeline entry names the stamp that reads it whole, and a whole one does not", () => {
+    // Live on AWSC-4 a person's four-item answer reached a retried run as
+    // "1=Shared … 2=RDS for SQL Server 2…", with nothing saying where the rest
+    // was. CANARY: drop the stamp and a clipped answer is a dead end again;
+    // stamp every entry and each whole one pays for an address it never needs.
+    const anchor = canonicalTaskAnchor({
+      parsed: parsed({
+        timeline: [
+          {
+            occurredAt: "2026-09-28T18:43:03.831Z",
+            type: "comment",
+            actor: { kind: "human", userId: "u_1", nameHint: "Arda" },
+            title: null,
+            text: "1=Shared tenancy for the 16 ordinary EC2 VMs.\n" + "2=RDS for SQL Server 2019 Standard. ".repeat(10),
+            toAgent: true,
+            evidence: null,
+          },
+          {
+            occurredAt: "2026-09-28T18:42:34.072Z",
+            type: "comment",
+            actor: { kind: "operator" },
+            title: null,
+            text: "The mapping is posted.",
+            toAgent: false,
+            evidence: null,
+          },
+        ],
+      }),
+      stageName: "Mapping",
+    });
+    const lines = anchor.split("\n");
+    const answer = lines.find((l) => l.includes("Arda:"))!;
+    expect(answer.endsWith("(clipped; the whole entry is at `2026-09-28T18:43:03.831Z`)")).toBe(true);
+    expect(lines.find((l) => l.includes("The mapping is posted."))).toBe("- comment · operator: The mapping is posted.");
+  });
 });
 
 describe("specialistReplyDirective", () => {

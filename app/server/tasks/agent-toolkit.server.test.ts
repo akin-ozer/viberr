@@ -648,6 +648,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       "github_read",
       "read_board",
       "read_knowledge_doc",
+      "read_timeline_entry",
       "report_outcome",
     ]);
   });
@@ -709,6 +710,38 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const missing = await call({ taskKey: "VIB-404" });
     expect(missing).toContain("[noop] No task VIB-404 in this project");
     expect(missing).toContain("that claim is wrong");
+  });
+
+  it("ruling 563: read_timeline_entry reads one entry of this task whole", async () => {
+    // The prompt clips each entry at 220 characters and names the stamp of a
+    // clipped one; this is the other half. CANARY: leave it unbuilt and the
+    // stamp names an address nothing can read.
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_entry");
+    const read = tools.read_timeline_entry!;
+    expect(read).toBeTruthy();
+    const store = lastStore;
+    const answer = "1=Shared tenancy.\n2=RDS for SQL Server.\n3=FSx ONTAP at 128 MB/s.\n4=FSx Windows at 64 MB/s.";
+    // The toolkit's own task: the tool reads that one only.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
+      timeline: [
+        {
+          occurredAt: "2026-09-28T18:43:03.831Z",
+          type: "comment",
+          actor: { kind: "human", userId: store.users.arda.id, nameHint: "Arda" },
+          title: null,
+          text: answer,
+          toAgent: true,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: every tool in this toolkit answers `{ content: [{ type: "text", text }] }`.
+    const out = (await read.handler({ occurredAt: "2026-09-28T18:43:03.831Z" } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    expect(out.content[0]!.text).toContain(JSON.stringify(answer));
   });
 
   it("declares `evidence` only when the profile holds attach-evidence-references", () => {

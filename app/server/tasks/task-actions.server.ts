@@ -2009,8 +2009,12 @@ function anchorActorLabel(actor: FileActorRef): string {
   }
 }
 
+function anchorFlat(text: string): string {
+  return text.trim().replace(/\s*\n\s*/g, " ");
+}
+
 function anchorClamp(text: string, max: number): string {
-  const flat = text.trim().replace(/\s*\n\s*/g, " ");
+  const flat = anchorFlat(text);
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
@@ -2168,8 +2172,14 @@ export function canonicalTaskAnchor(input: {
     lines.push("");
     lines.push("### Recent timeline (newest first)");
     for (const e of recent) {
+      // Ruling 563: a clipped entry names its stamp, the address
+      // `read_timeline_entry` takes, so the rest is one call away. Live on
+      // AWSC-4 a person's four-item answer reached a retried run as "1=Shared
+      // … 2=RDS for SQL Server 2…", and the agent had to ask for it again.
+      const clipped = anchorFlat(e.text).length > ANCHOR_EVENT_MAX_CHARS;
       lines.push(
-        `- ${e.type} · ${anchorActorLabel(e.actor)}: ${anchorClamp(e.text, ANCHOR_EVENT_MAX_CHARS)}`,
+        `- ${e.type} · ${anchorActorLabel(e.actor)}: ${anchorClamp(e.text, ANCHOR_EVENT_MAX_CHARS)}` +
+          (clipped ? ` (clipped; the whole entry is at \`${e.occurredAt}\`)` : ""),
       );
     }
   }
