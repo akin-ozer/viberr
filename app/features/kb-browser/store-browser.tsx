@@ -27,9 +27,9 @@ import {
   countKbDirs,
   countKbFiles,
   flatten,
-  prettySize,
   type StoreNode,
 } from "./tree";
+import { prettySize } from "~/shared/text/byte-size";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**

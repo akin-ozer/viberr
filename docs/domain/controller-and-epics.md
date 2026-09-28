@@ -667,7 +667,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**57 tools**: 56 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**58 tools**: 57 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -724,6 +724,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
 | `read_task_attachment` | One attachment of a task: text (`.txt .log .md .json .yml .yaml .csv .diff .patch`) as text, an `.xlsx` as its sheets in CSV, an image as the picture (rulings 293, 533). A read returns up to 40,000 characters; a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551) |
+| `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): text as text, an `.xlsx` as its sheets in CSV, an image as the picture, 40,000 characters at a time with `offset` (ruling 565, the task reader's rules); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
 | `read_pull_request` | A task's review PR: every changed file with status, counts and unified-diff hunks; `patches: false` for the file list, `path` for one file, a byte budget with `patchOmitted` flags (ruling 266); audited `controller.github.read` |

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { File as NodeFile } from "node:buffer";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import type { ControllerDockView } from "./controller-dock-query.server";
@@ -1164,6 +1165,66 @@ describe("ruling 259: the dock compares the box with what went out, trimmed", ()
 });
 
 /**
+ * Ruling 565: the dock's composer takes files. Picked ones show in its tray,
+ * go out as a multipart form (files alone are a message), and leave the tray
+ * only once the server took them.
+ */
+describe("ruling 565: files from the dock", () => {
+  /** A file the request body can carry, as a browser's can. jsdom's `File`
+   *  is not one Node's `Request` encodes or parses back, and jsdom's
+   *  `FormData` turns Node's `File` into a string, so these tests run on
+   *  Node's pair (installed below; `File` here is Node's). */
+  const file = (bits: string, name: string) => new File([bits], name);
+  beforeEach(async () => {
+    // Node's own FormData, from a body Node parsed (jsdom replaces the global).
+    const nodeForm = await new Response(new URLSearchParams("a=1")).formData();
+    vi.stubGlobal("FormData", nodeForm.constructor);
+    vi.stubGlobal("File", NodeFile);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function pickIntoDock(files: File[]) {
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("Message to the controller");
+    await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+    // SAFETY: AttachButton renders its picker as the input beside it.
+    const picker = screen.getByRole("button", { name: "Attach files" }).nextElementSibling as HTMLInputElement;
+    fireEvent.change(picker, { target: { files } });
+  }
+
+  it("sends the tray's files with no words, and empties the tray once the server took them", async () => {
+    // CANARY: drop the `files` append from the dock's send and the form
+    // carries no file; clear the tray at submit and the failure below loses it.
+    const { sends } = mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+    await pickIntoDock([file("host,cpu", "inventory.csv")]);
+    expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("inventory.csv");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sends.length).toBe(1));
+    const sent = sends[0]!.getAll("files");
+    expect(sent).toHaveLength(1);
+    const got = sent[0];
+    if (!(got instanceof NodeFile)) throw new Error("the form carried the file as a string");
+    expect(await got.text()).toBe("host,cpu");
+    await waitFor(() => expect(screen.queryByRole("list", { name: /files attached/ })).toBeNull());
+  });
+
+  it("keeps the tray when the send fails, and says why a file was refused", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+      action: () => ({ ok: false, error: "That request expired." }),
+    });
+    await pickIntoDock([file("a", "notes.txt"), file("<p>", "page.html")]);
+    expect(screen.getByRole("alert").textContent).toContain("page.html");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText("That request expired.");
+    expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("notes.txt");
+  });
+});
+
+/**
  * Ruling 368: the dock's Send named its work ("Sending…") but sat at the .45
  * refused step with no busy mark while the controller took the message. It is
  * `aria-busy` now, the loader spinning.
@@ -1188,6 +1249,8 @@ describe("ruling 368: the dock's send in flight", () => {
           onLeave={() => {}}
           composerRef={{ current: null }}
           onMount={() => {}}
+          files={[]}
+          onFiles={() => {}}
         />
       </MemoryRouter>,
     );
@@ -1513,6 +1576,8 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
           onLeave={() => {}}
           composerRef={{ current: null }}
           onMount={() => {}}
+          files={[]}
+          onFiles={() => {}}
         />
       </MemoryRouter>
     );

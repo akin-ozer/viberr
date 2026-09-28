@@ -7023,6 +7023,47 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   transition: transform .15s var(--ease-out);
 }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+/* Ruling 565: the files a composer holds before it sends, after ReUI's
+   composer tray and shadcn's Attachment: a chip per file over the text (its
+   picture or the file glyph, the name, the size, a remove), the paperclip in
+   the composer's foot, and the frame dashed while files are held over it. */
+.att-tray { display: flex; flex-direction: column; gap: .375rem; margin-bottom: .5rem; }
+.att-tray .form-err { margin: 0; }
+.att-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .375rem; }
+.att-chip {
+  display: inline-flex; align-items: center; gap: .375rem; min-width: 0; max-width: 16rem;
+  padding: .25rem; border: 1px solid var(--hairline); border-radius: var(--radius-button); background: var(--surface);
+}
+.att-chip .attach-name { min-width: 0; }
+.att-chip-media {
+  display: grid; place-items: center; width: 24px; height: 24px; flex: none; overflow: hidden;
+  border-radius: var(--radius-small); background: var(--tint-well); color: var(--muted);
+}
+.att-chip-media img { width: 100%; height: 100%; object-fit: cover; outline: 1px solid var(--image-outline); outline-offset: -1px; }
+.att-chip-media .ico { width: 14px; height: 14px; }
+.att-chip-x {
+  display: grid; place-items: center; width: 22px; height: 22px; flex: none; padding: 0;
+  border: 0; border-radius: var(--radius-small); background: none; color: var(--muted); cursor: pointer;
+}
+.att-chip-x:hover:not(:disabled) { color: var(--fg); background: var(--tint-hover); }
+.att-chip-x .ico { width: 12px; height: 12px; }
+.att-add { width: 30px; height: 30px; flex: none; }
+.att-add .ico { width: 16px; height: 16px; }
+.ctl-composer[data-dropping], .composer-box[data-dropping] { border-style: dashed; border-color: var(--blue); }
+/* Ruling 565: the paperclip leads a composer's foot, before its hint. */
+.att-lead { display: inline-flex; align-items: center; gap: .375rem; min-width: 0; }
+/* The files sent with a message, under its words: a picture as itself in a
+   frame sized before it loads (ruling 457), any other file as the tray's chip. */
+.ctl-files { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: .375rem; }
+.ctl-files > li { min-width: 0; max-width: 100%; }
+a.ctl-file { color: var(--fg); text-decoration: none; }
+a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.ctl-file-pic { display: block; border-radius: var(--radius-button); }
+.ctl-file-pic img {
+  display: block; width: 160px; max-width: 100%; height: 112px; object-fit: cover; object-position: top;
+  background: var(--tint-hover); border-radius: var(--radius-button);
+  outline: 1px solid var(--image-outline); outline-offset: -1px;
+}
 .attach-file svg, .filed-file > svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
 .attach-file .attach-name, .filed-file .attach-name { flex: 1; }
 /* Who put the file there, from the producing event (attachments panel). */

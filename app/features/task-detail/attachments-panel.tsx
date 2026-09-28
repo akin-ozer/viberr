@@ -3,7 +3,7 @@ import { useFetcher } from "react-router";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { UPLOADABLE_EXTENSIONS } from "~/shared/attachment-kinds";
 import { useCsrfToken } from "~/ui/csrf-input";
-import { prettySize } from "~/features/kb-browser/tree";
+import { prettySize } from "~/shared/text/byte-size";
 import { Collapsible } from "~/ui/collapsible";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";

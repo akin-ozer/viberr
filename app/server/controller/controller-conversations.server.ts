@@ -4,6 +4,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { publishSseEvent } from "~/server/events/sse-broker.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { withTransaction } from "~/server/db/transaction.server";
 
 /**
  * Controller conversation store (ruling 99; scope extended by ruling 121).
@@ -123,6 +124,18 @@ export interface ControllerMessage {
    *  the user message that turn answered; null on every other row. */
   steeredInto: string | null;
   createdAt: string;
+  /** Ruling 565: the files a person sent with this USER message, by name and
+   *  size (never the bytes); absent when there are none. */
+  files?: readonly MessageFile[];
+}
+
+/** Ruling 565: one file sent with a controller message, as a transcript and a
+ *  turn read it. The bytes stay in the row until the serving route or the
+ *  controller's reader asks for them. */
+export interface MessageFile {
+  id: string;
+  name: string;
+  bytes: number;
 }
 
 /** Parses one `controller_conversations` row at the DB boundary. */
@@ -153,6 +166,8 @@ const conversationRowSchema = z
   );
 
 /** Parses one `controller_messages` row at the DB boundary. */
+const messageFilesSchema = z.array(z.object({ id: z.string(), name: z.string(), bytes: z.number() }));
+
 const messageRowSchema = z
   .object({
     id: z.string(),
@@ -169,9 +184,12 @@ const messageRowSchema = z
     // Ruling 527: optional for the same reason.
     steered_into: z.string().nullable().optional(),
     created_at: z.string(),
+    // Ruling 565: the message's files, as a JSON array a read that names
+    // `MESSAGE_FILES_COLUMN` adds; absent from a read that does not.
+    files_json: z.string().optional(),
   })
-  .transform(
-    (r): ControllerMessage => ({
+  .transform((r): ControllerMessage => {
+    const message: ControllerMessage = {
       id: r.id,
       conversationId: r.conversation_id,
       seq: r.seq,
@@ -183,8 +201,19 @@ const messageRowSchema = z
       replyTo: r.reply_to ?? null,
       steeredInto: r.steered_into ?? null,
       createdAt: r.created_at,
-    }),
-  );
+    };
+    const files = r.files_json ? messageFilesSchema.parse(JSON.parse(r.files_json)) : [];
+    if (files.length > 0) message.files = files;
+    return message;
+  });
+
+/**
+ * Ruling 565: a message's files in the same statement as the message (`m`),
+ * as a JSON array of their names and sizes, so the transcript's reads cost
+ * no statement more than they did. Never the bytes.
+ */
+const MESSAGE_FILES_COLUMN = `(SELECT json_group_array(json_object('id', f.id, 'name', f.name, 'bytes', f.bytes))
+     FROM (SELECT id, name, bytes FROM controller_message_files WHERE message_id = m.id ORDER BY rowid) f) AS files_json`;
 
 /** Reader/actor identity every access check runs against. */
 export interface ConversationActor {
@@ -405,7 +434,7 @@ export function listMessages(
 ): ControllerMessage[] {
   const rows = db
     .prepare(
-      `SELECT * FROM controller_messages WHERE conversation_id = ? ORDER BY seq ASC`,
+      `SELECT m.*, ${MESSAGE_FILES_COLUMN} FROM controller_messages m WHERE m.conversation_id = ? ORDER BY m.seq ASC`,
     )
     .all(conversationId);
   return rows.map((row) => messageRowSchema.parse(row));
@@ -434,7 +463,7 @@ export function messagesUpTo(
 ): ControllerMessage[] {
   const rows = db
     .prepare(
-      `SELECT m.* FROM controller_messages m
+      `SELECT m.*, ${MESSAGE_FILES_COLUMN} FROM controller_messages m
         WHERE m.conversation_id = ?
           AND (
             (m.author = 'user' AND m.seq <= ?)
@@ -489,6 +518,22 @@ export interface AppendMessageInput {
   /** Ruling 465: on a CONTROLLER row, the user message it answers. Every
    *  writer of a reply, refusal or note that answers a message passes it. */
   replyTo?: string | null;
+  /** Ruling 565: the files a person sent with a USER message, already checked
+   *  by the upload's rules (`checkAttachmentBatch`). They are stored with the
+   *  message or not at all, under names unique in the conversation. */
+  files?: readonly { name: string; data: Uint8Array }[];
+}
+
+/** A name not yet taken in `taken` (case-folded): `screenshot.png`, then
+ *  `screenshot-2.png`, as a task's attachments name a relayed file. */
+function freeFileName(name: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(name.toLowerCase())) return name;
+  const dot = name.lastIndexOf(".");
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+  for (let n = 2; ; n++) {
+    const candidate = `${stem}-${n}${ext}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
 }
 
 /** Append one message; bumps the conversation clock and derives a title from
@@ -504,51 +549,155 @@ export function appendMessage(
   }
   const now = new Date().toISOString();
   const id = newId("cmsg");
-  // Next seq under the SQLite write lock — single-writer per data root, so a
-  // MAX+1 read-then-insert cannot interleave across processes, and the UNIQUE
-  // (conversation_id, seq) index backstops a same-process race.
-  const seqRow = z
-    .object({ next: z.number() })
-    .parse(
-      db
-        .prepare(
-          `SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM controller_messages
-           WHERE conversation_id = ?`,
-        )
-        .get(input.conversationId),
-    );
   const surface =
     input.author === "user" ? normalizeSurface(input.surface) : null;
   const replyTo = input.author === "controller" ? (input.replyTo ?? null) : null;
-  db.prepare(
-    `INSERT INTO controller_messages
-       (id, conversation_id, seq, author, user_id, text, run_id, surface, reply_to, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    input.conversationId,
-    seqRow.next,
-    input.author,
-    input.userId ?? null,
-    input.text,
-    input.runId ?? null,
-    surface,
-    replyTo,
-    now,
-  );
+  // Ruling 565: a first message of files alone is titled by their names.
   const title =
     conversation.title ||
-    (input.author === "user" ? deriveTitle(input.text) : "");
-  db.prepare(
-    `UPDATE controller_conversations
-     SET updated_at = ?, last_message_at = ?, title = ?
-     WHERE id = ?`,
-  ).run(now, now, title, input.conversationId);
+    (input.author === "user"
+      ? deriveTitle(input.text.trim() || (input.files ?? []).map((f) => f.name).join(", "))
+      : "");
+  const write = () => {
+    // Next seq under the SQLite write lock — single-writer per data root, so a
+    // MAX+1 read-then-insert cannot interleave across processes, and the
+    // UNIQUE (conversation_id, seq) index backstops a same-process race.
+    const seqRow = z
+      .object({ next: z.number() })
+      .parse(
+        db
+          .prepare(
+            `SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM controller_messages
+             WHERE conversation_id = ?`,
+          )
+          .get(input.conversationId),
+      );
+    db.prepare(
+      `INSERT INTO controller_messages
+         (id, conversation_id, seq, author, user_id, text, run_id, surface, reply_to, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      input.conversationId,
+      seqRow.next,
+      input.author,
+      input.userId ?? null,
+      input.text,
+      input.runId ?? null,
+      surface,
+      replyTo,
+      now,
+    );
+    if (input.author === "user" && input.files?.length) {
+      storeMessageFiles(db, input.conversationId, id, input.files, now);
+    }
+    db.prepare(
+      `UPDATE controller_conversations
+       SET updated_at = ?, last_message_at = ?, title = ?
+       WHERE id = ?`,
+    ).run(now, now, title, input.conversationId);
+  };
+  // Ruling 565: a message and its files commit together, inside the caller's
+  // transaction when there is one.
+  if (db.isTransaction) write();
+  else withTransaction(db, write);
   publishConversationUpdated(conversation.id, conversation.userId);
   // The row was inserted above under this id.
   return messageRowSchema.parse(
-    db.prepare(`SELECT * FROM controller_messages WHERE id = ?`).get(id),
+    db.prepare(`SELECT m.*, ${MESSAGE_FILES_COLUMN} FROM controller_messages m WHERE m.id = ?`).get(id),
   );
+}
+
+/** Ruling 565: a user message's files, each under a name no other file of the
+ *  conversation holds (case-folded), as a task's attachments name a relayed
+ *  file: `screenshot.png`, then `screenshot-2.png`. */
+function storeMessageFiles(
+  db: DatabaseSync,
+  conversationId: string,
+  messageId: string,
+  files: readonly { name: string; data: Uint8Array }[],
+  now: string,
+): void {
+  // SAFETY: `name` is the TEXT NOT NULL column of the table this selects.
+  const taken = new Set(
+    (db.prepare(`SELECT name FROM controller_message_files WHERE conversation_id = ?`).all(conversationId) as {
+      name: string;
+    }[]).map((f) => f.name.toLowerCase()),
+  );
+  const insert = db.prepare(
+    `INSERT INTO controller_message_files (id, message_id, conversation_id, name, bytes, data, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const file of files) {
+    const name = freeFileName(file.name, taken);
+    taken.add(name.toLowerCase());
+    insert.run(newId("cfile"), messageId, conversationId, name, file.data.byteLength, file.data, now);
+  }
+}
+
+/** Ruling 565: one file sent in a conversation, with its bytes, for the
+ *  serving route and the controller's reader. Null when the conversation has
+ *  no such file. */
+export interface StoredMessageFile {
+  id: string;
+  messageId: string;
+  conversationId: string;
+  name: string;
+  data: Buffer;
+}
+
+const storedFileSchema = z
+  .object({
+    id: z.string(),
+    message_id: z.string(),
+    conversation_id: z.string(),
+    name: z.string(),
+    data: z.instanceof(Uint8Array),
+  })
+  .transform(
+    (r): StoredMessageFile => ({
+      id: r.id,
+      messageId: r.message_id,
+      conversationId: r.conversation_id,
+      name: r.name,
+      data: Buffer.from(r.data),
+    }),
+  );
+
+/** Ruling 565: a file by its id, for the serving route (which then asks
+ *  whether the viewer may read its conversation). */
+export function getMessageFile(db: DatabaseSync, fileId: string): StoredMessageFile | null {
+  const row = db
+    .prepare(`SELECT id, message_id, conversation_id, name, data FROM controller_message_files WHERE id = ?`)
+    .get(fileId);
+  return row ? storedFileSchema.parse(row) : null;
+}
+
+/** Ruling 565: a conversation's file by its name, for the controller's
+ *  reader. */
+export function findMessageFile(
+  db: DatabaseSync,
+  conversationId: string,
+  name: string,
+): StoredMessageFile | null {
+  const row = db
+    .prepare(
+      `SELECT id, message_id, conversation_id, name, data FROM controller_message_files
+        WHERE conversation_id = ? AND name = ? COLLATE NOCASE`,
+    )
+    .get(conversationId, name.trim());
+  return row ? storedFileSchema.parse(row) : null;
+}
+
+/** Ruling 565: every file name a conversation holds, oldest first, for a
+ *  reader asked for one it does not hold. */
+export function listConversationFileNames(db: DatabaseSync, conversationId: string): string[] {
+  // SAFETY: `name` is the TEXT NOT NULL column of the table this selects.
+  return (
+    db
+      .prepare(`SELECT name FROM controller_message_files WHERE conversation_id = ? ORDER BY rowid`)
+      .all(conversationId) as { name: string }[]
+  ).map((f) => f.name);
 }
 
 /**

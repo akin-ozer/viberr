@@ -10,9 +10,11 @@ import {
   requireConversation,
 } from "~/server/controller/controller-conversations.server";
 import {
+  checkMessageFiles,
   controllerNotConnectedSentence,
   runControllerTurn,
 } from "~/server/controller/controller-run.server";
+import { formFiles } from "~/server/files/form-files.server";
 import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
 import { NEW_CONVERSATION_PARAM } from "~/features/controller/conversation-param";
 import {
@@ -182,6 +184,9 @@ export async function action({ request }: Route.ActionArgs) {
     const surface = textField.parse(formData.get("surface")) || null;
     // U39-24: the reader's zone; normalized by the engine.
     const timeZone = textField.parse(formData.get("timeZone")) || null;
+    // Ruling 565: the files it carries, checked before any thread is made for
+    // it (U35-4's rule for a refusal).
+    const files = checkMessageFiles(await formFiles(formData));
     let conversationId = textField.parse(formData.get("conversationId")).trim();
     if (!conversationId || conversationId === NEW_CONVERSATION_PARAM) {
       // U35-4 (pass 35): the dock disables its composer for a person with no
@@ -222,6 +227,7 @@ export async function action({ request }: Route.ActionArgs) {
     const result = await runControllerTurn(db, {
       conversationId,
       text,
+      files,
       user: {
         id: auth.user.id,
         email: auth.user.email,

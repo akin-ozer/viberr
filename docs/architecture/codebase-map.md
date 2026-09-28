@@ -92,7 +92,7 @@ the route table is `app/routes.ts`.
 | `db/` | SQLite open + pragmas, the copy-first read-only open (ruling 158), migration runner, baseline-column backfill, data-root writer lock + guard, CLI lock for scripts, retention, self-heal of a corrupt DB, backup/restore, transaction helper. |
 | `errors/` | `AppError` and the stable `ERROR_CODES`. |
 | `events/` | Projection event emitter, the SSE broker (per-connection scopes, 25 s heartbeat, a 256-event replay ring for data events and one for console lines, re-authorization each tick, the process shutdown hook), the publisher bridging the two. |
-| `files/` | The file store: data-root layout, atomic writes, per-file mutex, read-your-own-writes cache, the readers' content-keyed parse memo (ruling 457), frontmatter codec, task/project/epic/agent-profile readers and writers, actor-ref codec, the chokidar watcher (250 ms debounce, retrying failed rebuilds) and KB watcher, the KB index injector (ruling 283) and skill injection reader (24 000-char budget), the project rulings KB (ruling 239), attachments, the store doctor. |
+| `files/` | The file store: data-root layout, atomic writes, per-file mutex, read-your-own-writes cache, the readers' content-keyed parse memo (ruling 457), `form-files` (the files a multipart form carries, ruling 565), frontmatter codec, task/project/epic/agent-profile readers and writers, actor-ref codec, the chokidar watcher (250 ms debounce, retrying failed rebuilds) and KB watcher, the KB index injector (ruling 283) and skill injection reader (24 000-char budget), the project rulings KB (ruling 239), attachments, the store doctor. |
 | `github/` | Client, project GitHub context, branch sync, empty-repo bootstrap (ruling 128), PR open/link/adopt and the adoption record, PR diff reads for the controller (ruling 266) and for the task page's Changes panel, bound to the delivered revision (ruling 484), the GitHub review relay to the deliverer (ruling 484), workspace push and delivery reconciliation, reconciler + 5-minute poller, human-approval verdict, update-branch (merge, never rebase) and its operator decision half, the acceptance-boundary refresh rule (ruling 162), branch cleanup, scope-violation side effects, repo access check and remembered repo health, the agent GitHub read tool. |
 | `http/` | `isDocumentNavigation`: a document load (a hard load, a refresh, a new tab) versus single fetch's `.data` request; R19-15's read-marking and ruling 457's console shipping ask it. |
 | `insights/` | One aggregate query over `agent_runs` for `/insights`. |
@@ -129,7 +129,7 @@ the route table is `app/routes.ts`.
 | `project-settings/` | Identity, workflow stages (with colour presets, ruling 364), required reviewers, file leases, members, repository and credentials (change, scope re-check, branch cleanup toggle), danger zone. |
 | `org-settings/` | Tabs: GitHub connections, users and access, sign-in & SSO, agent resources (KBs, MCP servers, skills, global agent templates, store browser), controller (profile, locks, standing requests); below the tabs: run concurrency and run spend cap, the audit export card, the storage line. |
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
-| `controller/` | The conversation surface; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); where a transcript puts its reader and the jump back to its newest message, shared by the page and the dock (`transcript-follow.ts`, `transcript-jump.tsx`, rulings 476(c) and 564); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
+| `controller/` | The conversation surface; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); where a transcript puts its reader and the jump back to its newest message, shared by the page and the dock (`transcript-follow.ts`, `transcript-jump.tsx`, rulings 476(c) and 564); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`; the files sent with a message, `message-files.tsx`, served by `routes/resources.controller-file.ts`, ruling 565), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
 | `notifications/` | The inbox page and the shared notification row. |
 | `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 127): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live; ruling 507: the account in use first, the person's other accounts with Use this account (no sign-in), Rename and Disconnect each, and Add another account. |
 | `insights/` | Read-only run analytics dashboard (oversight cards, backend quota, prompt cache, breakdowns, daily chart). |
@@ -167,7 +167,7 @@ date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-t
 ticking reader, ruling 457), `use-stable-rows` (structural sharing of loader rows and
 values across revalidations, ruling 457), `number-ticker` (counts up to a figure,
 ruling 366(f); it commits only when the drawn digits change),
-`csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
+`attach-files` (a composer's tray of picked, dropped or pasted files, its paperclip and its drop target, ruling 565) + `picked-files` (the rules a composer keeps files by, which the New task dialog shares), `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
 ruling 166), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-hint`.
 
 ## 6. `app/shared/`
@@ -193,7 +193,7 @@ actors, notifications; `deriveDisplayReadiness` and the live-backend overlay liv
 `task.server.ts`), `dates/` (`format.ts`, the one timestamp formatter; `time-zone.ts`,
 the viewer's zone for the controller's prose), `ids/` (`newId` in `new-id.server.ts`,
 `slugify`), `text/` (`plural`, store text extensions, `BACKEND_LABEL` (ruling 92),
-`escapeRegExp`, `endSentence`, `wholeThousands`), `auth/` (auth paths, password
+`escapeRegExp`, `endSentence`, `wholeThousands`, `prettySize` (a byte count as people read it, ruling 565)), `auth/` (auth paths, password
 policy), `docs/` (six tests: `design/prd.md` against the canon PRD, `file-formats.md`
 against `PACKET_OPTION_KINDS`, the rulings supersession markers, the runbook's
 database-read rules, the vendored anti-slop tree against its manifest, the vitest

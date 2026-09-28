@@ -4656,8 +4656,16 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
   });
 
   // Every rule that targets an emitted <img>: the markdown embed, the
-  // lightbox picture and the two attachment tiles.
-  const IMAGES = [".md-body img", ".lightbox-card .lightbox-img", ".attach-thumb img", ".tl-attach-thumb img"];
+  // lightbox picture, the two attachment tiles, and (ruling 565) a picture
+  // in a composer's tray and in a controller message.
+  const IMAGES = [
+    ".md-body img",
+    ".lightbox-card .lightbox-img",
+    ".attach-thumb img",
+    ".tl-attach-thumb img",
+    ".att-chip-media img",
+    ".ctl-file-pic img",
+  ];
   it.each(IMAGES)("(b) %s draws the image edge just inside the picture", (selector) => {
     // CANARY: drop the outline from `.md-body img`.
     const d = requiredDecls(plain, selector);

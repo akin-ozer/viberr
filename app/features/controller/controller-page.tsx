@@ -48,6 +48,10 @@ import type {
 } from "~/server/controller/controller-run.server";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
+import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
+import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
+import { MessageFiles } from "./message-files";
 import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
@@ -100,8 +104,11 @@ function sendForm(
   /** Ruling 527: what the message does while a turn works; the server
    *  steers when the form names none. */
   mode: SendMode = "steer",
+  /** Ruling 565: the files it carries. */
+  files: readonly File[] = [],
 ): FormData {
   const body = new FormData();
+  for (const file of files) body.append("files", file);
   body.set("_csrf", csrf);
   body.set("intent", "send");
   body.set("text", text);
@@ -119,7 +126,7 @@ function sendForm(
  * the transcript beside it), so the composer lends its setter here while it is
  * mounted and the transcript's Retract calls it.
  */
-type RestoreDraft = RefObject<((text: string) => void) | null>;
+type RestoreDraft = RefObject<((text: string, files: readonly File[]) => void) | null>;
 
 export function ControllerPage({
   view,
@@ -760,7 +767,7 @@ function Transcript({
   const answered = answeredMessageIds(view.messages);
   const workingAfter = workingRowAfter(ordered, view.turn);
   const conversationId = view.conversation.id;
-  const onRetracted = (text: string) => restoreDraft?.current?.(text);
+  const onRetracted = (text: string, files: readonly File[]) => restoreDraft?.current?.(text, files);
   // Ruling 476(d): the row is what a sighted person watches. The page's one
   // status region (`TurnAnnouncer`) says that the turn started and that it
   // replied; this row, inserted with its sentence already in it, was skipped.
@@ -817,13 +824,17 @@ function Transcript({
                     messageId={m.id}
                     conversationId={conversationId}
                     csrf={csrf}
+                    files={m.files}
                     onRetracted={onRetracted}
                   />
                 )}
               </header>
-              <div className="md-body">
-                <Markdown text={m.text} taskLinks={messageLinks} />
-              </div>
+              {m.text && (
+                <div className="md-body">
+                  <Markdown text={m.text} taskLinks={messageLinks} />
+                </div>
+              )}
+              {m.files && <MessageFiles files={m.files} />}
             </article>
             {m.id === workingAfter && working}
           </Fragment>
@@ -850,11 +861,18 @@ function Composer({
   restoreDraft?: RestoreDraft;
 }) {
   const [text, setText] = useState("");
+  // Ruling 565: the files going with the message, and the first one refused.
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileProblem, setFileProblem] = useState<string | null>(null);
   const location = useLocation();
   // Ruling 527: the transcript's Retract puts a message back in this box.
+  // Ruling 565: and its files back in the tray.
   useEffect(() => {
     if (!restoreDraft) return;
-    restoreDraft.current = (retracted) => setText((cur) => withRetracted(cur, retracted));
+    restoreDraft.current = (retracted, back) => {
+      setText((cur) => withRetracted(cur, retracted));
+      if (back.length > 0) setFiles((cur) => addPickedFiles(cur, back, MESSAGE_BATCH).files);
+    };
     return () => {
       restoreDraft.current = null;
     };
@@ -868,6 +886,11 @@ function Composer({
   // Ruling 527: while a turn holds the conversation, a message steers it or
   // queues behind it, and the composer offers both.
   const live = view.turn.answering !== null;
+  const addFiles = (incoming: File[]) => {
+    const next = addPickedFiles(files, incoming, MESSAGE_BATCH);
+    setFiles(next.files);
+    setFileProblem(next.problem);
+  };
   const sending = busy ? (send.formData?.get("mode") === "queue" ? "queue" : "steer") : null;
   // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
   // takes them. `setText("")` used to run at submit, optimistically, and
@@ -876,6 +899,7 @@ function Composer({
   // is not open, or any transport failure destroyed what the person wrote, and
   // the only account of it was a toast that unmounts itself after 2.6 seconds.
   const pending = useRef<string | null>(null);
+  const pendingFiles = useRef<readonly File[]>([]);
   useFetcherResult(send, (data) => {
     // Cleared only on success, and only if the box still holds what went out —
     // somebody who started typing the next message while this one was in
@@ -884,28 +908,56 @@ function Composer({
     // clears like any other. `sent` is read before the ref is nulled, because
     // React may run the updater later than this line. On a failure the text
     // and the Send button both stay, so the person can retry or copy it out.
+    // Ruling 565: the files the same way, each one that went out.
     const sent = pending.current;
+    const sentFiles = pendingFiles.current;
     pending.current = null;
-    if (data.ok) setText((cur) => (cur.trim() === sent ? "" : cur));
+    pendingFiles.current = [];
+    if (data.ok) {
+      setText((cur) => (cur.trim() === sent ? "" : cur));
+      setFiles((cur) => cur.filter((f) => !sentFiles.includes(f)));
+      setFileProblem(null);
+    }
   });
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
+  const { dropping, dropProps } = useFileDrop(addFiles, disabled);
+  // Ruling 565: files alone are a message.
+  const empty = !text.trim() && files.length === 0;
   const submit = (mode: SendMode = "steer") => {
     const value = text.trim();
-    if (!value || busy || disabled) return;
+    if (empty || busy || disabled) return;
     pending.current = value;
+    pendingFiles.current = files;
     send.submit(
-      sendForm(csrf, value, `${location.pathname}${location.search}`, conversationId, mode),
-      { method: "post" },
+      sendForm(csrf, value, `${location.pathname}${location.search}`, conversationId, mode, files),
+      files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" },
     );
   };
   return (
-    <div className="ctl-composer">
+    <div className="ctl-composer" data-dropping={dropping ? "" : undefined} {...dropProps}>
       {!view.available && <NotConnectedNote />}
+      <AttachTray
+        files={files}
+        problem={fileProblem}
+        disabled={busy}
+        onRemove={(name) => {
+          setFiles((cur) => cur.filter((f) => f.name !== name));
+          setFileProblem(null);
+        }}
+      />
       <textarea
         value={text}
         autoFocus={!disabled}
         onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          // Ruling 565 (ruling 533's rule): a bare screenshot goes with the
+          // message; copied text, cells included, stays text.
+          const pasted = filesFromPaste(e.clipboardData, true, files);
+          if (!pasted) return;
+          e.preventDefault();
+          addFiles(pasted);
+        }}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();
@@ -926,12 +978,15 @@ function Composer({
         aria-label="Message to the controller"
       />
       <div className="ctl-composer-foot">
-        <span className="fine xs dim">
-          Acts with your permissions · refusals say why
-          {/* A touch screen has no key to name; app.css drops this on a
-              coarse pointer (`.kbd-hint`). */}
-          <span className="kbd-hint" suppressHydrationWarning>
-            {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
+        <span className="att-lead">
+          <AttachButton onFiles={addFiles} disabled={disabled || busy} />
+          <span className="fine xs dim">
+            Acts with your permissions · refusals say why
+            {/* A touch screen has no key to name; app.css drops this on a
+                coarse pointer (`.kbd-hint`). */}
+            <span className="kbd-hint" suppressHydrationWarning>
+              {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
+            </span>
           </span>
         </span>
         <span className="inline-row">
@@ -941,7 +996,7 @@ function Composer({
               className="btn sm"
               title="Wait for its own turn, after the one working now"
               onClick={() => submit("queue")}
-              disabled={busy || disabled || !text.trim()}
+              disabled={busy || disabled || empty}
               aria-busy={sending === "queue" || undefined}
             >
               {sending === "queue" && <Icon name="loader" className="spin" />}
@@ -953,7 +1008,7 @@ function Composer({
             className="btn primary sm"
             title={live ? "Go into the turn working now, at its next step" : undefined}
             onClick={() => submit("steer")}
-            disabled={busy || disabled || !text.trim()}
+            disabled={busy || disabled || empty}
             aria-busy={sending === "steer" || undefined}
           >
             {sending === "steer" && <Icon name="loader" className="spin" />}

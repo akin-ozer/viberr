@@ -11,9 +11,11 @@ import { getDb } from "~/server/db/sqlite.server";
 import { createConversation } from "~/server/controller/controller-conversations.server";
 import { deleteControllerConversation } from "~/server/controller/controller-deletion.server";
 import {
+  checkMessageFiles,
   interruptControllerTurn,
   runControllerTurn,
 } from "~/server/controller/controller-run.server";
+import { formFiles } from "~/server/files/form-files.server";
 import { ControllerPage } from "~/features/controller/controller-page";
 import {
   sendModeOf,
@@ -83,6 +85,9 @@ export async function action({ request, params }: Route.ActionArgs) {
   try {
     if (intent === "send") {
       const text = String(formData.get("text") ?? "");
+      // Ruling 565: the files it carries, checked before a thread is made for
+      // it, so a refused file leaves no empty conversation behind.
+      const files = checkMessageFiles(await formFiles(formData));
       let conversationId = String(formData.get("conversationId") ?? "");
       if (!conversationId) {
         conversationId = createConversation(db, {
@@ -94,6 +99,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       const result = await runControllerTurn(db, {
         conversationId,
         text,
+        files,
         user: {
           id: auth.user.id,
           email: auth.user.email,

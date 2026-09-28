@@ -617,6 +617,26 @@ CREATE TABLE controller_messages (
   steered_into TEXT,
   UNIQUE (conversation_id, seq)
 );
+-- Ruling 565: the files a person sent with a controller message. App-owned
+-- like the message: kept in the row (a message carries at most ten files and
+-- 25 MB), so the backup's snapshot carries them, a Retract (ruling 527) or a
+-- deleted conversation (ruling 525) takes them with the message, and a message
+-- and its files commit together. A name is unique in its conversation, which
+-- is how the controller's reader asks for one.
+CREATE TABLE controller_message_files (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL
+    REFERENCES controller_messages (id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL
+    REFERENCES controller_conversations (id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (conversation_id, name)
+);
+CREATE INDEX idx_controller_message_files__message
+  ON controller_message_files (message_id);
 CREATE TABLE "agent_runs" (
   id TEXT PRIMARY KEY,
   task_key TEXT NOT NULL,

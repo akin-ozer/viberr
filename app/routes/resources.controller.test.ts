@@ -79,10 +79,11 @@ async function withPendingReset<T>(userId: string, body: () => Promise<T>): Prom
 }
 
 /** One POST, signed in with `cookie` or with no session at all. */
-async function submit(fields: Record<string, string>, cookie?: string) {
+async function submit(fields: Record<string, string>, cookie?: string, files: readonly File[] = []) {
   const { action } = await import("~/routes/resources.controller");
   const body = new FormData();
   for (const [k, v] of Object.entries(fields)) body.set(k, v);
+  for (const file of files) body.append("files", file);
   const init: RequestInit & { cookie?: string } = { method: "POST", body };
   if (cookie) init.cookie = cookie;
   const request = app.request("/resources/controller", init);
@@ -95,9 +96,9 @@ async function submit(fields: Record<string, string>, cookie?: string) {
   });
 }
 
-async function post(userId: string, fields: Record<string, string>, csrf?: string) {
+async function post(userId: string, fields: Record<string, string>, csrf?: string, files: readonly File[] = []) {
   const { cookie, sessionId } = await app.cookieFor(userId);
-  return submit({ _csrf: csrf ?? (await app.csrfFor(sessionId)), ...fields }, cookie);
+  return submit({ _csrf: csrf ?? (await app.csrfFor(sessionId)), ...fields }, cookie, files);
 }
 
 describe("GET /resources/controller", () => {
@@ -491,5 +492,137 @@ describe("POST /resources/controller", () => {
   it("rejects an unknown intent", async () => {
     const reply = returnedRefusal.parse(await post(arda, { intent: "delete-everything" }));
     expect(reply.init?.status).toBe(400);
+  });
+});
+
+/**
+ * Ruling 565: a message carries files. They are checked before any thread is
+ * made, stored with the message, named to the turn, served to the thread's
+ * owner alone from `/resources/controller-file/:id`, and a retracted message
+ * takes them with it.
+ */
+describe("ruling 565: files sent with a controller message", () => {
+  async function serve(fileId: string, userId: string) {
+    const { loader } = await import("~/routes/resources.controller-file");
+    const request = app.request(`/resources/controller-file/${fileId}`, {
+      cookie: (await app.cookieFor(userId)).cookie,
+    });
+    return loader({
+      request,
+      url: new URL(request.url),
+      params: { id: fileId },
+      pattern: "/resources/controller-file/:id",
+      context: new RouterContextProvider(),
+    });
+  }
+
+  it("refuses a file the upload rules refuse before any thread exists", async () => {
+    // CANARY: drop `checkMessageFiles` from this route's send and the refusal
+    // comes from the engine, after an empty thread was made.
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../test-support/backend-credentials"
+    );
+    const { listConversations } = await import("~/server/controller/controller-conversations.server");
+    await connectFakeBackend(app.db, arda, "claude");
+    try {
+      const before = listConversations(app.db, { userId: arda }).length;
+      const refused = returnedRefusal.parse(
+        await post(arda, { intent: "send", text: "Look at this.", project: SLUG }, undefined, [
+          new File(["<p>hi</p>"], "page.html"),
+        ]),
+      );
+      expect(refused.init?.status).toBe(400);
+      expect(refused.data.error).toContain(".html");
+      expect(listConversations(app.db, { userId: arda }).length).toBe(before);
+    } finally {
+      await disconnectFakeBackend(app.db, arda, "claude");
+    }
+  });
+
+  it("stores the files with the message, names them to the turn, and serves them to the owner alone", async () => {
+    // CANARY: drop `withFilesNote` from the turn's start and the prompt never
+    // mentions `inventory.csv`; drop the access check in the serving route and
+    // deniz reads arda's file.
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../test-support/backend-credentials"
+    );
+    const { queueFakeRun, lastRunSpec } = await import("../../test-support/fake-runtime");
+    const { getConversation, listMessages } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    await connectFakeBackend(app.db, arda, "claude");
+    try {
+      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "Read it." }], sessionId: "sess-565" });
+      const { conversationId } = z
+        .object({ ok: z.literal(true), conversationId: z.string() })
+        .parse(
+          await post(arda, { intent: "send", text: "", project: SLUG }, undefined, [
+            new File(["host,cpu\nvm-1,4\n"], "inventory.csv"),
+          ]),
+        );
+      // Files alone are a message, titled by their names.
+      expect(getConversation(app.db, conversationId)?.title).toBe("inventory.csv");
+      const [asked] = listMessages(app.db, conversationId);
+      expect(asked).toMatchObject({ author: "user", text: "", files: [{ name: "inventory.csv", bytes: 16 }] });
+      expect(lastRunSpec()?.prompt).toContain("`inventory.csv` (1 KB)");
+      expect(lastRunSpec()?.prompt).toContain("read_message_file");
+
+      const served = await serve(asked!.files![0]!.id, arda);
+      expect(served.status).toBe(200);
+      expect(await served.text()).toBe("host,cpu\nvm-1,4\n");
+      expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+      expect((await serve(asked!.files![0]!.id, deniz)).status).toBe(404);
+      for (let i = 0; i < 200; i += 1) {
+        if (listMessages(app.db, conversationId).some((m) => m.author === "controller")) break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    } finally {
+      await disconnectFakeBackend(app.db, arda, "claude");
+    }
+  });
+
+  it("hands back a retracted message's words alone, and its files leave with it", async () => {
+    // CANARY: keep the note in the waiting message's text and Retract puts
+    // "A file came with this message…" into the person's composer.
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../test-support/backend-credentials"
+    );
+    const { queueFakeRun } = await import("../../test-support/fake-runtime");
+    const { conversationTurnState, interruptControllerTurn } = await import(
+      "~/server/controller/controller-run.server"
+    );
+    const { listConversationFileNames } = await import("~/server/controller/controller-conversations.server");
+    await connectFakeBackend(app.db, arda, "claude");
+    try {
+      queueFakeRun({
+        lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
+        sessionId: "sess-565-retract",
+        keepRunning: true,
+      });
+      const sent = z.object({ ok: z.literal(true), conversationId: z.string() });
+      const { conversationId } = sent.parse(await post(arda, { intent: "send", text: "Start.", project: SLUG }));
+      sent.parse(
+        await post(arda, { intent: "send", text: "And this.", project: SLUG, conversationId, mode: "queue" }, undefined, [
+          new File(["a"], "notes.txt"),
+        ]),
+      );
+      expect(listConversationFileNames(app.db, conversationId)).toEqual(["notes.txt"]);
+      const turn = conversationTurnState(app.db, conversationId);
+      const back = z
+        .object({ ok: z.literal(true), retracted: z.string() })
+        .parse(await post(arda, { intent: "retract", conversationId, messageId: turn.queued[0]!.messageId }));
+      expect(back.retracted).toBe("And this.");
+      expect(listConversationFileNames(app.db, conversationId)).toEqual([]);
+      await interruptControllerTurn(
+        app.db,
+        { conversationId, runId: turn.runId!, dataRoot: app.dataRoot },
+        { userId: arda, label: "arda@viberr.dev" },
+      );
+      for (let i = 0; i < 400 && conversationTurnState(app.db, conversationId).answering; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    } finally {
+      await disconnectFakeBackend(app.db, arda, "claude");
+    }
   });
 });

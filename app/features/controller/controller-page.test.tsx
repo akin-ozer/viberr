@@ -1912,3 +1912,73 @@ describe("ruling 525: deleting a conversation from the rail", () => {
     expect(await screen.findByRole("link", { name: "Show everyone's (project admin)" })).toBeTruthy();
   });
 });
+
+/**
+ * Ruling 565: a person's files, on the page. A pasted screenshot joins the
+ * composer's tray and goes out with the message; a message's files show under
+ * its words, a picture as itself and any other file as the tray's chip, each
+ * linking to the conversation's own serving route.
+ */
+describe("ruling 565: files on the controller page", () => {
+  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
+    id: "cnv_f",
+    userId: "u1",
+    userLabel: "Akin",
+    projectSlug: "viberr-core",
+    taskKey: null,
+    title: "Inventory",
+    createdAt: "2026-09-28T20:00:00.000Z",
+    updatedAt: "2026-09-28T20:00:00.000Z",
+    lastMessageAt: "2026-09-28T20:00:00.000Z",
+  };
+
+  it("shows a message's files under it, each opening from the conversation's route", async () => {
+    // CANARY: drop `<MessageFiles>` from the transcript and neither file shows.
+    renderPage(
+      view({
+        conversation,
+        viewerOwnsActive: true,
+        messages: [
+          {
+            id: "m1",
+            conversationId: "cnv_f",
+            seq: 1,
+            author: "user",
+            userId: "u1",
+            text: "",
+            runId: null,
+            surface: null,
+            replyTo: null,
+            steeredInto: null,
+            createdAt: "2026-09-28T20:00:00.000Z",
+            files: [
+              { id: "cfile_a", name: "portal.png", bytes: 2048 },
+              { id: "cfile_b", name: "inventory.csv", bytes: 16 },
+            ],
+          },
+        ],
+      }),
+    );
+    const sent = await screen.findByRole("list", { name: "2 files sent" });
+    const links = within(sent).getAllByRole("link");
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([
+      "/resources/controller-file/cfile_a",
+      "/resources/controller-file/cfile_b",
+    ]);
+    expect(links[0]!.getAttribute("aria-label")).toBe("Open portal.png (2.0 KB)");
+    expect(links[1]!.textContent).toContain("inventory.csv");
+  });
+
+  it("puts a pasted screenshot in the tray, and a tray alone may be sent", async () => {
+    // CANARY: drop the composer's `onPaste` and the screenshot never joins;
+    // keep Send's old `!text.trim()` and files alone cannot go. (The dock's
+    // tests send a tray through the request itself.)
+    const { container } = renderInstancePage(view({ available: true, projectName: null, conversations: [] }));
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    const shot = new File(["png"], "image.png", { type: "image/png" });
+    fireEvent.paste(box, { clipboardData: { files: [shot], types: ["Files"] } });
+    expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("screenshot.png");
+    expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(false);
+  });
+});

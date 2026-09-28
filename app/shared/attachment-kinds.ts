@@ -61,6 +61,27 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Ruling 533: how many files one task may be filed with, and their total
  *  size. A task's input, not a folder of them; the rest attach from the task
- *  page. */
-export const FILED_ATTACHMENTS_MAX = 10;
-export const FILED_ATTACHMENTS_MAX_BYTES = 25 * 1024 * 1024;
+ *  page. Ruling 565: one comment or one controller message carries the same
+ *  batch. */
+export const ATTACHMENT_BATCH_MAX = 10;
+export const ATTACHMENT_BATCH_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Ruling 565: how a batch names its own limits in a refusal, on the client
+ *  and the server alike: "A task can be filed with" or "A message can
+ *  carry", then where the rest go. */
+export interface AttachmentBatchWording {
+  holds: string;
+  rest: string;
+}
+
+/** Ruling 533: a task filed with its input. */
+export const FILING_BATCH: AttachmentBatchWording = {
+  holds: "A task can be filed with",
+  rest: "Attach the rest from the task page.",
+};
+
+/** Ruling 565: a comment or a controller message carrying files. */
+export const MESSAGE_BATCH: AttachmentBatchWording = {
+  holds: "A message can carry",
+  rest: "Send the rest in another message.",
+};

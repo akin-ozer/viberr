@@ -17,6 +17,9 @@ import { randomBytes } from "node:crypto";
 import { AppError } from "~/server/errors/app-error.server";
 import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import {
+  ATTACHMENT_BATCH_MAX,
+  ATTACHMENT_BATCH_MAX_BYTES,
+  type AttachmentBatchWording,
   INLINE_TYPES,
   MAX_UPLOAD_BYTES,
   READABLE_TEXT_EXTENSIONS,
@@ -477,6 +480,44 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
 }
 
 /**
+ * Rulings 533 and 565: every file a batch carries is checked before anything
+ * is written, by the rules one upload meets, and the batch by its own: at most
+ * {@link ATTACHMENT_BATCH_MAX} files and {@link ATTACHMENT_BATCH_MAX_BYTES},
+ * and no two names one case apart. One refused file refuses the batch.
+ * Returns the names they will be stored under.
+ */
+export function checkAttachmentBatch(
+  files: readonly { name: string; data: Uint8Array }[],
+  wording: AttachmentBatchWording,
+): string[] {
+  const holds = wording.holds.charAt(0).toLowerCase() + wording.holds.slice(1);
+  if (files.length > ATTACHMENT_BATCH_MAX) {
+    throw AppError.validation(
+      `${wording.holds} up to ${ATTACHMENT_BATCH_MAX} files; this one has ${files.length}. ${wording.rest}`,
+    );
+  }
+  const total = files.reduce((sum, f) => sum + f.data.byteLength, 0);
+  if (total > ATTACHMENT_BATCH_MAX_BYTES) {
+    throw AppError.validation(
+      `These files come to ${Math.round(total / 1024 / 1024)} MB; ${holds} up to ${ATTACHMENT_BATCH_MAX_BYTES / 1024 / 1024} MB. ${wording.rest}`,
+    );
+  }
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const name = checkAttachmentUpload(file.name, file.data.byteLength);
+    // Case-folded: two names one case apart are one file on a case-insensitive
+    // disk, and the second write would silently replace the first.
+    if (seen.has(name.toLowerCase())) {
+      throw AppError.validation(`Two of these files are named “${name}”. Rename one of them.`);
+    }
+    seen.add(name.toLowerCase());
+    names.push(name);
+  }
+  return names;
+}
+
+/**
  * Ruling 558: the names a writer is putting on a task for someone other than a
  * run (a person's upload, a relay, a take), from before the file lands until
  * the timeline entry that claims it is written.
@@ -774,6 +815,90 @@ export function attachmentImageHeader(taskKey: string, image: TaskAttachmentImag
   return `\`${image.name}\` (${kb} KB, ${image.mimeType}), attached to ${taskKey}. The image follows.`;
 }
 
+/** What a reader gets for one file: its text (a page of it), the picture
+ *  itself, or a sentence saying what the file is and why this channel does
+ *  not carry it. */
+export type AttachmentContent =
+  | ({ kind: "text" } & TaskAttachmentRead)
+  | ({ kind: "image" } & TaskAttachmentImage)
+  | { unreadable: string };
+
+/** The bytes a reader of `ext` takes at most. */
+function readCap(ext: string): number {
+  return IMAGE_READ_TYPES.has(ext) ? IMAGE_READ_MAX_BYTES : ext === ".xlsx" ? XLSX_READ_MAX_BYTES : TEXT_READ_MAX_BYTES;
+}
+
+/** The kinds a reader takes, said to a reader asked for another. */
+function unreadableKind(name: string, ext: string, bytes: number, where: string): AttachmentContent {
+  return {
+    unreadable:
+      `\`${name}\` is a ${ext || "typeless"} file (${bytes.toLocaleString("en-US")} bytes). ` +
+      `This reads text (${[...READABLE_TEXT_EXTENSIONS].join(", ")}), spreadsheets (.xlsx) and images ` +
+      `(${[...IMAGE_READ_TYPES.keys()].join(", ")}). Open it ${where} rather than describing it from its name.`,
+  };
+}
+
+/** A file over its reader's cap, named rather than read. */
+function tooLargeToRead(name: string, ext: string, bytes: number, where: string): AttachmentContent {
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+  const image = IMAGE_READ_TYPES.has(ext);
+  const cap = readCap(ext);
+  return {
+    unreadable:
+      `\`${name}\` is ${mb(bytes)} MB; this reads ${image ? "images" : "files like it"} up to ` +
+      `${image ? (cap / 1024 / 1024).toFixed(2) : mb(cap)} MB. Open it ${where} rather than describing it from its name.`,
+  };
+}
+
+/**
+ * Ruling 565: one file for a reader, from bytes already in hand: text as
+ * text, a spreadsheet as its sheets in CSV (ruling 533), an image as the image
+ * after its own header is checked. The task's reader and the controller's
+ * reader of a message's files share it; `where` says where a person opens the
+ * file instead ("on the task page", "in the conversation").
+ */
+export function readAttachmentContent(name: string, bytes: Buffer, offset: number, where: string): AttachmentContent {
+  const ext = path.extname(name).toLowerCase();
+  const mimeType = IMAGE_READ_TYPES.get(ext);
+  if (!mimeType && ext !== ".xlsx" && !READABLE_TEXT_EXTENSIONS.has(ext)) {
+    return unreadableKind(name, ext, bytes.length, where);
+  }
+  if (bytes.length > readCap(ext)) return tooLargeToRead(name, ext, bytes.length, where);
+  return decodeAttachment(name, ext, bytes, offset, where);
+}
+
+/** The picture, the workbook or the text, once the bytes are within the cap. */
+function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: number, where: string): AttachmentContent {
+  const mimeType = IMAGE_READ_TYPES.get(ext);
+  if (mimeType) {
+    const header = imageHeader(bytes);
+    if (!header || header.mimeType !== mimeType) {
+      return {
+        unreadable: `\`${name}\` is named as a ${ext} image, but its bytes are not one. Open it ${where} rather than describing it from its name.`,
+      };
+    }
+    if (header.width > IMAGE_READ_MAX_SIDE || header.height > IMAGE_READ_MAX_SIDE) {
+      return {
+        unreadable:
+          `\`${name}\` is ${header.width}×${header.height} pixels; this reads images up to ${IMAGE_READ_MAX_SIDE} on a side. ` +
+          `Open it ${where} rather than describing it from its name.`,
+      };
+    }
+    return { kind: "image", name, bytes: bytes.length, mimeType, data: bytes.toString("base64") };
+  }
+  if (ext === ".xlsx") {
+    const text = xlsxToText(bytes, XLSX_TEXT_MAX_CHARS);
+    if ("unreadable" in text) {
+      return { unreadable: `\`${name}\` ${text.unreadable}` };
+    }
+    if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
+    return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
+  }
+  const raw = bytes.toString("utf8");
+  if (offset > 0 && offset >= raw.length) return pastTheEnd(name, raw.length, offset);
+  return { kind: "text", name, bytes: bytes.length, ...textPage(raw, false, offset) };
+}
+
 /**
  * One attachment for a reader, or `null` when this task has no such file:
  * text as text, a spreadsheet as its sheets in CSV (ruling 533), an image as
@@ -786,11 +911,7 @@ export function readTaskAttachment(
   name: string,
   dataRoot?: string,
   offset = 0,
-):
-  | ({ kind: "text" } & TaskAttachmentRead)
-  | ({ kind: "image" } & TaskAttachmentImage)
-  | { unreadable: string }
-  | null {
+): AttachmentContent | null {
   const wanted = name.trim();
   if (!wanted) return null;
   let abs: string;
@@ -801,9 +922,9 @@ export function readTaskAttachment(
   } catch {
     return null;
   }
+  const where = "on the task page";
   const ext = path.extname(wanted).toLowerCase();
-  const mimeType = IMAGE_READ_TYPES.get(ext);
-  if (!mimeType && ext !== ".xlsx" && !READABLE_TEXT_EXTENSIONS.has(ext)) {
+  if (!IMAGE_READ_TYPES.has(ext) && ext !== ".xlsx" && !READABLE_TEXT_EXTENSIONS.has(ext)) {
     let st;
     try {
       // `lstat`: a link at this name is not the file it points to.
@@ -812,55 +933,12 @@ export function readTaskAttachment(
       return null;
     }
     if (!st.isFile()) return null;
-    return {
-      unreadable:
-        `\`${wanted}\` is a ${ext || "typeless"} file (${st.size.toLocaleString("en-US")} bytes). ` +
-        `This reads text (${[...READABLE_TEXT_EXTENSIONS].join(", ")}), spreadsheets (.xlsx) and images ` +
-        `(${[...IMAGE_READ_TYPES.keys()].join(", ")}). Open it on the task page rather than describing it from its name.`,
-    };
+    return unreadableKind(wanted, ext, st.size, where);
   }
-  const read = readAttachmentBytes(
-    abs,
-    mimeType ? IMAGE_READ_MAX_BYTES : ext === ".xlsx" ? XLSX_READ_MAX_BYTES : TEXT_READ_MAX_BYTES,
-  );
+  const read = readAttachmentBytes(abs, readCap(ext));
   if (!read) return null;
-  if ("tooLarge" in read) {
-    const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
-    const cap = mimeType ? IMAGE_READ_MAX_BYTES : ext === ".xlsx" ? XLSX_READ_MAX_BYTES : TEXT_READ_MAX_BYTES;
-    return {
-      unreadable:
-        `\`${wanted}\` is ${mb(read.tooLarge)} MB; this reads ${mimeType ? "images" : "files like it"} up to ` +
-        `${mimeType ? (cap / 1024 / 1024).toFixed(2) : mb(cap)} MB. Open it on the task page rather than describing it from its name.`,
-    };
-  }
-  if (mimeType) {
-    const bytes = read.bytes;
-    const header = imageHeader(bytes);
-    if (!header || header.mimeType !== mimeType) {
-      return {
-        unreadable: `\`${wanted}\` is named as a ${ext} image, but its bytes are not one. Open it on the task page rather than describing it from its name.`,
-      };
-    }
-    if (header.width > IMAGE_READ_MAX_SIDE || header.height > IMAGE_READ_MAX_SIDE) {
-      return {
-        unreadable:
-          `\`${wanted}\` is ${header.width}×${header.height} pixels; this reads images up to ${IMAGE_READ_MAX_SIDE} on a side. ` +
-          "Open it on the task page rather than describing it from its name.",
-      };
-    }
-    return { kind: "image", name: wanted, bytes: read.bytes.length, mimeType, data: bytes.toString("base64") };
-  }
-  if (ext === ".xlsx") {
-    const text = xlsxToText(read.bytes, XLSX_TEXT_MAX_CHARS);
-    if ("unreadable" in text) {
-      return { unreadable: `\`${wanted}\` ${text.unreadable}` };
-    }
-    if (offset > 0 && offset >= text.text.length) return pastTheEnd(wanted, text.text.length, offset);
-    return { kind: "text", name: wanted, bytes: read.bytes.length, ...textPage(text.text, text.truncated, offset) };
-  }
-  const raw = read.bytes.toString("utf8");
-  if (offset > 0 && offset >= raw.length) return pastTheEnd(wanted, raw.length, offset);
-  return { kind: "text", name: wanted, bytes: read.bytes.length, ...textPage(raw, false, offset) };
+  if ("tooLarge" in read) return tooLargeToRead(wanted, ext, read.tooLarge, where);
+  return decodeAttachment(wanted, ext, read.bytes, offset, where);
 }
 
 function pastTheEnd(name: string, chars: number, offset: number) {

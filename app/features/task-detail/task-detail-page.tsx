@@ -1191,6 +1191,9 @@ export function TaskDetailPage({
           runPrincipal={runPrincipal}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
+          // Ruling 565: a comment carries files for whoever may attach one
+          // (the attachments panel's own rule, F39-6).
+          canAttach={roleCan(role, "attach-file") && !archived}
           // U33-1 was inert: the Timeline accepted `runLive` and no production
           // caller ever passed it, so a task whose loop HAS started but has not
           // reported yet still read "this task hasn't started its operator

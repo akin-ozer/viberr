@@ -4336,6 +4336,68 @@ describe("ruling 533: a task filed with its input", () => {
  * that creates the task, before the operator's `create` trigger, so the first
  * run bills the named owner; the hand-off rule is the ONE shared check.
  */
+/**
+ * Ruling 565: a comment carries files. They land as the task's attachments,
+ * claimed by the comment (so the panel says who added them and no run takes
+ * them), the comment's text names them for every reader, and a refused file
+ * refuses the comment with nothing written.
+ */
+describe("ruling 565: a comment with files", () => {
+  it("puts the files on the task, claimed and named by the comment", async () => {
+    // CANARY: drop `attachments` from the comment's event and the files land
+    // unclaimed, the next completion's to take.
+    const store = setupProjectedStore(ctx);
+    const task = await createTask(store.db, { projectSlug: store.slug, title: "Size the estate" }, actorOf(store.users.arda), {
+      dataRoot: store.dataRoot,
+    });
+    await commentToAgent(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: task.key,
+        text: "Here is the current state.",
+        files: [{ name: "inventory.csv", data: new TextEncoder().encode("vm,cpu\nweb01,4\n") }],
+      },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: task.key, dataRoot: store.dataRoot })!.parsed;
+    const comment = parsed.timeline.find((e) => e.type === "comment")!;
+    expect(comment.attachments).toEqual(["inventory.csv"]);
+    expect(comment.text).toBe("Here is the current state.\n\nAttached `inventory.csv` (1 KB).");
+    expect(listTaskAttachments(store.slug, task.key, store.dataRoot).map((a) => a.name)).toEqual(["inventory.csv"]);
+    expect(listAuditEvents(store.db, { action: "task.attachment.added" }).map((e) => e.details?.name)).toContain(
+      "inventory.csv",
+    );
+  });
+
+  it("refuses the comment when a file is refused, and writes nothing", async () => {
+    const store = setupProjectedStore(ctx);
+    const task = await createTask(store.db, { projectSlug: store.slug, title: "Size the estate" }, actorOf(store.users.arda), {
+      dataRoot: store.dataRoot,
+    });
+    await expect(
+      commentToAgent(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: task.key,
+          text: "And this page.",
+          files: [
+            { name: "notes.txt", data: new TextEncoder().encode("ok") },
+            { name: "page.html", data: new TextEncoder().encode("<p>") },
+          ],
+        },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(".html");
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: task.key, dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.timeline.some((e) => e.type === "comment")).toBe(false);
+    expect(listTaskAttachments(store.slug, task.key, store.dataRoot)).toEqual([]);
+  });
+});
+
 describe("ruling 140(a): a named owner at creation", () => {
   it("the operator's create trigger reads the NAMED owner from the file, exactly once", async () => {
     // Asserting right after `await createTask` proves nothing: the hand-off is

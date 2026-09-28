@@ -770,8 +770,9 @@ Packet notes:
   `info` row whose result is its two cells (signed counts spaced, words joined by a comma,
   `—` dropped); the next write of the file puts it in the new form. At most 8 rows (label 200
   characters, result 40). An optional `attachments:` block follows the same way, one `- <file name>`
-  per file the event's run saved under `tasks/<KEY>/attachments/` (ruling 96); the directory
-  stays the truth.
+  per file the event's run saved under `tasks/<KEY>/attachments/` (ruling 96), or, on a
+  person's note or comment, per file that person put there with it (rulings 533(b) and 565);
+  the directory stays the truth.
 - **Compaction**: when the project's `compression-threshold` guardrail is on and a timeline
   passes its `value` (40 by default), writers fold older routine comments into ONE `comment`
   titled `Compacted` in the oldest folded entry's slot (`timeline-compaction.server.ts`). The

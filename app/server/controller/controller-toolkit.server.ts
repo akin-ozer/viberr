@@ -9,8 +9,10 @@ import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
   listTaskAttachments,
+  readAttachmentContent,
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
+import { findMessageFile, listConversationFileNames } from "./controller-conversations.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel } from "~/shared/text/plural";
 import {
@@ -2234,6 +2236,47 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "read_task_attachment",
+  );
+
+  // Ruling 565: the files a person sends with a message, read the way a
+  // task's attachments are. A screenshot of an error or an inventory handed
+  // over in the dock was a name in the prompt and nothing the turn could open.
+  add(
+    tool(
+      "read_message_file",
+      "Read ONE file the person sent with a message in THIS conversation. Their message names each file it carried (\"A file came with this message: ...\"), and the recent exchange lists what earlier messages carried under `[sent with: ...]`. Read a file before you say what it holds or act on it. Text files (.txt .log .md .json .yml .yaml .csv .diff .patch) come back as text, a spreadsheet (.xlsx) as its sheets in CSV, and an image (.png .jpg .jpeg .webp .gif) as the picture itself; anything else is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset`. Read-only; this conversation's files only.",
+      {
+        name: z.string().describe("The file's name, exactly as the message lists it."),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
+      },
+      runWith((args: { name: string; offset?: number }) => {
+        if (!deps.conversationId) {
+          return "[unavailable] This turn answers no conversation, so there are no sent files to read.";
+        }
+        const file = findMessageFile(db, deps.conversationId, args.name);
+        if (!file) {
+          const have = listConversationFileNames(db, deps.conversationId);
+          return (
+            `[noop] No file \`${args.name}\` was sent in this conversation. ` +
+            (have.length ? `It holds: ${have.join(", ")}.` : "No file has been sent in it.")
+          );
+        }
+        const read = readAttachmentContent(file.name, file.data, args.offset ?? 0, "in the conversation");
+        if ("unreadable" in read) return `[noop] ${read.unreadable}`;
+        if (read.kind === "image") {
+          const kb = Math.max(1, Math.round(read.bytes / 1024));
+          return imageResult(`\`${read.name}\` (${kb} KB, ${read.mimeType}), sent in this conversation. The image follows.`, read);
+        }
+        const { kind: _text, ...body } = read;
+        return json(body);
+      }),
+    ),
+    "read_message_file",
   );
 
   /**
