@@ -18,6 +18,11 @@ import {
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
 import { validatePat } from "~/server/secrets/pat-validator.server";
+import { readRepoHealth, recordRepoAccess } from "~/server/github/repo-health.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
+import { writeProject } from "../../../test-support/test-store";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   createConnection,
   ensureConnectionFresh,
@@ -288,10 +293,10 @@ describe("default + remove", () => {
   it("refuses to remove the default; removing another deletes its PAT", async () => {
     const db = makeDbWithUser();
     await twoConnections(db);
-    const refused = removeConnection(db, "akin-ozer", ACTOR);
+    const refused = await removeConnection(db, "akin-ozer", ACTOR);
     expect(refused.status).toBe("is_default");
 
-    const removed = removeConnection(db, "hepapi", ACTOR);
+    const removed = await removeConnection(db, "hepapi", ACTOR);
     expect(removed.status).toBe("removed");
     expect(listConnections(db)).toHaveLength(1);
     expect(
@@ -836,5 +841,85 @@ describe("ruling 480: a connection Re-check never unproves a repository", () => 
       "pull_request:write:header",
     ]);
     expect(card.repoProofs).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 540: every project bound to a connection's token checks its repository
+ * with that token, so Update token, Re-check and removal each take a new reading
+ * for those projects' boards (U33-2). Before, none of them touched a project's
+ * remembered check, and "token expired" stayed on every bound board after the
+ * token was replaced, until someone opened the project's GitHub page.
+ */
+describe("ruling 540: a connection change takes a new reading for every project bound to its token", () => {
+  const REPO = "akin-ozer/viberr"; // the projected store's project
+
+  function github(repoAnswer: FakeResponder) {
+    return fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" }, headers: { "x-oauth-scopes": "repo, workflow" } },
+      "GET /users/akin-ozer": { body: {} },
+      "GET /users/hepapi": { body: {} },
+      "GET /user/repos": { body: [] },
+      [`GET /repos/${REPO}`]: repoAnswer,
+    });
+  }
+
+  it("Update token, Re-check and removal re-check the bound project and leave every other project's check alone", async () => {
+    const store = setupProjectedStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    getPatValidationRateLimiter().reset(actor.userId);
+    const board = (slug = store.slug) => readRepoHealth(store.db, slug)?.result;
+    const reachable = github({
+      body: { full_name: REPO, default_branch: "main", private: true, permissions: { push: true } },
+    });
+    // hepapi is saved first and so is the default, which leaves akin-ozer removable.
+    for (const owner of ["hepapi", "akin-ozer"]) {
+      await createConnection(
+        store.db,
+        { owner, token: `ghp_${owner}_token_0001`, userId: store.users.arda.id },
+        actor,
+        { fetchImpl: reachable.fetchImpl },
+      );
+    }
+    const patId = listConnections(store.db).find((c) => c.id === "akin-ozer")!.patId;
+    setProjectCredential(store.db, { projectSlug: store.slug, patId }, actor);
+    recordRepoAccess(store.db, store.slug, { status: "auth_failed", repo: REPO, reason: "expired" });
+    // A project on no connection, whose reading none of this may touch.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      slug: "other",
+      name: "Other",
+      repo: "acme/other",
+      taskPrefix: "OTH",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const unbound = { status: "repo_not_found", repo: "acme/other" } as const;
+    recordRepoAccess(store.db, "other", unbound);
+
+    await replaceConnectionToken(
+      store.db,
+      { connectionId: "akin-ozer", token: "ghp_replacement_beef" },
+      actor,
+      { fetchImpl: reachable.fetchImpl },
+    );
+    // CANARY: take the new reading out of `replaceConnectionToken` and the
+    // bound board keeps saying "token expired" about the token just replaced.
+    expect(board()).toEqual({ status: "connected", repo: REPO, remoteDefaultBranch: "main", private: true });
+
+    const refused = { status: 401, body: { message: "Bad credentials" } };
+    await recheckConnection(store.db, "akin-ozer", actor, {
+      fetchImpl: fakeGithubFetch({ "GET /user": refused, [`GET /repos/${REPO}`]: refused }).fetchImpl,
+    });
+    expect(board()).toEqual({ status: "auth_failed", repo: REPO, reason: "revoked" });
+
+    // An unreachable GitHub evaluated nothing, so no board is re-checked either.
+    await recheckConnection(store.db, "akin-ozer", actor, { fetchImpl: unreachableFetch() });
+    expect(board()).toEqual({ status: "auth_failed", repo: REPO, reason: "revoked" });
+
+    // Removal unbinds the project with the token, so it reads the bindings first.
+    await removeConnection(store.db, "akin-ozer", actor);
+    expect(board()).toEqual({ status: "no_pat_configured", repo: REPO });
+    expect(board("other")).toEqual(unbound);
   });
 });

@@ -25,13 +25,13 @@ import { findUserByEmail } from "~/server/auth/user-store.server";
 import { listOrgUsers } from "~/server/org/org-users.server";
 import {
   addStage,
+  changeProjectRepo,
   deleteProject,
   inviteMember,
   removeMember,
   removeStage,
   renameStage,
   reorderStages,
-  repairProjectRepo,
   repoFootprintTasks,
   setBranchCleanup,
   setProjectRulingsKb,
@@ -479,9 +479,9 @@ describe("renameStage", () => {
   });
 });
 
-/* ------------- repo repair (owner ruling 2026-07-26) ------------- */
+/* ------- repository change (owner ruling 2026-07-26, ruling 539) ------- */
 
-describe("repairProjectRepo — the explicit misconfiguration escape hatch", () => {
+describe("changeProjectRepo — the one door that changes a project's repository", () => {
   const REPO_OK = "akin-ozer/viberr";
 
   async function misconfigure(store: TestStore, repo = "akin/viberr") {
@@ -498,13 +498,13 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     const actor = admin(store);
     const pat = createPat(
       store.db,
-      { userId: store.users.arda.id, label: "bot", token: "github_pat_repair01" },
+      { userId: store.users.arda.id, label: "bot", token: "github_pat_change01" },
       actor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
   }
 
-  it("repairs owner/name (URL input tolerated), refreshes defaultBranch from the probe, audits from → to", async () => {
+  it("changes owner/name (URL input tolerated), refreshes defaultBranch from the probe, audits from → to", async () => {
     const store = setupTestStore(ctx);
     await misconfigure(store);
     bindCredential(store);
@@ -513,7 +513,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
         body: { full_name: REPO_OK, default_branch: "develop" },
       },
     });
-    const result = await repairProjectRepo(
+    const result = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: `https://github.com/${REPO_OK}.git` },
       admin(store),
@@ -522,7 +522,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     );
     expect(result.changed).toBe(true);
     expect(result.repo).toBe(REPO_OK);
-    expect(result.toast).toContain("Repository repaired: akin/viberr → akin-ozer/viberr");
+    expect(result.toast).toContain("Repository changed: akin/viberr → akin-ozer/viberr");
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     expect(fm.repo).toBe(REPO_OK);
@@ -537,9 +537,9 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     });
   });
 
-  it("ruling 517: the repair's probe is the reading the board shows from then on", async () => {
+  it("ruling 517: the change's probe is the reading the board shows from then on", async () => {
     // The board and Home read the last reading taken of the project's
-    // repository. A repair probes the new repository and used to keep that
+    // repository. A change probes the new repository and used to keep that
     // answer to itself, so "akin-ozer/akin-website · repo not found" stayed on
     // the board of a project that no longer pointed there.
     const store = setupTestStore(ctx);
@@ -554,14 +554,14 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
         body: { full_name: REPO_OK, default_branch: "main", private: true },
       },
     });
-    await repairProjectRepo(
+    await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK },
       admin(store),
       { dataRoot: store.dataRoot },
       { fetchImpl: gh.fetchImpl },
     );
-    // CANARY: drop the repair's `recordRepoAccess` and this reads null: the
+    // CANARY: drop the change's `recordRepoAccess` and this reads null: the
     // old reading is about another repository, and no reading replaced it.
     expect(readRepoHealth(store.db, store.slug)?.result).toEqual({
       status: "connected",
@@ -571,13 +571,13 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     });
   });
 
-  it("REFUSES a target the bound credential cannot see — a repair must not install the next misconfiguration", async () => {
+  it("REFUSES a target the bound credential cannot see — a change must not install the next misconfiguration", async () => {
     const store = setupTestStore(ctx);
     await misconfigure(store);
     bindCredential(store);
     const gh = fakeGithubFetch({}); // every route 404s
     await expect(
-      repairProjectRepo(
+      changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: "akin-ozer/typo-again" },
         admin(store),
@@ -609,7 +609,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
       },
     });
     await expect(
-      repairProjectRepo(
+      changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: "octocat/Hello-World" },
         admin(store),
@@ -638,7 +638,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
         },
       },
     });
-    const result = await repairProjectRepo(
+    const result = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK },
       admin(store),
@@ -648,10 +648,10 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     expect(result.changed).toBe(true);
   });
 
-  it("with NO credential bound the repair applies unprobed, saying so", async () => {
+  it("with NO credential bound the change applies unprobed, saying so", async () => {
     const store = setupTestStore(ctx);
     await misconfigure(store);
-    const result = await repairProjectRepo(
+    const result = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK },
       admin(store),
@@ -678,9 +678,9 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(repoFootprintTasks(store.db, store.slug)).toBe(1);
 
-    // The refusal's count and verb agree, as the repair dialog's note does.
+    // The refusal's count and verb agree, as the dialog's note does.
     await expect(
-      repairProjectRepo(
+      changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: REPO_OK },
         admin(store),
@@ -689,7 +689,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     ).rejects.toMatchObject({
       status: 400,
       userMessage:
-        "1 task in this project carries branch/PR records against akin/viberr. Confirm the repair to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
+        "1 task in this project carries branch/PR records against akin/viberr. Confirm the change to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
     });
 
     writeTask(store.dataRoot, store.slug, {
@@ -702,7 +702,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(repoFootprintTasks(store.db, store.slug)).toBe(2);
     await expect(
-      repairProjectRepo(
+      changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: REPO_OK },
         admin(store),
@@ -711,10 +711,10 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     ).rejects.toMatchObject({
       status: 400,
       userMessage:
-        "2 tasks in this project carry branch/PR records against akin/viberr. Confirm the repair to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
+        "2 tasks in this project carry branch/PR records against akin/viberr. Confirm the change to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
     });
 
-    const confirmed = await repairProjectRepo(
+    const confirmed = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK, confirmFootprint: true },
       admin(store),
@@ -726,7 +726,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
   it("admin-only (edit-policy): a maintainer is refused; same-repo input is a no-op; garbage input is refused", async () => {
     const store = setupTestStore(ctx);
     await expect(
-      repairProjectRepo(
+      changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: REPO_OK },
         { userId: store.users.murat.id, label: store.users.murat.email },
@@ -734,7 +734,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
       ),
     ).rejects.toMatchObject({ status: 403 });
 
-    const noop = await repairProjectRepo(
+    const noop = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK }, // fixture already points here
       admin(store),
@@ -743,7 +743,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     expect(noop.changed).toBe(false);
 
     await expect(
-      repairProjectRepo(
+      changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: "not a repo" },
         admin(store),

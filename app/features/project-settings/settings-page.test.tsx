@@ -961,13 +961,13 @@ describe("settings panels take count + note styling from the sheet (F19-33)", ()
 function repoPanel(overrides: Partial<ComponentProps<typeof RepoPanel>> = {}) {
   return (
     <RepoPanel
-      canRepair
+      canEditPolicy
       branchCleanup
       onSetBranchCleanup={() => {}}
       footprintTasks={0}
-      repairBusy={false}
-      repairResult={undefined}
-      onRepair={() => {}}
+      repoBusy={false}
+      changeResult={undefined}
+      onChangeRepo={() => {}}
       repo="akin-ozer/viberr"
       credential={CREDENTIAL}
       canGrant
@@ -1052,7 +1052,7 @@ describe("RepoPanel", () => {
     const onSetBranchCleanup = vi.fn();
     const { container } = render(
       repoPanel({
-        canRepair: false,
+        canEditPolicy: false,
         branchCleanup: false,
         onSetBranchCleanup,
         canGrant: false,
@@ -1335,7 +1335,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
 });
 
 // E3: each panel asks for the action id its OWN server mutation checks —
-// `edit-policy` for project identity, stages, repo repair, branch cleanup and
+// `edit-policy` for project identity, stages, repo change, branch cleanup and
 // required reviewers (settings-actions.server.ts `requireProjectAction`),
 // `manage-members` for invite + remove (same file), `grant-github-scope` for
 // the credential row (routes/project.settings.tsx, as on the GitHub page). A
@@ -1362,13 +1362,13 @@ describe("SettingsPage — each panel follows the grant its own server guard che
           (b) => b.textContent?.trim() === "Add member",
         ),
       ),
-      repoRepair: Boolean(
+      repoChange: Boolean(
         Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Repair…",
+          (b) => b.textContent?.trim() === "Change…",
         ),
       ),
       // The one repo control that renders for everybody, so its reason to be
-      // disabled has to track the grant, not the repair button's presence.
+      // disabled has to track the grant, not the Change button's presence.
       branchCleanup: !container.querySelector<HTMLInputElement>(
         '.kv-row input[type="checkbox"]',
       )!.disabled,
@@ -1394,7 +1394,7 @@ describe("SettingsPage — each panel follows the grant its own server guard che
       identity: true,
       stages: true,
       members: true,
-      repoRepair: true,
+      repoChange: true,
       branchCleanup: true,
       credential: true,
       requiredReviewers: true,
@@ -1405,7 +1405,7 @@ describe("SettingsPage — each panel follows the grant its own server guard che
       identity: false,
       stages: false,
       members: false,
-      repoRepair: false,
+      repoChange: false,
       branchCleanup: false,
       credential: true,
       requiredReviewers: false,
@@ -1414,56 +1414,56 @@ describe("SettingsPage — each panel follows the grant its own server guard che
 });
 
 /**
- * Ruling 147: the repair dialog's primary stays enabled; a refused submit
- * names what is missing, marks it and moves focus there.
+ * Ruling 147: the Change repository dialog's primary stays enabled; a refused
+ * submit names what is missing, marks it and moves focus there.
  */
-describe("RepairRepoDialog refuses instead of disabling", () => {
+describe("ChangeRepoDialog refuses instead of disabling", () => {
   const openDialog = (footprintTasks: number) => {
-    const onRepair = vi.fn();
-    const utils = render(repoPanel({ footprintTasks, onRepair }));
-    fireEvent.click(utils.getByText("Repair…"));
+    const onChangeRepo = vi.fn();
+    const utils = render(repoPanel({ footprintTasks, onChangeRepo }));
+    fireEvent.click(utils.getByText("Change…"));
     const primary = [...document.querySelectorAll("button")].find(
-      (b) => b.textContent!.trim() === "Repair repository",
+      (b) => b.textContent!.trim() === "Change repository",
     )!;
-    return { ...utils, onRepair, primary };
+    return { ...utils, onChangeRepo, primary };
   };
 
   it("an empty repository field is refused, marked and focused", () => {
-    const { onRepair, primary } = openDialog(0);
+    const { onChangeRepo, primary } = openDialog(0);
     expect(primary.disabled).toBe(false);
     fireEvent.click(primary);
     const repo = document.querySelector<HTMLInputElement>(
-      'input[aria-label="Corrected repository, owner/name"]',
+      'input[aria-label="New repository, owner/name"]',
     )!;
     expect(repo.getAttribute("aria-invalid")).toBe("true");
-    expect(repo.getAttribute("aria-describedby")).toBe("repair-unmet");
-    expect(document.getElementById("repair-unmet")!.getAttribute("role")).toBe("alert");
+    expect(repo.getAttribute("aria-describedby")).toBe("repo-unmet");
+    expect(document.getElementById("repo-unmet")!.getAttribute("role")).toBe("alert");
     expect(document.activeElement).toBe(repo);
-    expect(onRepair).not.toHaveBeenCalled();
+    expect(onChangeRepo).not.toHaveBeenCalled();
   });
 
   it("an unconfirmed footprint note is the next refusal, on the checkbox", () => {
-    const { onRepair, primary } = openDialog(3);
+    const { onChangeRepo, primary } = openDialog(3);
     const repo = document.querySelector<HTMLInputElement>(
-      'input[aria-label="Corrected repository, owner/name"]',
+      'input[aria-label="New repository, owner/name"]',
     )!;
     fireEvent.change(repo, { target: { value: "akin-ozer/other" } });
     fireEvent.click(primary);
     const ack = document.querySelector<HTMLInputElement>(
-      'dialog[aria-label="Repair repository"] input[type="checkbox"]',
+      'dialog[aria-label="Change repository"] input[type="checkbox"]',
     )!;
     expect(ack.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(ack);
-    expect(onRepair).not.toHaveBeenCalled();
+    expect(onChangeRepo).not.toHaveBeenCalled();
     fireEvent.click(ack);
     fireEvent.click(primary);
-    expect(onRepair).toHaveBeenCalledWith("akin-ozer/other", true);
+    expect(onChangeRepo).toHaveBeenCalledWith("akin-ozer/other", true);
   });
 
   it("the footprint note's verb agrees with its count", () => {
     const note = () =>
       document
-        .querySelector('dialog[aria-label="Repair repository"] input[type="checkbox"]')!
+        .querySelector('dialog[aria-label="Change repository"] input[type="checkbox"]')!
         .closest("label")!.textContent;
     openDialog(1);
     expect(note()).toBe(
@@ -1696,7 +1696,7 @@ describe("FileLeasesPanel (ruling 396)", () => {
 });
 
 /**
- * Ruling 368 on project Settings: the repository fetcher carries the repair,
+ * Ruling 368 on project Settings: the repository fetcher carries the change,
  * the branch-cleanup switch and the scope re-check, and the credential fetcher
  * carries attach/rotate and remove, so every one of those buttons went to the
  * .45 refused step for any of them with its resting label. The one that sent
@@ -1707,7 +1707,7 @@ describe("FileLeasesPanel (ruling 396)", () => {
  */
 describe("ruling 368: Settings' requests in flight", () => {
   const renderInFlight = (inFlight: string | null, credInFlight: string | null) =>
-    render(repoPanel({ repairBusy: inFlight !== null, inFlight, credInFlight }));
+    render(repoPanel({ repoBusy: inFlight !== null, inFlight, credInFlight }));
 
   it("a scope re-check in flight reads Checking…, busy, the loader spinning", () => {
     const { getByText } = renderInFlight("grant-scope", null);

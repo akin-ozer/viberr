@@ -648,7 +648,7 @@ describe("F21-5: the settings loader withholds credential detail without the gra
   });
 });
 
-describe("E9: repair-repo + set-branch-cleanup authority gates", () => {
+describe("E9: change-repo + set-branch-cleanup authority gates", () => {
   it("set-branch-cleanup is edit-policy (admin): a contributor is refused, an admin round-trips", async () => {
     const denied = actionOutcome(
       await postAction(ids.selin, { intent: "set-branch-cleanup", enabled: "0" }),
@@ -665,12 +665,12 @@ describe("E9: repair-repo + set-branch-cleanup authority gates", () => {
     await postAction(ids.arda, { intent: "set-branch-cleanup", enabled: "1" });
   });
 
-  it("repair-repo is edit-policy (admin): a maintainer is refused before any GitHub probe", async () => {
+  it("change-repo is edit-policy (admin): a maintainer is refused before any GitHub probe", async () => {
     // Murat is a maintainer, above contributor but below the edit-policy tier
-    // this destructive repair demands — refused before it can touch GitHub.
+    // this destructive change demands — refused before it can touch GitHub.
     const denied = actionOutcome(
       await postAction(ids.murat, {
-        intent: "repair-repo",
+        intent: "change-repo",
         repo: "akin-ozer/viberr",
         confirmFootprint: "1",
       }),

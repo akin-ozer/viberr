@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { resolveGithubHandle } from "~/server/github/pr-human-approval.server";
+import { readRepoHealth, recordRepoAccess } from "~/server/github/repo-health.server";
 import { verifyPassword } from "~/server/auth/password.server";
 import { credentialPasswordHash } from "~/server/auth/identity.server";
 import {
@@ -326,7 +327,7 @@ describe("edit / role / reset / remove", () => {
     ).toBeUndefined();
   });
 
-  it("names the GitHub connections and project bindings the delete takes with it", async () => {
+  it("names the GitHub connections and project bindings the delete takes with it, and re-checks the unbound project's board", async () => {
     // users → github_pats → github_connections AND project_github_credentials,
     // all ON DELETE CASCADE. So removing one person can disconnect the org's
     // DEFAULT connection and unbind projects they never touched — the very
@@ -357,6 +358,12 @@ describe("edit / role / reset / remove", () => {
          (project_slug, pat_id, created_at, updated_at)
        VALUES (?, ?, ?, ?)`,
     ).run("viberr-core", "pat_1", now, now);
+    db.prepare(
+      `INSERT INTO projects (slug, name, repo, task_prefix, source_path, content_hash, parsed_at)
+       VALUES ('viberr-core', 'Viberr Core', 'acme/app', 'VIB', 'projects/viberr-core/project.md', 'x', ?)`,
+    ).run(now);
+    // What the board said while the leaver's token was bound (U33-2).
+    recordRepoAccess(db, "viberr-core", { status: "auth_failed", repo: "acme/app", reason: "revoked" });
 
     const result = await deleteOrgUser(db, user.id, ACTOR);
 
@@ -373,6 +380,12 @@ describe("edit / role / reset / remove", () => {
     expect(details.connectionsLost).toEqual(["acme"]);
     expect(details.defaultConnectionLost).toBe("acme");
     expect(details.projectsUnbound).toEqual(["viberr-core"]);
+    // Ruling 540: the unbound project has no credential now, and its board
+    // stops describing the token that went with the leaver.
+    expect(readRepoHealth(db, "viberr-core")?.result).toEqual({
+      status: "no_pat_configured",
+      repo: "acme/app",
+    });
   });
 });
 

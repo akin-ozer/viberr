@@ -12,7 +12,13 @@ import {
   getProjectCredential,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import { runReconcile, runSetCredential } from "./github-actions.server";
+import {
+  runClearCredential,
+  runGrantScope,
+  runReconcile,
+  runSetCredential,
+} from "./github-actions.server";
+import { readRepoHealth, recordRepoAccess } from "~/server/github/repo-health.server";
 import { latestProjectReconcileAt } from "~/server/provenance/provenance-query.server";
 
 const ctx = createTestDbContext();
@@ -66,7 +72,9 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
       fetchImpl: attachTime.fetchImpl,
     });
     expect(outcome.result).toBe("attached");
-    expect(attachTime.callsTo(`GET /repos/${REPO}`)).toHaveLength(1);
+    // One read proves the scopes; the other is the board's new reading of the
+    // repository (ruling 540).
+    expect(attachTime.callsTo(`GET /repos/${REPO}`)).toHaveLength(2);
 
     // 3. The SHARED cache (what the org card renders too) is upgraded.
     const credential = getProjectCredential(store.db, store.slug);
@@ -371,5 +379,60 @@ describe("ruling 480: re-attaching says what it did, never 'rotated'", () => {
     expect(getProjectCredential(store.db, store.slug)!.id).toBe(
       getConnection(store.db, "akin-ozer")!.patId,
     );
+  });
+});
+
+/**
+ * Ruling 540: the board's Repository strip and the home card read the check
+ * remembered per project (U33-2). Attaching, re-checking and removing the
+ * credential change what that check describes, so each takes a new reading.
+ * Before, each cleared only the 30-second memo in front of it, and the strip
+ * went on showing its verdict about the credential that was there before.
+ */
+describe("ruling 540: a credential change takes a new reading for the board", () => {
+  it("attach, Re-check scopes and remove each leave the check describing the credential as it now stands", async () => {
+    const store = setupProjectedStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    await createConnection(
+      store.db,
+      { owner: "akin-ozer", token: FINE, userId: store.users.arda.id },
+      actor,
+      {
+        fetchImpl: fakeGithubFetch({
+          "GET /user": { body: { login: "akin-ozer" } },
+          "GET /user/orgs": { body: [] },
+          "GET /users/akin-ozer": { body: {} },
+        }).fetchImpl,
+      },
+    );
+    // What the board said about the credential attached before this one.
+    recordRepoAccess(store.db, store.slug, { status: "auth_failed", repo: REPO, reason: "revoked" });
+    const board = () => readRepoHealth(store.db, store.slug)?.result;
+
+    const working = fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" } },
+      "GET /user/orgs": { body: [] },
+      [`GET /repos/${REPO}`]: {
+        body: { full_name: REPO, default_branch: "main", private: true, permissions: { push: true } },
+      },
+      [`GET /repos/${REPO}/pulls`]: { body: [] },
+    });
+    await runSetCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: working.fetchImpl,
+    });
+    // CANARY: let the attach only drop the memo again and the strip keeps
+    // saying "token revoked" about a credential that is gone.
+    expect(board()).toEqual({ status: "connected", repo: REPO, remoteDefaultBranch: "main", private: true });
+
+    const refused = { status: 401, body: { message: "Bad credentials" } };
+    await runGrantScope(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: fakeGithubFetch({ "GET /user": refused, [`GET /repos/${REPO}`]: refused }).fetchImpl,
+    });
+    expect(board()).toEqual({ status: "auth_failed", repo: REPO, reason: "revoked" });
+
+    await runClearCredential(store.db, store.slug, actor);
+    expect(board()).toEqual({ status: "no_pat_configured", repo: REPO });
   });
 });

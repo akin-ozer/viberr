@@ -42,6 +42,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import { initialsOf } from "~/ui/initials";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
 import { countLabel } from "~/shared/text/plural";
+import { refreshRepoAccess } from "~/features/github/github-query.server";
 
 /**
  * Org "Users & access" server layer (org-settings spec §4.2) — thin
@@ -575,6 +576,9 @@ export async function deleteOrgUser(
       projectsUnbound: projectsUnboundSlugs,
     },
   });
+  // Ruling 540: an unbound project has no credential now, so its board stops
+  // describing the token that went with this person. No GitHub call is needed.
+  for (const slug of projectsUnboundSlugs) await refreshRepoAccess(db, slug);
   const extras = [
     ...(projectsPruned.length > 0
       ? [

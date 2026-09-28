@@ -72,8 +72,8 @@ describe("repository health (U33-2)", () => {
   it("ruling 517: a reading of another repository is no reading, whatever the case of the name", () => {
     // Live, a board kept saying "akin-ozer/akin-website · repo not found" (a
     // repository the owner does not have) with nothing left to take it back: a
-    // repair or an edit of project.md moves the project to another repository,
-    // and the row, keyed by project, kept the old one's verdict.
+    // repository change or an edit of project.md moves the project to another
+    // repository, and the row, keyed by project, kept the old one's verdict.
     const store = setupProjectedStore(ctx);
     recordRepoAccess(store.db, store.slug, {
       status: "repo_not_found",

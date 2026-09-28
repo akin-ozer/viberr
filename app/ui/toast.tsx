@@ -183,7 +183,7 @@ const TOAST_HOST_STYLE: React.CSSProperties = {
  * its content appeared together, which is the one case screen readers do NOT
  * announce (a live region only announces CHANGES to a region it was already
  * observing). Every AcceptConfirm / ArchiveConfirm / ReleaseConfirm,
- * DeleteProject, RepairRepo, org-settings MiniModal and store-browser action
+ * DeleteProject, ChangeRepo, org-settings MiniModal and store-browser action
  * therefore completed in silence.
  *
  * Two-step, on the 0 → n transition only:

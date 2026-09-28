@@ -6309,10 +6309,10 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .stg-add.spaced { margin-top: .75rem; }
 .field.spaced { margin-top: .5rem; }
 .member-list.last { margin-bottom: 0; }
-.repair-note { color: var(--muted); font-size: .75rem; }
-.repair-btn { margin-left: .5rem; }
-/* The repo-repair acknowledgement is a LABEL wrapping a checkbox, so the whole
-   warning band is the hit target. */
+.repo-note { color: var(--muted); font-size: .75rem; }
+.repo-btn { margin-left: .5rem; }
+/* The repository change's acknowledgement is a LABEL wrapping a checkbox, so
+   the whole warning band is the hit target. */
 .cred-warn.ack { cursor: pointer; }
 .cred-warn.ack input { margin-top: .125rem; }
 /* A checkbox and its sentence on one line: the branch-cleanup switch and the
@@ -6352,8 +6352,8 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .kv-row.membership:has(+ .kv-row.membership) { border-bottom: 0; padding-bottom: .125rem; }
 .kv-row.membership + .kv-row.membership { padding-top: .125rem; }
 /* `.form-err` carries the same nudge: inside a `.confirm-card` (a plain block,
-   no flex gap) the repo-repair dialog's error sits directly under the note it
-   follows. */
+   no flex gap) the Change repository dialog's error sits directly under the
+   note it follows. */
 .login-err.spaced, .form-err.spaced { margin-top: .75rem; }
 .login-tag.providers { margin-top: .25rem; }
 .sub.sec-lede { margin: 0 0 .75rem; }

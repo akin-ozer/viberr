@@ -50,7 +50,8 @@ export interface SettingsViewData {
    */
   credential: ProjectCredentialHealth;
   /** Tasks whose GitHub records (linked PR / pushed commits) point at the
-   * current repo — drives the repair dialog's footprint acknowledgment. */
+   * current repo — drives the Change repository dialog's footprint
+   * acknowledgment. */
   repoFootprintTasks: number;
   /** R15-6: delete a task's branch on GitHub once its PR merges (default on). */
   branchCleanupOnMerge: boolean;

@@ -20,7 +20,8 @@ Three tables, one secret store:
 | `project_github_credentials` | One PAT bound per project. **Every project-scoped GitHub call** resolves through `getProjectGithubContext` (`projects.repo` + `default_branch` + this binding); it never consults connections. |
 
 Removing a connection deletes its PAT and cascades every project binding; the
-default connection cannot be removed.
+default connection cannot be removed. Each project it unbinds takes a new reading of its
+repository for the board (ruling 540, below).
 
 **A connection records which repositories its token reaches** (ruling 463). Every
 validation of the token (a save, a replaced token, the card's **Re-check**, the 24-hour
@@ -157,10 +158,12 @@ characters; last 8 lines, 600 characters.
   the reply says what GitHub answered; one that is not refuses without claiming nothing
   was made. Audit `project.repository.created {repo, private}` under the acting person,
   recorded as soon as GitHub is known to have made it.
-- **Changing the repo later is a repair** (`repair-repo`, `edit-policy`): normalizes
-  `owner/name` or a URL, demands `confirmFootprint` when tasks already carry GitHub
-  records, probes with the bound credential and refuses 404/401/403 or a read-only
-  repo. Audit `project.repo.updated`.
+- **Changing the repo later** (**Change…** in project settings, `change-repo`,
+  `edit-policy`; ruling 539 renamed it from "repair"): normalizes `owner/name` or a URL,
+  demands `confirmFootprint` when tasks already carry GitHub records, probes with the
+  bound credential and refuses 404/401/403 or a read-only repo. A change that lands records
+  its probe as the new repository's reading, and a reading of the repository the project
+  left no longer counts (ruling 517). Audit `project.repo.updated`.
 - **Attach, re-attach or clear the credential** (`set-credential` / `clear-credential`,
   `grant-github-scope`): prefers the connection whose owner matches the repo, else
   the default; a borrowed connection is probed against the repo first. Audit
@@ -173,7 +176,17 @@ characters; last 8 lines, 600 characters.
 - Without a credential or repo every service returns a typed degraded value
   (`no_pat_configured`, `no_repo_configured`, `auth_failed`, `network_unavailable`,
   …) that renders as a pill and an honest toast; nothing throws. The GitHub view
-  caches the repo-access check for 30 seconds. Credential detail is stripped from
+  caches the repo-access check for 30 seconds, and every check it takes is also
+  remembered per project (`project_github_health`) for the board's Repository strip and
+  the home card, which never call GitHub themselves (U33-2). A reading counts only while
+  the project points at the repository it was taken of, and the reconcile poller takes a
+  failing one again every five minutes (ruling 517). **A change to the credential takes a
+  new one** (`refreshRepoAccess`, ruling 540): the project's credential attached,
+  re-attached, re-checked (Re-check scopes) or removed; and, for every project bound to a
+  connection's token, that token replaced (Update token), re-checked (unless GitHub was
+  unreachable, which changes nothing) or removed, or its owner's account removed. One
+  `GET /repos/{repo}` per project, in turn; a project left without a credential needs
+  none, and an unreachable GitHub records nothing. Credential detail is stripped from
   loader payloads for readers without `grant-github-scope` (ruling 65).
 - **An empty repository is bootstrapped, never misreported** (ruling 128). A
   repository with no refs at all, or one whose only refs are task branches, has no
