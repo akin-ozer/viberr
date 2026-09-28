@@ -84,7 +84,8 @@ own pieces:
 - Each step is an agent with its skill and knowledge bases, deployed at the stages where
   the step happens. The agent that makes the final result delivers the task, and the
   operator's playbook skill names it, because only the delivering agent's saved files are
-  the delivery.
+  the delivery. The operator's own turn already says such a task is delivered on the
+  task and never through `deliver_for_review` (ruling 531, [operator.md §4](operator.md)).
 - What a task on the board is goes into the rulings knowledge base; research lands in
   knowledge bases and skills; the workflow improves by running sample inputs as ordinary
   tasks, the expected answers given only to the judging agent, and changing skills,

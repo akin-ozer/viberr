@@ -90,6 +90,16 @@ const QA_BOT: Engagement = {
   verdictCapable: true,
 };
 
+/** The project's required reviewer, engaged on the task the way the operator's
+ *  `run_agent` engages it before it can write a verdict. */
+const REVIEWER: Engagement = {
+  profileId: "reviewer",
+  backend: "claude",
+  role: "Review & validation",
+  delivers: false,
+  verdictCapable: true,
+};
+
 const REVISION: WorkRevision = {
   id: "rev_1",
   headSha: "a".repeat(40),
@@ -311,6 +321,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
         stage: "review",
         waiting: "human",
         deliveredAt: REPORT_AT,
+        // Ruling 531: engaged as every real review is. Without the reviewer's
+        // engagement this passed while the engaged-reviewer gate still said
+        // "No reviewed revision yet" to every files-only delivery.
+        engagements: [DEVELOPER, REVIEWER],
         verdicts: [
           {
             profileId: "reviewer",

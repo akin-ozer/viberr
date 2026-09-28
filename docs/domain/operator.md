@@ -329,6 +329,17 @@ to copy between tasks or asked to confirm a relay landed. The `agent-reply` inst
 says a "Relayed to …" line means the agent's relay already went out, and to relay the
 work itself otherwise.
 
+**A task whose deliverable is a result** (ruling 531; the boards of ruling 530). Two rules
+live in `result-delivery.server.ts` and reach every drive on both backends. The triage gate
+carries `RESULT_GOAL_RULE`: such a task is concrete when it names the result, the files it
+comes back in on the task and the reviewer whose approval proves it, and it is scoped from
+its goal, the rulings and its attachments, not from the repository. The stage rule and the
+`agent-reply` instruction (which returns before the stage rule) carry
+`RESULT_DELIVERY_RULE`: the files its delivering agent saves on the task are the delivery,
+so the operator hands delivery to the agent that makes the result (`run_agent` with
+`delivers: true`), directs it to commit nothing, and never calls `deliver_for_review` for
+it, even when something was committed. The shipped doctrine quotes both word for word.
+
 **Knowledge the work proved wrong.** The `agent-reply` instruction carries two duties
 about knowledge bases. A reviewer's objection to a defect CLASS the rulings have no
 convention for is written into the rulings as that convention (ruling 418). And a report
@@ -564,8 +575,9 @@ Details that matter:
   packet and offers the task itself. `get_task` carries `completionPacket` (`state`:
   `current | stale | none | not_applicable`, `changedLines`, `changesSummaryRequired`,
   `screenshotCandidates`, the newest 20 image attachments, and a `note` saying what to do).
-- **Delivery.** `deliver_for_review` runs `performDelivery`, with NO cached-state
-  short-circuit (ruling 134): rework on a task whose PR is already open is pushed to
+- **Delivery.** Its description says it never serves a task whose deliverable is a
+  result, which is delivered on the task (ruling 531, §4). `deliver_for_review` runs
+  `performDelivery`, with NO cached-state short-circuit (ruling 134): rework on a task whose PR is already open is pushed to
   that PR and the tool result names what moved ("pushed `<sha>` to the open review PR
   #N"); the only noop is the push itself answering `up_to_date` ("Nothing to push: PR
   #N already carries `<sha>`"). A held task refuses delivery (ruling 240), and a push

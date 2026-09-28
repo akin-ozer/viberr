@@ -123,6 +123,31 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     ).toBe("changed");
   });
 
+  /**
+   * Ruling 531: the ENGAGED reviewer's gate reads the same subject. Ruling 388
+   * moved the verdict, the derivation and the project's rule onto the files a
+   * delivering run saved, and this gate still keyed on `workRevision`, so a
+   * results task (ruling 530) whose reviewer approved its files was refused
+   * with "No reviewed revision yet".
+   */
+  it("ruling 531: an engaged reviewer's approval of the delivered files releases acceptance, and a later save holds it again", () => {
+    const at = "2026-09-27T22:31:54.701Z";
+    const fm = {
+      engagements: [deliverer, reviewerA],
+      workRevision: null,
+      deliveredAt: at,
+      verdicts: [
+        { profileId: "reviewer", revisionId: `files:${at}`, result: "approve" as const, reason: "", at, rounds: 1 },
+      ],
+    };
+    // CANARY: key the gate on `activeWorkRevision` again and this is "No
+    // reviewed revision yet".
+    expect(acceptanceBlockedReason(fm)).toBeNull();
+    expect(acceptanceBlockedReason({ ...fm, deliveredAt: "2026-09-27T23:00:00.000Z" })).toBe(
+      "Waiting on 1 required reviewer approval of the work delivered on this task.",
+    );
+  });
+
   it("deriveValidation: request_changes on the current revision → failing", () => {
     expect(
       deriveValidation({
