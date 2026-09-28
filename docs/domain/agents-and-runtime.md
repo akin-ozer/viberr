@@ -1331,7 +1331,7 @@ and get the outcome envelope instead (§2.5).
 | `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
 | `read_timeline_entry {occurredAt}` | none; built with `read_board` | one entry of this task's timeline, whole, by the stamp the prompt's recent timeline prints after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)", 220 characters); read-only (ruling 563, `readTimelineEntry`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
-| `correct_knowledge_doc {kb, doc, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage, or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
+| `correct_knowledge_doc {kb, doc, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage, or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
 
 A specialist has no post tool of its own for another task (ruling 488): its reach there is
 the `relay` entries of the outcome it already reports, posted by the completion through the
@@ -1948,9 +1948,13 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    (ruling 174, §3.4): a Claude CLI leads its own group, so a server that died without
    shutting down did not take it along — in the image the launcher's PDEATHSIG now does
    (ruling 460), and the sweep, through the launcher's `--reap`, finds what a SIGKILLed
-   launcher's agent had already detached. One "Interrupted by a restart" note per task
-   lists what was running and, separately, what was queued and had not started (ruling
-   310(b)); then one `runOperator({ trigger: "manual" })` per affected task (controller
+   launcher's agent had already detached. Each specialist or review run that had started
+   first gets the completion effects a person's Stop gives it (`state: "interrupted"`,
+   replayed, ruling 567): its last words and the files it saved are posted under its
+   name, and a deliverer's files are recorded as the delivery (`deliveredAt`). One
+   "Interrupted by a restart" note per task then lists what was running and, separately,
+   what was queued and had not started (ruling 310(b)); then, once every note is written,
+   one `runOperator({ trigger: "manual" })` per affected task (controller
    turns get a conversation note instead), capped at 3 per task per 30 min via
    `run.recovery.reinvoked` audit rows. **The cap is decided BEFORE the note is written**
    (ruling 198), so a capped task's note says what Viberr decided, why, and that running

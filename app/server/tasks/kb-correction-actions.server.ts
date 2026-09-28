@@ -108,10 +108,53 @@ function clipLine(value: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
+/**
+ * Ruling 568: the specialists deployed on the project that do NOT hold the
+ * knowledge base a correction wrote into, by name; empty when every one does,
+ * and always empty for the project's rulings, which every run reads.
+ *
+ * A grant decides who reads a knowledge base, and a task's timeline is read by
+ * every agent that can be engaged on it: the prompt's recent entries (ruling
+ * 563), `read_timeline_entry`, the operator's snapshot. So a correction's entry
+ * quotes the passage only when nobody the grant leaves out would read it there.
+ * Live on AWSC-4 the Estimate Judge found an error in its own golden-set entry,
+ * the knowledge base granted to it alone, and could not correct it: the entry
+ * would have put the expected answers on a benchmark task, in front of the
+ * agents under test. The operator asked Arda to edit the file by hand instead.
+ */
+async function agentsLeftOut(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  c: Pick<KbCorrection, "kb" | "rulings">,
+): Promise<string[]> {
+  if (c.rulings) return [];
+  const { listDeployedSpecialists } = await import("./specialist-run.server");
+  return listDeployedSpecialists(projectSlug, ctx)
+    .filter((s) => !s.resources.kb.includes(c.kb))
+    .map((s) => s.name);
+}
+
+/** Ruling 568: the sentence an entry carries instead of the passage. */
+function notQuotedSentence(kb: string, leftOut: readonly string[]): string {
+  const names =
+    leftOut.length === 1
+      ? leftOut[0]
+      : `${leftOut.slice(0, -1).join(", ")} and ${leftOut[leftOut.length - 1]}`;
+  return (
+    `The passage is not quoted here: \`${kb}\` is not given to ${names}, who read this ` +
+    "task. The project's Controller page shows the correction whole."
+  );
+}
+
 /** The task's entry for a correction: where, its id, what the passage was and
- *  what it is now. The evidence stays on the record the Controller page reads. */
-export function correctionEventText(c: KbCorrection): string {
+ *  what it is now. The evidence stays on the record the Controller page reads.
+ *  Ruling 568: with agents the knowledge base is not given to, only where and
+ *  the id. */
+export function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
   const where = `\`${c.kb}/${c.doc}\``;
+  if (leftOut.length > 0) {
+    return `${c.replaced === null ? "Added to" : "Corrected"} ${where} as \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`;
+  }
   return c.replaced === null
     ? `Added to ${where} as \`${c.id}\`:\n\n- **Added:** ${clipLine(c.text, 280)}`
     : `Corrected ${where} as \`${c.id}\`:\n\n` +
@@ -183,12 +226,13 @@ export async function correctKnowledgeDoc(
   );
   if (!merged.ok) return { outcome: "noop", message: merged.message };
   const c = merged.correction;
+  const leftOut = await agentsLeftOut(ctx, input.projectSlug, c);
   const event: TaskFileEvent = {
     occurredAt: c.at,
     type: "kb_correction",
     actor: input.actorRef,
     title: rulings ? RULINGS_CORRECTED_TITLE : KB_CORRECTED_TITLE,
-    text: correctionEventText(c),
+    text: correctionEventText(c, leftOut),
     toAgent: false,
     evidence: null,
   };
@@ -203,6 +247,9 @@ export async function correctKnowledgeDoc(
       (rulings
         ? "the project's rulings, which every run on this project reads, now say what you wrote. "
         : "every run given that knowledge base reads what you wrote from now on. ") +
+      (leftOut.length > 0
+        ? "The task's entry names the document and this correction without quoting it, because agents that read this task are not given that knowledge base. "
+        : "") +
       "A person may undo it from the project's Controller page; if one does, do not write it again.",
   };
 }
@@ -236,18 +283,24 @@ export async function undoKbCorrectionOnTask(
   if (result.outcome !== "done") return result;
   const c = result.correction;
   const where = `\`${c.kb}/${c.doc}\``;
+  const leftOut = await agentsLeftOut(ctx, c.projectSlug, c);
+  const quoted =
+    c.replaced === null
+      ? `The text \`${c.id}\` added to ${where} is gone:\n\n- **Removed:** ~~${clipLine(c.text, 280)}~~`
+      : `${where} reads as it did before \`${c.id}\`:\n\n` +
+        `- **Was:** ~~${clipLine(c.text, 160)}~~\n` +
+        `- **Now:** ${clipLine(c.replaced, 280)}`;
+  // Ruling 568: an undo quotes what the correction quoted, and no more.
+  const body =
+    leftOut.length > 0
+      ? `${where} reads as it did before \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`
+      : quoted;
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "kb_correction",
     actor: { kind: "human", userId: input.person.userId, nameHint: input.person.name },
     title: KB_CORRECTION_UNDONE_TITLE,
-    text:
-      (c.replaced === null
-        ? `The text \`${c.id}\` added to ${where} is gone:\n\n- **Removed:** ~~${clipLine(c.text, 280)}~~`
-        : `${where} reads as it did before \`${c.id}\`:\n\n` +
-          `- **Was:** ~~${clipLine(c.text, 160)}~~\n` +
-          `- **Now:** ${clipLine(c.replaced, 280)}`) +
-      (reason ? `\n\n**Why:** ${reason}` : ""),
+    text: body + (reason ? `\n\n**Why:** ${reason}` : ""),
     toAgent: false,
     evidence: null,
   };
