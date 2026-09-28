@@ -72,7 +72,10 @@ import { errorMessage, toError } from "~/shared/errors";
  * 2.1.280: every option below, the `Query` methods called on it, the result
  * and init fields read and the native-binary resolver `backend-login` mirrors
  * were re-checked against it; its `opus` alias resolves to `claude-opus-5-5`,
- * where 2.1.261's resolved to `claude-opus-5`). `query()` returns a
+ * where 2.1.261's resolved to `claude-opus-5`). Upgraded to v0.3.284 for
+ * Sonnet 5.5, which 0.3.280's `sonnet` alias did not reach (it ran
+ * `claude-sonnet-5`); that release only adds to the surface used here.
+ * `query()` returns a
  * `Query` (async generator of `SDKMessage`) whose yielded objects are the
  * SAME envelopes documented in runtime-adapters.md §1.3 (system·init with
  * session_id/model/tools, assistant/user with tool_use/tool_result blocks,
