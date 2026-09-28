@@ -245,3 +245,37 @@ describe("create-task carries the metadata fields from the form", () => {
     expect(fm.dueDate).toBeNull();
   });
 });
+
+/**
+ * Ruling 533: the New task form posts its files as multipart, and the route
+ * hands every one of them to `createTask`, which saves them before triage.
+ */
+describe("create-task carries the files the task is filed with", () => {
+  it("saves each posted file on the new task", async () => {
+    // CANARY: stop reading `files` in the create-task arm and the task is
+    // created with no attachments.
+    const { action } = await import("~/routes/project.board");
+    const { listTaskAttachments } = await import("~/server/files/task-attachments.server");
+    const { cookie, sessionId } = await app.cookieFor(ids.arda);
+    const form = new FormData();
+    form.set("_csrf", await app.csrfFor(sessionId));
+    form.set("intent", "create-task");
+    form.set("title", "Estimate the Contoso estate");
+    form.set("goal", "Price the attached inventory.");
+    form.append("files", new File(["vm,cpu\nweb01,4\n"], "inventory.csv"));
+    form.append("files", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "portal.png"));
+    const request = app.request("/projects/viberr-core/board", { method: "POST", cookie, body: form });
+    const result = await action({
+      request,
+      url: new URL(request.url),
+      params: { slug: "viberr-core" },
+      pattern: BOARD_PATTERN,
+      context: new RouterContextProvider(),
+    });
+    const key = z.object({ key: z.string() }).parse(result).key;
+    expect(listTaskAttachments("viberr-core", key, app.dataRoot).map((a) => a.name).sort()).toEqual([
+      "inventory.csv",
+      "portal.png",
+    ]);
+  });
+});

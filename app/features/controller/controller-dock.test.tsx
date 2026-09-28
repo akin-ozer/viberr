@@ -341,8 +341,13 @@ describe("the controller dock (ruling 121)", () => {
     // refused turn's transcript line carry.
     // U39-10: as a visible note with the place linked, not a placeholder cut
     // after the dock's two rows. CANARY: drop <NotConnectedNote /> from the dock.
+    // Waited for: under a loaded suite the note can commit after the focus move.
+    await waitFor(() =>
+      expect(panel.querySelector(".ctl-composer [data-not-connected]")?.textContent).toMatch(
+        /your own Claude account/,
+      ),
+    );
     const note = panel.querySelector(".ctl-composer [data-not-connected]");
-    expect(note?.textContent).toMatch(/your own Claude account/);
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
     expect(composer.getAttribute("placeholder")).toBe("Connect Claude to send a message.");
   });
@@ -580,7 +585,9 @@ describe("the controller dock (ruling 121)", () => {
       at("pointerup", 500);
       await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
       expect(trigger.getAttribute("aria-expanded")).toBe("false");
-      expect(document.activeElement).toBe(trigger);
+      // Focus returns after the close settles, a beat after the dialog leaves
+      // the tree; a loaded full suite read it before (2026-09-28).
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
       // The dock let go of the drag, so its button returns to rest.
       expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
       expect(dock.style.getPropertyValue("--sheet-drag")).toBe("");

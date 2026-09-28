@@ -9,7 +9,7 @@ import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.se
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import type { SkillPlugin } from "./skill-mount.server";
 import type { AgentLaunch } from "./agent-isolation.server";
-import type { EnvelopeFacts } from "./wire-format.server";
+import type { ClaudeResultUsage, EnvelopeFacts } from "./wire-format.server";
 import type { RunPrompt } from "./prompt-prefix.server";
 import {
   POST_TURN_TRANSPORT_TAG,
@@ -76,6 +76,16 @@ export interface RunSpec {
   workdir: string;
   /** Resume an existing provider session, if any. */
   resumeSessionId?: string | null;
+  /** Ruling 559: the totals the resumed Claude session last reported, read
+   *  from its run log by `startRun`. The adapter takes the run's share from
+   *  them (ruling 542) when this process holds nothing for the session, which
+   *  is every resumed session's first run after a restart. */
+  resumedSessionReported?: ClaudeResultUsage;
+  /** Ruling 553: the CLI will restore the resumed session's cost state (it was
+   *  the last session run where this run works, under this account), so the
+   *  spending cap, which the CLI measures against that restored total, is
+   *  raised by it. False or absent: the run's own spend starts from zero. */
+  costStateRestored?: boolean;
   /** Whether the run should be autonomous (Claude bypassPermissions / Codex
    *  danger-full-access for coding specialists). */
   autonomous?: boolean;

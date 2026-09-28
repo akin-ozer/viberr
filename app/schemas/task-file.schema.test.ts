@@ -142,8 +142,8 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     };
     // CANARY: key the gate on `activeWorkRevision` again and this is "No
     // reviewed revision yet".
-    expect(acceptanceBlockedReason(fm)).toBeNull();
-    expect(acceptanceBlockedReason({ ...fm, deliveredAt: "2026-09-27T23:00:00.000Z" })).toBe(
+    expect(acceptanceBlockedReason(fm, null)).toBeNull();
+    expect(acceptanceBlockedReason({ ...fm, deliveredAt: "2026-09-27T23:00:00.000Z" }, null)).toBe(
       "Waiting on 1 required reviewer approval of the work delivered on this task.",
     );
   });
@@ -295,7 +295,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
   it("acceptanceBlockedReason: blocks on request_changes, missing approvals, and no revision", () => {
     // No revision + a required reviewer → blocked.
     expect(
-      acceptanceBlockedReason({ engagements: [reviewerA], workRevision: null, verdicts: [] }),
+      acceptanceBlockedReason({ engagements: [reviewerA], workRevision: null, verdicts: [] }, null),
     ).toMatch(/no reviewed revision/i);
     // request_changes on current revision → blocked.
     expect(
@@ -303,7 +303,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
         engagements: [deliverer, reviewerA],
         workRevision: rev1,
         verdicts: [verdict("reviewer", "request_changes")],
-      }),
+      }, null),
     ).toMatch(/requests changes/i);
     // A required reviewer hasn't approved → blocked.
     expect(
@@ -311,7 +311,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
         engagements: [deliverer, reviewerA, reviewerB],
         workRevision: rev1,
         verdicts: [verdict("reviewer", "approve")],
-      }),
+      }, null),
     ).toMatch(/waiting on 1 required reviewer/i);
     // All required reviewers approved current revision → null (allowed).
     expect(
@@ -319,11 +319,11 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
         engagements: [deliverer, reviewerA],
         workRevision: rev1,
         verdicts: [verdict("reviewer", "approve")],
-      }),
+      }, null),
     ).toBeNull();
     // No revision AND no required reviewers → allowed (planning / non-repo work).
     expect(
-      acceptanceBlockedReason({ engagements: [], workRevision: null, verdicts: [] }),
+      acceptanceBlockedReason({ engagements: [], workRevision: null, verdicts: [] }, null),
     ).toBeNull();
   });
 
@@ -339,7 +339,9 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
       engagements: [reviewerA],
       workRevision: null,
       verdicts: [],
-    });
+    },
+      null,
+    );
     expect(reason).toContain("run delivery once to verify and record that");
     // Still the same refusal first — the guidance is an addition, not a swap.
     expect(reason).toMatch(/^No reviewed revision yet/);
@@ -1324,13 +1326,13 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
     // frontmatter whose validation pill reads "no validation".
     const fm = { engagements: [reviewer], workRevision: discarded, verdicts: [approve] };
     expect(deriveValidation(fm)).toBe("none");
-    const reason = acceptanceBlockedReason(fm)!;
+    const reason = acceptanceBlockedReason(fm, null)!;
     expect(reason).toContain("No reviewed revision yet");
     expect(reason).toContain("run delivery once to verify and record that");
     expect(reason).not.toContain("current revision");
     // The live record still walks the required-reviewer path, approved here.
     expect(
-      acceptanceBlockedReason({ ...fm, workRevision: delivered }),
+      acceptanceBlockedReason({ ...fm, workRevision: delivered }, null),
     ).toBeNull();
   });
 });

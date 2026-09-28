@@ -63,6 +63,8 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         // Ruling 316: `upsertRun` names it on every insert, so a root without
         // it could not start a run at all — the ruling-127 failure shape.
         "verdict_withheld",
+        // Ruling 544: `upsertRun` names it on every insert as well.
+        "review_subject",
         // Ruling 369: the sink names every one of these on a run's first
         // persisted line, and `upsertRun` names `credential_kind` on every
         // insert — the same failure shape on a root that lacks them.
@@ -82,7 +84,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       ]);
       // Second boot: nothing to add, nothing thrown.
       ensureBaselineColumns(db);
-      expect(columns()).toHaveLength(21);
+      expect(columns()).toHaveLength(22);
       db.prepare(`UPDATE agent_runs SET dispatched_by_name = ? WHERE id = ?`).run("x", "none");
 
       // F37-71: a task projection from before the recommendation-kinds column.

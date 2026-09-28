@@ -1,7 +1,19 @@
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FileActorRef, TaskFileEvent } from "~/schemas/task-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import {
+  checkAttachmentUpload,
+  listTaskAttachmentNames,
+  resolveTaskAttachment,
+  withAttachmentClaims,
+  readAttachmentBytes,
+} from "~/server/files/task-attachments.server";
+import { isAppError } from "~/server/errors/app-error.server";
+import { MAX_UPLOAD_BYTES } from "~/shared/attachment-kinds";
+import { joinDependencyEntries } from "~/shared/dependencies";
+import { countLabel } from "~/shared/text/plural";
 import { logger } from "~/server/logging/logger.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import { toError } from "~/shared/errors";
@@ -37,10 +49,15 @@ import type { TaskActionContext } from "./task-actions.server";
 /** How many relay entries one specialist outcome may carry. */
 export const RELAY_MAX_ENTRIES = 2;
 
+/** Ruling 538: how many files one relay may carry. */
+export const RELAY_MAX_FILES = 10;
+
 /** One relay a specialist asks for in its outcome. */
 export interface RelayEntry {
   taskKey: string;
   text: string;
+  /** Ruling 538: the names of this task's attachments to put on that task. */
+  files?: string[];
 }
 
 /** Who a relay is from, as each surface it lands on needs it. */
@@ -60,6 +77,9 @@ export interface RelayRequest {
   fromTaskKey: string;
   toTaskKey: string;
   text: string;
+  /** Ruling 538: names of the source task's attachments to copy onto the
+   *  target, where its agents read them as that task's own files. */
+  files?: readonly string[];
   author: RelayAuthor;
 }
 
@@ -82,6 +102,16 @@ export interface RelayPayload {
 /** The comment's header: the source task and the author, before the text. */
 export function relayHeader(fromTaskKey: string, by: string): string {
   return `**From ${fromTaskKey} (${by}):**`;
+}
+
+/** Ruling 538: a relay's own comment, told by the header only
+ *  {@link relayToTask} writes. Its files were carried, never a run's work.
+ *  The author's name may itself hold parentheses ("Reviewer (Opus)"), so the
+ *  header is the whole first line, closed by `):**`. */
+export function isRelayComment(event: Pick<TaskFileEvent, "type" | "toAgent" | "text">): boolean {
+  if (event.type !== "comment" || !event.toAgent) return false;
+  const firstLine = event.text.split("\n", 1)[0] ?? "";
+  return /^\*\*From \S+ \(.+\):\*\*$/.test(firstLine.trimEnd());
 }
 
 /** How much of the first line the source task's record quotes. */
@@ -181,15 +211,21 @@ export async function relayToTask(
         `Nothing was relayed: a closed task's operator starts no run, so the text would reach nobody.`,
     };
   }
-
+  // Ruling 538: every file is checked before anything is written, so a relay
+  // lands whole or not at all.
+  const staged = stageRelayFiles(req.projectSlug, from, to, req.files ?? [], ctx.dataRoot);
+  if ("refused" in staged) {
+    return { outcome: "noop", message: `Nothing was relayed to ${to}: ${staged.refused}` };
+  }
   // The target's comment. A machine author's ambiguous @handle notifies
   // nobody, so the disclosure rides the comment as it does on every agent
   // and operator comment (S5-G3).
   const body = withAmbiguityDisclosure(
     db,
-    `${relayHeader(from, req.author.name)}\n\n${text}`,
+    `${relayHeader(from, req.author.name)}\n\n${text}` + relayFilesSentence(staged.files),
     req.projectSlug,
   );
+  const carried = staged.files.map((f) => f.as);
   const occurredAt = new Date().toISOString();
   const comment: TaskFileEvent = {
     occurredAt,
@@ -202,9 +238,12 @@ export async function relayToTask(
     toAgent: true,
     evidence: null,
   };
-  await updateTaskFile(taskRef(ctx, req.projectSlug, to), (parsed) => {
-    parsed.timeline.unshift(comment);
-  });
+  // Ruling 538: the comment claims what it carried, so the files render on it
+  // and no run in flight on the target is ever credited with them. Ruling 558:
+  // the names are held from before the files land until the comment is down,
+  // and a comment that cannot be written takes the files back up.
+  if (carried.length > 0) comment.attachments = carried;
+  await landCarriedFiles(ctx, req.projectSlug, to, staged.files, comment);
   reprojectTask(db, ctx, req.projectSlug, to);
   recordAudit(db, {
     action: "task.relayed",
@@ -213,23 +252,18 @@ export async function relayToTask(
     subjectId: to,
     projectSlug: req.projectSlug,
     taskKey: to,
-    details: { from, to },
+    details: carried.length > 0 ? { from, to, files: carried } : { from, to },
   });
 
   // The source task's record of what went out, which is also how its own
   // operator sees the relay in its snapshot.
-  await updateTaskFile(taskRef(ctx, req.projectSlug, from), (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "note",
-      actor: req.author.actorRef,
-      title: null,
-      text: relaySourceLine(to, text),
-      toAgent: false,
-      evidence: null,
-    });
-  });
-  reprojectTask(db, ctx, req.projectSlug, from);
+  const recorded = await noteOnSource(
+    db,
+    ctx,
+    req,
+    from,
+    relaySourceLine(to, text) + (carried.length > 0 ? ` With ${countLabel(carried.length, "file")}.` : ""),
+  );
 
   // A person the relayed text tags is notified, as by any comment.
   await stampNotifiedRecipients(
@@ -268,8 +302,324 @@ export async function relayToTask(
     outcome: "done",
     message:
       `Relayed to ${to}: it is on ${to}'s timeline as your comment, headed "From ${from} (${req.author.name})", ` +
-      `and ${woken}. ${from}'s timeline records the relay. Nobody needs to copy it anywhere.`,
+      `and ${woken}. ${sourceRecord(from, "relay", recorded)} Nobody needs to copy it anywhere.` +
+      relayFilesSentence(staged.files).replace(/^\n\n/, " "),
   };
+}
+
+/** Ruling 557: a take, asked for by the task that needs the files. */
+export interface TakeRequest {
+  projectSlug: string;
+  /** The task the files are taken onto: the one the operator works. */
+  taskKey: string;
+  /** The task that holds them, open or closed. */
+  fromTaskKey: string;
+  files: readonly string[];
+  /** Why they are taken, on the claiming comment; optional. */
+  text?: string;
+  author: RelayAuthor;
+}
+
+/**
+ * Ruling 557: the other direction. A task that waits on another works from
+ * what that one made, and only the maker's side could hand it over:
+ * `relay_to_task` pushes, from a task whose operator is running. Live when
+ * AWSC-3 (the benchmark design) was accepted, its operator had relayed
+ * nothing, a closed task's operator starts no run, and AWSC-4 to AWSC-7 each
+ * opened a packet asking the owner to attach its input by hand, the one thing
+ * the operator's own doctrine says never to ask.
+ *
+ * So the task that needs the files takes them. Named attachments of another
+ * task in this project are copied onto this one under a relay's own header
+ * ("From AWSC-3 (operator):"), so the files render on that comment and no run
+ * on this task is credited with them (ruling 538), and the source task records
+ * what was taken. The source may be closed: its work is done, and its files are
+ * what it made. Every file passes the relay's checks (named, present, no link,
+ * an upload's kinds and size, at most ten, never an overwrite), all or none.
+ */
+export async function takeFromTask(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  req: TakeRequest,
+): Promise<RelayOutcome> {
+  const from = req.fromTaskKey.trim();
+  const to = req.taskKey.trim();
+  const names = req.files.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (!from) {
+    return { outcome: "noop", message: "Name the task to take files from, e.g. AWSC-3." };
+  }
+  if (from === to) {
+    return { outcome: "noop", message: `${to} is the task you are on: its attachments are already here.` };
+  }
+  if (names.length === 0) {
+    return {
+      outcome: "noop",
+      message: `Nothing was taken from ${from}: name the files, exactly as ${from} lists them.`,
+    };
+  }
+  const project = loadProjectContext(ctx, req.projectSlug);
+  if (project.archived) {
+    return { outcome: "noop", message: "This project is archived (read-only), so nothing can be taken onto its tasks." };
+  }
+  const source = readTaskFile(taskRef(ctx, req.projectSlug, from));
+  if (!source) {
+    const elsewhere = projectHoldingKey(db, req.projectSlug, from);
+    if (elsewhere) {
+      return {
+        outcome: "denied",
+        message: `${from} is a task in project ${elsewhere}, not in ${req.projectSlug}. Files are taken only from tasks in the same project.`,
+      };
+    }
+    return {
+      outcome: "noop",
+      message: `${from} is not a task in this project, so nothing was taken. \`read_board\` lists the project's tasks.`,
+    };
+  }
+  // A Done task's files are what it made; an archived one's work was
+  // withdrawn, and its file takes no writes, the "Taken by" line included.
+  const sourceClosure = taskClosure(source.parsed.frontmatter, project.stages);
+  if (sourceClosure.closed && sourceClosure.why === "archived") {
+    return {
+      outcome: "noop",
+      message: `${closureRefusal(from, sourceClosure, project.stages, "taking files from it")} Nothing was taken.`,
+    };
+  }
+  const target = readTaskFile(taskRef(ctx, req.projectSlug, to));
+  if (!target) throw new Error(`Task ${to} not found.`);
+  const closure = taskClosure(target.parsed.frontmatter, project.stages);
+  if (closure.closed) {
+    return {
+      outcome: "noop",
+      message: `${closureRefusal(to, closure, project.stages, "taking files onto it")} Nothing was taken.`,
+    };
+  }
+  const staged = stageRelayFiles(req.projectSlug, from, to, names, ctx.dataRoot);
+  if ("refused" in staged) {
+    return { outcome: "noop", message: `Nothing was taken from ${from}: ${staged.refused}` };
+  }
+  const carried = staged.files.map((f) => f.as);
+  const why = req.text?.trim();
+  const comment: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "comment",
+    actor: req.author.actorRef,
+    title: null,
+    // A relay's header, so the claim reads as carried, never as a run's work;
+    // and the relay's disclosure, so an @handle that notifies nobody says so.
+    text: withAmbiguityDisclosure(
+      db,
+      `${relayHeader(from, req.author.name)}\n\n${why || `Taken from ${from} to work from.`}` +
+        relayFilesSentence(staged.files),
+      req.projectSlug,
+    ),
+    // Kept out of timeline compaction, as a relay is.
+    toAgent: true,
+    evidence: null,
+    attachments: carried,
+  };
+  // Ruling 558: the names are held from before the files land until the
+  // claiming comment is down, and a comment that cannot be written takes the
+  // files back up.
+  await landCarriedFiles(ctx, req.projectSlug, to, staged.files, comment);
+  reprojectTask(db, ctx, req.projectSlug, to);
+  recordAudit(db, {
+    action: "task.files.taken",
+    actor: req.author.auditActor,
+    subjectKind: "task",
+    subjectId: to,
+    projectSlug: req.projectSlug,
+    taskKey: to,
+    details: { from, to, files: carried },
+  });
+  // A person the line tags is notified, as by any comment (NEW-4).
+  if (why) {
+    await stampNotifiedRecipients(
+      db,
+      taskRef(ctx, req.projectSlug, to),
+      comment.occurredAt,
+      notifyMentionedUsers(db, {
+        text: why,
+        projectSlug: req.projectSlug,
+        taskKey: to,
+        occurredAt: comment.occurredAt,
+        from: req.author.notifyFrom,
+      }),
+    );
+  }
+  const recorded = await noteOnSource(
+    db,
+    ctx,
+    req,
+    from,
+    `Taken by ${to}: ${joinDependencyEntries(staged.files.map((f) => `\`${f.name}\``))}.`,
+  );
+  return {
+    outcome: "done",
+    message:
+      `Took ${countLabel(carried.length, "file")} from ${from}: they are on ${to}'s attachments, where its agents read them, ` +
+      `claimed by your comment headed "From ${from} (${req.author.name})". ${sourceRecord(from, "take", recorded)}` +
+      relayFilesSentence(staged.files).replace(/^\n\n/, " "),
+  };
+}
+
+/**
+ * Ruling 558: put a relay's or a take's files on the target and write the
+ * comment that claims them, as one step. The names are held until the comment
+ * is down; if it cannot be written, the files that landed are taken back up,
+ * so none is left on the target unclaimed for a completion to credit.
+ */
+async function landCarriedFiles(
+  ctx: TaskActionContext,
+  projectSlug: string,
+  to: string,
+  files: readonly StagedRelayFile[],
+  comment: TaskFileEvent,
+): Promise<void> {
+  const names = files.map((f) => f.as);
+  await withAttachmentClaims(
+    projectSlug,
+    to,
+    names,
+    async (put) => {
+      for (const f of files) if (!f.reused) put(f.as, f.data);
+      await updateTaskFile(taskRef(ctx, projectSlug, to), (parsed) => {
+        parsed.timeline.unshift(comment);
+      });
+    },
+    ctx.dataRoot,
+  );
+}
+
+/**
+ * The source task's line about a relay or a take. Written last and never
+ * fatal: the files and their claim are down and audited, and a source whose
+ * file cannot be written must not turn what landed into an error its sender
+ * retries. Resolves whether the line was written, so the reply says so.
+ */
+async function noteOnSource(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  req: { projectSlug: string; author: RelayAuthor },
+  from: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    await updateTaskFile(taskRef(ctx, req.projectSlug, from), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: req.author.actorRef,
+        title: null,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, req.projectSlug, from);
+    return true;
+  } catch (error) {
+    logger.warn("the source task's line about a relay or take could not be written", {
+      taskKey: from,
+      err: toError(error),
+    });
+    return false;
+  }
+}
+
+/** The reply's word on the source task's line, true either way. */
+function sourceRecord(from: string, what: "relay" | "take", recorded: boolean): string {
+  return recorded
+    ? `${from}'s timeline records the ${what}.`
+    : `${from}'s timeline could not take its line about the ${what} (its file cannot be written), so the audit log is the record there.`;
+}
+
+/** One file a relay carries: its bytes, the name it lands under on the
+ *  target, and whether the target already holds exactly these bytes. */
+interface StagedRelayFile {
+  name: string;
+  as: string;
+  data: Uint8Array;
+  reused: boolean;
+}
+
+/**
+ * Ruling 538: read and check every file a relay names, writing nothing. A
+ * name the source task does not hold, a kind the target could neither show
+ * nor read back (the upload's own rules), and more than
+ * {@link RELAY_MAX_FILES} are refused by name. A target that already holds
+ * the same bytes under the name keeps its file; one that holds other bytes
+ * gets the relayed file under the next free name, never an overwrite.
+ */
+function stageRelayFiles(
+  projectSlug: string,
+  from: string,
+  to: string,
+  names: readonly string[],
+  dataRoot: string | undefined,
+): { files: StagedRelayFile[] } | { refused: string } {
+  const wanted = [...new Set(names.map((n) => n.trim()).filter((n) => n.length > 0))];
+  if (wanted.length > RELAY_MAX_FILES) {
+    return { refused: `a relay carries at most ${RELAY_MAX_FILES} files, and this one names ${wanted.length}.` };
+  }
+  const taken = new Set(listTaskAttachmentNames(projectSlug, to, dataRoot).map((n) => n.toLowerCase()));
+  const files: StagedRelayFile[] = [];
+  for (const name of wanted) {
+    let abs: string;
+    try {
+      abs = resolveTaskAttachment(projectSlug, from, name, dataRoot);
+    } catch {
+      return { refused: `\`${name}\` is not a file name ${from} can hold.` };
+    }
+    // Ruling 552: through no link, and no bigger than an upload, checked
+    // before a byte is read. A link an agent planted here would otherwise copy
+    // a file only the server may read onto another task, as an ordinary file.
+    const read = readAttachmentBytes(abs, MAX_UPLOAD_BYTES);
+    if (!read) {
+      const have = listTaskAttachmentNames(projectSlug, from, dataRoot);
+      return {
+        refused:
+          `${from} has no attachment \`${name}\`. ` +
+          (have.length > 0 ? `It holds: ${have.join(", ")}.` : "It has no attachments."),
+      };
+    }
+    try {
+      checkAttachmentUpload(name, "tooLarge" in read ? read.tooLarge : read.bytes.byteLength);
+    } catch (error) {
+      return { refused: isAppError(error) ? error.userMessage : `\`${name}\` cannot be relayed.` };
+    }
+    if ("tooLarge" in read) return { refused: `\`${name}\` cannot be relayed.` };
+    const data = read.bytes;
+    let as = name;
+    let reused = false;
+    if (taken.has(name.toLowerCase())) {
+      const there = readAttachmentBytes(resolveTaskAttachment(projectSlug, to, name, dataRoot), MAX_UPLOAD_BYTES);
+      if (there && "bytes" in there && there.bytes.equals(data)) {
+        reused = true;
+      } else {
+        as = nextFreeName(name, taken);
+      }
+    }
+    taken.add(as.toLowerCase());
+    files.push({ name, as, data, reused });
+  }
+  return { files };
+}
+
+/** `name`, then `stem-2.ext`, `stem-3.ext`: the first `taken` does not hold. */
+function nextFreeName(name: string, taken: ReadonlySet<string>): string {
+  const ext = path.extname(name);
+  const stem = ext ? name.slice(0, -ext.length) : name;
+  for (let n = 2; ; n++) {
+    const candidate = `${stem}-${n}${ext}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/** What the relay comment says it carried, and under which names. */
+function relayFilesSentence(files: readonly StagedRelayFile[]): string {
+  if (files.length === 0) return "";
+  const named = files.map((f) => (f.as === f.name ? `\`${f.as}\`` : `\`${f.name}\` (here as \`${f.as}\`, a file of that name was already on this task)`));
+  return `\n\nWith ${files.length === 1 ? "the file" : "the files"} ${joinDependencyEntries(named)}, now on this task's attachments.`;
 }
 
 /**
@@ -307,13 +657,15 @@ export async function postOutcomeRelays(
       continue;
     }
     try {
-      const result = await relayToTask(db, ctx, {
+      const request: RelayRequest = {
         projectSlug: input.projectSlug,
         fromTaskKey: input.taskKey,
         toTaskKey: entry.taskKey,
         text: entry.text,
         author: input.author,
-      });
+      };
+      if (entry.files) request.files = entry.files;
+      const result = await relayToTask(db, ctx, request);
       if (result.outcome !== "done") unsent.push(`${to}: ${result.message}`);
     } catch (error) {
       logger.warn("an agent's relay could not be posted", {

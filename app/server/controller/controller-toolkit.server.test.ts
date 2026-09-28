@@ -4450,6 +4450,15 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
 
       const tested = await call(ids.orgAdminOutsider, "test_mcp_server", { id: signedIn.id });
       expect(tested).toMatch(/signed in \(expires in 60 minutes, renews itself\) · read-only · 194 scopes$/);
+      // Ruling 537: save_mcp_server answers with the NAME, and a probe right
+      // after it passed that name and was told the server did not exist.
+      // CANARY: pass `args.id` to testMcpServer unresolved and this is refused.
+      expect(await call(ids.orgAdminOutsider, "test_mcp_server", { id: "grant-probe" })).toMatch(
+        /read-only · 194 scopes$/,
+      );
+      expect(await call(ids.orgAdminOutsider, "test_mcp_server", { id: "no-such-server" })).toMatch(
+        /^\[error\] No MCP server has the id or name “no-such-server”\. Registered: .*\bgrant-probe\b/,
+      );
     } finally {
       resetMcpOAuthForTests();
       await oauth.close();

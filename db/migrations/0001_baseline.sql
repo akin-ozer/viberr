@@ -658,6 +658,13 @@ CREATE TABLE "agent_runs" (
   -- fallback that manufactures a verdict from a reply must not fire here: the
   -- reviewer was told not to judge, and obeying is not an omission to repair.
   verdict_withheld INTEGER NOT NULL DEFAULT 0,
+  -- Ruling 544: what the task's review bound to when this run was dispatched
+  -- (reviewSubjectId: the work revision's id, or files:<deliveredAt>), or 'none'
+  -- when nothing on the task had been delivered yet. The run's verdict binds
+  -- only if the task still has that subject when it completes: a delivery that
+  -- landed while it was reviewing is content it never read. NULL on a run that
+  -- judges nothing (operator, controller) and on rows from before the ruling.
+  review_subject TEXT,
   -- The PERSON who interrupted the run (a users.id), or NULL. Never a
   -- pseudo-actor: a restart is a reason, not a person (pass 35 U35-7).
   interrupted_by TEXT,

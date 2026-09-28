@@ -245,7 +245,10 @@ profile's stages.
    instead. The task's epic is checked for being all done (`maybeNoteEpicComplete`,
    ruling 503), held dependents are swept (`maybeReleaseDependents`, ruling 131(e)), and
    entering the review stage with no live PR writes a "Review reached
-   with no PR yet" `github` event, so the gap is never silent.
+   with no PR yet" `github` event, so the gap is never silent, except on a task
+   delivered as the files saved on it, where there is no PR to open (ruling 546).
+   Accepting such a task records it delivered: the no-change probe skips it
+   (ruling 550).
 
 A person's own operator run (a `manual` trigger) also clears `heldAtStage`; a scheduled
 run does not (ruling 216).
@@ -291,7 +294,10 @@ run does not (ruling 216).
   reviewer; otherwise `changed`. The review subject is `reviewSubjectId` (ruling 388):
   the active work revision, or, for a task whose deliverable is not a commit, the moment
   its delivering run last saved files (`files:<deliveredAt>`), so a report or attachment
-  deliverable is reviewable like a commit and a later save stales older verdicts. Never
+  deliverable is reviewable like a commit and a later save stales older verdicts. A
+  verdict binds only to the subject its run was dispatched on (`agent_runs.review_subject`,
+  ruling 544): one returned after a newer delivery binds to nothing, and its note says what
+  moved and to run the review again. Never
   hand-edit it; the projection re-derives it from `workRevision`, `deliveredAt`,
   `verdicts`, `engagements`, `noChanges` and `acceptance`. A verdict's `quality` event (and
   the bell notification carrying its title) is titled from the validation it leaves:
@@ -473,6 +479,13 @@ order of an epic's work is each task's own list.
   cannot reroute it to the operator or notify a GitHub login. The deliverer resumes on it
   exactly as on a typed mention, under the same role gate: a contributor's notes post and
   start nothing, and the toast says so.
+- **A task takes the files it works from** (ruling 557, `takeFromTask`). The operator's
+  `take_from_task` copies named attachments of another task of the project, open or Done
+  but never archived, onto its own task under a relay's header (so completion credits no
+  run with them), and the source records "Taken by <task>: …". It is how a task gets the
+  input a task it waited on made, once that task has closed and its operator runs no more.
+  The source's line is written last and never fails the take (or a relay): the files, their
+  claim and the audit row are already down.
 - **Work on one task reaches another task of the same project** (ruling 488,
   `task-relay.server.ts`). The operator's `relay_to_task` and a specialist's `relay`
   entries (posted at completion, at most two per report) both go through `relayToTask`.
@@ -503,9 +516,21 @@ order of an epic's work is each task's own list.
   guardrails run (`repairDoubledNewlines`, ruling 383).
 - `attach-file` (contributor+, ruling 379) uploads a file into the task's attachments
   (`writeTaskAttachment`): names that traverse or start with a dot, extensions outside
-  the inline and readable-text sets, files over 10 MB (`MAX_UPLOAD_BYTES`) and archived
-  tasks are refused; an accepted upload writes a timeline note and an audit row naming
-  the uploader.
+  the inline and readable-text sets and `.xlsx` (ruling 533), files over 10 MB
+  (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
+  timeline note that claims the file for the uploader (`attachments:`) and an audit row.
+- A task can be FILED with its files (ruling 533): the New task dialog takes a picker, a
+  drop and a pasted screenshot, and `createTask` checks every file before it allocates a
+  key (at most 10 files and 25 MB, the upload's own rules, the `attach-file` tier) and
+  writes them before the task file and the operator's `create` trigger, so triage reads
+  the input. A completion never credits a run with a file a person's note claimed during
+  it, so a person's upload never stamps `deliveredAt`. Nor with one a writer is still
+  putting down for someone else (ruling 558): a person's upload, a relay and a take hold
+  the name (`withAttachmentClaims`) from before the file lands until their claim is on the
+  timeline, and a completion reads the held names after it lists the run's files and
+  before it reads the timeline. The file lands with its claim or not at all: a writer
+  whose claim cannot be written takes its files back up (a new file removed, a replaced
+  one put back), since a file nothing claims is the next completion's to credit.
 
 ## 8. Engagements, dispatch and verdicts
 
@@ -522,7 +547,17 @@ reviewer is required on every task whether or not the operator engaged it, so a 
 whose operator never ran it is not acceptable on another agent's verdict (§11 gate 4a).
 The engaged set stays as it was; the project rule adds to it. The operator's `get_task`
 names the rule as `requiredReviewers` and its turn prompt tells it to engage each one at
-its stage.
+its stage. Such a reviewer cannot be made a task's deliverer: `assignSpecialist`, the one
+door to `delivers: true`, refuses it by name, a dispatch with no delivery hint engages it
+to review whatever its grants, and the operator's `run_agent` refuses an explicit hand-off
+before any card (ruling 556), because its verdict on its own delivery would not count
+(ruling 555). No reviewer's verdict binds to its own work: `reviewSubjectAuthor` names
+who made the subject (the revision's `sourceProfileId`, or the agent whose event stamped
+`deliveredAt`), and a verdict from it is recorded in words and binds to nothing. The
+acceptance gates never wait on that review either: they take the subject's author and say
+that a required reviewer made what is delivered, so another agent must deliver its own
+work first. The task page's Run control says a required reviewer runs as a reviewer
+before the click.
 
 A dispatch goes through `startAgentRun`, which refuses a closed task (ruling 177) and a
 held one (ruling 186, §6) before it engages anything, and holds a dispatch into a backend
@@ -575,7 +610,11 @@ previous verdict, and a deliverer run the provider refused does not count
 asking the reviewer for its complete blocking set) the policy engine opens a deadlock
 packet inside the verdict's own write (`task.review.deadlock`, ruling 237) whose options
 include `question_reviewer`, which dispatches the reviewer with its verdict withheld
-(`withholdVerdict`, ruling 313). A completeness question the operator asks through
+(`withholdVerdict`, ruling 313). The deliverer never gets the channel: a verdict from
+a run dispatched to deliver is discarded and its reply stamps the delivery (ruling 555).
+Only such a run stamps it: a review run whose profile was handed delivery while it
+worked keeps its captures as evidence.
+A completeness question the operator asks through
 `run_agent`'s `completeness: true` is recorded as the answer the next verdict gives
 (ruling 421). An escalation skipped because another packet was open is retried when that
 packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
@@ -872,9 +911,12 @@ them.
    history, ruling 163), whether or not anyone engaged it; otherwise the refusal reads
    "Required reviewer <Agent> (project rule at <Stage>) has not approved revision
    <sha7>. Run the review at <Stage>, or an admin can force-accept." ("the work
-   delivered on this task" when the deliverable is not a commit, ruling 385). A task
-   that has delivered nothing (no active work revision, no pull request and no
-   `deliveredAt`) is not held. ONE pure gate, `requiredReviewerRefusals`
+   delivered on this task" when the deliverable is not a commit, ruling 385). When the
+   rule's agent is the task's own deliverer (engaged before ruling 556 refused it), the
+   sentence says it "is this task's deliverer, so its review cannot count" and names the
+   ways out (hand delivery to another agent, have that agent deliver, and run its review;
+   or force-accept), whatever has been delivered. Otherwise a task that has delivered
+   nothing (no active work revision, no pull request and no `deliveredAt`) is not held. ONE pure gate, `requiredReviewerRefusals`
    (`app/server/tasks/required-reviewers.server.ts`), is read by the acceptance refusal
    stack (so the task page, the operator's `notAcceptableReason` and every writer agree),
    by the projection's `validation_block_reason` (so the review queue lists the task as

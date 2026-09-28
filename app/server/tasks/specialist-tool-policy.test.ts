@@ -281,7 +281,7 @@ describe("resolveDeliveryPermissions", () => {
         grant("commit-push-branch", "direct"),
         grant("open-review-pr", "direct"),
       ]),
-    ).toEqual({ canBranch: true, canCommitPush: true, canOpenPr: true });
+    ).toEqual({ canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true });
   });
 
   it("reflects each withheld step so the prompt matches enforcement (XS-4)", () => {
@@ -291,7 +291,7 @@ describe("resolveDeliveryPermissions", () => {
         grant("commit-push-branch", "off"),
         grant("open-review-pr", "human"),
       ]),
-    ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false });
+    ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false });
   });
 
   it("a withheld execute-code-or-write-repo gates ALL delivery — the prompt may not instruct a commit the tool layer denies (VIB-1 incident)", () => {
@@ -302,7 +302,7 @@ describe("resolveDeliveryPermissions", () => {
         grant("commit-push-branch", "direct"),
         grant("open-review-pr", "direct"),
       ]),
-    ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false });
+    ).toEqual({ canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false });
   });
 });
 

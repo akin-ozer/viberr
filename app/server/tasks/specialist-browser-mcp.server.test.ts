@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { BROWSER_CALL_DEADLINE_MS } from "./browser-deadline.server";
 import {
   BROWSER_MCP_NAME,
   attachmentsDropSection,
@@ -59,10 +60,17 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(r.refused).toBeNull();
     const server = r.server!;
     expect(server.command).toBe(process.execPath);
-    expect(server.args[0]).toMatch(/@playwright[\\/]mcp[\\/]cli\.js$/);
-    // The CLI entry must actually exist — the config names a real file, not a
+    // Ruling 554: the server runs under the supervisor, which node runs as
+    // TypeScript. CANARY: mount the CLI bare and a page that stops answering
+    // holds the agent's browser for the rest of the run.
+    expect(server.args[0]).toMatch(/[\\/]browser-supervisor\.server\.ts$/);
+    // The deadline the supervisor keeps is the one Codex is told to outwait.
+    expect(server.args.slice(1, 3)).toEqual(["--deadline-ms", String(BROWSER_CALL_DEADLINE_MS)]);
+    expect(server.args[3]).toMatch(/@playwright[\\/]mcp[\\/]cli\.js$/);
+    // Both entries must actually exist — the config names real files, not a
     // package spec that would download on first use.
     expect(existsSync(server.args[0]!)).toBe(true);
+    expect(existsSync(server.args[3]!)).toBe(true);
     expect(server.args).toContain("--headless");
     expect(server.args).toContain("--isolated");
     expect(server.args).toContain(dir);

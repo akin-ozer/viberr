@@ -161,6 +161,16 @@ export async function action({ request, params }: Route.ActionArgs) {
       // Ruling 503: the epic it starts in; `createTask` checks it exists.
       const epic = String(formData.get("epic") ?? "").trim();
       if (epic) createInput.epic = epic;
+      // Ruling 533: the files the task is filed with. `createTask` checks
+      // them before it allocates a key and saves them before triage runs.
+      const files = formData
+        .getAll("files")
+        .filter((f): f is File => f instanceof File && f.size > 0);
+      if (files.length > 0) {
+        createInput.attachments = await Promise.all(
+          files.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })),
+        );
+      }
       const result = await createTask(db, createInput, actor);
       return {
         ok: true as const,

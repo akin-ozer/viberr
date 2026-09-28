@@ -68,6 +68,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
       {
         actorRef: AGENT,
         runId: "run_1",
+        delivers: true,
         replyText:
           "@Arda I rewrote the onboarding guide and split the CLI section out. " +
           "Please confirm the new ordering before I touch the API reference.",
@@ -99,6 +100,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
       {
         actorRef: AGENT,
         runId: "run_1",
+        delivers: true,
         replyText: `@${store.users.arda.name} the migration is written. @${selinLocal} can you take acceptance once CI is green?`,
         verdict: null,
         question: null,
@@ -120,6 +122,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
       {
         actorRef: AGENT,
         runId: "run_1",
+        delivers: true,
         replyText:
           "Rewrote the onboarding guide and split the CLI section into its own page.",
         verdict: null,
@@ -176,6 +179,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
       {
         actorRef: AGENT,
         runId,
+        delivers: true,
         // Body repeats the mid-run comment (deduped); the cc line is the new tag.
         replyText: `${body}\n\ncc @${store.users.arda.name} @operator`,
         verdict: null,
@@ -218,6 +222,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
       {
         actorRef: AGENT,
         runId: "run_fence",
+        delivers: true,
         replyText: `Validation output:\n\`\`\`\n${fenceBody}\n\`\`\`\nDone.`,
         verdict: null,
         question: null,
@@ -248,6 +253,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
       {
         actorRef: { ...AGENT, backend: "claude", profileId: "reviewer" },
         runId: "run_2",
+        delivers: false,
         replyText: "@Arda approving — the docs match the shipped flags now.",
         verdict: "approve",
         question: null,
@@ -285,6 +291,7 @@ describe("the completion path attributes and preserves the agent's question (P13
       {
         actorRef: AGENT,
         runId: "run_1",
+        delivers: true,
         replyText: "I need a decision before continuing.",
         verdict: null,
         question: {
@@ -316,6 +323,7 @@ describe("the completion path attributes and preserves the agent's question (P13
       {
         actorRef: AGENT,
         runId: "run_1",
+        delivers: true,
         replyText: "Blocked on the format decision.",
         verdict: null,
         question: { title: "Which changelog format?" },
@@ -333,6 +341,7 @@ describe("the completion path attributes and preserves the agent's question (P13
       {
         actorRef: { ...AGENT, profileId: "api-writer" },
         runId: "run_2",
+        delivers: true,
         replyText: "Also blocked.",
         verdict: null,
         question: { title: "Do we still document the v1 endpoints?" },

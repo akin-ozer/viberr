@@ -208,6 +208,24 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
       fm().timeline.some((e) => e.text.includes("no live review pull request")),
     ).toBe(false);
   });
+
+  it("ruling 546: no safety-net event for a task delivered as the files saved on it", async () => {
+    // Live on AWSC-2, a research task whose delivery is two files: the note
+    // said the operator decides a push and a review PR. CANARY: drop
+    // `deliveredAsFiles` from the condition and the note is written.
+    seed({ stage: "impl", deliveredAt: "2026-09-28T08:44:13.751Z" });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actorOf(store.users.arda),
+      dataCtx(),
+    );
+    await new Promise((r) => setTimeout(r, 80));
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(
+      fm().timeline.some((e) => e.text.includes("no live review pull request")),
+    ).toBe(false);
+  });
 });
 
 /**

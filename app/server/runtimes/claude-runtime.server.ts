@@ -30,7 +30,12 @@ import {
 import { COMPLETION_COMPACT_INSTRUCTIONS } from "./context-policy.server";
 import { SESSION_MISSING_RE } from "./session-export.server";
 import { isSdkSkillName, skillPluginInPlace } from "./skill-mount.server";
-import { projectEnvelope, type EnvelopeFacts } from "./wire-format.server";
+import {
+  claudeReportedTotals,
+  projectEnvelope,
+  type ClaudeResultUsage,
+  type EnvelopeFacts,
+} from "./wire-format.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
@@ -1019,6 +1024,48 @@ interface AssembleContext {
   abortController: AbortController;
 }
 
+/**
+ * Ruling 542: the totals each Claude session last REPORTED, keyed by session
+ * id. The CLI restores a session's cost state when it resumes it, so every
+ * result after the first reports the session's running totals; the next
+ * result's share (`sessionShareOf`) is taken from what this held. A run and
+ * its completion compaction (ruling 536) both read and update it. After a
+ * restart it is empty, and a resumed session's first result is recorded as
+ * reported, as it was before. Bounded: the oldest session goes first.
+ */
+const reportedBySession = new Map<string, ClaudeResultUsage>();
+const SESSIONS_KEPT = 512;
+function rememberReported(sessionId: string, totals: ClaudeResultUsage): void {
+  reportedBySession.delete(sessionId);
+  reportedBySession.set(sessionId, totals);
+  while (reportedBySession.size > SESSIONS_KEPT) {
+    const oldest = reportedBySession.keys().next().value;
+    if (oldest === undefined) break;
+    reportedBySession.delete(oldest);
+  }
+}
+
+/** Ruling 559: after a restart this process holds nothing for a resumed
+ *  session; the run log's newest result for it, which `startRun` read into
+ *  the spec, stands in until this run reports. */
+function recallReported(spec: RunSpec): void {
+  const id = spec.resumeSessionId;
+  if (id && spec.resumedSessionReported && !reportedBySession.has(id)) {
+    rememberReported(id, spec.resumedSessionReported);
+  }
+}
+
+/** Ruling 542: what a resumed session had spent when it was last reported,
+ *  which the CLI restores and counts against a run's spending cap. */
+function restoredSpendUsd(sessionId: string | null | undefined): number {
+  return sessionId ? (reportedBySession.get(sessionId)?.costUsd ?? 0) : 0;
+}
+
+/** Test seam: forget every session's totals, as a restart does. */
+export function resetSessionTotalsForTests(): void {
+  reportedBySession.clear();
+}
+
 /** What `assembleClaudeOptions` returns: the SDK options and the first prompt. */
 interface AssembledClaudeQuery {
   options: ClaudeQueryOptions;
@@ -1113,7 +1160,14 @@ function assembleClaudeOptions(
   options.spawnClaudeCodeProcess = (request) => ctx.spawn(request);
   // Ruling 175: the instance's spending cap, when one is set. The SDK
   // stops the query past it and says so with `error_max_budget_usd`.
-  if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd;
+  // Ruling 542: the CLI measures the cap against the session's restored
+  // total, so a resumed session's allowance starts from what it had spent.
+  if (spec.maxSpendUsd) {
+    // Ruling 553: only when the CLI will restore the session's spend does its
+    // cap need the room; otherwise the room is spend the run could overrun by.
+    options.maxBudgetUsd =
+      spec.maxSpendUsd + (spec.costStateRestored ? restoredSpendUsd(spec.resumeSessionId) : 0);
+  }
   // Only NAME a model when we have a real id/alias; otherwise let the SDK
   // (and the subscription) pick its default.
   if (resolvedModel) options.model = resolvedModel;
@@ -1343,6 +1397,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       });
       options.resume = sessionId;
       options.maxTurns = 1;
+      // Ruling 542: the compaction resumes the session too, so its cap starts
+      // from the session's restored total, not from the run's own spend.
+      if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd + restoredSpendUsd(sessionId);
       // Its own marker: the run's settle sweep must not reap this process.
       if (options.env?.[RUN_MARKER_ENV]) {
         options.env = { ...options.env, ...compactionMarkerEnv(spec.runId) };
@@ -1362,7 +1419,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         });
         for await (const message of q) {
           const occurredAt = new Date().toISOString();
-          const { display, facts } = projectEnvelope("claude", message, occurredAt);
+          // Ruling 542: the compaction's result reports the session's totals
+          // too (ruling 536); its share is what the run had not reported.
+          const { display, facts } = projectEnvelope(
+            "claude",
+            message,
+            occurredAt,
+            reportedBySession.get(sessionId),
+          );
           const envelope = claudeEnvelopeSchema.parse(message);
           // The session is the run's; its init line and the summary the CLI
           // writes as a user message are on the transcript, not the console.
@@ -1394,21 +1458,28 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             };
           } else if (facts.isResult) {
             resultText = envelope.result ?? null;
+            // Ruling 536: the facts are the compaction's own share already
+            // (ruling 542's projection), added to the run's figures.
+            const reported = claudeReportedTotals(message);
+            if (reported) rememberReported(sessionId, reported);
             if (facts.costUsd != null) folded.costAddUsd = facts.costUsd;
-            if (facts.usage && !facts.usage.outputEstimated) {
+            const own = facts.usage && !facts.usage.outputEstimated ? facts.usage : null;
+            if (own) {
               folded.usageAdd = {
-                input_tokens: facts.usage.input_tokens,
-                cached_input_tokens: facts.usage.cached_input_tokens,
-                output_tokens: facts.usage.output_tokens,
+                input_tokens: own.input_tokens,
+                cached_input_tokens: own.cached_input_tokens,
+                output_tokens: own.output_tokens,
               };
             }
             shown = {
               ...base,
               ev: "meta",
               tag: "run·compaction·request",
+              // The row's input is the whole prompt, cache reads included
+              // (ruling 175), so the cached share is named, never added again.
               text:
                 `compaction request · ${facts.costUsd != null ? `$${facts.costUsd.toFixed(2)}` : "cost not reported"}` +
-                (facts.usage ? ` · ${k(facts.usage.input_tokens + facts.usage.cached_input_tokens)} in, ${k(facts.usage.output_tokens)} out` : ""),
+                (own ? ` · ${k(own.input_tokens)} in (cached ${k(own.cached_input_tokens)}), ${k(own.output_tokens)} out` : ""),
             };
           } else if (envelope.type === "assistant") {
             // The summary call's own figures ride the result line; a per-call
@@ -1438,6 +1509,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       return outcome;
     },
     start(spec: RunSpec, cb: RunCallbacks): RunHandle {
+      recallReported(spec);
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawResult = false;
       let resultIsError = false;
@@ -1851,7 +1923,14 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           for await (const message of q) {
             armIdle(); // reset the inactivity window on every message
             const occurredAt = new Date().toISOString();
-            const { display, facts } = projectEnvelope("claude", message, occurredAt);
+            // Ruling 542: a result states this run's share of its session.
+            const session = sessionId ?? spec.resumeSessionId ?? null;
+            const { display, facts } = projectEnvelope(
+              "claude",
+              message,
+              occurredAt,
+              session ? reportedBySession.get(session) : null,
+            );
             const envelope = claudeEnvelopeSchema.parse(message);
             if (facts.sessionId) sessionId = facts.sessionId;
             // Ruling 130(a): keep the last rate-limit reading, the last API
@@ -1868,6 +1947,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               resultSubtype = envelope.subtype;
               resultErrorText = envelope.result;
               resultCostUsd = facts.costUsd ?? null;
+              const reported = claudeReportedTotals(message);
+              const reportedFor = sessionId ?? spec.resumeSessionId;
+              if (reported && reportedFor) rememberReported(reportedFor, reported);
               evidence.apiErrorStatus = envelope.api_error_status;
               evidence.terminalReason = envelope.terminal_reason;
             } else if (envelope.type === "user") {

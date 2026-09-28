@@ -212,6 +212,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     await recordAgentCompletion(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
       actorRef: reviewer,
       runId: "run_1",
+      delivers: false,
       replyText: "Approve — the change matches the goal.",
       verdict: "approve",
       question: null,
@@ -250,6 +251,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     await recordAgentCompletion(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
       actorRef: { ...reviewer, profileId: "dev", roleHint: "developer" },
       runId: "run_2",
+      delivers: true,
       replyText: "Implemented the attach flow.",
       verdict: null,
       question: null,
@@ -270,6 +272,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     await recordAgentCompletion(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", {
       actorRef: reviewer,
       runId: "run_3",
+      delivers: false,
       replyText: "Approve.",
       verdict: "approve",
       question: null,

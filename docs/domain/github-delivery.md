@@ -495,7 +495,8 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
   without `onto` links nothing.
 - **Verdicts** are bound to the review subject (`reviewSubjectId`: the active revision's
   id, or `files:<deliveredAt>` for a deliverable that is not a commit, ruling 388); only
-  verdicts on the current subject count. Required reviewers are supporting engagements
+  verdicts on the current subject count, and a verdict binds only to the subject its run
+  was dispatched on (ruling 544). Required reviewers are supporting engagements
   with `verdictCapable: true`, plus the project's declared `requiredReviewers`
   ([task-lifecycle.md §8](task-lifecycle.md#8-engagements-dispatch-and-verdicts)). A
   reviewer is checked out at the reviewed revision's head, except that

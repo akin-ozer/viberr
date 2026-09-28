@@ -4865,6 +4865,8 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     const NOT_A_CONTAINER = {
       '.btn:active:not(:disabled, [aria-disabled="true"]) → <label> app/features/task-detail/attachments-panel.tsx holds <input>':
         "the attach button is a <label> wrapping its own hidden file input: pressing the label is pressing that input, one control.",
+      '.btn:active:not(:disabled, [aria-disabled="true"]) → <label> app/features/board/filed-files.tsx holds <input>':
+        "the New task dialog's Attach files button (ruling 533) is the same <label> around its own hidden file input, one control.",
       ".keybtn:active → <span> app/features/notifications/notifications-page.tsx is not a control":
         "`.keybtn.dead`, an orphan row's project note, is an inline <span>; a transform does not apply to a non-replaced inline box, so no press draws on it.",
     } satisfies Record<string, string>;

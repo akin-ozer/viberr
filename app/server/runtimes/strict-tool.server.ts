@@ -16,6 +16,20 @@ export function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+/** Ruling 533: a text block, then the picture itself. A coordinator handed a
+ *  screenshot a person attached sees it, instead of reasoning from its name. */
+export function imageResult(text: string, image: { data: string; mimeType: string }) {
+  return {
+    content: [
+      { type: "text" as const, text },
+      { type: "image" as const, data: image.data, mimeType: image.mimeType },
+    ],
+  };
+}
+
+/** What a tool may answer with: text, or text and a picture. */
+export type ToolResult = ReturnType<typeof textResult> | ReturnType<typeof imageResult>;
+
 /**
  * The SDK's `tool()` at the signature its MCP server actually honours.
  *

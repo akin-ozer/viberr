@@ -1229,6 +1229,23 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     expect(fourth.container.querySelector(".agent-run")!.textContent).toContain(
       "Runs as a supporting agent (no repo write).",
     );
+    cleanup();
+
+    // Ruling 556: the project's required reviewer, delivery-capable, on a task
+    // with no deliverer → the dispatch engages it to review, and says so.
+    // CANARY: drop the `requiredReviewer` term and this promises it the branch.
+    const judge: DeployedSpecialistView = {
+      id: "judge", name: "Estimate Judge", role: "Review", backend: "codex", model: "codex-large",
+      capabilities: { delivery: true, verdict: true, askHuman: false, browser: true },
+      requiredReviewer: true,
+    };
+    const fifth = renderExec(execTask(), {
+      deployedSpecialists: [...deployedFixture, judge],
+    });
+    pickAgent(fifth.container, "Estimate Judge");
+    expect(fifth.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as a reviewer: its verdict gates acceptance.",
+    );
   });
 
   it("discloses the dispatch-completion contract where the run starts", () => {

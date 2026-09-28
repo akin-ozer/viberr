@@ -7010,7 +7010,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   padding: 4px;
   margin: -4px;
 }
-.attach-file {
+/* Ruling 533: a file a task is being filed with (`.filed-file`) draws as a
+   row of the list it will join; it is no link, so it never presses. */
+.attach-file, .filed-file {
   display: flex;
   align-items: center;
   gap: .5rem;
@@ -7023,8 +7025,8 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   transition: transform .15s var(--ease-out);
 }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
-.attach-file svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
-.attach-file .attach-name { flex: 1; }
+.attach-file svg, .filed-file > svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.attach-file .attach-name, .filed-file .attach-name { flex: 1; }
 /* Who put the file there, from the producing event (attachments panel). */
 .attach-by { font-size: .69rem; color: var(--muted); }
 .attach-thumb .attach-by { padding: .25rem .25rem .125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -786,29 +786,78 @@ describe("ruling 293: the coordinators can read the evidence", () => {
     expect(operator.allowedTools).toContain("mcp__viberr__read_task_attachment");
   });
 
-  it("reads a text attachment whole, and refuses a binary by name", async () => {
+  it("reads a text attachment whole, an image as the picture, and refuses what it cannot read", async () => {
     const { writeFileSync, mkdirSync } = await import("node:fs");
-    const { readTaskAttachmentText } = await import(
+    const { readTaskAttachment } = await import(
       "~/server/files/task-attachments.server"
     );
     const dir = `${app.dataRoot}/projects/viberr-core/tasks/VIB-1/attachments`;
     mkdirSync(dir, { recursive: true });
     writeFileSync(`${dir}/proof.txt`, "MUTANT RED\nFIX GREEN\n");
-    writeFileSync(`${dir}/shot.png`, "not really a png");
+    // A 1×1 PNG: signature, then the IHDR chunk the reader takes the size from.
+    const png = Buffer.from(
+      "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f0005010201e2f2e9a50000000049454e44ae426082",
+      "hex",
+    );
+    writeFileSync(`${dir}/portal.png`, png);
+    writeFileSync(`${dir}/fake.png`, "not really a png");
+    writeFileSync(`${dir}/brief.pdf`, "%PDF-1.7");
 
-    const text = readTaskAttachmentText("viberr-core", "VIB-1", "proof.txt", app.dataRoot);
-    expect(text).toMatchObject({ truncated: false });
+    const text = readTaskAttachment("viberr-core", "VIB-1", "proof.txt", app.dataRoot);
+    expect(text).toMatchObject({ kind: "text", truncated: false });
     expect(text && "text" in text ? text.text : "").toContain("MUTANT RED");
 
-    // A PNG is not something this channel carries, and saying so beats handing
-    // back bytes a model will describe as if it had looked at the image.
-    const binary = readTaskAttachmentText("viberr-core", "VIB-1", "shot.png", app.dataRoot);
-    expect(binary && "unreadable" in binary ? binary.unreadable : "").toContain(".png");
+    // Ruling 533: a person's screenshot is the picture, not a description.
+    const image = readTaskAttachment("viberr-core", "VIB-1", "portal.png", app.dataRoot);
+    expect(image).toMatchObject({ kind: "image", mimeType: "image/png", data: png.toString("base64") });
+
+    // A file named as an image that is not one would fail the reader's turn at
+    // the model API, so it is named instead of sent.
+    // CANARY: drop the header check and `fake.png` goes out as image/png.
+    const fake = readTaskAttachment("viberr-core", "VIB-1", "fake.png", app.dataRoot);
+    expect(fake && "unreadable" in fake ? fake.unreadable : "").toContain("its bytes are not one");
+    const pdf = readTaskAttachment("viberr-core", "VIB-1", "brief.pdf", app.dataRoot);
+    expect(pdf && "unreadable" in pdf ? pdf.unreadable : "").toContain(".pdf");
 
     // A name that climbs out of the task's own folder resolves to nothing.
     expect(
-      readTaskAttachmentText("viberr-core", "VIB-1", "../../secrets.txt", app.dataRoot),
+      readTaskAttachment("viberr-core", "VIB-1", "../../secrets.txt", app.dataRoot),
     ).toBeNull();
+  });
+
+  it("ruling 551: a long attachment reads in pages that join back into the whole file", async () => {
+    // Live, the controller asked to copy the table at the end of a 55 KB
+    // result could read 11 of its 25 rows and had no way on. CANARY: ignore
+    // `offset` in textPage and the second page repeats the first.
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { readTaskAttachment } = await import("~/server/files/task-attachments.server");
+    const dir = `${app.dataRoot}/projects/viberr-core/tasks/VIB-1/attachments`;
+    mkdirSync(dir, { recursive: true });
+    const whole = Array.from({ length: 10_000 }, (_, i) => `row ${String(i).padStart(5, "0")}\n`).join("");
+    expect(whole.length).toBe(100_000);
+    writeFileSync(`${dir}/result.md`, whole);
+
+    const pages: string[] = [];
+    let offset: number | undefined = 0;
+    const seen: unknown[] = [];
+    while (offset !== undefined) {
+      const read = readTaskAttachment("viberr-core", "VIB-1", "result.md", app.dataRoot, offset);
+      if (!read || !("text" in read)) throw new Error("expected a text page");
+      pages.push(read.text);
+      seen.push({ offset: read.offset, truncated: read.truncated, nextOffset: read.nextOffset });
+      offset = read.nextOffset;
+    }
+    expect(seen).toEqual([
+      { offset: undefined, truncated: true, nextOffset: 40_000 },
+      { offset: 40_000, truncated: true, nextOffset: 80_000 },
+      { offset: 80_000, truncated: false, nextOffset: undefined },
+    ]);
+    expect(pages.join("")).toBe(whole);
+
+    const past = readTaskAttachment("viberr-core", "VIB-1", "result.md", app.dataRoot, 100_000);
+    expect(past && "unreadable" in past ? past.unreadable : "").toBe(
+      "`result.md` reads as 100,000 characters; offset 100,000 is past its end.",
+    );
   });
 });
 

@@ -637,7 +637,10 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   unavailable | service unavailable | server error`.
 - Structured output: when a specialist has a verdict, ask or evidence grant, the run
   carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
-  calls a Claude specialist would make. Its `evidence` items require `label`, `result`
+  calls a Claude specialist would make. The SDK writes the schema into a directory of
+  its own (0700, the server's), so behind the launcher the adapter shares that file for
+  the agent group to read before the CLI starts (`shareOutputSchemaWithAgent`,
+  `shareFileForAgentsToRead`, ruling 534). Its `evidence` items require `label`, `result`
   (nullable) and `status` (`pass`, `fail` or `info`, ruling 526). Its `relay` field (ruling 488, required and
   nullable like the rest) is the Codex half of `report_outcome`'s: every entry is parsed
   and kept, a garbled one costs only itself, and the cap of two is applied where the
@@ -659,7 +662,7 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   session_id, sdk, state (queued|running|finished|error|interrupted), phase, step,
   started_at, finished_at, turns, input_tokens, cached_input_tokens, output_tokens,
   usage_final, total_cost_usd, interrupted_by, agent_name, agent_profile_id, outcome_key,
-  dispatched_by_name, dispatched_by_user_id, no_checkout, verdict_withheld,
+  dispatched_by_name, dispatched_by_user_id, no_checkout, verdict_withheld, review_subject,
   credential_user_id, interrupted_reason, created_at, updated_at`, and the prompt-cache
   record (ruling 369):
   `cache_write_tokens, first_call_prompt_tokens, first_call_cache_write,
@@ -672,7 +675,8 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   re-supply them after a restart: the staged outcome, who dispatched the run (its cc-tag),
   that the run's checkout failed so it records no verdict (ruling 248), and that the
   dispatch withheld the verdict channel so no prose fallback may manufacture one
-  (rulings 313, 316).
+  (rulings 313, 316). `review_subject` is what the run was dispatched to judge (ruling
+  544): its verdict binds only if the task still has that subject when it completes.
 - **The prompt-cache record** (ruling 369) is folded by the sink from the provider's own
   figures: `cache_write_tokens` sums every call's cache write (Claude
   `cache_creation_input_tokens`; Codex `cache_write_input_tokens`, 0 on every run this
@@ -689,7 +693,16 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   rollout at finalize, where the rollout's first `token_count` also replaces the streamed
   turn total as the first call (miss reason NULL). `compactions` counts
   `compact_boundary` envelopes and Codex compaction events (§2.5); a completion
-  compaction's own cost and tokens add to the run's totals (ruling 376).
+  compaction's own cost and tokens add to the run's totals (ruling 376). A Claude
+  result reports its SESSION's running totals (the CLI restores a session's cost state
+  on resume), so the adapter records each run's and each compaction's share: what the
+  report adds to the totals that session last reported, model by model
+  (`sessionShareOf`, `reportedBySession`, rulings 536 and 542). After a restart the
+  adapter's memory is empty, so `startRun` reads the newest `result` line the session's
+  earlier runs logged (`lastSessionResultRaw`) and hands it over as
+  `resumedSessionReported` (ruling 559). A resumed run's spending cap is raised by what its
+  session had already spent only when the CLI will restore that spend: the session ran last
+  where this run works, under the same account (`costStateRestored`, ruling 553).
   `credential_kind` is the kind of credential the run billed at start (`login`,
   `api_key`, `access_token`), which decides the TTL ruling 372 assumes; NULL on a refused
   run. A Codex run's usage is its turn's total over its calls. On a resumed thread the
@@ -1142,7 +1155,10 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   `app/shared/dependencies.ts`).
 - `wantsDelivery = input.delivers ?? (no current deliverer && profile is
   delivery-capable)` when the dispatch engages the profile; an explicit hand-off requires
-  the repo-write grant. `delivers: true` while another profile delivers is a hand-off
+  the repo-write grant, or (ruling 535, `canOwnDelivery`) an agent that can post files on
+  the task (`attach-evidence-references`, `postsFiles` in the operator's roster), whose
+  delivery is those files: its prompt says so and asks for their names instead of a
+  branch and commits. An agent that can do neither is refused naming both grants. `delivers: true` while another profile delivers is a hand-off
   through `assignSpecialist`, refused only while the outgoing deliverer has a live run; a
   second live delivering RUN hits the single-flight 409 (§3.1). `delivers: false` on the
   current deliverer is refused at the operator's `run_agent` door;
@@ -1242,7 +1258,10 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   channel on both backends for that run only (the Claude `report_outcome` field, the Codex
   envelope schema and the persona's collaboration notes) and records `verdict_withheld`
   on the run, so the completion's prose fallback cannot manufacture one either (rulings
-  313, 316). The engagement stays `verdictCapable`.
+  313, 316). The engagement stays `verdictCapable`. A delivering run, fresh or resumed,
+  gets no verdict channel at all, whatever its profile grants, and completion discards a
+  verdict from a run dispatched to deliver: its reply is its delivery, and its files stamp
+  `deliveredAt` (ruling 555).
 - The timeline's dispatch sentence follows `startRun`'s outcome (`runDispatchLine`,
   ruling 311): "Started a … run … — streaming to the agent logs." only when it started,
   "Queued a … run … Nothing is streaming yet." when the cap parked it, and "Refused a …
@@ -1762,10 +1781,19 @@ runtime's answer for a missing grant.
   `viberr-controller`, `viberr_ops`, `viberr-ops`.
 - **Browser**: `viberr_browser` = `@playwright/mcp` cli.js run with `process.execPath`,
   `--headless --isolated --output-dir <attachments>` (+ `--image-responses omit` on
-  Codex, + `--executable-path $VIBERR_BROWSER_EXECUTABLE --no-sandbox` when set).
+  Codex, + `--executable-path $VIBERR_BROWSER_EXECUTABLE --no-sandbox` when set), under
+  `browser-supervisor.server.ts --deadline-ms 90000` (ruling 554): every tool call has a
+  90 s deadline, and a call past it gets every waiting request answered with a sentence
+  saying the browser was restarted, the server and its browser ended, and a fresh server
+  handed the client's handshake, so a page that stops answering costs the agent its tabs,
+  not its browser. A cancelled call stays timed only as a check (restart when the browser
+  answered nothing since and another call has itself waited 30 s behind it). The
+  supervisor exits only once its last output has left stdout. Codex waits 120 s on this server
+  (`tool_timeout_sec`) so the supervisor's answer is the one the model reads, and the
+  persona states the deadline.
   Requires effective `use-browser: direct` **and** `use-web-search-fetch: direct`, the
-  package on disk and, when `VIBERR_BROWSER_EXECUTABLE` is set, that binary.
-  `/resources/health.browser` is the instance-level probe.
+  package and the supervisor on disk and, when `VIBERR_BROWSER_EXECUTABLE` is set, that
+  binary. `/resources/health.browser` is the instance-level probe.
 - **Shell inventory** (rulings 191, 196, 275; `shellInventoryPrompt`,
   `app/server/ops/toolchain.server.ts`): every specialist run, operator run and controller
   turn carries "## Shell inventory (measured on this host, not a guess)": the versions

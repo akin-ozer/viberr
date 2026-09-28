@@ -27,6 +27,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { listTaskAttachments } from "~/server/files/task-attachments.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -267,6 +268,7 @@ async function recordReviewerReply(
     {
       actorRef: ref,
       runId: `run_rv${++reviewerRunSeq}`,
+      delivers: false,
       replyText,
       verdict: classifyReviewerVerdict(replyText),
       question: null,
@@ -737,6 +739,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_test",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: `@${store.users.arda.name.split(" ")[0]} the review is clean — over to you for acceptance.`,
     });
@@ -791,6 +794,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_flood",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: "Implementation reviewed end to end; the flow is correct and the tests pass.",
     });
@@ -926,6 +930,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_test_ambiguous",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: `@${firstName} the review is clean — over to you for acceptance.`,
     });
@@ -964,6 +969,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_chatter",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: "ok",
     });
@@ -1039,6 +1045,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_dup",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: finding,
     });
@@ -1070,6 +1077,7 @@ describe("appendComment", () => {
     await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_fin",
+      delivers: false,
       replyText: finding,
       verdict: null,
       question: null,
@@ -1107,6 +1115,7 @@ describe("appendComment", () => {
     await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_cc",
+      delivers: false,
       // Exactly what the dispatch-completion contract hands this function.
       replyText: `${finding}\n\ncc @Arda Kaya @operator`,
       verdict: null,
@@ -1139,6 +1148,7 @@ describe("appendComment", () => {
     await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_b",
+      delivers: false,
       replyText: text,
       verdict: null,
       question: null,
@@ -1163,6 +1173,7 @@ describe("appendComment", () => {
     await recordAgentCompletion(store.db, opts, store.slug, "VIB-1", {
       actorRef: REVIEWER_REF,
       runId: "run_ev",
+      delivers: false,
       replyText: finding,
       verdict: null,
       question: null,
@@ -1201,6 +1212,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_att",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: finding,
       attachments: ["fail.png"],
@@ -1234,6 +1246,7 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_more",
+      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: "Investigating the flaky test. Fixed: it raced the catalog fetch.",
     });
@@ -1785,6 +1798,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_rework",
+      delivers: true,
       actorRef: {
         kind: "agent",
         backend: "claude",
@@ -3739,6 +3753,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
       {
         actorRef: REVIEWER_REF,
         runId: "run_att1",
+        delivers: false,
         replyText: "Captured the login page for the record.",
         verdict: null,
         question: null,
@@ -3777,6 +3792,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
       {
         actorRef: REVIEWER_REF,
         runId: "run_att2",
+        delivers: false,
         replyText: "The change renders correctly. Approve.",
         verdict: "approve",
         question: null,
@@ -3805,6 +3821,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
       {
         actorRef: REVIEWER_REF,
         runId: "run_att3",
+        delivers: false,
         replyText: null,
         verdict: null,
         question: null,
@@ -3832,6 +3849,7 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
       {
         actorRef: REVIEWER_REF,
         runId: "run_att4",
+        delivers: false,
         replyText: "One good file, two hostile names.",
         verdict: null,
         question: null,
@@ -4177,6 +4195,139 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     expect(rows).toHaveLength(1);
     expect(rows[0]!.details).toMatchObject({ cause: "stage_move", surviving: 1, removed: [{ id: "r-accept" }, { id: "r-done" }] });
     expect(rows[0]!.actorLabel).toBe(store.users.arda.email);
+  });
+});
+
+/**
+ * Ruling 533: a task is filed WITH its input. On a board that delivers results
+ * the file a person hands over (an inventory, a screenshot) is the task, and it
+ * could only be attached after the operator had triaged a goal that could not
+ * show it.
+ */
+describe("ruling 533: a task filed with its input", () => {
+  function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
+    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...projectFile.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "operator" as const,
+            name: "Operator",
+            role: "Coordination",
+            icon: "shield",
+            backends: ["claude" as const],
+            model: "sonnet",
+            autonomy: "supervised" as const,
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("the operator's create trigger finds the files on disk and claimed for the person", async () => {
+    // CANARY: leave the files out of `createTask`'s own writes (attach them
+    // afterwards, the way the task page does) and the triage run starts on a
+    // task with no input.
+    const store = setupProjectedStore(ctx);
+    deployOperatorOn(store);
+    const seen: { files: string[]; claimed: string[] }[] = [];
+    let settle: (() => void) | null = null;
+    const observed = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
+      const file = readTaskFile({ projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: store.dataRoot });
+      seen.push({
+        files: listTaskAttachments(input.projectSlug, input.taskKey, store.dataRoot).map((a) => a.name).sort(),
+        claimed: (file?.parsed.timeline ?? []).flatMap((e) => (e.actor.kind === "human" ? (e.attachments ?? []) : [])).sort(),
+      });
+      settle?.();
+      return Promise.resolve({ runId: "run_filed", queued: false, backend: "claude" as const, autonomy: "supervised" as const });
+    });
+    const created = await createTask(
+      store.db,
+      {
+        projectSlug: store.slug,
+        title: "Estimate the Contoso estate",
+        goal: "Price the attached inventory in calculator.aws.",
+        attachments: [
+          { name: "inventory.csv", data: new TextEncoder().encode("vm,cpu,ram\nweb01,4,16\n") },
+          { name: "portal.png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) },
+        ],
+      },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+    );
+    await Promise.race([
+      observed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("the create trigger never fired")), 5_000)),
+    ]);
+    expect(seen).toEqual([{ files: ["inventory.csv", "portal.png"], claimed: ["inventory.csv", "portal.png"] }]);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
+    const note = parsed.timeline.find((e) => e.title === "Attachment added")!;
+    expect(note.text).toContain("`inventory.csv`");
+    expect(note.text).toContain("`portal.png`");
+    // Ruling 255: one creation is one instant.
+    expect(note.occurredAt).toBe(parsed.frontmatter.createdAt);
+    // Both rows share the creation's instant, so they are compared by name.
+    const added = listAuditEvents(store.db, { action: "task.attachment.added" });
+    expect(added.map((e) => String(e.details?.name)).sort()).toEqual(["inventory.csv", "portal.png"]);
+  });
+
+  it("one refused file refuses the filing, and burns no key", async () => {
+    // CANARY: check the files after `allocateTaskKey` and the next task skips
+    // a number.
+    const store = setupProjectedStore(ctx);
+    const first = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Before the refusal" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    await expect(
+      createTask(
+        store.db,
+        {
+          projectSlug: store.slug,
+          title: "Filed with a page",
+          attachments: [
+            { name: "inventory.csv", data: new TextEncoder().encode("vm\n") },
+            { name: "page.html", data: new TextEncoder().encode("<script>") },
+          ],
+        },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/does not store/);
+    // A name the store's resolver would refuse is refused by the same check,
+    // before the key: it used to pass it, take the key, and fail on the write.
+    // CANARY: drop the separator test from checkAttachmentUpload and this
+    // throws the resolver's error after a key is taken.
+    await expect(
+      createTask(
+        store.db,
+        {
+          projectSlug: store.slug,
+          title: "Filed with a crafted name",
+          attachments: [{ name: "a\\b.png", data: new TextEncoder().encode("png") }],
+        },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/cannot hold/);
+    const next = await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "After the refusal" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const number = (key: string) => Number(key.split("-").pop());
+    expect(number(next.key)).toBe(number(first.key) + 1);
   });
 });
 

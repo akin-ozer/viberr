@@ -15,6 +15,7 @@ import {
 } from "./adapter.server";
 import {
   createClaudeAdapter,
+  resetSessionTotalsForTests,
   INTERRUPT_ABORT_GRACE_MS,
   INTERRUPT_GRACE_MS,
   resolveClaudeModel,
@@ -24,6 +25,7 @@ import {
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
+import { claudeReportedTotals } from "./wire-format.server";
 import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import type { JsonValue } from "~/features/runtime/runtime-types";
@@ -2121,6 +2123,165 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(lines[1]!.facts.usageAdd).toMatchObject({ output_tokens: 4_000 });
     expect(lines[1]!.facts.isResult).toBeUndefined();
     expect(lines[1]!.facts.cache).toBeUndefined();
+  });
+
+  it("ruling 536: records the compaction's own share when the resumed session reports its totals", async () => {
+    // The live controller turn of 2026-09-28: the run's result, then the
+    // `/compact` on its resumed session, whose result carried the SESSION's
+    // totals (the CLI restores a session's cost state on resume).
+    // CANARY: project the compaction's result without the session's totals
+    // and the compaction adds $1.98, recording the $1.87 run twice.
+    const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
+      "claude-opus-5-5[1m]": {
+        inputTokens,
+        outputTokens,
+        cacheReadInputTokens: cacheRead,
+        cacheCreationInputTokens: cacheWrite,
+        costUSD,
+      },
+    });
+    const run = fakeQuery([
+      { type: "system", subtype: "init", session_id: "sess-536", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
+      { type: "result", subtype: "success", is_error: false, num_turns: 60, usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.8710, modelUsage: opus(60, 28_716, 2_222_775, 106_480, 1.8710) },
+    ]);
+    const compaction = fakeQuery([
+      { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 108_628, post_tokens: 4_166 } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 1.9779, modelUsage: opus(2_889, 32_390, 2_328_378, 106_679, 1.9779) },
+    ]);
+    const queries = [run.q, compaction.q];
+    const adapter = createClaudeAdapter({ queryFn: () => queries.shift()! });
+    const spec = { ...SPEC, runId: "run_536" };
+    adapter.start(spec, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    const lines: EmittedLine[] = [];
+    await adapter.compact!(spec, "sess-536", { onLine: (l) => lines.push(l) });
+    const request = lines.find((l) => l.display?.tag === "run·compaction·request")!;
+    expect(request.facts.costAddUsd).toBeCloseTo(0.1069, 4);
+    expect(request.facts.usageAdd).toEqual({
+      input_tokens: 2_889 + 2_328_378 + 106_679 - (60 + 2_222_775 + 106_480),
+      cached_input_tokens: 2_328_378 - 2_222_775,
+      output_tokens: 32_390 - 28_716,
+    });
+    expect(request.display?.text).toBe("compaction request · $0.11 · 109k in (cached 106k), 4k out");
+  });
+
+  it("ruling 542: a resumed run records its own share, and its spending cap starts from what the session had spent", async () => {
+    // The live controller of 2026-09-28: its second turn, resumed on the same
+    // session, reported "$2.51 · in 2627.6k · out 35.2k" where its own four
+    // calls read 188k tokens in, because the CLI restores a session's cost
+    // state on resume.
+    // CANARY: project the resumed result without the session's totals
+    // (`projectEnvelope(..., null)`) and the turn records the first one again.
+    resetSessionTotalsForTests();
+    const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
+      "claude-opus-5-5[1m]": { inputTokens, outputTokens, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: cacheWrite, costUSD },
+    });
+    const first = fakeQuery([
+      { type: "system", subtype: "init", session_id: "sess-542", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
+      { type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000, usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779, modelUsage: opus(2_889, 32_390, 2_328_378, 106_679, 1.9779) },
+    ]);
+    const second = fakeQuery([
+      { type: "system", subtype: "init", session_id: "sess-542", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
+      { type: "result", subtype: "success", is_error: false, num_turns: 8, duration_ms: 29_000, usage: { input_tokens: 8, cache_read_input_tokens: 132_029, cache_creation_input_tokens: 56_088, output_tokens: 2_757 }, total_cost_usd: 2.5097, modelUsage: opus(4_383, 35_162, 2_460_407, 162_767, 2.5097) },
+    ]);
+    const options: ClaudeQueryOptions[] = [];
+    const queries = [first.q, second.q];
+    const adapter = createClaudeAdapter({
+      queryFn: ({ options: o }) => {
+        options.push(o ?? {});
+        return queries.shift()!;
+      },
+    });
+    adapter.start({ ...SPEC, runId: "run_turn1", maxSpendUsd: 5 }, { onLine: () => {}, onExit: () => {} });
+    await drain();
+    const lines: EmittedLine[] = [];
+    adapter.start(
+      { ...SPEC, runId: "run_turn2", resumeSessionId: "sess-542", maxSpendUsd: 5, costStateRestored: true },
+      { onLine: (l) => lines.push(l), onExit: () => {} },
+    );
+    await drain();
+    const result = lines.find((l) => l.facts.isResult)!;
+    expect(result.facts.costUsd).toBeCloseTo(2.5097 - 1.9779, 4);
+    expect(result.facts.usage).toMatchObject({
+      input_tokens: 4_383 + 2_460_407 + 162_767 - (2_889 + 2_328_378 + 106_679),
+      cached_input_tokens: 2_460_407 - 2_328_378,
+      output_tokens: 35_162 - 32_390,
+    });
+    expect(result.display?.text).toMatch(/^success · 8 turns · 29s · \$0\.53 · in 189\.6k \(cached 132\.0k\) · out 2\.8k tokens$/);
+    expect(options.map((o) => o.maxBudgetUsd)).toEqual([5, 5 + 1.9779]);
+  });
+
+  it("ruling 559: after a restart, a resumed run takes its share from the result its run log recalls", async () => {
+    // Live on the AWS calculator board, the first controller turn after a
+    // deploy recorded $3.36, the whole session's spend, because the restart
+    // had emptied the adapter's memory of the session. CANARY: drop
+    // `recallReported(spec)` in start() and the turn records $2.51 again.
+    resetSessionTotalsForTests();
+    const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
+      "claude-opus-5-5[1m]": { inputTokens, outputTokens, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: cacheWrite, costUSD },
+    });
+    const before = claudeReportedTotals({
+      type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
+      usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779,
+      modelUsage: opus(2_889, 32_390, 2_328_378, 106_679, 1.9779),
+    })!;
+    const resumed = fakeQuery([
+      { type: "system", subtype: "init", session_id: "sess-559", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
+      { type: "result", subtype: "success", is_error: false, num_turns: 8, duration_ms: 29_000, usage: { input_tokens: 8, cache_read_input_tokens: 132_029, cache_creation_input_tokens: 56_088, output_tokens: 2_757 }, total_cost_usd: 2.5097, modelUsage: opus(4_383, 35_162, 2_460_407, 162_767, 2.5097) },
+    ]);
+    const options: ClaudeQueryOptions[] = [];
+    const adapter = createClaudeAdapter({
+      queryFn: ({ options: o }) => {
+        options.push(o ?? {});
+        return resumed.q;
+      },
+    });
+    const lines: EmittedLine[] = [];
+    adapter.start(
+      {
+        ...SPEC,
+        runId: "run_after_restart",
+        resumeSessionId: "sess-559",
+        resumedSessionReported: before,
+        maxSpendUsd: 5,
+        costStateRestored: true,
+      },
+      { onLine: (l) => lines.push(l), onExit: () => {} },
+    );
+    await drain();
+    const result = lines.find((l) => l.facts.isResult)!;
+    expect(result.facts.costUsd).toBeCloseTo(2.5097 - 1.9779, 4);
+    expect(options.map((o) => o.maxBudgetUsd)).toEqual([5 + 1.9779]);
+  });
+
+  it("ruling 553: a resume the CLI will not restore keeps the cap at the run's own", async () => {
+    // Every controller conversation shares one scratch folder, so a turn of
+    // another conversation in between means the CLI restores nothing, and a
+    // cap raised by the session's old spend was spend the run could overrun
+    // by. CANARY: raise the cap whenever the session has totals, and this
+    // reads 5 + 1.9779.
+    resetSessionTotalsForTests();
+    const before = claudeReportedTotals({
+      type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
+      usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779, modelUsage: {},
+    })!;
+    const resumed = fakeQuery([
+      { type: "system", subtype: "init", session_id: "sess-553", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
+      { type: "result", subtype: "success", is_error: false, num_turns: 2, duration_ms: 9_000, usage: { input_tokens: 8, output_tokens: 100 }, total_cost_usd: 0.2 },
+    ]);
+    const options: ClaudeQueryOptions[] = [];
+    const adapter = createClaudeAdapter({
+      queryFn: ({ options: o }) => {
+        options.push(o ?? {});
+        return resumed.q;
+      },
+    });
+    adapter.start(
+      { ...SPEC, runId: "run_other_conversation_between", resumeSessionId: "sess-553", resumedSessionReported: before, maxSpendUsd: 5 },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    expect(options.map((o) => o.maxBudgetUsd)).toEqual([5]);
   });
 
   it("a refusal is the outcome's reason: the CLI had nothing to compact", async () => {

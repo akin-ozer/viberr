@@ -64,8 +64,11 @@ import {
   hasRunLinesBefore,
   insertRunLine,
   listRunLines,
+  lastClaudeSessionWorkingThere,
+  lastSessionResultRaw,
   listRunLinesTail,
   nextSeq,
+  NO_REVIEW_SUBJECT,
   patchRun,
   upsertRun,
   type AgentRunRow,
@@ -124,6 +127,7 @@ import { countLabel } from "~/shared/text/plural";
 import { newId } from "~/shared/ids/new-id.server";
 import { errorMessage, toError } from "~/shared/errors";
 import { agentLaunchFor } from "./agent-isolation.server";
+import { claudeReportedTotals } from "./wire-format.server";
 
 /**
  * The only module routes call
@@ -407,6 +411,11 @@ export interface StartRunInput {
    *  with no envelope verdict is an answer rather than a silence the prose
    *  fallback should repair. Stored on the run row. */
   verdictWithheld?: boolean;
+  /** Ruling 544: the task's review subject (`reviewSubjectId`) when this run
+   *  was dispatched, null when nothing had been delivered. The run's verdict
+   *  binds only if the task still has it at completion. Absent on a run that
+   *  judges nothing (operator, controller). */
+  reviewSubject?: string | null;
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional — the SDK default applies when absent. */
@@ -968,6 +977,9 @@ export async function startRun(
     // Ruling 316: kept on the row so the completion path can tell an answer
     // from a silence long after the dispatch is gone.
     verdictWithheld: input.verdictWithheld === true,
+    // Ruling 544: what this run is judging, for the completion to compare.
+    reviewSubject:
+      input.reviewSubject === undefined ? null : (input.reviewSubject ?? NO_REVIEW_SUBJECT),
     // A reserved row is ALREADY running (that is the point) — re-stamping it
     // `queued` would blink the strip off between preparation and the spawn, and
     // would throw away the clock the human has been watching.
@@ -1008,6 +1020,25 @@ export async function startRun(
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
   };
+  // Ruling 559: what the resumed Claude session last reported, from its run
+  // log, so the run's share survives a restart that emptied the adapter's
+  // memory of the session.
+  if (input.backend === "claude" && input.resumeSessionId) {
+    const raw = lastSessionResultRaw(db, input.resumeSessionId, runId);
+    const reported = raw ? claudeReportedTotals(JSON.parse(raw)) : null;
+    if (reported) spec.resumedSessionReported = reported;
+    // Ruling 553: and whether the CLI will restore its cost state at all,
+    // which decides whether the spending cap has to make room for it.
+    spec.costStateRestored =
+      lastClaudeSessionWorkingThere(db, {
+        exceptRunId: runId,
+        kind: input.kind,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        agentProfileId: input.agentProfileId,
+        accountId: credential.ok ? credential.credential.accountId : null,
+      }) === input.resumeSessionId;
+  }
   // Ruling 507: the home of the account this run bills. Claude already has it
   // as `CLAUDE_CONFIG_DIR` on the credential env; the Codex adapter's private
   // home copies the account's sign-in from here and hands it back here.
@@ -1793,6 +1824,9 @@ export interface ResumeRunInput {
   /** Ruling 371: re-apply the compaction anchor on resume, or a resumed run
    *  would lose it mid-thread (the XS-1 fresh-vs-resume parity class). */
   compactAnchor?: string;
+  /** Ruling 544: see `StartRunInput.reviewSubject` — the subject when THIS
+   *  turn was dispatched, not the original run's. */
+  reviewSubject?: string | null;
   /** U39-30: see `StartRunInput.onAnswered`. */
   onAnswered?: RunAnsweredCallback;
   /** Ruling 527: see `RunSpec.steering`. */
@@ -1840,6 +1874,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.mcpServers) target.mcpServers = input.mcpServers;
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) target.compactAnchor = input.compactAnchor;
+  if (input.reviewSubject !== undefined) target.reviewSubject = input.reviewSubject;
   if (input.onAnswered) target.onAnswered = input.onAnswered;
   if (input.steering) target.steering = input.steering;
   if (input.outputSchema) target.outputSchema = input.outputSchema;

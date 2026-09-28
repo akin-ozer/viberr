@@ -1,8 +1,14 @@
 import { existsSync } from "node:fs";
 import {
+  checkAttachmentUpload,
+  withAttachmentClaims,
   writeTaskAttachment,
   type WrittenAttachment,
 } from "~/server/files/task-attachments.server";
+import {
+  FILED_ATTACHMENTS_MAX,
+  FILED_ATTACHMENTS_MAX_BYTES,
+} from "~/shared/attachment-kinds";
 import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
 import {
@@ -23,7 +29,7 @@ import type {
   DeliveryServerOutcome,
   ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
-import type { RelayPayload } from "./task-relay.server";
+import { isRelayComment, type RelayPayload } from "./task-relay.server";
 // Ruling 489: where a react chain's work stands, read from the server's record.
 import {
   deliverHeadOption,
@@ -49,7 +55,9 @@ import {
   revisionLeftWorkspace,
   type RevisionDeparture,
   activeWorkRevision,
+  deliveredAsFiles,
   currentVerdicts,
+  reviewSubjectAuthor,
   reviewSubjectId,
   type ReviewVerdict,
   consecutiveRequestChanges,
@@ -80,6 +88,7 @@ import type { ProjectGate, ProjectRole } from "~/schemas/project-file.schema";
 import {
   gateOutcomeText,
   gateWallTime,
+  isGateLogName,
   projectGatesRefusal,
   projectGatesView,
   type GatesView,
@@ -228,6 +237,7 @@ import {
   getRun,
   listRunsForTaskRows,
   patchRun,
+  reviewSubjectAtDispatch,
 } from "~/server/runtimes/run-store.server";
 import { deliveredRoundSince } from "~/server/runtimes/provider-refusal.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
@@ -641,11 +651,55 @@ export interface CreateTaskInput {
    *  task.md write, before the operator's `create` trigger. Absent: the
    *  creator is seated (ruling 127). */
   ownerUserId?: string | null;
+  /** Ruling 533: the files the person filed the task with (an inventory, a
+   *  screenshot, a spreadsheet). Checked before the key is allocated and
+   *  saved before the operator's `create` trigger, so triage reads them. */
+  attachments?: readonly { name: string; data: Uint8Array }[];
   /** Ruling 255: the instant this creation happened. Every field and every
    *  timeline event it writes carries it, so the file's order is the
    *  arrangement and not a race between clock reads. Test seam only — the
    *  routes never pass it, and it defaults to now. */
   now?: string;
+}
+
+/** A size as the attachment notes write it: whole KB, never 0. */
+function attachmentKb(bytes: number): string {
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Ruling 533: every file a filing carries is checked BEFORE the key is
+ * allocated, by the same rules a later upload meets, so one refused file
+ * refuses the whole filing and burns no key. Returns the names they will be
+ * stored under.
+ */
+function checkFiledAttachments(
+  files: readonly { name: string; data: Uint8Array }[],
+): string[] {
+  if (files.length > FILED_ATTACHMENTS_MAX) {
+    throw AppError.validation(
+      `A task can be filed with up to ${FILED_ATTACHMENTS_MAX} files; this one has ${files.length}. Attach the rest from the task page.`,
+    );
+  }
+  const total = files.reduce((sum, f) => sum + f.data.byteLength, 0);
+  if (total > FILED_ATTACHMENTS_MAX_BYTES) {
+    throw AppError.validation(
+      `These files come to ${Math.round(total / 1024 / 1024)} MB; a task can be filed with up to ${FILED_ATTACHMENTS_MAX_BYTES / 1024 / 1024} MB. Attach the rest from the task page.`,
+    );
+  }
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const name = checkAttachmentUpload(file.name, file.data.byteLength);
+    // Case-folded: two names one case apart are one file on a case-insensitive
+    // disk, and the second write would silently replace the first.
+    if (seen.has(name.toLowerCase())) {
+      throw AppError.validation(`Two of these files are named “${name}”. Rename one of them.`);
+    }
+    seen.add(name.toLowerCase());
+    names.push(name);
+  }
+  return names;
 }
 
 /**
@@ -746,6 +800,12 @@ export async function createTask(
     : [];
   // Ruling 503: and the epic, for the same reason.
   const epic = input.epic?.trim() ? requireEpicForNewTask(ctx, input.projectSlug, input.epic) : null;
+  // Ruling 533: and the files it is filed with, by the upload's own tier.
+  const filed = input.attachments ?? [];
+  if (filed.length > 0) {
+    requireAction(db, project, actor, "attach-file", "attach a file to a task");
+  }
+  const filedNames = checkFiledAttachments(filed);
 
   const projectRef = {
     projectSlug: input.projectSlug,
@@ -844,6 +904,30 @@ export async function createTask(
       ),
     ];
   }
+  // Ruling 533: the files the task was filed with are written BEFORE the task
+  // file, so the operator's `create` trigger below reads a task whose input is
+  // already on it, and the note that names them claims them for the person:
+  // the attachments panel says who added each one, and no agent run is ever
+  // credited with them.
+  const written = filed.map((file, i) =>
+    writeTaskAttachment(input.projectSlug, key, filedNames[i]!, file.data, ctx.dataRoot),
+  );
+  if (written.length > 0) {
+    const listed = joinDependencyEntries(written.map((w) => `\`${w.name}\` (${attachmentKb(w.bytes)})`));
+    const filedNote: TaskFileEvent = {
+      occurredAt: now,
+      type: "note",
+      actor: signer ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
+      title: "Attachment added",
+      text:
+        `Filed with ${listed}. ` +
+        `Agents on this task read ${written.length === 1 ? "it" : "them"} from the task's attachments.`,
+      toAgent: false,
+      evidence: null,
+      attachments: written.map((w) => w.name),
+    };
+    createInput.timeline = [filedNote, ...(createInput.timeline ?? [])];
+  }
   const waitEntries = resolveDependencies(db, input.projectSlug, blockedBy);
   const waitAllDone = waitEntries.length > 0 && waitEntries.every((e) => e.state === "done");
   if (blockedBy.length > 0) {
@@ -899,6 +983,7 @@ export async function createTask(
     seat,
   };
   if (epic) createdDetails.epic = epic;
+  if (written.length > 0) createdDetails.attachments = written.map((w) => w.name);
   if (seat === "named" && namedOwnerId && creator) {
     const seatNotified = notifyOwnerSeatChange(db, {
       projectSlug: input.projectSlug,
@@ -920,6 +1005,19 @@ export async function createTask(
     taskKey: key,
     details: createdDetails,
   });
+  // Ruling 533: each filed file is on the audit log as an attachment, the row a
+  // later upload writes, so a search for what a person attached finds both.
+  for (const attachment of written) {
+    recordAudit(db, {
+      action: "task.attachment.added",
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "task",
+      subjectId: key,
+      projectSlug: input.projectSlug,
+      taskKey: key,
+      details: { name: attachment.name, bytes: attachment.bytes, replaced: false },
+    });
+  }
   // L02-1: the note above promises "Viberr releases the list at once". Only the
   // goal runner kept that promise, for the links it minted (ruling 358), and
   // ruling 503 removed it; every other creation waited for the minute tick,
@@ -1101,31 +1199,42 @@ export async function attachTaskFile(
   const agentSaved = existing.parsed.timeline.some(
     (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes(name),
   );
-  const attachment = writeTaskAttachment(
+  // Ruling 558: the name is held from before the file lands until the note
+  // claims it, so a run completing meanwhile never takes it as its own, and a
+  // note that cannot be written takes the file back up.
+  const attachment = await withAttachmentClaims(
     input.projectSlug,
     input.taskKey,
-    input.name,
-    input.data,
+    [checkAttachmentUpload(input.name, input.data.byteLength)],
+    async (put) => {
+      const written = put(
+        input.name,
+        input.data,
+        agentSaved
+          ? `“${name}” is a file an agent run saved on ${input.taskKey}, and it may be the work under review. Attach yours under another name.`
+          : null,
+      );
+      await updateTaskFile(ref, (parsed) => {
+        parsed.timeline.unshift({
+          occurredAt: new Date().toISOString(),
+          type: "note",
+          actor: humanActorRef(db, actor),
+          title: "Attachment added",
+          text:
+            `Attached \`${written.name}\` (${attachmentKb(written.bytes)})` +
+            `${written.replaced ? ", replacing a file of the same name" : ""}. ` +
+            "Agents on this task read it from the task's attachments.",
+          toAgent: false,
+          evidence: null,
+          // Ruling 533: the note claims the file for the person, so the panel says
+          // who added it and a run in flight is never credited with it.
+          attachments: [written.name],
+        });
+      });
+      return written;
+    },
     ctx.dataRoot,
-    agentSaved
-      ? `“${name}” is a file an agent run saved on ${input.taskKey}, and it may be the work under review. Attach yours under another name.`
-      : null,
   );
-  const kb = Math.max(1, Math.round(attachment.bytes / 1024));
-  await updateTaskFile(ref, (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "note",
-      actor: humanActorRef(db, actor),
-      title: "Attachment added",
-      text:
-        `Attached \`${attachment.name}\` (${kb} KB)` +
-        `${attachment.replaced ? ", replacing a file of the same name" : ""}. ` +
-        "Agents on this task read it from the task's attachments.",
-      toAgent: false,
-      evidence: null,
-    });
-  });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.attachment.added",
@@ -2573,6 +2682,18 @@ export async function commentToAgent(
     }
     if (target.effort) resume.effort = target.effort;
     if (!resumePrincipal.ok) resume.principalRefusal = resumePrincipal.refusal;
+    // Ruling 544: what the resumed run will judge. A resume re-pins nothing:
+    // the checkout is where the run it resumes left it, at that run's subject,
+    // so a commit revision under review is that run's; files are read as they
+    // stand, so a delivery of files is today's.
+    const resumeFm = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter;
+    if (resumeFm) {
+      const pinned = reviewSubjectAtDispatch(getRun(db, target.session.id));
+      resume.reviewSubject =
+        pinned !== undefined && activeWorkRevision(resumeFm.workRevision) !== null
+          ? pinned
+          : reviewSubjectId(resumeFm);
+    }
     const resumed = await resumeRun(db, resume);
     runId = resumed.runId;
     resumeOutcomeKey = confinement?.outcomeKey;
@@ -2906,6 +3027,33 @@ function duplicatedOwnCommentText(
 }
 
 /**
+ * Ruling 543: the files agents OTHER than `reviewerProfileId` saved on this
+ * task, as the timeline claims them. A task holding them has something a
+ * verification of the default branch cannot stand for: on a board that
+ * delivers results, the result a supporting agent made before anyone handed it
+ * delivery.
+ */
+function filesSavedByOtherAgents(
+  timeline: readonly TaskFileEvent[],
+  reviewerProfileId: string,
+): { agent: string; files: string[] }[] {
+  const byAgent = new Map<string, Set<string>>();
+  for (const e of timeline) {
+    if (e.actor.kind !== "agent" || e.actor.profileId === reviewerProfileId) continue;
+    // A relay's comment carried its files here from another task: nobody on
+    // this task made them (ruling 538).
+    if (isRelayComment(e)) continue;
+    const names = (e.attachments ?? []).filter((n) => !isGateLogName(n));
+    if (names.length === 0) continue;
+    const who = e.actor.roleHint ?? e.actor.profileId;
+    const set = byAgent.get(who) ?? new Set<string>();
+    for (const n of names) set.add(n);
+    byAgent.set(who, set);
+  }
+  return [...byAgent].map(([agent, files]) => ({ agent, files: [...files] }));
+}
+
+/**
  * Ruling 388 (F39-15): record a DELIVERER's saved files as this task's
  * non-commit delivery, and therefore as what a review of it binds to.
  *
@@ -2913,15 +3061,21 @@ function duplicatedOwnCommentText(
  * EVIDENCE for the verdict it is writing, not a new thing to review — stamping
  * those would make the subject move under the verdict and stale it on the way
  * in. Same division `workRevision` already draws: the deliverer mints, everyone
- * else judges. A person's upload never reaches here at all (ruling 379 writes a
- * plain note with no list).
+ * else judges. A person's upload never reaches here: its note claims its name,
+ * and a run's window leaves out what a person claimed (ruling 533).
+ *
+ * Ruling 555: and only a run DISPATCHED to deliver. A review run whose profile
+ * was handed delivery while it worked still saved evidence for a review, and
+ * the roster at completion does not turn that into the delivery.
  */
 function stampNonCommitDelivery(
   fm: TaskFrontmatter,
   actorRef: FileActorRef,
   attachments: readonly string[] | null,
   at: string,
+  dispatchedToDeliver: boolean,
 ): void {
+  if (!dispatchedToDeliver) return;
   if (!attachments || attachments.length === 0) return;
   if (actorRef.kind !== "agent") return;
   const deliverer = deliveringEngagement(fm);
@@ -3059,6 +3213,9 @@ export async function postAgentReplyComment(
      *  the reply so the producing message names its own files (an interrupted
      *  run may still have captured screenshots). */
     attachments?: string[] | null;
+    /** Ruling 555: the run was dispatched to deliver, so its files can be the
+     *  delivery. */
+    delivers: boolean;
   },
 ): Promise<void> {
   const attachments = sanitizeEventAttachmentNames(input.attachments);
@@ -3137,6 +3294,7 @@ export async function postAgentReplyComment(
         input.actorRef,
         attachments,
         event.occurredAt,
+        input.delivers,
       );
       if (compactOn) {
         parsed.timeline = compactTimelineEvents(
@@ -3921,11 +4079,16 @@ export async function recordAgentCompletion(
      *  captures). Stamped onto the same event that carries the evidence, so
      *  the producing message names its own files. */
     attachments?: string[] | null;
+    /** Ruling 555: the run was dispatched to deliver, so its files can be the
+     *  delivery. */
+    delivers: boolean;
   },
   /** Ruling 237: reports whether this completion RAISED the review-deadlock
    *  packet. The caller needs it to decide whether to hand the task back to the
-   *  operator — see the escalation arm in `applyAgentCompletionEffects`. */
-): Promise<{ escalated: boolean }> {
+   *  operator — see the escalation arm in `applyAgentCompletionEffects`.
+   *  Ruling 544: and whether the verdict BOUND to a subject, which is what makes
+   *  an approval a boundary (ruling 362). */
+): Promise<{ escalated: boolean; verdictBound: boolean }> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
   const attachments = sanitizeEventAttachmentNames(input.attachments);
@@ -3980,7 +4143,7 @@ export async function recordAgentCompletion(
     if (suppressedReason) {
       recordAgentRepliedAudit(db, projectSlug, taskKey, runId, suppressedReason);
     }
-    return { escalated: false };
+    return { escalated: false, verdictBound: false };
   }
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
@@ -4039,9 +4202,16 @@ export async function recordAgentCompletion(
   // engaged to deliver and no branch/PR/revision may ever have been linked. The
   // basis is proved by the same live, fail-closed probe acceptance uses.
   let noChangeMint: NoChangeVerification | null = null;
+  // Ruling 544: what this run was dispatched to judge. Its verdict binds only
+  // to that subject; undefined on a row that does not say (see
+  // `reviewSubjectAtDispatch`), which binds to the subject at completion.
+  const dispatchedOn = verdict ? reviewSubjectAtDispatch(getRun(db, runId)) : undefined;
+  let verdictBound = false;
+  /** Ruling 556: the verdict came from the agent that made what it judged. */
+  let ownWork = false;
   if (verdict === "approve" && actorRef.kind === "agent") {
-    const pre = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed
-      .frontmatter;
+    const preFile = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed;
+    const pre = preFile?.frontmatter;
     if (
       pre &&
       !activeWorkRevision(pre.workRevision) &&
@@ -4051,7 +4221,10 @@ export async function recordAgentCompletion(
       pre.engagements.some(
         (e) =>
           e.profileId === actorRef.profileId && !e.delivers && e.verdictCapable,
-      )
+      ) &&
+      // Ruling 543: files another agent saved here are work, not "nothing to
+      // deliver"; the approval waits for them to be delivered.
+      filesSavedByOtherAgents(preFile.timeline, actorRef.profileId).length === 0
     ) {
       const probe = await probeNothingToDeliver(db, ctx, projectSlug, taskKey);
       // `no_repo` verifies but carries no sha, and a revision needs a real head
@@ -4066,13 +4239,28 @@ export async function recordAgentCompletion(
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       if (verdict) {
+        // Ruling 544: a delivery that landed while this run was reviewing is a
+        // subject it never read, so its verdict binds to nothing.
+        const subjectNow = reviewSubjectId(parsed.frontmatter);
+        // A verification revision (R19-8) minted since the dispatch judges the
+        // base a run sent to review "nothing delivered" was judging too: a
+        // sibling reviewer's approval minted it, and it is not a delivery.
+        const mintedSince =
+          dispatchedOn === null && activeWorkRevision(parsed.frontmatter.workRevision)?.kind === "verified";
+        const moved =
+          dispatchedOn !== undefined && subjectNow !== null && dispatchedOn !== subjectNow && !mintedSince;
+        // Decided afresh on every pass of this mutator.
+        verdictBound = false;
+        ownWork = false;
         // In-lock re-check: a delivery could have landed during the probe above.
         if (
           noChangeMint &&
+          !moved &&
           !activeWorkRevision(parsed.frontmatter.workRevision) &&
           !parsed.frontmatter.pr &&
           parsed.frontmatter.branch === null &&
-          deliveringEngagement(parsed.frontmatter) === null
+          deliveringEngagement(parsed.frontmatter) === null &&
+          (actorRef.kind !== "agent" || filesSavedByOtherAgents(parsed.timeline, actorRef.profileId).length === 0)
         ) {
           parsed.frontmatter.workRevision = {
             id: newId("rev"),
@@ -4108,7 +4296,14 @@ export async function recordAgentCompletion(
         const subjectId = reviewSubjectId(parsed.frontmatter);
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
-        if (subjectId && reviewerProfileId) {
+        // Ruling 556: a verdict never binds to the reviewer's own work. Handing
+        // delivery away does not make the files its deliverer saved someone
+        // else's, and a review of them is still a review of its own.
+        ownWork =
+          reviewerProfileId !== null &&
+          reviewerProfileId === reviewSubjectAuthor(parsed.frontmatter, parsed.timeline);
+        if (subjectId && reviewerProfileId && !moved && !ownWork) {
+          verdictBound = true;
           // Ruling 204: the overwrite keeps the latest verdict and would keep
           // nothing else. A reviewer that returns the SAME result on the SAME
           // revision has reviewed twice, and that is the only signal saying the
@@ -4271,15 +4466,58 @@ export async function recordAgentCompletion(
         // "… requested changes.") spends the one informative line on nothing.
         // Name the revision the verdict binds to instead — the fact a reader
         // needs next, and the one that makes a stale verdict visible.
-        const onRevision = rev ? ` on \`${rev.headSha.slice(0, 12)}\`` : "";
-        if (verdict === "request_changes") {
+        // Ruling 543: a verdict on the files a result came back in binds to
+        // them (ruling 388), and the note says so rather than "no delivered
+        // revision", which read as a verdict that bound to nothing.
+        const onRevision = rev
+          ? ` on \`${rev.headSha.slice(0, 12)}\``
+          : subjectId
+            ? " on the files delivered on this task"
+            : "";
+        if (moved) {
+          // Ruling 544: the verdict is the reviewer's judgment of what it read,
+          // recorded in words; the task's review waits for a run on what is
+          // delivered now. A question this run was asked is answered all the
+          // same (ruling 421), so it does not wait on a later run.
+          title =
+            verdict === "request_changes"
+              ? VERDICT_NOTE_TITLE.changesRequested
+              : VERDICT_NOTE_TITLE.noted;
+          summary =
+            `${roleDisplay} ${verdict === "request_changes" ? "requested changes" : "approved"}, ` +
+            `but ${subjectMovedSentence(dispatchedOn ?? null, rev)}, so the verdict does not bind to ` +
+            "what is delivered now. Run the review again.";
+          const asked = parsed.frontmatter.engagements.find(
+            (e) => e.profileId === reviewerProfileId,
+          );
+          if (asked?.question && asked.question.runId === runId) asked.question = null;
+        } else if (ownWork) {
+          // Ruling 556: recorded in words, bound to nothing.
+          title =
+            verdict === "request_changes"
+              ? VERDICT_NOTE_TITLE.changesRequested
+              : VERDICT_NOTE_TITLE.noted;
+          summary =
+            `${roleDisplay} ${verdict === "request_changes" ? "requested changes" : "approved"}, ` +
+            "but it made what is delivered, so its verdict does not count. Have another agent " +
+            "deliver the work, or another reviewer judge it.";
+        } else if (verdict === "request_changes") {
           title = VERDICT_NOTE_TITLE.changesRequested;
           summary = `${roleDisplay} requested changes${onRevision}.`;
-        } else if (!rev || !reviewerProfileId) {
-          // Approve with nothing to bind to — no delivered revision yet. Record
+        } else if (!subjectId || !reviewerProfileId) {
+          // Approve with nothing to bind to — nothing delivered yet. Record
           // the prose but never claim a pass.
           title = VERDICT_NOTE_TITLE.noted;
-          summary = `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
+          const undelivered = reviewerProfileId
+            ? filesSavedByOtherAgents(parsed.timeline, reviewerProfileId)
+            : [];
+          summary =
+            undelivered.length > 0
+              ? `${roleDisplay} approved, but nothing on this task has been delivered for the verdict to bind to: ` +
+                `${joinDependencyEntries(undelivered.map((u) => `${u.agent} saved ${joinDependencyEntries(u.files.map((f) => `\`${f}\``))}`))} ` +
+                "without being handed delivery. Hand delivery to the agent that made the result (`run_agent` with `delivers: true`), " +
+                "have it save the final versions, and run the review again."
+              : `${roleDisplay} approved, but there is no delivered revision to bind the verdict to yet.`;
         } else if (validation === "healthy") {
           title = VERDICT_NOTE_TITLE.passed;
           // R19-8: when the subject is a VERIFICATION revision, say what was
@@ -4374,6 +4612,7 @@ export async function recordAgentCompletion(
           actorRef,
           replyEvent.attachments ?? null,
           replyEvent.occurredAt,
+          input.delivers,
         );
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
@@ -4400,6 +4639,7 @@ export async function recordAgentCompletion(
           actorRef,
           attachments,
           producing.occurredAt,
+          input.delivers,
         );
       }
       if (verdict) {
@@ -4668,7 +4908,26 @@ export async function recordAgentCompletion(
   }
   // Ruling 237: when the write above threw, nothing was escalated and the
   // caller reacts exactly as it always did.
-  return { escalated: deadlockEscalation.packet !== null };
+  return { escalated: deadlockEscalation.packet !== null, verdictBound };
+}
+
+/**
+ * Ruling 544: what moved under a reviewer while it ran, in its verdict note's
+ * words. `from` is the subject it was dispatched on (null when nothing had been
+ * delivered), `rev` the task's active revision now (null when the delivery is
+ * files).
+ */
+function subjectMovedSentence(from: string | null, rev: WorkRevision | null): string {
+  if (rev) {
+    const sha = `\`${rev.headSha.slice(0, 12)}\``;
+    return from === null
+      ? `it started before ${sha} was delivered`
+      : `${sha} was delivered while it was reviewing the revision before it`;
+  }
+  if (from === null) return "it started before the files on this task were delivered";
+  return from.startsWith("files:")
+    ? "the files on this task were delivered again while it was reviewing them"
+    : "the files on this task were delivered while it was reviewing a revision";
 }
 
 /**
@@ -5053,9 +5312,8 @@ export async function applyAgentCompletionEffects(
   // event below so the panel can say who added each file and from which
   // message; without a recorded start there is no honest window, so nothing is
   // claimed.
-  const { attachmentNamesSince, pruneBrowserWorkingArtifacts } = await import(
-    "~/server/files/task-attachments.server"
-  );
+  const { attachmentClaimsInFlight, attachmentNamesSince, pruneBrowserWorkingArtifacts, savedFilesText } =
+    await import("~/server/files/task-attachments.server");
   const runAttachmentsRaw = thisRunStartedAt
     ? attachmentNamesSince(
         input.projectSlug,
@@ -5064,6 +5322,10 @@ export async function applyAgentCompletionEffects(
         ctx.dataRoot,
       )
     : [];
+  // Ruling 558: read after the listing and before the timeline below, so a
+  // file this run's window holds is either still held by the writer putting
+  // it down for someone else, or already claimed on the timeline.
+  const heldForOthers = attachmentClaimsInFlight(input.projectSlug, input.taskKey);
   const prevReply = latestAgentReplyText(
     ctx,
     input.projectSlug,
@@ -5120,13 +5382,35 @@ export async function applyAgentCompletionEffects(
   const completionFile =
     readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed ?? null;
   const completionFm = completionFile?.frontmatter ?? null;
+  // Ruling 533: a file a PERSON attached while this run was in flight is in
+  // the run's mtime window too, and it is theirs: claiming it would name the
+  // run as its author and, for a deliverer, move `deliveredAt` onto the
+  // person's input. Their note claims the name; the run does not. Ruling 538:
+  // the same for a file a relay carried here from another task. A claim by
+  // another RUN is not excluded: a supporting run that finished first claims
+  // what fell in its own window, the deliverer's files among them.
+  const carriedHere = new Set(
+    thisRunStartedAt && completionFile
+      ? completionFile.timeline
+          .filter(
+            (e) => e.occurredAt >= thisRunStartedAt && (e.actor.kind === "human" || isRelayComment(e)),
+          )
+          .flatMap((e) => e.attachments ?? [])
+      : [],
+  );
+  const runSaved = runAttachmentsRaw.filter((name) => !carriedHere.has(name) && !heldForOthers.has(name));
   const verdictEngagement =
     input.profileId && completionFm
       ? completionFm.engagements.find((e) => e.profileId === input.profileId)
       : null;
-  const verdictAuthorized = verdictEngagement
-    ? verdictEngagement.verdictCapable === true
-    : collab.verdict;
+  // Ruling 555: a delivering run's reply is its delivery. A verdict in it is a
+  // verdict on its own work, which no review counts, and taking it as one filed
+  // the run's files as evidence for it instead of as the delivery. Keyed on how
+  // the run was DISPATCHED (`input.delivers`, the same flag the delivery
+  // reconcile reads), not on the roster at completion, so a review run whose
+  // profile was handed delivery while it worked still records its verdict.
+  const verdictAuthorized =
+    !input.delivers && (verdictEngagement ? verdictEngagement.verdictCapable === true : collab.verdict);
   // Envelope: a Claude toolkit-staged outcome first; else a Codex
   // outputSchema reply (JSON) parsed from the stored full text.
   let outcome = input.outcomeKey ? takeStagedOutcome(db, input.outcomeKey) : null;
@@ -5206,14 +5490,17 @@ export async function applyAgentCompletionEffects(
   ).n;
   // The corpus covers every place an agent can cite: the final reply (for a
   // Codex envelope, ALSO the raw envelope text — replyText is narrowed to its
-  // summary), the evidence rows, the ask-human question, and every timeline
-  // text since the run started (mid-run comments, human directives).
+  // summary), the evidence rows, the ask-human question, every timeline text
+  // since the run started (mid-run comments, human directives), and — ruling
+  // 549 — the text of the files this run saved, where a deliverer of files
+  // cites its evidence.
   const citationCorpus = [
     replyText ?? "",
     fullText ?? "",
     JSON.stringify(outcome?.evidence ?? []),
     outcome?.question?.title ?? "",
     outcome?.question?.body ?? "",
+    savedFilesText(input.projectSlug, input.taskKey, runSaved, ctx.dataRoot),
     ...(thisRunStartedAt && completionFile
       ? completionFile.timeline
           .filter((e) => e.occurredAt >= thisRunStartedAt)
@@ -5225,11 +5512,11 @@ export async function applyAgentCompletionEffects(
       ? pruneBrowserWorkingArtifacts(
           input.projectSlug,
           input.taskKey,
-          runAttachmentsRaw,
+          runSaved,
           citationCorpus,
           ctx.dataRoot,
         )
-      : { kept: [...runAttachmentsRaw], pruned: [] };
+      : { kept: [...runSaved], pruned: [] };
   if (finished.state === "finished" && siblingLiveRuns > 0) {
     logger.info("browser working-artifact prune skipped — sibling run live", {
       taskKey: input.taskKey,
@@ -5368,9 +5655,11 @@ export async function applyAgentCompletionEffects(
       question,
       evidence,
       attachments: runAttachments,
+      delivers: input.delivers,
     });
     if (recorded.escalated) raisedDeadlockPacket = true;
-    approvedThisReply = verdict === "approve";
+    // Ruling 544: an approval that bound to nothing opened no gate.
+    approvedThisReply = verdict === "approve" && recorded.verdictBound;
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
     // Ruling 488 (F40-67): the report's relays, posted through the operator's
     // relay door with this agent as the author, after the report itself and
@@ -5472,6 +5761,7 @@ export async function applyAgentCompletionEffects(
       actorRef,
       replyText,
       attachments: runAttachments,
+      delivers: input.delivers,
     });
   }
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO
@@ -7505,9 +7795,13 @@ export async function transitionStage(
   // performs the actual delivery.
   const reviewStageId = reviewStageIdOf(project);
   if (reviewStageId && input.toStageId === reviewStageId) {
-    const pr = existing.parsed.frontmatter.pr;
+    const moved = existing.parsed.frontmatter;
+    const pr = moved.pr;
     const livePr = pr && pr.state !== "closed" && pr.state !== "merged";
-    if (!livePr) {
+    // Ruling 546: a task delivered as the files its deliverer saved on it
+    // (rulings 388, 531) has nothing a pull request would carry, and the note
+    // told the person the operator was deciding a push and a PR for it.
+    if (!livePr && !deliveredAsFiles(moved)) {
       void surfaceDeliveryEvent(
         db,
         ctx,
@@ -10380,7 +10674,7 @@ export async function resolvePacket(
   const key = input.taskKey;
 
   let event: TaskFileEvent;
-  let mutate: (fm: TaskFrontmatter) => void;
+  let mutate: (fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]) => void;
   let clearPacket = false;
   /** U3 (NFR16): the terminal stage THIS resolution would write, set only by the
    *  `accept_completion` arm — the shared write below re-reads the stage under
@@ -10442,7 +10736,11 @@ export async function resolvePacket(
           project,
           existing.parsed.frontmatter,
           input.taskKey,
-          { blockedPacket: false, noChange },
+          {
+            blockedPacket: false,
+            noChange,
+            subjectAuthor: reviewSubjectAuthor(existing.parsed.frontmatter, existing.parsed.timeline),
+          },
         );
         if (refusal) throw AppError.conflict(refusal);
       }
@@ -10513,7 +10811,11 @@ export async function resolvePacket(
                     fresh.parsed.frontmatter,
                     input.taskKey,
                     // F28-L1: the same verified-empty result the outer gate saw.
-                    { blockedPacket: false, noChange },
+                    {
+                      blockedPacket: false,
+                      noChange,
+                      subjectAuthor: reviewSubjectAuthor(fresh.parsed.frontmatter, fresh.parsed.timeline),
+                    },
                   )
                 : null;
               if (refusal) throw AppError.conflict(refusal);
@@ -10614,7 +10916,7 @@ export async function resolvePacket(
       if (noChange.applies) {
         event.text += emptyBranchNote(branchDisposition, input.taskKey);
       }
-      mutate = (fm) => {
+      mutate = (fm, timeline) => {
         // In-lock re-check (B-WF1): the generic resolution write below holds the
         // file lock — this is the last word before Done is recorded. A2: the
         // head verification above is bound to one (PR, revision) pair, so the
@@ -10629,6 +10931,7 @@ export async function resolvePacket(
         const refusal = acceptanceRefusalReason(project, fm, input.taskKey, {
           blockedPacket: false,
           noChange,
+          subjectAuthor: reviewSubjectAuthor(fm, timeline),
         });
         if (refusal) throw AppError.conflict(refusal);
         // R20-2 (F20-6): a server-proved no-change acceptance repairs the flag so
@@ -11435,7 +11738,7 @@ export async function resolvePacket(
         "This decision was replaced by a newer one. Refresh the task and choose again.",
       );
     }
-    mutate(parsed.frontmatter);
+    mutate(parsed.frontmatter, parsed.timeline);
     // Ruling 189 (pass 37, F37-10): a person's decision joins the task's
     // CONTRACT, not just its timeline.
     //
@@ -13033,6 +13336,8 @@ function acceptanceRefusalReason(
 interface AcceptanceRefusalOptions {
   blockedPacket: boolean;
   noChange?: AcceptanceNoChangeCheck;
+  /** Ruling 556: who made the review subject, read from the timeline. */
+  subjectAuthor: string | null;
 }
 
 /**
@@ -13065,13 +13370,13 @@ function acceptanceRefusalReasons(
     closedPrBlockedReason(fm, taskKey),
     acceptanceStageBlockedReason(project, fm.stage, taskKey),
     // F10-15: every required reviewer must have approved the CURRENT revision.
-    acceptanceBlockedReason(fm),
+    acceptanceBlockedReason(fm, opts.subjectAuthor),
     // Ruling 178 (pass 36, G36-3): the reviewers the PROJECT declares must have
     // approved it too, engaged or not. F10-15's set is emergent (whoever the
     // operator engaged), so a task whose operator never ran the project's
     // reviewer was acceptable on another agent's verdict. Same order in the
     // projection's `acceptanceBlockReason`.
-    ...requiredReviewerRefusals(project.requiredReviewers, fm),
+    ...requiredReviewerRefusals(project.requiredReviewers, fm, opts.subjectAuthor),
     // R20-2 / F20-6: when the live probe already looked at the branch and found
     // WORK, its sentence wins — it names the branch and the commit count.
     // `verdictGateReason`'s "deliver the branch & open the PR" is right for a
@@ -13165,13 +13470,14 @@ export interface ForceAcceptDisclosure {
  */
 function forceAcceptDisclosure(
   project: ProjectContext,
-  parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null },
+  parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null; timeline: readonly TaskFileEvent[] },
   taskKey: string,
   opts: { noChange?: AcceptanceNoChangeCheck } = {},
 ): ForceAcceptDisclosure {
   const fm = parsed.frontmatter;
   const refusalOpts: AcceptanceRefusalOptions = {
     blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
+    subjectAuthor: reviewSubjectAuthor(fm, parsed.timeline),
   };
   if (opts.noChange) refusalOpts.noChange = opts.noChange;
   const gates = acceptanceRefusalReasons(project, fm, taskKey, refusalOpts);
@@ -13806,6 +14112,7 @@ export function acceptanceRefusalFor(
         existing.parsed.frontmatter.readiness === "blocked" &&
         existing.parsed.packet?.type === "blocked",
       noChange,
+      subjectAuthor: reviewSubjectAuthor(existing.parsed.frontmatter, existing.parsed.timeline),
     },
   );
 }
@@ -13982,6 +14289,7 @@ function affordanceIn(
   // disagree about what an override was bypassing.
   const blockedGates = acceptanceRefusalReasons(project, fm, input.taskKey, {
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
+    subjectAuthor: reviewSubjectAuthor(fm, existing.parsed.timeline),
   });
   const blockedReason = blockedGates[0] ?? null;
   const affordance: AcceptanceAffordance = {
@@ -13992,6 +14300,7 @@ function affordanceIn(
     // F19-7: what a packet resolution would hit — see the field's docstring.
     blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
       blockedPacket: false,
+      subjectAuthor: reviewSubjectAuthor(fm, existing.parsed.timeline),
     }),
     canAccept: hasAuthority && atBoundary && blockedReason === null,
     terminallyBlocked: acceptanceTerminallyBlocked(fm),
@@ -14321,6 +14630,7 @@ export async function applyAcceptanceWrite(
             parsed.packet?.type === "blocked",
           // R20-2: so a has-work branch refuses with the counted sentence.
           noChange,
+          subjectAuthor: reviewSubjectAuthor(parsed.frontmatter, parsed.timeline),
         },
       );
       if (refusal) throw AppError.conflict(refusal);
@@ -14675,6 +14985,7 @@ async function acceptCompletion(
           existing.parsed.frontmatter.readiness === "blocked" &&
           existing.parsed.packet?.type === "blocked",
         noChange,
+        subjectAuthor: reviewSubjectAuthor(existing.parsed.frontmatter, existing.parsed.timeline),
       },
     );
     if (refusal) throw AppError.conflict(refusal);
@@ -14758,6 +15069,7 @@ async function acceptCompletion(
                     fresh.parsed.packet?.type === "blocked",
                   // F28-L1: the same verified-empty result the outer gates saw.
                   noChange,
+                  subjectAuthor: reviewSubjectAuthor(fresh.parsed.frontmatter, fresh.parsed.timeline),
                 },
               );
               if (refusal) throw AppError.conflict(refusal);

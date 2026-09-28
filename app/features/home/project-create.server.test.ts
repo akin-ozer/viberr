@@ -988,6 +988,25 @@ describe("ruling 464: a designed roster replaces the base specialists", () => {
     expect(audit.details).toMatchObject({ agents: ["operator", "site-builder", "content-editor"] });
   });
 
+  it("ruling 545: the operator runs on the backend `operator` names, with that backend's model and effort", async () => {
+    // CANARY: drop the backend switch in withOperatorOverrides and the Codex
+    // model is refused against the operator's own Claude.
+    const { store, gh } = setup();
+    const result = await createProject(
+      store.db,
+      site({
+        agents: [{ profileId: "site-builder" }],
+        operator: { backend: "codex", model: "gpt-6-luna", effort: "max" },
+      }),
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const operator = readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === "operator")!;
+    expect(operator.definition).toMatchObject({ backends: ["codex"], model: "gpt-6-luna", effort: "max" });
+    expect(result.agents[0]).toMatchObject({ profileId: "operator", model: "gpt-6-luna", effort: "max" });
+  });
+
   it("without `agents` the base roster is still written (the New project modal is unchanged)", async () => {
     // CANARY: write only the operator when `agents` is absent.
     const { store, gh } = setup();
@@ -1009,6 +1028,13 @@ describe("ruling 464: a designed roster replaces the base specialists", () => {
     ["a bad effort", { agents: [{ profileId: "site-builder", effort: "ludicrous" }] }, /"ludicrous" is not an effort tier Claude offers/],
     ["a foreign model", { agents: [{ profileId: "site-builder", model: "gpt-5.6-terra" }] }, /Claude cannot run it/],
     ["a bad operator effort", { operator: { effort: "ludicrous" } }, /"ludicrous" is not an effort tier Claude offers/],
+    // Ruling 545: the refusal names the backend the model needs.
+    [
+      "a Codex model for the operator without its backend",
+      { operator: { model: "gpt-6-luna", effort: "max" } },
+      /GPT-6 Luna is a Codex model and the operator runs on Claude\. Pass `backend: "codex"` in `operator` to run it on Codex, or pick a Claude model\. Nothing was created\./,
+    ],
+    ["a Claude model for a Codex operator", { operator: { backend: "codex", model: "opus" } }, /Codex cannot run it/],
     ["an entry listed twice", { agents: [{ profileId: "site-builder" }, { profileId: "site-builder" }] }, /`site-builder` is listed twice/],
     ["an empty roster", { agents: [] }, /Name at least one agent/],
   ])("refuses %s by name with nothing written, GitHub included", async (_label, extra, message) => {

@@ -35,6 +35,7 @@ import {
   patchRun,
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
+import { claudeReportedTotals } from "./wire-format.server";
 import { RUN_PHASE } from "./adapter.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
@@ -1633,6 +1634,50 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     });
     await settle();
     expect(specs[1]?.webSearchWithheld).toBeUndefined();
+  });
+
+  it("ruling 559: a resumed Claude run is handed what its session last reported, read from the run log", async () => {
+    // After a restart the Claude adapter holds nothing for a session, and the
+    // first resumed run recorded the whole session's spend as its own ($3.36
+    // for a turn whose share was about $0.85, live). The newest result on the
+    // session's earlier runs is the baseline; a later run of the session that
+    // a restart stopped before its result is passed over.
+    // CANARY: drop the lookup in startRun and the spec carries no baseline.
+    const result = {
+      type: "result", subtype: "success", is_error: false, num_turns: 60,
+      usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779,
+      modelUsage: { "claude-opus-5-5[1m]": { inputTokens: 2_889, outputTokens: 32_390, cacheReadInputTokens: 2_328_378, cacheCreationInputTokens: 106_679, costUSD: 1.9779 } },
+    };
+    // The account the fixture's runs bill: a session's cost state lives in that
+    // account's home (ruling 553).
+    const accountId = getBackendCredential(store.db, store.users.arda.id, "claude")?.id ?? null;
+    const row = { projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary" as const, backend: "claude" as const, model: "opus", sdk: "claude", sessionId: "sess-559", agentProfileId: "developer", credentialAccountId: accountId };
+    upsertRun(store.db, { ...row, id: "run_turn1", threadId: "t-559-1", state: "finished" });
+    const line = (seq: number, raw: string) =>
+      insertRunLine(store.db, { runId: "run_turn1", seq, occurredAt: new Date().toISOString(), raw, display: { t: "", ev: "meta", tag: "t", text: "" } });
+    line(0, JSON.stringify({ type: "system", subtype: "init", session_id: "sess-559" }));
+    line(1, JSON.stringify(result));
+    upsertRun(store.db, { ...row, id: "run_turn2", threadId: "t-559-2", state: "interrupted" });
+    const specs = captureSpecs();
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-559-3", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot, resumeSessionId: "sess-559",
+    });
+    await settle();
+    expect(specs[0]?.resumedSessionReported).toEqual(claudeReportedTotals(result));
+    // Ruling 553: the newest run where it works is this session's, so the CLI
+    // will restore its cost state. CANARY: always false and the resumed run's
+    // cap cannot make room for the restored spend.
+    expect(specs[0]?.costStateRestored).toBe(true);
+
+    // Another session works there next: the CLI will restore nothing.
+    upsertRun(store.db, { ...row, id: "run_other", threadId: "t-559-other", sessionId: "sess-other", state: "finished" });
+    await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "t-559-4", role: "R", kind: "primary",
+      backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot, resumeSessionId: "sess-559",
+    });
+    await settle();
+    expect(specs[1]?.costStateRestored).toBe(false);
   });
 
   it("an explicit caller value wins over the derivation", async () => {

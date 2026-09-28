@@ -519,12 +519,68 @@ export interface ModelUsageShare {
 }
 
 /** What a Claude result folds to, in the run row's terms. */
-interface ClaudeResultUsage {
+export interface ClaudeResultUsage {
   inTok: number;
   cached: number;
   outTok: number;
   costUsd: number;
   models: ModelUsageShare[];
+}
+
+/**
+ * Ruling 542: a Claude result's figures are the SESSION's, not the query's.
+ * The CLI restores a session's saved cost state when it resumes it, so the
+ * result of a resumed run reports `total_cost_usd` and `modelUsage` for every
+ * query the session has made; only `usage` and `num_turns` are this query's.
+ * Live on the AWS calculator board a 29-second, 8-turn controller turn read
+ * "$2.51 · in 2627.6k · out 35.2k" where its own four calls read 188k tokens
+ * in, and ruling 536's compaction was the same fact once. Given the totals the
+ * session last reported, the run's share is the difference, model by model,
+ * when every figure grew from them; when one did not, the CLI restored
+ * nothing (another session ran in the same directory between the two) and
+ * the report is the query's own.
+ */
+/** Ruling 542: the totals a Claude result REPORTS (the session's), or null
+ *  when the message is not a result. What the next share is taken from. */
+export function claudeReportedTotals(
+  // eslint-disable-next-line anti-slop/no-unknown-parameters -- the raw SDK message, parsed here
+  raw: unknown,
+): ClaudeResultUsage | null {
+  const e = claudeEnvelope.parse(raw);
+  return e.type === "result" ? foldClaudeResultUsage(e) : null;
+}
+
+export function sessionShareOf(
+  previous: ClaudeResultUsage | null | undefined,
+  reported: ClaudeResultUsage,
+): ClaudeResultUsage {
+  if (!previous) return reported;
+  const grewFrom = (a: { in: number; cached: number; out: number; cost: number }, b: typeof a) =>
+    a.in >= b.in && a.cached >= b.cached && a.out >= b.out && a.cost >= b.cost;
+  const before = new Map(previous.models.map((m) => [m.model, m]));
+  const cumulative =
+    grewFrom(
+      { in: reported.inTok, cached: reported.cached, out: reported.outTok, cost: reported.costUsd },
+      { in: previous.inTok, cached: previous.cached, out: previous.outTok, cost: previous.costUsd },
+    ) &&
+    previous.models.every((m) => {
+      const now = reported.models.find((r) => r.model === m.model);
+      return now !== undefined && grewFrom(now, m);
+    });
+  if (!cumulative) return reported;
+  const models = reported.models
+    .map((m) => {
+      const b = before.get(m.model);
+      return b ? { ...m, in: m.in - b.in, cached: m.cached - b.cached, out: m.out - b.out, cost: Math.max(0, m.cost - b.cost) } : m;
+    })
+    .filter((m) => m.in > 0 || m.out > 0 || m.cost > 0);
+  return {
+    inTok: reported.inTok - previous.inTok,
+    cached: reported.cached - previous.cached,
+    outTok: reported.outTok - previous.outTok,
+    costUsd: Math.max(0, reported.costUsd - previous.costUsd),
+    models,
+  };
 }
 
 /**
@@ -535,7 +591,7 @@ interface ClaudeResultUsage {
  * written before the ruling and one written after mean the same thing; only
  * the calls counted grew (subagents, sidechains, compaction).
  */
-function foldClaudeResultUsage(e: ClaudeEnvelope): ClaudeResultUsage {
+export function foldClaudeResultUsage(e: ClaudeEnvelope): ClaudeResultUsage {
   const models = e.modelUsage.map((m) => ({
     model: m.model,
     in: m.inputTokens + m.cacheCreationInputTokens + m.cacheReadInputTokens,
@@ -576,6 +632,9 @@ export function projectEnvelope(
   // eslint-disable-next-line anti-slop/no-unknown-parameters -- see above
   raw: unknown,
   occurredAtIso?: string,
+  /** Ruling 542: the totals the Claude session last reported, so a result's
+   *  line and facts state this query's share (see `sessionShareOf`). */
+  claudeSession?: ClaudeResultUsage | null,
 ): ProjectedEnvelope {
   const t = clockOf(occurredAtIso);
   if (backend === "codex") {
@@ -583,7 +642,10 @@ export function projectEnvelope(
     return projectCodex(e, t) ?? unknownEnvelope(e.type, wireText.parse(raw), t);
   }
   const e = claudeEnvelope.parse(raw);
-  return projectClaude(e, t, occurredAtIso ?? null) ?? unknownEnvelope(e.type, wireText.parse(raw), t);
+  return (
+    projectClaude(e, t, occurredAtIso ?? null, claudeSession ?? null) ??
+    unknownEnvelope(e.type, wireText.parse(raw), t)
+  );
 }
 
 /** An envelope type this build does not know — shown verbatim, never dropped. */
@@ -593,7 +655,12 @@ function unknownEnvelope(type: string, text: string, t: string): ProjectedEnvelo
 
 /** `null` → the envelope type is unrecognized; the caller renders it raw.
  *  `at` is the envelope's own instant, which only the heartbeat line keeps. */
-function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): ProjectedEnvelope | null {
+function projectClaude(
+  e: ClaudeEnvelope,
+  t: string,
+  at: string | null,
+  session: ClaudeResultUsage | null,
+): ProjectedEnvelope | null {
   switch (e.type) {
     case "rate_limit_event": {
       // The SDK's live quota report. Previously fell through to the
@@ -782,7 +849,8 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
       // semantics either way. `usage` (and `total_cost_usd`) remain the
       // fallback for a result without per-model figures — an older CLI, or a
       // crash result whose `modelUsage` came back empty or zeroed.
-      const fold = foldClaudeResultUsage(e);
+      // Ruling 542: this query's share of the session's totals.
+      const fold = sessionShareOf(session, foldClaudeResultUsage(e));
       const { inTok, cached, outTok } = fold;
       const durSec = Math.round(e.duration_ms / 1000);
       // U34-1: the SDK ends an API-refused run with `subtype: "success"` and

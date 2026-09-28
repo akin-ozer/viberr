@@ -30,7 +30,7 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
-import { installFakeRuntime, queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
+import { drainRunCompletions, installFakeRuntime, queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
@@ -184,6 +184,9 @@ afterEach(async () => {
       }
     }
   }
+  // A resumed run's completion still writes after the assertions; the store
+  // must outlive it.
+  await drainRunCompletions();
   ctx.cleanup();
 });
 
@@ -1202,6 +1205,82 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     );
     expect(result.triggered).toBe("resumed");
     expect(result.runNotStarted).toBeNull();
+  });
+
+  it("ruling 544: a resumed agent's run records what is delivered when the resume is dispatched", async () => {
+    // CANARY: drop `resume.reviewSubject` in commentToAgent and the resumed
+    // row says nothing, so a verdict it returns binds to whatever is delivered
+    // when it finishes.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        deliveredAt: "2026-09-28T08:37:02.629Z",
+        engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_dev_old", "dev", "primary");
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev check the estimate again" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+    const resumed = listRunsForTaskRows(store.db, store.slug, "VIB-1").find((r) => r.id !== "run_dev_old");
+    expect(resumed?.review_subject).toBe("files:2026-09-28T08:37:02.629Z");
+  });
+
+  it("ruling 544: a resumed agent judging a commit records the revision its checkout was pinned to", async () => {
+    // A resume re-pins nothing, so the checkout still holds the revision the
+    // run it resumes was dispatched on. CANARY: record the task's current
+    // subject on every resume and this claims rev_2, which the checkout does
+    // not hold.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        branch: "vib-1",
+        workRevision: {
+          id: "rev_2",
+          headSha: "b".repeat(40),
+          treeSha: "c".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-28T10:00:00.000Z",
+          sourceProfileId: "dev",
+        },
+        engagements: [{ profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false }],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      id: "run_dev_pinned",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "dev-thread",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      sessionId: "run_dev_pinned-session",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+      reviewSubject: "rev_1",
+    });
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev look again" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+    const resumed = listRunsForTaskRows(store.db, store.slug, "VIB-1").find((r) => r.id !== "run_dev_pinned");
+    expect(resumed?.review_subject).toBe("rev_1");
   });
 
   it("an @mention of a RELEASED profile (session survives, no engagement) at an undeclared stage is refused", async () => {

@@ -447,6 +447,11 @@ describe("the gateway against a stdio upstream the server spawns", () => {
     // uncaughtException that exits the whole Viberr process. CANARY: drop the
     // try/catch around the append and vitest reports the unhandled error while
     // this call only times out.
+    // The upstream has to finish writing its 10 MiB line before the call's
+    // clock runs out, and the file's 400 ms clock did not allow that under a
+    // loaded full suite: the call timed out instead, in two runs on 2026-09-28.
+    await stopMcpGateway();
+    await startMcpGateway({ port: 0, callTimeoutMs: 8_000, connectTimeoutMs: 3_000 });
     addStdioPg();
     const { client, pid } = await stdioRun("run_gw_huge");
     await expect(client.callTool({ name: "huge", arguments: {} }, undefined, { timeout: 10_000 })).rejects.toThrow(

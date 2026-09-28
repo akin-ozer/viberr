@@ -1,12 +1,19 @@
 import {
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
   readFileSync,
   readdirSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
   type Dirent,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { AppError } from "~/server/errors/app-error.server";
 import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import {
@@ -21,6 +28,7 @@ import {
   resolveStoreSegment,
   taskAttachmentsDir,
 } from "./file-store-root.server";
+import { xlsxToText } from "./xlsx-text.server";
 
 /**
  * R19-19 — the task attachments store (read side).
@@ -86,6 +94,21 @@ export function listTaskAttachments(
       b.modifiedAt.localeCompare(a.modifiedAt) || a.name.localeCompare(b.name),
   );
   return entries.slice(0, LIST_CAP);
+}
+
+/**
+ * Ruling 538: every file name a task's attachments hold, uncapped and
+ * unordered (the display cap of {@link listTaskAttachments} would hide a
+ * clash past its hundredth file), dot-files skipped as every reader does.
+ */
+export function listTaskAttachmentNames(slug: string, key: string, dataRoot?: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(taskAttachmentsDir(slug, key, dataRoot), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.filter((e) => e.isFile() && !e.name.startsWith(".")).map((e) => e.name);
 }
 
 /**
@@ -195,9 +218,80 @@ export function isBrowserWorkingArtifact(name: string): boolean {
 }
 
 /**
+ * Ruling 552: the bytes of one regular file in a task's attachments, read
+ * through a descriptor opened without following a symlink. The folder is
+ * writable by every agent in the group (ruling 460), so a name in it can be a
+ * link an agent planted to a file only the server may read: following it
+ * handed that file to a coordinator's reader, and a relay copied it onto
+ * another task as an ordinary file every agent can read. Null for a link, a
+ * folder or a missing name; `tooLarge` (its size) past `maxBytes`, before
+ * anything is read.
+ */
+export function readAttachmentBytes(
+  abs: string,
+  maxBytes: number,
+): { bytes: Buffer } | { tooLarge: number } | null {
+  let fd: number;
+  try {
+    fd = openSync(abs, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) return null;
+    if (st.size > maxBytes) return { tooLarge: st.size };
+    return { bytes: readFileSync(fd) };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Ruling 552: the most of a text attachment read at all (then paged, 551). */
+const TEXT_READ_MAX_BYTES = 16 * 1024 * 1024;
+/** Ruling 552: the most of a workbook read (uploads stop at 10 MB; an agent's
+ *  own export can be larger). */
+const XLSX_READ_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Ruling 549: the most of one saved file read for its citations. */
+const SAVED_TEXT_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Ruling 549: the text of the files a run saved for people, where a run whose
+ * delivery is files (ruling 531) cites its evidence. On AWSC-1 the findings
+ * file named eleven browser snapshots and the report named none, so the prune
+ * deleted all eleven and the reviewer rejected the findings for citing files
+ * that were not there. Text files only (not the working artifacts
+ * themselves), each up to {@link SAVED_TEXT_MAX_BYTES}; an unreadable one adds
+ * nothing.
+ */
+export function savedFilesText(
+  slug: string,
+  key: string,
+  names: readonly string[],
+  dataRoot?: string,
+): string {
+  const parts: string[] = [];
+  for (const name of names) {
+    if (isBrowserWorkingArtifact(name)) continue;
+    if (!READABLE_TEXT_EXTENSIONS.has(path.extname(name).toLowerCase())) continue;
+    let abs: string;
+    try {
+      abs = resolveTaskAttachment(slug, key, name, dataRoot);
+    } catch {
+      continue;
+    }
+    // Ruling 552: never through a link. Gone, a link or too large: it cites nothing.
+    const read = readAttachmentBytes(abs, SAVED_TEXT_MAX_BYTES);
+    if (read && "bytes" in read) parts.push(read.bytes.toString("utf8"));
+  }
+  return parts.join("\n");
+}
+
+/**
  * Delete the working artifacts a finished run left behind, KEEPING any whose
- * exact filename the run cited (`citedIn` — reply text, evidence rows, and the
- * timeline since the run started). The persona's contract is "cite the exact
+ * exact filename the run cited (`citedIn` — reply text, evidence rows, the
+ * timeline since the run started, and the files it saved, ruling 549). The persona's contract is "cite the exact
  * filename", so a citation is the agent saying "this file is for the humans".
  * Returns the names that survive (the list the producing event should claim)
  * and the names deleted. A file that cannot be deleted stays listed — the
@@ -341,22 +435,14 @@ export interface WrittenAttachment {
 }
 
 /**
- * Write one human-supplied attachment onto a task. Refuses — by throwing
- * {@link AppError.validation} with a sentence naming the reason — a traversing
- * or separator-bearing name, a dot-prefixed name the store scanner would then
- * hide, an extension outside {@link UPLOADABLE_EXTENSIONS}, and anything over
- * {@link MAX_UPLOAD_BYTES}. The caller does the authorization and the audit.
+ * The refusals every person's upload meets, before anything is written: an
+ * empty or dot-prefixed name the store scanner would then hide, an extension
+ * outside {@link UPLOADABLE_EXTENSIONS}, and anything over
+ * {@link MAX_UPLOAD_BYTES}. Returns the name as it will be stored. Ruling 533:
+ * a task filed with its input checks every file here before its key is
+ * allocated, so a refused file costs no key.
  */
-export function writeTaskAttachment(
-  slug: string,
-  key: string,
-  name: string,
-  data: Uint8Array,
-  dataRoot?: string,
-  /** The sentence that refuses overwriting a file already there, or null to
-   *  allow it. The caller knows whose file it is; the store does not. */
-  refuseReplace: string | null = null,
-): WrittenAttachment {
+export function checkAttachmentUpload(name: string, byteLength: number): string {
   const cleaned = name.trim();
   if (!cleaned) {
     throw AppError.validation("Give the file a name.");
@@ -369,17 +455,134 @@ export function writeTaskAttachment(
       `A file name cannot start with a dot — “${cleaned}” would be hidden from this task and from every agent run.`,
     );
   }
+  // Ruling 533: every name the store's resolver refuses is refused here, by a
+  // sentence, before anything is written or a task key is taken for it.
+  if (/[\\/\0]/.test(cleaned)) {
+    throw AppError.validation(
+      `A file name cannot hold “/”, “\\” or a null character: “${cleaned.replaceAll("\0", "")}” is not one name.`,
+    );
+  }
   const ext = path.extname(cleaned).toLowerCase();
   if (!UPLOADABLE_EXTENSIONS.has(ext)) {
     throw AppError.validation(
       `Viberr does not store “${ext || cleaned}” attachments. It takes the files it can show or read back: ${[...UPLOADABLE_EXTENSIONS].sort().join(", ")}.`,
     );
   }
-  if (data.byteLength > MAX_UPLOAD_BYTES) {
+  if (byteLength > MAX_UPLOAD_BYTES) {
     throw AppError.validation(
-      `“${cleaned}” is ${Math.round(data.byteLength / 1024 / 1024)} MB; an attachment may be up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
+      `“${cleaned}” is ${Math.round(byteLength / 1024 / 1024)} MB; an attachment may be up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
     );
   }
+  return cleaned;
+}
+
+/**
+ * Ruling 558: the names a writer is putting on a task for someone other than a
+ * run (a person's upload, a relay, a take), from before the file lands until
+ * the timeline entry that claims it is written.
+ *
+ * A completion credits its run with every file saved in the run's window
+ * except those a person's note or a relay's comment claims (rulings 533 and
+ * 538). Those writers put the file down first and the claim second, so a
+ * completion that listed the file between the two read a timeline with no
+ * claim on it and took the file as the run's own: for a deliverer, its
+ * delivery. Holding the name here closes that gap without reordering the
+ * writers. A completion reads this after it lists the run's files and before
+ * it reads the timeline, so a file it saw is either still held here or
+ * already claimed there. In memory, because one process writes a data root.
+ */
+const claimsInFlight = new Map<string, Map<string, number>>();
+
+/** Puts one file on the task inside {@link withAttachmentClaims}: the store's
+ *  own write, with {@link writeTaskAttachment}'s refusals. */
+export type PutAttachment = (name: string, data: Uint8Array, refuseReplace?: string | null) => WrittenAttachment;
+
+/**
+ * Hold `names` on the task while `write` puts the files down with `put` and
+ * writes the entry that claims them. A file lands with its claim or not at
+ * all: if `write` fails, every file it put is taken back before the names are
+ * released (a new one removed, a replaced one put back), because a file left
+ * on the task without its claim is the next completion's to take.
+ */
+export async function withAttachmentClaims<T>(
+  slug: string,
+  key: string,
+  names: readonly string[],
+  write: (put: PutAttachment) => Promise<T>,
+  dataRoot?: string,
+): Promise<T> {
+  const task = `${slug}/${key}`;
+  const held = claimsInFlight.get(task) ?? new Map<string, number>();
+  if (names.length > 0) claimsInFlight.set(task, held);
+  for (const name of names) held.set(name, (held.get(name) ?? 0) + 1);
+  const landed: LandedAttachment[] = [];
+  const put: PutAttachment = (name, data, refuseReplace = null) => {
+    const file = landTaskAttachment(slug, key, name, data, dataRoot, refuseReplace);
+    landed.push(file);
+    return file.written;
+  };
+  try {
+    const result = await write(put);
+    for (const file of landed) file.keep();
+    return result;
+  } catch (error) {
+    for (const file of landed.reverse()) file.takeBack();
+    throw error;
+  } finally {
+    for (const name of names) {
+      const count = (held.get(name) ?? 1) - 1;
+      if (count > 0) held.set(name, count);
+      else held.delete(name);
+    }
+    // Only this writer's own entry: another may have replaced it meanwhile.
+    if (held.size === 0 && claimsInFlight.get(task) === held) claimsInFlight.delete(task);
+  }
+}
+
+/** The names held on a task right now, copied. */
+export function attachmentClaimsInFlight(slug: string, key: string): Set<string> {
+  return new Set(claimsInFlight.get(`${slug}/${key}`)?.keys() ?? []);
+}
+
+/** A file just put on a task, and the two ways to finish it. */
+interface LandedAttachment {
+  written: WrittenAttachment;
+  /** Remove it, or put back the file it replaced. */
+  takeBack: () => void;
+  /** Let go of the replaced file kept for `takeBack`. */
+  keep: () => void;
+}
+
+/**
+ * Write one human-supplied attachment onto a task. Refuses — by throwing
+ * {@link AppError.validation} with a sentence naming the reason — everything
+ * {@link checkAttachmentUpload} refuses, and a traversing or
+ * separator-bearing name. The caller does the authorization and the audit.
+ */
+export function writeTaskAttachment(
+  slug: string,
+  key: string,
+  name: string,
+  data: Uint8Array,
+  dataRoot?: string,
+  /** The sentence that refuses overwriting a file already there, or null to
+   *  allow it. The caller knows whose file it is; the store does not. */
+  refuseReplace: string | null = null,
+): WrittenAttachment {
+  const file = landTaskAttachment(slug, key, name, data, dataRoot, refuseReplace);
+  file.keep();
+  return file.written;
+}
+
+function landTaskAttachment(
+  slug: string,
+  key: string,
+  name: string,
+  data: Uint8Array,
+  dataRoot: string | undefined,
+  refuseReplace: string | null,
+): LandedAttachment {
+  const cleaned = checkAttachmentUpload(name, data.byteLength);
   const dir = taskAttachmentsDir(slug, key, dataRoot);
   // The SAME traversal-refusing resolver the serving route uses, so a name
   // this accepts is a name that route can serve and vice versa.
@@ -388,8 +591,47 @@ export function writeTaskAttachment(
   if (replaced && refuseReplace) throw AppError.validation(refuseReplace);
   // Ruling 460: the same directory agents drop evidence into, as their users.
   shareDirWithAgents(dir);
-  writeFileSync(abs, data);
-  return { name: cleaned, bytes: data.byteLength, replaced };
+  // Ruling 552: made whole under a fresh name, then renamed over the entry. A
+  // rename replaces the name itself, so a link an agent planted there is
+  // replaced, never written through to the file it points at.
+  const staging = path.join(dir, `.viberr-write-${randomBytes(6).toString("hex")}`);
+  const fd = openSync(
+    staging,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+    0o664,
+  );
+  try {
+    writeFileSync(fd, data);
+  } finally {
+    closeSync(fd);
+  }
+  // Ruling 558: the file it replaces is set aside, by a rename that moves the
+  // entry and never follows it, so a claim that fails can put it back.
+  const previous = replaced ? path.join(dir, `.viberr-prev-${randomBytes(6).toString("hex")}`) : null;
+  try {
+    if (previous) renameSync(abs, previous);
+    renameSync(staging, abs);
+  } catch (error) {
+    quietly(() => unlinkSync(staging));
+    if (previous && !existsSync(abs)) quietly(() => renameSync(previous, abs));
+    throw error;
+  }
+  return {
+    written: { name: cleaned, bytes: data.byteLength, replaced },
+    takeBack: () => quietly(() => (previous ? renameSync(previous, abs) : unlinkSync(abs))),
+    keep: () => {
+      if (previous) quietly(() => unlinkSync(previous));
+    },
+  };
+}
+
+/** A clean-up step whose target may already be gone. */
+function quietly(step: () => void): void {
+  try {
+    step();
+  } catch {
+    // Already gone.
+  }
 }
 
 /**
@@ -423,19 +665,132 @@ export interface TaskAttachmentRead {
    *  model states half an evidence log as the whole of it. */
   truncated: boolean;
   text: string;
+  /** Ruling 551: where this page starts, when it is not the first. */
+  offset?: number;
+  /** Ruling 551: the offset the next page starts at, on a truncated read. */
+  nextOffset?: number;
 }
 
 /**
- * One attachment as text, or `null` when this task has no such file. Throws
- * nothing for a binary: the caller is told what the file IS and that this
- * channel does not carry it.
+ * Ruling 551: one page of an attachment's text, from `offset`, and where the
+ * next one starts. A read used to stop at the page and offer no way on: the
+ * controller asked to copy the table at the end of a 55 KB result could read
+ * 11 of its 25 rows, and said so.
  */
-export function readTaskAttachmentText(
+function textPage(
+  whole: string,
+  cutShort: boolean,
+  offset: number,
+): Pick<TaskAttachmentRead, "text" | "truncated" | "offset" | "nextOffset"> {
+  const end = offset + ATTACHMENT_READ_CHARS;
+  const page: Pick<TaskAttachmentRead, "text" | "truncated" | "offset" | "nextOffset"> = {
+    text: whole.slice(offset, end),
+    // A whole that was itself cut short says so on its last page, with no
+    // page after it to offer.
+    truncated: cutShort || whole.length > end,
+  };
+  if (offset > 0) page.offset = offset;
+  if (whole.length > end) page.nextOffset = end;
+  return page;
+}
+
+/** Ruling 551: the most of a workbook's text a reader can page through. The
+ *  whole of it is rendered and sliced like any text, because the renderer
+ *  stops at whole lines and a page cut at its budget would skip the rest of
+ *  the line it stopped before. */
+const XLSX_TEXT_MAX_CHARS = 16_000_000;
+
+/**
+ * Ruling 533: the pictures a reader is handed as the picture itself. A person
+ * on a board that delivers results often hands over a screenshot (a portal's
+ * VM list, a spreadsheet they could not export), and a coordinator that could
+ * only read text triaged that task from the file's name. The ceiling is the
+ * model API's own per-image limit: 5 MB once base64-encoded.
+ */
+const IMAGE_READ_TYPES = new Map<string, string>([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".gif", "image/gif"],
+]);
+const IMAGE_READ_MAX_BYTES = 3_750_000;
+/** The model API refuses a picture wider or taller than this, and refuses the
+ *  whole request with it, so a larger one is named instead of sent. */
+const IMAGE_READ_MAX_SIDE = 8000;
+
+/**
+ * The image's format and size, read from its own header, or null when the
+ * bytes are not the picture the name claims. A file named `.png` that is not
+ * one would fail the reader's whole turn at the model API.
+ */
+export function imageHeader(buf: Buffer): { mimeType: string; width: number; height: number } | null {
+  if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47 && buf.toString("latin1", 12, 16) === "IHDR") {
+    return { mimeType: "image/png", width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  if (buf.length >= 10 && buf.toString("latin1", 0, 4) === "GIF8") {
+    return { mimeType: "image/gif", width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
+  }
+  if (buf.length >= 30 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP") {
+    const chunk = buf.toString("latin1", 12, 16);
+    if (chunk === "VP8X") {
+      return { mimeType: "image/webp", width: 1 + buf.readUIntLE(24, 3), height: 1 + buf.readUIntLE(27, 3) };
+    }
+    if (chunk === "VP8L") {
+      const bits = buf.readUInt32LE(21);
+      return { mimeType: "image/webp", width: 1 + (bits & 0x3fff), height: 1 + ((bits >> 14) & 0x3fff) };
+    }
+    if (chunk === "VP8 ") {
+      return { mimeType: "image/webp", width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+    }
+    return null;
+  }
+  if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    // Walk the JPEG's segments to the frame header, which carries the size.
+    let at = 2;
+    while (at + 9 < buf.length && buf[at] === 0xff) {
+      const marker = buf[at + 1]!;
+      const length = buf.readUInt16BE(at + 2);
+      const frame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+      if (frame) return { mimeType: "image/jpeg", width: buf.readUInt16BE(at + 7), height: buf.readUInt16BE(at + 5) };
+      at += 2 + length;
+    }
+    return null;
+  }
+  return null;
+}
+
+export interface TaskAttachmentImage {
+  name: string;
+  bytes: number;
+  mimeType: string;
+  /** The file, base64-encoded. */
+  data: string;
+}
+
+/** The sentence an image read opens with, before the picture itself. */
+export function attachmentImageHeader(taskKey: string, image: TaskAttachmentImage): string {
+  const kb = Math.max(1, Math.round(image.bytes / 1024));
+  return `\`${image.name}\` (${kb} KB, ${image.mimeType}), attached to ${taskKey}. The image follows.`;
+}
+
+/**
+ * One attachment for a reader, or `null` when this task has no such file:
+ * text as text, a spreadsheet as its sheets in CSV (ruling 533), an image as
+ * the image. Throws nothing for anything else: the caller is told what the
+ * file IS and that this channel does not carry it.
+ */
+export function readTaskAttachment(
   slug: string,
   key: string,
   name: string,
   dataRoot?: string,
-): TaskAttachmentRead | { unreadable: string } | null {
+  offset = 0,
+):
+  | ({ kind: "text" } & TaskAttachmentRead)
+  | ({ kind: "image" } & TaskAttachmentImage)
+  | { unreadable: string }
+  | null {
   const wanted = name.trim();
   if (!wanted) return null;
   let abs: string;
@@ -446,27 +801,70 @@ export function readTaskAttachmentText(
   } catch {
     return null;
   }
-  let st;
-  try {
-    st = statSync(abs);
-  } catch {
-    return null;
-  }
-  if (!st.isFile()) return null;
   const ext = path.extname(wanted).toLowerCase();
-  if (!READABLE_TEXT_EXTENSIONS.has(ext)) {
+  const mimeType = IMAGE_READ_TYPES.get(ext);
+  if (!mimeType && ext !== ".xlsx" && !READABLE_TEXT_EXTENSIONS.has(ext)) {
+    let st;
+    try {
+      // `lstat`: a link at this name is not the file it points to.
+      st = lstatSync(abs);
+    } catch {
+      return null;
+    }
+    if (!st.isFile()) return null;
     return {
       unreadable:
         `\`${wanted}\` is a ${ext || "typeless"} file (${st.size.toLocaleString("en-US")} bytes). ` +
-        `This reads TEXT attachments only (${[...READABLE_TEXT_EXTENSIONS].join(", ")}). ` +
-        `Open it on the task page rather than describing it from its name.`,
+        `This reads text (${[...READABLE_TEXT_EXTENSIONS].join(", ")}), spreadsheets (.xlsx) and images ` +
+        `(${[...IMAGE_READ_TYPES.keys()].join(", ")}). Open it on the task page rather than describing it from its name.`,
     };
   }
-  const raw = readFileSync(abs, "utf8");
+  const read = readAttachmentBytes(
+    abs,
+    mimeType ? IMAGE_READ_MAX_BYTES : ext === ".xlsx" ? XLSX_READ_MAX_BYTES : TEXT_READ_MAX_BYTES,
+  );
+  if (!read) return null;
+  if ("tooLarge" in read) {
+    const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+    const cap = mimeType ? IMAGE_READ_MAX_BYTES : ext === ".xlsx" ? XLSX_READ_MAX_BYTES : TEXT_READ_MAX_BYTES;
+    return {
+      unreadable:
+        `\`${wanted}\` is ${mb(read.tooLarge)} MB; this reads ${mimeType ? "images" : "files like it"} up to ` +
+        `${mimeType ? (cap / 1024 / 1024).toFixed(2) : mb(cap)} MB. Open it on the task page rather than describing it from its name.`,
+    };
+  }
+  if (mimeType) {
+    const bytes = read.bytes;
+    const header = imageHeader(bytes);
+    if (!header || header.mimeType !== mimeType) {
+      return {
+        unreadable: `\`${wanted}\` is named as a ${ext} image, but its bytes are not one. Open it on the task page rather than describing it from its name.`,
+      };
+    }
+    if (header.width > IMAGE_READ_MAX_SIDE || header.height > IMAGE_READ_MAX_SIDE) {
+      return {
+        unreadable:
+          `\`${wanted}\` is ${header.width}×${header.height} pixels; this reads images up to ${IMAGE_READ_MAX_SIDE} on a side. ` +
+          "Open it on the task page rather than describing it from its name.",
+      };
+    }
+    return { kind: "image", name: wanted, bytes: read.bytes.length, mimeType, data: bytes.toString("base64") };
+  }
+  if (ext === ".xlsx") {
+    const text = xlsxToText(read.bytes, XLSX_TEXT_MAX_CHARS);
+    if ("unreadable" in text) {
+      return { unreadable: `\`${wanted}\` ${text.unreadable}` };
+    }
+    if (offset > 0 && offset >= text.text.length) return pastTheEnd(wanted, text.text.length, offset);
+    return { kind: "text", name: wanted, bytes: read.bytes.length, ...textPage(text.text, text.truncated, offset) };
+  }
+  const raw = read.bytes.toString("utf8");
+  if (offset > 0 && offset >= raw.length) return pastTheEnd(wanted, raw.length, offset);
+  return { kind: "text", name: wanted, bytes: read.bytes.length, ...textPage(raw, false, offset) };
+}
+
+function pastTheEnd(name: string, chars: number, offset: number) {
   return {
-    name: wanted,
-    bytes: st.size,
-    truncated: raw.length > ATTACHMENT_READ_CHARS,
-    text: raw.slice(0, ATTACHMENT_READ_CHARS),
+    unreadable: `\`${name}\` reads as ${chars.toLocaleString("en-US")} characters; offset ${offset.toLocaleString("en-US")} is past its end.`,
   };
 }

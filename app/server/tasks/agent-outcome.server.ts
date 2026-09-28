@@ -94,7 +94,9 @@ export const RELAY_FIELD_NOTE =
   "numbers it needs), put it here as {taskKey, text}. Viberr posts each on that task after you " +
   "finish, as your comment headed with this task's key, wakes that task's operator, and records " +
   "the relay on this task. Never write it to an attachment or a report for a person to copy there. " +
-  "Refused: a task in another project, this task, a missing or closed task.";
+  "When that task needs a FILE you saved on this task (an input it works from, a file it is to judge), " +
+  "name it in `files` (ruling 538): it lands on that task's attachments, where its agents read it. " +
+  "Refused: a task in another project, this task, a missing or closed task, a file this task does not hold.";
 
 /**
  * JSON schema for the Codex `outputSchema` transport. MUST satisfy OpenAI's
@@ -121,10 +123,12 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["taskKey", "text"],
+        required: ["taskKey", "text", "files"],
         properties: {
           taskKey: { type: "string" },
           text: { type: "string" },
+          // Ruling 538: this task's attachments the relay carries; null for text alone.
+          files: { type: ["array", "null"], items: { type: "string" } },
         },
       },
     },
@@ -264,7 +268,12 @@ const codexEnvelopeSchema = z.object({
   relay: z
     .array(
       z
-        .object({ taskKey: envelopeProse, text: envelopeProse })
+        .object({
+          taskKey: envelopeProse,
+          text: envelopeProse,
+          // Ruling 538: a garbled list costs the files, never the relay.
+          files: z.array(z.string()).nullable().optional().catch(null),
+        })
         .nullable()
         .catch(null),
     )
@@ -326,7 +335,11 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
   }
   // Ruling 488: every entry the agent wrote; the cap is the poster's.
   if (envelope.relay !== undefined && envelope.relay.length > 0) {
-    outcome.relay = envelope.relay.map((r) => ({ taskKey: r.taskKey.trim(), text: r.text }));
+    outcome.relay = envelope.relay.map((r) =>
+      r.files?.length
+        ? { taskKey: r.taskKey.trim(), text: r.text, files: r.files }
+        : { taskKey: r.taskKey.trim(), text: r.text },
+    );
   }
   // An envelope with NOTHING usable is not an envelope. Evidence alone does not
   // qualify — rows with no report are a citation attached to nothing, and
@@ -380,7 +393,9 @@ const stagedOutcomeSchema = z.object({
     .array(z.object({ label: z.string(), result: z.string(), status: z.enum(EVIDENCE_STATUSES) }))
     .optional(),
   // Ruling 488: a restart between the run and its completion keeps the relay.
-  relay: z.array(z.object({ taskKey: z.string(), text: z.string() })).optional(),
+  relay: z
+    .array(z.object({ taskKey: z.string(), text: z.string(), files: z.array(z.string()).optional() }))
+    .optional(),
 });
 
 const runIdRowSchema = z.object({ id: z.string() });

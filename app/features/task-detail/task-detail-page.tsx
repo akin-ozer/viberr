@@ -195,6 +195,7 @@ export function TaskDetailPage({
   githubCheckedAt = null,
   workRevisionSha = null,
   noChanges = false,
+  filesDeliveredAt = null,
   defaultBranch = "main",
   canDeliver = false,
 }: {
@@ -302,6 +303,8 @@ export function TaskDetailPage({
   workRevisionSha?: string | null;
   /** R17-2: a verified no-change completion (empty branch, no PR). */
   noChanges?: boolean;
+  /** Ruling 550: when the task was delivered as files on it, the delivery's time. */
+  filesDeliveredAt?: string | null;
   /** The merge target named in the accept confirm — the project's default branch. */
   defaultBranch?: string;
   /** R15-2 safety net (b): the viewer may deliver by hand (maintainer+ or owner). */
@@ -1224,6 +1227,7 @@ export function TaskDetailPage({
           baseBehindBy={baseBehindBy}
           mergeCollisions={mergeCollisions}
           noChanges={noChanges}
+          filesDeliveredAt={filesDeliveredAt}
           // F32-11: the open decision this acceptance withdraws, if any.
           // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
           // (the `accept_completion` option, and the `force_accept` one ruling
@@ -1252,7 +1256,7 @@ export function TaskDetailPage({
           // accept path auto-detects it by re-probing the branch. The dialog
           // states that instead of promising a merge. `noChanges` (the flagged
           // shape) still takes precedence when the completion DID claim it.
-          noPullRequest={!task.pr && !noChanges}
+          noPullRequest={!task.pr && !noChanges && !filesDeliveredAt}
           defaultBranch={defaultBranch}
           // R19-5: a force-accept from before the boundary MAY skip the
           // remaining stages and the review gate — the dialog has to name which.

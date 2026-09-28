@@ -60,8 +60,14 @@ import {
   type SpawnAppServer,
   type ThreadResumeConfig,
 } from "./codex-app-server.server";
-import { launchEnv, prepareAgentPath, type AgentLaunch } from "./agent-isolation.server";
+import {
+  launchEnv,
+  prepareAgentPath,
+  shareFileForAgentsToRead,
+  type AgentLaunch,
+} from "./agent-isolation.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
+import { BROWSER_MCP_NAME, BROWSER_TOOL_TIMEOUT_SEC } from "~/server/tasks/browser-deadline.server";
 import { errorMessage, toError } from "~/shared/errors";
 
 /**
@@ -312,6 +318,10 @@ function codexMcpServers(
     if (declaration.data.args.length) stdio.args = declaration.data.args;
     if (runMarker) stdio.env = { [RUN_MARKER_ENV]: runMarker };
     if (disabledTools.length) stdio.disabled_tools = disabledTools;
+    // Ruling 554: the browser's supervisor answers a stuck call at its own
+    // deadline, saying the browser was restarted, so Codex must still be
+    // waiting then; its default gives up first and says only "timed out".
+    if (name === BROWSER_MCP_NAME) stdio.tool_timeout_sec = BROWSER_TOOL_TIMEOUT_SEC;
     translated[name] = stdio;
   }
   return translated;
@@ -771,11 +781,66 @@ function agentOwner(agent: AgentLaunch | undefined): RunHomePerson | undefined {
   };
 }
 
+/** The one argument of the SDK's private `CodexExec.run` this adapter reads
+ *  (dist/index.js). */
+interface CodexExecArgs {
+  outputSchemaFile?: string;
+}
+/** The SDK's private `CodexExec`, as far as this adapter touches it. */
+interface CodexExec {
+  run(args: CodexExecArgs): AsyncGenerator<string>;
+}
+/** A `Codex` whose private `exec` still has the `run` this adapter wraps: the
+ *  field is private in the SDK's types, so it is parsed, not asserted. */
+const codexWithExecSchema = z.object({
+  exec: z.custom<CodexExec>(
+    (value) => value instanceof Object && "run" in value && value.run instanceof Function,
+  ),
+});
+
+/**
+ * Ruling 534: the Codex SDK writes a turn's `outputSchema` into a directory of
+ * its own (`mkdtemp`, 0700, the server's) and passes the CLI its path, but the
+ * CLI runs as the person's agent uid behind the launcher (ruling 460) and so
+ * could not open it: every Codex run given a schema (the operator's decision
+ * plan, a specialist's outcome envelope) failed before its first turn with
+ * "Failed to read output schema file ... Permission denied". Live on the AWS
+ * calculator board, 2026-09-28, the first operator run of every task.
+ *
+ * The SDK offers no hook between writing the file and spawning the CLI, so
+ * this wraps the one method that does both halves' handover, its exec's
+ * `run`, and shares the file for the agent group to read before the spawn.
+ * `exec` is private in the SDK's types; `CODEX_SDK_VERIFIED_VERSION` pins the
+ * SDK this was read from, and the adapter test drives the real class through
+ * it. Called only when a launcher stands in for the CLI.
+ */
+export function shareOutputSchemaWithAgent(
+  codex: CodexSdk,
+  share: (file: string) => void = shareFileForAgentsToRead,
+): void {
+  const parsed = codexWithExecSchema.safeParse(codex);
+  if (!parsed.success) {
+    throw new Error(
+      "The Codex SDK no longer exposes the exec a turn's output schema is shared through; re-verify it against CODEX_SDK_VERIFIED_VERSION.",
+    );
+  }
+  const exec = parsed.data.exec;
+  const run = exec.run.bind(exec);
+  exec.run = (args) => {
+    if (args.outputSchemaFile) share(args.outputSchemaFile);
+    return run(args);
+  };
+}
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
   const mod = await import("@openai/codex-sdk");
-  cachedFactory = (options) => new mod.Codex(options);
+  cachedFactory = (options) => {
+    const codex = new mod.Codex(options);
+    if (options?.codexPathOverride) shareOutputSchemaWithAgent(codex);
+    return codex;
+  };
   return cachedFactory;
 }
 

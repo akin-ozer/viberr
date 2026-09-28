@@ -337,8 +337,9 @@ its goal, the rulings and its attachments, not from the repository. The stage ru
 `agent-reply` instruction (which returns before the stage rule) carry
 `RESULT_DELIVERY_RULE`: the files its delivering agent saves on the task are the delivery,
 so the operator hands delivery to the agent that makes the result (`run_agent` with
-`delivers: true`), directs it to commit nothing, and never calls `deliver_for_review` for
-it, even when something was committed. The shipped doctrine quotes both word for word.
+`delivers: true`, which needs only that the agent can post files on the task, ruling
+535), directs it to commit nothing, and never calls `deliver_for_review` for it, even
+when something was committed. The shipped doctrine quotes both word for word.
 
 **Knowledge the work proved wrong.** The `agent-reply` instruction carries two duties
 about knowledge bases. A reviewer's objection to a defect CLASS the rulings have no
@@ -437,10 +438,10 @@ and returns a structured plan over seventeen verbs (`post_comment`, `open_packet
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
 `set_dependencies`, `set_epic`, `correct_knowledge_doc`, `lease_files`,
-`schedule_task_action`, `cancel_task_schedule`, `relay_to_task`), the schema narrowed to what its policy allows
+`schedule_task_action`, `cancel_task_schedule`, `relay_to_task`, `take_from_task`), the schema narrowed to what its policy allows
 (`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
 in the all-denied fallback) and its packet options carrying every payload the
-Claude tool does (ruling 433). `relay_to_task` takes the target in the plan's `taskKey`
+Claude tool does (ruling 433). `relay_to_task` takes the target in the plan's `taskKey` and the files it carries in `files` (ruling 538)
 field (required and nullable, ruling 488) and the text in `text`, and like `post_comment`
 it still posts after a step of the plan opened a packet. The server executes the plan after the run
 (`runtime.operator.plan_executed` is the idempotency marker boot recovery reads). Once a
@@ -458,12 +459,13 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 |---|---|---|
 | `get_task` | `operatorSnapshot` (§4) | always |
 | `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 282) | always |
-| `read_task_attachment` | one of this task's text attachments (ruling 293) | always |
+| `read_task_attachment` | one of this task's attachments: text as text, an `.xlsx` as its sheets in CSV, an image as the picture (rulings 293, 533), 40,000 characters at a time with `offset` reading on from a truncated read's `nextOffset` (ruling 551) | always |
 | `read_timeline_entry` | one timeline entry in full, by its `occurredAt` stamp (ruling 285) | always |
 | `read_knowledge_doc` | one document of a KB attached to the operator (ruling 283) | always, when it holds a KB |
 | `read_default_branch_file` | anchored default-branch read (§4) | always, when the run has a checkout |
 | `post_comment` | `operatorPostComment` (guardrails applied, §7; narration stored verbatim, ruling 104) | `append-typed-events` |
-| `relay_to_task` | `operatorRelayToTask` → `relayToTask` (ruling 488: posts `text` on ANOTHER task of this project as the operator's comment headed "From <this task> (operator):", audits `task.relayed {from, to}`, wakes that task's operator with the `relayed` trigger and writes "Relayed to <task>: <first line>…" on this task; refuses another project (`denied`), this task, a missing task and a closed one, Done or archived (`noop`)) | `append-typed-events` |
+| `relay_to_task` | `operatorRelayToTask` → `relayToTask` (ruling 488: posts `text` on ANOTHER task of this project as the operator's comment headed "From <this task> (operator):", audits `task.relayed {from, to}`, wakes that task's operator with the `relayed` trigger and writes "Relayed to <task>: <first line>…" on this task; refuses another project (`denied`), this task, a missing task and a closed one, Done or archived (`noop`)); `files` (ruling 538) copies named attachments of this task onto that task's attachments, claimed by the relay comment and named in it, all or none, never over a different file (the next free name instead), `task.relayed` then carrying `files` | `append-typed-events` |
+| `take_from_task` | `operatorTakeFromTask` → `takeFromTask` (ruling 557: copies named attachments of ANOTHER task of this project, open or Done but not archived, onto THIS task, claimed by the operator's comment headed "From <that task> (operator):" (a relay's header, so no run here is credited with them), writes "Taken by <this task>: …" on that task and audits `task.files.taken {from, to, files}`; the relay's file checks, all or none; refuses this task, another project's task, a missing task, an archived source, a closed THIS task) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one). Its `goal` field is described with `DONE_SIGNAL_RULE`, as are `goalDraft` and `newTask.goal` (§6) and, in the Codex plan, the `text` that carries `set_goal`'s goal (ruling 492) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
 | `correct_knowledge_doc` | `operatorCorrectKnowledgeDoc` → `correctKnowledgeDoc` → `mergeKbCorrection` (rulings 378, 483 and 498: writes `text` in place of `replaces`, the exact passage, which must stand once in the settled text, or at the end of the document when `replaces` is omitted, in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the written text must stand once afterwards, each side at most 8 KB; a document that already says it is a `noop`, and so is text a person undid in that document, naming them and their reason; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold, a missing passage with the document's closest lines; writes a `kb_correction` event titled "Rulings corrected" or "Knowledge base corrected" and audit `task.kb_correction.merged` carrying both passages and the evidence, and notifies nobody; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved; a person undoes it from the Controller page) | `append-typed-events` |

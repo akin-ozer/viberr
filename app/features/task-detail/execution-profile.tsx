@@ -78,6 +78,9 @@ export interface DeployedSpecialistView {
    *  older fixtures = unknown, and the control pre-refuses nothing. */
   stages?: string[];
   spanAll?: boolean;
+  /** Ruling 556: the project names it a required reviewer, so a dispatch never
+   *  makes it the deliverer, whatever it may write. Sent only when true. */
+  requiredReviewer?: true;
 }
 
 /**
@@ -764,8 +767,8 @@ function AgentRunControl({
         ? selected.capabilities?.verdict
           ? "Runs as a reviewer (already engaged): its verdict gates acceptance."
           : "Runs as a supporting agent (already engaged)."
-        : selected.capabilities?.delivery === false
-          ? selected.capabilities.verdict
+        : selected.capabilities?.delivery === false || selected.requiredReviewer
+          ? selected.capabilities?.verdict
             ? "Runs as a reviewer: its verdict gates acceptance."
             : "Runs as a supporting agent (no repo write)."
           : deliveringProfileId === null

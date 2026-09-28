@@ -376,8 +376,11 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
       "- Text meant for ANOTHER task of this project (a result a goal says to post there, numbers another task depends on) is posted there with `relay_to_task`",
     );
     expect(prompt).toContain(
-      "Never hand text to a person to copy or post between tasks, and never ask a person to confirm a relay landed.",
+      "Never hand text or a file to a person to copy or post between tasks, and never ask a person to confirm a relay landed.",
     );
+    // Ruling 538: and a file that task needs goes with the text. Canary: drop
+    // the sentence.
+    expect(prompt).toContain("A file that task needs (an input it works from, a file it is to judge) goes with the text in `files` (ruling 538)");
   });
 });
 

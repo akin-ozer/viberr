@@ -1963,6 +1963,28 @@ export async function saveMcpServer(
   return { mcp: row, toast, writeToolsSuggestion };
 }
 
+/**
+ * Ruling 537: an MCP server named the way a person or the controller names
+ * it: by its id or by its registry name, the key every grant uses.
+ * `save_mcp_server` answers with the name, so a probe right after a save
+ * passed the name and was told "No such MCP server." about a server that was
+ * installing. Refuses naming what is registered.
+ */
+export function resolveMcpServerId(db: DatabaseSync, ref: string): string {
+  const wanted = ref.trim();
+  if (getMcpServer(db, wanted)) return wanted;
+  // SAFETY: `id` is `org_mcp_servers`' TEXT primary key (0001_baseline.sql).
+  const byName = db.prepare(`SELECT id FROM org_mcp_servers WHERE name = ?`).get(wanted) as
+    | { id: string }
+    | undefined;
+  if (byName) return byName.id;
+  const names = listMcpServers(db).map((m) => m.name);
+  throw AppError.notFound(
+    `No MCP server has the id or name “${wanted}”. ` +
+      (names.length > 0 ? `Registered: ${names.join(", ")}.` : "None is registered."),
+  );
+}
+
 export async function testMcpServer(
   db: DatabaseSync,
   id: string,

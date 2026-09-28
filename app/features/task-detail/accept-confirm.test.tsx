@@ -275,6 +275,40 @@ describe("F20-6: the no-PR auto-detect arm", () => {
 });
 
 /**
+ * Ruling 550 — a task delivered as the files saved on it. Live on AWSC-2 the
+ * confirm said "No delivered revision recorded." about a research task whose
+ * two files a reviewer had approved, and promised a GitHub re-check that would
+ * close it "with no changes".
+ */
+describe("ruling 550: a task delivered as files", () => {
+  it("names the files as the delivery and promises no merge and no re-check", () => {
+    // CANARY: drop the `filesDeliveredAt` arms and the rows read "No linked
+    // pull request" and "No delivered revision recorded."
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ branch: null })}
+        workRevisionSha={null}
+        noChanges={false}
+        filesDeliveredAt="2026-09-28T08:44:13.751Z"
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const text =
+      container.ownerDocument.querySelector('dialog[data-screen-label="Accept completion dialog"]')
+        ?.textContent ?? "";
+    expect(text).toContain("the delivery is the files saved on this task, so no pull request merges");
+    expect(text).toContain("The files delivered on this task at 2026-09-28 08:44 UTC.");
+    expect(text).not.toContain("completed with no changes");
+    expect(text).not.toContain("No delivered revision recorded.");
+  });
+});
+
+/**
  * F19-23 — the drift note's noun was switched with its count and the verb was
  * not, so a one-commit drift read "1 commit added since review; THEY MERGE
  * unreviewed". The server-side sentence was fixed; this dialog's own copy (and

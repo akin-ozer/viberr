@@ -402,7 +402,9 @@ describe("ruling 548: the Blocked by editor finds tasks and takes entries out by
     // no wait at all.
     const view = renderCapturing({ blockedBy: entries }, true, CANDIDATES);
     const { dialog, field } = await openEditor(view);
-    expect(document.activeElement).toBe(field);
+    // The picker takes the focus in an effect as it mounts, which a loaded
+    // suite runs after `findByRole` has returned.
+    await waitFor(() => expect(document.activeElement).toBe(field));
     // Archived JC-6 is refused on every Save while it is listed (ruling 355).
     expect(within(dialog).getByText("JC-6 can never complete: take it out to save.")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove JC-6" }));

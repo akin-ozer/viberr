@@ -1539,8 +1539,10 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // so it joins the fallback and it is 11. Ruling 503's `set_epic` puts this
     // task in an epic, in-Viberr like `set_dependencies`, so it is 12.
     // Ruling 521's `write_completion_packet` writes the task's own file, so
-    // it is 13.
-    expect(tools).toHaveLength(13);
+    // it is 13. Ruling 557's `take_from_task` is the relay's other direction,
+    // in-Viberr like it, so it is 14.
+    expect(tools).toHaveLength(14);
+    expect(tools).toContain("take_from_task");
     expect(tools).toContain("set_epic");
     expect(tools).toContain("write_completion_packet");
     expect(tools).toContain("relay_to_task");
@@ -4338,6 +4340,55 @@ describe("pending trigger queue", () => {
     const vib1 = readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!.parsed
       .timeline;
     expect(vib1.some((e) => e.text === "Relayed to VIB-2: Deployed cron CPU: 5 ms and 6 ms of 10.")).toBe(true);
+  });
+
+  it("ruling 557: a Codex plan's take_from_task puts the other task's files on this one, with its line", async () => {
+    // CANARY: drop the executor's `take_from_task` case (the step is skipped
+    // and VIB-1 never gets its input), or its `text` (the default line lands).
+    writeTask(store3.dataRoot, store3.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done", ownerUserId: store3.users.arda.id }),
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    writeTaskAttachment(store3.slug, "VIB-2", "sample-01-input.csv", new TextEncoder().encode("vm\n"), store3.dataRoot);
+    await drive({ trigger: "manual" });
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "take_from_task",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "The benchmark input this estimate works from.",
+            reason: null,
+            packetOptions: null,
+            kbSource: null,
+            repoSource: null,
+            blockedBy: null,
+            paths: null,
+            completeness: null,
+            dueAt: null,
+            delayMinutes: null,
+            scheduleId: null,
+            taskKey: "VIB-2",
+            files: ["sample-01-input.csv"],
+          },
+        ],
+      }),
+      "finished",
+    );
+    const claim = () =>
+      readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!.parsed.timeline.find(
+        (e) => (e.attachments ?? []).includes("sample-01-input.csv"),
+      );
+    await eventually(() => {
+      expect(claim()).toBeDefined();
+    });
+    expect(claim()).toMatchObject({ type: "comment", actor: { kind: "operator" } });
+    expect(claim()!.text).toMatch(/^\*\*From VIB-2 \(operator\):\*\*\n\nThe benchmark input this estimate works from\./);
   });
 
   it("B-OP2: a queued @operator question survives a later machine trigger", async () => {

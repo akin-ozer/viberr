@@ -498,6 +498,10 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           z.strictObject({
             taskKey: z.string().describe("The other task's key in this project, e.g. WEB-8."),
             text: z.string().describe("What to post there (markdown allowed), whole: it is what that task reads."),
+            files: z
+              .array(z.string())
+              .optional()
+              .describe("Ruling 538: names of this task's attachments to put on that task with the text, exactly as saved here."),
           }),
         )
         .max(RELAY_MAX_ENTRIES)
@@ -553,7 +557,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       if (args.summary) outcome.summary = prose(args.summary);
       if (evidence) outcome.evidence = evidence;
       if (args.relay?.length) {
-        outcome.relay = args.relay.map((r) => ({ taskKey: r.taskKey.trim(), text: prose(r.text) }));
+        outcome.relay = args.relay.map((r) =>
+          r.files?.length
+            ? { taskKey: r.taskKey.trim(), text: prose(r.text), files: r.files }
+            : { taskKey: r.taskKey.trim(), text: prose(r.text) },
+        );
       }
       const result = stageOutcome(db, outcomeKey, outcome);
       if (!result.staged) {

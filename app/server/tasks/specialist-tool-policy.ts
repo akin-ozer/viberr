@@ -285,6 +285,10 @@ export interface DeliveryPermissions {
   canBranch: boolean;
   canCommitPush: boolean;
   canOpenPr: boolean;
+  /** The headline repo-write grant is not withheld. Without it a deliverer's
+   *  delivery can only be the files it saves on the task (ruling 535); with it
+   *  and commit withheld, its workspace changes are published by a person. */
+  repoWrite: boolean;
 }
 
 /**
@@ -307,6 +311,7 @@ export function resolveDeliveryPermissions(
   // enforcement must tell the same story (XS-4).
   const repoWriteWithheld = isWithheld(modeById, "execute-code-or-write-repo");
   return {
+    repoWrite: !repoWriteWithheld,
     canBranch: !repoWriteWithheld && !isWithheld(modeById, "create-task-branch"),
     canCommitPush:
       !repoWriteWithheld && !isWithheld(modeById, "commit-push-branch"),

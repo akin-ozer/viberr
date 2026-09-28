@@ -191,6 +191,7 @@ export function AcceptConfirm({
   workRevisionSha,
   noChanges = false,
   noPullRequest = false,
+  filesDeliveredAt = null,
   defaultBranch,
   atBoundary = true,
   ceremony,
@@ -269,6 +270,9 @@ export function AcceptConfirm({
    *  an ordinary PR-less accept still reads "closes without a merge" — the loader
    *  decides which shape this is. */
   noPullRequest?: boolean;
+  /** Ruling 550: the task's delivery is the files saved on it, delivered at
+   *  this instant. Nothing merges and nothing is re-checked on GitHub. */
+  filesDeliveredAt?: string | null;
   /** The merge target — the project's default branch. */
   defaultBranch: string;
   /** `acceptance.atBoundary` — the task stands at the stage a completion is
@@ -485,6 +489,11 @@ export function AcceptConfirm({
                     </>
                   )}
                 </>
+              ) : filesDeliveredAt ? (
+                <>
+                  Nothing: the delivery is the files saved on this task, so no
+                  pull request merges.
+                </>
               ) : noPullRequest && !force ? (
                 // F20-6 (R20-2): no PR, and the completion never claimed "no
                 // changes" — the server auto-detects it by re-probing the branch
@@ -575,6 +584,9 @@ export function AcceptConfirm({
             <span>
               {workRevisionSha ? (
                 <span className="mono">{workRevisionSha.slice(0, 12)}</span>
+              ) : filesDeliveredAt ? (
+                // The stored ISO instant, as `formatAbsoluteUTC` writes it.
+                `The files delivered on this task at ${filesDeliveredAt.slice(0, 16).replace("T", " ")} UTC.`
               ) : (
                 "No delivered revision recorded."
               )}

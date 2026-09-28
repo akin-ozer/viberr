@@ -19,6 +19,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   acceptanceNoChangeCheck,
+  assertVerifiedNoChangeStillApplies,
   noChangeApplies,
   noChangeCompletionEvent,
   probeNothingToDeliver,
@@ -237,6 +238,25 @@ describe("acceptanceNoChangeCheck — the accept-time gate", () => {
     expect(check.applies).toBe(true);
     expect(check.verification).toBeNull();
     expect(check.refusal).toContain("2 commit");
+  });
+
+  it("ruling 550: a files delivery that lands during the probe stops the no-change close", () => {
+    // The probe found no branch for a task with nothing delivered; then its
+    // deliverer's files were stamped while the acceptance awaited GitHub. The
+    // re-check in the lock must see what the check before the probe would
+    // have. CANARY: re-check with `noChangeCandidate` alone and this closes a
+    // delivered result as "completed with no changes".
+    const delivered: TaskFrontmatter = {
+      ...baseTaskFrontmatter("VIB-1", { pr: null }),
+      deliveredAt: "2026-09-28T08:44:13.751Z",
+    };
+    expect(() =>
+      assertVerifiedNoChangeStillApplies(
+        delivered,
+        { applies: true, refusal: null, verification: null, branch: null, autoDetected: true },
+        "VIB-1",
+      ),
+    ).toThrow(/changed while the acceptance was being verified/);
   });
 
   it("a flagged task WITH a PR is an ordinary merge acceptance", () => {

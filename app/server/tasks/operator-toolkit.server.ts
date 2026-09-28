@@ -2,8 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
+  attachmentImageHeader,
   listTaskAttachments,
-  readTaskAttachmentText,
+  readTaskAttachment,
 } from "~/server/files/task-attachments.server";
 import { z } from "zod";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
-import { strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
+import { imageResult, strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   deliverGate,
@@ -34,6 +35,7 @@ import {
   operatorScheduleRun,
   operatorPostComment,
   operatorRelayToTask,
+  operatorTakeFromTask,
   operatorSetDependencies,
   operatorSetEpic,
   operatorSetGoal,
@@ -103,6 +105,13 @@ const SCHEDULE_TOOL_DESCRIPTION =
   "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn. The entry is the record, get_task lists it under `schedules`, and Viberr does not treat the task as stranded while it is pending. " +
   "It is the run you could start now, with a date on it: an agent you could not dispatch now (not deployed, held by a dependency, not eligible at the task's stage) cannot be scheduled either. It fires on the profile deployed when it fires, and the reply names the schedule id.";
 
+/** Ruling 557: what `take_from_task` is for, and when it is the move. */
+const TAKE_TOOL_DESCRIPTION =
+  "Put named attachments of ANOTHER task in this project onto THIS task (ruling 557): the input this task works from, which the task it waited on made. " +
+  "The source may be Done. The files land on this task's attachments, where its agents read them, claimed by your comment headed \"From <that task> (operator):\", so no run here is credited with them, and that task's timeline gets one line, \"Taken by <this task>: ...\". " +
+  "Use it instead of asking a person to attach or carry a file between tasks. Name only what this task should work from: a file another task keeps from this one (an answer key, a private note) stays where it is. " +
+  "Refused, writing nothing: this task, a task in another project or not in this one, an archived task, a file that task does not hold, a kind Viberr does not store, more than 10 files. A name this task already holds with other bytes lands under the next free name, never an overwrite.";
+
 /**
  * Ruling 488 (F40-67): the operator's `relay_to_task`. The doctrine it
  * carries: text meant for another task is relayed, never handed to a person
@@ -113,7 +122,8 @@ const RELAY_TOOL_DESCRIPTION =
   "It lands on that task's timeline as your comment, headed \"From <this task> (operator):\", its operator is woken with it the way an @operator comment wakes it, and this task's timeline gets one line, \"Relayed to <task>: <first line>\". " +
   "Use it instead of handing text to a person: never ask anyone to copy, paste or post text between tasks, and never ask a person to confirm a relay landed, since the line on this task is the record. " +
   "An agent's report whose `relay` entries were posted already says so on this timeline (\"Relayed to …\"), so do not relay the same text again. " +
-  "Refused: a task in another project, this task itself, a task that does not exist (check with read_board), and a closed task (Done or archived), whose operator starts no run.";
+  "Refused: a task in another project, this task itself, a task that does not exist (check with read_board), and a closed task (Done or archived), whose operator starts no run. " +
+  "`files` carries attachments of THIS task with the text (ruling 538): an input the other task works from, a file it is to judge. They land on its attachments, where its agents read them, and the relay comment shows them; a name the other task already holds with different contents lands under the next free name, never over it. Never ask a person to download a file here and attach it there.";
 
 /** What the run mounts, keyed by server name: the in-process `viberr`
  *  governance server, plus whichever org MCP grants resolved. */
@@ -388,15 +398,21 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_task_attachment",
-      "Read ONE of this task's attachments as text. Attachments are where the agents you dispatch put their PROOF - a mutation run with both outputs, before/after captures, a cold-stack log - and a report names them without carrying their contents. Call it before you tell a person something was proved, before you recommend acceptance on the strength of evidence you have not read, and before you repeat a report's claim about what its own attachment shows. Text files only (.txt .log .md .json .yml .yaml .csv .diff .patch); anything else is named and refused rather than guessed at. Read-only.",
+      "Read ONE of this task's attachments. Attachments are where the agents you dispatch put their PROOF - a mutation run with both outputs, before/after captures, a cold-stack log - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A report names them without carrying their contents. Call it before you scope a task from what a person attached, before you tell a person something was proved, before you recommend acceptance on the strength of evidence you have not read, and before you repeat a report's claim about what its own attachment shows. Text files (.txt .log .md .json .yml .yaml .csv .diff .patch) come back as text, a spreadsheet (.xlsx) as its sheets in CSV, and an image (.png .jpg .jpeg .webp .gif) as the picture itself; anything else is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). Read-only.",
       {
         name: z
           .string()
           .describe("The attachment's file name, exactly as the timeline lists it."),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
       },
       // eslint-disable-next-line @typescript-eslint/require-await
-      async (args: { name: string }) => {
-        const read = readTaskAttachmentText(projectSlug, taskKey, args.name, ctx.dataRoot);
+      async (args: { name: string; offset?: number }) => {
+        const read = readTaskAttachment(projectSlug, taskKey, args.name, ctx.dataRoot, args.offset);
         if (!read) {
           const have = listTaskAttachments(projectSlug, taskKey, ctx.dataRoot).map(
             (a) => a.name,
@@ -409,7 +425,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           );
         }
         if ("unreadable" in read) return textResult(`[noop] ${read.unreadable}`);
-        return textResult(JSON.stringify(read, null, 1));
+        if (read.kind === "image") return imageResult(attachmentImageHeader(taskKey, read), read);
+        const { kind: _text, ...body } = read;
+        return textResult(JSON.stringify(body, null, 1));
       },
     ),
     "read_task_attachment",
@@ -569,18 +587,52 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           text: z
             .string()
             .describe("What to post there (markdown allowed), whole: it is what that task reads."),
+          files: z
+            .array(z.string())
+            .optional()
+            .describe("Names of this task's attachments to put on the other task with the text, exactly as this task lists them."),
         },
-        async (args: { taskKey: string; text: string }) =>
+        async (args: { taskKey: string; text: string; files?: string[] }) =>
           resultText(
             await operatorRelayToTask(
               db,
               ctx,
-              { ...base, toTaskKey: args.taskKey, text: prose(args.text) },
+              { ...base, toTaskKey: args.taskKey, text: prose(args.text), files: args.files ?? [] },
               authority,
             ),
           ),
       ),
       "relay_to_task",
+    );
+    // Ruling 557: the relay's other direction, asked for by the task that
+    // needs the files. Same grant.
+    add(
+      tool(
+        "take_from_task",
+        TAKE_TOOL_DESCRIPTION,
+        {
+          taskKey: z
+            .string()
+            .describe("The task that holds the files, in this project, e.g. AWSC-3. It may be Done."),
+          files: z
+            .array(z.string())
+            .describe("Names of that task's attachments to put on this task, exactly as it lists them."),
+          text: z
+            .string()
+            .optional()
+            .describe("One line on what they are for, on the comment that claims them."),
+        },
+        async (args: { taskKey: string; files: string[]; text?: string }) => {
+          const input: Parameters<typeof operatorTakeFromTask>[2] = {
+            ...base,
+            fromTaskKey: args.taskKey,
+            files: args.files,
+          };
+          if (args.text) input.text = prose(args.text);
+          return resultText(await operatorTakeFromTask(db, ctx, input, authority));
+        },
+      ),
+      "take_from_task",
     );
     add(
       tool(
@@ -965,7 +1017,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "run_agent",
-        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer). A hand-off is a choice about WHO should build, never a way around a stage: the engaged deliverer runs at EVERY stage (ruling 133), so rework, conflict resolution and follow-ups go back to it wherever the board shows the task; never hand delivery to another profile to get around a stage. Whether this RUNS the agent or files a recommendation card is decided by your `dispatch-agents` grant, not by autonomy: `direct` runs it (the seeded default, and what supervised autonomy therefore does too), `recommend` files ONE card — which full autonomy then promotes to a direct run. Read the mode off `operatorPolicy` before you narrate what you did (ruling 207(c)).",
+        "Select a deployed agent and put it to work on the task — YOU choose which agent fits what the CURRENT stage needs, weighing where the task just came from (a task back from Review is rework for the same builder; a task newly in Review wants a verdict-capable profile). Pick by each profile's `desc` and `capabilities` from get_task, never by name. Engages the profile if needed: it becomes the delivering agent when the task has none and it holds repo-write, otherwise a supporting agent (its own read-only checkout; a verdict-capable one gates acceptance). Pass a concrete `prompt` when handing off work — it is posted as your comment and becomes the run's directive; omit it only to re-run an agent against the task as it stands. `delivers: true` explicitly hands delivery to this profile (reassigning the current deliverer); on a task whose deliverable is a result, it hands delivery to the agent that makes it even without repo-write, when it can post files (`postsFiles`), and its saved files are then the delivery (ruling 535). A hand-off is a choice about WHO should build, never a way around a stage: the engaged deliverer runs at EVERY stage (ruling 133), so rework, conflict resolution and follow-ups go back to it wherever the board shows the task; never hand delivery to another profile to get around a stage. Whether this RUNS the agent or files a recommendation card is decided by your `dispatch-agents` grant, not by autonomy: `direct` runs it (the seeded default, and what supervised autonomy therefore does too), `recommend` files ONE card — which full autonomy then promotes to a direct run. Read the mode off `operatorPolicy` before you narrate what you did (ruling 207(c)).",
         {
           profileId: z
             .string()

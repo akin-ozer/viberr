@@ -361,6 +361,30 @@ describe("relay is a BOTH-backend channel (ruling 488)", () => {
     ]);
   });
 
+  it("ruling 538: an entry's files ride with it, and a garbled list costs the files, never the relay", () => {
+    // CANARY: leave `files` out of the envelope's relay items (the strict
+    // schema then refuses it) or out of the parser's copy.
+    expect(AGENT_OUTCOME_JSON_SCHEMA.properties.relay.items.required).toContain("files");
+    const o = parseAgentOutcomeJson(
+      JSON.stringify({
+        summary: "Designed four benchmark inventories.",
+        verdict: null,
+        question: null,
+        evidence: null,
+        relay: [
+          { taskKey: "AWSC-4", text: "Your input.", files: ["sample-01-input.xlsx"] },
+          { taskKey: "AWSC-5", text: "Your input.", files: "sample-02-input.csv" },
+          { taskKey: "AWSC-6", text: "Text alone.", files: null },
+        ],
+      }),
+    );
+    expect(o?.relay).toEqual([
+      { taskKey: "AWSC-4", text: "Your input.", files: ["sample-01-input.xlsx"] },
+      { taskKey: "AWSC-5", text: "Your input." },
+      { taskKey: "AWSC-6", text: "Text alone." },
+    ]);
+  });
+
   it("a staged relay survives a restart", () => {
     // CANARY: drop `relay` from the staged row's schema (it parses away).
     const db = ctx.makeDb();

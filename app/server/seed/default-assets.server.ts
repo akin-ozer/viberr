@@ -311,6 +311,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // option for a read task that waits on this one. Live on WEB-16 the
     // operator's own option drafted a goal done only "after the merge".
     "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8",
+    // Ruling 557 (AWSC-4 to AWSC-7, 2026-09-28): before the doctrine named
+    // `take_from_task`, the way a task takes a file another task made. Live,
+    // four benchmark tasks asked the owner to attach their inputs by hand.
+    "e3929b89b637f3318a6178dfe06ad0f8f7570a60a5d5f9096a3b1e9eee22b4ab",
     // Ruling 488 (pass 40, F40-67): before the doctrine said text meant for
     // another task is posted there with `relay_to_task` (an agent's with its
     // `relay` entries), and never handed to a person to copy over or confirm.
@@ -418,6 +422,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 557 (AWSC-4 to AWSC-7, 2026-09-28): before the Tools list named
+    // `take_from_task`.
+    "2292c6376abda42e210cc73af4f8cf8b9ecbc12e32272c24b79e4af34278710a",
     // Ruling 503 (owner, 2026-09-26): before the `goalChain` bullet became the
     // task's `epic` and the Tools list named `set_epic`.
     "c267649f85bac274e0be3299f01ad59f0758d9ff43285054af8a7f630a3cc2f6",

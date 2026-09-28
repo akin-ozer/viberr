@@ -7,8 +7,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
+  attachmentImageHeader,
   listTaskAttachments,
-  readTaskAttachmentText,
+  readTaskAttachment,
 } from "~/server/files/task-attachments.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel } from "~/shared/text/plural";
@@ -54,7 +55,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
-import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
+import { imageResult, strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { tasksReleasedBy } from "~/server/projections/dependencies.server";
 import {
   defaultBranchPageNote,
@@ -95,6 +96,7 @@ import {
   saveKnowledgeBase,
   saveMcpServer,
   saveSkill,
+  resolveMcpServerId,
   testMcpServer,
 } from "~/server/org/resources.server";
 import {
@@ -121,6 +123,7 @@ import {
   type CreateProjectInput,
   type CreateRepositoryRequest,
   type CustomProjectBlueprint,
+  type OperatorOverrides,
   type RosterEntry,
 } from "~/features/home/project-create.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
@@ -128,7 +131,6 @@ import {
   deleteAgentProfile,
   deployAgentProfileFromLibrary,
   updateAgentProfile,
-  type DeployOverrides,
   type SubmittedProfileForm,
   deploymentFingerprint,
 } from "~/features/agents/agent-profile-actions.server";
@@ -1335,10 +1337,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     tool(
       "test_mcp_server",
       "Probe one org MCP connection now and report its health in the command's own words; a server signed in with OAuth also names what its sign-in was granted (\"read-only · 194 scopes\", ruling 486). Org admins only.",
-      { id: z.string().describe("The server id (from list_mcp_servers).") },
+      { id: z.string().describe("The server's id or its name (from list_mcp_servers).") },
       runWith(async (args: { id: string }) => {
         requireOrgAdmin("test MCP connections");
-        const result = await testMcpServer(db, args.id);
+        const result = await testMcpServer(db, resolveMcpServerId(db, args.id));
         return `[done] ${result.toast}`;
       }),
     ),
@@ -1797,6 +1799,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ),
         operator: z
           .strictObject({
+            backend: z
+              .enum(["claude", "codex"])
+              .optional()
+              .describe("The backend the operator runs on; omit for its own (Claude). Its model and effort are checked against this backend."),
             model: z.string().optional(),
             effort: z
               .string()
@@ -1804,7 +1810,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               .describe(`Effort tier (${EFFORT_TIERS_SENTENCE}).`),
           })
           .optional()
-          .describe("The operator's own model and effort, checked the same way; omit to keep its defaults."),
+          .describe("The operator's own backend, model and effort, checked the same way; omit to keep its defaults."),
       },
       runWith(
         async (args: {
@@ -1819,7 +1825,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           boundaries?: { from: string; to: string; boundary: "auto" | "approval" | "human" }[];
           members?: { email: string; role: (typeof PROJECT_ROLES)[number] }[];
           agents?: RosterEntry[];
-          operator?: DeployOverrides;
+          operator?: OperatorOverrides;
         }) => {
           const input: CreateProjectInput = {
             name: args.name,
@@ -2191,19 +2197,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_task_attachment",
-      "Read ONE of a task's attachments as text. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and a timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. Text files only (.txt .log .md .json .yml .yaml .csv .diff .patch); anything else is named and refused rather than guessed at. Read-only, membership gated.",
+      "Read ONE of a task's attachments. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. Text files (.txt .log .md .json .yml .yaml .csv .diff .patch) come back as text, a spreadsheet (.xlsx) as its sheets in CSV, and an image (.png .jpg .jpeg .webp .gif) as the picture itself; anything else is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). Read-only, membership gated.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         name: z
           .string()
           .describe("The attachment's file name, exactly as the timeline lists it."),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
       },
-      runWith((args: { projectSlug?: string; taskKey?: string; name: string }) => {
+      runWith((args: { projectSlug?: string; taskKey?: string; name: string; offset?: number }) => {
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "read this task");
-        const read = readTaskAttachmentText(slug, key, args.name, dataRoot);
+        const read = readTaskAttachment(slug, key, args.name, dataRoot, args.offset);
         if (!read) {
           const have = listTaskAttachments(slug, key, dataRoot).map((a) => a.name);
           // Ruling 246's shape: say what this reader IS and what it holds,
@@ -2216,7 +2228,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           );
         }
         if ("unreadable" in read) return `[noop] ${read.unreadable}`;
-        return json(read);
+        if (read.kind === "image") return imageResult(attachmentImageHeader(key, read), read);
+        const { kind: _text, ...body } = read;
+        return json(body);
       }),
     ),
     "read_task_attachment",
