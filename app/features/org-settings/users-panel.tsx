@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { countLabel } from "~/shared/text/plural";
@@ -64,10 +65,12 @@ function InviteModal({
   onClose,
   onSetupNotice,
   providers,
+  initialRole,
 }: {
   onClose: () => void;
   onSetupNotice: (notice: SetupNotice) => void;
   providers: { github: boolean; google: boolean };
+  initialRole: "admin" | "member";
 }) {
   // F18-3: default to a method this deployment can actually grant. A whitelisted
   // GitHub/Google account can NEVER sign in if that OAuth provider is unset, so
@@ -83,7 +86,7 @@ function InviteModal({
   const [handle, setHandle] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"admin" | "member">("member");
+  const [role, setRole] = useState<"admin" | "member">(initialRole);
   const [err, setErr] = useState<string | null>(null);
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
@@ -631,7 +634,12 @@ export function UsersPanel({
     | null
   >(null);
   const [disabling, setDisabling] = useState<OrgUserView | null>(null);
-  const [inviting, setInviting] = useState(false);
+  // Ruling 532: Home's setup checklist lands here with `?add=admin`, the
+  // person making an account of their own: the dialog opens with Admin chosen.
+  const [searchParams] = useSearchParams();
+  const [inviting, setInviting] = useState<"admin" | "member" | null>(
+    searchParams.get("add") === "admin" ? "admin" : null,
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<SetupNotice | null>(null);
   const push = useToast();
@@ -654,7 +662,7 @@ export function UsersPanel({
         <Icon name="user" />
         <h2>Users &amp; access</h2>
         <span className="right">
-          <button type="button" className="btn sm" onClick={() => setInviting(true)}>
+          <button type="button" className="btn sm" onClick={() => setInviting("member")}>
             <Icon name="plus" />
             Allow access
           </button>
@@ -831,9 +839,10 @@ export function UsersPanel({
       </div>
       {inviting && (
         <InviteModal
-          onClose={() => setInviting(false)}
+          onClose={() => setInviting(null)}
           onSetupNotice={setSetupNotice}
           providers={providers}
+          initialRole={inviting}
         />
       )}
       {editing && (

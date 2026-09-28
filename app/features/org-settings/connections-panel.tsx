@@ -283,9 +283,12 @@ export function ConnectionsPanel({
   // Ruling 480 (F40-45): a project's credential card sends an instance admin
   // here with `?update=<connection id>`, since Update token is the one place a
   // token is actually replaced, and the link lands on that connection's modal.
+  // Ruling 532: Home's setup checklist sends one with `?add`, which lands on
+  // the new connection's.
   const [searchParams] = useSearchParams();
   const [modal, setModal] = useState<{ item: ConnectionRecord | null } | null>(
     () => {
+      if (searchParams.has("add")) return { item: null };
       const asked = searchParams.get("update");
       const item = asked ? connections.find((c) => c.id === asked) : undefined;
       return item ? { item } : null;

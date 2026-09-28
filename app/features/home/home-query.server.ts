@@ -6,8 +6,14 @@ import {
 import { listGlobalAgentProfiles } from "~/server/org/gagents.server";
 import { readRepoHealthMany } from "~/server/github/repo-health.server";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
+import { bootstrapAdminOf } from "~/server/auth/seed-admin.server";
 import { listUsers } from "~/server/auth/user-store.server";
-import { listConnections } from "~/server/org/connections.server";
+import {
+  listConnections,
+  type ConnectionRecord,
+} from "~/server/org/connections.server";
+import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   listKnowledgeBases,
   listMcpServers,
@@ -358,4 +364,87 @@ export function getHomeOrgSummary(
     mcpServers: listMcpServers(db).length,
     skills: listSkills(db, resCtx).length,
   };
+}
+
+/**
+ * Ruling 532: one step of Home's setup checklist, with the one fact its row
+ * shows. `todo` is open, `done` closed. GitHub is `failed` when every
+ * connection's token failed its last check, and the row sends an admin to that
+ * connection's Update token. Claude or Codex is `stale` when the viewer's own
+ * account stopped working (a wiped runtime volume), and the row asks them to
+ * sign in again. The first project is `blocked` while no connection exists,
+ * because a project takes its repository from one.
+ */
+export type HomeSetupStep =
+  | { id: "github"; state: "todo" }
+  | { id: "github"; state: "done"; owner: string; more: number }
+  | { id: "github"; state: "failed"; owner: string; connectionId: string }
+  | { id: "account"; state: "todo" | "done" }
+  | { id: "agents"; state: "todo" }
+  | { id: "agents"; state: "done"; backends: RealBackend[] }
+  | { id: "agents"; state: "stale"; backend: RealBackend }
+  | { id: "project"; state: "todo" | "blocked" | "done" };
+
+const SETUP_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
+
+/**
+ * Ruling 532: what `viewer` still has to do before Viberr can work for them,
+ * in the order Home's checklist lists it. An org admin gets the instance's
+ * steps (a GitHub connection, an account other than the bootstrap admin), and
+ * everyone gets the two that are their own: a Claude or Codex account, which
+ * the runs on their tasks and their controller turns bill (ruling 127), and a
+ * first project among those they can see (`projects`). Null once every step is
+ * done, which is when the checklist leaves Home.
+ */
+export function getHomeSetup(
+  db: DatabaseSync,
+  viewer: { id: string; role: "admin" | "member" },
+  projects: number,
+): HomeSetupStep[] | null {
+  const connections = listConnections(db);
+  const steps: HomeSetupStep[] =
+    viewer.role === "admin"
+      ? [githubStep(connections), accountStep(db)]
+      : [];
+  steps.push(agentsStep(db, viewer.id), {
+    id: "project",
+    state: projects > 0 ? "done" : connections.length > 0 ? "todo" : "blocked",
+  });
+  return steps.every((step) => step.state === "done") ? null : steps;
+}
+
+function githubStep(connections: readonly ConnectionRecord[]): HomeSetupStep {
+  // A token GitHub refused at its last check pushes nothing. One no check has
+  // read yet was never refused, and the add form validates before it saves.
+  const usable = connections.filter((c) => c.validationState !== "failed");
+  const named = (list: readonly ConnectionRecord[]) =>
+    list.find((c) => c.def) ?? list[0];
+  const live = named(usable);
+  if (live) {
+    return { id: "github", state: "done", owner: live.owner, more: usable.length - 1 };
+  }
+  const failed = named(connections);
+  return failed
+    ? { id: "github", state: "failed", owner: failed.owner, connectionId: failed.id }
+    : { id: "github", state: "todo" };
+}
+
+function accountStep(db: DatabaseSync): HomeSetupStep {
+  // Done once anyone but the bootstrap admin can sign in: the person setting
+  // up made an account of their own, or someone was allowed in.
+  const users = listUsers(db);
+  const bootstrap = bootstrapAdminOf(users);
+  const someoneElse = users.some((u) => !u.disabled && u.id !== bootstrap?.id);
+  return { id: "account", state: someoneElse ? "done" : "todo" };
+}
+
+function agentsStep(db: DatabaseSync, userId: string): HomeSetupStep {
+  const health = SETUP_BACKENDS.map((backend) => userBackendHealth(db, userId, backend));
+  const working = health.filter((h) => h.available).map((h) => h.backend);
+  if (working.length > 0) return { id: "agents", state: "done", backends: working };
+  // Connected but unable to bill a run: the account in use lost its sign-in.
+  const stale = health.find((h) => h.accountId !== null);
+  return stale
+    ? { id: "agents", state: "stale", backend: stale.backend }
+    : { id: "agents", state: "todo" };
 }

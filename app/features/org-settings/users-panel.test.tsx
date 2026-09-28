@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import { Icon } from "~/ui/icon";
@@ -40,11 +40,14 @@ function renderUsers({
   domains = DOMAINS,
   providers = { github: false, google: false },
   action = async () => ({ ok: true, toast: "stub done" }),
+  url = "/org/settings",
 }: {
   users?: OrgUserView[];
   domains?: DomainRecord[];
   providers?: { github: boolean; google: boolean };
   action?: StubRoute["action"];
+  /** Where the page opens (a link's query string). */
+  url?: string;
 } = {}) {
   const Stub = createRoutesStub([
     {
@@ -57,8 +60,18 @@ function renderUsers({
       action,
     },
   ]);
-  return render(<Stub initialEntries={["/org/settings"]} />);
+  return render(<Stub initialEntries={[url]} />);
 }
+
+// Ruling 532: Home's setup checklist sends the default admin here to make an
+// account of their own, which an instance needs as an admin. Canary: open the
+// dialog with Member chosen, or not at all.
+it("ruling 532: ?add=admin opens Allow access with Admin chosen", async () => {
+  const { findByRole } = renderUsers({ url: "/org/settings?tab=users&add=admin" });
+  const dialog = within(await findByRole("dialog", { name: "Allow access" }));
+  const role = within(dialog.getByRole("group", { name: "Instance role" }));
+  expect(role.getByRole("button", { name: "Admin" }).getAttribute("aria-pressed")).toBe("true");
+});
 
 describe("F18-3: the Allow-access modal keys its method off configured providers", () => {
   const openModal = (container: HTMLElement, getByText: (t: string) => HTMLElement) => {

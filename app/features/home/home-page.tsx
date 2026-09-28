@@ -10,9 +10,12 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { useToast } from "~/ui/toast";
 import { CommandPalette } from "~/features/shell/command-palette";
 import { useCommandPaletteShortcut } from "~/features/shell/use-command-palette";
-import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
+import type {
+  HomeOrgSummary,
+  HomeProjectCard,
+  HomeSetupStep,
+} from "./home-query.server";
 import {
-  EmptyHero,
   HomeHero,
   HomeTopBar,
   ProjectSections,
@@ -21,6 +24,7 @@ import {
   StoreStrip,
 } from "./home-sections";
 import { NewProjectModal } from "./new-project-modal";
+import { SetupChecklist } from "./setup-checklist";
 
 /**
  * Multi-project home. Uses loader data,
@@ -38,6 +42,8 @@ export interface HomePageData {
   user: SessionUser;
   greet: string;
   projects: HomeProjectCard[];
+  /** Ruling 532: the setup checklist's steps; null once all are done. */
+  setup: HomeSetupStep[] | null;
   prefs: HomePrefs;
   org: HomeOrgSummary;
   /** The bell's counts; the bell loads its own list (ruling 457). */
@@ -269,9 +275,14 @@ export function HomePage({
           onNew={() => setModal(true)}
         />
 
-        {projects.length === 0 ? (
-          <EmptyHero onNew={() => setModal(true)} />
-        ) : (
+        {/* Ruling 532: an empty Home is never without the checklist, whose
+            last step is the first project, so it stands where the empty
+            state's dashed box did. */}
+        {data.setup && (
+          <SetupChecklist steps={data.setup} onNewProject={() => setModal(true)} />
+        )}
+
+        {projects.length > 0 && (
           <ProjectSections
             view={view}
             stars={stars}

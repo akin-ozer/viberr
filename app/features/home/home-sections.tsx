@@ -188,10 +188,11 @@ export function HomeHero({
             project this user belongs to, while a board header counts tasks in
             one project and the Agents page counts engagements — three numbers,
             three questions, near-identical copy. Each names its scope now. */}
+        {/* Ruling 532: with no project, the setup checklist under the hero
+            says what comes first, so the hero adds no sentence of its own. */}
+        {projectCount > 0 && (
         <p className="sub">
-          {projectCount === 0 ? (
-            "No projects yet. Create your first project below."
-          ) : totalRunning === 0 ? (
+          {totalRunning === 0 ? (
             <>
               All quiet. No agent runs right now.{" "}
               {totalWaiting > 0 ? (
@@ -216,11 +217,12 @@ export function HomeHero({
             </>
           )}
         </p>
+        )}
       </div>
-      {/* Zero projects: EmptyHero below carries the page's single primary CTA;
-          a second identical "New project" up here plus a view toggle over a
-          grid that does not exist read as chrome for content that is not
-          there. */}
+      {/* Zero projects: the setup checklist below carries the page's single
+          primary CTA (ruling 532); a second identical "New project" up here
+          plus a view toggle over a grid that does not exist read as chrome for
+          content that is not there. */}
       {projectCount > 0 && (
       <div className="hero-actions">
         {/* UI-13: selection was conveyed by the `on` class alone — invisible to
@@ -255,36 +257,6 @@ export function HomeHero({
         </button>
       </div>
       )}
-    </div>
-  );
-}
-
-export function EmptyHero({ onNew }: { onNew: () => void }) {
-  return (
-    <div className="empty-hero" data-screen-label="Empty state">
-      <span className="plus">
-        <Icon name="plus" />
-      </span>
-      <h2>Create your first project</h2>
-      <p>
-        A project is one board, one repo, and a policy that decides what
-        agents may do on their own, and what waits for you.
-      </p>
-      <div className="empty-steps">
-        <span className="st">
-          <span className="n">1</span>Connect a repository
-        </span>
-        <span className="st">
-          <span className="n">2</span>Define workflow stages
-        </span>
-        <span className="st">
-          <span className="n">3</span>Put agents under policy
-        </span>
-      </div>
-      <button type="button" className="btn primary" onClick={onNew}>
-        <Icon name="plus" />
-        New project
-      </button>
     </div>
   );
 }

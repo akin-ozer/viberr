@@ -219,7 +219,17 @@ export function HumanAccess({
         ))}
       </div>
 
-      <div className="rbac-scroll">
+      {/* The table scrolls sideways in its own box where the four role columns
+          are wider than the panel, so the keyboard has to reach it too:
+          focusable and named, as the Insights tables' wraps are (layo-21).
+          Unfocusable, it failed the e2e axe sweep (scrollable-region-focusable)
+          once the rows' labels grew past the panel's width. */}
+      <div
+        className="rbac-scroll"
+        tabIndex={0}
+        role="region"
+        aria-label="What each role may do"
+      >
         <table className="rbac-table">
           <thead>
             <tr>

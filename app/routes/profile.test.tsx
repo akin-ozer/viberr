@@ -112,3 +112,35 @@ describe("Profile: the theme segment shows the theme on screen", () => {
     expect(page()).toBe("light");
   });
 });
+
+/**
+ * Ruling 532: Home's setup checklist links "Connect" for Claude or Codex to
+ * `/profile#agent-accounts`, and the link lands on the Agent accounts panel:
+ * marked while the URL names it (ruling 497's idiom) and focused, so the keys
+ * scroll from there.
+ */
+describe("Profile: the setup checklist's link lands on Agent accounts", () => {
+  it("marks and focuses the panel `#agent-accounts` names", async () => {
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ theme: "light", csrf: "csrf-token" }),
+        Component: () => (
+          <ToastProvider>
+            <Outlet />
+          </ToastProvider>
+        ),
+        children: [
+          { path: "profile", loader: () => ({ profile: PROFILE_DATA }), Component: Profile },
+        ],
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/profile#agent-accounts"]} />);
+    const heading = await view.findByRole("heading", { name: "Agent accounts" });
+    const panel = heading.closest(".panel");
+    // CANARY: drop the panel's id and nothing is marked or focused.
+    await waitFor(() => expect(panel?.hasAttribute("data-targeted")).toBe(true));
+    expect(document.activeElement).toBe(panel);
+  });
+});

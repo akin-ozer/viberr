@@ -1057,6 +1057,7 @@ export function ProfilePage({
   onTheme,
   fetchers,
   submitWith,
+  accountsTargeted = false,
 }: {
   data: ProfileData;
   theme: ThemePreference;
@@ -1074,6 +1075,8 @@ export function ProfilePage({
   submitWith: (
     fetcher: ProfileFetcher,
   ) => (fields: Record<string, string>) => void;
+  /** Ruling 532: the URL names the Agent accounts panel (`#agent-accounts`). */
+  accountsTargeted?: boolean;
 }) {
   const navigate = useNavigate();
   const first = data.memberships[0] ?? null;
@@ -1133,6 +1136,7 @@ export function ProfilePage({
               backends={data.backends}
               fetcher={fetchers.backends}
               submit={submitWith(fetchers.backends)}
+              targeted={accountsTargeted}
             />
             <ProfileGithub
               data={data}

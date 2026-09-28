@@ -22,6 +22,7 @@ import {
 import { getHomePrefs, patchHomePrefs } from "~/server/prefs/user-prefs.server";
 import {
   getHomeOrgSummary,
+  getHomeSetup,
   listHomeProjectsForUser,
 } from "~/features/home/home-query.server";
 import {
@@ -47,10 +48,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const hour = new Date().getHours();
   const greet =
     hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const viewer = { id: user.id, role: user.role };
+  const projects = listHomeProjectsForUser(db, viewer);
   return {
     user,
     greet,
-    projects: listHomeProjectsForUser(db, { id: user.id, role: user.role }),
+    projects,
+    // Ruling 532: the setup checklist's steps, null once all are done.
+    setup: getHomeSetup(db, viewer, projects.length),
     prefs: getHomePrefs(db, user.id),
     org: getHomeOrgSummary(db),
     // Ruling 457 (FL-4): the bell's counts; the bell loads its own list.

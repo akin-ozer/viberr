@@ -127,10 +127,8 @@ describe("ConnectionsPanel", () => {
     expect(queryByText("validation failed")).toBeNull();
   });
 
-  // Ruling 480 (F40-45): a project's credential card links an instance admin
-  // to `?update=<connection id>`, the one place a token is replaced. Canary:
-  // start the modal state at null and no dialog opens.
-  it("ruling 480: ?update=<id> opens that connection's Update token, and its note promises no dry-run", async () => {
+  /** The panel on a stubbed /org/settings opened at `url`. */
+  function renderConnectionsAt(url: string) {
     const Stub = createRoutesStub([
       {
         path: "/org/settings",
@@ -141,9 +139,14 @@ describe("ConnectionsPanel", () => {
         ),
       },
     ]);
-    const { findByRole } = render(
-      <Stub initialEntries={["/org/settings?tab=connections&update=hepapi"]} />,
-    );
+    return render(<Stub initialEntries={[url]} />);
+  }
+
+  // Ruling 480 (F40-45): a project's credential card links an instance admin
+  // to `?update=<connection id>`, the one place a token is replaced. Canary:
+  // start the modal state at null and no dialog opens.
+  it("ruling 480: ?update=<id> opens that connection's Update token, and its note promises no dry-run", async () => {
+    const { findByRole } = renderConnectionsAt("/org/settings?tab=connections&update=hepapi");
     const dialog = await findByRole("dialog", { name: "Update token for hepapi" });
     // F40-43: the dry-run is an env opt-in that is off by default.
     expect(dialog.textContent).not.toContain("dry-run");
@@ -153,20 +156,16 @@ describe("ConnectionsPanel", () => {
   });
 
   it("ruling 480: an unknown ?update= id opens nothing", () => {
-    const Stub = createRoutesStub([
-      {
-        path: "/org/settings",
-        Component: () => (
-          <ToastProvider>
-            <ConnectionsPanel connections={CONNECTIONS} />
-          </ToastProvider>
-        ),
-      },
-    ]);
-    const { queryByRole } = render(
-      <Stub initialEntries={["/org/settings?tab=connections&update=nobody"]} />,
-    );
+    const { queryByRole } = renderConnectionsAt("/org/settings?tab=connections&update=nobody");
     expect(queryByRole("dialog")).toBeNull();
+  });
+
+  // Ruling 532: Home's setup checklist links "Connect GitHub" here with
+  // `?add`. Canary: drop the `add` branch from the modal's first state and the
+  // page opens on no dialog.
+  it("ruling 532: ?add opens the new connection's dialog", async () => {
+    const { findByRole } = renderConnectionsAt("/org/settings?tab=connections&add=1");
+    expect(await findByRole("dialog", { name: "New GitHub connection" })).toBeTruthy();
   });
 
   it("C6: a PAT expiry hydrates safely — the UTC day first, the viewer's calendar date after hydration", () => {
