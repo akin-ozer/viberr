@@ -1030,3 +1030,21 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
     await client.close();
   });
 });
+
+/**
+ * Ruling 573: a message's files are named to the turn that reads it, whether
+ * it starts a turn or steers one, and the transcript keeps the words alone.
+ */
+describe("ruling 573: the turn is told what files came", () => {
+  it("names a steering message's files after its words", async () => {
+    // CANARY: drop `withFilesNote` from `steeringText` and a file sent while
+    // a turn worked reaches it as words alone.
+    const { steeringText } = await import("./controller-run.server");
+    const text = steeringText({ userLabel: "Akin" }, [
+      { text: "Use this one instead.", surface: null, files: [{ id: "cfile_1", name: "rvtools.xlsx", bytes: 40_000 }] },
+    ]);
+    expect(text).toContain(
+      "Use this one instead.\n\nA file came with this message: `rvtools.xlsx` (39 KB). Read it with `read_message_file`",
+    );
+  });
+});

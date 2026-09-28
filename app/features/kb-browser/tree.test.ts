@@ -3,7 +3,6 @@ import {
   countKbDirs,
   countKbFiles,
   flatten,
-  prettySize,
   type StoreNode,
 } from "./tree";
 
@@ -26,14 +25,6 @@ describe("tree helpers", () => {
     expect(countKbFiles(TREE)).toBe(3);
     expect(countKbDirs(TREE)).toBe(2);
     expect(countKbFiles(undefined)).toBe(0);
-  });
-
-  it("prettySize matches the mock's display forms", () => {
-    expect(prettySize(512)).toBe("512 B");
-    expect(prettySize(0)).toBe("0 B");
-    expect(prettySize(1536)).toBe("1.5 KB");
-    expect(prettySize(2 * 1024 * 1024)).toBe("2.0 MB");
-    expect(prettySize(null)).toBe("");
   });
 
   it("flatten: dirs before files, recursing only into expanded dirs", () => {

@@ -4642,3 +4642,51 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
     expect(leaky, `these still strip unknown keys: ${leaky.join(", ")}`).toEqual([]);
   });
 });
+
+/**
+ * Ruling 573: the controller reads the files a person sent in the conversation
+ * it answers, and only there.
+ */
+describe("ruling 573: read_message_file", () => {
+  async function callIn(conversationId: string | null, args: Record<string, JsonValue>): Promise<string> {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const user = findUserById(app.db, ids.orgAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: SLUG,
+      conversationId,
+    });
+    return callToolText(toolkit.tools, "read_message_file", args);
+  }
+
+  it("reads a file sent in this conversation by its name, and names the ones it holds otherwise", async () => {
+    // CANARY: look the file up without the conversation and another thread's
+    // file of the same name is read here.
+    const { appendMessage, createConversation } = await import("./controller-conversations.server");
+    const thread = (label: string) =>
+      createConversation(app.db, { userId: ids.orgAdmin, userLabel: label, projectSlug: SLUG }).id;
+    const mine = thread("mine");
+    const other = thread("other");
+    const send = (conversationId: string, data: string) =>
+      appendMessage(app.db, {
+        conversationId,
+        author: "user",
+        userId: ids.orgAdmin,
+        text: "",
+        files: [{ name: "inventory.csv", data: new TextEncoder().encode(data) }],
+      });
+    send(mine, "host,cpu\nvm-1,4\n");
+    send(other, "secret,elsewhere\n");
+
+    const read = await callIn(mine, { name: "Inventory.csv" });
+    expect(read).toContain("vm-1,4");
+    expect(read).not.toContain("elsewhere");
+    expect(await callIn(mine, { name: "missing.csv" })).toBe(
+      "[noop] No file `missing.csv` was sent in this conversation. It holds: inventory.csv.",
+    );
+    expect(await callIn(null, { name: "inventory.csv" })).toContain("[unavailable]");
+  });
+});

@@ -1,4 +1,5 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
+import { formFiles } from "~/server/files/form-files.server";
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
@@ -740,9 +741,10 @@ export async function action({ request, params }: Route.ActionArgs) {
         // and when an agent is @mentioned (and the commenter is admin|
         // maintainer) resumes THAT agent's session — the agent's reply arrives
         // later as a new agent-authored comment via SSE revalidation.
+        // Ruling 573: the files the comment carries, as the task's attachments.
         const result = await commentToAgent(
           db,
-          { projectSlug, taskKey, text: String(formData.get("text") ?? "") },
+          { projectSlug, taskKey, text: String(formData.get("text") ?? ""), files: await formFiles(formData) },
           actor,
         );
         return {

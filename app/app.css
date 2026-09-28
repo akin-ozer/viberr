@@ -6507,11 +6507,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   .ctl-wrap .ctl-transcript { max-height: calc(100dvh - 360px); min-height: 260px; }
   /* Ruling 419(d): a narrow column cannot afford a frame inside a frame. The
      transcript panel's padding, the reply card's own padding and its 92% cap
-     left a 234px text column on a 375px phone; the dock already gives a reply
-     the full width (`.dock-msgs .ctl-msg`), and the page now does too. */
-  .ctl-wrap .ctl-transcript { padding: .5rem; }
-  .ctl-wrap .ctl-msg { max-width: 100%; }
-  .ctl-wrap .ctl-msg.from-user { max-width: 92%; }
+     left a 234px text column on a 375px phone. Ruling 572(b) took the reply's
+     frame away at every width, so the panel keeps a reading gutter. */
+  .ctl-wrap .ctl-transcript { padding: .75rem; }
   /* One column: the rail flows after the conversation instead of pinning. */
   .ctl-wrap .ctl-side { position: static; max-height: none; overflow-y: visible; }
   /* The phone's thread switcher takes the head's second row. Two classes, for
@@ -7025,6 +7023,47 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   transition: transform .15s var(--ease-out);
 }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+/* Ruling 573: the files a composer holds before it sends, after ReUI's
+   composer tray and shadcn's Attachment: a chip per file over the text (its
+   picture or the file glyph, the name, the size, a remove), the paperclip in
+   the composer's foot, and the frame dashed while files are held over it. */
+.att-tray { display: flex; flex-direction: column; gap: .375rem; margin-bottom: .5rem; }
+.att-tray .form-err { margin: 0; }
+.att-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .375rem; }
+.att-chip {
+  display: inline-flex; align-items: center; gap: .375rem; min-width: 0; max-width: 16rem;
+  padding: .25rem; border: 1px solid var(--hairline); border-radius: var(--radius-button); background: var(--surface);
+}
+.att-chip .attach-name { min-width: 0; }
+.att-chip-media {
+  display: grid; place-items: center; width: 24px; height: 24px; flex: none; overflow: hidden;
+  border-radius: var(--radius-small); background: var(--tint-well); color: var(--muted);
+}
+.att-chip-media img { width: 100%; height: 100%; object-fit: cover; outline: 1px solid var(--image-outline); outline-offset: -1px; }
+.att-chip-media .ico { width: 14px; height: 14px; }
+.att-chip-x {
+  display: grid; place-items: center; width: 22px; height: 22px; flex: none; padding: 0;
+  border: 0; border-radius: var(--radius-small); background: none; color: var(--muted); cursor: pointer;
+}
+.att-chip-x:hover:not(:disabled) { color: var(--fg); background: var(--tint-hover); }
+.att-chip-x .ico { width: 12px; height: 12px; }
+.att-add { width: 30px; height: 30px; flex: none; }
+.att-add .ico { width: 16px; height: 16px; }
+.ctl-composer[data-dropping], .composer-box[data-dropping] { border-style: dashed; border-color: var(--blue); }
+/* Ruling 573: the paperclip leads a composer's foot, before its hint. */
+.att-lead { display: inline-flex; align-items: center; gap: .375rem; min-width: 0; }
+/* The files sent with a message, under its words: a picture as itself in a
+   frame sized before it loads (ruling 457), any other file as the tray's chip. */
+.ctl-files { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: .375rem; }
+.ctl-files > li { min-width: 0; max-width: 100%; }
+a.ctl-file { color: var(--fg); text-decoration: none; }
+a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.ctl-file-pic { display: block; border-radius: var(--radius-button); }
+.ctl-file-pic img {
+  display: block; width: 160px; max-width: 100%; height: 112px; object-fit: cover; object-position: top;
+  background: var(--tint-hover); border-radius: var(--radius-button);
+  outline: 1px solid var(--image-outline); outline-offset: -1px;
+}
 .attach-file svg, .filed-file > svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
 .attach-file .attach-name, .filed-file .attach-name { flex: 1; }
 /* Who put the file there, from the producing event (attachments panel). */
@@ -7381,28 +7420,32 @@ a.card:active, .pj-new:active { transform: scale(.99); }
     .ctl-wrap:has(> .ctl-layout > .ctl-run:not([data-console="closed"])) .ctl-picker { display: block; }
   }
 }
+/* Ruling 572(b): the thread is one reading column, 48rem at most and centred
+   in its box, so an ask and its answer share an axis: on a desktop they stood
+   at the two edges of a 1,092px transcript. */
 .ctl-msgs {
   display: flex;
   flex-direction: column;
-  gap: .75rem;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 48rem;
+  margin-inline: auto;
 }
-/* 48rem: on the instance controller, which has no rail, 92% of the column is
-   a 950px measure for a markdown answer. */
+/* The person's message is a bubble at the column's end. */
 .ctl-msg {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-card);
   padding: .75rem .75rem;
-  max-width: min(92%, 48rem);
+  max-width: 92%;
 }
 .ctl-msg.from-user {
   align-self: flex-end;
   background: var(--tint-well);
 }
-.ctl-msg.from-controller {
-  align-self: flex-start;
-  background: var(--surface);
-  border-color: color-mix(in srgb, var(--agent), transparent 72%);
-}
+/* Ruling 572(b): a reply is the column's text, not a card inside the
+   transcript's card (ruling 419(d)'s frame inside a frame, now at every
+   width); its header says who wrote it. */
+.ctl-msg.from-controller { max-width: none; border: 0; padding: 0; }
 .ctl-msg header {
   display: flex;
   align-items: baseline;
@@ -7726,12 +7769,18 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
   overscroll-behavior: contain;
 }
 .dock-transcript { scroll-behavior: auto; }
-.dock-msgs .ctl-msg { max-width: 100%; }
-.dock-msgs .ctl-msg.from-user { max-width: 92%; }
+/* The dock's .88rem thread keeps a step less air than the page's. */
+.dock-msgs { gap: 1rem; }
 /* Only a message that arrives while the conversation is already on screen
    animates (the component marks it); history never does. The dock and the
    full controller page share the rule (ruling 451(d)). */
 .ctl-msg[data-fresh] { animation: dock-msg-in .2s var(--ease-out); }
+/* Ruling 572: the jump back to the newest message, the transcript's last
+   child, pinned to its box's foot. It takes no room (the button stands up out
+   of a zero-height row), so the box's end holds still as it comes and goes,
+   and it enters as a message does. */
+.ctl-jump { position: sticky; bottom: .75rem; z-index: 1; height: 0; display: flex; align-items: flex-end; justify-content: center; }
+.ctl-jump > .btn { box-shadow: var(--shadow-lift); animation: dock-msg-in .2s var(--ease-out); }
 @keyframes dock-msg-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
@@ -7772,7 +7821,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
      heavier than the rule above, sets the sheet's .15s, and the fade out
      would have taken it. */
   .dock .dock-panel[data-closing] { opacity: 0; transform: none; transition-duration: .12s; }
-  .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
+  .ctl-msg[data-fresh], .ctl-jump > .btn { animation: fade-in .12s ease; }
   /* The panel's working row dot, which kept pulsing forever inside the sheet. */
   .dock .live-dot::after { animation: none; }
   .dock[data-open="true"] .dock-fab { transition: none; }

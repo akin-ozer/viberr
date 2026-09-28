@@ -26,6 +26,9 @@ import { Pill } from "~/ui/pill";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
+import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
+import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
 import type { VerdictNoteView } from "~/shared/verdict-note";
 import { eventMeta, typedKind } from "./event-meta";
@@ -483,6 +486,7 @@ export function Timeline({
   taskLinks,
   knowledgeHref,
   landed = false,
+  canAttach = false,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -524,6 +528,9 @@ export function Timeline({
    *  non-members whose list the loader withheld). */
   attachmentNames?: string[];
   attachmentsBase?: string;
+  /** Ruling 573: the viewer may attach files to a comment (`attach-file`, a
+   *  task not archived). Absent ⇒ the composer takes words only. */
+  canAttach?: boolean;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   // The raw draft, synced synchronously from the editor. A ref, not state:
@@ -574,8 +581,32 @@ export function Timeline({
 
   // Comment result: success clears the draft + toasts (server copy);
   // failure keeps the draft and shows the inline error below.
+  // Ruling 573: the files going with the comment, and the first refused.
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileProblem, setFileProblem] = useState<string | null>(null);
+  // Stable, so the memoised paperclip and tray skip a revalidation's render
+  // (ruling 457); the ref holds the picks the next add builds on.
+  const filesNow = useRef<File[]>(files);
+  filesNow.current = files;
+  const addFiles = useCallback((incoming: File[]) => {
+    const next = addPickedFiles(filesNow.current, incoming, MESSAGE_BATCH);
+    filesNow.current = next.files;
+    setFiles(next.files);
+    setFileProblem(next.problem);
+  }, []);
+  const removeFile = useCallback((name: string) => {
+    setFiles((cur) => cur.filter((file) => file.name !== name));
+    setFileProblem(null);
+  }, []);
+  const { dropping, dropProps } = useFileDrop(addFiles, !canAttach);
+  const pendingFiles = useRef<readonly File[]>([]);
   useFetcherResult(fetcher, (data) => {
+    const sentFiles = pendingFiles.current;
+    pendingFiles.current = [];
     if (data.ok) {
+      // Ruling 573: the files that went out leave the tray; a failure keeps them.
+      setFiles((cur) => cur.filter((file) => !sentFiles.includes(file)));
+      setFileProblem(null);
       draftRef.current = "";
       // Clear the editor AND its undo history — ⌘Z must not resurrect a
       // posted comment. A failure runs neither: the draft stays as typed.
@@ -644,12 +675,15 @@ export function Timeline({
 
   const send = () => {
     const text = draftRef.current.trim();
-    if (!text || busy) return;
+    // Ruling 573: files alone are a comment.
+    if ((!text && files.length === 0) || busy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "comment");
     fd.set("text", text);
-    fetcher.submit(fd, { method: "post" });
+    for (const file of files) fd.append("files", file);
+    pendingFiles.current = files;
+    fetcher.submit(fd, files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" });
   };
   // Ruling 457 (CS-7): the composer is memoised, so what it is handed holds
   // still while nothing it draws changed: a revalidation or a fetcher state
@@ -709,8 +743,33 @@ export function Timeline({
             This task is closed. Comments are still recorded.
           </div>
         )}
-        <div className="composer-box">
-          <div className="composer-input" ref={composerBoxRef}>
+        <div
+          className="composer-box"
+          data-dropping={dropping ? "" : undefined}
+          {...(canAttach ? dropProps : {})}
+        >
+          {canAttach && (
+            <AttachTray
+              files={files}
+              problem={fileProblem}
+              disabled={busy}
+              onRemove={removeFile}
+            />
+          )}
+          <div
+            className="composer-input"
+            ref={composerBoxRef}
+            onPasteCapture={(e) => {
+              // Ruling 573: a bare screenshot joins the comment before the
+              // editor sees the paste; copied text stays the editor's.
+              if (!canAttach) return;
+              const pasted = filesFromPaste(e.clipboardData, true, files);
+              if (!pasted) return;
+              e.preventDefault();
+              e.stopPropagation();
+              addFiles(pasted);
+            }}
+          >
             {/* Lexical plain-text editor: known @mentions highlight live as
                 character-editable text (no backdrop mirroring); the posted
                 value stays exactly the trimmed plain draft. Loaded lazily
@@ -731,8 +790,11 @@ export function Timeline({
                 R15-4 members-only was re-proven live this pass — a signed-in
                 non-member 404s on the page and on the comment POST. Say what
                 the server actually enforces, in the panel's own words. */}
-            <span className="fine xs dim">
-              Every project member can comment · @mentions route to agents
+            <span className="att-lead">
+              {canAttach && <AttachButton onFiles={addFiles} disabled={busy} />}
+              <span className="fine xs dim">
+                Every project member can comment · @mentions route to agents
+              </span>
             </span>
             {commentError && (
               <span className="composer-err" role="alert">

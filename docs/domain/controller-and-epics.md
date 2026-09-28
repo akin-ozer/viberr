@@ -139,7 +139,15 @@ its reader is one rule for the page and the dock (`useTranscriptFollow`,
 first line when a reply is the newest message, and its end otherwise; a controller message
 that lands is scrolled to its first line, unless the reader has scrolled up above the
 newest reply they had, and then nothing moves; the person's own message, and a turn that
-starts while they follow the thread, go to the end. One visually hidden `role="status"`
+starts while they follow the thread, go to the end. A reader who has scrolled away from the
+newest message has the transcript's jump, pinned to the foot of its box
+(`TranscriptJumpButton`, `transcript-jump.tsx`, ruling 572(a)): "New reply" on the primary
+face when a reply landed while they read history, which puts that reply's first line at the
+top of the box, and "Latest" otherwise, which goes where opening the thread would. It shows
+only while that place is below what they can see, leaves once it comes into view, and hands
+the focus it held to the message it showed. The thread is one reading column, 48rem at most
+and centred: the person's messages are bubbles at its end, and a reply is the column's text,
+with no frame of its own, under the header that names who wrote it (ruling 572(b)). One visually hidden `role="status"`
 region, mounted outside the per-thread subtree and changing only its text, says "<name> is
 working" when a turn starts and "<name> replied: <first sentence>" when the reply lands
 (`useTurnAnnouncement`, ruling 476(d)); the working row is visual only. The transcript
@@ -219,6 +227,9 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   examples at its foot, over the composer (ruling 516).
   The transcript meets a reply as the page's does (ruling 476(c) and (d), below in §2): it
   opens on the newest reply's first line and scrolls a reply that lands to its first line,
+  offers the page's jump back to the newest message ("New reply" or "Latest", ruling
+  572(a)) and sets its thread the page's way, a reply unframed under its header and the
+  person's messages as bubbles (ruling 572(b)),
   and the panel's own visually hidden `role="status"` region says "<name> replied: <first
   sentence>" for the thread on screen, which the button's announcer leaves out while the
   panel is open. The "is working…" row is visual only; the button's announcer says a turn
@@ -656,7 +667,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**57 tools**: 56 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**58 tools**: 57 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -712,7 +723,8 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 503); Done included, archived only with `includeArchived` |
 | `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
-| `read_task_attachment` | One attachment of a task: text (`.txt .log .md .json .yml .yaml .csv .diff .patch`) as text, an `.xlsx` as its sheets in CSV, an image as the picture (rulings 293, 533). A read returns up to 40,000 characters; a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551) |
+| `read_task_attachment` | One attachment of a task: an `.xlsx` as its sheets in CSV, an image as the picture, and any other file whose bytes are text as text, whatever its name; a known binary kind or bytes with a NUL in their head are named and refused (rulings 293, 533, 574). A read returns up to 40,000 characters; a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551) |
+| `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, 40,000 characters at a time with `offset`; rulings 573 and 574); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
 | `read_pull_request` | A task's review PR: every changed file with status, counts and unified-diff hunks; `patches: false` for the file list, `path` for one file, a byte budget with `patchOmitted` flags (ruling 266); audited `controller.github.read` |

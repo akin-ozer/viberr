@@ -1439,6 +1439,87 @@ describe("ruling 476: the controller page", () => {
       expect(region.textContent).toBe("Controller replied: I've removed the sentence from WEB-1's goal.");
     });
   });
+
+  /**
+   * Ruling 572, on (c)'s box: the way back for a reader who has scrolled away.
+   * (c) leaves a reader in history where they are when a reply lands, and
+   * nothing on screen said that one had.
+   */
+  describe("ruling 572: the jump back to the newest message", () => {
+    /** The reader moves the box; the jump is measured on the next frame. */
+    async function scrollTo(top: number) {
+      transcript().scrollTop = top;
+      fireEvent.scroll(transcript());
+      await act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+    }
+    const jump = () => within(transcript()).queryByRole("button", { name: /New reply|Latest/ });
+
+    it("offers Latest to a reader above the newest reply, never to one reading it, and goes where an open goes", async () => {
+      // CANARY: measure the jump against the box's end instead of the newest
+      // reply's first line, and the thread opens with the jump already up.
+      const restore = stubTranscript({ p1: 0, r1: 1200 });
+      try {
+        renderLive(at([msg("p1", 1, "user", "Status?"), msg("r1", 2, "controller", "A long answer.", "p1")]));
+        await screen.findByText("A long answer.");
+        await waitFor(() => expect(transcript().scrollTop).toBe(1192));
+        expect(jump()).toBeNull();
+        // CANARY: drop the box's scroll listener, and the jump never comes.
+        await scrollTo(0);
+        fireEvent.click(await within(transcript()).findByRole("button", { name: "Latest" }));
+        expect(transcript().scrollTop).toBe(1192);
+        expect(jump()).toBeNull();
+      } finally {
+        restore();
+      }
+    });
+
+    it("says New reply when one lands on a reader in history, and takes them and the focus to its first line", async () => {
+      const restore = stubTranscript({ p1: 0, r1: 1200, p2: 2400, r2: 3000 });
+      const three = [msg("p1", 1, "user", "One."), msg("r1", 2, "controller", "Answer one.", "p1"), msg("p2", 3, "user", "Two.")];
+      try {
+        const { update } = renderLive(at(three, busy("p2")));
+        await screen.findByText("Two.");
+        await waitFor(() => expect(transcript().scrollTop).toBe(5000));
+        await scrollTo(100);
+        expect(jump()?.textContent).toBe("Latest");
+        update(at([...three, msg("r2", 4, "controller", "Answer two.", "p2")]));
+        await screen.findByText("Answer two.");
+        // Ruling 476(c): the reader stays where they are, and is told.
+        // CANARY: forget the reply (c) left below the reader, and this reads Latest.
+        expect(transcript().scrollTop).toBe(100);
+        const button = within(transcript()).getByRole("button", { name: "New reply" });
+        expect(button.className).toContain("primary");
+        button.focus();
+        fireEvent.click(button);
+        expect(transcript().scrollTop).toBe(2992);
+        expect(jump()).toBeNull();
+        // CANARY: drop the focus move, and the focus goes to nothing with the jump.
+        expect(document.activeElement).toBe(transcript().querySelector('[data-message-id="r2"]'));
+      } finally {
+        restore();
+      }
+    });
+
+    it("stops saying New reply once the reader has scrolled to it", async () => {
+      // CANARY: keep the held reply until the jump is pressed, and a reader who
+      // scrolled down to it is still told it is new.
+      const restore = stubTranscript({ p1: 0, r1: 1200, p2: 2400, r2: 3000 });
+      const three = [msg("p1", 1, "user", "One."), msg("r1", 2, "controller", "Answer one.", "p1"), msg("p2", 3, "user", "Two.")];
+      try {
+        const { update } = renderLive(at(three, busy("p2")));
+        await screen.findByText("Two.");
+        await scrollTo(100);
+        update(at([...three, msg("r2", 4, "controller", "Answer two.", "p2")]));
+        await within(transcript()).findByRole("button", { name: "New reply" });
+        await scrollTo(2800); // r2's first line is in view
+        expect(jump()).toBeNull();
+        await scrollTo(100);
+        expect(jump()?.textContent).toBe("Latest");
+      } finally {
+        restore();
+      }
+    });
+  });
 });
 
 
@@ -1829,5 +1910,75 @@ describe("ruling 525: deleting a conversation from the rail", () => {
   it("names who the viewer lists everyone's as", async () => {
     renderPage(view({ showAllAs: "project admin", viewerIsOrgAdmin: false }));
     expect(await screen.findByRole("link", { name: "Show everyone's (project admin)" })).toBeTruthy();
+  });
+});
+
+/**
+ * Ruling 573: a person's files, on the page. A pasted screenshot joins the
+ * composer's tray and goes out with the message; a message's files show under
+ * its words, a picture as itself and any other file as the tray's chip, each
+ * linking to the conversation's own serving route.
+ */
+describe("ruling 573: files on the controller page", () => {
+  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
+    id: "cnv_f",
+    userId: "u1",
+    userLabel: "Akin",
+    projectSlug: "viberr-core",
+    taskKey: null,
+    title: "Inventory",
+    createdAt: "2026-09-28T20:00:00.000Z",
+    updatedAt: "2026-09-28T20:00:00.000Z",
+    lastMessageAt: "2026-09-28T20:00:00.000Z",
+  };
+
+  it("shows a message's files under it, each opening from the conversation's route", async () => {
+    // CANARY: drop `<MessageFiles>` from the transcript and neither file shows.
+    renderPage(
+      view({
+        conversation,
+        viewerOwnsActive: true,
+        messages: [
+          {
+            id: "m1",
+            conversationId: "cnv_f",
+            seq: 1,
+            author: "user",
+            userId: "u1",
+            text: "",
+            runId: null,
+            surface: null,
+            replyTo: null,
+            steeredInto: null,
+            createdAt: "2026-09-28T20:00:00.000Z",
+            files: [
+              { id: "cfile_a", name: "portal.png", bytes: 2048 },
+              { id: "cfile_b", name: "inventory.csv", bytes: 16 },
+            ],
+          },
+        ],
+      }),
+    );
+    const sent = await screen.findByRole("list", { name: "2 files sent" });
+    const links = within(sent).getAllByRole("link");
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([
+      "/resources/controller-file/cfile_a",
+      "/resources/controller-file/cfile_b",
+    ]);
+    expect(links[0]!.getAttribute("aria-label")).toBe("Open portal.png (2.0 KB)");
+    expect(links[1]!.textContent).toContain("inventory.csv");
+  });
+
+  it("puts a pasted screenshot in the tray, and a tray alone may be sent", async () => {
+    // CANARY: drop the composer's `onPaste` and the screenshot never joins;
+    // keep Send's old `!text.trim()` and files alone cannot go. (The dock's
+    // tests send a tray through the request itself.)
+    const { container } = renderInstancePage(view({ available: true, projectName: null, conversations: [] }));
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    const shot = new File(["png"], "image.png", { type: "image/png" });
+    fireEvent.paste(box, { clipboardData: { files: [shot], types: ["Files"] } });
+    expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("screenshot.png");
+    expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(false);
   });
 });

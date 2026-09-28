@@ -6,6 +6,7 @@ import type { loader as projectLoader } from "./project";
 import { requireVisibleProject } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 import { requireUser } from "~/server/auth/require-user.server";
+import { formFiles } from "~/server/files/form-files.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { readRepoHealth } from "~/server/github/repo-health.server";
 import { listEpicChips } from "~/server/projections/epic-query.server";
@@ -163,14 +164,8 @@ export async function action({ request, params }: Route.ActionArgs) {
       if (epic) createInput.epic = epic;
       // Ruling 533: the files the task is filed with. `createTask` checks
       // them before it allocates a key and saves them before triage runs.
-      const files = formData
-        .getAll("files")
-        .filter((f): f is File => f instanceof File && f.size > 0);
-      if (files.length > 0) {
-        createInput.attachments = await Promise.all(
-          files.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })),
-        );
-      }
+      const files = await formFiles(formData);
+      if (files.length > 0) createInput.attachments = files;
       const result = await createTask(db, createInput, actor);
       return {
         ok: true as const,

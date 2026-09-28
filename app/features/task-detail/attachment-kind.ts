@@ -19,27 +19,11 @@
  */
 
 import { languageForName, PLAIN_LANGUAGE } from "~/ui/code-language";
+import { BINARY_EXTENSIONS } from "~/shared/attachment-kinds";
 
 /** Image-typed attachment names — thumbnail previews + the image lightbox. */
 export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 
-/** Kinds the reader never opens: bytes with no text to show. */
-const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
-  // documents the route serves inline (PDF) or as downloads
-  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
-  // archives
-  "zip", "gz", "tgz", "tar", "bz2", "xz", "zst", "7z", "rar", "jar", "war",
-  // executables, libraries, compiled objects, images of systems
-  "exe", "dll", "so", "dylib", "bin", "dmg", "iso", "pkg", "deb", "rpm", "wasm", "class", "pyc", "o", "a",
-  // fonts
-  "woff", "woff2", "ttf", "otf", "eot",
-  // media
-  "mp3", "mp4", "m4a", "mov", "avi", "mkv", "webm", "ogg", "wav", "flac",
-  // raster images the lightbox does not show, and image editors' files
-  "ico", "bmp", "tif", "tiff", "psd", "heic", "avif",
-  // databases
-  "sqlite", "sqlite3", "db",
-]);
 
 export type AttachmentKind = "image" | "binary" | "text";
 

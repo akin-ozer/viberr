@@ -72,7 +72,10 @@ import {
   retractMessage,
   type ControllerConversation,
   type ControllerMessage,
+  type MessageFile,
 } from "./controller-conversations.server";
+import { checkAttachmentBatch } from "~/server/files/task-attachments.server";
+import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 import { purgeDeletedConversationLogs } from "./controller-purge.server";
 import { inReplyOrder } from "~/shared/controller-thread";
 import {
@@ -143,7 +146,11 @@ interface WaitingMessage {
   messageId: string;
   /** Ruling 465: the message's `seq`, where its turn's digest stops. */
   seq: number;
+  /** The person's words, as the transcript keeps them and Retract hands back. */
   text: string;
+  /** Ruling 573: the files sent with it, named to the turn that reads it
+   *  (`withFilesNote`). */
+  files: readonly MessageFile[];
   surface: string | null;
   timeZone: string | null;
   /** Ruling 527: it asked to go into a running turn and missed it, so it
@@ -233,7 +240,46 @@ export interface ControllerTurnInput {
   /** Ruling 527: what the message does when a turn is already working.
    *  Absent, it steers that turn. */
   mode?: SendMode;
+  /** Ruling 573: the files the person sent with the message. Checked again
+   *  here by `checkMessageFiles`, and stored with the message. */
+  files?: readonly { name: string; data: Uint8Array }[];
   dataRoot?: string;
+}
+
+/**
+ * Ruling 573: the files a controller message carries, checked by the upload's
+ * own rules (the kinds a person may attach, 10 MB each, at most ten and 25 MB
+ * together, no two names one case apart) before anything is written. Returns
+ * them under the names they are stored as. The routes call it before they
+ * create a conversation for the message, so a refused file leaves no empty
+ * thread behind; the engine calls it again before it records the message.
+ */
+export function checkMessageFiles(
+  files: readonly { name: string; data: Uint8Array }[],
+): { name: string; data: Uint8Array }[] {
+  if (files.length === 0) return [];
+  const names = checkAttachmentBatch(files, MESSAGE_BATCH);
+  return files.map((file, i) => ({ name: names[i] ?? file.name, data: file.data }));
+}
+
+/** A size as the turn reads it: whole KB, never 0. */
+function fileKb(bytes: number): string {
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Ruling 573: the message as the turn reads it: the person's words, then one
+ * line naming the files they sent with it and the tool that reads them. The
+ * transcript keeps the words alone; the files show under them.
+ */
+export function withFilesNote(text: string, files: readonly MessageFile[] | undefined): string {
+  if (!files?.length) return text;
+  const list = files.map((f) => `\`${f.name}\` (${fileKb(f.bytes)})`).join(", ");
+  const one = files.length === 1;
+  const note =
+    `${one ? "A file came" : `${files.length} files came`} with this message: ${list}. ` +
+    `Read ${one ? "it" : "each one"} with \`read_message_file\` before you say what ${one ? "it holds" : "they hold"}.`;
+  return text ? `${text}\n\n${note}` : note;
 }
 
 /**
@@ -360,7 +406,9 @@ export async function runControllerTurn(
   input: ControllerTurnInput,
 ): Promise<ControllerTurnResult> {
   const text = input.text.trim();
-  if (!text) throw AppError.validation("Say something for the controller to act on.");
+  const files = checkMessageFiles(input.files ?? []);
+  // Ruling 573: files alone are a message; the turn is told what came.
+  if (!text && files.length === 0) throw AppError.validation("Say something for the controller to act on.");
   const conversation = requireOwnConversation(db, input.conversationId, input.user);
 
   const surface = normalizeSurface(input.surface);
@@ -371,6 +419,7 @@ export async function runControllerTurn(
     userId: input.user.id,
     text,
     surface,
+    files,
   });
 
   // Ruling 127: a controller turn runs on the ASKER's own Claude account —
@@ -410,7 +459,14 @@ export async function runControllerTurn(
       });
       return { state: "refused", reason: note };
     }
-    const waiting: WaitingMessage = { messageId: message.id, seq: message.seq, text, surface, timeZone };
+    const waiting: WaitingMessage = {
+      messageId: message.id,
+      seq: message.seq,
+      text,
+      files: message.files ?? [],
+      surface,
+      timeZone,
+    };
     // Ruling 465: the queue is part of what every open transcript shows
     // ("queued · N ahead"), and the append above published before the
     // message joined it. Ruling 527: so is steering.
@@ -432,7 +488,8 @@ export async function runControllerTurn(
       conversation,
       entry,
       input,
-      { id: message.id, seq: message.seq, text },
+      // Ruling 573: the turn reads the words and a line naming the files.
+      { id: message.id, seq: message.seq, text: withFilesNote(text, message.files) },
       principal.principal.userId,
       surface,
       timeZone,
@@ -565,7 +622,7 @@ function steeringChannel(
  */
 export function steeringText(
   conversation: Pick<ControllerConversation, "userLabel">,
-  messages: readonly Pick<WaitingMessage, "text" | "surface">[],
+  messages: readonly (Pick<WaitingMessage, "text" | "surface"> & { files?: readonly MessageFile[] })[],
 ): string {
   const one = messages.length === 1;
   const head =
@@ -573,7 +630,10 @@ export function steeringText(
     `working on this turn. ${one ? "It is" : "They are"} part of this turn: take ${one ? "it" : "them"} ` +
     `into account from here, and answer ${one ? "it" : "them"} in the reply you write for this turn.`;
   const body = messages
-    .map((m) => (m.surface ? `(sent from ${m.surface})\n${m.text}` : m.text))
+    .map((m) => {
+      const asked = withFilesNote(m.text, m.files);
+      return m.surface ? `(sent from ${m.surface})\n${asked}` : asked;
+    })
     .join("\n\n---\n\n");
   return `${head}\n\n${body}`;
 }
@@ -1085,7 +1145,7 @@ async function settleTurn(
       conversation,
       entry,
       input,
-      { id: next.messageId, seq: next.seq, text: next.text },
+      { id: next.messageId, seq: next.seq, text: withFilesNote(next.text, next.files) },
       input.user.id,
       next.surface,
       next.timeZone,
@@ -1399,6 +1459,9 @@ function transcriptDigest(messages: ControllerMessage[]): string {
     (m) =>
       `${m.author === "user" ? "Person" : "Controller"}: ${
         m.text.length > 600 ? `${m.text.slice(0, 600)}…` : m.text
+      }${
+        // Ruling 573: what a message carried, by name, for `read_message_file`.
+        m.files?.length ? ` [sent with: ${m.files.map((f) => f.name).join(", ")}]` : ""
       }`,
   );
   const parts: string[] = [];

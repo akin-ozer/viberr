@@ -37,7 +37,8 @@ import {
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
-import { addFiledFiles, FiledFiles, filesFromPaste } from "./filed-files";
+import { addFiledFiles, FiledFiles } from "./filed-files";
+import { filesFromPaste } from "~/ui/picked-files";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
 import type { BoardCard } from "./board-card";
 import {

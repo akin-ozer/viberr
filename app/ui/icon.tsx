@@ -100,6 +100,9 @@ const ICON_PATHS = {
   folderup:
     '<path d="M3.5 7a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 16v-5.5M9.5 12.5L12 10l2.5 2.5"/>',
   upload: '<path d="M12 16V5M7.5 9L12 4.5 16.5 9M5 19.5h14"/>',
+  // Ruling 573: the composers' attach button, the one glyph every chat app
+  // uses for it: three strokes joined by two bends, the clip at 45°.
+  clip: '<path d="M16.5 6.5 8.7 14.3a1.77 1.77 0 0 0 2.5 2.5l8-8a3.6 3.6 0 0 0-5.1-5.1l-8.3 8.3a5.4 5.4 0 0 0 7.6 7.6l7.1-7.1"/>',
   edit: '<path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M13.5 7.5l3 3"/>',
   star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
   starfilled:

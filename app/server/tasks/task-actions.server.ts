@@ -1,15 +1,13 @@
 import { existsSync } from "node:fs";
 import {
+  checkAttachmentBatch,
   checkAttachmentUpload,
   isBrowserWorkingArtifact,
   withAttachmentClaims,
   writeTaskAttachment,
   type WrittenAttachment,
 } from "~/server/files/task-attachments.server";
-import {
-  FILED_ATTACHMENTS_MAX,
-  FILED_ATTACHMENTS_MAX_BYTES,
-} from "~/shared/attachment-kinds";
+import { FILING_BATCH, MESSAGE_BATCH } from "~/shared/attachment-kinds";
 import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
 import {
@@ -669,41 +667,6 @@ function attachmentKb(bytes: number): string {
 }
 
 /**
- * Ruling 533: every file a filing carries is checked BEFORE the key is
- * allocated, by the same rules a later upload meets, so one refused file
- * refuses the whole filing and burns no key. Returns the names they will be
- * stored under.
- */
-function checkFiledAttachments(
-  files: readonly { name: string; data: Uint8Array }[],
-): string[] {
-  if (files.length > FILED_ATTACHMENTS_MAX) {
-    throw AppError.validation(
-      `A task can be filed with up to ${FILED_ATTACHMENTS_MAX} files; this one has ${files.length}. Attach the rest from the task page.`,
-    );
-  }
-  const total = files.reduce((sum, f) => sum + f.data.byteLength, 0);
-  if (total > FILED_ATTACHMENTS_MAX_BYTES) {
-    throw AppError.validation(
-      `These files come to ${Math.round(total / 1024 / 1024)} MB; a task can be filed with up to ${FILED_ATTACHMENTS_MAX_BYTES / 1024 / 1024} MB. Attach the rest from the task page.`,
-    );
-  }
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const file of files) {
-    const name = checkAttachmentUpload(file.name, file.data.byteLength);
-    // Case-folded: two names one case apart are one file on a case-insensitive
-    // disk, and the second write would silently replace the first.
-    if (seen.has(name.toLowerCase())) {
-      throw AppError.validation(`Two of these files are named “${name}”. Rename one of them.`);
-    }
-    seen.add(name.toLowerCase());
-    names.push(name);
-  }
-  return names;
-}
-
-/**
  * Board "New task" flow: allocates the next `<PREFIX>-<n>` key atomically
  * from the per-project counter in project.md, writes the task file with the
  * mock create defaults, reprojects, audits.
@@ -806,7 +769,9 @@ export async function createTask(
   if (filed.length > 0) {
     requireAction(db, project, actor, "attach-file", "attach a file to a task");
   }
-  const filedNames = checkFiledAttachments(filed);
+  // Checked BEFORE the key is allocated, so one refused file refuses the
+  // whole filing and burns no key.
+  const filedNames = checkAttachmentBatch(filed, FILING_BATCH);
 
   const projectRef = {
     projectSlug: input.projectSlug,
@@ -1837,6 +1802,9 @@ export async function appendComment(
      *  GitHub ids it relayed, so a relay is recorded exactly when its comment
      *  is). Never set by a route. */
     alsoWrite?: (parsed: ParsedTaskFile) => void;
+    /** Ruling 573: the files the comment carries, already on the task; the
+     *  comment claims them (ruling 533(b)). Set by `commentToAgent` only. */
+    attachments?: readonly string[];
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -1865,6 +1833,7 @@ export async function appendComment(
     toAgent,
     evidence: null,
   };
+  if (input.attachments?.length) event.attachments = [...input.attachments];
 
   // Timeline compaction fires on HUMAN comments too — a comment flood used to
   // never compact because compaction only ran inside operator writes.
@@ -2304,6 +2273,81 @@ async function noteMentionNotStarted(
   }
 }
 
+/**
+ * Ruling 573: a comment's files, checked before anything is written: the
+ * `attach-file` tier, a task that is not archived, the upload's own rules for
+ * a batch, and no name an agent run saved (ruling 388, as `attachTaskFile`).
+ * `append` puts them on the task and writes the comment that claims them,
+ * under the claim that keeps a completing run from taking them (ruling 558),
+ * then audits each. The comment's text names them, so every reader of the
+ * comment (an agent it wakes, a notification, a digest) learns what came.
+ * Null when the comment carries no file.
+ */
+function commentFiles(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; text: string; files?: readonly { name: string; data: Uint8Array }[] },
+  actor: TaskActor,
+  ctx: TaskMutationContext,
+): {
+  text: string;
+  append: <T>(write: (attachments: readonly string[]) => Promise<T>) => Promise<T>;
+} | null {
+  const files = input.files ?? [];
+  if (files.length === 0) return null;
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "attach-file", "attach a file to a comment");
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
+  const existing = readTaskFile(ref);
+  if (!existing) throw AppError.notFound(`No task ${input.taskKey} in ${input.projectSlug}.`);
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(`${input.taskKey} is archived. Restore it before attaching a file.`);
+  }
+  const names = checkAttachmentBatch(files, MESSAGE_BATCH);
+  const agentSaved = new Set(
+    existing.parsed.timeline.flatMap((e) => (e.actor.kind === "agent" ? (e.attachments ?? []) : [])),
+  );
+  const listed = names.map((name, i) => `\`${name}\` (${attachmentKb(files[i]!.data.byteLength)})`).join(", ");
+  const words = input.text.trim();
+  return {
+    text: `${words ? `${words}\n\n` : ""}Attached ${listed}.`,
+    append: async (write) => {
+      const written: WrittenAttachment[] = [];
+      const result = await withAttachmentClaims(
+        input.projectSlug,
+        input.taskKey,
+        names,
+        async (put) => {
+          names.forEach((name, i) => {
+            written.push(
+              put(
+                name,
+                files[i]!.data,
+                agentSaved.has(name)
+                  ? `“${name}” is a file an agent run saved on ${input.taskKey}, and it may be the work under review. Attach yours under another name.`
+                  : null,
+              ),
+            );
+          });
+          return write(written.map((w) => w.name));
+        },
+        ctx.dataRoot,
+      );
+      for (const file of written) {
+        recordAudit(db, {
+          action: "task.attachment.added",
+          actor: { userId: actor.userId, label: actor.label },
+          subjectKind: "task",
+          subjectId: input.taskKey,
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          details: { name: file.name, bytes: file.bytes, replaced: file.replaced },
+        });
+      }
+      return result;
+    },
+  };
+}
+
 export async function commentToAgent(
   db: DatabaseSync,
   input: {
@@ -2323,10 +2367,14 @@ export async function commentToAgent(
     redelivered?: boolean;
     /** Ruling 484: see `appendComment`. Never set by a route. */
     alsoWrite?: (parsed: ParsedTaskFile) => void;
+    /** Ruling 573: files the person sends with the comment. They land as the
+     *  task's attachments, claimed by the comment, which names them. */
+    files?: readonly { name: string; data: Uint8Array }[];
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<CommentToAgentResult> {
+  const withFiles = commentFiles(db, input, actor, ctx);
   // Resolve the mentioned agent FIRST (dynamic import avoids a module cycle:
   // agent-reply → specialist-run → task-actions). We need it before appending
   // so a named mention like `@dev` still flags the comment as routed-to-agent
@@ -2348,14 +2396,14 @@ export async function commentToAgent(
 
   // 1. Record the comment (existing behavior, incl. mention fan-out). Flag
   //    the routed tint when an agent was resolved.
+  const commentInput = target ? { ...input, forceToAgent: true } : input;
   const base = input.redelivered
     ? { toAgent: true, mentionedUserIds: [] }
-    : await appendComment(
-        db,
-        target ? { ...input, forceToAgent: true } : input,
-        actor,
-        ctx,
-      );
+    : withFiles
+      ? await withFiles.append((attachments) =>
+          appendComment(db, { ...commentInput, text: withFiles.text, attachments }, actor, ctx),
+        )
+      : await appendComment(db, commentInput, actor, ctx);
 
   if (!target) {
     // B-AG2: `@claude` on a project running two claude profiles engages NOBODY

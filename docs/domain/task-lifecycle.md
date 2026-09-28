@@ -517,9 +517,8 @@ order of an epic's work is each task's own list.
   long body whose line breaks arrived as literal `\n` is repaired before the other
   guardrails run (`repairDoubledNewlines`, ruling 383).
 - `attach-file` (contributor+, ruling 379) uploads a file into the task's attachments
-  (`writeTaskAttachment`): names that traverse or start with a dot, extensions outside
-  the inline and readable-text sets and `.xlsx` (ruling 533), files over 10 MB
-  (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
+  (`writeTaskAttachment`): a file of any kind (ruling 574); names that traverse or start
+  with a dot, files over 10 MB (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
   timeline note that claims the file for the uploader (`attachments:`) and an audit row.
 - A task can be FILED with its files (ruling 533): the New task dialog takes a picker, a
   drop and a pasted screenshot, and `createTask` checks every file before it allocates a

@@ -6,7 +6,8 @@
  * time (spec §7). Trees are scanned from the REAL store directory server-
  * side (app/server/org/store-files.server.ts) — dirs first, then files.
  *
- * Exported for org-settings rows per the spec: countKbFiles, prettySize
+ * Exported for org-settings rows per the spec: countKbFiles (`prettySize`
+ * moved to `~/shared/text/byte-size`, which the composers' file trays share)
  * (the folder glyph is `Icon`'s `folder`, ruling 458(f)).
  */
 
@@ -28,14 +29,6 @@ export function countKbDirs(nodes: StoreNode[] | undefined): number {
     (a, n) => a + (n.type === "dir" ? 1 + countKbDirs(n.children) : 0),
     0,
   );
-}
-
-/** bytes → "512 B" | "1.5 KB" | "2.0 MB" (mock prettySize, verbatim). */
-export function prettySize(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export interface FlatRow {

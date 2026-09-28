@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useRef, type RefObject } from "react";
+import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router";
 import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
 import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
+import { TranscriptJumpButton } from "./transcript-jump";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type {
   ConversationTurnState,
@@ -17,6 +18,10 @@ import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
+import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
+import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
+import { MessageFiles } from "./message-files";
 
 /**
  * The OPEN controller dock's body (ruling 121): the context line, the replies
@@ -93,6 +98,9 @@ export interface DockPanelBodyProps {
   /** A link out of the dock was followed: close without animating. */
   onLeave: () => void;
   composerRef: RefObject<HTMLTextAreaElement | null>;
+  /** Ruling 573: the files going with the next message, held by the shell. */
+  files: File[];
+  onFiles: (update: (current: File[]) => File[]) => void;
   /** The body is on screen; focus may move into it (a lazy load lands after
    *  the open that asked for it). */
   onMount: () => void;
@@ -113,6 +121,8 @@ export function DockPanelBody({
   onLeave,
   composerRef,
   onMount,
+  files,
+  onFiles,
 }: DockPanelBodyProps) {
   // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55; the page's composer shares the rule).
@@ -128,6 +138,16 @@ export function DockPanelBody({
   useEffect(() => {
     onMount();
   }, [onMount]);
+
+  // Ruling 573: picked, dropped or pasted files, refused as the server would.
+  const [fileProblem, setFileProblem] = useState<string | null>(null);
+  const addFiles = (incoming: readonly File[]) => {
+    const next = addPickedFiles(files, incoming, MESSAGE_BATCH);
+    onFiles(() => next.files);
+    setFileProblem(next.problem);
+  };
+  const { dropping, dropProps } = useFileDrop(addFiles, disabled);
+  const empty = !text.trim() && files.length === 0;
 
   // Message entry motion: only a message that arrives while THIS conversation
   // is already on screen animates (the page shares the rule, ruling 451(d)).
@@ -149,8 +169,9 @@ export function DockPanelBody({
   // that lands shows its first line, not its last.
   const scrollRef = useRef<HTMLDivElement>(null);
   // The thread list swaps the transcript's box out, and the box it swaps back
-  // in starts at its top: that is an open too.
-  useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
+  // in starts at its top: that is an open too. Ruling 572: the page's way back
+  // to the newest message, too.
+  const jump = useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
   // Ruling 476(d): a reply to the thread on screen is announced here; the
   // announcer beside the button leaves this thread out while the panel is open.
   const said = useTurnAnnouncement(current?.controllerName ?? "Controller", messages, fresh, false);
@@ -282,13 +303,20 @@ export function DockPanelBody({
                           conversationId={conversationId}
                           csrf={csrf}
                           action="/resources/controller"
-                          onRetracted={(retracted) => onText(withRetracted(text, retracted))}
+                          files={m.files}
+                          onRetracted={(retracted, back) => {
+                            onText(withRetracted(text, retracted));
+                            if (back.length > 0) onFiles((cur) => addPickedFiles(cur, back, MESSAGE_BATCH).files);
+                          }}
                         />
                       )}
                     </header>
-                    <div className="md-body">
-                      <Markdown text={m.text} taskLinks={current.taskLinks} />
-                    </div>
+                    {m.text && (
+                      <div className="md-body">
+                        <Markdown text={m.text} taskLinks={current.taskLinks} />
+                      </div>
+                    )}
+                    {m.files && <MessageFiles files={m.files} />}
                   </article>
                   {m.id === workingAfter && turn?.working && (
                     <DockWorkingRow name={current.controllerName} turn={turn} />
@@ -300,15 +328,33 @@ export function DockPanelBody({
               )}
             </div>
           )}
+          <TranscriptJumpButton jump={jump} />
         </section>
       )}
       <div className="dock-composer">
-        <div className="ctl-composer">
+        <div className="ctl-composer" data-dropping={dropping ? "" : undefined} {...dropProps}>
           {current && !current.available && !current.signedOut && <NotConnectedNote />}
+          <AttachTray
+            files={files}
+            problem={fileProblem}
+            disabled={busy}
+            onRemove={(name) => {
+              onFiles((cur) => cur.filter((f) => f.name !== name));
+              setFileProblem(null);
+            }}
+          />
           <textarea
             ref={composerRef}
             value={text}
             onChange={(e) => onText(e.target.value)}
+            onPaste={(e) => {
+              // Ruling 573: a bare screenshot goes with the message; copied
+              // text, cells included, stays text.
+              const pasted = filesFromPaste(e.clipboardData, true, files);
+              if (!pasted) return;
+              e.preventDefault();
+              addFiles(pasted);
+            }}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
@@ -334,10 +380,13 @@ export function DockPanelBody({
             aria-label="Message to the controller"
           />
           <div className="ctl-composer-foot">
-            <span className="fine xs dim">
-              Acts with your permissions
-              <span className="kbd-hint" suppressHydrationWarning>
-                {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
+            <span className="att-lead">
+              <AttachButton onFiles={addFiles} disabled={disabled || busy} />
+              <span className="fine xs dim">
+                Acts with your permissions
+                <span className="kbd-hint" suppressHydrationWarning>
+                  {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
+                </span>
               </span>
             </span>
             <span className="inline-row">
@@ -347,7 +396,7 @@ export function DockPanelBody({
                   className="btn sm"
                   title="Wait for its own turn, after the one working now"
                   onClick={() => onSubmit(undefined, "queue")}
-                  disabled={busy || disabled || !text.trim()}
+                  disabled={busy || disabled || empty}
                 >
                   Queue
                 </button>
@@ -357,7 +406,7 @@ export function DockPanelBody({
                 className="btn primary sm"
                 title={live ? "Go into the turn working now, at its next step" : undefined}
                 onClick={() => onSubmit(undefined, "steer")}
-                disabled={busy || disabled || !text.trim()}
+                disabled={busy || disabled || empty}
                 aria-busy={busy || undefined}
               >
                 {busy && <Icon name="loader" className="spin" />}

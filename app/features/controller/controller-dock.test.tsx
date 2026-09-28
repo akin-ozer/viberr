@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { File as NodeFile } from "node:buffer";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import type { ControllerDockView } from "./controller-dock-query.server";
@@ -1164,6 +1165,66 @@ describe("ruling 259: the dock compares the box with what went out, trimmed", ()
 });
 
 /**
+ * Ruling 573: the dock's composer takes files. Picked ones show in its tray,
+ * go out as a multipart form (files alone are a message), and leave the tray
+ * only once the server took them.
+ */
+describe("ruling 573: files from the dock", () => {
+  /** A file the request body can carry, as a browser's can. jsdom's `File`
+   *  is not one Node's `Request` encodes or parses back, and jsdom's
+   *  `FormData` turns Node's `File` into a string, so these tests run on
+   *  Node's pair (installed below; `File` here is Node's). */
+  const file = (bits: string, name: string) => new File([bits], name);
+  beforeEach(async () => {
+    // Node's own FormData, from a body Node parsed (jsdom replaces the global).
+    const nodeForm = await new Response(new URLSearchParams("a=1")).formData();
+    vi.stubGlobal("FormData", nodeForm.constructor);
+    vi.stubGlobal("File", NodeFile);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function pickIntoDock(files: File[]) {
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("Message to the controller");
+    await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+    // SAFETY: AttachButton renders its picker as the input beside it.
+    const picker = screen.getByRole("button", { name: "Attach files" }).nextElementSibling as HTMLInputElement;
+    fireEvent.change(picker, { target: { files } });
+  }
+
+  it("sends the tray's files with no words, and empties the tray once the server took them", async () => {
+    // CANARY: drop the `files` append from the dock's send and the form
+    // carries no file; clear the tray at submit and the failure below loses it.
+    const { sends } = mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+    await pickIntoDock([file("host,cpu", "inventory.csv")]);
+    expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("inventory.csv");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sends.length).toBe(1));
+    const sent = sends[0]!.getAll("files");
+    expect(sent).toHaveLength(1);
+    const got = sent[0];
+    if (!(got instanceof NodeFile)) throw new Error("the form carried the file as a string");
+    expect(await got.text()).toBe("host,cpu");
+    await waitFor(() => expect(screen.queryByRole("list", { name: /files attached/ })).toBeNull());
+  });
+
+  it("keeps the tray when the send fails, and says why a file was refused", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+      action: () => ({ ok: false, error: "That request expired." }),
+    });
+    await pickIntoDock([file("a", "notes.txt"), file("x".repeat(10 * 1024 * 1024 + 1), "memory.dmp")]);
+    expect(screen.getByRole("alert").textContent).toContain("memory.dmp");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText("That request expired.");
+    expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("notes.txt");
+  });
+});
+
+/**
  * Ruling 368: the dock's Send named its work ("Sending…") but sat at the .45
  * refused step with no busy mark while the controller took the message. It is
  * `aria-busy` now, the loader spinning.
@@ -1188,6 +1249,8 @@ describe("ruling 368: the dock's send in flight", () => {
           onLeave={() => {}}
           composerRef={{ current: null }}
           onMount={() => {}}
+          files={[]}
+          onFiles={() => {}}
         />
       </MemoryRouter>,
     );
@@ -1513,15 +1576,19 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
           onLeave={() => {}}
           composerRef={{ current: null }}
           onMount={() => {}}
+          files={[]}
+          onFiles={() => {}}
         />
       </MemoryRouter>
     );
   }
 
-  it("(c) scrolls to the first line of a reply that lands, not to the end", () => {
-    // CANARY: restore `el.scrollTop = el.scrollHeight` in the dock's effect.
+  const box = () => document.querySelector<HTMLElement>(".dock-transcript")!;
+
+  /** Layout jsdom does not do: a 388px transcript box over 3,000px of
+   *  content, `p1` at its top and `r1` 700px down. */
+  function stubDockTranscript(): () => void {
     const tops = new Map([["p1", 0], ["r1", 700]]);
-    const box = () => document.querySelector<HTMLElement>(".dock-transcript");
     const spies = [
       vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
         return this.classList.contains("dock-transcript") ? 3000 : 0;
@@ -1531,16 +1598,43 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
       }),
       vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
         const top = tops.get(this.dataset.messageId ?? "");
-        return DOMRect.fromRect({ x: 0, y: top === undefined ? 0 : top - (box()?.scrollTop ?? 0), width: 388, height: 100 });
+        return DOMRect.fromRect({ x: 0, y: top === undefined ? 0 : top - box().scrollTop, width: 388, height: 100 });
       }),
     ];
-    try {
-      const { rerender } = render(body([msg("p1", 1, "user", "Is the feed live?")], true));
-      expect(box()!.scrollTop).toBe(3000);
-      rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
-      expect(box()!.scrollTop).toBe(692);
-    } finally {
+    return () => {
       for (const spy of spies) spy.mockRestore();
+    };
+  }
+  const asked = msg("p1", 1, "user", "Is the feed live?");
+  const answered = [asked, msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")];
+
+  it("(c) scrolls to the first line of a reply that lands, not to the end", () => {
+    // CANARY: restore `el.scrollTop = el.scrollHeight` in the dock's effect.
+    const restore = stubDockTranscript();
+    try {
+      const { rerender } = render(body([asked], true));
+      expect(box().scrollTop).toBe(3000);
+      rerender(body(answered, false));
+      expect(box().scrollTop).toBe(692);
+    } finally {
+      restore();
+    }
+  });
+
+  it("(ruling 572) offers a reader scrolled up in the dock the page's way back", async () => {
+    // CANARY: drop the dock's <TranscriptJumpButton>, and the wheel is the
+    // only way back down the panel.
+    const restore = stubDockTranscript();
+    try {
+      render(body(answered, false));
+      expect(box().scrollTop).toBe(692);
+      expect(within(box()).queryByRole("button", { name: "Latest" })).toBeNull();
+      box().scrollTop = 0;
+      fireEvent.scroll(box());
+      fireEvent.click(await within(box()).findByRole("button", { name: "Latest" }));
+      expect(box().scrollTop).toBe(692);
+    } finally {
+      restore();
     }
   });
 

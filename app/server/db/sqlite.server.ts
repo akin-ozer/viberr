@@ -648,6 +648,21 @@ const BASELINE_TABLES: readonly string[] = [
      parsed_at TEXT NOT NULL,
      PRIMARY KEY (project_slug, epic_id)
    )`,
+  // Ruling 573: the files sent with a controller message. The page, the dock
+  // and the send name it, so a root that predates it would fail them all.
+  // Same DDL as the baseline.
+  `CREATE TABLE IF NOT EXISTS controller_message_files (
+     id TEXT PRIMARY KEY,
+     message_id TEXT NOT NULL
+       REFERENCES controller_messages (id) ON DELETE CASCADE,
+     conversation_id TEXT NOT NULL
+       REFERENCES controller_conversations (id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     bytes INTEGER NOT NULL,
+     data BLOB NOT NULL,
+     created_at TEXT NOT NULL,
+     UNIQUE (conversation_id, name)
+   )`,
 ];
 
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes
@@ -670,6 +685,10 @@ const BASELINE_INDEXES: readonly string[] = [
   // instead of key order).
   `CREATE INDEX IF NOT EXISTS idx_task_projections__epic
      ON task_projections (project_slug, epic_id) WHERE epic_id IS NOT NULL`,
+  // Ruling 573: a message's files, for the transcript's reads. Follows the
+  // table above.
+  `CREATE INDEX IF NOT EXISTS idx_controller_message_files__message
+     ON controller_message_files (message_id)`,
 ];
 
 export function ensureBaselineColumns(db: DatabaseSync): void {

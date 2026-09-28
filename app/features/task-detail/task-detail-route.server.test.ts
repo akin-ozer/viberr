@@ -1826,17 +1826,18 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     });
     expect(await attachmentsOf("VIB-141")).not.toContain("sneaky.txt");
 
-    // SAFETY: an extension outside the upload whitelist throws AppError, which
-    // the route renders through `appErrorResponse` — the refusal arm.
-    const badType = (await postFile(
+    // SAFETY: a name the store would hide throws AppError, which the route
+    // renders through `appErrorResponse` — the refusal arm. (Ruling 574: any
+    // kind is stored; the name and the size are what an upload is refused by.)
+    const badName = (await postFile(
       "VIB-141",
       ids.selin,
-      "page.html",
-      "<script>",
+      ".hidden.txt",
+      "x",
     )) as ActionRefusal;
-    expect(badType.data.ok).toBe(false);
-    expect(badType.data.error).toContain("does not store");
-    expect(await attachmentsOf("VIB-141")).not.toContain("page.html");
+    expect(badName.data.ok).toBe(false);
+    expect(badName.data.error).toContain("cannot start with a dot");
+    expect(await attachmentsOf("VIB-141")).not.toContain(".hidden.txt");
   });
 
   it("refuses a VIEWER at attachTaskFile's own attach-file grant, and stores nothing", async () => {

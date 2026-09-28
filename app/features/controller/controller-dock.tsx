@@ -177,6 +177,9 @@ function DockShell({ context }: { context: DockContext }) {
   // tab, it hid a conversation started on the full page or on another device.
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
+  // Ruling 573: the files going with the next message. Held here with the
+  // text so a close keeps both; the panel's lazy module does the picking.
+  const [files, setFiles] = useState<File[]>([]);
   const restored = useRef(false);
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -338,12 +341,14 @@ function DockShell({ context }: { context: DockContext }) {
   const sentUnder = useRef(context.key);
   /** Ruling 259: what was submitted, held until the server answers. */
   const pending = useRef<string | null>(null);
+  const pendingFiles = useRef<readonly File[]>([]);
   useFetcherResult(send, (result) => {
     if (!result.ok) {
       // The text is still in the composer, and Send is live again: the person
       // can retry or copy it out.
       push(result.error ?? "The controller could not take that. Try again.", "error");
       pending.current = null;
+      pendingFiles.current = [];
       return;
     }
     // Ruling 259: cleared HERE, and only if the box still holds what went out —
@@ -353,8 +358,12 @@ function DockShell({ context }: { context: DockContext }) {
     // clears like any other. `sent` is read before the ref is nulled, because
     // React may run the updater later than the line after it.
     const sent = pending.current;
+    const sentFiles = pendingFiles.current;
     setText((cur) => (cur.trim() === sent ? "" : cur));
+    // Ruling 573: the files the same way, each one that went out.
+    setFiles((cur) => cur.filter((f) => !sentFiles.includes(f)));
     pending.current = null;
+    pendingFiles.current = [];
     const key = sentUnder.current;
     // A thread the selection does not name yet (a new one, or the scope's
     // newest with nothing selected) is selected, and the load effect above
@@ -554,8 +563,10 @@ function DockShell({ context }: { context: DockContext }) {
    */
   const submit = (override?: string, mode: SendMode = "steer") => {
     const value = (override ?? text).trim();
-    if (!value || busy || disabled || !current) return;
+    // Ruling 573: files alone are a message.
+    if ((!value && files.length === 0) || busy || disabled || !current) return;
     const body = new FormData();
+    for (const file of files) body.append("files", file);
     body.set("_csrf", csrf);
     body.set("intent", "send");
     body.set("text", value);
@@ -584,13 +595,16 @@ function DockShell({ context }: { context: DockContext }) {
     // Four of the five longest messages on the live board are 1,800 to 2,200
     // characters, typed into a two-row textarea.
     pending.current = value;
+    pendingFiles.current = files;
     // Ruling 457 (CTL-4): a send changes the conversation and nothing the page
     // under the dock renders, so it does not re-run the page's loaders; what
     // the turn then does to a board or a task arrives on that page's stream.
+    // Ruling 573: a message with files goes as a multipart form.
     send.submit(body, {
       method: "post",
       action: "/resources/controller",
       defaultShouldRevalidate: false,
+      encType: files.length > 0 ? "multipart/form-data" : "application/x-www-form-urlencoded",
     });
   };
 
@@ -702,6 +716,8 @@ function DockShell({ context }: { context: DockContext }) {
               disabled={disabled}
               text={text}
               onText={setText}
+              files={files}
+              onFiles={setFiles}
               onSubmit={submit}
               csrf={csrf}
               onPick={pick}
