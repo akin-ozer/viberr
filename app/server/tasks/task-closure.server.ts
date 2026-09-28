@@ -36,6 +36,21 @@ export function taskClosure(
 }
 
 /**
+ * What is true of a closed task, without the remedy: the first sentence of
+ * `closureRefusal`, for a record written after the fact (a run that finished
+ * once its task had closed), which has nothing left to refuse.
+ */
+export function closureClaim(
+  taskKey: string,
+  closure: Extract<TaskClosure, { closed: true }>,
+  stages: readonly Pick<StageDef, "id" | "name">[],
+): string {
+  return closure.why === "archived"
+    ? `${taskKey} is archived`
+    : `${taskKey} is closed (${stageName(stages, closure.stageId)} is the terminal stage)`;
+}
+
+/**
  * The refusal sentence every door uses, so a person meets the same words on
  * the Run buttons, in a "Mention not started" note, in the operator's plan
  * narration and in the audit detail. `verb` completes "…before <verb>", e.g.
@@ -47,11 +62,7 @@ export function closureRefusal(
   stages: readonly Pick<StageDef, "id" | "name">[],
   verb: string,
 ): string {
-  if (closure.why === "archived") {
-    return `${taskKey} is archived — restore it before ${verb}.`;
-  }
-  return (
-    `${taskKey} is closed (${stageName(stages, closure.stageId)} is the terminal stage) — ` +
-    `move it back to an open stage before ${verb}.`
-  );
+  const remedy =
+    closure.why === "archived" ? "Restore it" : "Move it back to an open stage";
+  return `${closureClaim(taskKey, closure, stages)}. ${remedy} before ${verb}.`;
 }

@@ -375,7 +375,7 @@ describe("Codex structured operator completion", () => {
     expect(narration).toBeDefined();
     expect(narration!.type).toBe("note");
     expect(narration!.text).toContain("did not apply to the task's current state");
-    expect(narration!.text).toContain("`set_dependencies` — plan step omitted the list of what the task waits on");
+    expect(narration!.text).toContain("`set_dependencies`: plan step omitted the list of what the task waits on");
     expect(narration!.text).not.toContain("refused by its capability policy");
   });
 
@@ -3430,7 +3430,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).toContain("TRIAGE QUALITY GATE");
     expect(prompt).toContain("MUST NOT `transition_stage` forward");
     expect(prompt).toContain("`set_goal`");
-    expect(prompt).toContain("2–4 concrete scopes");
+    expect(prompt).toContain("2 to 4 concrete scopes");
     // Advancing requires SAYING why the goal is concrete.
     expect(prompt).toContain("name the deliverable and the acceptance signal");
   });
@@ -3540,16 +3540,16 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
       note: "please get it onto the PR",
       serverOutcome: { kind: "resolve_remote_collision", outcome: "own_pr_pushed", prNumber: 5 },
     });
-    expect(prompt).toContain('the human added: "please get it onto the PR"');
+    expect(prompt).toContain('The human added: "please get it onto the PR"');
     expect(prompt).toContain("Viberr then performed that option's own steps and reports, in its own words and not the person's: there was no collision to clear (PR #5 is this task's own review PR); the delivered revision was pushed to it and the block is lifted.");
-    const quoted = /the human added: "([^"]*)"/.exec(prompt)![1]!;
+    const quoted = /The human added: "([^"]*)"/.exec(prompt)![1]!;
     expect(quoted).not.toContain("no collision");
     const withoutNote = operatorPrompts.buildOperatorTurnPrompt(atWork, "packet-resolved", undefined, undefined, undefined, undefined, undefined, {
       kind: "resolve_remote_collision",
       title: "Delete the stale remote branch, then redeliver",
       serverOutcome: { kind: "resolve_remote_collision", outcome: "refused", reason: "GitHub refused the deletion (boom)." },
     });
-    expect(withoutNote).not.toContain("the human added");
+    expect(withoutNote).not.toContain("The human added");
     expect(withoutNote).toContain("the collision was not cleared (GitHub refused the deletion (boom).); nothing was re-delivered and the block stays.");
   });
 
@@ -6178,7 +6178,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     expect(existsSync(path.join(dir, "stale.txt"))).toBe(false);
     expect(warned).toContain("a checkout with no .git/HEAD is removed as its person and cloned again");
     expect(warned).not.toContain(
-      "cloning from the project's repository mirror failed — cloning from GitHub",
+      "cloning from the project's repository mirror failed; cloning from GitHub",
     );
     expect(systemPrompt()).toContain("read-only checkout of **acme/widgets**");
   });

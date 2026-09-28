@@ -336,7 +336,7 @@ export function checkDiskPressure(
     };
     if (disk.status === "critical") {
       logger.error(
-        "data root is critically low on free space — writes (task files, SQLite WAL) can start failing",
+        "data root is critically low on free space; writes (task files, SQLite WAL) can start failing",
         detail,
       );
     } else if (disk.status === "low") {

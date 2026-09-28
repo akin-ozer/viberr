@@ -262,11 +262,11 @@ describe("ruling 488: the operator's relay_to_task", () => {
       "[noop] VIB-99 is not a task in this project, so nothing was relayed. `read_board` lists the project's tasks.",
     );
     expect(await relay("VIB-3", NUMBERS, { runOperator })).toBe(
-      "[noop] VIB-3 is closed (Done is the terminal stage) — move it back to an open stage before relaying to it. " +
+      "[noop] VIB-3 is closed (Done is the terminal stage). Move it back to an open stage before relaying to it. " +
         "Nothing was relayed: a closed task's operator starts no run, so the text would reach nobody.",
     );
     expect(await relay("VIB-4", NUMBERS, { runOperator })).toBe(
-      "[noop] VIB-4 is archived — restore it before relaying to it. " +
+      "[noop] VIB-4 is archived. Restore it before relaying to it. " +
         "Nothing was relayed: a closed task's operator starts no run, so the text would reach nobody.",
     );
 
@@ -420,7 +420,7 @@ describe("ruling 557: a task takes the files it works from", () => {
     expect(await take("VIB-2", "SHOP-1", ["inventory.csv"])).toMatch(/^\[denied\] SHOP-1 is a task in project shop/);
     expect(await take("VIB-2", "VIB-99", ["inventory.csv"])).toMatch(/VIB-99 is not a task in this project/);
     expect(await take("VIB-2", "VIB-4", ["inventory.csv"])).toBe(
-      "[noop] VIB-4 is archived — restore it before taking files from it. Nothing was taken.",
+      "[noop] VIB-4 is archived. Restore it before taking files from it. Nothing was taken.",
     );
     expect(await take("VIB-2", "VIB-1", ["inventory.csv", "missing.csv"])).toMatch(
       /^\[noop\] Nothing was taken from VIB-1: VIB-1 has no attachment `missing.csv`/,

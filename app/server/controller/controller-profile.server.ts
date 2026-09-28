@@ -147,7 +147,7 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
       .safeParse(splitFrontmatter(raw).data).data?.effort;
     if (rawEffort !== undefined) {
       logger.warn(
-        "controller profile carries an unreadable `effort:` value — it reads as the backend default and the next save will drop it",
+        "controller profile carries an unreadable `effort:` value; it reads as the backend default and the next save will drop it",
         { file: abs, effort: JSON.stringify(rawEffort) },
       );
     }

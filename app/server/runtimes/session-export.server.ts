@@ -930,7 +930,7 @@ export function buildResumeScript(
 
 const RESUME_SCRIPT_TEMPLATE = [
   "#!/usr/bin/env bash",
-  "# Viberr — resume this agent session on your OWN machine (same subscription).",
+  "# Viberr: resume this agent session on your OWN machine (same subscription).",
   "#",
   "#   session : __SID__",
   "#   backend : __BACKEND__",
@@ -938,8 +938,8 @@ const RESUME_SCRIPT_TEMPLATE = [
   "#   origin  : __ORIGIN_CWD__   (the working dir the agent used inside Viberr)",
   "#",
   "# Installs the conversation transcript where the local CLI looks for it, then",
-  "# prints the exact resume command. Writes ONE file; carries NO credentials —",
-  "# sign in locally with your own subscription first:",
+  "# prints the exact resume command. Writes ONE file; carries NO credentials.",
+  "# Sign in locally with your own subscription first:",
   "#   Claude : run `claude` once and sign in with your own account (Pro/Max or Console)",
   "#   Codex  : run `codex login` (a ChatGPT plan that includes Codex)",
   "set -euo pipefail",
@@ -971,7 +971,7 @@ const RESUME_SCRIPT_TEMPLATE = [
   "else",
   "  # Claude locates a session by the ENCODED name of your CURRENT directory, so",
   "  # this maps the conversation onto whatever project dir you point it at",
-  "  # (default: the dir you run this from — cd into your local checkout first).",
+  "  # (default: the dir you run this from; cd into your local checkout first).",
   '  TARGET_DIR="${1:-$PWD}"',
   "  # Physical path (pwd -P): Claude resolves symlinks (e.g. macOS /var ->",
   "  # /private/var, /tmp -> /private/tmp), so the encoded folder must match the",

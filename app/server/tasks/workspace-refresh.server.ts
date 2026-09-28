@@ -325,7 +325,7 @@ export function describeWorkspaceRefresh(
       return result.from === "unborn"
         ? `fast-forwarded the unborn checkout to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`
         : result.from === "behind_task_branch"
-          ? `fast-forwarded the task branch to origin's copy at \`${result.head.slice(0, 7)}\` — commits Viberr did not deliver joined it (ruling 179)${stale(result)}`
+          ? `fast-forwarded the task branch to origin's copy at \`${result.head.slice(0, 7)}\`; commits Viberr did not deliver joined it (ruling 179)${stale(result)}`
           : `fast-forwarded \`${defaultBranch}\` to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`;
     case "fetched":
       switch (result.head) {
@@ -344,9 +344,9 @@ export function describeWorkspaceRefresh(
             case "unpushed":
               return `origin/* refreshed; HEAD is on the task branch, which origin does not have yet${stale(result)}`;
             case "in_sync":
-              return `origin/* refreshed; HEAD is on the task branch and matches ${remote} — nothing to move${stale(result)}`;
+              return `origin/* refreshed; HEAD is on the task branch and matches ${remote}: nothing to move${stale(result)}`;
             case "ahead":
-              return `origin/* refreshed; HEAD is on the task branch, ahead of ${remote} — the delivery is what pushes it${stale(result)}`;
+              return `origin/* refreshed; HEAD is on the task branch, ahead of ${remote}: the delivery is what pushes it${stale(result)}`;
             case "diverged":
               return `origin/* refreshed; HEAD is on the task branch and was left as it is: it and ${remote} have BOTH moved (update_branch_from_base and a person own a diverged branch)${stale(result)}`;
           }

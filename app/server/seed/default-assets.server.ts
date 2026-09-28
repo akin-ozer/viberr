@@ -683,7 +683,7 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
         // so the divergent path staying silent read as "nothing to do here".
         if (!shippedCopyIsUnedited(asset.rel, onDiskHash, manifest)) {
           logger.warn(
-            "shipped agent asset diverged — keeping the store's copy, which may be stale",
+            "shipped agent asset diverged; keeping the store's copy, which may be stale",
             {
               asset: asset.rel,
               onDisk: onDiskHash.slice(0, 12),

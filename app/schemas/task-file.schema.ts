@@ -861,7 +861,7 @@ export function unpushedRevisionBlockedReason(
   // to replace. Naming the uncertainty is the honest answer: the same first
   // move, without the promise that it will land.
   if (record.relation === "unknown") {
-    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}), and Viberr could not read how the two relate. Deliver the branch to try the push — if the remote has diverged it will refuse, and the history has to be resolved first. It cannot be accepted until the PR carries the reviewed revision.`;
+    return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}), and Viberr could not read how the two relate. Deliver the branch to try the push; if the remote has diverged it will refuse, and the history has to be resolved first. It cannot be accepted until the PR carries the reviewed revision.`;
   }
   return `${taskKey}'s delivered revision \`${rev}\` is not on PR #${pr.number} (its head is ${head}). Deliver the branch to push it; it cannot be accepted until the PR carries the reviewed revision.`;
 }
@@ -1833,7 +1833,7 @@ export function conflictingPrBlockedReason(
   // reader with no tool and the most freedom to do it by hand. It is also the
   // operation that broke a branch on this very board: "Live on SHOP-11: a
   // rebase diverged the branch from its own PR #15" (operator-actions.server).
-  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`;
+  return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.`;
 }
 
 /**

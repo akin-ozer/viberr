@@ -822,7 +822,7 @@ export async function pushWorkspaceBranch(
     // (notably a Codex run, which ignores the tool denylist) could still have
     // its dirty tree delivered. Refuse before touching the index or the remote.
     if (input.canCommitPush === false) {
-      logger.info("skipping workspace delivery — repo-write grant withheld", {
+      logger.info("skipping workspace delivery: repo-write grant withheld", {
         taskKey,
         branch,
       });
@@ -887,7 +887,7 @@ export async function pushWorkspaceBranch(
             files: changedFiles,
           });
         } else {
-          logger.info("delivery auto-commit failed — pushing existing commits only", {
+          logger.info("delivery auto-commit failed; pushing existing commits only", {
             taskKey,
             branch,
           });
@@ -987,7 +987,7 @@ export async function pushWorkspaceBranch(
               remoteHeadBefore = /^[0-9a-f]{40}$/i.test(remoteSha) ? remoteSha : null;
               pushedRemoteBefore = remoteHeadBefore;
               if (remoteHeadBefore === headSha) {
-                logger.info("workspace branch already on origin — no push needed", {
+                logger.info("workspace branch already on origin; no push needed", {
                   taskKey,
                   branch,
                 });
@@ -1213,7 +1213,7 @@ export async function pushWorkspaceBranch(
       err: errorMessage(error),
     };
     if (detail) fields.detail = detail;
-    logger.info("workspace branch push errored — skipping", fields);
+    logger.info("workspace branch push errored; skipping", fields);
     return pushFailed(
       detail
         ? `the push could not run (${oneLine(detail)})`

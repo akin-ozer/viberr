@@ -161,7 +161,7 @@ export function decisionsRequiring(
                             AND validation_block_reason <> '')))
           -- R14-3: archiving already withdraws the packet and the pending
           -- recommendations, so an archived task drops out of the inbox by
-          -- itself. This covers the other way in — a task archived by editing
+          -- itself. This covers the other way in: a task archived by editing
           -- the file directly, which the projection picks up untouched.
           AND archived = 0
           ${opts.projectSlug ? "AND project_slug = ?" : ""}`,

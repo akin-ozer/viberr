@@ -469,11 +469,13 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   `app/features`, `app/routes`, `app/ui`, `app.css` and the top-level render files), in
   any string literal under `app/server`, `app/schemas`, `app/shared` or `app/lib`, or in
   a seeded agent definition or skill doc outside its named prompt sentences; every
-  top-level entry under `app/` must be claimed by one of these scans. Em and en dashes
-  are banned from the same rendered copy and from the seed assets (P21: reword with a
-  comma, period, colon or parentheses). "primary specialist" may not appear in rendered
-  or server-built copy (the capability id `assign-primary-specialist` excepted); say
-  "delivering agent".
+  top-level entry under `app/` must be claimed by one of these scans. Em and en dashes,
+  typed or spelled as an escape or an HTML entity, are banned from the same rendered copy,
+  from the seed assets (P21: reword with a comma, period, colon or parentheses) and from
+  every string literal under the same four server roots, prompts and log lines included
+  (ruling 571; its one exemption is the task.md glyph for an empty evidence result).
+  "primary specialist" may not appear in rendered or server-built copy (the capability id
+  `assign-primary-specialist` excepted); say "delivering agent".
 - **Retired "specialist" wording** (`app/features/retired-vocabulary.test.tsx`): no
   seeded agent asset teaches the retired "primary specialist" model; no
   operator-recommendation chip renders "specialist"; the Agents

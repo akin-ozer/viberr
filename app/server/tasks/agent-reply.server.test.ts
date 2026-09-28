@@ -767,7 +767,7 @@ describe("extractReplyText", () => {
     const out = extractReplyText([line({ tag: "assistant", text: big })])!;
     expect(out.length).toBeLessThan(5000);
     expect(out).toContain("…");
-    expect(out.endsWith("_(truncated — full report in the agent logs)_")).toBe(true);
+    expect(out.endsWith("_(truncated; full report in the agent logs)_")).toBe(true);
   });
 
   it("extractFullReplyText returns the untruncated text (verdicts classify on this)", async () => {

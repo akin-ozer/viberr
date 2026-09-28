@@ -123,7 +123,7 @@ const envSchema = z.object({
   VIBERR_SESSION_SECRET: z
     .string({
       error:
-        "required — random string of at least 32 characters (generate: openssl rand -base64 48)",
+        "required, random string of at least 32 characters (generate: openssl rand -base64 48)",
     })
     .min(32, "must be at least 32 characters of random data"),
 
@@ -153,7 +153,7 @@ const envSchema = z.object({
   VIBERR_SECRET_ENCRYPTION_KEY: z
     .string({
       error:
-        "required — base64 encoding of exactly 32 random bytes (generate: openssl rand -base64 32)",
+        "required, base64 encoding of exactly 32 random bytes (generate: openssl rand -base64 32)",
     })
     .transform((value, ctx) => {
       const normalized = value.trim();
@@ -457,7 +457,7 @@ export function insecureAuthOriginWarning(
   return (
     `BETTER_AUTH_URL is an http:// origin in production (${raw}). ` +
     "better-auth derives the session cookie's Secure attribute from it, so " +
-    "session cookies are issued WITHOUT Secure and travel in cleartext — any " +
+    "session cookies are issued WITHOUT Secure and travel in cleartext; any " +
     "listener on the network path can replay them. Set BETTER_AUTH_URL to the " +
     "https:// origin your reverse proxy terminates TLS on (NFR6; see " +
     "docs/operations/deployment.md)."

@@ -95,7 +95,7 @@ describe("tolerantListField (F18, ruling 458(h))", () => {
       ["frontmatter.invalid_field", "members[1]"],
     ]);
     expect(diagnostics[0]!.message).toMatch(
-      /^Frontmatter `members\[1\]` is invalid \(.+\) — dropping this entry, keeping the rest\.$/,
+      /^Frontmatter `members\[1\]` is invalid \(.+\); dropping this entry, keeping the rest\.$/,
     );
   });
 
@@ -123,7 +123,7 @@ describe("tolerantListField (F18, ruling 458(h))", () => {
       {
         severity: "warning",
         code: "frontmatter.invalid_field",
-        message: "Frontmatter field `members` is not a list — using an empty list.",
+        message: "Frontmatter field `members` is not a list; using an empty list.",
         path: "members",
       },
     ]);

@@ -193,7 +193,7 @@ export async function runSeed(
       }
     } else {
       logger.info(
-        "seed admin not created — users already exist (the bootstrap only runs on an empty users table)",
+        "seed admin not created: users already exist (the bootstrap only runs on an empty users table)",
         { email: adminEmail },
       );
     }

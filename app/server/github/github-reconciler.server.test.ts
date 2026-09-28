@@ -1592,7 +1592,7 @@ describe("reconcileTask", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const { fm, divergence } = await mergedOutOfBand(store, actor);
     expect(divergence).toContain(
-      "Move it to Review first — a completion can only be accepted from there — then accept it",
+      "Move it to Review first (a completion can only be accepted from there), then accept it",
     );
     expect(divergence).not.toContain("Accept the completion so");
     // …and the card that gets there is still on the task.

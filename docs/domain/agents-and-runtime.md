@@ -798,9 +798,9 @@ outcome, refusal }` with `outcome ∈ started | queued | refused` (ruling 263), 
 `admitRun` says whether it launched or parked, so every door that reports a dispatch says
 which of the three happened; a refusal quotes the run's own sentence. A queued run that
 later gets a slot writes a "Run started" note on its task ("The queued … run … got a slot
-and started — streaming to the agent logs", `noteRunStarted`, ruling 311). The cap is the
-instance setting `maxConcurrentRuns` (0 = unlimited, ceiling 64, Instance settings →
-set-concurrency).
+and started. It is streaming to the agent logs.", `noteRunStarted`, ruling 311). The cap
+is the instance setting `maxConcurrentRuns` (0 = unlimited, ceiling 64, Instance settings
+→ set-concurrency).
 
 **The coordination lane (ruling 152(b), pass 35).** A positive cap carries a lane of
 `coordinationLane(cap) = max(1, ceil(cap / 4))` extra slots for `operator` and
@@ -1182,7 +1182,7 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   dispatch sentence then says the task is pinned. F36-8 (pass 36): a run on a backend
   other than the profile's hands the profile's ORIGINAL model through to `startRun` (no
   pre-swap), so the F21-13 substitution notice opens the run log; the "Started a … run
-  (switched from …)" event names the model it ran on and the profile's own ("on `sonnet` —
+  (switched from …)" event names the model it ran on and the profile's own ("on `sonnet`:
   the profile's `gpt-5.6-luna` is a Codex model"), and a run that set the pin says later
   runs on this task stay on that backend. The `retry_other_backend` option says both
   before the human chooses.
@@ -1276,9 +1276,10 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   verdict from a run dispatched to deliver: its reply is its delivery, and its files stamp
   `deliveredAt` (ruling 555).
 - The timeline's dispatch sentence follows `startRun`'s outcome (`runDispatchLine`,
-  ruling 311): "Started a … run … — streaming to the agent logs." only when it started,
-  "Queued a … run … Nothing is streaming yet." when the cap parked it, and "Refused a …
-  run — <the run's own sentence>" when it was refused.
+  ruling 311): "Started a … run …. It is streaming to the agent logs." only when it
+  started, "Queued a … run … Nothing is streaming yet." when the cap parked it, and
+  "Refused a … run. <the run's own sentence>" when it was refused. None of the three
+  carries a dash (ruling 571).
 - The directive is on the record (R21-9): the task page's Run control writes the person's
   `@<agent> <prompt>` comment BEFORE the start, so it predates the run and no completion's
   deferred-mention window can redeliver it; a start that throws appends the person's own

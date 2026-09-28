@@ -154,7 +154,7 @@ export function runInputsSummary(inputs: RunInputs, kind?: RunKind): string {
     inputs.mcp.unresolved.length +
     inputs.mcp.unhealthy.length;
   if (missing > 0) bits.push(`${countLabel(missing, "grant")} did NOT reach this run`);
-  return `Run inputs — ${bits.join(" · ")}`;
+  return `Run inputs: ${bits.join(" · ")}`;
 }
 
 /**

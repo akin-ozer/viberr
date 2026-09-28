@@ -1116,7 +1116,7 @@ async function reconcileTaskUnlocked(
       ? `**Divergence:** PR #${newPr!.number} was merged on GitHub, but ${fm.key} hasn't been accepted through Viberr, so its stage is unchanged. ` +
         (acceptableHere
           ? `Accept the completion so the task reflects the merge.`
-          : `Move it to ${boundaryName ?? "the approval boundary"} first — a completion can only be accepted from there — then accept it so the task reflects the merge.`)
+          : `Move it to ${boundaryName ?? "the approval boundary"} first (a completion can only be accepted from there), then accept it so the task reflects the merge.`)
       : closedButActive
         ? `**Divergence:** PR #${newPr!.number} was closed on GitHub without merging, but ${fm.key} is still active. Decide whether to rework and reopen, or archive the task.`
         : null;
@@ -2213,7 +2213,7 @@ export async function mergeTaskPr(
         prNumber,
         // Ruling 291: merge the base IN. Viberr's own remedy is a merge, and a
         // rebase rewrites commits the pull request already published.
-        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Merge \`${gh.defaultBranch}\` into the branch — never rebase it — then merge.`,
+        message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Merge \`${gh.defaultBranch}\` into the branch (never rebase it), then merge.`,
         mergeable,
       };
     }
@@ -2794,7 +2794,7 @@ export async function resolveRemoteBranchCollision(
         const shows = reread.ok
           ? reread.data.state === "closed"
             ? "is closed on GitHub with its head"
-            : "still shows open on GitHub — close it there"
+            : "still shows open on GitHub. Close it there"
           : "could not be re-read on GitHub";
         fate =
           `deleted branch \`${branch}\`; PR #${unowned}, which stood on the name, ${shows} ` +

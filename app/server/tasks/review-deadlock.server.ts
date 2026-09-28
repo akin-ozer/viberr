@@ -342,7 +342,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         /**
          * Ruling 329: an option's `d` BECOMES the contract.
          *
-         * `resolvePacket` appends `${option.t} — ${option.d}` to the task's
+         * `resolvePacket` appends `${option.t}: ${option.d}` to the task's
          * goal, so every word here is permanent text that every later run
          * reads. This one ended with "Anything you type below is recorded on
          * the task's contract and every later run reads it (ruling 189), so say

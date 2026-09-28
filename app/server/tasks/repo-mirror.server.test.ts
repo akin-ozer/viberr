@@ -168,7 +168,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     expect(result.viaMirror).toBe(false);
     expect(existsSync(path.join(workspace("a"), "README.md"))).toBe(true);
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "the project's repository mirror is unavailable — cloning from GitHub",
+      "the project's repository mirror is unavailable; cloning from GitHub",
     );
   });
 
@@ -208,7 +208,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "the project's repository mirror could not be refreshed — serving a possibly stale mirror",
+      "the project's repository mirror could not be refreshed; serving a possibly stale mirror",
     );
     // Cut from the kept copy — no second network clone…
     expect(result.viaMirror).toBe(true);
@@ -242,7 +242,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
 
     expect(rebuilt).toEqual({ dir: mirrorDir(), refreshed: true });
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "the project's repository mirror failed to refresh twice — rebuilding it",
+      "the project's repository mirror failed to refresh twice; rebuilding it",
     );
     // The rebuild is a real clone: the sabotaged remote is gone and the mirror
     // carries what the origin has NOW.
@@ -343,7 +343,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "the project's repository mirror has no branch to check out — cloning from GitHub",
+      "the project's repository mirror has no branch to check out; cloning from GitHub",
     );
     expect(result.viaMirror).toBe(false);
     expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
@@ -370,7 +370,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "the project's repository mirror has no branch to check out — cloning from GitHub",
+      "the project's repository mirror has no branch to check out; cloning from GitHub",
     );
     expect(result.viaMirror).toBe(false);
     expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
@@ -437,7 +437,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // It fell back to the direct clone, and the fallback arm is the one that ran:
     expect(result.viaMirror).toBe(false);
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
-      "cloning from the project's repository mirror failed — cloning from GitHub",
+      "cloning from the project's repository mirror failed; cloning from GitHub",
     );
     // The half-written destination was cleared (rmSync) before the re-clone…
     expect(existsSync(path.join(dest, "occupied.txt"))).toBe(false);

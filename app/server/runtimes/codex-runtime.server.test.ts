@@ -726,7 +726,7 @@ describe("codex failure classification survives redaction into runFailureReason 
       "rollout at /data/runtimes/users/u_1/codex-home/sessions/2026/09/23/rollout-2026-09-23T01-25-02-01a0cbdd.jsonl does not start with session metadata (code -32603)",
     );
     expect(reason?.kind).toBe("session_missing");
-    expect(reason?.text).toContain("its rollout is damaged");
+    expect(reason?.text).toContain("Its rollout is damaged");
     expect(reason?.text).toContain("Nothing is wrong with the credential");
     expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
     expect(reason?.text).not.toContain("/data/runtimes");

@@ -452,7 +452,7 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
     // dot-files, so this one would be written, reported as saved, and then be
     // invisible to the panel and to every agent run.
     throw AppError.validation(
-      `A file name cannot start with a dot — “${cleaned}” would be hidden from this task and from every agent run.`,
+      `A file name cannot start with a dot: “${cleaned}” would be hidden from this task and from every agent run.`,
     );
   }
   // Ruling 533: every name the store's resolver refuses is refused here, by a

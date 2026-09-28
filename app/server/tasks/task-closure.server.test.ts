@@ -48,9 +48,9 @@ describe("ruling 177: taskClosure is the one spelling of a closed task", () => {
   it("the refusal names the task, the reason and the verb, with the stage's display name", () => {
     expect(
       closureRefusal("VIB-9", { closed: true, why: "terminal", stageId: "done" }, STAGES, "running the operator on it"),
-    ).toBe("VIB-9 is closed (Shipped is the terminal stage) — move it back to an open stage before running the operator on it.");
+    ).toBe("VIB-9 is closed (Shipped is the terminal stage). Move it back to an open stage before running the operator on it.");
     expect(
       closureRefusal("VIB-9", { closed: true, why: "archived", stageId: "impl" }, STAGES, "running an agent on it"),
-    ).toBe("VIB-9 is archived — restore it before running an agent on it.");
+    ).toBe("VIB-9 is archived. Restore it before running an agent on it.");
   });
 });

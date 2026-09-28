@@ -509,7 +509,7 @@ a notification row: replies stay out of the bell (§8).
    whatever its own `seq`, ruling 527; the newest 30 of those, `CONTEXT_MESSAGES`, 24 000
    chars, each message cut at 600), then, when messages wait behind it, one line: "N more
    messages from <person> are queued behind this one; each is answered in its own turn, in
-   order — do not treat them as lost" (ruling 465, F40-10: a queued message used to reach
+   order. Do not treat them as lost." (ruling 465, F40-10: a queued message used to reach
    the running turn as a 600-character stub, which the model reported lost), then
    `<user label> says:` and the message.
 

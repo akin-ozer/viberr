@@ -453,7 +453,7 @@ describe("ruling 503(g): a Codex operator reaches set_epic through its plan", ()
     expect(taskOf("VIB-1").frontmatter.epic).toBe(epicId);
     expect(historyOf(epicId)[0]).toBe("The operator added VIB-1.");
     const narration = taskOf("VIB-1").timeline.find((e) => e.text.includes("plan step omitted"));
-    expect(narration?.text).toContain("- `set_epic` — plan step omitted the epic");
+    expect(narration?.text).toContain("- `set_epic`: plan step omitted the epic");
   });
 });
 

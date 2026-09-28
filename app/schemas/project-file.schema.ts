@@ -251,7 +251,7 @@ function cleanAgentGrants(
       diagnostics.push(
         diagWarning(
           "frontmatter.invalid_field",
-          `Frontmatter \`${path}[${i}].capabilities[${j}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}) — dropping this grant, keeping the deployment.`,
+          `Frontmatter \`${path}[${i}].capabilities[${j}]\` is invalid (${parsed.error.issues[0]?.message ?? "unparseable"}); dropping this grant, keeping the deployment.`,
           `${path}[${i}].capabilities[${j}]`,
         ),
       );
@@ -441,7 +441,7 @@ export function parseProjectFrontmatter(
       diagnostics.push(
         diagError(
           "frontmatter.slug_mismatch",
-          `Frontmatter slug \`${slug}\` does not match the project directory \`${context.fallbackSlug}\` — the directory name wins.`,
+          `Frontmatter slug \`${slug}\` does not match the project directory \`${context.fallbackSlug}\`. The directory name wins.`,
           "slug",
         ),
       );
@@ -452,7 +452,7 @@ export function parseProjectFrontmatter(
     diagnostics.push(
       diagWarning(
         "frontmatter.missing_slug",
-        `Frontmatter has no valid \`slug\` — inferred \`${slug}\` from the project directory.`,
+        `Frontmatter has no valid \`slug\`; inferred \`${slug}\` from the project directory.`,
         "slug",
       ),
     );
@@ -552,7 +552,7 @@ export function parseProjectFrontmatter(
     diagnostics.push(
       diagError(
         "project.no_stages",
-        "Project defines no stages — the board cannot render columns.",
+        "Project defines no stages; the board cannot render columns.",
         "stages",
       ),
     );

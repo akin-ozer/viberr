@@ -224,7 +224,7 @@ export function selfHealProjectionDbIfCorrupt(
   }
 
   logger.error(
-    "projection database is CORRUPT — self-healing (salvaging auth/PATs/audit; projections rebuild from files)",
+    "projection database is CORRUPT: self-healing (salvaging auth/PATs/audit; projections rebuild from files)",
     { dbPath },
   );
 
@@ -298,7 +298,7 @@ export function selfHealProjectionDbIfCorrupt(
   renameSync(tempPath, dbPath);
 
   logger.error(
-    "projection database self-healed — corrupt file + WAL preserved; projections rebuild from the .md files on the boot rescan",
+    "projection database self-healed: corrupt file + WAL preserved; projections rebuild from the .md files on the boot rescan",
     { movedTo: corruptPath, salvaged, skipped },
   );
   return { healed: true, salvaged, skipped, movedTo: corruptPath };

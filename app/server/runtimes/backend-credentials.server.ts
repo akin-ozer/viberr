@@ -723,7 +723,7 @@ function validatePastedSecret(
   if (!value) throw AppError.validation(`Paste the ${noun} first.`);
   if (/\s/.test(value)) {
     throw AppError.validation(
-      `That ${noun} contains a space or line break — copy it again.`,
+      `That ${noun} contains a space or line break; copy it again.`,
     );
   }
   if (value.length > MAX_SECRET_LEN) {

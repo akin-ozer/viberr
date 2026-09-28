@@ -116,13 +116,13 @@ export function installCrashVisibilityHandlers(): void {
   if (slot[CRASH_HANDLERS_KEY]) return;
   slot[CRASH_HANDLERS_KEY] = true;
   process.on("uncaughtException", (error) => {
-    writeFatalSync("FATAL: uncaught exception — shutting down", {
+    writeFatalSync("FATAL: uncaught exception, shutting down", {
       err: toError(error),
     });
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
-    writeFatalSync("FATAL: unhandled promise rejection — shutting down", {
+    writeFatalSync("FATAL: unhandled promise rejection, shutting down", {
       err: toError(reason),
     });
     process.exit(1);
@@ -453,18 +453,18 @@ export function logBootIntegrity(db: DatabaseSync): void {
           "fail-open insert with nothing on any surface";
     drift.remedy =
       (missingColumns.length > 0 && validationGaps.length === 0
-        ? "additive drift only — `ALTER TABLE <table> ADD COLUMN <column>` for " +
+        ? "additive drift only: `ALTER TABLE <table> ADD COLUMN <column>` for " +
           "each table-qualified entry above matches the baseline without " +
           "touching the non-derived rows. Otherwise (or to be certain): "
         : "") +
       "re-baseline the projection database: stop the app, delete " +
-      "<dataRoot>/state/projection.sqlite* , restart — projection tables rebuild " +
+      "<dataRoot>/state/projection.sqlite* , restart; projection tables rebuild " +
       "from projects/ at boot. This also destroys the NON-derived rows in that file " +
       "(users, sessions, sealed PATs, audit, notifications), so run `npm run backup` " +
       "first and expect to re-establish sign-ins. See docs/operations/deployment.md " +
       "§Re-baselining the projection database";
     logger.warn(
-      "projection schema drift — this root's rebuilder tables lag the shipped baseline",
+      "projection schema drift: this root's rebuilder tables lag the shipped baseline",
       drift,
     );
   }
@@ -729,7 +729,7 @@ export async function bootServer(): Promise<void> {
     (env.GITHUB_OAUTH_CLIENT_ID || env.GOOGLE_OAUTH_CLIENT_ID)
   ) {
     logger.warn(
-      "BETTER_AUTH_URL is unset but OAuth is configured — behind a reverse proxy this collapses trustedOrigins to [] and breaks OAuth callback/cookie URLs. Set BETTER_AUTH_URL to the app's public origin.",
+      "BETTER_AUTH_URL is unset but OAuth is configured; behind a reverse proxy this collapses trustedOrigins to [] and breaks OAuth callback/cookie URLs. Set BETTER_AUTH_URL to the app's public origin.",
     );
   }
 
@@ -771,7 +771,7 @@ export async function bootServer(): Promise<void> {
   const heal = selfHealProjectionDbIfCorrupt(getProjectionDbPath());
   if (heal.healed) {
     logger.warn(
-      "recovered a corrupt projection database at boot — projections rebuild from the .md files on the rescan below; the corrupt file is preserved",
+      "recovered a corrupt projection database at boot: projections rebuild from the .md files on the rescan below; the corrupt file is preserved",
       {
         movedTo: heal.movedTo,
         salvaged: heal.salvaged,
@@ -823,7 +823,7 @@ export async function bootServer(): Promise<void> {
   try {
     await startMcpGateway({ port: env.VIBERR_MCP_PROXY_PORT });
   } catch (error) {
-    logger.error("mcp gateway failed to start — credentialed MCP servers cannot be mounted", {
+    logger.error("mcp gateway failed to start; credentialed MCP servers cannot be mounted", {
       port: env.VIBERR_MCP_PROXY_PORT,
       err: toError(error),
     });

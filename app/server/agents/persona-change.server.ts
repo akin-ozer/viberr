@@ -48,7 +48,7 @@ export function describePersonaChange(before: string, after: string): string | n
   const clipped = { any: false };
   const range =
     newLast > head
-      ? `lines ${count(head + 1)}–${count(newLast + 1)} of ${count(b.length)} changed`
+      ? `lines ${count(head + 1)}-${count(newLast + 1)} of ${count(b.length)} changed`
       : newLast === head
         ? `line ${count(head + 1)} of ${count(b.length)} changed`
         : `${count(oldLast - head + 1)} line${oldLast === head ? "" : "s"} removed after line ${count(head)}`;

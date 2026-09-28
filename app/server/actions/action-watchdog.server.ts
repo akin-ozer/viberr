@@ -41,7 +41,7 @@ export async function withActionWatchdog<T>(
           message: `action "${label}" exceeded ${timeoutMs}ms`,
           userMessage: `This action did not complete in ${Math.round(
             timeoutMs / 1000,
-          )}s — the data root may be unreachable. Nothing reliable was changed; try again once storage is healthy.`,
+          )}s; the data root may be unreachable. Nothing reliable was changed; try again once storage is healthy.`,
         }),
       );
     }, timeoutMs);

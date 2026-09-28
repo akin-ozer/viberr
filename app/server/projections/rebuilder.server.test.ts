@@ -894,7 +894,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     // which used to be left to each reader to re-derive (and one of them didn't).
     expect(task.validation).toBe("healthy");
     expect(task.blockReason).toBe(
-      "VIB-9's review PR #900 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. " + "Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.",
+      "VIB-9's review PR #900 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. " + "Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.",
     );
   });
 

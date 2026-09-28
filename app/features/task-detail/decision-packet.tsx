@@ -1593,7 +1593,7 @@ export function DecisionPacket({
                   {i < all.length - 1 ? ", " : ""}
                 </span>
               ))}
-              . Confirming still creates a new one &mdash; check it is not a second owner for
+              . Confirming still creates a new one, so check it is not a second owner for
               work one of these already holds.
             </span>
           </div>

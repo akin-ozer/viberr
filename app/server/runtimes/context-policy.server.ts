@@ -302,20 +302,20 @@ export interface SpecialistCompactAnchorInput {
  */
 export function specialistCompactAnchor(input: SpecialistCompactAnchorInput): string {
   const lines = [
-    "# Context compacted — re-anchor before you continue",
+    "# Context compacted: re-anchor before you continue",
     "",
     "Viberr compacted this session's context. Your persona and the knowledge-base " +
       "indexes in your system prompt are unchanged; the conversation above is a " +
       "summary, and any tool output it does not mention is gone.",
     "",
-    `Task: ${input.taskKey} — "${input.title}"`,
-    `Canonical task file: ${input.taskMdPath} — re-read it before you act; it is the truth, the summary is not.`,
+    `Task: ${input.taskKey}, "${input.title}"`,
+    `Canonical task file: ${input.taskMdPath}. Re-read it before you act; it is the truth, the summary is not.`,
     input.branch ? `Branch: \`${input.branch}\`` : "Branch: none allocated yet",
     input.pr
       ? `Pull request: #${input.pr.number}${input.pr.url ? ` (${input.pr.url})` : ""}`
       : "Pull request: none opened yet",
     input.kb.length
-      ? `Knowledge bases: ${input.kb.join(", ")} — read a document again with read_knowledge_doc; nothing in the summary replaces it.`
+      ? `Knowledge bases: ${input.kb.join(", ")}. Read a document again with read_knowledge_doc; nothing in the summary replaces it.`
       : "Knowledge bases: none attached.",
     input.rulingsKb
       ? `The project's rulings (${input.rulingsKb}) still bind you; re-read the relevant document before a decision.`
@@ -341,7 +341,7 @@ export function controllerCompactAnchor(input: ControllerCompactAnchorInput): st
         ? `bound to the project \`${input.projectSlug}\``
         : "instance-scoped: name the project when acting on a board";
   return [
-    "# Context compacted — re-anchor before you continue",
+    "# Context compacted: re-anchor before you continue",
     "",
     "Viberr compacted this conversation's context. Your system prompt, the tool " +
       "manifest and the knowledge-base indexes are unchanged; the exchange above is " +

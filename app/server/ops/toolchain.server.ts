@@ -293,7 +293,7 @@ export function probeTool(name: string, deps: ToolchainDeps = {}): ProbedTool {
       name: cleaned,
       present: false,
       reason:
-        "not a command name — probe a bare name like \"golangci-lint\", never a path, a flag or a shell fragment",
+        "not a command name; probe a bare name like \"golangci-lint\", never a path, a flag or a shell fragment",
     };
   }
   // `command -v` is POSIX and answers for builtins and functions too, which
@@ -471,7 +471,7 @@ export function shellInventoryPrompt(
       `A missing command exits 127 (\`command not found\`). ${routes.join("; ")}. ` +
         "Plan the work, and any verification you promise, around what is actually " +
         "present. A step that calls an absent tool will not run, and saying so plainly " +
-        "is the honest outcome — never report an unrun check as a pass, and never treat " +
+        "is the honest outcome; never report an unrun check as a pass, and never treat " +
         "one as the deliverable's fault.",
     );
   } else {
@@ -486,7 +486,7 @@ export function shellInventoryPrompt(
       "",
       `Your own role description above mentions ${conflicts
         .map((t) => `\`${t}\``)
-        .join(", ")} — not on this host. Where it plans around ` +
+        .join(", ")} (not on this host). Where it plans around ` +
         `${conflicts.length === 1 ? "that" : "those"}, this measurement is the ` +
         "one that is true today: say so and work to what is here, rather than " +
         "following the description into a command that exits 127.",

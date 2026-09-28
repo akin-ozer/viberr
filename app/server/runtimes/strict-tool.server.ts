@@ -175,7 +175,7 @@ function guarded(
         return textResult(
           `[error] \`${name}\` did not run: Viberr is shutting down and has closed its ` +
             "store, so no Viberr tool will answer for the rest of this run. This is NOT " +
-            "transient and retrying cannot succeed — stop here, and say in your report " +
+            "transient and retrying cannot succeed. Stop here, and say in your report " +
             "that Viberr shut down mid-run rather than describing a store error. What " +
             "happens to this task next is decided by restart recovery and recorded on the " +
             "task itself.",

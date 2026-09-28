@@ -604,7 +604,7 @@ export async function updateWorkspaceBranchFromBase(
               );
               const fields: GitLogFields = { taskKey, branch, base, files };
               if (!abortRes.ok) fields.abortFailed = true;
-              logger.info("branch update conflicted — merge aborted", fields);
+              logger.info("branch update conflicted; merge aborted", fields);
               const conflict: Extract<UpdateBranchResult, { status: "conflict" }> = {
                 status: "conflict",
                 branch,
