@@ -3,8 +3,13 @@ import { useFetcher } from "react-router";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { TaskLinks } from "~/shared/task-key-links";
-import { TASK_DECISION_ANCHOR, TASK_RECOMMENDATIONS_ANCHOR } from "~/shared/page-anchors";
-import { useHashTarget } from "~/ui/use-hash-target";
+import {
+  decisionPacketId,
+  TASK_DECISION_ANCHOR,
+  TASK_RECOMMENDATIONS_ANCHOR,
+  TASK_TIMELINE_ANCHOR,
+} from "~/shared/page-anchors";
+import { revealTarget, useHashTarget } from "~/ui/use-hash-target";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -118,9 +123,34 @@ function runThreadKey(run: RunView): string {
 }
 
 /** Ruling 497: the page's own places a notification opens (the timeline's
- *  events are the timeline's). */
+ *  events are the timeline's); ruling 547 names a decision by its packet. */
 function isTaskRegionAnchor(id: string): boolean {
-  return id === TASK_DECISION_ANCHOR || id === TASK_RECOMMENDATIONS_ANCHOR;
+  return (
+    id === TASK_DECISION_ANCHOR ||
+    decisionPacketId(id) !== null ||
+    id === TASK_RECOMMENDATIONS_ANCHOR
+  );
+}
+
+/**
+ * Ruling 547: the element a region link lands on: the place it names while
+ * the page shows it, else the timeline, which records what became of it (the
+ * decision answered or withdrawn, the recommendations applied or dismissed).
+ * A link naming a packet opens the card only for that packet; the bare
+ * `#decision` of a row written before ruling 547 opens whichever is open.
+ */
+function regionPlace(
+  id: string,
+  packet: TaskDetail["packet"],
+  hasRecommendations: boolean,
+): string {
+  if (id === TASK_RECOMMENDATIONS_ANCHOR) {
+    return hasRecommendations ? TASK_RECOMMENDATIONS_ANCHOR : TASK_TIMELINE_ANCHOR;
+  }
+  const named = decisionPacketId(id);
+  return packet && (named === null || named === packet.id)
+    ? TASK_DECISION_ANCHOR
+    : TASK_TIMELINE_ANCHOR;
 }
 
 export function TaskDetailPage({
@@ -299,8 +329,18 @@ export function TaskDetailPage({
   }, []);
   // Ruling 497: a decision's notification opens the packet or the
   // recommendation cards, and a second click on it, from this page, brings
-  // them back into view.
-  const regionTarget = useHashTarget(isTaskRegionAnchor);
+  // them back into view. Ruling 547: once they are gone, the timeline.
+  const regionTarget = useHashTarget(isTaskRegionAnchor, true, (id) => {
+    const place = document.getElementById(
+      regionPlace(id, task.packet, recommendations.length > 0),
+    );
+    if (place) revealTarget(place);
+    return place;
+  });
+  const regionMark =
+    regionTarget === null
+      ? null
+      : regionPlace(regionTarget, task.packet, recommendations.length > 0);
 
   const ownerFetcher = useFetcher<ActionResult>();
   const resolveFetcher = useFetcher<ActionResult>();
@@ -887,7 +927,7 @@ export function TaskDetailPage({
           className="detail-packet"
           id={TASK_DECISION_ANCHOR}
           tabIndex={-1}
-          data-targeted={regionTarget === TASK_DECISION_ANCHOR || undefined}
+          data-targeted={regionMark === TASK_DECISION_ANCHOR || undefined}
         >
           <DecisionPacket
             packet={task.packet}
@@ -1042,7 +1082,7 @@ export function TaskDetailPage({
         />
 
         <OperatorRecommendations
-          targeted={regionTarget === TASK_RECOMMENDATIONS_ANCHOR}
+          targeted={regionMark === TASK_RECOMMENDATIONS_ANCHOR}
           inFlight={recInFlight}
           recommendations={recommendations}
           canApply={canDecideOwned}
@@ -1130,6 +1170,7 @@ export function TaskDetailPage({
         ) : null}
 
         <Timeline
+          landed={regionMark === TASK_TIMELINE_ANCHOR}
           events={task.timeline}
           hasMore={timelineHasMore}
           remaining={timelineRemaining}

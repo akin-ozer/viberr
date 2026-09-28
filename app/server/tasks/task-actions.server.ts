@@ -216,7 +216,11 @@ import {
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { readEpicFile } from "~/server/files/epic-writer.server";
 import { maybeNoteEpicComplete, noteTaskMadeInEpic, requireEpicForNewTask } from "./epic-actions.server";
-import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
+import {
+  type ClosedDecision,
+  followClosedDecision,
+  markTaskPacketApprovalRead,
+} from "~/server/projections/notifications.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
@@ -978,7 +982,8 @@ export async function updateTaskGoal(
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false };
   }
 
-  let clearedPacket = false;
+  /** Ruling 547: the awaiting packet this edit fulfils, and its record. */
+  let clearedPacket: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.goal = goal;
     // V18: an edited goal re-litigates a recorded deliberate hold — the hold
@@ -989,13 +994,14 @@ export async function updateTaskGoal(
     // lifted its own readiness gate with it.
     if (parsed.packet?.awaiting === "goal_edit") {
       const wasBlocked = parsed.packet.type === "blocked";
+      const closedAt = new Date().toISOString();
+      clearedPacket = { packetId: parsed.packet.id, closedAt };
       parsed.packet = null;
-      clearedPacket = true;
       if (wasBlocked && parsed.frontmatter.readiness === "blocked") {
         parsed.frontmatter.readiness = "ready";
       }
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: closedAt,
         type: "transition",
         actor: humanActorRef(db, actor),
         title: null,
@@ -1018,6 +1024,7 @@ export async function updateTaskGoal(
   });
   if (clearedPacket) {
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+    followClosedDecision(db, input.projectSlug, input.taskKey, clearedPacket);
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
@@ -3598,7 +3605,7 @@ async function withdrawSupersededStuckPacket(
         : input.delivers;
       if (!matches) return;
     }
-    let withdrawn = false;
+    let withdrawn: ClosedDecision | null = null;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const p = parsed.packet;
       // Re-check inside the write — the read above raced other writers, and a
@@ -3610,8 +3617,9 @@ async function withdrawSupersededStuckPacket(
       if (parsed.frontmatter.readiness === "blocked") {
         parsed.frontmatter.readiness = "ready";
       }
+      const closedAt = new Date().toISOString();
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: closedAt,
         type: "transition",
         actor: { kind: "operator" },
         title: null,
@@ -3619,10 +3627,11 @@ async function withdrawSupersededStuckPacket(
         toAgent: false,
         evidence: null,
       });
-      withdrawn = true;
+      withdrawn = { packetId: p.id, closedAt };
     });
     if (!withdrawn) return;
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+    followClosedDecision(db, input.projectSlug, input.taskKey, withdrawn);
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // Ruling 328: the automatic clear. The verdict that just landed was written
     // while this packet stood, so ruling 237's escalation was skipped; seconds
@@ -3699,7 +3708,7 @@ async function withdrawSupersededDeliveryPacket(
     const existing = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     const packet = existing?.parsed.packet;
     if (!packet || !isConflictPacket(packet)) return;
-    let withdrawn = false;
+    let withdrawn: ClosedDecision | null = null;
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       const p = parsed.packet;
       // Re-check inside the write — the read above raced other writers.
@@ -3709,8 +3718,9 @@ async function withdrawSupersededDeliveryPacket(
       if (parsed.frontmatter.readiness === "blocked") {
         parsed.frontmatter.readiness = "ready";
       }
+      const closedAt = new Date().toISOString();
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: closedAt,
         type: "transition",
         actor: { kind: "operator" },
         title: null,
@@ -3718,10 +3728,11 @@ async function withdrawSupersededDeliveryPacket(
         toAgent: false,
         evidence: null,
       });
-      withdrawn = true;
+      withdrawn = { packetId: p.id, closedAt };
     });
     if (!withdrawn) return;
     markTaskPacketApprovalRead(db, projectSlug, taskKey);
+    followClosedDecision(db, projectSlug, taskKey, withdrawn);
     reprojectTask(db, ctx, projectSlug, taskKey);
     recordAudit(db, {
       action: "task.packet.withdrawn_superseded",
@@ -3974,6 +3985,8 @@ export async function recordAgentCompletion(
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
   let questionOpened = false;
+  /** Ruling 547: the question packet's id, which its notification names. */
+  let questionPacketId: string | undefined;
   // Ruling 137: the envelope's question packet withdraws the standing
   // acceptance offers on the record, inside the same locked write.
   const questionCause: OfferWithdrawalCause | null = question
@@ -4423,6 +4436,7 @@ export async function recordAgentCompletion(
       // task — never clobber an open decision.
       if (question && !parsed.packet) {
         parsed.packet = buildAgentQuestionPacket(actorRef, question);
+        questionPacketId = parsed.packet.id;
         parsed.frontmatter.waiting = "human";
         if (questionCause) {
           questionWithdrawal.offers = withdrawAcceptanceOffers(
@@ -4494,7 +4508,7 @@ export async function recordAgentCompletion(
           title: `Decision needed: ${deadlockEscalation.packet.title}`,
           text: deadlockEscalation.packet.body,
           // Ruling 497: the row opens the packet, where it is decided.
-          about: "decision",
+          about: { decision: deadlockEscalation.packet.id },
           // Ruling 237: `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any
           // notice that names nobody, so leaving this off told the inbox the
           // Operator raised it — contradicting the card, which says
@@ -4594,7 +4608,7 @@ export async function recordAgentCompletion(
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
         // Ruling 497: the row opens the question's card, where it is answered.
-        about: "decision",
+        about: { decision: questionPacketId },
         // Ruling 361: the asker by name; the Operator only when the operator asked.
         from:
           actorRef.kind === "agent"
@@ -9850,6 +9864,8 @@ export async function setTaskArchived(
     evidence: null,
   };
 
+  /** Ruling 547: the decision the archive withdrew, recorded by its note. */
+  let archivedPacket: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.frontmatter.archived = input.archived;
     if (input.archived) {
@@ -9857,6 +9873,9 @@ export async function setTaskArchived(
       // inbox, the board chip and the review queue stop asking for one.
       parsed.frontmatter.waiting = "none";
       parsed.frontmatter.recommendations = [];
+      if (parsed.packet) {
+        archivedPacket = { packetId: parsed.packet.id, closedAt: event.occurredAt };
+      }
       parsed.packet = null;
       // P14-RV-03: and the SCHEDULES. Withdrawing the packet and the
       // recommendations but leaving a pending operator re-run behind meant the
@@ -9877,6 +9896,7 @@ export async function setTaskArchived(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  if (archivedPacket) followClosedDecision(db, input.projectSlug, input.taskKey, archivedPacket);
   // Ruling 177 (pass 36): archiving closes the task — its live runs end too.
   if (input.archived) {
     await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, {
@@ -10096,7 +10116,7 @@ async function retryReviewDeadlockEscalation(
         title: `Decision needed: ${packet.title}`,
         text: packet.body,
         // Ruling 497: the row opens the packet, where it is decided.
-        about: "decision",
+        about: { decision: packet.id },
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,
@@ -11543,6 +11563,15 @@ export async function resolvePacket(
   // the approval is read in every case. (Was gated on `!clearPacket`, which now
   // reduces to exactly this set.)
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  // Ruling 547: a packet this answer cleared leaves the page, so its rows open
+  // the decision's own entry. An `edit_goal` answer keeps its packet, decided,
+  // until the goal lands; a write the racing acceptance owned cleared nothing.
+  if (clearPacket && !alreadyAccepted) {
+    followClosedDecision(db, input.projectSlug, input.taskKey, {
+      packetId: packet.id,
+      closedAt: event.occurredAt,
+    });
+  }
 
   // R20-1 (F20-5): EVERY settled decision hands the task back to the operator,
   // not just the three send-back kinds. The exceptions are the options that end
@@ -12909,7 +12938,7 @@ export async function requestPacketMaintainerDecision(
     text: noteText,
     occurredAt,
     // Ruling 497: the row opens the packet the maintainer is asked to decide.
-    about: "decision",
+    about: { decision: packet.id },
     // Ruling 361: the person who asked, or the operator when it did.
     from: actor.userId
       ? {
@@ -14190,6 +14219,11 @@ interface WithdrawnPacketRef {
 interface AnsweredPacketRef {
   current: { packetKind: string; option: PacketOption } | null;
 }
+/** Ruling 547: the decision an acceptance closed, answered or withdrawn, and
+ *  the entry that records it. */
+interface ClosedDecisionRef {
+  current: ClosedDecision | null;
+}
 
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
@@ -14252,6 +14286,7 @@ export async function applyAcceptanceWrite(
   // Ruling 471: or the open decision this acceptance ANSWERS, captured in the
   // same place for the same reason.
   const answered: AnsweredPacketRef = { current: null };
+  const closedPacket: ClosedDecisionRef = { current: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the callers' "already Done → return" check reads the file
     // OUTSIDE this lock, so two concurrent acceptances of one task both passed
@@ -14353,6 +14388,7 @@ export async function applyAcceptanceWrite(
         : null;
     if (parsed.packet && answer) {
       answered.current = { packetKind: parsed.packet.kind, option: answer.option };
+      closedPacket.current = { packetId: parsed.packet.id, closedAt: input.event.occurredAt };
       // The packet door's own `accept_completion` answer IS its completion
       // event, so the answer rides this one as a single clause (it needs
       // saying here: the person pressed Accept, not the decision's option).
@@ -14368,8 +14404,10 @@ export async function applyAcceptanceWrite(
       // Live (VIB-3): force-accepting a task at Triage with an open decision
       // cleared it with no trace — the question simply vanished. The note is
       // the human-readable record; the audit row below is the durable one.
+      const closedAt = new Date().toISOString();
+      closedPacket.current = { packetId: parsed.packet.id, closedAt };
       parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
+        occurredAt: closedAt,
         type: "note",
         actor: { kind: "system", systemId: "policy-engine" },
         title: null,
@@ -14421,6 +14459,9 @@ export async function applyAcceptanceWrite(
     accepted = true;
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  if (accepted && closedPacket.current) {
+    followClosedDecision(db, input.projectSlug, input.taskKey, closedPacket.current);
+  }
   if (accepted && withdrawn.current) {
     // The acceptance's own audit row (forced or not) names the human; this one
     // records that a decision died with it, and which.

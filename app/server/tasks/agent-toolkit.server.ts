@@ -347,7 +347,7 @@ export async function openAgentQuestionPacket(
     title: `${role} asks: ${packet.title}`,
     text: packet.body || "An engaged agent needs a human decision.",
     // Ruling 497: the row opens the question's card, where it is answered.
-    about: "decision",
+    about: { decision: packet.id },
     // Ruling 361: the agent that asked, by name; the Operator only when it did.
     from:
       input.actorRef.kind === "agent"

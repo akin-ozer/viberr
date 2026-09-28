@@ -6,6 +6,7 @@ import {
   hashTarget,
   KB_CORRECTIONS_ANCHOR,
   KB_PROPOSALS_ANCHOR,
+  TASK_TIMELINE_ANCHOR,
   timelineEventAnchor,
   timelineEventTime,
 } from "~/shared/page-anchors";
@@ -481,9 +482,13 @@ export function Timeline({
   attachmentsBase,
   taskLinks,
   knowledgeHref,
+  landed = false,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
+  /** Ruling 547: a link to a decision or to the recommendations landed here,
+   *  because they are gone from the page (the task page's `regionPlace`). */
+  landed?: boolean;
   /** Rulings 483 and 498: the project's Controller page, which a `proposal` or
    *  `kb_correction` event links. */
   knowledgeHref?: string;
@@ -672,7 +677,12 @@ export function Timeline({
   };
 
   return (
-    <div className="panel">
+    <div
+      className="panel"
+      id={TASK_TIMELINE_ANCHOR}
+      tabIndex={-1}
+      data-targeted={landed || undefined}
+    >
       <div className="panel-head">
         <Icon name="activity" />
         <h2>Timeline</h2>

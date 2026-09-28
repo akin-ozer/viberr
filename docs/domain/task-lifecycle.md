@@ -1076,7 +1076,10 @@ read (ruling 71); the bell and inbox mark-read explicitly.
 A row opens the thing it is about (ruling 497, `notifications.href`): a notice about a
 timeline event opens that event (`#event-<occurredAt>`: a verdict, a failed run, a
 delivery or PR note, a release, a lease, a scope violation, an ownership change, a
-mention's comment), a packet or an agent's question opens `#decision`, a recommendation
+mention's comment), a packet or an agent's question opens its card by the packet's id
+(`#decision-<id>`) and, once the packet has closed, the timeline entry that records how
+(the answer, the withdrawal, the fulfilled goal edit, the acceptance or the archive: every
+door that clears a packet moves its rows there, ruling 547), a recommendation
 opens `#recommendations`, a knowledge-base proposal opens its entry on the project
 Controller page, "GitHub sync is failing" opens the project's GitHub page, and an epic
 notice opens the epic's page. A task notice names its subject
@@ -1085,7 +1088,11 @@ A stored link is used only inside the row's own project, and a row with none ope
 task, or the project's board for a project-level row (B-FD6). On the task page the named
 event is marked and focused, the filter tab that hid it opens, and older events load
 until it is among them; a click on a row about the page already on screen brings the
-place back into view (`useHashTarget`, `app/ui/use-hash-target.ts`). The mark lasts until
+place back into view (`useHashTarget`, `app/ui/use-hash-target.ts`). The place stays
+where the link put it while the page settles around it (a task page that mounts for the
+link folds its long entries only after the reveal), until the person scrolls, presses or
+types (ruling 547). A link to a packet the page no longer shows, or to recommendations
+none of which is pending, lands on the Timeline panel, marked. The mark lasts until
 the person's next press anywhere on the page or key (a lone modifier aside), which takes
 the hash out of the URL in place, so a reload does not bring it back; the event keeps
 the focus the link gave it (ruling 523).

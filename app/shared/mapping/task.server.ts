@@ -183,6 +183,10 @@ export interface OperatorRender {
 }
 
 export interface PacketRender {
+  /** F10-09: the packet's id (spread from the file by `mapPacket`), which a
+   *  notification about it names (ruling 547). Absent on a packet written
+   *  before ids. */
+  id?: string;
   type: "input" | "blocked";
   /** Pill label, e.g. "Completion report" | "Blocked decision". */
   kind: string;

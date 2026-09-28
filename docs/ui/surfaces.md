@@ -116,9 +116,13 @@ Intents behind `project.task.tsx` are explained in
   never the error page. At the cap the list discloses it ("Showing the newest
   100", UI-14) (ruling 457). A row opens the thing it is about (ruling 497): the event
   on its task's timeline (marked, focused, its filter tab opened, older events loaded
-  until it is shown), the task's `#decision` or `#recommendations`, a proposal's entry
-  on the Controller page, the project's GitHub page, an epic's page; a click on a row
-  about the page already on screen brings the place back into view. The mark lasts until
+  until it is shown), the task's open packet (`#decision-<id>`; once the packet closes,
+  the timeline entry that records how) or `#recommendations`, a proposal's entry on the
+  Controller page, the project's GitHub page, an epic's page; a click on a row about the
+  page already on screen brings the place back into view, and the place stays where the
+  link put it while the page settles, until the person scrolls, presses or types. A link
+  to a place the task page no longer shows lands on its Timeline panel (ruling 547). The
+  mark lasts until
   the person's next press anywhere on the page or key (a lone modifier aside), which takes
   the hash out of the URL in place, keeps the focus where the link put it and reloads
   nothing (ruling 523). The
