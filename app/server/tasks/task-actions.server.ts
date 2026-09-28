@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import {
   checkAttachmentUpload,
+  isBrowserWorkingArtifact,
   withAttachmentClaims,
   writeTaskAttachment,
   type WrittenAttachment,
@@ -3132,6 +3133,14 @@ function filesSavedByOtherAgents(
  * Ruling 555: and only a run DISPATCHED to deliver. A review run whose profile
  * was handed delivery while it worked still saved evidence for a review, and
  * the roster at completion does not turn that into the delivery.
+ *
+ * Ruling 570: and never the browser's working files alone. The `page-….yml`
+ * snapshots and `console-….log` dumps are tool transport (ruling 105), pruned
+ * from a finished run and kept on an interrupted one as its diagnostics, so a
+ * deliverer cut off mid-browse (ruling 567) had its snapshots recorded as the
+ * delivery. Live on AWSC-8 a restart cut the Workflow Researcher while it
+ * reproduced a calculator form, and `deliveredAt` moved off its report, the
+ * `improvements.md` it had saved, onto twelve page snapshots.
  */
 function stampNonCommitDelivery(
   fm: TaskFrontmatter,
@@ -3141,7 +3150,7 @@ function stampNonCommitDelivery(
   dispatchedToDeliver: boolean,
 ): void {
   if (!dispatchedToDeliver) return;
-  if (!attachments || attachments.length === 0) return;
+  if (!attachments || attachments.every(isBrowserWorkingArtifact)) return;
   if (actorRef.kind !== "agent") return;
   const deliverer = deliveringEngagement(fm);
   if (!deliverer || deliverer.profileId !== actorRef.profileId) return;

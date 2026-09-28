@@ -265,6 +265,23 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(deliveredAtWhenCalled).toEqual([producing!.occurredAt]);
   });
 
+  it("ruling 570: a deliverer cut off mid-browse has its working files posted under its name, and they are not the delivery", async () => {
+    // Live on AWSC-8 a restart cut the Workflow Researcher while it reproduced
+    // a calculator form, and `deliveredAt` moved off its report onto twelve
+    // page snapshots. CANARY: stamp on any attachment again and this one moves.
+    cutRunWithFiles("primary", "developer", [
+      "page-2026-09-28T21-40-41-539Z.yml",
+      "console-2026-09-28T21-39-46-325Z.log",
+    ]);
+    await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).notes;
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const producing = parsed.timeline.find(
+      (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes("page-2026-09-28T21-40-41-539Z.yml"),
+    );
+    expect(producing?.actor).toMatchObject({ kind: "agent", profileId: "developer" });
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+  });
+
   it("ruling 567: a reviewer the restart cut off has its files posted under its name, and they are not the delivery", async () => {
     // Ruling 388: a reviewer's captures are evidence, never the subject.
     cutRunWithFiles("reviewer", "judge", ["page-capture.png"]);

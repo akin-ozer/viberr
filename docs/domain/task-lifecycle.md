@@ -294,7 +294,9 @@ run does not (ruling 216).
   reviewer; otherwise `changed`. The review subject is `reviewSubjectId` (ruling 388):
   the active work revision, or, for a task whose deliverable is not a commit, the moment
   its delivering run last saved files (`files:<deliveredAt>`), so a report or attachment
-  deliverable is reviewable like a commit and a later save stales older verdicts. A
+  deliverable is reviewable like a commit and a later save stales older verdicts. The
+  browser's working files alone (`page-….yml`, `console-….log`, `isBrowserWorkingArtifact`)
+  never move it: they are tool transport, not a delivery (ruling 570). A
   verdict binds only to the subject its run was dispatched on (`agent_runs.review_subject`,
   ruling 544): one returned after a newer delivery binds to nothing, and its note says what
   moved and to run the review again. Never
