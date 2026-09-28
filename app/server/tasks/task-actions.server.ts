@@ -1453,7 +1453,8 @@ export function answerNamesAnotherActor(
  *
  * Returns false when the answer could not be delivered (profile undeployed, no
  * resumable session, agent no longer resolvable), so the caller can fall back to
- * the operator hand-off rather than swallowing the human's decision.
+ * the operator hand-off rather than swallowing the human's decision. An asker
+ * that is still running is owed the answer, not refused it (ruling 565): true.
  */
 async function answerAskingAgent(
   db: DatabaseSync,
@@ -1526,6 +1527,27 @@ async function answerAskingAgent(
       actor,
       ctx,
     );
+    // Ruling 565: an asker still running when its question is answered gets the
+    // answer when that run finishes: its completion delivers every comment the
+    // single-flight guard refused (`deliverDeferredMention`). Live on AWSC-5
+    // the Cloud Solutions Architect raised its packet and kept working, the
+    // answer fell through to the operator with no note, and the operator told
+    // the record the answer had gone "straight to" a run that never saw it.
+    if (result.triggered === null && result.deferred) {
+      await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text:
+          `The answer waits for ${deployed.name}, who asked: its run on this task is still ` +
+          "going, and Viberr starts it on the answer as soon as that run finishes.",
+        toAgent: false,
+        evidence: null,
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      return true;
+    }
     // `triggered` is the only honest signal that the answer actually reached a
     // run: a recorded comment whose run never started has not answered anyone.
     return result.triggered !== null;
@@ -1976,6 +1998,10 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * refusal signal.
    */
   runNotStarted: string | null;
+  /** Ruling 565: the run did not start because this agent is already running
+   *  on the task, which is the one refusal viberr makes good on: that run's
+   *  completion starts it on this comment (`deliverDeferredMention`). */
+  deferred?: true;
 }
 
 // ------------------------------------------------- canonical re-anchor (D-3)
@@ -2552,6 +2578,8 @@ export async function commentToAgent(
   let runId: string;
   let triggered: "resumed" | "started";
   let resumeOutcomeKey: string | undefined;
+  /** Ruling 565: the single-flight guard refused it, so it is owed, not lost. */
+  let deferred = false;
 
   // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure
   // (single-flight conflict, a backend the task owner has not connected (ruling
@@ -2579,6 +2607,7 @@ export async function commentToAgent(
         (r.state === "running" || r.state === "queued"),
     );
     if (liveSameProfile) {
+      deferred = true;
       throw new AppError({
         code: ERROR_CODES.CONFLICT,
         status: 409,
@@ -2817,7 +2846,7 @@ export async function commentToAgent(
     if (!input.relayed && !input.redelivered) {
       await noteMentionNotStarted(db, ctx, input, actor, target.name, target.profileId, reason);
     }
-    return {
+    const refused: CommentToAgentResult = {
       ...base,
       agent: agentIdentity,
       triggered: null,
@@ -2826,6 +2855,8 @@ export async function commentToAgent(
       operatorRefused: null,
       runNotStarted: reason,
     };
+    if (deferred) refused.deferred = true;
+    return refused;
   }
 
   // 5. Install THE canonical completion handler (reply → reconcile → verdict →
