@@ -224,22 +224,36 @@ describe("ruling 503(e): About, History and Details", () => {
     expect(within(readOnly).queryByRole("button")).toBeNull();
   });
 
-  it("History shows the newest eight entries, with Show all for the rest, and links the tasks it names", async () => {
-    const history = Array.from({ length: 10 }, (_, i) => ({
-      occurredAt: `2026-09-${String(20 - i).padStart(2, "0")}T10:00:00.000Z`,
-      text: i === 0 ? "Arda Kaya added VIB-151." : `Entry ${10 - i}`,
-    }));
+  it("History shows the newest eight entries under their days, with Show more for the rest, and links the tasks it names", async () => {
+    // Local hours of fixed past days, so every zone reads the same days.
+    const at = (day: number, hour: number) => new Date(2024, 8, day, hour).toISOString();
+    const history = [
+      { occurredAt: at(20, 12), text: "Arda Kaya added VIB-151." },
+      { occurredAt: at(20, 11), text: "Entry 9" },
+      ...Array.from({ length: 8 }, (_, i) => ({ occurredAt: at(19 - i, 12), text: `Entry ${8 - i}` })),
+    ];
     renderEpic(pageView({ epic: detail({ history }), taskLinks: { "VIB-151": "/projects/viberr-core/tasks/VIB-151" } }));
-    const list = await screen.findByRole("list", { name: "epic-3 history" });
+    const panel = await section("History");
     // CANARY: drop the `slice(0, HISTORY_PREVIEW)` and a long history opens in
     // full, pushing Details off the first screen.
-    expect(list.querySelectorAll("li")).toHaveLength(8);
-    expect(within(list).getByRole("link", { name: "VIB-151" }).getAttribute("href")).toBe(
+    expect(panel.querySelectorAll("li")).toHaveLength(8);
+    // CANARY: render the entries without `daySections` and the two Sep 20
+    // entries lose the day they share.
+    expect([...panel.querySelectorAll(".epic-history-day")].map((day) => day.textContent)).toEqual([
+      "Sep 20",
+      "Sep 19",
+      "Sep 18",
+      "Sep 17",
+      "Sep 16",
+      "Sep 15",
+      "Sep 14",
+    ]);
+    expect(within(panel).getByRole("link", { name: "VIB-151" }).getAttribute("href")).toBe(
       "/projects/viberr-core/tasks/VIB-151",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Show all 10 entries" }));
-    expect(list.querySelectorAll("li")).toHaveLength(10);
-    expect(screen.getByRole("button", { name: "Show the latest only" })).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Show 2 more" }));
+    expect(panel.querySelectorAll("li")).toHaveLength(10);
+    expect(within(panel).getByRole("button", { name: "Show less" })).toBeTruthy();
   });
 
   it("Details names the status, the lead, the dates and the creator", async () => {

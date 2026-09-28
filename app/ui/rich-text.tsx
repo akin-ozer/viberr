@@ -47,7 +47,9 @@ export function RichText({
   let key = 0;
 
   /** U39-31: plain prose, with the resolved task keys in it as links (same
-   *  tab, like the markdown renderer's). */
+   *  tab, like the markdown renderer's). Ruling 560: drawn as the key chip the
+   *  activity and notification feeds link a task with; outside `.md-body` a
+   *  bare link took the browser's own blue, and its purple once visited. */
   const pushLinked = (chunk: string) => {
     if (!chunk) return;
     if (!taskLinks) {
@@ -60,7 +62,7 @@ export function RichText({
       if (!href) continue;
       if (match.index > at) parts.push(chunk.slice(at, match.index));
       parts.push(
-        <Link key={key++} to={href} className="task-ref">
+        <Link key={key++} to={href} className="task-ref keybtn">
           {match[0]}
         </Link>,
       );

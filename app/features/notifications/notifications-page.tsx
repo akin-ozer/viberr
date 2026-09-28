@@ -3,14 +3,8 @@ import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useHydrated } from "~/ui/local-time";
-import {
-  formatClock,
-  formatClockUTC,
-  formatDayBucket,
-  formatDayBucketUTC,
-  localDayKey,
-  utcDayKey,
-} from "~/shared/dates/format";
+import { daySections } from "~/shared/dates/day-sections";
+import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { ntfMeta, ntfPill, plainText } from "./notification-meta";
 import {
   needsYouTime,
@@ -158,22 +152,7 @@ function NtfStream({
   // task detail and the run console all adopted the useHydrated + *UTC first
   // pass; the notifications stream was never brought along.
   const local = useHydrated();
-  const now = new Date();
-  const dayOf = (iso: string) =>
-    local ? formatDayBucket(iso, now) : formatDayBucketUTC(iso);
-  // Walk the newest-first list ONCE, opening a new section whenever the
-  // ABSOLUTE day changes. Bucketing on a Set of LABELS merged rows a year apart
-  // under one "Mar 30" header (the label carries no year) and drew the year-old
-  // row inside the recent block, with nothing to tell them apart: the row's own
-  // stamp is time-only. The label is still what the reader sees.
-  const keyOf = (iso: string) => (local ? localDayKey(iso) : utcDayKey(iso));
-  const sections: { key: string; day: string; rows: NotificationPageItem[] }[] = [];
-  for (const item of items) {
-    const key = keyOf(item.occurredAt);
-    const last = sections[sections.length - 1];
-    if (last && last.key === key) last.rows.push(item);
-    else sections.push({ key, day: dayOf(item.occurredAt), rows: [item] });
-  }
+  const sections = daySections(items, (item) => item.occurredAt, local);
   return (
     <div className="panel">
       <div className="panel-head">
