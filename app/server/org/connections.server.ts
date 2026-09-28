@@ -46,6 +46,7 @@ import {
 } from "~/server/secrets/pat-validator.server";
 import { slugify } from "~/shared/ids/slugify";
 import { formatCalendarDate } from "~/shared/dates/format";
+import { refreshRepoAccess } from "~/features/github/github-query.server";
 
 /**
  * Org-level GitHub OWNER connections (org-settings spec §3.1 / §4.1).
@@ -426,6 +427,38 @@ export interface ConnectionOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * Ruling 540: the projects whose GitHub calls go through this PAT. A project
+ * talks to GitHub only with the credential bound to it
+ * (`project_github_credentials`), never with a connection it is not bound to,
+ * so these are the boards a change to the token can change.
+ */
+function boundProjectSlugs(db: DatabaseSync, patId: string): string[] {
+  // SAFETY: the SELECT names one column, `project_slug`, TEXT NOT NULL.
+  const rows = db
+    .prepare(
+      `SELECT project_slug FROM project_github_credentials WHERE pat_id = ? ORDER BY project_slug`,
+    )
+    .all(patId) as { project_slug: string }[];
+  return rows.map((row) => row.project_slug);
+}
+
+/**
+ * Ruling 540: a new reading of each bound project's repository, for its board
+ * and home card (U33-2). One `GET /repos/{repo}` each, in turn rather than all
+ * at once, the way GitHub asks one token's requests to arrive; a project left
+ * without a credential answers without a call.
+ */
+async function refreshBoundProjects(
+  db: DatabaseSync,
+  projectSlugs: readonly string[],
+  options: ConnectionOptions,
+): Promise<void> {
+  for (const projectSlug of projectSlugs) {
+    await refreshRepoAccess(db, projectSlug, options);
+  }
+}
+
 export type SaveConnectionResult =
   | { status: "saved"; connection: ConnectionRecord; toast: string }
   | { status: "duplicate"; message: string }
@@ -660,6 +693,9 @@ export async function replaceConnectionToken(
     subjectId: existing.id,
     details: { owner: existing.owner },
   });
+  // Ruling 540: every project bound to this token checks its repository with
+  // the new one now; a board that said "token expired" says what GitHub does.
+  await refreshBoundProjects(db, boundProjectSlugs(db, existing.patId), options);
 
   const connection = getConnection(db, existing.id)!;
   const expiry = formatCalendarDate(connection.expiresAt);
@@ -738,6 +774,11 @@ export async function recheckConnection(
           : "unknown",
     },
   });
+  // Ruling 540: GitHub's verdict on the token is the verdict on every bound
+  // project's repository too, so each board takes a new reading. An
+  // unreachable GitHub returned above: it evaluated nothing, so nothing is
+  // re-checked.
+  await refreshBoundProjects(db, boundProjectSlugs(db, existing.patId), options);
   if (validation.status !== "valid") {
     const why =
       validation.status === "insufficient_scope"
@@ -822,11 +863,11 @@ export type RemoveConnectionResult =
   | { status: "not_found" };
 
 /** Refuses to remove the default ("Set another connection as default first"). */
-export function removeConnection(
+export async function removeConnection(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
-): RemoveConnectionResult {
+): Promise<RemoveConnectionResult> {
   const existing = getConnection(db, id);
   if (!existing) return { status: "not_found" };
   if (existing.def) {
@@ -835,6 +876,8 @@ export function removeConnection(
       message: "Set another connection as default first",
     };
   }
+  // Ruling 540: read the bindings first; deleting the token cascades them away.
+  const unbound = boundProjectSlugs(db, existing.patId);
   db.prepare(`DELETE FROM github_connections WHERE id = ?`).run(id);
   deletePat(db, existing.patId, actor);
   recordAudit(db, {
@@ -844,5 +887,7 @@ export function removeConnection(
     subjectId: id,
     details: { owner: existing.owner },
   });
+  // Each of them has no credential now, which its board reads without a call.
+  await refreshBoundProjects(db, unbound, {});
   return { status: "removed", toast: `${existing.owner} disconnected` };
 }

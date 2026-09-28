@@ -82,9 +82,9 @@ import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
 
 /**
- * The two `GET /repos/{owner}/{repo}` fields the repair reads, decoded by the
+ * The two `GET /repos/{owner}/{repo}` fields the change reads, decoded by the
  * probe's `request`. Tolerant at every level — an unreadable field reads as
- * "unknown" and the repair falls back to the same behaviour it had before the
+ * "unknown" and the change falls back to the same behaviour it had before the
  * probe existed; the object-level catch means a 2xx never comes back as a
  * `decode` failure, so a reachable repo always reaches the write check.
  * The `permissions` block (F20-15, the read-only proof of write access) is
@@ -95,7 +95,7 @@ const repoProbeSchema = z
   .object({
     default_branch: z.string().min(1).nullable().catch(null),
     permissions: repoPermissionsSchema.nullable().catch(null),
-    // Ruling 517: the repair records what it read, as the other probes do.
+    // Ruling 517: the change records what it read, as the other probes do.
     private: z.boolean().nullable().catch(null),
   })
   .catch({ default_branch: null, permissions: null, private: null });
@@ -778,7 +778,7 @@ export async function setProjectGates(
   return { toast, gates, changed: true, queued };
 }
 
-// -------------------------------------------------------------- repo repair
+// -------------------------------------------------------- repository change
 
 /** `owner/name` from free input — tolerates a pasted GitHub URL and a
  * trailing `.git`, refuses anything that is not exactly one owner + one
@@ -794,8 +794,9 @@ function normalizeRepoInput(raw: string): string | null {
 }
 
 /** Tasks whose GitHub records point at the CURRENT repo: a linked PR, or
- * commits observed on a pushed branch. A truly misconfigured repo has zero
- * (every push failed), which is what keeps its repair friction-free. */
+ * commits observed on a pushed branch. A project that never reached its
+ * repository has zero (every push failed), which is what keeps changing it
+ * friction-free. */
 export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): number {
   const row = db
     .prepare(
@@ -809,22 +810,25 @@ export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): numbe
 }
 
 /**
- * Owner ruling 2026-07-26 — the repository identity stays ONE-per-project and
- * is deliberately not editable in place; this is the explicit REPAIR path for
- * the one legitimate case: the repo was misconfigured at creation (wrong
- * owner, wrong name, or both) and every sync has been failing since.
+ * A project has ONE repository (owner ruling 2026-07-26), and this is the one
+ * door that changes which. Ruling 539 renamed it: the owner pointed a new
+ * project at the repository it should have had and called "repair" the wrong
+ * word for that, so every surface says Change.
  *
  * Contract:
- *  - the human TYPES the corrected `owner/name` — nothing is inferred from
+ *  - the human TYPES the new `owner/name` — nothing is inferred from
  *    the connection owner and there is no automatic failover;
  *  - when a credential is bound, the new repo is probed live and a miss
- *    REFUSES the repair (a repair must not install the next
+ *    REFUSES the change (a change must not install the next
  *    misconfiguration); a hit also refreshes `defaultBranch` from GitHub;
  *  - a project whose tasks already carry PRs or pushed commits demands
  *    `confirmFootprint` — those records keep pointing at the old repo;
- *  - `edit-policy` tier (admin), audited from → to.
+ *  - `edit-policy` tier (admin), audited from → to;
+ *  - the probe is recorded as the new repository's reading, and a reading of
+ *    any other repository reads as none (ruling 517), so no surface goes on
+ *    describing the repository the project left.
  */
-export async function repairProjectRepo(
+export async function changeProjectRepo(
   db: DatabaseSync,
   input: { projectSlug: string; repo: string; confirmFootprint?: boolean },
   actor: SettingsActor,
@@ -837,7 +841,7 @@ export async function repairProjectRepo(
     "edit-policy",
     input.projectSlug,
     actor,
-    "repair the project repository",
+    "change the project repository",
   );
 
   const repo = normalizeRepoInput(input.repo);
@@ -861,12 +865,12 @@ export async function repairProjectRepo(
   const footprint = repoFootprintTasks(db, input.projectSlug);
   if (footprint > 0 && !input.confirmFootprint) {
     throw AppError.validation(
-      `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "the current repo"}. Confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
+      `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "the current repo"}. Confirm the change to proceed; those records keep their history but future sync runs against ${repo}.`,
     );
   }
 
   // Verify the target with the BOUND credential before anything is written.
-  // No credential → nothing to probe with; the repair applies and the
+  // No credential → nothing to probe with; the change applies and the
   // credential card keeps saying so.
   const ghOptions: GithubContextOptions = {};
   if (options.fetchImpl) ghOptions.fetchImpl = options.fetchImpl;
@@ -879,11 +883,11 @@ export async function repairProjectRepo(
     if (res.ok) {
       // F20-15: `res.ok` proves the credential can SEE the repo, not push to it.
       // Adopting a read-only-visible repo silently defers the failure to first
-      // delivery (live: repairing to a foreign public repo succeeded). Refuse a
+      // delivery (live: changing to a foreign public repo succeeded). Refuse a
       // PROVEN read-only target; an unknown/absent permissions block still passes.
       if (repoWritable(res.data.permissions) === false) {
         throw AppError.validation(
-          `The attached credential can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
+          `The attached credential can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then try again. Nothing was changed.`,
         );
       }
       probed = true;
@@ -896,7 +900,7 @@ export async function repairProjectRepo(
       };
     } else if (res.kind === "network") {
       throw AppError.validation(
-        `GitHub is unreachable (${res.message}). The repair was NOT applied. Try again when it is.`,
+        `GitHub is unreachable (${res.message}). Nothing was changed. Try again when it is.`,
       );
     } else if (res.status === 404) {
       throw AppError.validation(
@@ -904,7 +908,7 @@ export async function repairProjectRepo(
       );
     } else if (res.status === 401) {
       throw AppError.validation(
-        "GitHub rejected the attached credential. Update the token in Instance settings, then repair again. Nothing was changed.",
+        "GitHub rejected the attached credential. Update the token in Instance settings, then try again. Nothing was changed.",
       );
     } else {
       throw AppError.validation(
@@ -921,7 +925,7 @@ export async function repairProjectRepo(
   // The 30 s memoized repo-access probe still describes the OLD repo.
   invalidateRepoAccess(db, input.projectSlug);
   // Ruling 517: and so does the reading the board's banner and Home's pill
-  // show. The probe above is a reading of the new one; an unprobed repair
+  // show. The probe above is a reading of the new one; an unprobed change
   // leaves the old reading, which no surface shows for a repository the
   // project no longer points at.
   if (reading) recordRepoAccess(db, input.projectSlug, reading);
@@ -939,7 +943,7 @@ export async function repairProjectRepo(
 
   return {
     toast: probed
-      ? `Repository repaired: ${from ?? "unset"} → ${repo}${defaultBranch ? ` (default branch ${defaultBranch})` : ""}`
+      ? `Repository changed: ${from ?? "unset"} → ${repo}${defaultBranch ? ` (default branch ${defaultBranch})` : ""}`
       : `Repository set to ${repo}. Attach a credential to verify access`,
     changed: true,
     repo,

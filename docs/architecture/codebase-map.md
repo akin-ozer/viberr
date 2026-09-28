@@ -126,7 +126,7 @@ the route table is `app/routes.ts`.
 | `policy/` | Human access roles, agent capability rows, workflow rules, guardrails, required reviewers, permission table from `rbac.ts`. |
 | `github/` | Repository panel, credential card (shared with settings), PR list, branch table, reconcile and grant-scope actions, credential redaction by role. |
 | `activity/` | Cross-task stream and project audit column with compaction and paging. |
-| `project-settings/` | Identity, workflow stages (with colour presets, ruling 364), required reviewers, file leases, members, repository and credentials (repair, scope re-check, branch cleanup toggle), danger zone. |
+| `project-settings/` | Identity, workflow stages (with colour presets, ruling 364), required reviewers, file leases, members, repository and credentials (change, scope re-check, branch cleanup toggle), danger zone. |
 | `org-settings/` | Tabs: GitHub connections, users and access, sign-in & SSO, agent resources (KBs, MCP servers, skills, global agent templates, store browser), controller (profile, locks, standing requests); below the tabs: run concurrency and run spend cap, the audit export card, the storage line. |
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
 | `controller/` | The conversation surface; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |

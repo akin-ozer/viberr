@@ -22,6 +22,7 @@ import {
 } from "~/features/github/credential-visibility.server";
 import {
   addStage,
+  changeProjectRepo,
   recolorStage,
   deleteProject,
   setProjectArchived,
@@ -33,7 +34,6 @@ import {
   removeStage,
   renameStage,
   reorderStages,
-  repairProjectRepo,
   setBranchCleanup,
   setProjectFileLeases,
   setProjectGates,
@@ -188,11 +188,11 @@ export async function action({ request, params }: Route.ActionArgs) {
       // consulted, next to copy on three surfaces promising a capability
       // nothing could write. One project, one repository.
       //
-      // Owner ruling 2026-07-26: …and one explicit REPAIR path for the repo
-      // misconfigured at creation. The human types the corrected owner/name;
-      // the server probes it with the bound credential and refuses misses.
-      case "repair-repo": {
-        const result = await repairProjectRepo(
+      // Owner ruling 2026-07-26: …and one door that changes WHICH repository
+      // (ruling 539 named it Change). The human types the new owner/name; the
+      // server probes it with the bound credential and refuses misses.
+      case "change-repo": {
+        const result = await changeProjectRepo(
           db,
           {
             projectSlug: slug,
@@ -257,7 +257,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential");
         return intent === "set-credential"
           ? await runSetCredential(db, slug, actor)
-          : runClearCredential(db, slug, actor);
+          : await runClearCredential(db, slug, actor);
       }
       case "archive-project": {
         const result = await setProjectArchived(

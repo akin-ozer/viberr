@@ -156,6 +156,32 @@ export function invalidateRepoAccess(
   repoAccessCache.get(db)?.delete(projectSlug);
 }
 
+/**
+ * Ruling 540: take a new reading of a project's repository after something it
+ * depends on changed (the project's credential, or the token behind it) and
+ * record it for the board and the home card (U33-2), which otherwise kept
+ * their verdict about what was there before: "token revoked" after a working
+ * connection was attached, "token expired" on every bound board after Update
+ * token. Deleting the row would not do: it clears a failure the change did not
+ * fix. As in ruling 517's re-check, an unreachable GitHub is not an answer, so
+ * it records nothing and a failure still shown is taken again by the poller.
+ * The memo is dropped, not refilled: the GitHub page's next load asks again.
+ * A project with no credential or no repository answers without a GitHub call.
+ */
+export async function refreshRepoAccess(
+  db: DatabaseSync,
+  projectSlug: string,
+  ctx: { fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  invalidateRepoAccess(db, projectSlug);
+  const result = await checkRepoAccess(
+    db,
+    projectSlug,
+    ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {},
+  );
+  if (result.status !== "network_unavailable") recordRepoAccess(db, projectSlug, result);
+}
+
 async function checkRepoAccessCached(
   db: DatabaseSync,
   projectSlug: string,

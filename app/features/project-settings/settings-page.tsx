@@ -2013,13 +2013,14 @@ export function MembersPanel({
 // -------------------------------------------------- repository & credentials
 
 /**
- * Owner ruling 2026-07-26: the repository stays one-per-project and read-only —
- * this dialog is the explicit repair path for a repo misconfigured at creation
- * (wrong owner, wrong name, or both). The human TYPES the corrected target;
- * the server probes it with the bound credential and refuses misses. Nothing
- * is inferred and there is no automatic failover.
+ * Owner ruling 2026-07-26: a project has one repository, and this dialog is
+ * the one door that changes which (ruling 539 named it Change: "repair" was
+ * the wrong word for pointing a project at the repository it should have had).
+ * The human TYPES the new target; the server probes it with the bound
+ * credential and refuses misses. Nothing is inferred and there is no
+ * automatic failover.
  */
-function RepairRepoDialog({
+function ChangeRepoDialog({
   current,
   footprintTasks,
   hasCredential,
@@ -2034,7 +2035,7 @@ function RepairRepoDialog({
   hasCredential: boolean;
   busy: boolean;
   result: { ok: boolean; error?: string } | undefined;
-  /** The repair landed: the dialog plays its exit, then onCancel unmounts it
+  /** The change landed: the dialog plays its exit, then onCancel unmounts it
    *  (ruling 459). */
   done: boolean;
   onCancel: () => void;
@@ -2070,16 +2071,15 @@ function RepairRepoDialog({
   };
   const flagged = refused > 0 ? missing : null;
   return (
-    <dialog ref={ref} className="confirm-card" aria-label="Repair repository">
+    <dialog ref={ref} className="confirm-card" aria-label="Change repository">
       {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
       <div className="confirm-icon primary">
         <Icon name="github" />
       </div>
-      <h3>Repair repository</h3>
+      <h3>Change repository</h3>
       <p>
         Currently <code className="mono">{current ?? "unset"}</code>. Enter the
-        corrected <span className="mono">owner/name</span>. This is for the
-        project that was misconfigured at creation, not for moving healthy work.
+        repository to use instead, as <span className="mono">owner/name</span>.
       </p>
       <div className="field">
         <input
@@ -2088,16 +2088,16 @@ function RepairRepoDialog({
           className="mono"
           value={repo}
           placeholder="owner/name"
-          aria-label="Corrected repository, owner/name"
+          aria-label="New repository, owner/name"
           aria-invalid={flagged === "repo" || undefined}
-          aria-describedby={flagged === "repo" ? "repair-unmet" : undefined}
+          aria-describedby={flagged === "repo" ? "repo-unmet" : undefined}
           onChange={(e) => setRepo(e.target.value)}
           data-autofocus=""
         />
       </div>
-      <p className="repair-note">
+      <p className="repo-note">
         {hasCredential
-          ? "The new repository is verified with the attached credential before anything changes. A repo the token can't see refuses the repair."
+          ? "Viberr checks it with the attached credential first, and changes nothing if the token can't push to it."
           : "No credential is attached, so the new repository can't be verified until one is."}
       </p>
       {footprintTasks > 0 && (
@@ -2109,7 +2109,7 @@ function RepairRepoDialog({
             type="checkbox"
             checked={ack}
             aria-invalid={flagged === "ack" || undefined}
-            aria-describedby={flagged === "ack" ? "repair-unmet" : undefined}
+            aria-describedby={flagged === "ack" ? "repo-unmet" : undefined}
             onChange={(e) => setAck(e.target.checked)}
           />
           <span>
@@ -2121,7 +2121,7 @@ function RepairRepoDialog({
         </label>
       )}
       {/* Pass-19 UX audit #20 named this slot too, but it is NOT silent: the
-          repair rides `repoFetcher`, and `useActionToast(repoFetcher)` in
+          change rides `repoFetcher`, and `useActionToast(repoFetcher)` in
           SettingsPage already pushes the failure through the app's announcer
           with the error glyph. This div is the "also render it in place" half.
           Adding `role="alert"` here would announce the same refusal twice. */}
@@ -2137,7 +2137,7 @@ function RepairRepoDialog({
           className={"form-err spaced" + (refusalShake.shake ? " refused" : "")}
           onAnimationEnd={refusalShake.onAnimationEnd}
           role="alert"
-          id="repair-unmet"
+          id="repo-unmet"
           key={"refused-" + refused}
         >
           <Icon name="alert" />
@@ -2157,7 +2157,7 @@ function RepairRepoDialog({
           aria-busy={busy}
           onClick={submit}
         >
-          Repair repository
+          Change repository
         </button>
       </div>
     </dialog>
@@ -2170,12 +2170,12 @@ export function RepoPanel({
   canGrant,
   inFlight,
   credInFlight,
-  canRepair,
+  canEditPolicy,
   footprintTasks,
   branchCleanup,
-  repairBusy,
-  repairResult,
-  onRepair,
+  repoBusy,
+  changeResult,
+  onChangeRepo,
   onSetBranchCleanup,
   onGrantScope,
   onSetCredential,
@@ -2186,20 +2186,20 @@ export function RepoPanel({
   repo: string | null;
   credential: SettingsViewData["credential"];
   canGrant: boolean;
-  /** Ruling 368: the intent the repository fetcher is carrying (repair,
+  /** Ruling 368: the intent the repository fetcher is carrying (the change,
    *  branch cleanup or the scope re-check), null while it is idle. */
   inFlight: string | null;
   /** The same for the credential fetcher (attach / re-attach / remove). */
   credInFlight: string | null;
   /** `edit-policy` (admin) — the repo is project identity, one tier above the
    *  credential actions. */
-  canRepair: boolean;
+  canEditPolicy: boolean;
   footprintTasks: number;
   /** R15-6: delete the task branch on GitHub once its review PR merges. */
   branchCleanup: boolean;
-  repairBusy: boolean;
-  repairResult: { ok: boolean; toast?: string; error?: string } | undefined;
-  onRepair: (repo: string, confirmFootprint: boolean) => void;
+  repoBusy: boolean;
+  changeResult: { ok: boolean; toast?: string; error?: string } | undefined;
+  onChangeRepo: (repo: string, confirmFootprint: boolean) => void;
   onSetBranchCleanup: (enabled: boolean) => void;
   onGrantScope: () => void;
   onSetCredential: () => void;
@@ -2210,19 +2210,19 @@ export function RepoPanel({
    *  admin-only; everyone else reads where a token is replaced). */
   instanceAdmin?: boolean;
 }) {
-  const [repairing, setRepairing] = useState(false);
+  const [changing, setChanging] = useState(false);
   const rechecking = inFlight === "grant-scope";
-  // Close the dialog only when a repair SUCCEEDS — a probe refusal keeps it
+  // Close the dialog only when a change SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
-  // Ruling 459: through the dialog's exit (`repairDone`), then its onCancel
+  // Ruling 459: through the dialog's exit (`changeDone`), then its onCancel
   // unmounts it.
-  const [repairDone, setRepairDone] = useState(false);
-  const settled = useRef<unknown>(repairResult);
+  const [changeDone, setChangeDone] = useState(false);
+  const settled = useRef<unknown>(changeResult);
   useEffect(() => {
-    if (!repairResult || settled.current === repairResult) return;
-    settled.current = repairResult;
-    if (repairResult.ok) setRepairDone(true);
-  }, [repairResult]);
+    if (!changeResult || settled.current === changeResult) return;
+    settled.current = changeResult;
+    if (changeResult.ok) setChangeDone(true);
+  }, [changeResult]);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -2232,15 +2232,15 @@ export function RepoPanel({
       {/* UXA-3: LV-F2's lock note reached the Project, Stages and Members
           panels but not this one — yet its "delete the task branch on GitHub"
           checkbox is `disabled` for a role without the grant, with the sibling
-          Repair control hidden entirely. Same silent-disabled defect; same
+          Change control hidden entirely. Same silent-disabled defect; same
           remedy, naming the grant this panel actually needs. */}
-      {!canRepair && (
+      {!canEditPolicy && (
         <div className="pol-note">
           <Icon name="lock" />
           <span>
             {/* F20-16: real grant + tier (see the identity card note). */}
-            Read-only. Repairing the repository binding and changing the
-            after-merge branch policy need the{" "}
+            Read-only. Changing the repository and the after-merge branch
+            policy needs the{" "}
             <strong>Edit workflow &amp; policy</strong> grant (project admin).
           </span>
         </div>
@@ -2255,19 +2255,18 @@ export function RepoPanel({
             ) : (
               <span className="fine md dim">not set</span>
             )}
-            {canRepair && (
+            {canEditPolicy && (
               <button
                 type="button"
-                className="btn ghost sm repair-btn"
+                className="btn ghost sm repo-btn"
                 onClick={() => {
-                  // A repair that landed after a Cancel must not close the
+                  // A change that landed after a Cancel must not close the
                   // next opening at once.
-                  setRepairDone(false);
-                  setRepairing(true);
+                  setChangeDone(false);
+                  setChanging(true);
                 }}
-                title="Fix a repository that was misconfigured at creation. The fix is verified against the attached credential before anything changes"
               >
-                Repair…
+                Change…
               </button>
             )}
           </span>
@@ -2287,12 +2286,12 @@ export function RepoPanel({
           <span className="v light">
             <label
               className="check-line"
-              style={{ cursor: canRepair ? "pointer" : "default" }}
+              style={{ cursor: canEditPolicy ? "pointer" : "default" }}
             >
               <input
                 type="checkbox"
                 checked={branchCleanup}
-                disabled={!canRepair || repairBusy}
+                disabled={!canEditPolicy || repoBusy}
                 onChange={(e) => onSetBranchCleanup(e.target.checked)}
               />
               delete the task branch on GitHub
@@ -2301,19 +2300,19 @@ export function RepoPanel({
         </div>
       </div>
 
-      {repairing && (
-        <RepairRepoDialog
+      {changing && (
+        <ChangeRepoDialog
           current={repo}
           footprintTasks={footprintTasks}
           hasCredential={credential.source === "pat"}
-          busy={repairBusy}
-          result={repairResult}
-          done={repairDone}
+          busy={repoBusy}
+          result={changeResult}
+          done={changeDone}
           onCancel={() => {
-            setRepairing(false);
-            setRepairDone(false);
+            setChanging(false);
+            setChangeDone(false);
           }}
-          onSubmit={onRepair}
+          onSubmit={onChangeRepo}
         />
       )}
 
@@ -2575,7 +2574,7 @@ export function SettingsPage({
 
   // E3: every panel gate names the RbacAction its OWN server mutation checks,
   // never a shared `myRole === "admin"` literal. Project identity, the stage
-  // editor and the repo panel (repair + branch-cleanup) all reach
+  // editor and the repo panel (repository change + branch cleanup) all reach
   // `requireProjectAction(..., "edit-policy", ...)` in settings-actions.server;
   // membership CRUD reaches `manage-members`; the credential/scope actions
   // reach `grant-github-scope` (project.github.tsx). `edit-policy` and
@@ -2764,18 +2763,18 @@ export function SettingsPage({
             canGrant={canGrant}
             inFlight={inFlightIntent(repoFetcher)}
             credInFlight={inFlightIntent(credFetcher)}
-            canRepair={canEditPolicy}
+            canEditPolicy={canEditPolicy}
             footprintTasks={data.repoFootprintTasks}
             branchCleanup={data.branchCleanupOnMerge}
-            repairBusy={repoFetcher.state !== "idle"}
-            repairResult={repoFetcher.data}
-            onRepair={(repoInput, confirmFootprint) => {
+            repoBusy={repoFetcher.state !== "idle"}
+            changeResult={repoFetcher.data}
+            onChangeRepo={(repoInput, confirmFootprint) => {
               const fields = {
-                intent: "repair-repo",
+                intent: "change-repo",
                 _csrf: csrf,
                 repo: repoInput,
               };
-              // Only a confirmed repair carries the field: the route reads it
+              // Only a confirmed change carries the field: the route reads it
               // as `confirmFootprint === "1"`, so it is sent or absent, never
               // blank.
               repoFetcher.submit(

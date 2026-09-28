@@ -13,17 +13,18 @@
  *
  * This module is the memory that closes it. Every writer is a place that
  * already takes a `RepoAccessResult`: the GitHub page's cached probe, project
- * creation's own probe, a repository repair's probe, and the reconcile poller's
- * re-check of a failing reading. So the board and the home card read a row
- * instead of calling GitHub on a hot render path. That constraint is the whole
- * design: a board that phones GitHub on every render would be a worse defect
- * than the one being fixed.
+ * creation's own probe, a repository change's probe, the reconcile poller's
+ * re-check of a failing reading, and the reading a credential or token change
+ * takes (`refreshRepoAccess`, ruling 540). So the board and the home card read
+ * a row instead of calling GitHub on a hot render path. That constraint is the
+ * whole design: a board that phones GitHub on every render would be a worse
+ * defect than the one being fixed.
  *
  * Ruling 517: a reading is OF a repository, and a failing one is taken again.
  * Live on 2026-09-27 a board kept saying "akin-ozer/akin-website · repo not
  * found", a repository the owner's account does not have. The row is keyed by
- * project and only the first two writers above wrote it, so a repair in
- * Project settings, which probes the new repository, left the old
+ * project and only the first two writers above wrote it, so changing the
+ * repository in Project settings, which probes the new one, left the old
  * repository's verdict on the board (and Home printed that verdict beside the
  * new name), and a repository created on GitHub, or a token given access to
  * it, changed nothing until someone opened the GitHub page. So a reading of

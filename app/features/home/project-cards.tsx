@@ -180,7 +180,7 @@ function RepoLine({
       <Icon name="github" />
       {repo ?? "no repository"}
       {degraded && (
-        <span title="GitHub won't serve this repository, so agent runs here fail their clone. The project's GitHub page has the detail and the repair.">
+        <span title="GitHub won't serve this repository, so agent runs here fail their clone. The project's GitHub page has the detail.">
           <Pill kind={pill.kind} sm>
             {pill.label}
           </Pill>

@@ -144,7 +144,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       requireGithubAction("grant-github-scope", "change the credential");
       return intent === "set-credential"
         ? await runSetCredential(db, params.slug, actor)
-        : runClearCredential(db, params.slug, actor);
+        : await runClearCredential(db, params.slug, actor);
     }
     return data(
       { ok: false as const, error: "Unknown action." },

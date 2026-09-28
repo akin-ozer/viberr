@@ -30,7 +30,7 @@ import {
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { logger } from "~/server/logging/logger.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
-import { invalidateRepoAccess } from "./github-query.server";
+import { refreshRepoAccess } from "./github-query.server";
 import { errorMessage } from "~/shared/errors";
 
 /**
@@ -125,9 +125,10 @@ export async function runGrantScope(
   ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<GithubActionOutcome> {
   const result = await revalidateProjectCredential(db, projectSlug, actor, ctx);
-  // LV-05: a re-validation can change the credential's health, so the memoized
-  // connection probe must not keep serving the pre-check answer.
-  invalidateRepoAccess(db, projectSlug);
+  // LV-05, ruling 540: a re-validation can change the credential's health, so
+  // neither the memo nor the board's remembered check may keep the pre-check
+  // answer.
+  await refreshRepoAccess(db, projectSlug, ctx);
 
   if (result.status !== "revalidated") {
     return {
@@ -259,7 +260,7 @@ async function probeRepoWithConnection(
  *
  * It is not REQUIRED, though: owner-matching was briefly a hard refusal, which
  * stranded the entirely legitimate one-PAT-many-owners setup (org repos,
- * collaborator repos) that `repairProjectRepo` explicitly supports — it accepts
+ * collaborator repos) that `changeProjectRepo` explicitly supports — it accepts
  * any `owner/name` and infers nothing from connection owners. So a project with
  * no owner-matched connection falls back to the org default and asks GitHub
  * whether that token reaches the repo; only a real access miss refuses.
@@ -321,9 +322,11 @@ export async function runSetCredential(
 
   const previousPatId = getProjectCredential(db, projectSlug)?.id ?? null;
   setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
-  // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
-  // probe. Without this the row kept saying "no credential" after a full reload.
-  invalidateRepoAccess(db, projectSlug);
+  // LV-05, ruling 540: the connection pill and the board read a remembered
+  // `checkRepoAccess` probe. Without a new one the pill kept saying "no
+  // credential" after a full reload, and the board kept its verdict about the
+  // credential this one replaced.
+  await refreshRepoAccess(db, projectSlug, ctx);
   const proveCtx: CredentialCallContext = { dataRoot: ctx.dataRoot };
   if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
   await proveAttachedCredential(db, projectSlug, actor, proveCtx);
@@ -358,15 +361,16 @@ export async function runSetCredential(
  * so branch/PR sync goes offline (the health reader falls back to the
  * credentialPolicy display, or "none"). Idempotent.
  */
-export function runClearCredential(
+export async function runClearCredential(
   db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
-): GithubActionOutcome {
+): Promise<GithubActionOutcome> {
   const cleared = clearProjectCredential(db, projectSlug, actor);
-  // LV-05: same invalidation on removal — otherwise the pill keeps claiming
-  // "connected" for up to 30 s after the credential is gone.
-  invalidateRepoAccess(db, projectSlug);
+  // LV-05, ruling 540: same new reading on removal, otherwise the pill claims
+  // "connected" for up to 30 s after the credential is gone and the board
+  // keeps its verdict about it. With no credential it needs no GitHub call.
+  await refreshRepoAccess(db, projectSlug);
   return {
     ok: true,
     toast: cleared

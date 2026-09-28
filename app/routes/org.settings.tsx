@@ -307,7 +307,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "connection-remove": {
-        const result = removeConnection(db, field("connectionId"), actor);
+        const result = await removeConnection(db, field("connectionId"), actor);
         if (result.status === "not_found") {
           return fail("That connection no longer exists.", 404);
         }

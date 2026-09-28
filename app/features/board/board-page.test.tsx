@@ -2146,7 +2146,7 @@ describe("U33-2: an unreachable repository has a home on the board", () => {
     expect(banner(renderBoard([task()]).container)).toBeNull();
   });
 
-  it("names the repository, GitHub's own answer, and where the repair lives", () => {
+  it("names the repository, GitHub's own answer, and where the detail lives", () => {
     const { container } = renderBoard([task()], {
       repoAccess: { status: "repo_not_found", repo: "akin-ozer/sandbox" },
     });
