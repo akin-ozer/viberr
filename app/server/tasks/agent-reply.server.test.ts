@@ -1123,6 +1123,58 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
   });
 
+  it("ruling 562: the answer to an agent that cannot run at the task's stage now goes to the operator, and says so", async () => {
+    // Live on AWSC-6 the task had moved on to Estimate while the Cloud
+    // Solutions Architect's mapping question was open, and the answer was
+    // posted to it as "Continue from where you stopped" before its run was
+    // refused. CANARY: drop the eligibility check from `answerAskingAgent` and
+    // the hand-back is posted to an agent that never runs; restore the fixed
+    // sentence and the record promises an operator summon nobody made.
+    scopeBothToReview();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        engagements: [
+          { profileId: "dev", backend: "claude", role: "developer", delivers: true, verdictCapable: false },
+          { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
+        ],
+      }),
+      packet: {
+        id: "pkt_562",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/rev (reviewer)",
+        askedBy: "rev",
+        title: "Keep the proposed defaults?",
+        body: "The mapping applies defaults for the gaps.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Keep the defaults", d: "", rec: true },
+          { kind: "custom", t: "Send corrections", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    sessionRow("run_rev_562", "rev", "reviewer");
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const texts = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline.map(
+      (e) => e.text,
+    );
+    expect(texts.some((t) => t.includes("has been answered by a human"))).toBe(false);
+    expect(texts).toContain(
+      "The answer went to the operator, not back to rev, who asked: rev is not eligible for the In Progress stage; its profile is scoped to Review.",
+    );
+    expect(texts).toContain("**Decision:** Keep the defaults.");
+    expect(listRunsForTaskRows(store.db, store.slug, "VIB-1").filter((r) => r.agent_profile_id === "rev")).toHaveLength(1);
+  });
+
   it("F37-62: the RESUME door refuses a CLOSED task, like every other dispatch door", async () => {
     // Ruling 177: "a closed task refuses every coordination door". The
     // Run-an-agent control on the same page refuses a Done task by name because

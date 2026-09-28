@@ -18,7 +18,7 @@ import {
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
-import { readBoardList, readBoardTask } from "./board-read.server";
+import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   readTaskFile,
@@ -730,6 +730,30 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               err: toError(error),
             });
             return textResult("[error] The board could not be read.");
+          }
+        },
+      ),
+      // Ruling 563: the prompt's recent timeline clips every entry at 220
+      // characters, and nothing here returned one whole, the gap ruling 285
+      // closed for the operator. Live on AWSC-4 a retried run got a person's
+      // four-item answer as "1=Shared … 2=RDS for SQL Server 2…" and raised a
+      // packet asking for it again. Same gate as `read_board`: this task only,
+      // read-only, nothing a member could not read on the task page.
+      tool(
+        "read_timeline_entry",
+        "Read ONE entry of this task's timeline in full, by its `occurredAt` stamp. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp: call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you. Read-only.",
+        {
+          occurredAt: z
+            .string()
+            .describe("The entry's stamp, exactly as your prompt prints it (ISO, to the millisecond)."),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            return textResult(readTimelineEntry({ db, ctx, projectSlug }, taskKey, args.occurredAt));
+          } catch (error) {
+            logger.warn("agent read_timeline_entry failed", { taskKey, err: toError(error) });
+            return textResult("[error] The timeline could not be read.");
           }
         },
       ),

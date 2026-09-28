@@ -175,7 +175,7 @@ import {
   type NoChangeVerification,
 } from "./no-change-completion.server";
 import { newId } from "~/shared/ids/new-id.server";
-import { AppError } from "~/server/errors/app-error.server";
+import { AppError, isAppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 // OBS-11: R15-6's post-merge branch-cleanup switch. A leaf module (one
 // projection read + the guardrail schema), so no dynamic import is needed.
@@ -1470,7 +1470,7 @@ async function answerAskingAgent(
 ): Promise<boolean> {
   try {
     const { agentMentionHandle } = await import("./agent-reply.server");
-    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const { assertResumeEligible, listDeployedSpecialists } = await import("./specialist-run.server");
     const specialistCtx: TaskMutationContext = {};
     if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
     const deployed = listDeployedSpecialists(
@@ -1478,6 +1478,30 @@ async function answerAskingAgent(
       specialistCtx,
     ).find((a: { id: string }) => a.id === input.profileId);
     if (!deployed) return false;
+
+    // Ruling 562: only an agent that can run on the task now is handed the
+    // answer. Live on AWSC-6 the task had moved on to Estimate by the time Arda
+    // answered the Cloud Solutions Architect's mapping question, and "Continue
+    // from where you stopped" was posted to an agent that does not run there:
+    // the run was refused after the comment was down, and nothing said so. The
+    // operator takes the answer instead, and the record says why.
+    try {
+      assertResumeEligible(db, specialistCtx, input.projectSlug, input.taskKey, deployed.id);
+    } catch (error) {
+      if (!isAppError(error)) throw error;
+      const why = error.userMessage.split(/(?<=\.)\s/)[0] ?? error.userMessage;
+      await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), {
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text: `The answer went to the operator, not back to ${deployed.name}, who asked: ${why}`,
+        toAgent: false,
+        evidence: null,
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      return false;
+    }
 
     // Address the agent by the SAME handle a human would type, so resolution
     // goes through one code path instead of a private back door that can drift
@@ -1985,8 +2009,12 @@ function anchorActorLabel(actor: FileActorRef): string {
   }
 }
 
+function anchorFlat(text: string): string {
+  return text.trim().replace(/\s*\n\s*/g, " ");
+}
+
 function anchorClamp(text: string, max: number): string {
-  const flat = text.trim().replace(/\s*\n\s*/g, " ");
+  const flat = anchorFlat(text);
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
@@ -2144,8 +2172,14 @@ export function canonicalTaskAnchor(input: {
     lines.push("");
     lines.push("### Recent timeline (newest first)");
     for (const e of recent) {
+      // Ruling 563: a clipped entry names its stamp, the address
+      // `read_timeline_entry` takes, so the rest is one call away. Live on
+      // AWSC-4 a person's four-item answer reached a retried run as "1=Shared
+      // … 2=RDS for SQL Server 2…", and the agent had to ask for it again.
+      const clipped = anchorFlat(e.text).length > ANCHOR_EVENT_MAX_CHARS;
       lines.push(
-        `- ${e.type} · ${anchorActorLabel(e.actor)}: ${anchorClamp(e.text, ANCHOR_EVENT_MAX_CHARS)}`,
+        `- ${e.type} · ${anchorActorLabel(e.actor)}: ${anchorClamp(e.text, ANCHOR_EVENT_MAX_CHARS)}` +
+          (clipped ? ` (clipped; the whole entry is at \`${e.occurredAt}\`)` : ""),
       );
     }
   }
@@ -11616,7 +11650,12 @@ export async function resolvePacket(
         title: null,
         text:
           (option.ev ??
-            `**Decision:** ${option.t}. Operator re-engages the specialist with a summon note.`) +
+            // Ruling 562: an agent's question is answered back to that agent
+            // when it can run, and to the operator when it cannot; the events
+            // that follow say which. Its record names the decision only.
+            (packet.kind === AGENT_QUESTION_PACKET_KIND && packet.askedBy?.trim()
+              ? `**Decision:** ${option.t}.`
+              : `**Decision:** ${option.t}. Operator re-engages the specialist with a summon note.`)) +
           returnNote,
         toAgent: false,
         evidence: null,

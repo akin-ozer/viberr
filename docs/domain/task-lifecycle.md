@@ -635,7 +635,9 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   refused and nothing is recorded (ruling 315).
   An answer that names another deployed agent or the operator goes to the operator with
   the `packet-resolved` trigger rather than back to the agent that asked
-  (`answerNamesAnotherActor`, ruling 447).
+  (`answerNamesAnotherActor`, ruling 447), and so does one for an asker that cannot run
+  on the task now, such as a mapping agent whose question was answered after the task
+  moved on to Estimate (ruling 562).
 - `edit_goal` is the only kind that keeps its packet open until the goal is saved; the
   confirm stamps `decided` beside `awaiting`, so the card, the hero, the queue and the
   rail all read the packet as decided after a reload, and the editor prefill is
