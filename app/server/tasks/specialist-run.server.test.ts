@@ -5222,6 +5222,55 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(confinement.runInputs.delivers).toBe(true);
   });
 
+  it("ruling 564: a Claude run that posts files records its file tools as confined, not denied", async () => {
+    // The console reads what the adapter's hook reads (`fileWriteRoots`), so it
+    // cannot say "denied: Write" on a run whose Write works. Canaries: drop the
+    // `fileWriteRoots:` argument on the fresh path (the first block fails) or on
+    // the resume path (the second fails).
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    const postsFiles = (backend: "claude" | "codex") => ({
+      profileId: "dev",
+      capabilities: [{ capabilityId: "attach-evidence-references", mode: "direct" as const }],
+      extras: [],
+      definition: {
+        kind: "specialist" as const,
+        name: "dev",
+        role: "developer",
+        backends: [backend],
+        model: backend === "claude" ? "sonnet" : "gpt-5-codex",
+        resources: { skills: [], mcps: [], kb: [] },
+      },
+    });
+    writeProject(store.dataRoot, { ...fm, agents: [postsFiles("claude")] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const drop = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments");
+    const fresh = inputsLine(await assignAndRun())!;
+    expect(fresh.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    expect(fresh.tools.denied).toContain("NotebookEdit");
+    expect(fresh.tools.denied).not.toContain("Write");
+
+    const resume = (backend: "claude" | "codex") =>
+      resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend, delivers: true },
+      );
+    const claude = await resume("claude");
+    expect(claude.runInputs.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    expect(claude.runInputs.tools.denied).not.toContain("Write");
+    // The adapter is still handed the grants' whole denylist, and confines from it.
+    expect(claude.disallowedTools).toContain("Write");
+
+    // Codex: the write posture is advisory (ruling 185), nothing is confined,
+    // and the row keeps every entry the grants deny.
+    writeProject(store.dataRoot, { ...fm, agents: [postsFiles("codex")] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const codex = await resume("codex");
+    expect(codex.runInputs.tools.fileWriteRoots).toBeUndefined();
+    expect(codex.runInputs.tools.denied).toContain("Write");
+  });
+
   it("says so when a resumed run's profile cannot be resolved at all", async () => {
     // The conservative branch. It withholds every delivery tool — and now says
     // WHY on the run, instead of a console that just looks unusually quiet.

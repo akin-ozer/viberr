@@ -455,6 +455,19 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   and let `git -C . push` and `sh -c 'git push'` land. With the hook, all five were refused
   and nothing landed. The hook runs before the rules and only ever denies; the rules stay
   the fence.
+- File tools of a run that posts files (ruling 564). A specialist or review run with an
+  attachments folder (`spec.attachmentsWritableDir`, its profile holds
+  `attach-evidence-references`) whose grants deny `Edit`, `MultiEdit` and `Write` keeps
+  the three: `fileWriteRoots` (`file-tool-policy.server.ts`) names the folder and the temp
+  directory, the SDK is handed the denylist without them (`NotebookEdit` stays denied),
+  and a second `PreToolUse` hook, matcher `Edit|MultiEdit|Write`, refuses a call whose
+  `file_path` resolves outside both roots (symlinks resolved, so `/tmp` and `/private/tmp`
+  compare), naming the withheld grant and the folder. Its refusals write the same
+  `permission_denied` frame, named for the file tool. The Bash hook's reasons still read
+  the grants' whole denylist, so a refused `git commit` names the repo-write grant. The
+  operator and the controller never qualify. The run's disclosure takes the same
+  derivation: `tools.denied` drops the three and `tools.fileWriteRoots` lists the roots,
+  which the console's tools row states. Codex is unchanged (advisory, ruling 185).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
@@ -1346,7 +1359,7 @@ resources, MCP server editor), per mounted server, derived from the same denylis
 
 | Withheld capability | Claude denies | Codex |
 |---|---|---|
-| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | advisory (ruling 185) |
+| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)`; a run with an attachments folder keeps `Edit MultiEdit Write`, confined by a hook to that folder and the temp directory (ruling 564) | advisory (ruling 185) |
 | `execute-code-or-write-repo`, org MCP write tools (ruling 176) | `mcp__<server>__<tool>` for each marked tool; an HTTP config also carries `always_deny` | that server's `disabled_tools` (binds) |
 | the same, on a server reached through the MCP gateway (ruling 461) | as above, and the gateway leaves the tool out of `tools/list` and refuses a call to it | as above, plus the gateway's filter and refusal |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
