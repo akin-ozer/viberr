@@ -3401,6 +3401,28 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(withReviewer).toContain('"consecutiveRequestChanges": 3');
   });
 
+  /**
+   * Ruling 531: a board can deliver results (ruling 530), and the operator is
+   * told how such a task is scoped and delivered in its own turn, not only in
+   * a doctrine a project can override. Live, the aws-cost-calculator CALC-4
+   * pilot estimate was committed and delivered as PR #4.
+   */
+  it("ruling 531: triage says when a results task is concrete, and every turn says a result is delivered on the task", () => {
+    // CANARY: drop RESULT_GOAL_RULE from triageQualityGate, or
+    // RESULT_DELIVERY_RULE from stageRule or from the agent-reply turn, which
+    // returns before the stage rules and is where a report gets delivered.
+    const triage = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
+    expect(triage).toContain("is concrete when it names the result, the files it comes back in on this task");
+    const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Estimate the attached inventory." });
+    for (const trigger of ["manual", "agent-reply"] as const) {
+      const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, trigger);
+      expect(prompt, trigger).toContain(
+        "A task whose deliverable is a result is delivered on the task, never in a pull request",
+      );
+      expect(prompt, trigger).toContain("never call `deliver_for_review` for it, even when it committed something");
+    }
+  });
+
   it("F15-14: the entry stage carries the gate — no forward move on a vague goal", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
     expect(prompt).toContain("TRIAGE QUALITY GATE");

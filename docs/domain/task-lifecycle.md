@@ -835,7 +835,12 @@ them.
    that finishes after the closure records its report with a "Completed after the task
    closed" note and wakes no operator.
 4. **Verdict gate**: every required reviewer must have approved the current review
-   subject and none may request changes (ruling 20). Force-accept bypasses this and is
+   subject and none may request changes (ruling 20). The engaged reviewers' gate
+   (`acceptanceBlockedReason`) reads the subject through `reviewSubjectId`, as the
+   project rule below does (ruling 531): a delivery that is files on the task is
+   released by an approval bound to `files:<deliveredAt>`, and its refusals name "the
+   work delivered on this task". Keyed on the work revision alone, it had refused every
+   files-only task whose reviewer was engaged with "No reviewed revision yet". Force-accept bypasses this and is
    audited `task.acceptance.forced` with EVERY gate it bypassed (U35-3: `bypassedGates`
    is the full refusal list in gate order, `skippedStages` the stage ids jumped,
    `validation`, `withdrawnPacket`; `bypassed` keeps the sentences joined with " | " for

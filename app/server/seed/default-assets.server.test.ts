@@ -337,6 +337,29 @@ describe("shipped-asset refresh (B-OP1)", () => {
     );
   });
 
+  /**
+   * Ruling 531: the operator scopes and delivers a task whose deliverable is a
+   * result (ruling 530) on the task. The turn prompt carries both rules from
+   * `result-delivery.server.ts`; the doctrine a project reads quotes them, so
+   * the two cannot drift, and a store seeded before them upgrades in place.
+   */
+  it("ruling 531: the operator doctrine quotes the result rules word for word, and its outgoing hash is recorded", async () => {
+    // CANARY: drop either rule from the doctrine, or reword one side only; or
+    // remove the outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { RESULT_DELIVERY_RULE, RESULT_GOAL_RULE } = await import(
+      "~/server/tasks/result-delivery.server"
+    );
+    expect(
+      shippedCopyIsUnedited(OPERATOR_REL, "e3abc19158dc27db39cd9efd29b3a2cceb1a0cf78eaf852b46738e783b159b89", {}),
+      "the doctrine's outgoing hash is not recorded",
+    ).toBe(true);
+    const doctrine = shipped();
+    expect(PRIOR_SHIPPED_HASHES[OPERATOR_REL]).not.toContain(sha256Hex(doctrine));
+    expect(doctrine, "the triage gate").toContain(RESULT_GOAL_RULE);
+    expect(doctrine, "the delivery paragraph").toContain(RESULT_DELIVERY_RULE);
+  });
+
   it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
     // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");

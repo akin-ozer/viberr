@@ -102,6 +102,7 @@ import {
 } from "~/server/tasks/operator-actions.server";
 import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
+import { RESULT_DELIVERY_RULE, RESULT_GOAL_RULE } from "~/server/tasks/result-delivery.server";
 import type { RelayPayload } from "~/server/tasks/task-relay.server";
 import {
   buildOperatorToolkit,
@@ -4782,6 +4783,8 @@ function triageQualityGate(snapshot: OperatorTaskSnapshot): string {
   return (
     "TRIAGE QUALITY GATE — this is the first stage, so scoping is this turn's job and no forward transition happens until the goal survives it. " +
     "A goal is CONCRETE only when it names a deliverable (what changes, and where) AND the signal that proves it done. " +
+    // Ruling 531: a board can deliver results (ruling 530).
+    RESULT_GOAL_RULE + " " +
     '"The documentation could be improved. Make it better." is a wish, not a goal: no file, no change, no acceptance criteria. ' +
     "While the goal is that vague you MUST NOT `transition_stage` forward: either `set_goal` with real scope when the task text, comments, and repository make it unambiguous, " +
     'or `open_decision_packet` (type "input") proposing 2–4 concrete scopes for the human to choose between. Reading the repository is not scoping — a scope you invented is the failure this gate exists to stop. ' +
@@ -4915,6 +4918,9 @@ function operatorTurnDoctrine(
   if (trigger === "agent-reply") {
     return (
       "React to the report above. When the deliverer reports completed, committed work that is plausibly reviewable, deliver it with `deliver_for_review` (push + review PR — YOUR decision, see the stage rules) and move the task toward review; accept a clean review through `accept_completion`. " +
+      // Ruling 531: this is the turn that delivers after a report, and it
+      // returns before the stage rules, so the result exception is here too.
+      RESULT_DELIVERY_RULE + " " +
       "Rework on a task whose PR is already open is delivered the same way: `deliver_for_review` pushes the new revision to that PR. " +
       "If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt. " +
       // Ruling 410: the sentence above is round ONE. Live on ax-clone the skill
@@ -5255,7 +5261,10 @@ function stageRule(snapshot: OperatorTaskSnapshot): string {
     // status (AX-22) and lost field presence (AX-24), and none became a
     // convention the next task on the same surfaces would read.
     "- A reviewer blocked on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it: alongside your one coordination action, `correct_knowledge_doc` the convention into the rulings document it belongs to, with the verdict as the evidence. It is written at once, every later run reads it, and a person undoes it if they disagree. One convention per class, never one per finding; a class the rulings already cover needs nothing.\n" +
-    "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
+    "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. " +
+    // Ruling 531: except a result, which is delivered on the task (ruling 530).
+    RESULT_DELIVERY_RULE + " " +
+    "Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done, no packet and no pending schedule: either advance the boundary, hand off to a specialist, `schedule_task_action` the run a clock is waiting for (a cron run, a window reopening), or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human, and a wait on a time is never a packet (ruling 487)."
   );

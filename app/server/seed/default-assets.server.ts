@@ -283,6 +283,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 531 (owner, 2026-09-28): before the triage gate said when a task
+    // whose deliverable is a result is concrete, and the delivery paragraph
+    // said such a task is delivered on the task, never in a pull request. The
+    // aws-cost-calculator CALC-4 pilot estimate went out as PR #4.
+    "e3abc19158dc27db39cd9efd29b3a2cceb1a0cf78eaf852b46738e783b159b89",
     // Ruling 521 (owner, 2026-09-27): before every acceptance offer carried
     // the completion packet (`write_completion_packet`).
     "c966e35ad36af27b8d5f60595da3e0a980495912af5ddca5db6c68d59493df71",

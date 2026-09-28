@@ -1698,7 +1698,12 @@ export function acceptanceBlockedReason(fm: ReviewState): string | null {
   // told a person to wait for an approval of a revision no reviewer can be
   // given (the verdict binding refuses to pin one to a retired head) — the
   // F19-21 dead end, re-created by the new kind.
-  if (!activeWorkRevision(fm.workRevision)) {
+  //
+  // Ruling 531: and a delivery that is files on the task (ruling 388) is a
+  // subject too. Keyed on the revision alone, this refused every files-only
+  // task whose reviewer was engaged, which is every one that was reviewed,
+  // with "No reviewed revision yet" beside the approval that released it.
+  if (reviewSubjectId(fm) === null) {
     // F19-21 (spec change 3) — the refusal used to stop at the first sentence,
     // and on a VERIFICATION-only task that reads as a dead end: nothing this
     // task will ever do produces a revision, so "nothing to approve" looks
@@ -1714,12 +1719,16 @@ export function acceptanceBlockedReason(fm: ReviewState): string | null {
   const cur = currentVerdicts(fm);
   const verdictOf = (profileId: string) =>
     cur.find((v) => v.profileId === profileId)?.result;
+  // What the review binds to, in a person's words (ruling 385's for files).
+  const subject = activeWorkRevision(fm.workRevision)
+    ? "the current revision"
+    : "the work delivered on this task";
   if (required.some((r) => verdictOf(r.profileId) === "request_changes")) {
-    return "This task's latest review requests changes on the current revision. Rework and re-review before accepting.";
+    return `This task's latest review requests changes on ${subject}. Rework and re-review before accepting.`;
   }
   const missing = required.filter((r) => verdictOf(r.profileId) !== "approve");
   if (missing.length > 0) {
-    return `Waiting on ${missing.length} required reviewer approval${missing.length === 1 ? "" : "s"} of the current revision.`;
+    return `Waiting on ${missing.length} required reviewer approval${missing.length === 1 ? "" : "s"} of ${subject}.`;
   }
   return null;
 }
