@@ -1608,6 +1608,8 @@ export default function TaskDetailRoute({
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
       // Ruling 484: the Changes panel's read, beside the page it posts notes to.
       changesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/changes`}
+      // Ruling 548: the Blocked by picker's list of the project's tasks.
+      dependencyCandidatesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/dependency-candidates`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}

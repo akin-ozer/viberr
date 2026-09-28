@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  canonicalDependencyRef,
   formatDependencyRef,
   holdRefusal,
   isDeadDependencyState,
@@ -8,7 +9,8 @@ import {
   type DependencyRender,
   type DependencyState,
 } from "~/shared/dependencies";
-import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import type { DependencyCandidate } from "~/shared/dependency-candidates";
+import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
 
 /**
  * Ruling 131 (pass 34, Q34-11): the READ model for a task's `blockedBy` list.
@@ -28,15 +30,20 @@ interface TaskStateRow {
   archived: number;
 }
 
-function projectStageIds(db: DatabaseSync, slug: string): { id: string }[] {
+function projectStages(db: DatabaseSync, slug: string): { id: string; name: string }[] {
   // SAFETY: `stages_json` is TEXT NOT NULL on `projects` and has ONE writer
-  // (the rebuilder stores `JSON.stringify(fm.stages)`); every stage carries `id`.
+  // (the rebuilder stores `JSON.stringify(fm.stages)`); every stage carries
+  // `id` and `name`.
   const row = db
     .prepare(`SELECT stages_json FROM projects WHERE slug = ?`)
     .get(slug) as { stages_json: string } | undefined;
   if (!row) return [];
-  // SAFETY: same writer as above; every parsed stage row carries a string `id`.
-  return (JSON.parse(row.stages_json) as { id: string }[]).map((s) => ({ id: s.id }));
+  // SAFETY: same writer as above; every parsed stage row carries a string `id`
+  // and `name`.
+  return (JSON.parse(row.stages_json) as { id: string; name: string }[]).map((s) => ({
+    id: s.id,
+    name: s.name,
+  }));
 }
 
 function taskState(
@@ -65,7 +72,7 @@ export function dependencyResolver(db: DatabaseSync, slug: string): DependencyRe
   let stages: { id: string }[] | null = null;
   return (refs) => {
     if (refs.length === 0) return [];
-    stages ??= projectStageIds(db, slug);
+    stages ??= projectStages(db, slug);
     return resolveWithStages(db, slug, refs, stages);
   };
 }
@@ -82,7 +89,7 @@ export function resolveDependencies(
   refs: readonly string[],
 ): DependencyRender[] {
   if (refs.length === 0) return [];
-  return resolveWithStages(db, slug, refs, projectStageIds(db, slug));
+  return resolveWithStages(db, slug, refs, projectStages(db, slug));
 }
 
 function resolveWithStages(
@@ -247,4 +254,79 @@ export function tasksReleasedBy(
     hop += 1;
   }
   return { direct, downstream };
+}
+
+type CandidateRow = {
+  task_key: string;
+  title: string;
+  stage: string;
+  archived: number;
+  blocked_by_json: string;
+};
+
+/**
+ * Ruling 548: every task another task could be set to wait on, as the Blocked
+ * by picker lists them: the project's tasks but `taskKey` itself, newest key
+ * first, each with the refusal the writer would give it as a new entry
+ * (`DependencyCandidateBar`, in the order the writer checks). Null when
+ * `taskKey` is not a task in the project.
+ *
+ * The cycle is the writer's own walk run backwards: a task that already waits
+ * on `taskKey`, directly or down the chain, is one a new entry would close a
+ * cycle through, and the walk keeps the way back so the picker can name the
+ * cycle as the writer does. The stored lists of archived tasks count, as they
+ * do there.
+ */
+export function listDependencyCandidates(
+  db: DatabaseSync,
+  slug: string,
+  taskKey: string,
+): DependencyCandidate[] | null {
+  // SAFETY: the five selected columns are TEXT NOT NULL (`task_key`, `title`,
+  // `stage`, `blocked_by_json`) and INTEGER NOT NULL (`archived`) on
+  // `task_projections` (0001 + ruling 131).
+  const rows = db
+    .prepare(
+      `SELECT task_key, title, stage, archived, blocked_by_json FROM task_projections
+       WHERE project_slug = ?`,
+    )
+    .all(slug) as CandidateRow[];
+  if (!rows.some((row) => row.task_key === taskKey)) return null;
+  // Who lists each task: the stored edges, read backwards.
+  const listedBy = new Map<string, string[]>();
+  for (const row of rows) {
+    for (const raw of parseBlockedByColumn(row.blocked_by_json)) {
+      const key = canonicalDependencyRef(raw);
+      if (!key) continue;
+      const waiters = listedBy.get(key);
+      if (waiters) waiters.push(row.task_key);
+      else listedBy.set(key, [row.task_key]);
+    }
+  }
+  // Each task that waits on `taskKey`, and the entry of its list the wait
+  // runs through.
+  const via = new Map<string, string>();
+  const queue = [taskKey];
+  for (let key = queue.pop(); key !== undefined; key = queue.pop()) {
+    for (const waiter of listedBy.get(key) ?? []) {
+      if (waiter === taskKey || via.has(waiter)) continue;
+      via.set(waiter, key);
+      queue.push(waiter);
+    }
+  }
+  const chainThrough = (key: string): string[] => {
+    const chain = [taskKey, key];
+    for (let at = via.get(key); at !== undefined; at = via.get(at)) chain.push(at);
+    return chain;
+  };
+  const stages = projectStages(db, slug);
+  return rows
+    .filter((row) => row.task_key !== taskKey)
+    .sort((a, b) => b.task_key.localeCompare(a.task_key, "en", { numeric: true }))
+    .map((row): DependencyCandidate => {
+      const candidate = { key: row.task_key, title: row.title, stage: stageName(stages, row.stage) };
+      if (row.archived) return { ...candidate, bar: "archived" };
+      if (via.has(row.task_key)) return { ...candidate, bar: "cycle", chain: chainThrough(row.task_key) };
+      return { ...candidate, bar: isTerminalStage(row.stage, stages) ? "done" : null };
+    });
 }

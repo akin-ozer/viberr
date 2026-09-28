@@ -7,15 +7,21 @@ import {
   type Dispatch,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SetStateAction,
 } from "react";
 import { useFetcher, type FetcherWithComponents } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { PRIORITY_VALUES, type TaskPriority } from "~/schemas/task-file.schema";
-import type { DependencyRender, DependencyState } from "~/shared/dependencies";
+import {
+  isDeadDependencyState,
+  joinDependencyEntries,
+  type DependencyRender,
+} from "~/shared/dependencies";
 import { EPIC_STATUS_LABEL, isEpicOpen } from "~/shared/task-refs";
 import { epicHref } from "~/shared/epic-href";
 import { Calendar } from "~/ui/calendar";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { EpicChip, type EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
@@ -24,7 +30,9 @@ import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { useDismiss } from "~/ui/use-dismiss";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableValue } from "~/ui/use-stable-rows";
+import type { DependencyCandidatesView } from "~/routes/task-dependency-candidates";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
+import { WaitChip } from "./wait-chip";
 
 /**
  * Ruling 501: the task's Details panel (priority, labels, epic, due date and
@@ -50,15 +58,6 @@ type DetailProp = "priority" | "labels" | "epic" | "due" | "deps";
 const PRIORITY_MENU = [...PRIORITY_VALUES].reverse();
 const priorityName = (p: TaskPriority) => p.charAt(0).toUpperCase() + p.slice(1);
 
-/** An entry's state as a status ring, the family ruling 499's to-do steps
- *  draw: waiting, done, or a wait that can never complete (ruling 355). */
-const WAIT_GLYPH = {
-  open: "todo",
-  done: "checkcircle",
-  failed: "ban",
-  missing: "ban",
-} satisfies Record<DependencyState, IconName>;
-
 type Fetcher = FetcherWithComponents<ActionResult>;
 
 export function TaskDetailsPanel({
@@ -67,6 +66,7 @@ export function TaskDetailsPanel({
   labelSuggestions = [],
   epics = [],
   queuedQuestions = [],
+  dependencyCandidatesUrl = null,
 }: {
   task: TaskDetail;
   canEdit: boolean;
@@ -77,6 +77,9 @@ export function TaskDetailsPanel({
   /** Ruling 241: reviewer questions the hold refused, put when it lifts. They
    *  belong under the wait because they ARE what happens when it ends. */
   queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
+  /** Ruling 548: the Blocked by picker's read, built by the route component.
+   *  Null offers no list; a key typed in full still goes in. */
+  dependencyCandidatesUrl?: string | null;
 }) {
   const [open, setOpen] = useState<DetailProp | null>(null);
   // F26-13: an archived task's planning metadata is frozen (the server refuses
@@ -109,7 +112,13 @@ export function TaskDetailsPanel({
           setOpen={setOpen}
         />
         <DueRow due={task.dueDate ?? null} open={openState("due")} setOpen={setOpen} />
-        <WaitRow taskKey={task.key} blockedBy={blockedBy} open={openState("deps")} setOpen={setOpen} />
+        <WaitRow
+          taskKey={task.key}
+          candidatesUrl={dependencyCandidatesUrl}
+          blockedBy={blockedBy}
+          open={openState("deps")}
+          setOpen={setOpen}
+        />
         {queuedQuestions.length > 0 && (
           // Ruling 241: without this the only trace of a queued question is
           // one timeline note, and a promise a person cannot see is the
@@ -200,6 +209,9 @@ function PropRow({
   value,
   editor,
   rowData,
+  onIntent,
+  lead,
+  triggerRef,
 }: {
   prop: DetailProp;
   label: string;
@@ -212,10 +224,20 @@ function PropRow({
   /** The popover's content, handed the close that gives focus back. */
   editor: (done: () => void) => ReactNode;
   rowData?: Record<`data-${string}`, number>;
+  /** The pointer or the focus reached the trigger: an editor in its own
+   *  chunk starts fetching it (ruling 548). */
+  onIntent?: () => void;
+  /** Ruling 548: for an editor, what stands before the trigger rather than in
+   *  it (the wait's chips, each with a remove cross, which a button cannot
+   *  hold); the trigger is then the compact one after them. */
+  lead?: ReactNode;
+  /** The trigger, for a row that hands the focus back to it itself. */
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const labelId = useId();
   const valueId = useId();
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const ownRef = useRef<HTMLButtonElement>(null);
+  const btnRef = triggerRef ?? ownRef;
   const open = edit?.open === true;
   const role = popup === "menu" ? "menu" : "dialog";
   // An outside press, or focus leaving for another control, closes it where
@@ -262,10 +284,11 @@ function PropRow({
       <span className="v">
         {edit ? (
           <>
+            {lead}
             <button
               ref={btnRef}
               type="button"
-              className="prop-btn"
+              className={lead ? "prop-btn prop-add" : "prop-btn"}
               aria-haspopup={role}
               aria-expanded={open}
               aria-labelledby={`${labelId} ${valueId}`}
@@ -273,6 +296,8 @@ function PropRow({
               // focusable while it works (a disabled control drops the
               // keyboard's place) and ignores presses until the server answers.
               aria-busy={busy || undefined}
+              onPointerEnter={onIntent}
+              onFocus={onIntent}
               onClick={() => {
                 if (!busy) edit.toggle();
               }}
@@ -656,58 +681,215 @@ const DueRow = memo(function DueRow({ due, ...control }: { due: string | null } 
   );
 });
 
-/** Ruling 131: what the task waits on, each entry with its live state. */
+let pickerModule: Promise<typeof import("./dependency-picker")> | null = null;
+let loadedPicker: (typeof import("./dependency-picker"))["DependencyPicker"] | null = null;
+
+/** Starts (once) fetching the wait editor's picker, its own chunk (ruling
+ *  548). A failed fetch is forgotten, so the next intent retries. */
+function loadPicker(): Promise<typeof import("./dependency-picker")> {
+  if (!pickerModule) {
+    const pending = import("./dependency-picker");
+    pickerModule = pending;
+    pending.then(
+      (module) => {
+        loadedPicker = module.DependencyPicker;
+      },
+      () => {
+        pickerModule = null;
+      },
+    );
+  }
+  return pickerModule;
+}
+
+const preloadPicker = () => void loadPicker().catch(() => undefined);
+
+/** A task key in running text, kept whole: Chromium breaks "VIB-153" after its
+ *  hyphen (ruling 520's `.hold-ref`). */
+const keyRef = (key: string) => <span className="hold-ref">{key}</span>;
+
+/** What the picker is told where no read is wired (a bare render). */
+const NO_TASK_LIST: DependencyCandidatesView = { ok: false, reason: "No task list is offered here." };
+
+/** Ruling 131: what the task waits on, each entry with its live state.
+ *  Ruling 548: for an editor each entry's chip carries the Owner row's remove
+ *  cross, which saves the wait without it at once, and the trigger is the plus
+ *  after the chips. A cross that leaves nothing still open is the release
+ *  (ruling 131(e)), so that one asks first, as the Owner row's does. */
 const WaitRow = memo(function WaitRow({
   taskKey,
+  candidatesUrl,
   blockedBy,
   ...control
-}: { taskKey: string; blockedBy: DependencyRender[] } & RowControl) {
+}: { taskKey: string; candidatesUrl: string | null; blockedBy: DependencyRender[] } & RowControl) {
+  const csrf = useCsrfToken();
   const fetcher = usePropFetcher();
   const edit = editState("deps", control);
   const busy = fetcher.state !== "idle";
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The entry a cross is taking out while its save runs (until the server
+  // answers), and the one whose cross is waiting on the release's confirm.
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState<DependencyRender | null>(null);
+  // The cross that had the focus leaves with its chip once the wait comes
+  // back without it; the trigger takes the focus rather than the page. A
+  // refused save keeps the chip, and the cross keeps the focus.
+  const handoff = useRef<string | null>(null);
+  useFetcherResult(fetcher, (result) => {
+    setRemoving(null);
+    if (!result.ok) handoff.current = null;
+  });
+  useEffect(() => {
+    const gone = handoff.current;
+    if (gone === null || blockedBy.some((e) => e.ref === gone)) return;
+    handoff.current = null;
+    if (document.activeElement === document.body) triggerRef.current?.focus({ preventScroll: true });
+  }, [blockedBy]);
+  const remove = (entry: DependencyRender) => {
+    setRemoving(entry.ref);
+    handoff.current = entry.ref;
+    void fetcher.submit(
+      {
+        intent: "set-task-dependencies",
+        _csrf: csrf,
+        blockedBy: blockedBy
+          .filter((e) => e.ref !== entry.ref)
+          .map((e) => e.ref)
+          .join(", "),
+      },
+      { method: "post" },
+    );
+  };
+  const onRemove = (entry: DependencyRender) => {
+    // One save at a time: a second cross would post a list without the
+    // first's answer in it.
+    if (busy) return;
+    if (blockedBy.every((e) => e.ref === entry.ref || e.state === "done")) setReleasing(entry);
+    else remove(entry);
+  };
+  const rest = releasing ? blockedBy.filter((e) => e.ref !== releasing.ref) : [];
   return (
-    <PropRow
-      prop="deps"
-      label="Blocked by"
-      edit={edit}
-      busy={busy && !edit?.open}
-      popup="form"
-      rowData={{ "data-blocked-by": blockedBy.length }}
-      value={
-        blockedBy.length > 0 ? (
-          blockedBy.map((e) => <WaitChip key={e.ref} entry={e} />)
-        ) : edit ? (
-          <Quiet icon="plus">Add dependency</Quiet>
-        ) : (
-          <Quiet>Nothing</Quiet>
-        )
-      }
-      editor={(done) => (
-        <WaitEditor taskKey={taskKey} blockedBy={blockedBy} fetcher={fetcher} done={done} />
+    <>
+      <PropRow
+        prop="deps"
+        label="Blocked by"
+        // A cross's save holds the editor shut until it answers, so no draft
+        // starts from the list it is changing.
+        edit={edit && removing !== null ? { ...edit, toggle: () => undefined } : edit}
+        busy={busy && !edit?.open && removing === null}
+        popup="form"
+        rowData={{ "data-blocked-by": blockedBy.length }}
+        onIntent={preloadPicker}
+        triggerRef={triggerRef}
+        lead={
+          edit && blockedBy.length > 0
+            ? blockedBy.map((e) => (
+                <WaitChip key={e.ref} entry={e} onRemove={() => onRemove(e)} removing={removing === e.ref} />
+              ))
+            : null
+        }
+        value={
+          blockedBy.length > 0 ? (
+            edit ? (
+              <Quiet icon="plus">
+                <span className="vh">Add dependency</span>
+              </Quiet>
+            ) : (
+              blockedBy.map((e) => <WaitChip key={e.ref} entry={e} />)
+            )
+          ) : edit ? (
+            <Quiet icon="plus">Add dependency</Quiet>
+          ) : (
+            <Quiet>Nothing</Quiet>
+          )
+        }
+        editor={(done) => (
+          <WaitEditor
+            taskKey={taskKey}
+            candidatesUrl={candidatesUrl}
+            blockedBy={blockedBy}
+            fetcher={fetcher}
+            done={done}
+          />
+        )}
+      />
+      {releasing && (
+        <ConfirmDialog
+          title={`Release ${taskKey}?`}
+          body={
+            <>
+              {rest.length === 0 ? (
+                <>
+                  {keyRef(releasing.label)} is the last task {keyRef(taskKey)} waits on.
+                </>
+              ) : (
+                <>Everything else {keyRef(taskKey)} waits on is done.</>
+              )}{" "}
+              Taking {keyRef(releasing.label)} off releases {keyRef(taskKey)}: it can move again, and
+              Viberr hands it to the operator.
+            </>
+          }
+          confirmLabel={`Release ${taskKey}`}
+          cancelLabel="Keep the wait"
+          tone="primary"
+          busy={busy}
+          screenLabel="Release wait dialog"
+          onCancel={() => setReleasing(null)}
+          onConfirm={() => remove(releasing)}
+        />
       )}
-    />
+    </>
   );
 });
 
-/** The wait's own form (ruling 131): the FULL list, prefilled with the
- *  canonical refs rather than the display labels. */
+/** The wait's own form (ruling 131): the FULL list, posted as its canonical
+ *  refs. Ruling 548: its entries are chips with a remove cross and its field
+ *  finds the project's tasks (`DependencyPicker`, loaded here as a chunk while
+ *  the editor reads the tasks it offers); mounted each time the editor opens,
+ *  so the draft and the tasks start from what the server holds now. */
 function WaitEditor({
   taskKey,
+  candidatesUrl,
   blockedBy,
   fetcher,
   done,
 }: {
   taskKey: string;
+  candidatesUrl: string | null;
   blockedBy: DependencyRender[];
   fetcher: Fetcher;
   done: () => void;
 }) {
   const csrf = useCsrfToken();
-  const [text, setText] = useState(() => blockedBy.map((e) => e.ref).join(", "));
+  const [draft, setDraft] = useState(blockedBy);
   const busy = fetcher.state !== "idle";
   const sent = useSent(fetcher, done);
-  // The example keys take this project's own prefix.
-  const prefix = taskKey.replace(/-\d+$/, "");
+  const refs = draft.map((e) => e.ref);
+  const read = useFetcher<DependencyCandidatesView>();
+  const loadRead = read.load;
+  useEffect(() => {
+    if (candidatesUrl) void loadRead(candidatesUrl);
+  }, [loadRead, candidatesUrl]);
+  // The writer refuses the whole list while it holds an entry that can never
+  // complete (ruling 355), so the editor says so before Save does.
+  const dead = draft.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
+  const [Picker, setPicker] = useState(() => loadedPicker);
+  const [chunkFailed, setChunkFailed] = useState(false);
+  useEffect(() => {
+    if (Picker) return;
+    let live = true;
+    loadPicker().then(
+      (module) => {
+        if (live) setPicker(() => module.DependencyPicker);
+      },
+      () => {
+        if (live) setChunkFailed(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [Picker]);
   return (
     <fetcher.Form
       method="post"
@@ -715,46 +897,48 @@ function WaitEditor({
       data-dependency-form
       onSubmit={(e) => {
         if (busy) e.preventDefault();
-        else sent();
+        else if (refs.join("\n") === blockedBy.map((e) => e.ref).join("\n")) {
+          // Nothing changed: close without a request, or a toast.
+          e.preventDefault();
+          done();
+        } else sent();
       }}
     >
       <input type="hidden" name="intent" value="set-task-dependencies" />
       <input type="hidden" name="_csrf" value={csrf} />
-      <label className="field">
+      <input type="hidden" name="blockedBy" value={refs.join(", ")} />
+      <div className="dep-field">
         <span className="flabel">Waits on</span>
-        <input
-          className="mono"
-          type="text"
-          name="blockedBy"
-          value={text}
-          placeholder={`${prefix}-12, ${prefix}-14`}
-          aria-label="What this task waits on"
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(e) => setText(e.target.value)}
-        />
-      </label>
-      <p className="fine">
-        Task keys in this project, comma-separated. Empty clears the wait and releases the task.
-      </p>
+        {Picker ? (
+          <Picker
+            view={candidatesUrl ? read.data : NO_TASK_LIST}
+            taskKey={taskKey}
+            initial={blockedBy}
+            value={draft}
+            onChange={setDraft}
+          />
+        ) : chunkFailed ? (
+          // Offline, or a deploy that retired the chunk: a browser may keep a
+          // failed module load for the page's life, so only a reload is sure.
+          <p className="form-err" role="alert">
+            <Icon name="alert" />
+            The task picker could not be loaded. Reload the page to try again.
+          </p>
+        ) : (
+          <p className="fine">Loading…</p>
+        )}
+      </div>
+      {dead.length > 0 && (
+        <p className="deny-note">
+          <Icon name="alert" />
+          <span>
+            {joinDependencyEntries(dead)} can never complete: take {dead.length === 1 ? "it" : "them"} out to save.
+          </span>
+        </p>
+      )}
+      <p className="fine">Tasks in this project. Empty clears the wait and releases the task.</p>
       <SaveRow busy={busy} onCancel={done} />
     </fetcher.Form>
-  );
-}
-
-/** One entry of the wait: its status ring, its label and, once it is not
- *  simply open, the word for where it stands. */
-function WaitChip({ entry }: { entry: DependencyRender }) {
-  return (
-    <span
-      className="label-chip wait-chip"
-      data-wait-state={entry.state}
-      title={`${entry.label} · ${entry.state}`}
-    >
-      <Icon name={WAIT_GLYPH[entry.state]} />
-      {entry.label}
-      {entry.state !== "open" ? ` · ${entry.state === "failed" ? "archived" : entry.state}` : ""}
-    </span>
   );
 }
 
