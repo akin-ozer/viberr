@@ -1518,10 +1518,12 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
     );
   }
 
-  it("(c) scrolls to the first line of a reply that lands, not to the end", () => {
-    // CANARY: restore `el.scrollTop = el.scrollHeight` in the dock's effect.
+  const box = () => document.querySelector<HTMLElement>(".dock-transcript")!;
+
+  /** Layout jsdom does not do: a 388px transcript box over 3,000px of
+   *  content, `p1` at its top and `r1` 700px down. */
+  function stubDockTranscript(): () => void {
     const tops = new Map([["p1", 0], ["r1", 700]]);
-    const box = () => document.querySelector<HTMLElement>(".dock-transcript");
     const spies = [
       vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
         return this.classList.contains("dock-transcript") ? 3000 : 0;
@@ -1531,16 +1533,43 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
       }),
       vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
         const top = tops.get(this.dataset.messageId ?? "");
-        return DOMRect.fromRect({ x: 0, y: top === undefined ? 0 : top - (box()?.scrollTop ?? 0), width: 388, height: 100 });
+        return DOMRect.fromRect({ x: 0, y: top === undefined ? 0 : top - box().scrollTop, width: 388, height: 100 });
       }),
     ];
-    try {
-      const { rerender } = render(body([msg("p1", 1, "user", "Is the feed live?")], true));
-      expect(box()!.scrollTop).toBe(3000);
-      rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
-      expect(box()!.scrollTop).toBe(692);
-    } finally {
+    return () => {
       for (const spy of spies) spy.mockRestore();
+    };
+  }
+  const asked = msg("p1", 1, "user", "Is the feed live?");
+  const answered = [asked, msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")];
+
+  it("(c) scrolls to the first line of a reply that lands, not to the end", () => {
+    // CANARY: restore `el.scrollTop = el.scrollHeight` in the dock's effect.
+    const restore = stubDockTranscript();
+    try {
+      const { rerender } = render(body([asked], true));
+      expect(box().scrollTop).toBe(3000);
+      rerender(body(answered, false));
+      expect(box().scrollTop).toBe(692);
+    } finally {
+      restore();
+    }
+  });
+
+  it("(ruling 564) offers a reader scrolled up in the dock the page's way back", async () => {
+    // CANARY: drop the dock's <TranscriptJumpButton>, and the wheel is the
+    // only way back down the panel.
+    const restore = stubDockTranscript();
+    try {
+      render(body(answered, false));
+      expect(box().scrollTop).toBe(692);
+      expect(within(box()).queryByRole("button", { name: "Latest" })).toBeNull();
+      box().scrollTop = 0;
+      fireEvent.scroll(box());
+      fireEvent.click(await within(box()).findByRole("button", { name: "Latest" }));
+      expect(box().scrollTop).toBe(692);
+    } finally {
+      restore();
     }
   });
 

@@ -13,6 +13,7 @@ import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
 import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
+import { TranscriptJumpButton } from "./transcript-jump";
 import {
   Link,
   useFetcher,
@@ -705,7 +706,8 @@ function Transcript({
   // rail, on every load and every new message. The transcript is its own
   // capped scroller at every width now, so only its own box moves. Ruling
   // 476(c): and a reply that lands shows its first line, not its last.
-  useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
+  // Ruling 564: and a reader who scrolled away has the way back.
+  const jump = useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
   // A reply that names an open knowledge-base proposal links it to its entry
   // in the panel beside the transcript (owner, 2026-09-25), and one that names
   // a correction to its entry there too (ruling 498).
@@ -828,6 +830,7 @@ function Transcript({
         ))}
         {workingAfter === null && working}
       </div>
+      <TranscriptJumpButton jump={jump} />
     </section>
   );
 }

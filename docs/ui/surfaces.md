@@ -206,7 +206,10 @@ Intents behind `project.task.tsx` are explained in
   sent; "… is working" sits under the answered message (ruling 465). Both transcripts show
   a reply that lands from its first line, never pulling a reader who scrolled up to
   history, and a link's URL or any other long token in prose wraps inside them (ruling
-  476(a), (c), (i)); the open panel has its
+  476(a), (c), (i)). A reader scrolled away from the newest message gets a jump back at the
+  foot of the box, "New reply" when one landed meanwhile and "Latest" otherwise, and both
+  set the thread as one centred column with the person's messages as bubbles and each reply
+  as unframed text (ruling 564); the open panel has its
   own always-mounted status region that says "<name> replied: <first sentence>" for the
   thread on screen, and the working row is no live region (ruling 476(d)). Root ships only the button, the panel's frame and header; the panel's body
   loads on the first open, preloaded on hover or focus (ruling 457). The dock's data

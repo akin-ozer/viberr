@@ -6249,3 +6249,38 @@ describe("app.css ruling 525: deleting a controller conversation from the rail",
     );
   });
 });
+
+/**
+ * Ruling 564, after the shadcn chatbot template: the controller transcript
+ * reads as one column (b), and its jump back to the newest message takes no
+ * room in the box it scrolls (a).
+ */
+describe("app.css ruling 564: the controller transcript reads as one column", () => {
+  it("(b) centres one 48rem column, keeps the person's bubble and frames no reply", () => {
+    // CANARY: put the agent-tinted border and padding back on
+    // `.ctl-msg.from-controller`, and a reply is a card inside the
+    // transcript's card again.
+    const column = requiredDecls(plain, ".ctl-msgs");
+    expect(column.get("max-width")).toBe("48rem");
+    expect(column.get("margin-inline")).toBe("auto");
+    const reply = requiredDecls(plain, ".ctl-msg.from-controller");
+    expect([reply.get("border"), reply.get("padding"), reply.get("max-width")]).toEqual(["0", "0", "none"]);
+    // No width or preference puts a frame back on a reply.
+    const framing = RULES.filter((r) => selectorParts(r).some((s) => s.includes(".from-controller")))
+      .flatMap((r) => [...r.decls])
+      .filter(([prop, value]) => /^(border(?!-radius)|background|box-shadow|padding)/.test(prop) && !/^(0|none)$/.test(value));
+    expect(framing).toEqual([]);
+    const user = requiredDecls(plain, ".ctl-msg.from-user");
+    expect(user.get("align-self")).toBe("flex-end");
+    expect(user.get("background")).toBe("var(--tint-well)");
+  });
+
+  it("(a) pins the jump to its box's foot in a row of no height, and it only fades under reduced motion", () => {
+    // CANARY: drop `height: 0`, and the box's end moves by the button's height
+    // each time the jump comes and goes.
+    const slot = requiredDecls(plain, ".ctl-jump");
+    expect([slot.get("position"), slot.get("height"), slot.get("align-items")]).toEqual(["sticky", "0", "flex-end"]);
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(requiredDecls(reduced, ".ctl-jump > .btn").get("animation")).toBe("fade-in .12s ease");
+  });
+});

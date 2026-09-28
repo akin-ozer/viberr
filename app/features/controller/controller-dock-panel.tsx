@@ -4,6 +4,7 @@ import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
 import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
+import { TranscriptJumpButton } from "./transcript-jump";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type {
   ConversationTurnState,
@@ -149,8 +150,9 @@ export function DockPanelBody({
   // that lands shows its first line, not its last.
   const scrollRef = useRef<HTMLDivElement>(null);
   // The thread list swaps the transcript's box out, and the box it swaps back
-  // in starts at its top: that is an open too.
-  useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
+  // in starts at its top: that is an open too. Ruling 564: the page's way back
+  // to the newest message, too.
+  const jump = useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
   // Ruling 476(d): a reply to the thread on screen is announced here; the
   // announcer beside the button leaves this thread out while the panel is open.
   const said = useTurnAnnouncement(current?.controllerName ?? "Controller", messages, fresh, false);
@@ -300,6 +302,7 @@ export function DockPanelBody({
               )}
             </div>
           )}
+          <TranscriptJumpButton jump={jump} />
         </section>
       )}
       <div className="dock-composer">

@@ -139,7 +139,15 @@ its reader is one rule for the page and the dock (`useTranscriptFollow`,
 first line when a reply is the newest message, and its end otherwise; a controller message
 that lands is scrolled to its first line, unless the reader has scrolled up above the
 newest reply they had, and then nothing moves; the person's own message, and a turn that
-starts while they follow the thread, go to the end. One visually hidden `role="status"`
+starts while they follow the thread, go to the end. A reader who has scrolled away from the
+newest message has the transcript's jump, pinned to the foot of its box
+(`TranscriptJumpButton`, `transcript-jump.tsx`, ruling 564(a)): "New reply" on the primary
+face when a reply landed while they read history, which puts that reply's first line at the
+top of the box, and "Latest" otherwise, which goes where opening the thread would. It shows
+only while that place is below what they can see, leaves once it comes into view, and hands
+the focus it held to the message it showed. The thread is one reading column, 48rem at most
+and centred: the person's messages are bubbles at its end, and a reply is the column's text,
+with no frame of its own, under the header that names who wrote it (ruling 564(b)). One visually hidden `role="status"`
 region, mounted outside the per-thread subtree and changing only its text, says "<name> is
 working" when a turn starts and "<name> replied: <first sentence>" when the reply lands
 (`useTurnAnnouncement`, ruling 476(d)); the working row is visual only. The transcript
@@ -219,6 +227,9 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   examples at its foot, over the composer (ruling 516).
   The transcript meets a reply as the page's does (ruling 476(c) and (d), below in §2): it
   opens on the newest reply's first line and scrolls a reply that lands to its first line,
+  offers the page's jump back to the newest message ("New reply" or "Latest", ruling
+  564(a)) and sets its thread the page's way, a reply unframed under its header and the
+  person's messages as bubbles (ruling 564(b)),
   and the panel's own visually hidden `role="status"` region says "<name> replied: <first
   sentence>" for the thread on screen, which the button's announcer leaves out while the
   panel is open. The "is working…" row is visual only; the button's announcer says a turn
