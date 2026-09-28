@@ -112,6 +112,19 @@ test("a task joins the epic from its own page", async ({ page }) => {
   await expect(taskRow(page, "VIB-166")).toBeVisible();
 });
 
+test("at 375px the epic page reads in one column", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(EPIC);
+  await expect(page.locator(".epic-history")).toContainText("Created by");
+  const main = await page.locator(".epic-main").boundingBox();
+  const side = await page.locator(".epic-side").boundingBox();
+  // CANARY: drop `.policy-wrap` from the 1100px collapse and the base rule,
+  // later in the sheet, keeps two columns: About, Tasks and History shrink to
+  // 0px beside a 340px Details column (ruling 560).
+  expect(main!.width).toBeGreaterThan(300);
+  expect(side!.y).toBeGreaterThanOrEqual(main!.y + main!.height);
+});
+
 test("the epic page and its dialogs have no WCAG 2.2 AA violations", async ({ page }) => {
   await page.goto("/");
   await inBothThemes(page, EPIC, ".epic-task-list", async () => {

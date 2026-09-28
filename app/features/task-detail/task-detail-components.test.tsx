@@ -1233,7 +1233,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
 
     // Ruling 556: the project's required reviewer, delivery-capable, on a task
     // with no deliverer → the dispatch engages it to review, and says so.
-    // CANARY: drop the `requiredReviewer` arm and this promises it the branch.
+    // CANARY: drop the `requiredReviewer` term and this promises it the branch.
     const judge: DeployedSpecialistView = {
       id: "judge", name: "Estimate Judge", role: "Review", backend: "codex", model: "codex-large",
       capabilities: { delivery: true, verdict: true, askHuman: false, browser: true },
@@ -1244,7 +1244,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     });
     pickAgent(fifth.container, "Estimate Judge");
     expect(fifth.container.querySelector(".agent-run")!.textContent).toContain(
-      "Runs as a reviewer: it is this project's required reviewer, so it never delivers.",
+      "Runs as a reviewer: its verdict gates acceptance.",
     );
   });
 

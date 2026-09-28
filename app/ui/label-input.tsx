@@ -24,6 +24,11 @@ import { useDismiss } from "./use-dismiss";
  * behaves identically in the (non-dialog) Details panel.
  */
 
+/** What ends a press (ruling 561): its click, which goes to where the press
+ *  began and ended before any listener runs, so letting go there moves nothing
+ *  it lands on; or the drop of a drag it started, which sends no click. */
+const PRESS_ENDS = ["click", "dragend"] as const;
+
 type Row =
   | { kind: "selected"; value: string }
   | { kind: "suggest"; value: string }
@@ -94,6 +99,38 @@ export function LabelInput({
   useEffect(() => {
     if (showList) listRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [showList]);
+
+  // Ruling 561: a press that takes the focus out of the field lands on what it
+  // pressed. The press folds the list (useDismiss, the blur) and commits a
+  // half-typed label as it begins, and with the list went its height: the
+  // Details editor's Save rose 128 px between the press and the release, so
+  // the release landed on no button and the browser sent no click. While a
+  // press outside is under way the combo keeps the height it had, and lets
+  // go at the press's click. Listening only while the list is shown or a
+  // label is half typed: nothing else here moves.
+  const shifts = showList || query !== "";
+  useEffect(() => {
+    const combo = wrapRef.current;
+    if (!shifts || !combo) return;
+    const onPress = (event: MouseEvent) => {
+      const target = event.target;
+      // The inline height is the hold: one press at a time.
+      if (event.button !== 0 || combo.style.height || !(target instanceof Element)) return;
+      // A select opens its menu on the press itself, and the menu takes the
+      // release: held, the combo would let go under an open menu, or never.
+      if (combo.contains(target) || target.closest("select")) return;
+      combo.style.height = `${combo.getBoundingClientRect().height}px`;
+      const end = () => {
+        for (const type of PRESS_ENDS) window.removeEventListener(type, end, true);
+        combo.style.height = "";
+      };
+      for (const type of PRESS_ENDS) window.addEventListener(type, end, true);
+    };
+    // Capture on the window, so the height is taken before anything this
+    // press sets off.
+    window.addEventListener("mousedown", onPress, true);
+    return () => window.removeEventListener("mousedown", onPress, true);
+  }, [shifts, wrapRef]);
 
   const announce = (next: string[], verb: "Added" | "Removed", label: string) => {
     setStatus(`${verb} label ${label}, ${next.length} of ${max}`);

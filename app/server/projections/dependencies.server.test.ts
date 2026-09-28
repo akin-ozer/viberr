@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
@@ -8,13 +9,16 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { updateTaskFile } from "~/server/files/task-writer.server";
+import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import {
   deadDependencies,
   dependenciesSatisfied,
+  listDependencyCandidates,
   listHeldTasks,
   resolveDependencies,
   tasksReleasedBy,
 } from "./dependencies.server";
+import { candidateRefusal } from "~/shared/dependency-candidates";
 
 /**
  * Ruling 131 (pass 34): every `blockedBy` entry resolves at READ time from the
@@ -155,5 +159,62 @@ describe("tasksReleasedBy (ruling 300)", () => {
     const none = { direct: [], downstream: [] };
     expect(tasksReleasedBy(store.db, store.slug, "VIB-3")).toEqual(none);
     expect(tasksReleasedBy(store.db, store.slug, "VIB-404")).toEqual(none);
+  });
+});
+
+/**
+ * Ruling 548: the Details panel's Blocked by picker lists the project's other
+ * tasks and bars each one the writer would refuse as a new entry, so a person
+ * reads the refusal on the row before Save instead of in a toast after it.
+ * The writer is the oracle: a bar that disagrees with `setTaskDependencies`
+ * offers a task Save then refuses, or hides one it would take, and the
+ * sentence the picker says for it is the one Save throws.
+ */
+describe("listDependencyCandidates (ruling 548)", () => {
+  it("lists every other task newest first, barred exactly where the writer refuses it, in the writer's words", async () => {
+    // CANARY: walk only the direct waiters and VIB-5, two hops behind VIB-1,
+    // reads free while the writer refuses it; skip archived tasks' lists and
+    // VIB-7, waiting through archived VIB-6, does the same; sort the keys as
+    // text and VIB-10 sinks under VIB-7; keep the first hop only in a
+    // cycle's chain and the picker names a cycle Save does not.
+    const store = setupTestStore(ctx);
+    // VIB-1 at a working stage, VIB-2 done, VIB-3 archived, VIB-4 waiting on VIB-1.
+    seed(store);
+    const more: [string, Parameters<typeof baseTaskFrontmatter>[1]][] = [
+      ["VIB-5", { stage: "impl", blockedBy: ["VIB-4"] }],
+      ["VIB-6", { stage: "impl", archived: true, blockedBy: ["VIB-1"] }],
+      ["VIB-7", { stage: "impl", blockedBy: ["VIB-6"] }],
+      ["VIB-10", { stage: "ready" }],
+    ];
+    for (const [key, patch] of more) {
+      writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, patch) });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const candidates = listDependencyCandidates(store.db, store.slug, "VIB-1")!;
+    expect(candidates.map((c) => [c.key, c.bar])).toEqual([
+      ["VIB-10", null],
+      ["VIB-7", "cycle"],
+      ["VIB-6", "archived"],
+      ["VIB-5", "cycle"],
+      ["VIB-4", "cycle"],
+      ["VIB-3", "archived"],
+      ["VIB-2", "done"],
+    ]);
+    expect(candidates[0]).toEqual({ key: "VIB-10", title: "Task VIB-10", stage: "Ready", bar: null });
+
+    const waitOn = (key: string) =>
+      setTaskDependencies(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: [key] },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    for (const candidate of candidates) {
+      if (candidate.bar) {
+        await expect(waitOn(candidate.key), candidate.key).rejects.toThrow(candidateRefusal(candidate));
+      }
+    }
+    await expect(waitOn("VIB-10")).resolves.toMatchObject({ changed: true, blockedBy: ["VIB-10"] });
   });
 });

@@ -6,13 +6,15 @@ import {
   isEpicOpen,
   type EpicStatus,
 } from "~/schemas/epic-file.schema";
+import { daySections } from "~/shared/dates/day-sections";
+import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { epicsHref } from "~/shared/epic-href";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
-import { LocalDayDotTime } from "~/ui/local-time";
+import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { RichText } from "~/ui/rich-text";
 import { DueDatePill } from "~/ui/task-meta";
@@ -84,6 +86,7 @@ export function EpicPage({
     statusFetcher.submit(fd, { method: "post" });
   };
   const history = showAllHistory ? epic.history : epic.history.slice(0, HISTORY_PREVIEW);
+  const olderHistory = epic.history.length - HISTORY_PREVIEW;
 
   return (
     <div className="board-wrap" data-screen-label="Epic">
@@ -243,22 +246,17 @@ export function EpicPage({
               {epic.history.length === 0 ? (
                 <p className="empty sm">Nothing recorded yet.</p>
               ) : (
-                <ol className="epic-history" aria-label={`${epic.id} history`}>
-                  {history.map((entry, i) => (
-                    <li key={`${entry.occurredAt}-${i}`}>
-                      <span className="fine dim epic-history-at">
-                        <LocalDayDotTime iso={entry.occurredAt} />
-                      </span>
-                      <span>
-                        <RichText text={entry.text} mentions={false} taskLinks={view.taskLinks} />
-                      </span>
-                    </li>
-                  ))}
-                </ol>
+                <EpicHistory entries={history} taskLinks={view.taskLinks} />
               )}
-              {epic.history.length > HISTORY_PREVIEW && (
-                <button type="button" className="linkish fine xs" onClick={() => setShowAllHistory((all) => !all)}>
-                  {showAllHistory ? "Show the latest only" : `Show all ${epic.history.length} entries`}
+              {olderHistory > 0 && (
+                <button
+                  type="button"
+                  className="btn ghost sm epic-history-more"
+                  aria-expanded={showAllHistory}
+                  onClick={() => setShowAllHistory((all) => !all)}
+                >
+                  {showAllHistory ? "Show less" : `Show ${olderHistory} more`}
+                  <Icon name="chevron" className="disc-chev ico-end" />
                 </button>
               )}
             </section>
@@ -344,6 +342,41 @@ export function EpicPage({
           onClose={() => setCreatingTask(false)}
         />
       )}
+    </div>
+  );
+}
+
+/** Ruling 560: the history reads as a feed, the way the shadcn timeline
+ *  blocks draw one. Days head their entries, newest first; each entry is a dot
+ *  on one rail with its clock at the right, and the tasks it names are the key
+ *  chips every other feed links a task with. */
+function EpicHistory({
+  entries,
+  taskLinks,
+}: {
+  entries: EpicPageView["epic"]["history"];
+  taskLinks: EpicPageView["taskLinks"];
+}) {
+  const local = useHydrated();
+  return (
+    <div className="epic-history">
+      {daySections(entries, (entry) => entry.occurredAt, local).map((day) => (
+        <div key={day.key}>
+          <p className="epic-history-day">{day.day}</p>
+          <ol className="epic-history-list">
+            {day.rows.map((entry, i) => (
+              <li key={`${entry.occurredAt}-${i}`}>
+                <span className="epic-history-text">
+                  <RichText text={entry.text} mentions={false} taskLinks={taskLinks} />
+                </span>
+                <time className="epic-history-at" dateTime={entry.occurredAt}>
+                  {(local ? formatClock : formatClockUTC)(entry.occurredAt)}
+                </time>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
     </div>
   );
 }

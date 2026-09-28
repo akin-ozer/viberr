@@ -1166,8 +1166,10 @@ minute.
   same `cardStatus` the board computes, fed the review queue and live-run state, ruling
   476(g)), "waits on N" when it waits, its owner, and Remove; Add tasks offers every live
   task not in it and says which will move from another epic; New task makes one in it;
-  archived tasks fold under the list. History is the file's timeline (the newest shown,
-  "Show all" for the rest). Details: status, lead, dates, creator, and "Planned in
+  archived tasks fold under the list. History is the file's timeline as a feed (ruling
+  560): the newest eight under their days ("Today", "Yesterday", "Sep 25"), each entry a
+  dot on one rail with its clock at the right and the tasks it names as key chips, and
+  "Show N more" / "Show less" for the rest. Details: status, lead, dates, creator, and "Planned in
   <conversation>" for a viewer who may open that thread (its owner or an org admin,
   `canAccessConversation`). Intents: `update-epic`, `add-tasks`, `remove-task`,
   `create-task`, each gated inside its writer.
