@@ -2869,6 +2869,7 @@ describe("recordAgentCompletion — failing verdict drops a stale accept-complet
           roleHint: "Review & validation",
         },
         runId: "run_rv1",
+        delivers: false,
         replyText,
         verdict: classifyReviewerVerdict(replyText),
         question: null,

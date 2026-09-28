@@ -18,6 +18,7 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
+  drainRunCompletions,
   installFakeRuntime,
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
@@ -192,7 +193,7 @@ beforeEach(async () => {
   // than quietly reach github.com from a unit test.
   process.env.GIT_ALLOW_PROTOCOL = "file";
 });
-afterEach(() => {
+afterEach(async () => {
   for (const key of GIT_ENV_KEYS) {
     const value = savedGitEnv[key];
     if (value === undefined) delete process.env[key];
@@ -201,6 +202,10 @@ afterEach(() => {
   // The operator lease is module state: a test that leaves a drive in flight
   // (below) must not hand the next one a held lease.
   resetOperatorLeasesForTests();
+  // A fired schedule's operator run still writes into the data root after the
+  // test's assertions; under a loaded suite the cleanup's rmSync met it
+  // (ENOTEMPTY, T17, 2026-09-28).
+  await drainRunCompletions();
   ctx.cleanup();
 });
 

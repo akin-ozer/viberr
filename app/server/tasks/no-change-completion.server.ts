@@ -7,10 +7,11 @@ import {
 } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import type { GithubContextOptions } from "~/server/github/github-context.server";
-import type {
-  FileActorRef,
-  TaskFileEvent,
-  TaskFrontmatter,
+import {
+  deliveredAsFiles,
+  type FileActorRef,
+  type TaskFileEvent,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import { toError } from "~/shared/errors";
 
@@ -79,6 +80,17 @@ export function noChangeApplies(
  *  server refusing with advice that would open an EMPTY PR (VIB-2). */
 export function noChangeCandidate(fm: Pick<TaskFrontmatter, "pr">): boolean {
   return !fm.pr;
+}
+
+/**
+ * Ruling 550: a task the accept-time probe may prove empty: no pull request,
+ * and a delivery that was never a branch. A task delivered as the files saved
+ * on it has no PR because its delivery never was a branch, and the probe found
+ * no branch and recorded a delivered result as "completed with no changes".
+ * ONE predicate for the check before the probe and the re-check in the lock.
+ */
+function probeCandidate(fm: Pick<TaskFrontmatter, "pr" | "workRevision" | "deliveredAt">): boolean {
+  return noChangeCandidate(fm) && !deliveredAsFiles(fm);
 }
 
 /** `GET /git/ref/...` — the one field this module reads, decoded by the
@@ -293,8 +305,9 @@ export async function acceptanceNoChangeCheck(
     return { applies: false, refusal: null, verification: null, branch: null, autoDetected: false };
   }
   const claimed = noChangeApplies(fm); // fm.noChanges === true && !fm.pr
-  // The ordinary PR path pays NOTHING — a task WITH a PR fails noChangeCandidate.
-  if (!claimed && !noChangeCandidate(fm)) {
+  // The ordinary PR path pays NOTHING — a task WITH a PR fails the candidate
+  // test, and (ruling 550) so does a task delivered as files.
+  if (!claimed && !probeCandidate(fm)) {
     return { applies: false, refusal: null, verification: null, branch: null, autoDetected: false };
   }
   const probe = await probeNothingToDeliver(db, ctx, projectSlug, taskKey);
@@ -347,7 +360,7 @@ export function assertVerifiedNoChangeStillApplies(
 ): void {
   // R20-2: re-assert against the predicate the check actually used, or an
   // auto-detected acceptance (which never saw a `noChanges` flag) always throws.
-  const stillApplies = check.autoDetected ? noChangeCandidate(fm) : noChangeApplies(fm);
+  const stillApplies = check.autoDetected ? probeCandidate(fm) : noChangeApplies(fm);
   if (stillApplies === check.applies) return;
   throw AppError.conflict(
     `${taskKey} changed while the acceptance was being verified: it is ` +

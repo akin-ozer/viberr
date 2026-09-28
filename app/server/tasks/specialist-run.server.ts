@@ -28,6 +28,7 @@ import {
   activeWorkRevision,
   deliveringEngagement,
   deriveValidation,
+  reviewSubjectId,
   supportingEngagements,
   type AgentRef,
   type FileActorRef,
@@ -187,6 +188,7 @@ import {
   type TaskMutationContext,
 } from "./task-mutation.server";
 import { userDisplayName } from "./user-display-name.server";
+import { readRequiredReviewers, requiredReviewerDeliversRefusal } from "./required-reviewers.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 
 /** The mount call's own input contract — named so `dataRoot` can be OMITTED
@@ -671,6 +673,18 @@ export async function assignSpecialist(
     existing.parsed.frontmatter.stage,
     projectBoard(ctx, input.projectSlug),
   );
+  // Ruling 556: every door to `delivers: true` passes here, so a reviewer the
+  // project requires is refused on all of them.
+  {
+    const reviews = readRequiredReviewers(input.projectSlug, ctx).filter(
+      (rule) => rule.profileId === specialist.profileId,
+    );
+    if (reviews.length > 0) {
+      throw AppError.validation(
+        requiredReviewerDeliversRefusal(specialist.name, input.taskKey, reviews),
+      );
+    }
+  }
 
   // P14-GV-10: swapping the DELIVERER out from under a live run. The outgoing
   // agent's run keeps going and still reconciles delivery under its own profile,
@@ -1259,15 +1273,18 @@ async function dispatchAgentRun(
     }
     const currentDeliverer = deliveringEngagement(existing.parsed.frontmatter);
     const delivery = view.capabilities?.delivery === true;
+    // Ruling 556: a reviewer the project requires is engaged to review when
+    // nothing asks otherwise; only an explicit `delivers: true` reaches the
+    // refusal in `assignSpecialist`.
+    const requiredHere = readRequiredReviewers(input.projectSlug, ctx).some(
+      (rule) => rule.profileId === input.profileId,
+    );
     const wantsDelivery =
-      input.delivers ?? (currentDeliverer === null && delivery);
-    if (wantsDelivery && !delivery) {
+      input.delivers ?? (currentDeliverer === null && delivery && !requiredHere);
+    if (wantsDelivery && !canOwnDelivery(view, input.delivers)) {
       // R21-2's posture: name the capability AND where a human grants it,
       // rather than starting a delivering run that can ship nothing.
-      throw AppError.validation(
-        `${view.name} holds no repo-write grant, so it cannot own delivery. ` +
-          `Run it as a supporting agent, or grant "Execute code or write to the repo" on the Agents page.`,
-      );
+      throw AppError.validation(cannotOwnDeliverySentence(view.name));
     }
     if (wantsDelivery) {
       await assignSpecialist(
@@ -1316,11 +1333,8 @@ async function dispatchAgentRun(
     const handoffView = listDeployedSpecialists(input.projectSlug, ctx).find(
       (s) => s.id === input.profileId,
     );
-    if (handoffView && handoffView.capabilities?.delivery !== true) {
-      throw AppError.validation(
-        `${handoffView.name} holds no repo-write grant, so it cannot own delivery. ` +
-          `Run it as a supporting agent, or grant "Execute code or write to the repo" on the Agents page.`,
-      );
+    if (handoffView && !canOwnDelivery(handoffView, input.delivers)) {
+      throw AppError.validation(cannotOwnDeliverySentence(handoffView.name));
     }
     await assignSpecialist(
       db,
@@ -1636,8 +1650,15 @@ async function dispatchAgentRun(
    * Claude toolkit's `report_outcome` field, the Codex envelope's schema, and
    * the persona's collaboration notes — so withholding it once withholds it
    * everywhere, and the prompt stops promising what the tools contradict.
+   *
+   * Ruling 555: nor is the deliverer offered it. The deliverer mints and
+   * everyone else judges (ruling 388), so a verdict from the run that makes the
+   * delivery is a verdict on its own work, which `requiredReviewers` has never
+   * counted. On AWSC-3 the Estimate Judge delivered and approved in one reply,
+   * and completion filed its files as the evidence for that verdict, so they
+   * were never recorded as the delivery.
    */
-  const collab = input.withholdVerdict ? { ...granted, verdict: false } : granted;
+  const collab = input.withholdVerdict || delivers ? { ...granted, verdict: false } : granted;
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
     kind: "agent",
@@ -2197,6 +2218,10 @@ async function dispatchAgentRun(
   // completion path can tell an answer from a silence. Ruling 313 stopped the
   // tool; without this the prose fallback manufactures the verdict anyway.
   if (input.withholdVerdict) runInput.verdictWithheld = true;
+  // Ruling 544: what this run is judging — read from the same task file the
+  // support checkout was pinned from — so a verdict returned after a newer
+  // delivery binds to nothing it never read.
+  runInput.reviewSubject = reviewSubjectId(existing.parsed.frontmatter);
   if (!principal.ok) runInput.principalRefusal = principal.refusal;
   if (effort) runInput.effort = effort;
   if (persona) runInput.systemPrompt = personaPrefix;
@@ -3243,6 +3268,34 @@ export function knowledgeBaseReadDirs(
   return [...dirs].sort();
 }
 
+/**
+ * Ruling 535: who may own a task's delivery. A repo-write grant always could
+ * (ruling 98(a): a deliverer that can commit nothing ships nothing). Since
+ * ruling 388 the files a deliverer saves on the task are a delivery too, so an
+ * EXPLICIT hand-off (`delivers: true`, the operator's "this agent makes the
+ * result") may also go to an agent that can post files on the task and cannot
+ * write the repository: on a board that delivers results that is exactly the
+ * agent the playbook names, and it must never write the repository. The
+ * implicit posture (no hint) still keys on repo-write alone, so a reviewer run
+ * first on a task never becomes its deliverer by accident.
+ */
+export function canOwnDelivery(
+  view: Pick<DeployedSpecialistView, "capabilities">,
+  delivers: boolean | undefined,
+): boolean {
+  if (view.capabilities.delivery) return true;
+  return delivers === true && view.capabilities.postsFiles;
+}
+
+/** The refusal when an agent can deliver nothing: it names both grants that
+ *  would let it, and where a person gives one (R21-2's posture). */
+export function cannotOwnDeliverySentence(name: string): string {
+  return (
+    `${name} holds neither a repo-write grant nor "Attach evidence references", so it could deliver nothing: ` +
+    `no commit, and no file saved on the task. Run it as a supporting agent, or grant one of them on the Agents page.`
+  );
+}
+
 export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   let prompt =
     `You are the ${input.role} specialist on task ${input.taskKey}: ` +
@@ -3381,9 +3434,20 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
         // may still say "push updates" — the contract must override it, or the
         // agent obeys the directive into denied `git commit` attempts (XS-4,
         // observed live on VIB-1).
-        prompt += `- Repo delivery is HUMAN-gated for your profile: do NOT run \`git commit\` / \`git push\` or open a PR — even if a directive tells you to. Make the changes in the workspace and report exactly what you changed (files + summary); the operator's delivery decision (or a human) publishes them to the branch/PR (ruling 211(f): R15-2 deleted the Review-transition hook).\n`;
+        // Ruling 535: a deliverer with no repo-write grant at all delivers the
+        // files it saves; one that may write the repo but not commit still
+        // delivers its workspace, published by a person.
+        const deliversFiles = !input.delivery.repoWrite && Boolean(input.attachmentsDropDir);
+        prompt += deliversFiles
+          ? // Ruling 535: a deliverer that can post files but not write the
+            // repository delivers results. Telling it a human will publish its
+            // workspace to a PR described a delivery that never happens.
+            `- You cannot commit for this task: do NOT run \`git commit\` / \`git push\` or open a PR — even if a directive tells you to. Your delivery is the files you save on the task (see "Files on the task thread" below): the result, in the files and formats the goal names. Those files are what the reviewers judge and what the person accepts, so save the final version of each there, and cite each one by name in your reply.\n`
+          : `- Repo delivery is HUMAN-gated for your profile: do NOT run \`git commit\` / \`git push\` or open a PR — even if a directive tells you to. Make the changes in the workspace and report exactly what you changed (files + summary); the operator's delivery decision (or a human) publishes them to the branch/PR (ruling 211(f): R15-2 deleted the Review-transition hook).\n`;
       }
-      prompt += `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`;
+      prompt += canCommitPush || input.delivery.repoWrite || !input.attachmentsDropDir
+        ? `- Report the exact branch name, commit SHAs, and PR URL for whatever delivery steps you performed back in your reply.`
+        : `- Report the exact name of every file you saved on the task back in your reply.`;
     }
   }
   // Ruling 191: what this host's shell actually contains, before the agent
@@ -3793,7 +3857,9 @@ export async function resolveResumeConfinement(
     // Resolve the collaboration gates up-front: the persona's github_read
     // section (F4) needs `collab.githubRead`, and the toolkit below reuses the
     // same value. Same both-paths parity the browser mount keeps (line ~2476).
-    const collab = resolveAgentCollab(resolved.capabilities);
+    // Ruling 555: a resumed deliverer is offered no verdict either.
+    const resumeGranted = resolveAgentCollab(resolved.capabilities);
+    const collab = input.delivers ? { ...resumeGranted, verdict: false } : resumeGranted;
     const resumeRepo = projectRepo(ctx, input.projectSlug);
     const personaInput: SpecialistPersonaInput = {
       profileId: input.profileId,
@@ -4536,6 +4602,10 @@ export interface DeployedSpecialistView {
   capabilities: {
     /** May own the workspace/branch/PR when engaged as the deliverer. */
     delivery: boolean;
+    /** Ruling 535: holds `attach-evidence-references`, so it can save files on
+     *  the task, and an explicit hand-off makes it a deliverer whose delivery
+     *  is those files (ruling 388) even without a repo-write grant. */
+    postsFiles: boolean;
     /** Holds report-validation-verdict → its verdicts gate acceptance. */
     verdict: boolean;
     /** May raise ask-human question packets. */
@@ -4801,6 +4871,7 @@ export function listDeployedSpecialists(
         // (absent grant → verdict-on for supporting engagements) is a
         // RECORDING rule, not a selection signal; applying it here made every
         // profile look review-capable and mis-picked the reviewer.
+        postsFiles: effectiveCollabMode(grants, "attach-evidence-references") === "direct",
         verdict: granted("report-validation-verdict"),
         askHuman: effectiveCollabMode(grants, "ask-human") === "direct",
         // D8/R19-19: whether this agent can drive a browser — the mount's own

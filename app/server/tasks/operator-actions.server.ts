@@ -174,6 +174,8 @@ import {
   noChangeCompletionEvent,
 } from "./no-change-completion.server";
 import {
+  canOwnDelivery,
+  cannotOwnDeliverySentence,
   isDispatchHeld,
   listDeployedSpecialists,
   projectBoard,
@@ -186,6 +188,7 @@ import {
 import {
   acceptanceOfferBasis,
   readRequiredReviewers,
+  requiredReviewerDeliversRefusal,
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "./required-reviewers.server";
@@ -203,7 +206,7 @@ import {
 } from "~/server/projections/notifications.server";
 import { liveMergeable } from "~/features/github/github-pills";
 import { correctKnowledgeDoc, type KbCorrectionRequest } from "./kb-correction-actions.server";
-import { relayToTask } from "./task-relay.server";
+import { relayToTask, takeFromTask, type TakeRequest } from "./task-relay.server";
 import {
   listKnowledgeBaseNames,
   listMcpServerNames,
@@ -3792,7 +3795,14 @@ export async function operatorPostComment(
 export async function operatorRelayToTask(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; toTaskKey: string; text: string },
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    toTaskKey: string;
+    text: string;
+    /** Ruling 538: this task's attachments to put on the other task. */
+    files?: readonly string[];
+  },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
   if (gate(authority, "append-typed-events") === "deny") {
@@ -3806,6 +3816,7 @@ export async function operatorRelayToTask(
     fromTaskKey: input.taskKey,
     toTaskKey: input.toTaskKey,
     text: input.text,
+    files: input.files ?? [],
     author: {
       actorRef: { kind: "operator" },
       name: "operator",
@@ -3813,6 +3824,42 @@ export async function operatorRelayToTask(
       notifyFrom: OPERATOR_NOTIFY_FROM,
     },
   });
+}
+
+/** Ruling 557: take named attachments of another task onto this one. The
+ *  relay's grant: it is the relay's claim comment, written on this task. */
+export async function operatorTakeFromTask(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    fromTaskKey: string;
+    files: readonly string[];
+    text?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project, so it cannot take files from another task.",
+    };
+  }
+  const request: TakeRequest = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    fromTaskKey: input.fromTaskKey,
+    files: input.files,
+    author: {
+      actorRef: { kind: "operator" },
+      name: "operator",
+      auditActor: OPERATOR_AUDIT_ACTOR,
+      notifyFrom: OPERATOR_NOTIFY_FROM,
+    },
+  };
+  if (input.text) request.text = input.text;
+  return takeFromTask(db, ctx, request);
 }
 
 /**
@@ -4249,6 +4296,9 @@ function resolveDeliversIntent(
   const delivering = deliveringEngagement(fm);
   if (delivering?.profileId === agent.id) return true;
   if (fm.engagements.some((e) => e.profileId === agent.id)) return false;
+  // Ruling 556: a reviewer the project requires is run to review, never
+  // handed delivery by default, whatever its grants.
+  if (readRequiredReviewers(projectSlug, ctx).some((rule) => rule.profileId === agent.id)) return false;
   return delivering === null && agent.capabilities.delivery;
 }
 
@@ -4307,14 +4357,10 @@ export async function operatorDispatchAgent(
   // (1) `delivers: true` for a profile with no repo-write grant — the dispatch
   // refuses it at both engage doors; filing a card for it would strand a
   // maintainer's Apply on that refusal.
-  if (input.delivers === true && !agent.capabilities.delivery) {
-    return {
-      outcome: "noop",
-      message:
-        `${agent.name} holds no repo-write grant, so it cannot own delivery. ` +
-        `Run it as a supporting agent (omit \`delivers\`), or a human grants ` +
-        `"Execute code or write to the repo" on the project's Agents surface.`,
-    };
+  // Ruling 535: an agent that can post files on the task can own a results
+  // task's delivery without a repo-write grant.
+  if (input.delivers === true && !canOwnDelivery(agent, input.delivers)) {
+    return { outcome: "noop", message: cannotOwnDeliverySentence(agent.name) };
   }
   // (2) `delivers: false` aimed at the CURRENT deliverer — dispatchAgentRun
   // deliberately keeps an engaged profile's shape (a delivering run cannot be
@@ -4342,6 +4388,19 @@ export async function operatorDispatchAgent(
     agent,
     input.delivers,
   );
+  // Ruling 556: nor to a reviewer the project requires. The engage refuses it
+  // (`assignSpecialist`), and a card for it would strand Apply on that refusal.
+  if (delivers && currentDeliverer !== input.profileId) {
+    const reviews = readRequiredReviewers(input.projectSlug, ctx).filter(
+      (rule) => rule.profileId === input.profileId,
+    );
+    if (reviews.length > 0) {
+      return {
+        outcome: "noop",
+        message: requiredReviewerDeliversRefusal(agent.name, input.taskKey, reviews),
+      };
+    }
+  }
   const as = delivers
     ? "the delivering agent"
     : supportingRoleWord(ctx, input.projectSlug, input.profileId);

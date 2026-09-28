@@ -429,6 +429,11 @@ const BASELINE_COLUMNS: readonly {
         name: "verdict_withheld",
         ddl: "verdict_withheld INTEGER NOT NULL DEFAULT 0",
       },
+      // Ruling 544: `upsertRun` names it on every insert — the ruling-127
+      // failure shape. NULL is the truth for an older row (nothing recorded
+      // what it was dispatched on), and the completion binds such a run's
+      // verdict to the subject at completion, as before the ruling.
+      { name: "review_subject", ddl: "review_subject TEXT" },
       // Ruling 369: the prompt-cache columns the sink folds on every persisted
       // line, so a root that predates them would fail every run's first line.
       // No backfill on any of them: a row written before the columns existed

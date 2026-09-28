@@ -505,3 +505,92 @@ describe("ruling 384: the acceptance card's basis reads the review subject", () 
     );
   });
 });
+
+/**
+ * Ruling 556. Live on AWSC-3 the operator made the Estimate Judge the
+ * benchmark's deliverer on a board whose rule is "Estimate Judge reviews at
+ * Review". A deliverer's verdict on its own delivery does not count (ruling
+ * 555), so the task could never pass Review, and the gate kept saying "Run the
+ * review", which only started more delivering runs.
+ */
+describe("ruling 556: the project's required reviewer cannot deliver", () => {
+  it("refuses to make it a task's deliverer", async () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(store, { stage: "review", engagements: [DEVELOPER] });
+    const { assignSpecialist } = await import("./specialist-run.server");
+    // CANARY: drop the check in `assignSpecialist` and Code Reviewer takes
+    // delivery of VIB-1.
+    await expect(
+      assignSpecialist(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      message:
+        "Code Reviewer is this project's required reviewer at Review, so it cannot deliver VIB-1: " +
+        "its verdict on its own delivery would not count, and VIB-1 could never pass Review. " +
+        "Have another agent deliver it and run Code Reviewer's review on what that agent delivers, or change " +
+        "Settings → Required reviewers.",
+    });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.engagements).toEqual([DEVELOPER]);
+  });
+
+  it.each([
+    ["with its files delivered", { deliveredAt: REPORT_AT }],
+    // AWSC-3's shape: the files were saved but never recorded as delivered
+    // (ruling 555), which the gate read as "nothing to judge" and let through.
+    ["with nothing recorded as delivered", {}],
+  ])("tells a task its own required reviewer delivers that the review cannot count, %s", (_case, delivered) => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(store, { stage: "review", waiting: "human", ...delivered, engagements: [{ ...REVIEWER, delivers: true }] });
+    // CANARY: drop the deliverer branch from `requiredReviewerRefusals` and the
+    // gate says "Run the review at Review", which no run of the deliverer
+    // meets; move it below the "nothing delivered" return and the second row
+    // is acceptable with nothing reviewed.
+    expect(
+      acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
+    ).toBe(
+      "Required reviewer Code Reviewer (project rule at Review) is this task's deliverer, so its review " +
+        "cannot count. Hand delivery to another agent, have that agent deliver, and run Code Reviewer's " +
+        "review, or an admin can force-accept.",
+    );
+  });
+
+  it.each([
+    [
+      "before it is engaged again",
+      [DEVELOPER],
+      "Required reviewer Code Reviewer (project rule at Review) made the work delivered on this task, so its " +
+        "review of it cannot count. Have another agent deliver its own work, then run Code Reviewer's review, " +
+        "or an admin can force-accept.",
+    ],
+    [
+      "once it is engaged again to review",
+      [DEVELOPER, REVIEWER],
+      "A required reviewer made the work delivered on this task, so its approval of it cannot count. Have " +
+        "another agent deliver its own work, then run the review, or an admin can force-accept.",
+    ],
+  ])(
+    "tells a task whose delivered work its required reviewer made that the review cannot count, %s",
+    (_case, engagements, sentence) => {
+      // The way out half taken: delivery went to the developer, which has
+      // saved nothing yet, so what is delivered is still the reviewer's own
+      // and its verdict will not bind to it. CANARY: drop the author branch
+      // from `requiredReviewerRefusals` (the first row) or from
+      // `acceptanceBlockedReason` (the second) and the gate asks for a review
+      // that can never count.
+      const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+      const madeByReviewer: TaskFileEvent = {
+        ...reportEvent(),
+        actor: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Review & validation" },
+      };
+      seed(store, { stage: "review", waiting: "human", deliveredAt: REPORT_AT, engagements }, null, [madeByReviewer]);
+      expect(
+        acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
+      ).toBe(sentence);
+    },
+  );
+});

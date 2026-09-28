@@ -86,6 +86,12 @@ export type AgentRunRow = {
    *  withheld. A reply with no envelope verdict is then an ANSWER, not silence,
    *  and the prose fallback must not manufacture one over it. */
   verdict_withheld: number;
+  /** Ruling 544: what the task's review bound to when this run was dispatched
+   *  (`reviewSubjectId`), or {@link NO_REVIEW_SUBJECT} when nothing on it had
+   *  been delivered yet. The run's verdict binds only if the task still has
+   *  that subject when it completes. NULL on a run that is not a task agent's
+   *  and on rows written before the column existed. */
+  review_subject: string | null;
   /** Ruling 248 (pass 37, F37-77): 1 when the workspace checkout could not be
    *  provisioned, so this run executed with NO working tree. A run that could
    *  not read the work judges nothing — the completion pipeline closes the
@@ -121,6 +127,101 @@ export type AgentRunRow = {
    *  written before the column existed. */
   credential_account_id: string | null;
 };
+
+/**
+ * Ruling 559: the raw `result` message a Claude session last reported: the
+ * newest one on any other run that carried the session. A completion
+ * compaction's result is a line of the run it compacted, so it counts; a run
+ * that stopped before its result (a restart) is passed over for the one before
+ * it. Null when none is left (never reported, or its lines were pruned).
+ */
+export function lastSessionResultRaw(
+  db: DatabaseSync,
+  sessionId: string,
+  exceptRunId: string,
+): string | null {
+  // SAFETY: the SELECT list is the single TEXT NOT NULL column `raw_json`.
+  const rows = db
+    .prepare(
+      `SELECT l.raw_json FROM run_log_lines l JOIN agent_runs r ON r.id = l.run_id
+        WHERE r.session_id = ? AND r.id != ? AND l.raw_json LIKE '%"type":"result"%'
+        ORDER BY r.created_at DESC, l.seq DESC LIMIT 8`,
+    )
+    .all(sessionId, exceptRunId) as { raw_json: string }[];
+  for (const row of rows) {
+    if (isResultLine(row.raw_json)) return row.raw_json;
+  }
+  return null;
+}
+
+const resultTypeSchema = z.object({ type: z.literal("result") });
+
+/** Where a run works, for {@link lastClaudeSessionWorkingThere}. */
+export interface RunPlace {
+  exceptRunId: string;
+  kind: RunKind;
+  projectSlug: string;
+  taskKey: string;
+  agentProfileId: string;
+  accountId: string | null;
+}
+
+/**
+ * Ruling 553: the session of the newest other Claude run that worked where
+ * this one will, under the same account. The CLI restores a resumed session's
+ * cost state only when that session was the last one it ran in the working
+ * directory, per account home, and every controller conversation shares one
+ * scratch folder; a task run's folder is its task's, per agent and kind.
+ */
+export function lastClaudeSessionWorkingThere(db: DatabaseSync, place: RunPlace): string | null {
+  // SAFETY: the SELECT list is the single nullable TEXT column `session_id`.
+  const row = (
+    place.kind === "controller"
+      ? db
+          .prepare(
+            `SELECT session_id FROM agent_runs WHERE backend = 'claude' AND kind = 'controller'
+               AND id != ? AND credential_account_id IS ? AND session_id IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1`,
+          )
+          .get(place.exceptRunId, place.accountId)
+      : db
+          .prepare(
+            `SELECT session_id FROM agent_runs WHERE backend = 'claude' AND kind = ?
+               AND project_slug = ? AND task_key = ? AND agent_profile_id = ?
+               AND id != ? AND credential_account_id IS ? AND session_id IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1`,
+          )
+          .get(place.kind, place.projectSlug, place.taskKey, place.agentProfileId, place.exceptRunId, place.accountId)
+  ) as { session_id: string } | undefined;
+  return row?.session_id ?? null;
+}
+
+/** Whether a stored raw line is a provider `result` message. */
+function isResultLine(raw: string): boolean {
+  try {
+    return resultTypeSchema.safeParse(JSON.parse(raw)).success;
+  } catch {
+    return false;
+  }
+}
+
+/** Ruling 544: `agent_runs.review_subject` for a run dispatched before anything
+ *  on its task was delivered. Never a subject id, which is a revision id or
+ *  `files:<deliveredAt>`. */
+export const NO_REVIEW_SUBJECT = "none";
+
+/**
+ * Ruling 544: the subject a run was dispatched on, read back off its row. Null
+ * when nothing on the task had been delivered yet; undefined when the row does
+ * not say (a run that is not a task agent's, or one written before the column).
+ */
+export function reviewSubjectAtDispatch(
+  row: Pick<AgentRunRow, "review_subject"> | null,
+): string | null | undefined {
+  const stored = row?.review_subject ?? null;
+  if (stored === null) return undefined;
+  return stored === NO_REVIEW_SUBJECT ? null : stored;
+}
 
 /** Ruling 369: which prompt-cache TTL the provider billed a run's writes under. */
 export type CacheTtlBucket = "5m" | "1h" | "mixed";
@@ -162,6 +263,8 @@ export interface InsertRunInput {
   /** Ruling 316: this run was dispatched with its verdict channel withheld, so
    *  a reply carrying no envelope verdict is an ANSWER, not silence to repair. */
   verdictWithheld?: boolean;
+  /** Ruling 544: see `AgentRunRow.review_subject`. Omitted stores NULL. */
+  reviewSubject?: string | null;
   /** Ruling 369: the kind of credential the run bills (see
    *  `AgentRunRow.credential_kind`). Omitted (a refused run, a fixture) stores
    *  NULL. */
@@ -181,7 +284,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, interrupted_reason, credential_user_id, verdict_withheld,
-        credential_kind, credential_account_id,
+        review_subject, credential_kind, credential_account_id,
         created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
@@ -189,7 +292,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
         @interruptedBy, @interruptedReason, @credentialUserId, @verdictWithheld,
-        @credentialKind, @credentialAccountId,
+        @reviewSubject, @credentialKind, @credentialAccountId,
         @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
@@ -206,6 +309,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         interrupted_reason=excluded.interrupted_reason,
         credential_user_id=excluded.credential_user_id,
         verdict_withheld=excluded.verdict_withheld,
+        review_subject=excluded.review_subject,
         credential_kind=excluded.credential_kind,
         credential_account_id=excluded.credential_account_id,
         updated_at=excluded.updated_at`,
@@ -236,6 +340,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     interruptedReason: input.interruptedReason ?? null,
     credentialUserId: input.credentialUserId ?? null,
     verdictWithheld: input.verdictWithheld ? 1 : 0,
+    reviewSubject: input.reviewSubject ?? null,
     credentialKind: input.credentialKind ?? null,
     credentialAccountId: input.credentialAccountId ?? null,
     createdAt: now,

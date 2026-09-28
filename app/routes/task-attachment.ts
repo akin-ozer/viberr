@@ -1,9 +1,9 @@
-import { readFileSync, statSync } from "node:fs";
 import type { Route } from "./+types/task-attachment";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import {
   attachmentContentType,
+  readAttachmentBytes,
   resolveTaskAttachment,
 } from "~/server/files/task-attachments.server";
 
@@ -38,15 +38,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   } catch {
     return new Response("Not found", { status: 404 });
   }
-  let size: number;
-  try {
-    const st = statSync(abs);
-    if (!st.isFile()) return new Response("Not found", { status: 404 });
-    size = st.size;
-  } catch {
-    return new Response("Not found", { status: 404 });
-  }
-  if (size > MAX_ATTACHMENT_BYTES) {
+  // Ruling 552: never through a link. Agents can write this folder (ruling
+  // 460), and a link planted in it served the file it pointed at, one only
+  // the server may read, to anyone in the project.
+  const read = readAttachmentBytes(abs, MAX_ATTACHMENT_BYTES);
+  if (!read) return new Response("Not found", { status: 404 });
+  if ("tooLarge" in read) {
     return new Response("Attachment too large to serve.", { status: 413 });
   }
 
@@ -58,11 +55,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // The filename survived resolveTaskAttachment (no separators/quotes beyond
   // ordinary characters); strip the two characters that could break the header.
   const safeName = params.file.replace(/["\\]/g, "_");
-  const body = readFileSync(abs);
-  return new Response(new Uint8Array(body), {
+  return new Response(new Uint8Array(read.bytes), {
     headers: {
       "content-type": type,
-      "content-length": String(size),
+      "content-length": String(read.bytes.length),
       "content-disposition": `${inline && !forceDownload ? "inline" : "attachment"}; filename="${safeName}"`,
       "x-content-type-options": "nosniff",
       // Even the inline types render inert: no scripts, no plugins reaching

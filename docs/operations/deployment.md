@@ -569,8 +569,8 @@ baseline column or table added after this root was created is applied at open by
 `ensureBaselineColumns` (`app/server/db/sqlite.server.ts`), which `ALTER TABLE … ADD
 COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
 `dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
-`interrupted_reason`, `usage_final`, `no_checkout`, `verdict_withheld` and the eleven
-prompt-cache columns of ruling 369; `controller_conversations.task_key` and `seen_seq`;
+`interrupted_reason`, `usage_final`, `no_checkout`, `verdict_withheld`, `review_subject` and
+the eleven prompt-cache columns of ruling 369; `controller_conversations.task_key` and `seen_seq`;
 `controller_messages.surface`, `reply_to` and `unlinked_history`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
 `projects.required_reviewers_json`; `task_projections.recommendation_kinds` — creates the
 `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and indexes it

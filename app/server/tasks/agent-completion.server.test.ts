@@ -19,8 +19,10 @@ import type {
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   readTaskFile,
+  resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
+import { withFileLock } from "~/server/files/file-mutex.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -30,6 +32,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import {
+  drainRunCompletions,
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
@@ -37,12 +40,15 @@ import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { stageOutcome } from "./agent-outcome.server";
+import { OPERATOR_NOTIFY_FROM } from "./task-mutation.server";
+import { relayToTask, takeFromTask, type RelayAuthor } from "./task-relay.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   acceptanceRefusalFor,
   applyAgentCompletionEffects,
+  attachTaskFile,
   classifyReviewerVerdict,
   markWaitingAgent,
   OPERATOR_REACT_HOP_CEILING,
@@ -252,7 +258,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    *  unique per call so a test can drive more than one run without colliding on
    *  the (project, task, thread) uniqueness. */
   let runSeq = 0;
-  async function finishedRunWith(text: string): Promise<string> {
+  async function finishedRunWith(text: string, reviewSubject?: string | null): Promise<string> {
     runSeq += 1;
     queueFakeRun({
       lines: [
@@ -263,7 +269,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
       sessionId: `t-${runSeq}`,
     });
-    const started = await startRun(store.db, {
+    const input: Parameters<typeof startRun>[1] = {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       kind: "reviewer",
@@ -278,7 +284,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       dataRoot: store.dataRoot,
       actor: actorOf(store.users.arda),
       threadId: `th-${runSeq}`,
-    });
+    };
+    // Ruling 544: what the run was dispatched on, when the case says.
+    if (reviewSubject !== undefined) input.reviewSubject = reviewSubject;
+    const started = await startRun(store.db, input);
     await pollUntil(() => {
       // SAFETY: the SELECT list is the single column `state`, which
       // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
@@ -768,6 +777,573 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(claimed).toContain(screenshot);
     expect(claimed).not.toContain(uncitedSnap);
     expect(claimed).not.toContain(uncitedLog);
+  });
+
+  it("ruling 549: a snapshot cited only in a file the run saved is kept", async () => {
+    // Live on AWSC-1 the Workflow Researcher's findings file named eleven
+    // browser snapshots and its report named none: the prune deleted all
+    // eleven, and the Estimate Judge rejected the findings for citing files
+    // that were not there. CANARY: drop `savedFilesText` from the citation
+    // corpus and the snapshot the findings cite is deleted.
+    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+    const citedInFile = "page-2026-09-28T08-36-09-671Z.yml";
+    const uncited = "page-2026-09-28T08-36-38-297Z.yml";
+    const runId = await finishedRunWith("Saved the findings on the task.");
+    const dir = saveInRunWindow(runId, [citedInFile, uncited, "calculator-findings.md"]);
+    const findings = path.join(dir, "calculator-findings.md");
+    writeFileSync(findings, `Bulk import offers three templates. Evidence: ${citedInFile}.\n`);
+    const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
+    utimesSync(findings, finishedAt, finishedAt);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(existsSync(path.join(dir, citedInFile))).toBe(true);
+    expect(existsSync(path.join(dir, uncited))).toBe(false);
+    expect(existsSync(findings)).toBe(true);
+  });
+
+  it("ruling 533: a file a person attaches while a deliverer runs stays theirs, and delivers nothing", async () => {
+    // A run's files are found by mtime, so a person's upload during the run
+    // is in its window too. Claimed, it named the deliverer as its author and
+    // stamped `deliveredAt` from the person's own input: a files-only task
+    // then read as delivered by a run that saved nothing.
+    // CANARY: drop the `personFiled` filter in applyAgentCompletionEffects and
+    // the run claims `inventory.csv` and `deliveredAt` is stamped.
+    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+    const runId = await finishedRunWith("Read the inventory; nothing to save yet.");
+    await attachTaskFile(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", name: "inventory.csv", data: new TextEncoder().encode("vm,cpu\nweb01,4\n") },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Inside the run's window, which is the case at issue (stamped like
+    // `saveInRunWindow` stamps a run's own files, for the same clock reason).
+    const upload = path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), "inventory.csv");
+    const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
+    utimesSync(upload, finishedAt, finishedAt);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+    const claimants = parsed.timeline.filter((e) => (e.attachments ?? []).includes("inventory.csv"));
+    expect(claimants.map((e) => e.actor.kind)).toEqual(["human"]);
+    expect(existsSync(upload)).toBe(true);
+  });
+
+  it("ruling 558: a file still being put down for someone else when the run completes is never the run's", async () => {
+    // A person's upload, a relay and a take put the file down and then claim
+    // it. A completion between the two read a timeline with no claim and took
+    // the file: for a deliverer, as its delivery. The writers hold the name
+    // meanwhile; here the completion lands inside that hold.
+    // CANARY: drop the held names from the completion's exclusion and the run
+    // claims `sample-01-input.csv` and stamps `deliveredAt`.
+    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+    const runId = await finishedRunWith("Waiting for the benchmark input.");
+    const { withAttachmentClaims } = await import("~/server/files/task-attachments.server");
+    await withAttachmentClaims(store.slug, "VIB-1", ["sample-01-input.csv"], async () => {
+      saveInRunWindow(runId, ["sample-01-input.csv"]);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "dev",
+          role: "Developer",
+          delivers: true,
+          workdir: null,
+          agentHandle: "dev",
+        },
+        { id: runId, state: "finished" },
+      );
+    });
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+    expect(parsed.timeline.some((e) => (e.attachments ?? []).includes("sample-01-input.csv"))).toBe(false);
+  });
+
+  /** Ruling 558's writers: each puts `SAMPLE` on VIB-1 for someone other
+   *  than a run. The relay and the take bring it from VIB-2, which is Done. */
+  const WRITERS = ["a person's upload", "a relay", "a take"] as const;
+  const SAMPLE = "sample-01-input.csv";
+  const SAMPLE_BODY = "vm,cpu\nweb01,4\n";
+  async function putSampleOnVib1(writer: (typeof WRITERS)[number]): Promise<void> {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const source = taskAttachmentsDir(store.slug, "VIB-2", store.dataRoot);
+    mkdirSync(source, { recursive: true });
+    writeFileSync(path.join(source, SAMPLE), SAMPLE_BODY);
+    const author: RelayAuthor = {
+      actorRef: { kind: "operator" },
+      name: "operator",
+      auditActor: { userId: null, label: "operator" },
+      notifyFrom: OPERATOR_NOTIFY_FROM,
+    };
+    if (writer === "a person's upload") {
+      await attachTaskFile(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", name: SAMPLE, data: new TextEncoder().encode(SAMPLE_BODY) },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      return;
+    }
+    if (writer === "a relay") {
+      await relayToTask(store.db, { dataRoot: store.dataRoot }, {
+        projectSlug: store.slug,
+        fromTaskKey: "VIB-2",
+        toTaskKey: "VIB-1",
+        text: "The benchmark input.",
+        files: [SAMPLE],
+        author,
+      });
+      return;
+    }
+    await takeFromTask(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      fromTaskKey: "VIB-2",
+      files: [SAMPLE],
+      author,
+    });
+  }
+  const vib1Sample = () => path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), SAMPLE);
+
+  it.each(WRITERS)(
+    "ruling 558: a completion that lands while %s is claiming its file leaves the file to it",
+    async (writer) => {
+      // The writers' side of the hold. Each puts its file down, then waits for
+      // VIB-1's file lock to write the entry that claims it. The test holds
+      // that lock, so the completion lists the file, reads a timeline with no
+      // claim on it, and queues behind the writer.
+      // CANARY: hold no name while the file is put down (`[]` for the names in
+      // attachTaskFile, or in task-relay's landCarriedFiles) and the run claims
+      // `sample-01-input.csv` and stamps `deliveredAt`.
+      writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+      const runId = await finishedRunWith("Waiting for the benchmark input.");
+      const lock = resolveTaskFilePath({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+      let unlock: (() => void) | null = null;
+      const locked = withFileLock(lock, () => new Promise<void>((resolve) => (unlock = resolve)));
+      await vi.waitFor(() => expect(unlock).not.toBeNull());
+      const writing = putSampleOnVib1(writer);
+      // The file is down and its claim waits on the lock. Inside the run's
+      // window, as `saveInRunWindow` stamps a run's own files.
+      const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
+      utimesSync(vib1Sample(), finishedAt, finishedAt);
+      const completing = applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "dev",
+          role: "Developer",
+          delivers: true,
+          workdir: null,
+          agentHandle: "dev",
+        },
+        { id: runId, state: "finished" },
+      );
+      // Both wait on the lock: the writer's claim first, then the completion.
+      await vi.waitFor(async () => {
+        const { pending = [] } = await navigator.locks.query();
+        expect(pending.filter((l) => l.name === lock)).toHaveLength(2);
+      });
+      unlock!();
+      await Promise.all([locked, writing, completing]);
+      const parsed = taskFile().parsed;
+      expect(parsed.frontmatter.deliveredAt).toBeNull();
+      const claimants = parsed.timeline.filter((e) => (e.attachments ?? []).includes(SAMPLE));
+      expect(claimants).toHaveLength(1);
+      expect(claimants[0]!.actor.kind).not.toBe("agent");
+    },
+  );
+
+  it.each(WRITERS)("ruling 558: %s whose claim cannot be written leaves no file behind", async (writer) => {
+    // A file on the task that nothing claims is the next completion's to
+    // credit to its run. CANARY: write the file with `writeTaskAttachment`
+    // instead of the hold's `put` (in attachTaskFile, or in task-relay's
+    // landCarriedFiles) and the sample stays on VIB-1 with no claim.
+    writeFileSync(
+      resolveTaskFilePath({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }),
+      "---\nkey: VIB-1\ntitle: Truncated by an editor\nstage: impl\n",
+    );
+    await expect(putSampleOnVib1(writer)).rejects.toMatchObject({ code: "file_not_trusted" });
+    expect(existsSync(vib1Sample())).toBe(false);
+  });
+
+  it("ruling 555: a deliverer's reply is its delivery, whatever verdict it states", async () => {
+    // Live on AWSC-3 the Estimate Judge designed the benchmark (it delivers
+    // there) and ended its report "**Approved.**". Completion took that as a
+    // review verdict, filed the samples as its evidence and never stamped the
+    // delivery, so the task reached Review with nothing delivered and a
+    // verdict bound to nothing, and each re-run did the same.
+    // CANARY: authorize the delivering engagement's verdict and `deliveredAt`
+    // stays null while the files ride an "Approval noted" verdict event.
+    writeReviewTask({
+      stage: "impl",
+      workRevision: null,
+      validation: "none",
+      engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+    });
+    const runId = await finishedRunWith(
+      "Verdict: approve. Every sample carries at least three traps; the files are saved on this task.",
+    );
+    saveInRunWindow(runId, ["sample-01-input.csv", "golden-files.md"]);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: true,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).not.toBeNull();
+    const reply = parsed.timeline.find((e) => e.type === "comment" && e.actor.kind === "agent");
+    expect(reply?.attachments).toEqual(expect.arrayContaining(["sample-01-input.csv", "golden-files.md"]));
+    expect(parsed.timeline.some((e) => e.type === "quality")).toBe(false);
+    // Nor does it approve its own delivery once that is stamped.
+    expect(parsed.frontmatter.verdicts).toEqual([]);
+  });
+
+  /** Ruling 555's hand-off: the `reviewer` profile was handed delivery while
+   *  its review run worked, over files `dev` delivered at `savedAt`. */
+  function writeHandedOffReviewTask(savedAt: string): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+        workRevision: null,
+        deliveredAt: savedAt,
+        validation: "changed",
+      }),
+      goal: "Price the estate.",
+      timeline: [
+        {
+          occurredAt: savedAt,
+          type: "comment",
+          actor: { kind: "agent", backend: "claude", profileId: "dev", roleHint: "Reviewer" },
+          title: null,
+          text: "The estimate is saved on the task.",
+          toAgent: false,
+          evidence: null,
+          attachments: ["estimate-link.md"],
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const completeReviewRun = (runId: string) =>
+    applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+
+  it("ruling 555: a review run whose profile was handed delivery while it worked keeps its verdict", async () => {
+    // The channel was offered at dispatch, as a reviewer; the roster at
+    // completion does not take it back. CANARY: key `verdictAuthorized` on the
+    // engagement at completion instead of the run's dispatch and the verdict
+    // is discarded.
+    const savedAt = "2026-09-28T12:27:12.883Z";
+    writeHandedOffReviewTask(savedAt);
+    const runId = await finishedRunWith("Verdict: approve. The totals match the mapping.", `files:${savedAt}`);
+    await completeReviewRun(runId);
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.verdicts.map((v) => [v.profileId, v.result])).toEqual([["reviewer", "approve"]]);
+    expect(parsed.frontmatter.deliveredAt).toBe(savedAt);
+  });
+
+  it("ruling 555: that review run's captures never become the delivery, with no verdict to carry them", async () => {
+    // With no verdict the run's files ride its reply, which the delivery stamp
+    // reads. They were saved for a review, and the roster at completion does
+    // not make them the delivery. CANARY: drop the dispatch check from
+    // `stampNonCommitDelivery` and `deliveredAt` moves onto the capture.
+    const savedAt = "2026-09-28T12:27:12.883Z";
+    writeHandedOffReviewTask(savedAt);
+    const capture = "page-2026-09-28T12-40-00-000Z.png";
+    const runId = await finishedRunWith(
+      "The estimate link would not open, so I have no finding on the totals yet; the capture shows the error.",
+      `files:${savedAt}`,
+    );
+    saveInRunWindow(runId, [capture]);
+    await completeReviewRun(runId);
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).toBe(savedAt);
+    // Still the reviewer's, on its own report.
+    const carrier = parsed.timeline.find((e) => (e.attachments ?? []).includes(capture));
+    expect(carrier?.actor).toMatchObject({ kind: "agent", profileId: "reviewer" });
+  });
+
+  it("ruling 556: a reviewer's verdict never binds to files it saved itself", async () => {
+    // AWSC-3's way out, taken naively: the Estimate Judge delivered, delivery
+    // was handed to another agent that saved nothing, and the Judge was run as
+    // the reviewer. The subject is still the Judge's own files.
+    // CANARY: drop `!ownWork` from the binding and the approval binds to them.
+    const savedAt = "2026-09-28T12:37:42.597Z";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_DELIVERS_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: null,
+        deliveredAt: savedAt,
+        validation: "changed",
+      }),
+      goal: "Design the samples.",
+      timeline: [
+        {
+          occurredAt: savedAt,
+          type: "comment",
+          actor: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Review & validation" },
+          title: null,
+          text: "The samples are saved on the task.",
+          toAgent: false,
+          evidence: null,
+          attachments: ["sample-01-input.csv"],
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = await finishedRunWith("Verdict: approve. Every sample carries its traps.", `files:${savedAt}`);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.verdicts).toEqual([]);
+    const note = parsed.timeline.find((e) => e.type === "quality");
+    expect(note?.text).toContain("but it made what is delivered, so its verdict does not count");
+  });
+
+  it("ruling 538: a file a relay carries here while a deliverer runs is the relay's, and delivers nothing", async () => {
+    // CANARY: leave relay comments out of the completion's `carriedHere` and
+    // the run claims `sample-01-input.csv` and stamps `deliveredAt`.
+    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = await finishedRunWith("Waiting for the benchmark input.");
+    const source = taskAttachmentsDir(store.slug, "VIB-2", store.dataRoot);
+    mkdirSync(source, { recursive: true });
+    writeFileSync(path.join(source, "sample-01-input.csv"), "vm,cpu\nweb01,4\n");
+    const { relayToTask } = await import("./task-relay.server");
+    const relayed = await relayToTask(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        fromTaskKey: "VIB-2",
+        toTaskKey: "VIB-1",
+        text: "The benchmark input.",
+        files: ["sample-01-input.csv"],
+        author: {
+          actorRef: { kind: "operator" },
+          name: "operator",
+          auditActor: { userId: null, label: "operator" },
+          notifyFrom: OPERATOR_NOTIFY_FROM,
+        },
+      },
+    );
+    expect(relayed.outcome).toBe("done");
+    // Inside the run's window, stamped as `saveInRunWindow` stamps a run's files.
+    const landed = path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), "sample-01-input.csv");
+    const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
+    utimesSync(landed, finishedAt, finishedAt);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+    const claimants = parsed.timeline.filter((e) => (e.attachments ?? []).includes("sample-01-input.csv"));
+    expect(claimants.map((e) => e.actor.kind)).toEqual(["operator"]);
+  });
+
+  /**
+   * Ruling 544 (live, AWSC-2): a verdict binds to the subject its run was
+   * dispatched on. The Estimate Judge started on the research as it stood;
+   * the researcher delivered the final files five seconds before the Judge
+   * finished, and the Judge's verdict bound to that delivery, which it never
+   * read. An approval there would have released acceptance on content no
+   * reviewer read.
+   */
+  it("ruling 544: a reviewer's run records the subject it was dispatched on", async () => {
+    // CANARY: drop `runInput.reviewSubject` in dispatchAgentRun and both rows
+    // say nothing, so each verdict binds to whatever is delivered at the end.
+    writeReviewTask();
+    const onRevision = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(getRun(store.db, onRevision.runId)?.review_subject).toBe("rev_1");
+    await drainRunCompletions();
+    writeReviewTask({ workRevision: null, branch: null, validation: "none" });
+    const beforeDelivery = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(getRun(store.db, beforeDelivery.runId)?.review_subject).toBe("none");
+    // Both runs' completions finish before the store is torn down.
+    await drainRunCompletions();
+  });
+
+  it.each([
+    {
+      moved: "files were delivered while it reviewed",
+      dispatchedOn: null,
+      task: { workRevision: null, branch: null, deliveredAt: "2026-09-28T08:37:02.629Z" },
+      verdict: "approve" as const,
+      says: "Review & validation approved, but it started before the files on this task were delivered",
+    },
+    {
+      moved: "the files were delivered again",
+      dispatchedOn: "files:2026-09-28T08:26:00.000Z",
+      task: { workRevision: null, branch: null, deliveredAt: "2026-09-28T08:37:02.629Z" },
+      verdict: "request_changes" as const,
+      says: "Review & validation requested changes, but the files on this task were delivered again while it was reviewing them",
+    },
+    {
+      moved: "a new revision was delivered",
+      dispatchedOn: "rev_0",
+      task: {},
+      verdict: "approve" as const,
+      says: `Review & validation approved, but \`${"a".repeat(12)}\` was delivered while it was reviewing the revision before it`,
+    },
+  ])("ruling 544: a verdict does not bind when $moved during its run", async ({ dispatchedOn, task, verdict, says }) => {
+    // CANARY: drop `!moved` from the binding in recordAgentCompletion and the
+    // verdict binds to the delivery the reviewer never read.
+    writeReviewTask(task);
+    const summary = "Checked every line item against the pricing pages.";
+    const runId = await finishedRunWith(summary, dispatchedOn);
+    stageOutcome(store.db, `oc-${runId}`, { summary, verdict });
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        outcomeKey: `oc-${runId}`,
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.verdicts).toEqual([]);
+    expect(parsed.frontmatter.validation).toBe("changed");
+    expect(parsed.timeline.find((e) => e.type === "quality")?.text).toBe(
+      `**Validation:** changed. ${says}, so the verdict does not bind to what is delivered now. Run the review again.`,
+    );
+    expect(
+      acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
+    ).not.toBeNull();
+  });
+
+  it("ruling 544: a verdict binds when the subject it was dispatched on is still delivered", async () => {
+    writeReviewTask();
+    const summary = "Approved at the pinned head.";
+    const runId = await finishedRunWith(summary, "rev_1");
+    stageOutcome(store.db, `oc-${runId}`, { summary, verdict: "approve" });
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+        outcomeKey: `oc-${runId}`,
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(
+      taskFile().parsed.frontmatter.verdicts.map((v) => [v.revisionId, v.result]),
+    ).toEqual([["rev_1", "approve"]]);
   });
 
   it("ruling 105 review: an ERRORED run keeps its working artifacts (its only diagnostics)", async () => {
@@ -3929,7 +4505,9 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
         ownerUserId: store.users.arda.id,
         title: "Unified completion pipeline probe",
         branch: "vib-1-work",
-        workRevision: workRev(),
+        // Delivered by another agent: a verdict on one's own revision binds to
+        // nothing (ruling 556).
+        workRevision: { ...workRev(), sourceProfileId: "builder" },
       }),
       goal: "Exercise the canonical completion handler.",
     });

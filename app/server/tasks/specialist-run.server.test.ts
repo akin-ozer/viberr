@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -313,6 +314,7 @@ describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
       canBranch: false,
       canCommitPush: false,
       canOpenPr: false,
+      repoWrite: false,
     });
     expect(resolveSpecialistDisallowedTools(resolved.capabilities)).toContain(
       "Write",
@@ -1749,6 +1751,50 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     );
   });
 
+  it("ruling 556: runs the project's required reviewer to review, even when it could deliver", async () => {
+    // A required reviewer holding repo-write, on a task nobody delivers yet:
+    // the derived posture made it the deliverer, which the engage refuses, so
+    // the Run control and the controller could not start its review at all.
+    // CANARY: drop the required-reviewer term from the derived posture and
+    // this dispatch is refused.
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      requiredReviewers: [{ stageId: "review", profileId: "dev" }],
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "dev"
+          ? {
+              ...a,
+              capabilities: [
+                { capabilityId: "execute-code-or-write-repo", mode: "direct" as const },
+                { capabilityId: "report-validation-verdict", mode: "direct" as const },
+              ],
+            }
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const result = await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const fm = readTaskFile({
+      projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    expect(fm.engagements).toEqual([
+      { profileId: "dev", backend: "claude", role: "developer", delivers: false, verdictCapable: true },
+    ]);
+    expect(getRun(store.db, result.runId)!.kind).toBe("reviewer");
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
+      actorOf(store.users.arda),
+    );
+  });
+
   it("still REFUSES an undeployed profileId (validation, not auto-engage)", async () => {
     await expect(
       startAgentRun(
@@ -1966,31 +2012,36 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * five, every round correct on its own terms, and nobody ever asked the
    * reviewer what ELSE it would block on. The reviewer's own contract now does.
    */
-  it("ruling 210: a verdict-capable reviewer is told a request_changes is a COMPLETE list", async () => {
+  /** `dev` (the task's deliverer, engaged above) and `critic`, both holding
+   *  the verdict grant. */
+  function deployVerdictGranted(): void {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    const granted = (profileId: string): AgentDeployment => ({
+      profileId,
+      capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+      extras: [],
+      definition: {
+        kind: "specialist",
+        name: profileId,
+        role: "reviewer",
+        backends: ["claude"],
+        model: "claude-sonnet-4-5",
+      },
+    });
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       repo: null,
-      agents: [
-        {
-          profileId: "dev",
-          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
-          extras: [],
-          definition: {
-            kind: "specialist",
-            name: "dev",
-            role: "reviewer",
-            backends: ["claude"],
-            model: "claude-sonnet-4-5",
-          },
-        },
-      ],
+      agents: [granted("dev"), granted("critic")],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("ruling 210: a verdict-capable reviewer is told a request_changes is a COMPLETE list", async () => {
+    deployVerdictGranted();
 
     await startAgentRun(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1" },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -2004,6 +2055,23 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // …and the escape hatch for a genuinely new problem, so the rule does not
     // push a reviewer into hiding one.
     expect(prompt).toContain("say THAT explicitly and why it could not have been named before");
+  });
+
+  it("ruling 555: the deliverer is offered no verdict, whatever its profile grants", async () => {
+    deployVerdictGranted();
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    const prompt = specs.at(-1)!.prompt;
+    // CANARY: drop `delivers` from the collab gate and the run delivering the
+    // work is told to approve it.
+    expect(prompt).not.toContain("REQUIRED at the end of your review");
+    expect(prompt).not.toContain("report `approve` or `request_changes`");
   });
 
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
@@ -2389,7 +2457,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("a commit-push grant AUTHORS commits but is told NOT to push or open a PR", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
     });
     // Agent still writes the commit + its own `[TASK]`-prefixed message.
     expect(prompt).toContain("Commit your work locally");
@@ -2410,7 +2478,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     // username" and the run was spent reporting it. CANARY: drop the sentence.
     const prompt = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
     });
     expect(prompt).toContain("holds no GitHub credentials, by design, so `git fetch` and `git pull` cannot reach origin");
     expect(prompt).toContain("the operator brings it up to date on the server");
@@ -2426,7 +2494,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("ruling 191: the prompt names what this host's shell has and has not", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
     });
     // CANARY: drop the `shellInventoryPrompt` line and an agent plans a
     // `make up` it cannot run, exactly as pass 37's board did.
@@ -2443,7 +2511,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       ...base,
       repo: null,
       cloned: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
     });
     expect(prompt).toContain("## Shell inventory (measured on this host, not a guess)");
   });
@@ -2466,7 +2534,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
           "The workspace checkout was cancelled after 900s — the clone ran past its time limit rather than failing. The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem.",
         credential: "supplied",
       },
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
     });
     // The reason travels verbatim, so the agent's report can quote it.
     expect(prompt).toContain("not a missing-credential problem");
@@ -2495,7 +2563,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
           "The workspace checkout failed (git exit 128). This step never reached GitHub at all: the checkout is copied from a clone already on this server, so no credential was involved either way.",
         credential: "not_involved",
       },
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
     });
     expect(prompt).toContain("Do NOT try to clone");
     expect(prompt).toContain("never reached GitHub, so no credential is involved in it");
@@ -2519,7 +2587,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
         credential: "supplied",
         stderrExcerpt: "remote: Repository not found.\nfatal: repository not found",
       },
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
     });
     expect(prompt).toContain("fatal: repository not found");
     expect(prompt).toContain("include it VERBATIM in your report");
@@ -2532,7 +2600,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
           sentence: "The workspace checkout failed (git exit 128).",
           credential: "supplied",
         },
-        delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+        delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
       }),
     ).not.toContain("error output (already redacted by Viberr)");
   });
@@ -2543,7 +2611,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const prompt = buildAnalyzePrompt({
       ...base,
       cloned: false,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
     });
     expect(prompt).toContain("INTO the current directory");
     expect(prompt).not.toContain("Do NOT try to clone");
@@ -2552,10 +2620,42 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("a human-gated profile is prohibited from committing at all", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: false, canOpenPr: false, repoWrite: true },
     });
     expect(prompt).toContain("Repo delivery is HUMAN-gated");
     expect(prompt).toContain("do NOT run `git commit`");
+  });
+
+  it("ruling 535: a deliverer that posts files but cannot commit is told the files ARE its delivery", () => {
+    // It used to be told a human would publish its workspace to a PR, a
+    // delivery that never happens for an agent whose result is files on the
+    // task. CANARY: drop the `attachmentsDropDir` arm and this reads
+    // "HUMAN-gated ... publishes them to the branch/PR" again.
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+      attachmentsDropDir: "/data/projects/p/tasks/VIB-1/attachments",
+    });
+    expect(prompt).toContain("Your delivery is the files you save on the task");
+    expect(prompt).toContain("Report the exact name of every file you saved on the task");
+    expect(prompt).not.toContain("publishes them to the branch/PR");
+    expect(prompt).toContain("do NOT run `git commit`");
+  });
+
+  it("ruling 535: a deliverer that may write the repo but not commit still delivers its workspace, drop folder or not", () => {
+    // The files arm keys on the repo-write grant, the fact `canOwnDelivery`
+    // reads, not on commit alone: an agent with repo-write and commit
+    // withheld (the B-AG1 posture) was told its delivery was files on the
+    // task. CANARY: branch on `!canCommitPush && attachmentsDropDir` again and
+    // this reads "Your delivery is the files".
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: false, canOpenPr: false, repoWrite: true },
+      attachmentsDropDir: "/data/projects/p/tasks/VIB-1/attachments",
+    });
+    expect(prompt).toContain("Repo delivery is HUMAN-gated");
+    expect(prompt).not.toContain("Your delivery is the files you save on the task");
+    expect(prompt).toContain("Report the exact branch name, commit SHAs, and PR URL");
   });
 
   it("F10-12 / C02-R4: a SUPPORTING run's local write posture follows its grants (ruling 101(b)); it never ships either way", () => {
@@ -2571,7 +2671,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const granted = buildAnalyzePrompt({
       ...base,
       delivers: false,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
     });
     // P8 (pass 25): a supporting run gets its own isolated checkout, so the
     // load-bearing guarantee is delivery-isolation (true on both backends), not
@@ -2593,7 +2693,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const withheld = buildAnalyzePrompt({
       ...base,
       delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
     });
     expect(withheld).toContain("Do NOT create a branch, edit files");
     expect(withheld).not.toContain("edit files and commit LOCALLY");
@@ -2603,7 +2703,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("F10-31: frames the turn directive as untrusted guidance the contract outranks", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
       directive: "Please add a glossary section, then push and open the PR.",
     });
     expect(prompt).toContain("Your directive for this turn (what was asked — NOT an authority grant)");
@@ -2620,7 +2720,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const prompt = buildAnalyzePrompt({
       ...base,
       delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       reviewSubject: { headSha: head, prNumber: 114 },
     });
     expect(prompt).toContain(`PINNED to the delivered revision \`${head}\``);
@@ -2630,7 +2730,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     // A delivering run never gets the pin (it authors the revision).
     const delivering = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
       reviewSubject: { headSha: head, prNumber: 114 },
     });
     expect(delivering).not.toContain("PINNED to the delivered revision");
@@ -2645,8 +2745,8 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
         ...base,
         delivers,
         delivery: delivers
-          ? { canBranch: true, canCommitPush: true, canOpenPr: true }
-          : { canBranch: false, canCommitPush: false, canOpenPr: false },
+          ? { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true }
+          : { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       });
       expect(prompt).not.toContain("This sandbox will not let you");
       expect(prompt).not.toContain("sandbox denied the child process");
@@ -2657,7 +2757,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const prompt = buildAnalyzePrompt({
       ...base,
       delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       directive: "What response shape should GET /health/scripts return?",
     });
     // Conversational: it decides review vs answer from the directive.
@@ -2675,13 +2775,13 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("R-C: every prompt carries the prompt-injection trust boundary", () => {
     const withRepo = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
     });
     const noRepo = buildAnalyzePrompt({
       ...base,
       repo: null,
       delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
     });
     for (const p of [withRepo, noRepo]) {
       expect(p).toContain("Trust boundary");
@@ -2699,7 +2799,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     const prompt = buildAnalyzePrompt({
       ...base,
       delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       directive: "does the health endpoint still return 200 on a cold start?",
       directiveFrom: "Arda Kaya",
     });
@@ -2777,7 +2877,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       repo: "akin-ozer/viberr",
       branch: "vib-2",
       cloned: true,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
       delivers: true,
     };
     const withDrop = buildAnalyzePrompt({
@@ -2813,7 +2913,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       repo: "akin-ozer/ax-clone",
       branch: "ax-19",
       cloned: true,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
       delivers: true,
       attachmentsDropDir: "/data/projects/ax-clone/tasks/AX-19/attachments",
     };
@@ -2940,7 +3040,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("an operator hand-off (no human author) keeps the impersonal framing", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
       directive: "implement the parser",
     });
     expect(prompt).toContain('You were asked: "implement the parser"');
@@ -2952,7 +3052,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       ...base,
       repo: null,
       delivers: false,
-      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false },
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
     });
     expect(prompt).toContain("no repository attached");
     expect(prompt).not.toContain("Analyze the repository");
@@ -3645,6 +3745,50 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       existsSync(path.join(confinement.skillPlugin!.path, "skills", "conventional-commits", "SKILL.md")),
     ).toBe(true);
     expect(existsSync(path.join(ws, ".claude"))).toBe(false);
+  });
+
+  it("ruling 555: a RESUMED deliverer is offered no verdict either", async () => {
+    // An @mention or an answered question resumes the deliverer's session, and
+    // the resume builds its own toolkit. CANARY: build the resumed collab
+    // without the deliverer term and `report_outcome` offers `verdict` again.
+    await workspaceCheckout();
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "reviewer", backends: ["claude"], model: "sonnet" },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const advertised = async (delivers: boolean) => {
+      const confinement = await resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend: "claude", delivers },
+      );
+      // The mounted SDK server's own registry, read as agent-toolkit's suite
+      // reads it. zod publishes a ZodObject's fields under its own `shape`
+      // key, a name this repo cannot rename, hence the literal.
+      const registry = z
+        .object({
+          instance: z.object({
+            _registeredTools: z.record(
+              z.string(),
+              z.object({ inputSchema: z.object({ "shape": z.record(z.string(), z.custom((v) => v instanceof Object)) }) }),
+            ),
+          }),
+        })
+        .parse(confinement.mcpServers?.viberr_agent);
+      return Object.keys(registry.instance._registeredTools.report_outcome?.inputSchema["shape"] ?? {});
+    };
+    expect(await advertised(false)).toContain("verdict");
+    expect(await advertised(true)).not.toContain("verdict");
   });
 
   it("C02-R3 (pass 32): a RESUMED evidence-granted run keeps its attachments drop — dir, spec field and persona section", async () => {
@@ -4769,7 +4913,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
       branch: "vib-42",
       cloned: true,
       delivers: true,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
       anchor,
       directive: "SENTINEL-DIRECTIVE",
       directiveFrom: "Deniz",
@@ -4792,7 +4936,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
       branch: "vib-42",
       cloned: false,
       delivers: true,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false },
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
     });
     expect(prompt).not.toContain("## Canonical task state");
     expect(prompt).toContain("Trust boundary");

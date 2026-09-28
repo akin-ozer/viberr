@@ -19,7 +19,12 @@ import { deploymentRuntimeIdentity } from "~/server/agents/deployment-view.serve
 import {
   assertEffortForBackend,
   assertModelForBackend,
+  defaultModelFor,
+  foreignModelBackend,
+  modelDisplayName,
 } from "~/server/runtimes/model-catalog.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -452,8 +457,15 @@ export interface CreateProjectInput {
    *  Developer or Reviewer; absent (the New project modal), the base roster.
    *  Every entry is checked before anything is written. */
   agents?: RosterEntry[];
-  /** Ruling 464: the operator's own model and effort, checked the same way. */
-  operator?: DeployOverrides;
+  /** Ruling 464: the operator's own model and effort, checked the same way.
+   *  Ruling 545: and the backend they run on. */
+  operator?: OperatorOverrides;
+}
+
+/** Ruling 545: the operator's overrides at creation, ruling 464's model and
+ *  effort plus the backend they run on (the operator's own when omitted). */
+export interface OperatorOverrides extends DeployOverrides {
+  backend?: RealBackend;
 }
 
 /** Ruling 464: one deployment of a designed roster — a global template by its
@@ -873,21 +885,44 @@ function resolveRoster(
 }
 
 /** The operator's deployment with ruling 464's `operator: { model?, effort? }`
- *  applied, each judged by name against the operator's own primary backend
- *  before anything is written. Only the fields given are written. */
+ *  applied, each judged by name against the backend it will run on before
+ *  anything is written. Only the fields given are written.
+ *
+ *  Ruling 545: that backend is the one asked for, else the operator's own.
+ *  Without the choice here a controller that designed a Codex operator was
+ *  refused ("GPT-6 Luna is a Codex model. Claude cannot run it. Pick a model
+ *  from the Claude list.") and had to create the project and switch the
+ *  backend with `update_agent_deployment`, which the refusal never named. */
 function withOperatorOverrides(
   operator: AgentDeployment | undefined,
-  overrides: DeployOverrides | undefined,
+  overrides: OperatorOverrides | undefined,
   dataRoot: string | undefined,
 ): AgentDeployment | undefined {
   const model = overrides?.model?.trim() ?? "";
   const effort = overrides?.effort?.trim() ?? "";
-  if (!operator || (!model && !effort)) return operator;
-  const backend =
+  const asked = overrides?.backend;
+  if (!operator || (!model && !effort && !asked)) return operator;
+  const own: RealBackend =
     deploymentRuntimeIdentity(operator, dataRoot).backends[0] === "codex" ? "codex" : "claude";
+  const backend = asked ?? own;
+  const foreign = model && !asked ? foreignModelBackend(backend, model) : null;
+  if (foreign) {
+    throw AppError.validation(
+      `${modelDisplayName(foreign, model)} is a ${BACKEND_LABEL[foreign]} model and the operator runs on ` +
+        `${BACKEND_LABEL[backend]}. Pass \`backend: "${foreign}"\` in \`operator\` to run it on ` +
+        `${BACKEND_LABEL[foreign]}, or pick a ${BACKEND_LABEL[backend]} model. Nothing was created.`,
+    );
+  }
   if (model) assertModelForBackend(backend, model);
   if (effort) assertEffortForBackend(backend, effort);
   const definition: AgentDeploymentDefinition = { ...operator.definition };
+  if (backend !== own) {
+    // What `update_agent_deployment` writes for a backend switch: the new
+    // backend with its own default model, and no effort carried across.
+    definition.backends = [backend];
+    definition.model = defaultModelFor(backend);
+    delete definition.effort;
+  }
   if (model) definition.model = model;
   if (effort) definition.effort = effort;
   return { ...operator, definition };

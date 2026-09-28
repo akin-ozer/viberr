@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -140,7 +142,7 @@ afterEach(async () => {
 async function relay(
   toTaskKey: string,
   text: string,
-  over: { from?: string; runOperator?: ReturnType<typeof runOperatorStub> } = {},
+  over: { from?: string; runOperator?: ReturnType<typeof runOperatorStub>; files?: string[] } = {},
 ): Promise<string> {
   const toolCtx = over.runOperator
     ? { dataRoot: store.dataRoot, deps: { runOperator: over.runOperator } }
@@ -154,7 +156,8 @@ async function relay(
   });
   const def = toolkit.tools.find((t) => t.name === "relay_to_task");
   if (!def) throw new Error("relay_to_task is not built for this operator");
-  return replyText.parse(await def.handler({ taskKey: toTaskKey, text }, {}));
+  const args = over.files ? { taskKey: toTaskKey, text, files: over.files } : { taskKey: toTaskKey, text };
+  return replyText.parse(await def.handler(args, {}));
 }
 
 async function eventually(assertion: () => void, ms = 8_000): Promise<void> {
@@ -287,6 +290,191 @@ describe("ruling 488: the operator's relay_to_task", () => {
       authority,
     });
     expect(toolkit.allowedTools).not.toContain("mcp__viberr__relay_to_task");
+  });
+});
+
+/**
+ * Ruling 538: a relay carries files. Live on the AWS calculator board the
+ * benchmark tasks were planned to work from inventories saved on another
+ * task (a spreadsheet, a screenshot), and nothing could put a file on another
+ * task: the relay carried text, and each agent reads only its own task's
+ * attachments.
+ */
+describe("ruling 538: a relay carries files", () => {
+  const attachmentsOf = (key: string) => path.join(store.dataRoot, "projects", store.slug, "tasks", key, "attachments");
+  function save(key: string, name: string, body: string): void {
+    mkdirSync(attachmentsOf(key), { recursive: true });
+    writeFileSync(path.join(attachmentsOf(key), name), body);
+  }
+
+  it("puts the named files on the target, claimed and named by the relay comment", async () => {
+    // CANARY: drop the files from `relayToTask` and VIB-2 receives the text
+    // with nothing to work from.
+    save("VIB-1", "sample-01-input.csv", "vm,cpu,ram\nweb01,4,16\n");
+    save("VIB-1", "sample-04-input.png", "\x89PNG fake bytes");
+    const reply = await relay("VIB-2", "Benchmark input for sample 01.", {
+      runOperator: runOperatorStub(),
+      files: ["sample-01-input.csv", "sample-04-input.png"],
+    });
+    expect(reply).toContain("With the files `sample-01-input.csv` and `sample-04-input.png`");
+    expect(readFileSync(path.join(attachmentsOf("VIB-2"), "sample-01-input.csv"), "utf8")).toBe("vm,cpu,ram\nweb01,4,16\n");
+    const posted = timeline("VIB-2")[0]!;
+    expect(posted.attachments).toEqual(["sample-01-input.csv", "sample-04-input.png"]);
+    expect(posted.text).toContain("now on this task's attachments");
+    expect(timeline("VIB-1")[0]!.text).toMatch(/With 2 files\.$/);
+    expect(listAuditEvents(store.db, { action: "task.relayed" })[0]!.details).toEqual({
+      from: "VIB-1",
+      to: "VIB-2",
+      files: ["sample-01-input.csv", "sample-04-input.png"],
+    });
+  });
+
+  it("never overwrites: the same bytes stay, other bytes land under the next free name", async () => {
+    save("VIB-1", "inventory.csv", "vm\nweb01\n");
+    save("VIB-2", "inventory.csv", "vm\nweb01\n");
+    await relay("VIB-2", "Same file again.", { runOperator: runOperatorStub(), files: ["inventory.csv"] });
+    expect(timeline("VIB-2")[0]!.attachments).toEqual(["inventory.csv"]);
+    save("VIB-1", "inventory.csv", "vm\ndb01\n");
+    const reply = await relay("VIB-2", "A newer inventory.", { runOperator: runOperatorStub(), files: ["inventory.csv"] });
+    expect(reply).toContain("`inventory.csv` (here as `inventory-2.csv`");
+    expect(readFileSync(path.join(attachmentsOf("VIB-2"), "inventory.csv"), "utf8")).toBe("vm\nweb01\n");
+    expect(readFileSync(path.join(attachmentsOf("VIB-2"), "inventory-2.csv"), "utf8")).toBe("vm\ndb01\n");
+  });
+
+  it("refuses the whole relay for a file the source does not hold or the target could not read, and writes nothing", async () => {
+    save("VIB-1", "inventory.csv", "vm\n");
+    save("VIB-1", "notes.docx", "binary");
+    const before = timeline("VIB-2").length;
+    expect(await relay("VIB-2", "Inputs.", { files: ["inventory.csv", "missing.csv"] })).toMatch(
+      /^\[noop\] Nothing was relayed to VIB-2: VIB-1 has no attachment `missing.csv`\. It holds: /,
+    );
+    expect(await relay("VIB-2", "Inputs.", { files: ["inventory.csv", "notes.docx"] })).toContain(
+      "Viberr does not store “.docx” attachments",
+    );
+    expect(timeline("VIB-2")).toHaveLength(before);
+    expect(existsSync(path.join(attachmentsOf("VIB-2"), "inventory.csv"))).toBe(false);
+  });
+});
+
+/**
+ * Ruling 557: the relay's other direction. Live when AWSC-3 (the benchmark
+ * design) was accepted, its operator had relayed nothing, a closed task's
+ * operator starts no run, and AWSC-4 to AWSC-7 each asked the owner to attach
+ * its input by hand.
+ */
+describe("ruling 557: a task takes the files it works from", () => {
+  const attachmentsOf = (key: string) => path.join(store.dataRoot, "projects", store.slug, "tasks", key, "attachments");
+  function save(key: string, name: string, body: string): void {
+    mkdirSync(attachmentsOf(key), { recursive: true });
+    writeFileSync(path.join(attachmentsOf(key), name), body);
+  }
+  /** Call the operator's `take_from_task` on `on`, as the real toolkit builds it. */
+  async function take(on: string, from: string, files: string[], text = "The benchmark input."): Promise<string> {
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: dctx(),
+      projectSlug: store.slug,
+      taskKey: on,
+      authority: resolveOperatorAuthority(dctx(), store.slug),
+    });
+    const def = toolkit.tools.find((t) => t.name === "take_from_task");
+    if (!def) throw new Error("take_from_task is not built for this operator");
+    return replyText.parse(await def.handler({ taskKey: from, files, text }, {}));
+  }
+
+  it("puts the named files of a Done task on this one, claimed as carried, and the source records the take", async () => {
+    // VIB-3 is Done: the task that made the input has closed, which is the
+    // case the relay could not reach. CANARY: refuse a closed source (as the
+    // relay refuses a closed target) and VIB-2 never gets its input.
+    save("VIB-3", "sample-01-input.csv", "vm,cpu\nweb01,4\n");
+    save("VIB-3", "golden-files.md", "the answers");
+    const reply = await take("VIB-2", "VIB-3", ["sample-01-input.csv"]);
+    expect(reply).toMatch(/^\[done\] Took 1 file from VIB-3/);
+    expect(readFileSync(path.join(attachmentsOf("VIB-2"), "sample-01-input.csv"), "utf8")).toBe("vm,cpu\nweb01,4\n");
+    // Only what was named: the answer key stays where it is.
+    expect(existsSync(path.join(attachmentsOf("VIB-2"), "golden-files.md"))).toBe(false);
+    const claim = timeline("VIB-2")[0]!;
+    expect(claim.attachments).toEqual(["sample-01-input.csv"]);
+    expect(claim.text.split("\n", 1)[0]).toBe("**From VIB-3 (operator):**");
+    // A relay's own header, so completion never credits a run on VIB-2 with
+    // the file (ruling 538). CANARY: head it otherwise and a deliverer finishing
+    // meanwhile claims the input as its delivery.
+    const { isRelayComment } = await import("./task-relay.server");
+    expect(isRelayComment(claim)).toBe(true);
+    expect(timeline("VIB-3")[0]!.text).toBe("Taken by VIB-2: `sample-01-input.csv`.");
+    expect(listAuditEvents(store.db, { action: "task.files.taken" })[0]!.details).toEqual({
+      from: "VIB-3",
+      to: "VIB-2",
+      files: ["sample-01-input.csv"],
+    });
+  });
+
+  it("refuses this task, another project's task, a missing task, an archived task and a missing file, and writes nothing", async () => {
+    // CANARY: drop the archived-source refusal and VIB-4's file lands on VIB-2
+    // while VIB-4, whose work was withdrawn, gets a "Taken by" line.
+    save("VIB-1", "inventory.csv", "vm\n");
+    save("VIB-4", "inventory.csv", "vm\n");
+    const before = timeline("VIB-2").length;
+    const archivedBefore = timeline("VIB-4").length;
+    expect(await take("VIB-2", "VIB-2", ["inventory.csv"])).toMatch(/is the task you are on/);
+    expect(await take("VIB-2", "SHOP-1", ["inventory.csv"])).toMatch(/^\[denied\] SHOP-1 is a task in project shop/);
+    expect(await take("VIB-2", "VIB-99", ["inventory.csv"])).toMatch(/VIB-99 is not a task in this project/);
+    expect(await take("VIB-2", "VIB-4", ["inventory.csv"])).toBe(
+      "[noop] VIB-4 is archived — restore it before taking files from it. Nothing was taken.",
+    );
+    expect(await take("VIB-2", "VIB-1", ["inventory.csv", "missing.csv"])).toMatch(
+      /^\[noop\] Nothing was taken from VIB-1: VIB-1 has no attachment `missing.csv`/,
+    );
+    expect(timeline("VIB-2")).toHaveLength(before);
+    expect(timeline("VIB-4")).toHaveLength(archivedBefore);
+    expect(existsSync(path.join(attachmentsOf("VIB-2"), "inventory.csv"))).toBe(false);
+  });
+
+  it("says on its comment when a tag in its line reaches nobody, as a relay does", async () => {
+    // A machine-authored comment cannot be retagged, so the comment is where
+    // its author learns the tag notified nobody. CANARY: write the claim
+    // without `withAmbiguityDisclosure` and the dropped tag goes unsaid.
+    save("VIB-3", "sample-01-input.csv", "vm\n");
+    const deniz = store.users.deniz.email.split("@")[0]!;
+    await take("VIB-2", "VIB-3", ["sample-01-input.csv"], `@${deniz} the benchmark input.`);
+    expect(timeline("VIB-2")[0]!.text).toContain(`@${deniz} is not a member of this project`);
+  });
+
+  it("gives its files when the source cannot take its line, and says which", async () => {
+    // The files and their claim are down and audited before the source's
+    // line is written. CANARY: let the line's failure throw and the take
+    // reads as failed after its files landed, so the operator takes again;
+    // or reply that the line is there and the operator trusts a record that
+    // is not.
+    save("VIB-3", "sample-01-input.csv", "vm\n");
+    writeFileSync(
+      path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-3", "task.md"),
+      "---\nkey: VIB-3\ntitle: Truncated by an editor\nstage: done\n",
+    );
+    const reply = await take("VIB-2", "VIB-3", ["sample-01-input.csv"]);
+    expect(reply).toMatch(/^\[done\] Took 1 file from VIB-3/);
+    expect(reply).toContain("VIB-3's timeline could not take its line about the take");
+    expect(timeline("VIB-2")[0]!.attachments).toEqual(["sample-01-input.csv"]);
+    expect(listAuditEvents(store.db, { action: "task.files.taken" })).toHaveLength(1);
+  });
+
+  it("is withheld with the comment grant, as the relay is", () => {
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [{ ...OPERATOR, capabilities: [{ capabilityId: "append-typed-events", mode: "off" }] }, PLATFORM_ENGINEER],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: dctx(),
+      projectSlug: store.slug,
+      taskKey: "VIB-2",
+      authority: resolveOperatorAuthority(dctx(), store.slug),
+    });
+    // CANARY: build the tool outside the comment grant's block and an operator
+    // that may not post on its own task writes a claim comment anyway.
+    expect(toolkit.tools.some((t) => t.name === "take_from_task")).toBe(false);
   });
 });
 

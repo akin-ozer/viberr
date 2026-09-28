@@ -5,6 +5,7 @@ import type {
 import {
   activeWorkRevision,
   reviewSubjectId,
+  type Engagement,
   type PrRef,
   type ReviewVerdict,
   type WorkRevision,
@@ -140,11 +141,29 @@ function requiredReviewerApproved(
  */
 export function requiredReviewerRefusals(
   rules: readonly RequiredReviewerView[],
-  fm: RequiredReviewerTaskState,
+  fm: RequiredReviewerTaskState & {
+    engagements: readonly Pick<Engagement, "profileId" | "delivers">[];
+  },
+  /** Ruling 556: who made the review subject ({@link reviewSubjectAuthor}),
+   *  whose own verdict never binds to it. */
+  subjectAuthor: string | null,
 ): string[] {
   if (rules.length === 0) return [];
+  // Ruling 556: a rule whose reviewer is this task's deliverer can never be
+  // met, whatever has been delivered, and "run the review" sends the operator
+  // into a loop of delivering runs; nor is such a task one that has "nothing
+  // to judge", since its deliverer's work is what no review will judge.
+  const deliverer = fm.engagements.find((e) => e.delivers)?.profileId ?? null;
+  const asDeliverer = rules
+    .filter((rule) => rule.profileId === deliverer)
+    .map(
+      (rule) =>
+        `Required reviewer ${rule.agentName} (project rule at ${rule.stageName}) is this task's deliverer, ` +
+        `so its review cannot count. Hand delivery to another agent, have that agent deliver, and run ` +
+        `${rule.agentName}'s review, or an admin can force-accept.`,
+    );
   const rev = activeWorkRevision(fm.workRevision);
-  if (!rev && !fm.pr && !fm.deliveredAt) return [];
+  if (!rev && !fm.pr && !fm.deliveredAt) return asDeliverer;
   const subject = rev
     ? `revision ${rev.headSha.slice(0, 7)}`
     : fm.pr?.headSha
@@ -153,13 +172,54 @@ export function requiredReviewerRefusals(
         ? `pull request #${fm.pr.number}`
         : // Ruling 385: no git subject at all — name what there IS to review.
           "the work delivered on this task";
-  return rules
-    .filter((rule) => !requiredReviewerApproved(rule, fm))
+  // Ruling 556: nor one whose reviewer MADE what is delivered: delivery handed
+  // to another agent that has saved nothing yet leaves the reviewer's own work
+  // as the subject, and its review of that can never count either.
+  const asAuthor = rules
+    .filter((rule) => rule.profileId !== deliverer && rule.profileId === subjectAuthor)
     .map(
       (rule) =>
-        `Required reviewer ${rule.agentName} (project rule at ${rule.stageName}) has not approved ${subject}. ` +
-        `Run the review at ${rule.stageName}, or an admin can force-accept.`,
+        `Required reviewer ${rule.agentName} (project rule at ${rule.stageName}) made ${subject}, ` +
+        `so its review of it cannot count. Have another agent deliver its own work, then run ` +
+        `${rule.agentName}'s review, or an admin can force-accept.`,
     );
+  return [
+    ...asDeliverer,
+    ...asAuthor,
+    ...rules
+      .filter(
+        (rule) =>
+          rule.profileId !== deliverer && rule.profileId !== subjectAuthor && !requiredReviewerApproved(rule, fm),
+      )
+      .map(
+        (rule) =>
+          `Required reviewer ${rule.agentName} (project rule at ${rule.stageName}) has not approved ${subject}. ` +
+          `Run the review at ${rule.stageName}, or an admin can force-accept.`,
+      ),
+  ];
+}
+
+const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
+/**
+ * Ruling 556: the refusal when an agent the project requires as a reviewer is
+ * asked to deliver a task. Its verdict on its own delivery does not count
+ * (ruling 555), so the task could never pass the stage the rule holds it at.
+ * Live on AWSC-3 the operator made the Estimate Judge the benchmark's
+ * deliverer on a board whose rule is "Estimate Judge reviews at Review".
+ */
+export function requiredReviewerDeliversRefusal(
+  agentName: string,
+  taskKey: string,
+  rules: readonly RequiredReviewerView[],
+): string {
+  const stages = LIST_AND.format(rules.map((r) => r.stageName));
+  return (
+    `${agentName} is this project's required reviewer at ${stages}, so it cannot deliver ${taskKey}: ` +
+    `its verdict on its own delivery would not count, and ${taskKey} could never pass ${stages}. ` +
+    `Have another agent deliver it and run ${agentName}'s review on what that agent delivers, or change ` +
+    `Settings → Required reviewers.`
+  );
 }
 
 /**

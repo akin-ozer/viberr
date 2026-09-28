@@ -1,17 +1,21 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_UPLOAD_BYTES,
   UPLOADABLE_EXTENSIONS,
+  attachmentClaimsInFlight,
   attachmentContentType,
   attachmentNamesSince,
   countTaskAttachments,
   isBrowserWorkingArtifact,
   listTaskAttachments,
   pruneBrowserWorkingArtifacts,
+  readTaskAttachment,
   resolveTaskAttachment,
+  savedFilesText,
+  withAttachmentClaims,
   writeTaskAttachment,
 } from "./task-attachments.server";
 
@@ -329,5 +333,118 @@ describe("writeTaskAttachment", () => {
   it("refuses an empty name", () => {
     setRoot();
     expect(() => write("   ")).toThrow(/Give the file a name/);
+  });
+});
+
+/**
+ * Ruling 552: every agent in the group can write a task's attachments folder
+ * (ruling 460), so a name in it can be a link an agent planted to a file only
+ * the server may read (another person's credentials, the store's state). No
+ * reader of an attachment follows one, and no writer writes through one.
+ */
+describe("ruling 552: a link in the attachments folder is never followed", () => {
+  function plant() {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    const dir = path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments");
+    mkdirSync(dir, { recursive: true });
+    const secret = path.join(root, "state-secret.json");
+    writeFileSync(secret, '{"token":"server-only"}');
+    symlinkSync(secret, path.join(dir, "notes.md"));
+    return { dir, secret };
+  }
+
+  it("reads nothing through a link, for a reader or a citation", () => {
+    // CANARY: read with readFileSync(abs) again and the server-only bytes
+    // come back as the attachment's text.
+    plant();
+    expect(readTaskAttachment("p1", "VIB-1", "notes.md", root)).toBeNull();
+    expect(savedFilesText("p1", "VIB-1", ["notes.md"], root)).toBe("");
+  });
+
+  it("replaces a link at the name it writes, and leaves the file it pointed at alone", () => {
+    // CANARY: write with writeFileSync(abs, data) again and the secret file
+    // is overwritten with the attachment's bytes.
+    const { dir, secret } = plant();
+    writeTaskAttachment("p1", "VIB-1", "notes.md", new TextEncoder().encode("# notes\n"), root);
+    expect(readFileSync(secret, "utf8")).toBe('{"token":"server-only"}');
+    expect(readFileSync(path.join(dir, "notes.md"), "utf8")).toBe("# notes\n");
+  });
+});
+
+/**
+ * Ruling 558: a person's upload, a relay and a take put a file on a task for
+ * someone other than a run. The name is held until the entry that claims it is
+ * written, and the file lands with that claim or not at all: a file left on
+ * the task unclaimed is the next completion's to credit to its run.
+ */
+describe("ruling 558: a file put down for someone else", () => {
+  const dir = () => path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments");
+  const bytes = (body: string) => new TextEncoder().encode(body);
+  const setRoot = () => {
+    root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
+    mkdirSync(path.join(root, "projects", "p1", "tasks", "VIB-1"), { recursive: true });
+  };
+  /** A writer's claim still to come: `open` lets it be written. */
+  const pending = () => {
+    let open!: () => void;
+    const written = new Promise<void>((resolve) => (open = resolve));
+    return { open, written };
+  };
+
+  it("is taken back up when its claim cannot be written: a new file removed, a replaced one put back", async () => {
+    // CANARY: drop the take-back and `sample.csv` stays on the task with no
+    // claim, and `notes.md` keeps the bytes nobody claimed.
+    setRoot();
+    writeTaskAttachment("p1", "VIB-1", "notes.md", bytes("# mine\n"), root);
+    await expect(
+      withAttachmentClaims(
+        "p1",
+        "VIB-1",
+        ["sample.csv", "notes.md"],
+        async (put) => {
+          put("sample.csv", bytes("vm,cpu\n"));
+          put("notes.md", bytes("# theirs\n"));
+          throw new Error("the claim could not be written");
+        },
+        root,
+      ),
+    ).rejects.toThrow("the claim could not be written");
+    expect(readdirSync(dir())).toEqual(["notes.md"]);
+    expect(readFileSync(path.join(dir(), "notes.md"), "utf8")).toBe("# mine\n");
+    expect(attachmentClaimsInFlight("p1", "VIB-1").size).toBe(0);
+  });
+
+  it("stays once its claim is written, and nothing set aside is left behind", async () => {
+    // CANARY: skip `keep` and every replace leaves a `.viberr-prev-` file.
+    setRoot();
+    writeTaskAttachment("p1", "VIB-1", "notes.md", bytes("# mine\n"), root);
+    await withAttachmentClaims("p1", "VIB-1", ["notes.md"], async (put) => {
+      expect(put("notes.md", bytes("# theirs\n")).replaced).toBe(true);
+    }, root);
+    expect(readdirSync(dir())).toEqual(["notes.md"]);
+    expect(readFileSync(path.join(dir(), "notes.md"), "utf8")).toBe("# theirs\n");
+  });
+
+  it("stays held for its writer when another writer on the task finishes first", async () => {
+    // A relay of text alone holds no name, and it found the entry a person's
+    // upload made. The upload finished and its entry went; the operator's
+    // take made a fresh one. The relay, finishing, must not drop the take's.
+    // CANARY: delete the task's entry whenever the finishing writer's own map
+    // is empty, and `b.xlsx` is released while the take is still writing it.
+    setRoot();
+    const upload = pending();
+    const relay = pending();
+    const take = pending();
+    const uploading = withAttachmentClaims("p1", "VIB-1", ["a.csv"], () => upload.written, root);
+    const relaying = withAttachmentClaims("p1", "VIB-1", [], () => relay.written, root);
+    upload.open();
+    await uploading;
+    const taking = withAttachmentClaims("p1", "VIB-1", ["b.xlsx"], () => take.written, root);
+    relay.open();
+    await relaying;
+    expect(attachmentClaimsInFlight("p1", "VIB-1")).toEqual(new Set(["b.xlsx"]));
+    take.open();
+    await taking;
+    expect(attachmentClaimsInFlight("p1", "VIB-1").size).toBe(0);
   });
 });

@@ -454,6 +454,35 @@ export function shareDirWithAgents(dir: string, deps: { gid?: number } = {}): vo
 }
 
 /**
+ * Ruling 534: a file the server wrote into a private directory of its own,
+ * made READABLE by the agent group: the directory traversable (0710), the file
+ * readable (0640), both in the group, through the same no-follow descriptor
+ * every share uses. The Codex SDK writes a turn's output schema into a
+ * `mkdtemp` directory (0700, the server's) and hands its path to the CLI,
+ * which the launcher runs as the person's own uid; without this, every Codex
+ * run given an output schema failed before its first turn. Throws when the
+ * share did not take, so the run fails saying so instead of on a bare EACCES.
+ * A no-op when this server launches no agents.
+ */
+export function shareFileForAgentsToRead(file: string, deps: { gid?: number } = {}): void {
+  if (deps.gid === undefined && !launchesAgents()) return;
+  const gid = deps.gid ?? AGENT_GID;
+  const dir = path.dirname(file);
+  shareEntry(dir, gid, () => 0o710);
+  shareEntry(file, gid, () => 0o640);
+  const dirStat = lstatSync(dir);
+  const fileStat = lstatSync(file);
+  if (
+    dirStat.gid !== gid ||
+    (dirStat.mode & 0o7777) !== 0o710 ||
+    fileStat.gid !== gid ||
+    (fileStat.mode & 0o7777) !== 0o640
+  ) {
+    throw new Error(`${file} could not be shared with the agent group for reading.`);
+  }
+}
+
+/**
  * {@link shareDirWithAgents}, best effort: a directory left unshared makes the
  * person's own step in it (a clone, a log write) fail in its own words, which
  * the caller reports, rather than failing here before anything says why. Only

@@ -20,7 +20,8 @@ import type {
   CapabilityMode,
 } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { NO_REVIEW_SUBJECT, upsertRun } from "~/server/runtimes/run-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   forceAcceptCompletion,
@@ -259,6 +260,7 @@ async function reviewerApproves(): Promise<void> {
   await recordAgentCompletion(store.db, dataCtx(), store.slug, "VIB-1", {
     actorRef: REVIEWER_ACTOR,
     runId: "run_review_1",
+    delivers: false,
     replyText: "Checked main: the file is present and correct. Nothing to change.",
     verdict: "approve",
     question: null,
@@ -343,6 +345,94 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(quality?.title).toBe("Approval noted");
   });
 
+  it("ruling 543: files another agent saved are not \"nothing to deliver\": no mint, and the note says to hand delivery", async () => {
+    // Live on AWSC-2 the Workflow Researcher saved the result as a supporting
+    // agent (before ruling 535 let it deliver), and the Estimate Judge's
+    // approval would have been recorded against `main` as "no changes".
+    // CANARY: drop the `filesSavedByOtherAgents` precondition and this mints.
+    deployAgents();
+    seedVerificationTask();
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date(Date.now() - 60_000).toISOString(),
+        type: "comment",
+        actor: { kind: "agent", backend: "codex", profileId: "researcher", roleHint: "Workflow Researcher" },
+        title: null,
+        text: "Delivered mapping-review.md.",
+        toAgent: false,
+        evidence: null,
+        attachments: ["mapping-review.md"],
+      });
+    });
+    await reviewerApproves();
+
+    const fm = task().frontmatter;
+    expect(fm.workRevision).toBeNull();
+    expect(fm.noChanges).toBeFalsy();
+    const quality = task().timeline.find((e) => e.type === "quality");
+    expect(quality?.title).toBe("Approval noted");
+    expect(quality?.text).toContain(
+      "Workflow Researcher saved `mapping-review.md` without being handed delivery. Hand delivery to the agent that made the result (`run_agent` with `delivers: true`)",
+    );
+  });
+
+  it("ruling 543: an approval of the files a result was delivered in says it bound to them", async () => {
+    // Ruling 388 bound it all along; the note read "there is no delivered
+    // revision to bind the verdict to yet" beside a healthy validation.
+    // CANARY: branch the note on `rev` again instead of the review subject.
+    deployAgents();
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER], deliveredAt: "2026-09-28T08:00:00.000Z" });
+    await reviewerApproves();
+
+    const fm = task().frontmatter;
+    expect(fm.verdicts.map((v) => v.revisionId)).toEqual(["files:2026-09-28T08:00:00.000Z"]);
+    expect(fm.validation).toBe("healthy");
+    const quality = task().timeline.find((e) => e.type === "quality");
+    expect(quality?.title).toBe("Review passed");
+    expect(quality?.text).toContain("approved the work on the files delivered on this task");
+  });
+
+  it("ruling 544: a sibling reviewer's approval binds to the verification a first approval minted", async () => {
+    // Both reviewers were sent to judge a task with nothing delivered. The
+    // first approval minted a verification revision of the base; the second
+    // judged that same base, and its approval is not about a delivery it
+    // never read. CANARY: drop `mintedSince` and the second approval binds to
+    // nothing, its note saying it started before the base sha was delivered.
+    deployAgents();
+    const verifier: Engagement = { ...REVIEWER, profileId: "verifier", role: "Verification" };
+    seedVerificationTask({ engagements: [REVIEWER, verifier] });
+    await reviewerApproves();
+    upsertRun(store.db, {
+      id: "run_verifier",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-verifier",
+      role: "Verification",
+      kind: "reviewer",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      agentProfileId: "verifier",
+      state: "finished",
+      reviewSubject: NO_REVIEW_SUBJECT,
+    });
+    await recordAgentCompletion(store.db, dataCtx(), store.slug, "VIB-1", {
+      actorRef: { ...REVIEWER_ACTOR, profileId: "verifier", roleHint: "Verification" },
+      runId: "run_verifier",
+      delivers: false,
+      replyText: "Checked main as well: nothing to change.",
+      verdict: "approve",
+      question: null,
+    });
+    const fm = task().frontmatter;
+    const minted = fm.workRevision?.id;
+    expect(fm.workRevision?.kind).toBe("verified");
+    expect(fm.verdicts.map((v) => [v.profileId, v.revisionId])).toEqual([
+      ["reviewer", minted],
+      ["verifier", minted],
+    ]);
+  });
+
   it("R19-8: a reviewer approving a task that already has a branch mints nothing", async () => {
     deployAgents();
     seedVerificationTask({ branch: "vib-1" });
@@ -416,6 +506,38 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     // that knows whether a PR exists); it answers `no_pr`, so nothing merges and
     // the record says so. Assert the OUTCOME, not the call.
     expect(await mergeMock.mock.results[0]?.value).toEqual({ status: "no_pr" });
+  });
+
+  it("ruling 550: a task delivered as files is accepted as delivered, never as \"completed with no changes\"", async () => {
+    // Live on AWSC-2 the acceptance of a research task whose delivery is two
+    // files would have probed GitHub, found no branch (a files task never has
+    // one) and recorded the delivered result as having no changes.
+    // CANARY: drop `deliveredAsFiles(fm)` from acceptanceNoChangeCheck and the
+    // task closes as "Completed with no changes" with `noChanges: true`.
+    deployAgents();
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER], deliveredAt: "2026-09-28T08:44:13.751Z" });
+    await reviewerApproves();
+    remote();
+    const probed: string[] = [];
+    const answer = fetchImpl;
+    fetchImpl = async (input, init) => {
+      probed.push(new URL(input instanceof Request ? input.url : String(input)).pathname);
+      return answer(input, init);
+    };
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+
+    expect(task().frontmatter.stage).toBe("done");
+    expect(task().frontmatter.noChanges).toBeFalsy();
+    const completion = completionEvent();
+    expect(completion?.title).toBe("Completion accepted");
+    expect(completion?.text).not.toMatch(/no changes/i);
+    expect(probed.filter((p) => p.includes("/git/ref"))).toEqual([]);
   });
 
   it("F28-L1: an UNCLAIMED delivered task the probe proves empty is accepted (auto-detect)", async () => {

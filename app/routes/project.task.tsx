@@ -68,7 +68,7 @@ import {
   parsePanelReviewNotes,
 } from "~/server/tasks/review-notes.server";
 import { splitDependencyText } from "~/shared/dependencies";
-import { activeWorkRevision, coercePriority } from "~/schemas/task-file.schema";
+import { activeWorkRevision, coercePriority, deliveredAsFiles } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countTaskAttachments,
@@ -391,6 +391,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
   // without a merge — the confirm says so instead of implying delivered work.
   const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
+  // Ruling 550: a task delivered as files says so in the confirm, rather than
+  // a merge it never had and a GitHub re-check that would call it unchanged.
+  // Sent only when it applies: every other task's payload stays as it was
+  // (ruling 457's console budget measures it).
+  const deliveredFm = taskFile?.parsed.frontmatter;
+  const filesDelivery =
+    deliveredFm && deliveredAsFiles(deliveredFm) && deliveredFm.deliveredAt
+      ? { filesDeliveredAt: deliveredFm.deliveredAt }
+      : {};
   const project = getProject(db, params.slug);
   const defaultBranch = project?.defaultBranch || "main";
 
@@ -470,6 +479,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     taskKey: params.key,
     viewerUserId: user.id,
   });
+  const ruleReviewerIds = new Set(standing.requiredReviewers.map((r) => r.profileId));
 
   // Ruling 521: the completion packet, with each reviewer's verdict on the
   // work under review and the change's size, built from what this loader has
@@ -538,7 +548,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     timelineNextLimit: slice.nextLimit,
     tlDefault,
     runtime,
-    deployedSpecialists,
+    // Ruling 535's `postsFiles` is the operator's delivery signal; the page
+    // renders nothing from it, so it stays off the wire (ruling 457).
+    deployedSpecialists: deployedSpecialists.map(({ capabilities: { postsFiles: _operatorOnly, ...shown }, ...agent }) => {
+      const view: typeof agent & { capabilities: typeof shown; requiredReviewer?: true } = {
+        ...agent,
+        capabilities: shown,
+      };
+      // Ruling 556: a project rule's reviewer is engaged to review, never to
+      // deliver, so the run control must not promise it the branch. Only
+      // where true, so no other agent's bytes grow (ruling 457).
+      if (ruleReviewerIds.has(agent.id)) view.requiredReviewer = true;
+      return view;
+    }),
     // P11-76: the operator's configured backend so the run picker defaults to it.
     operatorBackend: operatorBackendFor({}, params.slug),
     // R19-A: the ceiling, so the run picker offers only what will actually run.
@@ -590,6 +612,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // R15-1 accept confirm + R15-2 manual-delivery affordance.
     workRevisionSha,
     noChanges,
+    ...filesDelivery,
     defaultBranch,
     canDeliver,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
@@ -1650,6 +1673,7 @@ export default function TaskDetailRoute({
       githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}
+      filesDeliveredAt={loaderData.filesDeliveredAt ?? null}
       defaultBranch={loaderData.defaultBranch}
       canDeliver={loaderData.canDeliver}
     />

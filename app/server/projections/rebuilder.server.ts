@@ -16,6 +16,7 @@ import {
   type TaskFrontmatter,
   type Validation,
   type Waiting,
+  reviewSubjectAuthor,
 } from "~/schemas/task-file.schema";
 import { verdictGateReason } from "~/server/github/pr-human-approval.server";
 import { projectGatesRefusal } from "~/shared/project-gates";
@@ -542,6 +543,9 @@ function acceptanceBlockReason(
     requiredReviewers: readonly RequiredReviewerView[];
     /** Ruling 482: the project's declared gates, from the projected row. */
     gates: readonly ProjectGate[];
+    /** Ruling 556: who made the review subject, read from the task file's
+     *  BODY (the timeline) by the caller, like `blockedPacket`. */
+    subjectAuthor: string | null;
   },
 ): string | null {
   return (
@@ -558,10 +562,10 @@ function acceptanceBlockReason(
     // from, so naming it here fabricates nothing the file does not already say.
     closedPrBlockedReason(fm, fm.key) ??
     // F10-15: every required reviewer must have approved the current revision.
-    acceptanceBlockedReason(fm) ??
+    acceptanceBlockedReason(fm, ctx.subjectAuthor) ??
     // Ruling 178: and every reviewer the PROJECT declares, engaged or not —
     // the same position it holds in `acceptanceRefusalReasons`.
-    requiredReviewerRefusals(ctx.requiredReviewers, fm)[0] ??
+    requiredReviewerRefusals(ctx.requiredReviewers, fm, ctx.subjectAuthor)[0] ??
     verdictGateReason(fm, ctx.validation, fm.key) ??
     // Ruling 482: the project's gates on the revision under review — the same
     // position it holds in `acceptanceRefusalReasons`.
@@ -716,6 +720,7 @@ function rebuildTaskFileNow(
     blockedPacket,
     requiredReviewers,
     gates: projectGates,
+    subjectAuthor: reviewSubjectAuthor(fm, parsed.timeline),
   });
 
   // Ruling 225 (F37-45): a task resting on a CLOCK is not waiting on a person.

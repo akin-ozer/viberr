@@ -51,7 +51,16 @@ export const READABLE_TEXT_EXTENSIONS = new Set([
 export const UPLOADABLE_EXTENSIONS: ReadonlySet<string> = new Set([
   ...INLINE_TYPES.keys(),
   ...READABLE_TEXT_EXTENSIONS,
+  // Ruling 533: a spreadsheet reads back as its sheets in CSV, and an
+  // inventory arrives as one far more often than as anything else.
+  ".xlsx",
 ]);
 
 /** One attachment's byte ceiling: evidence, not a payload. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/** Ruling 533: how many files one task may be filed with, and their total
+ *  size. A task's input, not a folder of them; the rest attach from the task
+ *  page. */
+export const FILED_ATTACHMENTS_MAX = 10;
+export const FILED_ATTACHMENTS_MAX_BYTES = 25 * 1024 * 1024;

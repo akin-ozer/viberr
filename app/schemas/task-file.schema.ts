@@ -1602,6 +1602,36 @@ export function reviewSubjectId(fm: {
   return fm.deliveredAt ? `files:${fm.deliveredAt}` : null;
 }
 
+/**
+ * Ruling 556: the agent that made what a review binds to — the one whose
+ * delivery minted the active revision, or whose saved files stamped
+ * `deliveredAt` (the agent event stamped at that instant, ruling 388). Null
+ * when no agent did. A verdict from it is a verdict on its own work.
+ */
+export function reviewSubjectAuthor(
+  fm: { workRevision: WorkRevision | null; deliveredAt?: string | null },
+  timeline: readonly { occurredAt: string; actor: FileActorRef }[],
+): string | null {
+  const rev = activeWorkRevision(fm.workRevision);
+  if (rev) return rev.sourceProfileId ?? null;
+  if (!fm.deliveredAt) return null;
+  const stamp = timeline.find((e) => e.occurredAt === fm.deliveredAt && e.actor.kind === "agent");
+  return stamp && stamp.actor.kind === "agent" ? stamp.actor.profileId : null;
+}
+
+/**
+ * Rulings 388 and 531: the task's delivery is the files its delivering agent
+ * saved on it, not a commit: it has a review subject and no work revision
+ * behind it. Such a task has no branch or pull request to check (rulings 546,
+ * 550).
+ */
+export function deliveredAsFiles(fm: {
+  workRevision: WorkRevision | null;
+  deliveredAt?: string | null;
+}): boolean {
+  return activeWorkRevision(fm.workRevision) === null && reviewSubjectId(fm) !== null;
+}
+
 /** Verdicts bound to the CURRENT subject — older ones are stale (F10-32,
  *  ruling 388). */
 export function currentVerdicts(fm: {
@@ -1689,7 +1719,12 @@ export function deriveValidation(
  *  HERE: such a task now carries a `kind: "verified"` revision minted at verdict
  *  time, so it walks the ordinary required-reviewer path below. A second
  *  required reviewer who has not approved still holds it, which is intended. */
-export function acceptanceBlockedReason(fm: ReviewState): string | null {
+export function acceptanceBlockedReason(
+  fm: ReviewState,
+  /** Ruling 556: who made the review subject ({@link reviewSubjectAuthor}),
+   *  whose own verdict never binds to it. */
+  subjectAuthor: string | null,
+): string | null {
   const required = requiredReviewers(fm);
   // Ruling 161(b) names the acceptance gates among the readers that mean "the
   // revision under review": a DISCARDED record is retired, its verdicts are
@@ -1727,6 +1762,13 @@ export function acceptanceBlockedReason(fm: ReviewState): string | null {
     return `This task's latest review requests changes on ${subject}. Rework and re-review before accepting.`;
   }
   const missing = required.filter((r) => verdictOf(r.profileId) !== "approve");
+  // Ruling 556: an approval its reviewer can never give is not one to wait on.
+  if (missing.some((r) => r.profileId === subjectAuthor)) {
+    return (
+      `A required reviewer made ${subject}, so its approval of it cannot count. ` +
+      "Have another agent deliver its own work, then run the review, or an admin can force-accept."
+    );
+  }
   if (missing.length > 0) {
     return `Waiting on ${missing.length} required reviewer approval${missing.length === 1 ? "" : "s"} of ${subject}.`;
   }

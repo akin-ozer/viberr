@@ -40,7 +40,7 @@ export interface ControllerToolUser {
  *  SDK's tool-result parameter carries an index signature, and only an alias
  *  picks up the implicit one that makes it assignable. */
 export type ControllerToolText = {
-  content: { type: "text"; text: string }[];
+  content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
 };
 
 /** Uniform not-visible copy: a missing project and a forbidden one read
@@ -65,11 +65,14 @@ export interface ControllerToolGuards {
   /** Membership gate for project READS: missing and forbidden both throw the
    *  same not-visible shape. Org admins pass via the audited override. */
   requireVisible: (slug: string, what: string) => void;
-  /** Wrap a handler: AppError → [denied]/[error] text the model relays. */
-  run: (fn: () => Promise<string> | string) => () => Promise<ControllerToolText>;
+  /** Wrap a handler: AppError → [denied]/[error] text the model relays. A
+   *  handler answers in text, or (ruling 533) in text and a picture. */
+  run: (
+    fn: () => Promise<string | ControllerToolText> | string | ControllerToolText,
+  ) => () => Promise<ControllerToolText>;
   /** The same wrapper for handlers that take validated args. */
   runWith: <A>(
-    fn: (args: A) => Promise<string> | string,
+    fn: (args: A) => Promise<string | ControllerToolText> | string | ControllerToolText,
   ) => (args: A) => Promise<ControllerToolText>;
   /** Machine-readable answers, formatted for a model to read back. */
   json: <T>(value: T) => string;
@@ -109,10 +112,11 @@ export function controllerToolGuards(
     }
   }
 
-  function run(fn: () => Promise<string> | string) {
-    return async () => {
+  function run(fn: () => Promise<string | ControllerToolText> | string | ControllerToolText) {
+    return async (): Promise<ControllerToolText> => {
       try {
-        return textResult(await fn());
+        const answer = await fn();
+        return answer instanceof Object ? answer : textResult(answer);
       } catch (error) {
         if (error instanceof AppError) {
           const denied = error.status === 403 || error.status === 401;
@@ -133,7 +137,7 @@ export function controllerToolGuards(
     };
   }
 
-  function runWith<A>(fn: (args: A) => Promise<string> | string) {
+  function runWith<A>(fn: (args: A) => Promise<string | ControllerToolText> | string | ControllerToolText) {
     return async (args: A) => {
       const wrapped = run(() => fn(args));
       return wrapped();

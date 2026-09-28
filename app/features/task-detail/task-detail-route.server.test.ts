@@ -9,6 +9,7 @@ import {
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import type { loader as taskLoader, action as taskAction } from "~/routes/project.task";
+import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 
 /**
  * Route-level tests for the phase-5 task workspace: real Requests against
@@ -1023,6 +1024,31 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
 
 /* ---------------------------------------------- agent dispatch (run-agent) */
 
+describe("loader — ruling 550: a task delivered as files", () => {
+  it("hands the accept confirm the delivery's time, and nothing for a task with a commit revision", async () => {
+    // CANARY: drop `filesDeliveredAt` from the loader and the confirm promises
+    // a GitHub re-check that would close a delivered result "with no changes".
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const ref = { projectSlug: "viberr-core", taskKey: "VIB-166", dataRoot: app.dataRoot };
+    const before: Pick<TaskFrontmatter, "workRevision" | "deliveredAt"> = { workRevision: null, deliveredAt: null };
+    await updateTaskFile(ref, (parsed) => {
+      before.workRevision = parsed.frontmatter.workRevision;
+      before.deliveredAt = parsed.frontmatter.deliveredAt ?? null;
+      parsed.frontmatter.workRevision = null;
+      parsed.frontmatter.deliveredAt = "2026-09-28T08:44:13.751Z";
+    });
+    try {
+      expect((await runLoader("VIB-166", ids.arda)).filesDeliveredAt).toBe("2026-09-28T08:44:13.751Z");
+    } finally {
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.workRevision = before.workRevision;
+        parsed.frontmatter.deliveredAt = before.deliveredAt ?? null;
+      });
+    }
+    expect((await runLoader("VIB-166", ids.arda)).filesDeliveredAt).toBeUndefined();
+  });
+});
+
 describe("loader — deployed specialists", () => {
   it("exposes the project's deployed specialists (developer) + the live-run profile set", async () => {
     const result = await runLoader("VIB-166", ids.arda);
@@ -1886,8 +1912,8 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     // CANARY: pass no refusal to the writer and the agent's report is replaced.
     expect(refused.data.ok).toBe(false);
     expect(refused.data.error).toContain("an agent run saved");
-    const { readTaskAttachmentText } = await import("~/server/files/task-attachments.server");
-    expect(JSON.stringify(readTaskAttachmentText("viberr-core", "VIB-141", "report.md", app.dataRoot))).toContain(
+    const { readTaskAttachment } = await import("~/server/files/task-attachments.server");
+    expect(JSON.stringify(readTaskAttachment("viberr-core", "VIB-141", "report.md", app.dataRoot))).toContain(
       "the agent's report",
     );
     expect(readTaskFile(ref)!.parsed.timeline[0]!.title).not.toBe("Attachment added");

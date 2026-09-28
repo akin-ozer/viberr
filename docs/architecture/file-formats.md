@@ -599,7 +599,8 @@ Notes:
   derived cache recomputed from the others plus the required-reviewer set on every write; do
   not hand-edit it as a source of truth. A verdict names the subject it judged
   (`reviewSubjectId`: the active revision's id, else `files:<deliveredAt>`), so a new subject
-  staleness-expires every prior verdict. A head reached from the reviewed one only through
+  staleness-expires every prior verdict, and it is only ever the subject the reviewer's run
+  was dispatched on (ruling 544). A head reached from the reviewed one only through
   Viberr's own recorded base refreshes is the same subject (ruling 439). A `kind: discarded`
   revision (ruling 161) is a retired record: `validation` derives to `none` over it, no
   verdict binds to it, and the next delivered head mints a fresh id even for the same tree.

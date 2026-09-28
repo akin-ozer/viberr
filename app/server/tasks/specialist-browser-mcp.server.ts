@@ -7,6 +7,9 @@ import { getEnv } from "~/server/config/env.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { effectiveCollabMode } from "./agent-outcome.server";
 import type { UnresolvedMcpGrant } from "./specialist-mcp.server";
+import { BROWSER_CALL_DEADLINE_MS, BROWSER_MCP_NAME } from "./browser-deadline.server";
+
+export { BROWSER_MCP_NAME };
 
 /**
  * R19-19 (owner ruling, decisions.md 75) — the viberr-owned BROWSER MCP server.
@@ -47,10 +50,11 @@ import type { UnresolvedMcpGrant } from "./specialist-mcp.server";
  *     stays workspace-local where no human sees it.
  *   - injection stance is prompt-level (owner decision b): page content is
  *     data, never instructions — `browserPersonaSection` below is the text.
+ *   - it runs under `browser-supervisor.server.ts` (ruling 554): every tool
+ *     call has a deadline, and a page that stops answering gets the browser
+ *     restarted instead of holding every later call for the rest of the run.
  */
 
-/** Reserved server name (joins viberr/viberr_agent in RESERVED_MCP_NAMES). */
-export const BROWSER_MCP_NAME = "viberr_browser";
 
 /** The portable stdio config for the mounted browser — the exact shape both
  *  backends receive (no `env`: it must survive codex `--config` argv). */
@@ -89,6 +93,32 @@ function playwrightMcpCliPath(): string | null {
   }
 }
 
+/**
+ * Ruling 554: the supervisor the server runs under, tried in order: beside
+ * this module (source, vitest), then where the image's `COPY app` puts it next
+ * to the bundled server. Node runs it as TypeScript directly.
+ */
+const SUPERVISOR_CANDIDATES = [
+  path.join(import.meta.dirname, "browser-supervisor.server.ts"),
+  path.resolve(process.cwd(), "app/server/tasks/browser-supervisor.server.ts"),
+];
+
+/** The server's command line before its options: the supervisor, then
+ *  Playwright MCP's CLI, or which of them is missing. */
+function browserServerEntry():
+  | { installed: true; supervisor: string; cli: string }
+  | { installed: false; missing: string } {
+  const cli = playwrightMcpCliPath();
+  if (!cli) {
+    return { installed: false, missing: "the @playwright/mcp package is not installed in this deployment" };
+  }
+  const supervisor = SUPERVISOR_CANDIDATES.find((file) => existsSync(file));
+  if (!supervisor) {
+    return { installed: false, missing: "the browser supervisor (ruling 554) is not installed in this deployment" };
+  }
+  return { installed: true, supervisor, cli };
+}
+
 export interface BrowserRuntimeStatus {
   available: boolean;
   /** Present only when unavailable — the human-readable reason, free of
@@ -101,8 +131,9 @@ export interface BrowserRuntimeStatus {
 
 /**
  * Is the browser capability's RUNTIME actually installed in this deployment?
- * Instance-level and capability-agnostic: the `@playwright/mcp` CLI must be on
- * disk, and IF a browser executable is pinned it must exist too — the exact
+ * Instance-level and capability-agnostic: the `@playwright/mcp` CLI and the
+ * supervisor it runs under (ruling 554) must be on disk, and IF a browser
+ * executable is pinned it must exist too — the exact
  * gates `resolveBrowserMcp` applies per run, hoisted so a health/ops surface can
  * report the same verdict BEFORE a run is spent (the deployed-specialist view's
  * `modelUnavailable` and the boot Codex-availability report have this; the
@@ -112,12 +143,8 @@ export interface BrowserRuntimeStatus {
  * browser is a correct deployment (the R17-5 never-checked-renders-neutral rule).
  */
 export function browserRuntimeStatus(): BrowserRuntimeStatus {
-  if (!playwrightMcpCliPath()) {
-    return {
-      available: false,
-      reason: "the @playwright/mcp package is not installed in this deployment",
-    };
-  }
+  const entry = browserServerEntry();
+  if (!entry.installed) return { available: false, reason: entry.missing };
   const executable = getEnv().VIBERR_BROWSER_EXECUTABLE ?? null;
   if (executable && !existsSync(executable)) {
     return {
@@ -170,12 +197,8 @@ export function resolveBrowserMcp(input: {
     );
   }
 
-  const cli = playwrightMcpCliPath();
-  if (!cli) {
-    return refuse(
-      "the @playwright/mcp package is not installed in this deployment",
-    );
-  }
+  const entry = browserServerEntry();
+  if (!entry.installed) return refuse(entry.missing);
 
   // A deployment that pins a browser executable must actually have it on disk.
   // `--executable-path` to a missing binary does NOT fail here — it fails deep
@@ -198,7 +221,10 @@ export function resolveBrowserMcp(input: {
   shareDirWithAgents(input.attachmentsDir);
 
   const args = [
-    cli,
+    entry.supervisor,
+    "--deadline-ms",
+    String(BROWSER_CALL_DEADLINE_MS),
+    entry.cli,
     "--headless",
     "--isolated",
     "--output-dir",
@@ -319,6 +345,14 @@ export function browserPersonaSection(
     "references when a screenshot backs a claim. A screenshot you NAME " +
     "yourself saves into your working directory instead and no human will " +
     "see it.\n" +
+    // Ruling 554: said before it happens, so a long script in the page is kept
+    // short and a long form is saved as it goes, rather than learned at the
+    // cost of every tab.
+    `- **A browser call that runs past ${BROWSER_CALL_DEADLINE_MS / 1000} seconds restarts the browser.** ` +
+    "A page that stops answering holds every later call, so Viberr ends the browser " +
+    "and starts a fresh one: every tab is gone, and so is whatever a page held that " +
+    "was not saved. Keep a script you run in a page short, and on a long form save " +
+    "or export as you go.\n" +
     "- **Snapshots and console dumps are yours, not the humans'.** The " +
     "browser's machine-stamped working files (`page-….yml`, `console-….log`) " +
     "are removed from the task's attachments after your run unless your reply " +

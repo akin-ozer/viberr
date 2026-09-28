@@ -149,14 +149,14 @@ function authority(autonomy: OperatorAutonomy) {
   return resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, { autonomy });
 }
 
-function task() {
-  return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+function task(key = "VIB-1") {
+  return readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!
     .parsed;
 }
 
-function seedTask(stage: string): void {
+function seedTask(stage: string, key = "VIB-1"): void {
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-1", {
+    frontmatter: baseTaskFrontmatter(key, {
       stage,
       ownerUserId: store.users.arda.id,
       operator: { assignedAtStageId: "triage" },
@@ -838,8 +838,30 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   // The old guard ("not the delivering agent" for any profileId ≠ deliverer) is
   // gone with the slot ceremony: an explicit `delivers: true` is now a delivery
   // HAND-OFF, vetted by the profile's own grants instead of the current slot.
-  it("refuses an explicit delivery hand-off to a profile with NO repo-write grant", async () => {
+  /** The reviewer with its file posting withheld too: an agent with no way
+   *  to deliver anything. */
+  function withholdReviewerFiles(): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "reviewer"
+          ? {
+              ...a,
+              capabilities: [
+                ...a.capabilities,
+                { capabilityId: "attach-evidence-references", mode: "off" as const },
+              ],
+            }
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("refuses an explicit delivery hand-off to a profile that can neither write the repo nor post files", async () => {
     deployRoster(DEFAULT_POLICY);
+    withholdReviewerFiles();
     seedTask("impl");
     const { assignSpecialist } = await import("./specialist-run.server");
     await assignSpecialist(
@@ -848,8 +870,8 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       { userId: store.users.arda.id, label: "Arda" },
       { dataRoot: store.dataRoot },
     );
-    // "reviewer" holds no repo-write grant — a delivering run for it would own
-    // a branch it can ship nothing to. The hunt hardened this from a thrown
+    // A delivering run for it would own a delivery it can put nothing into:
+    // no commit, and no file on the task. The hunt hardened this from a thrown
     // dispatch error into an operator-level NOOP naming the remedy (R21-2's
     // posture) — refused BEFORE any card, trace or engage can announce it.
     const refused = await operatorDispatchAgent(
@@ -859,10 +881,95 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       authority("full"),
     );
     expect(refused.outcome).toBe("noop");
-    expect(refused.message).toMatch(/holds no repo-write grant/i);
-    expect(refused.message).toMatch(/Agents surface/);
+    expect(refused.message).toMatch(/holds neither a repo-write grant nor "Attach evidence references"/);
+    expect(refused.message).toMatch(/Agents page/);
     // The deliverer was not reassigned.
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
+  });
+
+  it("ruling 556: refuses a hand-off to the project's required reviewer before any card", async () => {
+    // The engage refuses it (`assignSpecialist`), so a card for it would
+    // strand a maintainer's Apply on that refusal. CANARY: drop the operator's
+    // pre-check and recommend mode files a `run_agent` card nobody can apply.
+    deployRoster(
+      DEFAULT_POLICY.map((p) => (p.capabilityId === "dispatch-agents" ? { ...p, mode: "recommend" as const } : p)),
+    );
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedTask("impl");
+    const refused = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+      authority("supervised"),
+    );
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toMatch(/^Rev is this project's required reviewer at .+, so it cannot deliver VIB-1:/);
+    expect(task().frontmatter.recommendations).toEqual([]);
+  });
+
+  it("ruling 556: offers the project's required reviewer as a reviewer, even when it could deliver", async () => {
+    // CANARY: drop the required-reviewer term from `resolveDeliversIntent` and
+    // the dispatch reads as a hand-off of delivery, which the pre-check above
+    // refuses: no card offers the reviewer at all.
+    deployRoster(
+      DEFAULT_POLICY.map((p) => (p.capabilityId === "dispatch-agents" ? { ...p, mode: "recommend" as const } : p)),
+    );
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "reviewer"
+          ? { ...a, capabilities: [...a.capabilities, { capabilityId: "execute-code-or-write-repo", mode: "direct" as const }] }
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedTask("impl");
+    const offered = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
+      authority("supervised"),
+    );
+    expect(offered.outcome).toBe("recommended");
+    expect(offered.message).not.toContain("the delivering agent");
+  });
+
+  it("ruling 535: an explicit hand-off to an agent that posts files but cannot write the repo makes it the deliverer", async () => {
+    // On a board that delivers results, the agent that makes the result must
+    // deliver the task (ruling 388: its saved files are the delivery and what
+    // a review binds to), and it must never write the repository. Live on
+    // AWSC-1 the operator's hand-off was refused for want of a repo-write
+    // grant, the researcher ran as a supporting agent, and nothing it saved
+    // could ever be reviewed or accepted.
+    // CANARY: require `capabilities.delivery` for `delivers: true` again (in
+    // `canOwnDelivery`) and this is refused.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const handed = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+      authority("full"),
+    );
+    expect(handed.outcome).toBe("done");
+    expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("reviewer");
+    // Without the hint the posture still keys on repo-write alone: a reviewer
+    // run first on a fresh task never becomes its deliverer by accident.
+    seedTask("impl", "VIB-2");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-2", profileId: "reviewer" },
+      authority("full"),
+    );
+    expect(deliveringEngagement(task("VIB-2").frontmatter)).toBeNull();
   });
 
   it("refuses `delivers: false` aimed at the CURRENT deliverer — a delivering run cannot be demoted per-dispatch", async () => {

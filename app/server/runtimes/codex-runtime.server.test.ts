@@ -12,9 +12,11 @@ import {
   CODEX_SDK_VERIFIED_VERSION,
   createCodexAdapter,
   INTERRUPT_SETTLE_GRACE_MS,
+  shareOutputSchemaWithAgent,
   type CodexClient,
   type CodexThread,
 } from "./codex-runtime.server";
+import { shareFileForAgentsToRead } from "./agent-isolation.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { codexVendor } from "./codex-app-server.server";
@@ -240,6 +242,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
           local: { command: "npx", args: ["-y", "example-mcp"] },
           viberr: { type: "sdk", instance: {} },
           malformed: { command: "npx", args: ["ok", 42] },
+          viberr_browser: { command: "node", args: ["browser-supervisor.server.ts", "cli.js"] },
         },
       },
       { onLine: () => {}, onExit: () => {} },
@@ -288,6 +291,15 @@ describe("codex adapter (SDK, injected fake client)", () => {
         command: "npx",
         args: ["-y", "example-mcp"],
         default_tools_approval_mode: "approve",
+      },
+      // Ruling 554: Codex waits past the supervisor's deadline, so the model
+      // reads the supervisor's "restarted" answer rather than a bare timeout.
+      // CANARY: drop the browser's `tool_timeout_sec` and Codex gives up first.
+      viberr_browser: {
+        command: "node",
+        args: ["browser-supervisor.server.ts", "cli.js"],
+        default_tools_approval_mode: "approve",
+        tool_timeout_sec: 120,
       },
     });
   });
@@ -2272,5 +2284,61 @@ describe("ruling 394: the transport died after the turn completed", () => {
       ]).factory,
     );
     expect(exit).toMatchObject({ outcome: "error" });
+  });
+});
+
+/**
+ * Ruling 534: the Codex SDK writes a turn's output schema into a 0700
+ * directory of the server's own, and the CLI behind the launcher runs as the
+ * person's agent uid (ruling 460). Live, every Codex run given a schema
+ * failed before its first turn: "Failed to read output schema file ...
+ * Permission denied". Driven through the REAL SDK class, so an SDK whose exec
+ * no longer takes the hook fails here rather than on the board.
+ */
+describe("ruling 534: a turn's output schema is readable by the agent the launcher runs", () => {
+  const homes = createTestDbContext();
+  afterEach(() => homes.cleanup());
+
+  it("shares the SDK's schema file with the agent group before the CLI starts", async () => {
+    // CANARY: drop `share(args.outputSchemaFile)` in shareOutputSchemaWithAgent
+    // and the CLI finds a 0700 directory it cannot enter.
+    const { Codex } = await import("@openai/codex-sdk");
+    const dir = homes.makeTempDir("viberr-schema-");
+    const seen = path.join(dir, "seen.json");
+    const cli = path.join(dir, "codex");
+    writeFileSync(
+      cli,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const file = args[args.indexOf("--output-schema") + 1];
+const st = (p) => { const s = fs.statSync(p); return { mode: s.mode & 0o7777, gid: s.gid }; };
+fs.writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ dir: st(path.dirname(file)), file: st(file), schema: JSON.parse(fs.readFileSync(file, "utf8")) }));
+const out = (e) => process.stdout.write(JSON.stringify(e) + "\\n");
+out({ type: "thread.started", thread_id: "th_534" });
+out({ type: "turn.started" });
+out({ type: "item.completed", item: { id: "i1", type: "agent_message", text: "{}" } });
+out({ type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } });
+`,
+    );
+    chmodSync(cli, 0o755);
+    const codex = new Codex({ codexPathOverride: cli, env: { PATH: process.env.PATH ?? "" } });
+    const gid = process.getgid?.() ?? 0;
+    shareOutputSchemaWithAgent(codex, (file) => shareFileForAgentsToRead(file, { gid }));
+    const { events } = await codex
+      .startThread()
+      .runStreamed("hello", { outputSchema: { type: "object", properties: {}, additionalProperties: false } });
+    for await (const event of events) expect(event.type).toBeTruthy();
+    const recorded = z
+      .object({
+        dir: z.object({ mode: z.number(), gid: z.number() }),
+        file: z.object({ mode: z.number(), gid: z.number() }),
+        schema: z.object({ type: z.string() }),
+      })
+      .parse(JSON.parse(readFileSync(seen, "utf8")));
+    expect(recorded.dir).toEqual({ mode: 0o710, gid });
+    expect(recorded.file).toEqual({ mode: 0o640, gid });
+    expect(recorded.schema.type).toBe("object");
   });
 });

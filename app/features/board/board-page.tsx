@@ -37,6 +37,7 @@ import {
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
+import { addFiledFiles, FiledFiles, filesFromPaste } from "./filed-files";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
 import type { BoardCard } from "./board-card";
 import {
@@ -1195,6 +1196,14 @@ function NewTaskModal({
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [labels, setLabels] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState("");
+  // Ruling 533: the files the task is filed with, and the first one refused.
+  const [files, setFiles] = useState<File[]>([]);
+  const [filesProblem, setFilesProblem] = useState<string | null>(null);
+  const addFiles = (incoming: File[]) => {
+    const next = addFiledFiles(files, incoming);
+    setFiles(next.files);
+    setFilesProblem(next.problem);
+  };
   const fetcher = useFetcher<{
     ok: boolean;
     key?: string;
@@ -1258,8 +1267,12 @@ function NewTaskModal({
     if (labels.length > 0) fd.set("labels", labels.join(","));
     if (dueDate) fd.set("dueDate", dueDate);
     if (epic) fd.set("epic", epic);
+    for (const file of files) fd.append("files", file, file.name);
     // R19-14: no stage field — the server creates at the entry stage.
-    fetcher.submit(fd, { method: "post" });
+    fetcher.submit(
+      fd,
+      files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" },
+    );
   };
 
   return (
@@ -1267,6 +1280,16 @@ function NewTaskModal({
       className="modal-card modal-narrow"
       aria-label="New task"
       ref={panelRef}
+      // Ruling 533: a screenshot pasted anywhere in the dialog is filed with
+      // the task; copied text pasted into a field stays text.
+      onPaste={(e) => {
+        const intoTextField =
+          e.target instanceof Element && e.target.matches("input, textarea, [contenteditable]");
+        const pasted = filesFromPaste(e.clipboardData, intoTextField, files);
+        if (!pasted) return;
+        e.preventDefault();
+        addFiles(pasted);
+      }}
     >
       <div className="modal-head">
         <span className="agent-glyph lg">
@@ -1342,6 +1365,15 @@ function NewTaskModal({
             placeholder="One or two sentences. A vague goal gets flagged by the operator at triage."
           />
         </div>
+        <FiledFiles
+          files={files}
+          problem={filesProblem}
+          onAdd={addFiles}
+          onRemove={(name) => {
+            setFiles((prev) => prev.filter((f) => f.name !== name));
+            setFilesProblem(null);
+          }}
+        />
         <div className="field-row">
           <div className="field">
             <label className="flabel" htmlFor="new-task-priority">

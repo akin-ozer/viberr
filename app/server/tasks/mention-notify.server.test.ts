@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,7 +21,7 @@ import {
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
-import { relayToTask } from "./task-relay.server";
+import { relayToTask, takeFromTask } from "./task-relay.server";
 import {
   operatorDispatchAgent,
   operatorPostComment,
@@ -728,6 +728,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
             projectSlug: store.slug,
             taskKey: "VIB-1",
             runId: "run_reply",
+            delivers: true,
             actorRef: AGENT,
             replyText: `${tag} I stopped at the migration — your call on the schema.`,
           },
@@ -746,6 +747,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
           {
             actorRef: AGENT,
             runId: "run_done",
+            delivers: true,
             replyText: `${tag} implemented and self-checked; over to you.`,
             verdict: null,
             question: null,
@@ -825,6 +827,29 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
           toTaskKey: "VIB-1",
           text: `${tag} the deployed CPU numbers you asked for: 5 ms and 6 ms of 10.`,
           author: { actorRef: AGENT, name: "Dev", auditActor: { userId: null, label: "agent" }, notifyFrom: OPERATOR_FROM },
+        });
+        expect(result.outcome).toBe("done");
+      },
+    },
+    {
+      // Ruling 557: a take lands on VIB-1 as the operator's claiming comment.
+      name: "takeFromTask (files taken from another task, with a line on why)",
+      roster: false,
+      write: async (store, tag) => {
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
+        });
+        rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+        const dir = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-2", "attachments");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, "inventory.csv"), "vm\nweb01\n");
+        const result = await takeFromTask(store.db, { dataRoot: store.dataRoot }, {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          fromTaskKey: "VIB-2",
+          files: ["inventory.csv"],
+          text: `${tag} the inventory this estimate works from.`,
+          author: { actorRef: { kind: "operator" }, name: "operator", auditActor: { userId: null, label: "operator" }, notifyFrom: OPERATOR_FROM },
         });
         expect(result.outcome).toBe("done");
       },
@@ -938,8 +963,9 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     "server/tasks/task-actions.server.ts": 4,
     "server/tasks/operator-actions.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
-    // Ruling 488: the relay's comment on the target task.
-    "server/tasks/task-relay.server.ts": 1,
+    // Ruling 488: the relay's comment on the target task; ruling 557: the
+    // take's claiming comment on the task that takes.
+    "server/tasks/task-relay.server.ts": 2,
     // The ONE site that must NOT fan out: the compaction marker is synthesized
     // FROM events already on the timeline (whose mentions were fanned out when
     // they were written). Re-notifying on a fold would ping people for a
