@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SetStateAction,
 } from "react";
 import { useFetcher, type FetcherWithComponents } from "react-router";
@@ -20,6 +21,7 @@ import {
 import { EPIC_STATUS_LABEL, isEpicOpen } from "~/shared/task-refs";
 import { epicHref } from "~/shared/epic-href";
 import { Calendar } from "~/ui/calendar";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { EpicChip, type EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
@@ -208,6 +210,8 @@ function PropRow({
   editor,
   rowData,
   onIntent,
+  lead,
+  triggerRef,
 }: {
   prop: DetailProp;
   label: string;
@@ -223,10 +227,17 @@ function PropRow({
   /** The pointer or the focus reached the trigger: an editor in its own
    *  chunk starts fetching it (ruling 548). */
   onIntent?: () => void;
+  /** Ruling 548: for an editor, what stands before the trigger rather than in
+   *  it (the wait's chips, each with a remove cross, which a button cannot
+   *  hold); the trigger is then the compact one after them. */
+  lead?: ReactNode;
+  /** The trigger, for a row that hands the focus back to it itself. */
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const labelId = useId();
   const valueId = useId();
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const ownRef = useRef<HTMLButtonElement>(null);
+  const btnRef = triggerRef ?? ownRef;
   const open = edit?.open === true;
   const role = popup === "menu" ? "menu" : "dialog";
   // An outside press, or focus leaving for another control, closes it where
@@ -273,10 +284,11 @@ function PropRow({
       <span className="v">
         {edit ? (
           <>
+            {lead}
             <button
               ref={btnRef}
               type="button"
-              className="prop-btn"
+              className={lead ? "prop-btn prop-add" : "prop-btn"}
               aria-haspopup={role}
               aria-expanded={open}
               aria-labelledby={`${labelId} ${valueId}`}
@@ -692,47 +704,141 @@ function loadPicker(): Promise<typeof import("./dependency-picker")> {
 
 const preloadPicker = () => void loadPicker().catch(() => undefined);
 
+/** A task key in running text, kept whole: Chromium breaks "VIB-153" after its
+ *  hyphen (ruling 520's `.hold-ref`). */
+const keyRef = (key: string) => <span className="hold-ref">{key}</span>;
+
 /** What the picker is told where no read is wired (a bare render). */
 const NO_TASK_LIST: DependencyCandidatesView = { ok: false, reason: "No task list is offered here." };
 
-/** Ruling 131: what the task waits on, each entry with its live state. */
+/** Ruling 131: what the task waits on, each entry with its live state.
+ *  Ruling 548: for an editor each entry's chip carries the Owner row's remove
+ *  cross, which saves the wait without it at once, and the trigger is the plus
+ *  after the chips. A cross that leaves nothing still open is the release
+ *  (ruling 131(e)), so that one asks first, as the Owner row's does. */
 const WaitRow = memo(function WaitRow({
   taskKey,
   candidatesUrl,
   blockedBy,
   ...control
 }: { taskKey: string; candidatesUrl: string | null; blockedBy: DependencyRender[] } & RowControl) {
+  const csrf = useCsrfToken();
   const fetcher = usePropFetcher();
   const edit = editState("deps", control);
   const busy = fetcher.state !== "idle";
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The entry a cross is taking out while its save runs (until the server
+  // answers), and the one whose cross is waiting on the release's confirm.
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState<DependencyRender | null>(null);
+  // The cross that had the focus leaves with its chip once the wait comes
+  // back without it; the trigger takes the focus rather than the page. A
+  // refused save keeps the chip, and the cross keeps the focus.
+  const handoff = useRef<string | null>(null);
+  useFetcherResult(fetcher, (result) => {
+    setRemoving(null);
+    if (!result.ok) handoff.current = null;
+  });
+  useEffect(() => {
+    const gone = handoff.current;
+    if (gone === null || blockedBy.some((e) => e.ref === gone)) return;
+    handoff.current = null;
+    if (document.activeElement === document.body) triggerRef.current?.focus({ preventScroll: true });
+  }, [blockedBy]);
+  const remove = (entry: DependencyRender) => {
+    setRemoving(entry.ref);
+    handoff.current = entry.ref;
+    void fetcher.submit(
+      {
+        intent: "set-task-dependencies",
+        _csrf: csrf,
+        blockedBy: blockedBy
+          .filter((e) => e.ref !== entry.ref)
+          .map((e) => e.ref)
+          .join(", "),
+      },
+      { method: "post" },
+    );
+  };
+  const onRemove = (entry: DependencyRender) => {
+    // One save at a time: a second cross would post a list without the
+    // first's answer in it.
+    if (busy) return;
+    if (blockedBy.every((e) => e.ref === entry.ref || e.state === "done")) setReleasing(entry);
+    else remove(entry);
+  };
+  const rest = releasing ? blockedBy.filter((e) => e.ref !== releasing.ref) : [];
   return (
-    <PropRow
-      prop="deps"
-      label="Blocked by"
-      edit={edit}
-      busy={busy && !edit?.open}
-      popup="form"
-      rowData={{ "data-blocked-by": blockedBy.length }}
-      onIntent={preloadPicker}
-      value={
-        blockedBy.length > 0 ? (
-          blockedBy.map((e) => <WaitChip key={e.ref} entry={e} />)
-        ) : edit ? (
-          <Quiet icon="plus">Add dependency</Quiet>
-        ) : (
-          <Quiet>Nothing</Quiet>
-        )
-      }
-      editor={(done) => (
-        <WaitEditor
-          taskKey={taskKey}
-          candidatesUrl={candidatesUrl}
-          blockedBy={blockedBy}
-          fetcher={fetcher}
-          done={done}
+    <>
+      <PropRow
+        prop="deps"
+        label="Blocked by"
+        // A cross's save holds the editor shut until it answers, so no draft
+        // starts from the list it is changing.
+        edit={edit && removing !== null ? { ...edit, toggle: () => undefined } : edit}
+        busy={busy && !edit?.open && removing === null}
+        popup="form"
+        rowData={{ "data-blocked-by": blockedBy.length }}
+        onIntent={preloadPicker}
+        triggerRef={triggerRef}
+        lead={
+          edit && blockedBy.length > 0
+            ? blockedBy.map((e) => (
+                <WaitChip key={e.ref} entry={e} onRemove={() => onRemove(e)} removing={removing === e.ref} />
+              ))
+            : null
+        }
+        value={
+          blockedBy.length > 0 ? (
+            edit ? (
+              <Quiet icon="plus">
+                <span className="vh">Add dependency</span>
+              </Quiet>
+            ) : (
+              blockedBy.map((e) => <WaitChip key={e.ref} entry={e} />)
+            )
+          ) : edit ? (
+            <Quiet icon="plus">Add dependency</Quiet>
+          ) : (
+            <Quiet>Nothing</Quiet>
+          )
+        }
+        editor={(done) => (
+          <WaitEditor
+            taskKey={taskKey}
+            candidatesUrl={candidatesUrl}
+            blockedBy={blockedBy}
+            fetcher={fetcher}
+            done={done}
+          />
+        )}
+      />
+      {releasing && (
+        <ConfirmDialog
+          title={`Release ${taskKey}?`}
+          body={
+            <>
+              {rest.length === 0 ? (
+                <>
+                  {keyRef(releasing.label)} is the last task {keyRef(taskKey)} waits on.
+                </>
+              ) : (
+                <>Everything else {keyRef(taskKey)} waits on is done.</>
+              )}{" "}
+              Taking {keyRef(releasing.label)} off releases {keyRef(taskKey)}: it can move again, and
+              Viberr hands it to the operator.
+            </>
+          }
+          confirmLabel={`Release ${taskKey}`}
+          cancelLabel="Keep the wait"
+          tone="primary"
+          busy={busy}
+          screenLabel="Release wait dialog"
+          onCancel={() => setReleasing(null)}
+          onConfirm={() => remove(releasing)}
         />
       )}
-    />
+    </>
   );
 });
 

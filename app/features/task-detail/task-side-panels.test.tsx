@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, useLoaderData } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { ToastProvider } from "~/ui/toast";
@@ -337,6 +337,9 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
   it("reads the wait as a kv row with each entry's state, and its status ring", () => {
     const { container } = renderCapturing({ blockedBy: entries }, false);
     expect(kv(container, "Blocked by")).toBe("JC-3 · doneJC-6 · archivedJC-7");
+    // Ruling 548: a viewer's chips carry no cross. CANARY: hand the row its
+    // crosses without the edit grant.
+    expect(container.querySelectorAll("button")).toHaveLength(0);
     // Ruling 501: each entry is a chip carrying its state for the sheet's ring.
     // CANARY: drop `data-wait-state` and the done and dead rings lose their tone.
     const chips = [...container.querySelectorAll(".wait-chip")];
@@ -349,6 +352,7 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
   it("an archived task offers no dependency editor", () => {
     const { queryByRole } = renderCapturing({ blockedBy: entries, archived: true }, true);
     expect(queryByRole("button", { name: /^Blocked by/ })).toBeNull();
+    expect(queryByRole("button", { name: /^Remove / })).toBeNull();
   });
 });
 
@@ -652,6 +656,95 @@ describe("ruling 503(e): the Details panel's Epic row", () => {
     const view = renderEpicRow(null, true, closed);
     expect(view.queryByRole("button", { name: /^Epic / })).toBeNull();
     expect(kv(view.container, "Epic")).toBe("None");
+  });
+});
+
+/**
+ * Ruling 548 (the owner's follow-up, "add the × on the row chips too"): for an
+ * editor the Blocked by row's own chips carry the Owner row's cross. A press
+ * saves the wait without that entry at once, through the wait's own intent,
+ * and the trigger is the plus after the chips. A cross that leaves nothing
+ * still open releases the task (ruling 131(e)), so that one asks first, as the
+ * Owner row's cross does.
+ */
+describe("ruling 548: the Blocked by row's chips carry the remove cross", () => {
+  const entry = (ref: string, state: "open" | "done" | "failed") => ({ ref, label: ref, state, taskKey: ref });
+  /** The row itself, outside any popover. */
+  const row = (container: HTMLElement) => container.querySelector<HTMLElement>('.kv-row[data-prop="deps"]')!;
+
+  it("saves the wait without an entry at once, and ignores the other crosses until that save answers", async () => {
+    // CANARY: drop the one-save-at-a-time guard and the second press posts a
+    // list that still holds JC-6, the entry the first press took out.
+    const view = renderCapturing({ blockedBy: [entry("JC-3", "done"), entry("JC-6", "failed"), entry("JC-7", "open")] }, true);
+    const r = within(row(view.container));
+    expect(r.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([
+      "Remove JC-3",
+      "Remove JC-6",
+      "Remove JC-7",
+      "Add dependency",
+    ]);
+    // The plus after the chips is still the row's trigger, named by its label.
+    expect(trigger(view, "Blocked by").textContent).toBe("Add dependency");
+    fireEvent.click(r.getByRole("button", { name: "Remove JC-6" }));
+    expect(r.getByRole("button", { name: "Remove JC-6" }).getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(r.getByRole("button", { name: "Remove JC-7" }));
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-3, JC-7" });
+    await waitFor(() => expect(r.getByRole("button", { name: "Remove JC-6" }).getAttribute("aria-busy")).toBeNull());
+    expect(view.posted).toHaveLength(1);
+  });
+
+  it.each([
+    ["the last entry", [entry("JC-7", "open")], "", "JC-7 is the last task VIB-151 waits on."],
+    ["the last one still open", [entry("JC-3", "done"), entry("JC-7", "open")], "JC-3", "Everything else VIB-151 waits on is done."],
+  ])("asks before a cross takes out %s, and Keep the wait posts nothing", async (_, blockedBy, posted, lead) => {
+    // CANARY: confirm only an emptied list and the second row releases VIB-151
+    // (the engine's next sweep) without a word.
+    const view = renderCapturing({ blockedBy }, true);
+    const cross = within(row(view.container)).getByRole("button", { name: "Remove JC-7" });
+    fireEvent.click(cross);
+    const dialog = view.getByRole("alertdialog", { name: "Release VIB-151?" });
+    expect(dialog.textContent).toContain(
+      `${lead} Taking JC-7 off releases VIB-151: it can move again, and Viberr hands it to the operator.`,
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep the wait" }));
+    await waitFor(() => expect(view.queryByRole("alertdialog")).toBeNull());
+    expect(view.posted).toHaveLength(0);
+    fireEvent.click(cross);
+    fireEvent.click(within(view.getByRole("alertdialog")).getByRole("button", { name: "Release VIB-151" }));
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: posted });
+  });
+
+  it("hands the focus to the trigger once the wait comes back without the chip", async () => {
+    // CANARY: drop the hand-off and the focus falls to the page when the
+    // cross that held it leaves with its chip.
+    let blockedBy = [entry("JC-7", "open"), entry("JC-9", "open")];
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        loader: () => ({ blockedBy }),
+        Component: function Panel() {
+          const data = useLoaderData<{ blockedBy: typeof blockedBy }>();
+          return (
+            <ToastProvider>
+              <TaskDetailsPanel task={detail({ blockedBy: data.blockedBy })} canEdit />
+            </ToastProvider>
+          );
+        },
+        action: async ({ request }) => {
+          const kept = String((await request.formData()).get("blockedBy")).split(", ");
+          blockedBy = blockedBy.filter((e) => kept.includes(e.ref));
+          return { ok: true };
+        },
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/"]} />);
+    const cross = await view.findByRole("button", { name: "Remove JC-7" });
+    cross.focus();
+    fireEvent.click(cross);
+    await waitFor(() => expect(view.queryByRole("button", { name: "Remove JC-7" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger(view, "Blocked by")));
   });
 });
 

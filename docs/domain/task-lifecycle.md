@@ -327,9 +327,11 @@ and task page say what it waits on and in what state: the board's neutral "block
 chip leads the state stack (its title lists every entry with its state; the readiness
 pill already carries the red), the hero renders one linked chip per entry, the
 Current-state row reads "Other work: …", and the Details panel shows a "Blocked by" row
-with its own editor, which picks from the project's tasks and bars the ones this writer
-would refuse as a new entry, read ahead of the write (`listDependencyCandidates` in
-`app/server/projections/dependencies.server.ts`, ruling 548). Every hold sentence is
+whose chips each carry a remove cross (it saves the list without that entry through the
+same intent; a cross that releases the task asks first) and whose editor picks from the
+project's tasks and bars the ones this writer would refuse as a new entry, read ahead of
+the write (`listDependencyCandidates` in `app/server/projections/dependencies.server.ts`,
+ruling 548). Every hold sentence is
 built by `holdEntriesSentence` and `holdRefusal` (`app/shared/dependencies.ts`;
 `holdRefusalFor` on the server): pending entries first, each done entry tagged in its
 own parenthesis ("JC-2 and JC-3 (done)", ruling 420), and an entry that can never

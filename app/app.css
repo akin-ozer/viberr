@@ -9221,6 +9221,12 @@ a.pr-branch:hover { background: var(--tint-hover); }
 /* The crosses keep WCAG 2.2's 24px of clear space (2.5.8) from the chips and
    the field wrapped under them. */
 .dep-field .label-input { row-gap: .375rem; }
+/* On the row, after the chips and their crosses, the trigger is its plus
+   alone: it hangs no padding back over the chip before it. */
+.prop-btn.prop-add { margin-left: 0; min-width: 1.75rem; justify-content: center; }
+/* The release's confirm keeps each task key on one line, as the Waiting on
+   row does (ruling 520). */
+.confirm-card .hold-ref { white-space: nowrap; }
 .wait-chip .own-x .ico { width: 10px; height: 10px; }
 .dep-opt .label-opt-name { flex: none; }
 .dep-opt-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }

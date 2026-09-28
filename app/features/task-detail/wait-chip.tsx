@@ -12,8 +12,17 @@ const WAIT_GLYPH = {
 
 /** One entry of the wait: its status ring, its label and, once it is not
  *  simply open, the word for where it stands. Ruling 548: `onRemove` adds the
- *  Owner row's release cross, for the wait's editor. */
-export function WaitChip({ entry, onRemove }: { entry: DependencyRender; onRemove?: () => void }) {
+ *  Owner row's release cross; `removing` says the save it started is in
+ *  flight (ruling 368), the cross spinning and still focusable. */
+export function WaitChip({
+  entry,
+  onRemove,
+  removing = false,
+}: {
+  entry: DependencyRender;
+  onRemove?: () => void;
+  removing?: boolean;
+}) {
   return (
     <span
       className="label-chip wait-chip"
@@ -29,9 +38,10 @@ export function WaitChip({ entry, onRemove }: { entry: DependencyRender; onRemov
           className="own-x"
           aria-label={`Remove ${entry.label}`}
           title={`Remove ${entry.label}`}
+          aria-busy={removing || undefined}
           onClick={onRemove}
         >
-          <Icon name="x" />
+          {removing ? <Icon name="loader" className="spin" /> : <Icon name="x" />}
         </button>
       )}
     </span>
