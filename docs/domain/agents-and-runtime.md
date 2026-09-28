@@ -1948,9 +1948,13 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    (ruling 174, §3.4): a Claude CLI leads its own group, so a server that died without
    shutting down did not take it along — in the image the launcher's PDEATHSIG now does
    (ruling 460), and the sweep, through the launcher's `--reap`, finds what a SIGKILLed
-   launcher's agent had already detached. One "Interrupted by a restart" note per task
-   lists what was running and, separately, what was queued and had not started (ruling
-   310(b)); then one `runOperator({ trigger: "manual" })` per affected task (controller
+   launcher's agent had already detached. Each specialist or review run that had started
+   first gets the completion effects a person's Stop gives it (`state: "interrupted"`,
+   replayed, ruling 567): its last words and the files it saved are posted under its
+   name, and a deliverer's files are recorded as the delivery (`deliveredAt`). One
+   "Interrupted by a restart" note per task then lists what was running and, separately,
+   what was queued and had not started (ruling 310(b)); then, once every note is written,
+   one `runOperator({ trigger: "manual" })` per affected task (controller
    turns get a conversation note instead), capped at 3 per task per 30 min via
    `run.recovery.reinvoked` audit rows. **The cap is decided BEFORE the note is written**
    (ruling 198), so a capped task's note says what Viberr decided, why, and that running

@@ -29,7 +29,7 @@ import {
   prepareCodexRunHome,
 } from "./user-homes.server";
 import { loginTargetFor, recordBackendLogin } from "./backend-credentials.server";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 let ctx: TestDbContext;
@@ -200,6 +200,81 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).toMatch(/the operator is re-invoked/);
     // One note per task, not one per run.
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
+  });
+
+  /**
+   * Ruling 567. A person's Stop and a failed run both reach the completion
+   * effects, which post the run's saved files under its name and record a
+   * deliverer's as the delivery. A restart reached none of it. Live on AWSC-7
+   * a deploy cut the Calculator Builder after it had saved every result file:
+   * the files belonged to nobody, `deliveredAt` stayed null, the move to Review
+   * offered acceptance before the Judge had started, and the Judge's verdict
+   * could bind to nothing.
+   */
+  function cutRunWithFiles(kind: "primary" | "reviewer", profileId: string, files: string[]) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        waiting: "agent",
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "judge", backend: "claude", role: "Judge", delivers: false, verdictCapable: true },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seedRun(`run_${profileId}_cut`, {
+      kind,
+      role: profileId === "developer" ? "Implementation" : "Judge",
+      agentProfileId: profileId,
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const dir = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments");
+    mkdirSync(dir, { recursive: true });
+    for (const f of files) writeFileSync(path.join(dir, f), f);
+  }
+
+  it("ruling 567: a deliverer the restart cut off keeps its saved files as the delivery, recorded before the operator runs again", async () => {
+    // CANARIES: drop the replay from the notes loop and the files belong to
+    // nobody with `deliveredAt` null; drop `await notes` from the re-invokes and
+    // the operator is called while `deliveredAt` is still null.
+    cutRunWithFiles("primary", "developer", ["estimate-link.md", "summary.md"]);
+    /** What the re-invoked operator would read, at the moment it is called. */
+    const deliveredAtWhenCalled: (string | null)[] = [];
+    const res = finalizeOrphanedRuns(store.db, {
+      dataRoot: store.dataRoot,
+      runOperator: async () => {
+        deliveredAtWhenCalled.push(
+          readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+            .parsed.frontmatter.deliveredAt,
+        );
+        return { runId: null, queued: true, backend: "claude", autonomy: "supervised" };
+      },
+    });
+    await res.notes;
+    await res.reinvokes;
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const producing = parsed.timeline.find(
+      (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes("estimate-link.md"),
+    );
+    expect(producing?.actor).toMatchObject({ kind: "agent", profileId: "developer" });
+    expect(producing!.attachments).toEqual(expect.arrayContaining(["estimate-link.md", "summary.md"]));
+    expect(parsed.frontmatter.deliveredAt).toBe(producing!.occurredAt);
+    const note = parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
+    expect(note.occurredAt >= producing!.occurredAt).toBe(true);
+    expect(deliveredAtWhenCalled).toEqual([producing!.occurredAt]);
+  });
+
+  it("ruling 567: a reviewer the restart cut off has its files posted under its name, and they are not the delivery", async () => {
+    // Ruling 388: a reviewer's captures are evidence, never the subject.
+    cutRunWithFiles("reviewer", "judge", ["page-capture.png"]);
+    await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).notes;
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const producing = parsed.timeline.find(
+      (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes("page-capture.png"),
+    );
+    expect(producing?.actor).toMatchObject({ kind: "agent", profileId: "judge" });
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
   });
 
   it("ruling 181: a Codex run the restart orphaned gets its private home finished at boot — sign-in written back, directory gone", () => {
