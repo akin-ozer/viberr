@@ -2412,6 +2412,45 @@ describe("ruling 497: a decision's notification opens the decision", () => {
   });
 });
 
+/**
+ * Ruling 547: a decision's link names its packet (`#decision-<id>`), and the
+ * page opens the card only for that packet. A link to a place the page no
+ * longer shows (a decision answered or withdrawn, recommendations applied or
+ * dismissed) lands on the timeline, where what became of it is recorded,
+ * marked and focused; it used to move nothing, and hand the focus back to the
+ * bell (live on AWSC-2, 2026-09-28).
+ */
+describe("ruling 547: a region link lands where the page still shows it", () => {
+  const OPEN = {
+    id: "pkt_open",
+    type: "input" as const,
+    kind: "Agent question",
+    from: "Workflow Researcher",
+    title: "Approve the Mapping-stage hours and pricing baseline?",
+    body: "",
+    observations: [],
+    options: [{ kind: "custom" as const, t: "Adopt proposed policy", d: "", rec: true }],
+  };
+
+  // CANARY: drop the timeline from `regionPlace` and the four rows after the
+  // first mark nothing, which is what a click on them did before.
+  it.each([
+    ["the packet it names", "/#decision-pkt_open", OPEN, ".detail-packet"],
+    // CANARY: open the card for any link that names a packet and a row about
+    // an answered question rings the next one.
+    ["the timeline, for a packet closed since", "/#decision-pkt_gone", OPEN, "#timeline"],
+    ["the timeline, with no packet open", "/#decision-pkt_gone", null, "#timeline"],
+    ["the timeline, for a row written before ruling 547", "/#decision", null, "#timeline"],
+    ["the timeline, with no recommendation pending", "/#recommendations", null, "#timeline"],
+  ])("%s", async (_place, entry, packet, landsOn) => {
+    const { container } = renderPage({ entry, task: { packet } });
+    const place = container.querySelector(landsOn)!;
+    await waitFor(() => expect(place.hasAttribute("data-targeted")).toBe(true));
+    await waitFor(() => expect(document.activeElement).toBe(place));
+    expect(container.querySelectorAll("[data-targeted]")).toHaveLength(1);
+  });
+});
+
 describe("U7 / U35-2: the task detail's reading order matches its stacking rule", () => {
   it("puts the title and the open packet first, current state next, the timeline last in the DOM", () => {
     const { container } = renderPage({

@@ -375,14 +375,14 @@ function isAgentAccountsAnchor(id: string): boolean {
 /** Ruling 532: the overlay pins its head over the top of what it scrolls
  *  (`.page-overlay .board-head`), so the panel comes to rest below it, where
  *  its title shows, instead of under it. */
-function revealUnderHead(id: string): boolean {
+function revealUnderHead(id: string): HTMLElement | null {
   const target = document.getElementById(id);
-  if (!target) return false;
+  if (!target) return null;
   revealTarget(target);
   const head = target.closest("dialog")?.querySelector(".board-head");
   const box = scrollingBox(target);
   if (head && box) box.scrollTop -= head.getBoundingClientRect().height;
-  return true;
+  return target;
 }
 
 /** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */

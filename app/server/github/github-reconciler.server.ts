@@ -1157,7 +1157,7 @@ async function reconcileTaskUnlocked(
     const supersededIds = new Set(supersededRecs.map((r) => r.id));
     // Ruling 475 (F40-55 (b)): the open decision packet that offers the same
     // acceptance goes too. Filled inside the lock below.
-    const withdrawnPacket: AcceptancePacketWithdrawalSlot = { title: null };
+    const withdrawnPacket: AcceptancePacketWithdrawalSlot = { withdrawn: null };
     // Everything above was decided from a snapshot taken BEFORE several awaited
     // GitHub round trips, and this is a blind whole-key assign. Another writer
     // can land in that window — an acceptance stamping `pr.state: "accepted"`
@@ -1218,12 +1218,11 @@ async function reconcileTaskUnlocked(
       // "the PR is mergeable", and the owner found out when Accept was
       // refused. Ruling 162(d) withdrew only the recommendation cards.
       if (conflictText && !divergenceText) {
-        withdrawnPacket.title =
-          withdrawAcceptancePacket(
-            parsed,
-            `PR #${newPr!.number} now conflicts with the base branch, so the acceptance it offers would be refused`,
-            POLICY_ENGINE_ACTOR,
-          )?.title ?? null;
+        withdrawnPacket.withdrawn = withdrawAcceptancePacket(
+          parsed,
+          `PR #${newPr!.number} now conflicts with the base branch, so the acceptance it offers would be refused`,
+          POLICY_ENGINE_ACTOR,
+        );
       }
       // Ruling 179: re-checked under the lock — a delivery landing during
       // this pass's round trips replaces the revision itself, and then the
@@ -1362,11 +1361,11 @@ async function reconcileTaskUnlocked(
     rebuildPath(db, resolveTaskFilePath(ref), {
       dataRoot: ctx.dataRoot,
     });
-    if (withdrawnPacket.title !== null) {
+    if (withdrawnPacket.withdrawn !== null) {
       recordAcceptancePacketWithdrawal(db, {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
-        title: withdrawnPacket.title,
+        withdrawn: withdrawnPacket.withdrawn,
         reason: "pr_conflicting",
         actor,
       });
@@ -1382,7 +1381,7 @@ async function reconcileTaskUnlocked(
             kind: "policy",
             title: `PR #${newPr!.number} now conflicts with the base: ${fm.key}'s acceptance is withdrawn`,
             text:
-              `${conflictText} The decision "${withdrawnPacket.title}" was withdrawn, because ` +
+              `${conflictText} The decision "${withdrawnPacket.withdrawn.title}" was withdrawn, because ` +
               `the acceptance it offered would be refused. The task's operator is asked to resolve the conflict.`,
             about: conflictAt ? { event: conflictAt } : null,
             from: POLICY_ENGINE_NOTIFY_FROM,

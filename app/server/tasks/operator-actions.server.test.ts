@@ -38,10 +38,14 @@ import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   RECOMMENDATION_DECLINED_TITLE,
+  applyAcceptanceWrite,
   applyRecommendation,
   createTask,
   dismissRecommendation,
+  resolvePacket,
+  setTaskArchived,
   transitionStage,
+  updateTaskGoal,
   type TaskActionContext,
 } from "./task-actions.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
@@ -2968,9 +2972,10 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(packets(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
     expect(packets(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
     // Ruling 497: the row opens the packet, where it is decided. CANARY: drop
-    // `about` from the notice and the row opens the task's top.
+    // `about` from the notice and the row opens the task's top. Ruling 547:
+    // the link names the packet, so the row can follow it once it closes.
     expect(packets(store.users.murat.id)[0]!.href).toBe(
-      `/projects/${store.slug}/tasks/VIB-1#decision`,
+      `/projects/${store.slug}/tasks/VIB-1#decision-${p.id}`,
     );
     // The audit trail records it.
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain(
@@ -3503,6 +3508,132 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(res.outcome).toBe("noop");
     expect(res.message).toContain("Unknown packet option kind");
     expect(task().packet).toBeNull();
+  });
+});
+
+/**
+ * Ruling 547: a decision's row opens the packet while it is open and, once it
+ * has closed, the timeline entry that records how. The task page shows a packet
+ * only while it is open, so a row about a question already answered used to
+ * open nothing at all (live on AWSC-2, 2026-09-28). The row names its packet
+ * (`#decision-<id>`); every door that clears one moves the rows naming it to
+ * the entry it wrote (`#event-<occurredAt>`). One row per door: each calls
+ * `followClosedDecision` itself, and a door that forgets strands its rows.
+ */
+describe("ruling 547: a decision's row follows it to the entry that closed it", () => {
+  const OPTIONS: OperatorPacketOptionInput[] = [
+    { kind: "hold_runtime_debug", title: "Hold for runtime debugging", recommended: true },
+    { kind: "edit_goal", title: "Narrow the goal to the API" },
+  ];
+  const arda = () => ({ userId: store.users.arda.id, label: "Arda" });
+  const at = () => ({ dataRoot: store.dataRoot });
+  const vib1 = () => ({ projectSlug: store.slug, taskKey: "VIB-1" });
+  /** Where the owner's bell row about the packet opens. */
+  const rowHref = () =>
+    listNotifications(store.db, store.users.arda.id).find((n) => n.kind === "packet")!.href;
+
+  /** Choose the edit_goal option: the packet stays on the page, decided, until
+   *  the goal it asks for lands. */
+  async function decideGoalEdit(packetId: string): Promise<void> {
+    await resolvePacket(store.db, { ...vib1(), optionIndex: 1 }, arda(), at());
+    expect(task().packet?.awaiting).toBe("goal_edit");
+    // CANARY: follow the packet on every answer (drop `clearPacket` from
+    // `resolvePacket`'s condition) and the row leaves the decided card.
+    expect(rowHref()).toBe(`/projects/${store.slug}/tasks/VIB-1#decision-${packetId}`);
+  }
+
+  it.each<[string, string, (packetId: string) => Promise<void>]>([
+    [
+      "a person answers it",
+      "**Decision:** hold for runtime debug.",
+      async () => {
+        await resolvePacket(store.db, { ...vib1(), optionIndex: 0 }, arda(), at());
+      },
+    ],
+    [
+      "the operator withdraws it",
+      "**Packet withdrawn:**",
+      async () => {
+        await operatorResolvePacket(store.db, at(), { ...vib1(), reason: "The logs arrived." }, authority("full"));
+      },
+    ],
+    [
+      "the task is archived",
+      "**Archived:**",
+      async () => {
+        await setTaskArchived(store.db, { ...vib1(), archived: true }, arda(), at());
+      },
+    ],
+    [
+      "an acceptance closes the task without answering it",
+      "Withdrew the open decision",
+      async () => {
+        await applyAcceptanceWrite(store.db, at(), {
+          ...vib1(),
+          doneStageId: "done",
+          prState: "accepted",
+          event: {
+            occurredAt: new Date().toISOString(),
+            type: "completion",
+            actor: { kind: "operator" },
+            title: "Completion accepted",
+            text: "Operator acceptance recorded.",
+            toAgent: false,
+            evidence: null,
+          },
+        });
+      },
+    ],
+    [
+      "the goal edit it asked for lands",
+      "**Packet resolved:**",
+      async (packetId) => {
+        await decideGoalEdit(packetId);
+        await updateTaskGoal(store.db, { ...vib1(), goal: "Serve the API only." }, arda(), at());
+      },
+    ],
+    [
+      "the operator drafts the goal it asked for",
+      "The operator drafted the task goal",
+      async (packetId) => {
+        await decideGoalEdit(packetId);
+        await operatorSetGoal(store.db, at(), { ...vib1(), goal: "Serve the API only." }, authority("full"));
+      },
+    ],
+  ])("%s", async (_door, record, close) => {
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    // At the acceptance boundary, with no goal yet, so every door is open.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+      }),
+      goal: "",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const opened = await operatorOpenPacket(
+      store.db,
+      at(),
+      { ...vib1(), packetType: "input", title: "Pick a recovery path", body: "", options: OPTIONS },
+      authority("full"),
+    );
+    expect(opened.outcome).toBe("done");
+    const packetId = task().packet!.id!;
+    // CANARY: link the decision without its id and no door can find the rows.
+    expect(rowHref()).toBe(`/projects/${store.slug}/tasks/VIB-1#decision-${packetId}`);
+
+    await close(packetId);
+
+    expect(task().packet).toBeNull();
+    const entry = task().timeline.find((e) => e.text.startsWith(record));
+    expect(entry).toBeDefined();
+    // CANARY: drop this door's `followClosedDecision` and the row keeps
+    // naming a packet the task page no longer shows.
+    expect(rowHref()).toBe(`/projects/${store.slug}/tasks/VIB-1#event-${entry!.occurredAt}`);
   });
 });
 

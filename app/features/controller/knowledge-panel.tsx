@@ -55,14 +55,13 @@ function isKnowledgeTarget(id: string): boolean {
 /** An entry the panel no longer lists (a proposal closed since, a correction
  *  older than the newest shown) leaves its list, or the panel, in view: that
  *  is still where the link was pointing. */
-function revealKnowledge(id: string): boolean {
+function revealKnowledge(id: string): HTMLElement | null {
   const target =
     document.getElementById(id) ??
     (id.startsWith(proposalAnchor("")) ? document.getElementById(KB_PROPOSALS_ANCHOR) : null) ??
     document.getElementById(KB_CORRECTIONS_ANCHOR);
-  if (!target) return false;
-  revealTarget(target);
-  return true;
+  if (target) revealTarget(target);
+  return target;
 }
 
 /** The request each proposal button sends, in the words the controller acts on. */

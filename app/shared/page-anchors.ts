@@ -26,8 +26,26 @@ export function timelineEventTime(anchor: string): string | null {
 /** The task page's open decision packet (an operator's, or an agent's question). */
 export const TASK_DECISION_ANCHOR = "decision";
 
+/** Ruling 547: one decision packet, by its id: what a notification about it
+ *  links to while it is open, so the row can follow it once it closes. */
+export function decisionAnchor(packetId: string): string {
+  return `${TASK_DECISION_ANCHOR}-${packetId}`;
+}
+
+/** The packet a {@link decisionAnchor} names, or null for any other id (the
+ *  bare {@link TASK_DECISION_ANCHOR} included). */
+export function decisionPacketId(anchor: string): string | null {
+  const prefix = decisionAnchor("");
+  return anchor.startsWith(prefix) ? anchor.slice(prefix.length) || null : null;
+}
+
 /** The task page's pending recommendations, each a decision to apply. */
 export const TASK_RECOMMENDATIONS_ANCHOR = "recommendations";
+
+/** Ruling 547: the task page's timeline, where a link to a decision or to the
+ *  recommendations lands once they are gone from the page: what became of
+ *  them is recorded there. */
+export const TASK_TIMELINE_ANCHOR = "timeline";
 
 /** The project Controller page's open proposals (ruling 483), listed inside
  *  its Knowledge base panel since ruling 498. */

@@ -7,8 +7,10 @@ import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
+  type ClosedDecision,
   type CreateNotificationInput,
   createNotification,
+  followClosedDecision,
   markTaskPacketApprovalRead,
   proposalLink,
   taskDecisionLink,
@@ -283,8 +285,9 @@ export const POLICY_ENGINE_NOTIFY_FROM: ActorRender = { kind: "system", name: "P
 export type NoticeSubject =
   /** The timeline event written at this time (its `occurredAt`). */
   | { event: string }
-  /** The task's open decision packet (an operator's, or an agent's question). */
-  | "decision"
+  /** The task's open decision packet (an operator's, or an agent's question),
+   *  by its id: ruling 547 moves the row to the event that closes it. */
+  | { decision: string | undefined }
   /** The task's pending recommendation cards. */
   | "recommendations"
   /** A knowledge-base proposal, by id (ruling 483). */
@@ -293,8 +296,8 @@ export type NoticeSubject =
 /** Where a row about `about` on this task opens (the links in
  *  `notifications.server.ts`). */
 export function noticeHref(projectSlug: string, taskKey: string, about: NoticeSubject): string {
-  if (about === "decision") return taskDecisionLink(projectSlug, taskKey);
   if (about === "recommendations") return taskRecommendationsLink(projectSlug, taskKey);
+  if ("decision" in about) return taskDecisionLink(projectSlug, taskKey, about.decision);
   if ("event" in about) return taskEventLink(projectSlug, taskKey, about.event);
   return proposalLink(projectSlug, about.proposal);
 }
@@ -668,21 +671,21 @@ export function recordRecommendationWithdrawal(
  *
  * Runs INSIDE the task file's lock (the caller is an `updateTaskFile` mutator)
  * and writes one person-facing note. {@link recordAcceptancePacketWithdrawal}
- * writes the audit row and clears the bell after the lock. Returns the
- * withdrawn packet's title, or null when no such packet stood.
+ * writes the audit row and clears the bell after the lock. Returns what was
+ * withdrawn, or null when no such packet stood.
  */
 export function withdrawAcceptancePacket(
   parsed: ParsedTaskFile,
   /** Why the offer no longer holds, as the tail of a sentence. */
   reason: string,
   actor: FileActorRef,
-): { title: string } | null {
+): AcceptancePacketWithdrawal | null {
   const packet = parsed.packet;
   if (!packet || !packet.options.some((o) => o.kind === "accept_completion")) return null;
   parsed.packet = null;
   // A blocked packet held the readiness gate down with it.
   if (parsed.frontmatter.readiness === "blocked") parsed.frontmatter.readiness = "ready";
-  parsed.timeline.unshift({
+  const note: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "transition",
     actor,
@@ -690,25 +693,34 @@ export function withdrawAcceptancePacket(
     text: `**Packet withdrawn:** "${packet.title}" no longer holds: ${reason}.`,
     toAgent: false,
     evidence: null,
-  });
-  return { title: packet.title };
+  };
+  parsed.timeline.unshift(note);
+  return { title: packet.title, closed: { packetId: packet.id, closedAt: note.occurredAt } };
+}
+
+/** What {@link withdrawAcceptancePacket} withdrew. */
+export interface AcceptancePacketWithdrawal {
+  title: string;
+  /** Ruling 547: the packet, and the note that records its withdrawal. */
+  closed: ClosedDecision;
 }
 
 /** A locked mutator's {@link withdrawAcceptancePacket} result, carried out of
  *  the closure (the same reason {@link OfferWithdrawalSlot} exists). */
 export interface AcceptancePacketWithdrawalSlot {
-  /** The withdrawn packet's title; null when none stood. */
-  title: string | null;
+  /** Null when no such packet stood. */
+  withdrawn: AcceptancePacketWithdrawal | null;
 }
 
-/** The database half of {@link withdrawAcceptancePacket}: the audit row, and
- *  the packet's bell marked read for everyone it reached. */
+/** The database half of {@link withdrawAcceptancePacket}: the audit row, the
+ *  packet's bell marked read for everyone it reached, and its rows sent to the
+ *  note that says why it went (ruling 547). */
 export function recordAcceptancePacketWithdrawal(
   db: DatabaseSync,
   input: {
     projectSlug: string;
     taskKey: string;
-    title: string;
+    withdrawn: AcceptancePacketWithdrawal;
     reason: "pr_conflicting";
     actor: AuditActor;
   },
@@ -720,7 +732,8 @@ export function recordAcceptancePacketWithdrawal(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { reason: input.reason, title: input.title },
+    details: { reason: input.reason, title: input.withdrawn.title },
   });
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  followClosedDecision(db, input.projectSlug, input.taskKey, input.withdrawn.closed);
 }

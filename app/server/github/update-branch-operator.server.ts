@@ -1074,22 +1074,21 @@ async function withdrawMootAcceptancePacket(
 ): Promise<void> {
   const open = readTaskFile(ref)?.parsed.packet;
   if (!open || !open.options.some((o) => o.kind === "accept_completion")) return;
-  const slot: AcceptancePacketWithdrawalSlot = { title: null };
+  const slot: AcceptancePacketWithdrawalSlot = { withdrawn: null };
   await updateTaskFile(ref, (parsed) => {
-    slot.title =
-      withdrawAcceptancePacket(
-        parsed,
-        result.status === "conflict"
-          ? `\`${result.branch}\` conflicts with \`${result.base}\`, so the acceptance it offers would be refused`
-          : `\`${result.branch}\` diverged from its remote, so the acceptance it offers would be refused`,
-        { kind: "operator" },
-      )?.title ?? null;
+    slot.withdrawn = withdrawAcceptancePacket(
+      parsed,
+      result.status === "conflict"
+        ? `\`${result.branch}\` conflicts with \`${result.base}\`, so the acceptance it offers would be refused`
+        : `\`${result.branch}\` diverged from its remote, so the acceptance it offers would be refused`,
+      { kind: "operator" },
+    );
   });
-  if (slot.title === null) return;
+  if (slot.withdrawn === null) return;
   recordAcceptancePacketWithdrawal(db, {
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
-    title: slot.title,
+    withdrawn: slot.withdrawn,
     reason: "pr_conflicting",
     actor: OPERATOR_AUDIT_ACTOR,
   });

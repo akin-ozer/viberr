@@ -196,7 +196,11 @@ import {
   type CompletionPacketFact,
   type CompletionPacketInput,
 } from "./completion-packet.server";
-import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
+import {
+  type ClosedDecision,
+  followClosedDecision,
+  markTaskPacketApprovalRead,
+} from "~/server/projections/notifications.server";
 import { liveMergeable } from "~/features/github/github-pills";
 import { correctKnowledgeDoc, type KbCorrectionRequest } from "./kb-correction-actions.server";
 import { relayToTask } from "./task-relay.server";
@@ -1955,7 +1959,7 @@ export async function operatorOpenPacket(
           : `Decision needed: ${title}`,
       text: packet.body || title,
       // Ruling 497: the row opens the packet, where it is decided.
-      about: "decision",
+      about: { decision: packet.id },
     },
     ctx,
   );
@@ -2014,7 +2018,7 @@ export async function operatorResolvePacket(
   const reason =
     (input.reason ?? "").trim() ||
     "The input it asked for has since been provided.";
-  let withdrawn = false;
+  let withdrawn: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // Re-check inside the locked write — the read above raced other writers.
     // Both halves matter: the packet standing NOW must still be the operator's
@@ -2024,14 +2028,15 @@ export async function operatorResolvePacket(
     if (!current || !packetIsOperators(current)) return;
     if (packet.id && current.id !== packet.id) return;
     parsed.packet = null;
-    withdrawn = true;
+    const closedAt = new Date().toISOString();
+    withdrawn = { packetId: current.id, closedAt };
     // A blocked packet set readiness=blocked when it opened — withdrawing the
     // packet lifts that (a genuine standing block would re-assert itself).
     if (packet.type === "blocked" && parsed.frontmatter.readiness === "blocked") {
       parsed.frontmatter.readiness = "ready";
     }
     parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
+      occurredAt: closedAt,
       type: "transition",
       actor: { kind: "operator" },
       title: null,
@@ -2048,6 +2053,7 @@ export async function operatorResolvePacket(
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+  followClosedDecision(db, input.projectSlug, input.taskKey, withdrawn);
   recordAudit(db, {
     action: "task.operator.packet_withdrawn",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -4010,22 +4016,25 @@ export async function operatorSetGoal(
   if (current === goal) {
     return { outcome: "noop", message: "Goal unchanged." };
   }
-  let clearedPacket = false;
+  /** Ruling 547: the awaiting packet the drafted goal fulfils; the note below
+   *  is its record. */
+  let clearedPacket: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.goal = goal;
+    const draftedAt = new Date().toISOString();
     // Fulfil an awaiting goal-edit packet (the operator drafted the scope the
     // human asked it to) — clear it + lift its readiness gate, exactly like
     // updateTaskGoal does for a human edit.
     if (parsed.packet?.awaiting === "goal_edit") {
       const wasBlocked = parsed.packet.type === "blocked";
+      clearedPacket = { packetId: parsed.packet.id, closedAt: draftedAt };
       parsed.packet = null;
-      clearedPacket = true;
       if (wasBlocked && parsed.frontmatter.readiness === "blocked") {
         parsed.frontmatter.readiness = "ready";
       }
     }
     parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
+      occurredAt: draftedAt,
       // A drafted goal is a neutral lifecycle note, not a policy violation
       // (P13-LV-03 — this rendered as a coral "Policy violation" shield).
       type: "note",
@@ -4040,6 +4049,7 @@ export async function operatorSetGoal(
   });
   if (clearedPacket) {
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+    followClosedDecision(db, input.projectSlug, input.taskKey, clearedPacket);
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {

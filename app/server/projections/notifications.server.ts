@@ -19,6 +19,7 @@ import type { AttentionSnapshot } from "~/features/notifications/desktop-alerts"
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import {
+  decisionAnchor,
   proposalAnchor,
   TASK_DECISION_ANCHOR,
   TASK_RECOMMENDATIONS_ANCHOR,
@@ -130,9 +131,55 @@ export function taskEventLink(projectSlug: string, taskKey: string, occurredAt: 
   return `${taskPath(projectSlug, taskKey)}#${timelineEventAnchor(occurredAt)}`;
 }
 
-/** The task's open decision packet (an operator's, or an agent's question). */
-export function taskDecisionLink(projectSlug: string, taskKey: string): string {
-  return `${taskPath(projectSlug, taskKey)}#${TASK_DECISION_ANCHOR}`;
+/** The task's open decision packet (an operator's, or an agent's question).
+ *  Ruling 547: named by its id, so {@link followClosedDecision} can find the
+ *  rows about it; a packet with no id (written before F10-09) is not. */
+export function taskDecisionLink(
+  projectSlug: string,
+  taskKey: string,
+  packetId?: string,
+): string {
+  const anchor = packetId ? decisionAnchor(packetId) : TASK_DECISION_ANCHOR;
+  return `${taskPath(projectSlug, taskKey)}#${anchor}`;
+}
+
+/** Ruling 547: a decision packet that closed, and the timeline event that
+ *  recorded how (the answer, the withdrawal, the fulfilled goal edit, or the
+ *  acceptance or archive it ended with). */
+export interface ClosedDecision {
+  /** The packet's id; a packet with none has no rows to follow it. */
+  packetId: string | undefined;
+  /** The `occurredAt` of the event that recorded the close. */
+  closedAt: string;
+}
+
+/**
+ * Ruling 547: the rows that opened a decision packet open the event that
+ * closed it, once it has. Their link named the packet (`taskDecisionLink`),
+ * and the task page shows a packet only while it is open, so a click on a row
+ * about a question already answered used to move nothing at all. The rows keep
+ * their read state; the callers that mark them read still do.
+ */
+export function followClosedDecision(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  closed: ClosedDecision,
+): number {
+  if (!closed.packetId) return 0;
+  return Number(
+    db
+      .prepare(
+        `UPDATE notifications SET href = ?
+         WHERE project_slug = ? AND task_key = ? AND href = ?`,
+      )
+      .run(
+        taskEventLink(projectSlug, taskKey, closed.closedAt),
+        projectSlug,
+        taskKey,
+        taskDecisionLink(projectSlug, taskKey, closed.packetId),
+      ).changes,
+  );
 }
 
 /** The task's pending recommendations, each a decision to apply. */

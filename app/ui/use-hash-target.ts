@@ -52,24 +52,37 @@ export function scrollingBox(el: HTMLElement): HTMLElement | null {
  * modifier) takes the hash out of the URL, in place and with no scroll: every
  * reader of the location lets go of the place at once, and a reload does not
  * bring the mark back. The press itself goes on to do what it does.
+ *
+ * Ruling 547: the place stays where the reveal put it while the page goes on
+ * laying out around it (`holdInView`), until the person moves the page.
+ * `reveal` returns the element it brought into view, or null when the page
+ * cannot show one yet.
  */
 export function useHashTarget(
   accepts: (id: string) => boolean,
   ready = true,
-  reveal: (id: string) => boolean = revealById,
+  reveal: (id: string) => HTMLElement | null = revealById,
 ): string | null {
   const location = useLocation();
   const navigate = useNavigate();
   const id = useHydrated() ? hashTarget(location.hash) : "";
   const claimed = id !== "" && accepts(id) ? id : null;
-  const revealedFor = useRef<string | null>(null);
+  const revealed = useRef<RevealedPlace | null>(null);
   const revealRef = useRef(reveal);
   useEffect(() => {
     revealRef.current = reveal;
   });
   useEffect(() => {
-    if (!claimed || !ready || revealedFor.current === location.key) return;
-    if (revealRef.current(claimed)) revealedFor.current = location.key;
+    if (!claimed || !ready) return;
+    if (revealed.current?.key !== location.key) {
+      const target = revealRef.current(claimed);
+      if (!target) return;
+      revealed.current = placeOf(target, location.key);
+    }
+    // Held again when the effect runs again for the same navigation (React's
+    // StrictMode mounts it twice), unless the person has let go since.
+    const place = revealed.current;
+    return place.free ? undefined : holdInView(place);
   }, [claimed, ready, location.key]);
   useEffect(() => {
     if (!claimed) return;
@@ -92,9 +105,76 @@ export function useHashTarget(
   return claimed;
 }
 
-function revealById(id: string): boolean {
+function revealById(id: string): HTMLElement | null {
   const target = document.getElementById(id);
-  if (!target) return false;
-  revealTarget(target);
-  return true;
+  if (target) revealTarget(target);
+  return target;
+}
+
+/** Where a reveal left the place a navigation named: `at` px below the top of
+ *  the box that scrolls it. `free` once the person has moved the page, or when
+ *  nothing around it scrolls. */
+interface RevealedPlace {
+  key: string;
+  target: HTMLElement;
+  box: HTMLElement | null;
+  at: number;
+  free: boolean;
+}
+
+function placeOf(target: HTMLElement, key: string): RevealedPlace {
+  const box = scrollingBox(target);
+  return { key, target, box, at: box ? offsetIn(box, target) : 0, free: box === null };
+}
+
+function offsetIn(box: HTMLElement, el: HTMLElement): number {
+  return el.getBoundingClientRect().top - box.getBoundingClientRect().top;
+}
+
+/** What the person does to move a page themselves. */
+const MOVES = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/**
+ * Ruling 547: keep a revealed place `at` px below the top of the box that
+ * scrolls it while the page goes on laying out around it. A task page that
+ * mounts for the link (another task's) draws its long entries whole and folds
+ * them only in the render after the one that revealed the place: on AWSC-2 the
+ * reveal scrolled a page 11,842 px tall, the folds above the entry then took
+ * 3,222 px out of it, and the entry sat 606 px over the top of the page column,
+ * marked and out of sight. Whatever changes size in the box (a fold, a picture
+ * loading, an event arriving above, a region drawn into it), the box scrolls by
+ * what the place moved. The person's first wheel, touch, press or key lets go
+ * for good. Returns the release, for the next navigation or the mark's end.
+ */
+function holdInView(place: RevealedPlace): () => void {
+  const { target, box } = place;
+  if (!box || !("ResizeObserver" in globalThis)) return () => {};
+  const keep = () => {
+    if (target.isConnected) box.scrollTop += offsetIn(box, target) - place.at;
+  };
+  const sizes = new ResizeObserver(keep);
+  const watch = () => {
+    sizes.observe(box);
+    for (const child of box.children) sizes.observe(child);
+  };
+  watch();
+  const drawn = new MutationObserver(() => {
+    watch();
+    keep();
+  });
+  drawn.observe(box, { childList: true });
+  const off = new AbortController();
+  const release = () => {
+    sizes.disconnect();
+    drawn.disconnect();
+    off.abort();
+  };
+  const letGo = () => {
+    place.free = true;
+    release();
+  };
+  for (const type of MOVES) {
+    document.addEventListener(type, letGo, { capture: true, passive: true, signal: off.signal });
+  }
+  return release;
 }
