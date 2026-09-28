@@ -202,9 +202,9 @@ export function githubReadPersonaSection(repo: string): string {
   return (
     "\n\n---\n# Reading GitHub (github_read)\n\n" +
     `You have \`github_read\`, a READ-ONLY GitHub API tool scoped to this task's ` +
-    `repository (\`${repo}\`). Pass a repository path — \`pulls/12\`, ` +
+    `repository (\`${repo}\`). Pass a repository path (\`pulls/12\`, ` +
     "`pulls/12/files`, `commits/<sha>`, `contents/<path>?ref=<branch>`, " +
-    "`issues/34/comments`, `commits/<sha>/check-runs` — and it returns GitHub's " +
+    "`issues/34/comments`, `commits/<sha>/check-runs`) and it returns GitHub's " +
     "JSON, authenticated with the project's credential.\n\n" +
     "- **It is GET-only and repo-scoped.** It cannot reach another repository, " +
     "your account, or search, and it can never write, comment, merge, or change " +

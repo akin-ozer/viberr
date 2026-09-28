@@ -160,7 +160,7 @@ describe("createConnection", () => {
     expect(conn).not.toHaveProperty("repos");
     expect(conn!.expiresAt).toBeTruthy();
     if (result.status === "saved") {
-      expect(result.toast).toContain("akin-ozer connected — scopes verified");
+      expect(result.toast).toContain("akin-ozer connected: scopes verified");
     }
     // The plaintext token never appears in the record.
     expect(JSON.stringify(conn)).not.toContain("ghp_valid_token_42af");

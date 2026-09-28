@@ -47,7 +47,7 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
     diagnostics.push(
       diagError(
         "frontmatter.missing",
-        "File has no frontmatter block (`---` fences) — all fields fall back to defaults.",
+        "File has no frontmatter block (`---` fences); all fields fall back to defaults.",
         undefined,
         true,
       ),
@@ -107,7 +107,7 @@ export function splitFrontmatterMapping(content: string): FrontmatterMappingSpli
   diagnostics.push(
     diagError(
       "frontmatter.not_a_map",
-      "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
+      "Frontmatter is not a YAML mapping; all fields fall back to defaults.",
       undefined,
       true,
     ),

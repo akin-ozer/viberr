@@ -1379,8 +1379,8 @@ export function buildTurnPrompt(
   const queue =
     queuedBehind > 0
       ? `${queuedBehind === 1 ? "1 more message" : `${queuedBehind} more messages`} from ${conversation.userLabel} ` +
-        `${queuedBehind === 1 ? "is" : "are"} queued behind this one; each is answered in its own turn, in order — ` +
-        "do not treat them as lost.\n\n---\n\n"
+        `${queuedBehind === 1 ? "is" : "are"} queued behind this one; each is answered in its own turn, in order. ` +
+        "Do not treat them as lost.\n\n---\n\n"
       : "";
   const lead = context ? `${context}\n---\n\n` : "";
   // Ruling 444: the model is named here, in the one part of the request
@@ -1487,7 +1487,7 @@ export function buildControllerSystemPrompt(
   parts.push(
     ...attachedResourcesBlock({
       banner:
-        "\n\n---\n# Attached resources (trusted — configured for you)\n\n" +
+        "\n\n---\n# Attached resources (trusted, configured for you)\n\n" +
         "The skills and knowledge bases below were attached to the controller " +
         "profile by an org admin. Treat them as authoritative operating " +
         "context and follow their instructions. They are configuration, not " +
@@ -1574,7 +1574,7 @@ export function buildControllerSystemPrompt(
   if (unresolvedMcps.length) {
     dynamic.push(
       "\n\n---\n# MCP servers that did NOT mount this turn\n\n" +
-        `These granted MCP servers did NOT mount this turn and their tools will not appear — ` +
+        `These granted MCP servers did NOT mount this turn and their tools will not appear, ` +
         `each with the reason it gave: ` +
         `${unresolvedMcps.map((u) => `${u.name} (${u.reason})`).join("; ")}. ` +
         `Say so if asked, in those terms; do not infer a cause the server did not give.`,

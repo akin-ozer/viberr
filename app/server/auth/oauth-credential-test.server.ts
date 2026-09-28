@@ -75,7 +75,7 @@ async function testGithub(
     return {
       ok: false,
       reason:
-        "GitHub rejected the client ID / secret pair (401 Bad credentials) — check both values on the OAuth app.",
+        "GitHub rejected the client ID / secret pair (401 Bad credentials). Check both values on the OAuth app.",
     };
   }
   // 404/422 = the APP authenticated and only the probe token was refused, which
@@ -89,7 +89,7 @@ async function testGithub(
   }
   return {
     ok: false,
-    reason: `GitHub answered HTTP ${res.status} — the credential pair could not be proved.`,
+    reason: `GitHub answered HTTP ${res.status}; the credential pair could not be proved.`,
   };
 }
 
@@ -126,12 +126,12 @@ async function testGoogle(
     return {
       ok: false,
       reason:
-        "Google rejected the client ID / secret pair (invalid_client) — check both values on the OAuth client.",
+        "Google rejected the client ID / secret pair (invalid_client). Check both values on the OAuth client.",
     };
   }
   return {
     ok: false,
-    reason: `Google answered ${data.error ?? `HTTP ${res.status}`} — the credential pair could not be proved.`,
+    reason: `Google answered ${data.error ?? `HTTP ${res.status}`}; the credential pair could not be proved.`,
   };
 }
 
@@ -155,7 +155,7 @@ export async function testOAuthCredentials(
     // request carries the secret.
     return {
       ok: false,
-      reason: `Could not reach ${provider === "github" ? "GitHub" : "Google"} to prove the credentials — nothing was changed.`,
+      reason: `Could not reach ${provider === "github" ? "GitHub" : "Google"} to prove the credentials; nothing was changed.`,
     };
   }
 }

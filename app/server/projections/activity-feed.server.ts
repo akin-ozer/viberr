@@ -620,8 +620,11 @@ function auditText(
       if (!bypassed || bypassed.startsWith("no gate")) {
         return `${actor} force-accepted the completion on`;
       }
+      // Rows recorded before ruling 571 carry gate sentences that set their
+      // remedy off with a dash; newer ones end the claim with a period, which
+      // the sentence split below takes care of.
       const reason = bypassed
-        .split(" — ")[0]!
+        .split(/ — /)[0]!
         .split(/(?<=\.)\s/)[0]!
         .replace(/\.$/, "");
       return `${actor} force-accepted the completion, overriding the acceptance gate (${reason}) on`;

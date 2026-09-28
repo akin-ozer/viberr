@@ -233,7 +233,7 @@ export function setOAuthProviderEnabled(
     return {
       ok: false,
       reason:
-        "Test the credentials first — a sign-in method is only offered once the provider has accepted its client ID and secret.",
+        "Test the credentials first: a sign-in method is only offered once the provider has accepted its client ID and secret.",
     };
   }
   db.prepare(

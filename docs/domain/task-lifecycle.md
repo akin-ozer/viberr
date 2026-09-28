@@ -627,14 +627,14 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   for the kinds and their effects). Resolvers: the owner, `resolve-packet` holders,
   and for `accept_completion` the acceptance tier.
   **A decision joins the task's contract** (rulings 189, 284, 329): choosing a structured
-  option appends "**Decision — <date>, <name> answered "<title>":**" and the option's
-  words to the goal in the same locked write, so every fresh run re-anchors on the
-  human's answer. The exceptions are `PROCESS_ONLY_OPTION_KINDS` (the recovery and
-  process kinds) and the resolutions that end the task (`accept_completion`,
-  `force_accept`). A typed free-text directive never amends the goal: it is written
-  verbatim to the timeline and reaches the operator in the re-queue's note. Notes and
-  directives share one limit, `PACKET_NOTE_MAX` (4,000 characters); a longer one is
-  refused and nothing is recorded (ruling 315).
+  option appends "**Decision: <date>, <name> answered "<title>":**" and the option's
+  title and detail, joined by a colon (ruling 571), to the goal in the same locked write,
+  so every fresh run re-anchors on the human's answer. The exceptions are
+  `PROCESS_ONLY_OPTION_KINDS` (the recovery and process kinds) and the resolutions that
+  end the task (`accept_completion`, `force_accept`). A typed free-text directive never
+  amends the goal: it is written verbatim to the timeline and reaches the operator in the
+  re-queue's note. Notes and directives share one limit, `PACKET_NOTE_MAX` (4,000
+  characters); a longer one is refused and nothing is recorded (ruling 315).
   An answer that names another deployed agent or the operator goes to the operator with
   the `packet-resolved` trigger rather than back to the agent that asked
   (`answerNamesAnotherActor`, ruling 447), and so does one for an asker that cannot run

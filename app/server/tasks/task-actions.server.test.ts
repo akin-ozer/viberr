@@ -1374,7 +1374,7 @@ describe("ownership", () => {
         actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/archived — restore it before changing its owner/);
+    ).rejects.toThrow(/archived\. Restore it before changing its owner/);
   });
 
   it("E32-9 / ruling 118: a CLOSED task refuses a contributor's take; an admin may reassign for the record", async () => {
@@ -1391,7 +1391,7 @@ describe("ownership", () => {
         actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/closed — move it back to an open stage before changing its owner/);
+    ).rejects.toThrow(/closed\. Move it back to an open stage before changing its owner/);
     // The admin carve-out (canary: drop the `release-any-ownership` clause and
     // this refuses arda too).
     const task = await setOwner(
@@ -5064,7 +5064,7 @@ describe("pass 35: operator and task actions", () => {
       expect(result.operatorRefused).toBe("closed");
       const note = file(store).timeline.find((e) => e.type === "note" && e.title === "Mention not started")!;
       expect(note).toBeDefined();
-      expect(note.text).toMatch(/@operator was mentioned, but its run did not start: VIB-1 is archived — restore it before running the operator on it\./);
+      expect(note.text).toMatch(/@operator was mentioned, but its run did not start: VIB-1 is archived\. Restore it before running the operator on it\./);
       expect(
         store.db.prepare(`SELECT COUNT(*) AS n FROM agent_runs WHERE kind = 'operator'`).get(),
       ).toMatchObject({ n: 0 });
@@ -5658,7 +5658,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
     await expect(rejected).rejects.toThrow(
-      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.",
+      "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.",
     );
     expect(taskFile(store).frontmatter.stage).toBe("review");
   });

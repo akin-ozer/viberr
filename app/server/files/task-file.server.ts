@@ -225,7 +225,7 @@ function parseEventBlock(
     diagnostics.push(
       diagInfo(
         "timeline.unknown_type",
-        `Timeline entry has unknown type "${type}" — rendered as a plain comment.`,
+        `Timeline entry has unknown type "${type}". Rendered as a plain comment.`,
         "timeline",
       ),
     );
@@ -239,7 +239,7 @@ function parseEventBlock(
     diagnostics.push(
       diagWarning(
         "timeline.unknown_actor",
-        `Timeline entry has an unrecognized actor ref "${actorRaw}" — kept verbatim.`,
+        `Timeline entry has an unrecognized actor ref "${actorRaw}". Kept verbatim.`,
         "timeline",
       ),
     );
@@ -352,7 +352,7 @@ function parseTimeline(
       diagnostics.push(
         diagWarning(
           "timeline.stray_content",
-          "Timeline section contains content outside any `###` entry — ignored.",
+          "Timeline section contains content outside any `###` entry. Ignored.",
           "timeline",
         ),
       );
@@ -431,7 +431,7 @@ function parsePacketSection(
       diagnostics.push(
         diagWarning(
           "packet.no_yaml_block",
-          "Packet section has no fenced yaml block — packet ignored.",
+          "Packet section has no fenced yaml block. Packet ignored.",
           "packet",
         ),
       );
@@ -445,7 +445,7 @@ function parsePacketSection(
     diagnostics.push(
       diagWarning(
         "packet.invalid_yaml",
-        `Packet yaml is unparseable (${error instanceof Error ? error.message.split("\n")[0] : String(error)}) — packet ignored.`,
+        `Packet yaml is unparseable (${error instanceof Error ? error.message.split("\n")[0] : String(error)}). Packet ignored.`,
         "packet",
       ),
     );
@@ -520,7 +520,7 @@ function parsePacketSection(
   diagnostics.push(
     diagError(
       "packet.invalid",
-      `Packet block is invalid at \`${issue?.path.join(".") || "packet"}\` (${issue?.message ?? "unparseable"}) — packet ignored.`,
+      `Packet block is invalid at \`${issue?.path.join(".") || "packet"}\` (${issue?.message ?? "unparseable"}). Packet ignored.`,
       "packet",
     ),
   );
@@ -559,7 +559,7 @@ export function parseTaskFileContent(
     diagnostics.push(
       diagWarning(
         "body.duplicate_section",
-        `Duplicate \`## ${title}\` section — the first occurrence wins; the duplicate is preserved as an unrecognized section.`,
+        `Duplicate \`## ${title}\` section: the first occurrence wins; the duplicate is preserved as an unrecognized section.`,
         title.toLowerCase(),
       ),
     );

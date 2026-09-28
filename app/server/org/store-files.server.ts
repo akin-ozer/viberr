@@ -392,7 +392,7 @@ export function createStoreFolder(
     const s = cleanSegment(raw);
     if (!s) {
       throw AppError.validation(
-        `A folder name cannot start with a dot — “${raw.trim()}” would be hidden from the browser and from every agent run.`,
+        `A folder name cannot start with a dot: “${raw.trim()}” would be hidden from the browser and from every agent run.`,
       );
     }
     return [s];
@@ -548,7 +548,7 @@ export function writeStoreDoc(
   // reported as saved, and then be invisible, un-injectable and undeletable.
   if (!cleanSegment(cleaned)) {
     throw AppError.validation(
-      `A document name cannot start with a dot — “${cleaned}” would be hidden from the browser and from every agent run.`,
+      `A document name cannot start with a dot: “${cleaned}” would be hidden from the browser and from every agent run.`,
     );
   }
   const withExt = path.extname(cleaned) ? cleaned : `${cleaned}.md`;

@@ -264,13 +264,13 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     await exec("git", ["-C", dir, "commit", "-qm", "[VIB-30] two"]);
     const ahead = await refreshTask(dir, "vib-30");
     expect(ahead).toMatchObject({ taskBranch: { standing: "ahead" } });
-    expect(say(ahead)).toContain("ahead of `origin/vib-30` — the delivery is what pushes it");
+    expect(say(ahead)).toContain("ahead of `origin/vib-30`: the delivery is what pushes it");
 
     // 3. in sync: the delivery pushed it. NOT "diverged".
     await withLocalGithub(origins, () => exec("git", ["-C", dir, "push", "-q", "origin", "vib-30"]));
     const inSync = await refreshTask(dir, "vib-30");
     expect(inSync).toMatchObject({ taskBranch: { standing: "in_sync" } });
-    expect(say(inSync)).toContain("matches `origin/vib-30` — nothing to move");
+    expect(say(inSync)).toContain("matches `origin/vib-30`: nothing to move");
     expect(say(inSync)).not.toContain("diverged");
 
     // 4. diverged: both moved. The old sentence, now earned.

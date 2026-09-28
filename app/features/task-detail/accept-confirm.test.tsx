@@ -655,7 +655,7 @@ describe("ruling 449: update the branch and re-review first", () => {
  */
 describe("ruling 162: a standing refusal disables the confirm", () => {
   const REFUSAL =
-    "VIB-151's review PR #16 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.";
+    "VIB-151's review PR #16 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.";
   function confirmButton(mode: "accept" | "force", blockedReason: string | null) {
     const { container } = render(
       <AcceptConfirm

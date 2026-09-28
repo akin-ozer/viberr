@@ -122,7 +122,7 @@ export function startMcpWarmup(
           // stamp it (idempotently) so a later cold probe is never mistaken for
           // a fresh first run. Ruling 176: and its tool names reach the editor.
         ).run(disc.tools, now, now, JSON.stringify(disc.toolNames), now, input.id, input.target);
-        logger.info("mcp background install finished — server answered", {
+        logger.info("mcp background install finished; server answered", {
           mcp: input.name,
           tools: disc.tools,
         });
@@ -189,13 +189,13 @@ export function reapStaleWarmups(db: DatabaseSync): number {
       `UPDATE org_mcp_servers
          SET warming_since = NULL,
              -- R20-4 (N20-2): a warm-up a restart killed never got its 15
-             -- minutes, so it is NOT a spent heuristic attempt — roll the
+             -- minutes, so it is NOT a spent heuristic attempt; roll the
              -- counter back so a retest can try once more (and so the reaper's
              -- "retest to start it again" message is not a lie). MAX(0, …) keeps
              -- an evidence-armed row (counter 0) at 0.
              heuristic_warmups = MAX(0, heuristic_warmups - 1),
              last_error = COALESCE(last_error,
-               'the background install was interrupted by a restart — retest to start it again'),
+               'the background install was interrupted by a restart; retest to start it again'),
              updated_at = ?
        WHERE id = ?`,
     ).run(new Date().toISOString(), row.id);

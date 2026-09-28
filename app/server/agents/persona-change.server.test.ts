@@ -17,7 +17,7 @@ describe("describePersonaChange (ruling 467)", () => {
     // CANARY: compare lines from the front only and the unchanged `e` is
     // counted into the range.
     expect(describePersonaChange(before, after)).toBe(
-      '9 → 9 characters; lines 2–4 of 5 changed: first "b" → "B"; last "d" → "D"',
+      '9 → 9 characters; lines 2-4 of 5 changed: first "b" → "B"; last "d" → "D"',
     );
   });
 

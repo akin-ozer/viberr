@@ -237,14 +237,14 @@ export async function validatePatToken(
         return {
           ...base,
           status: "expired",
-          detail: "The token has expired — generate a new one on GitHub.",
+          detail: "The token has expired. Generate a new one on GitHub.",
         };
       }
       return {
         ...base,
         status: "revoked",
         detail:
-          "GitHub rejected the token (bad credentials) — it was revoked or never valid.",
+          "GitHub rejected the token (bad credentials): it was revoked or never valid.",
       };
     }
     // A GitHub-side outage (5xx) never evaluated the token — say so, or a
@@ -254,7 +254,7 @@ export async function validatePatToken(
         ...base,
         status: "network_error",
         detail:
-          `GitHub's API is degraded right now (HTTP ${user.status} on /user) — ` +
+          `GitHub's API is degraded right now (HTTP ${user.status} on /user); ` +
           "the token was NOT rejected. Try again in a few minutes.",
       };
     }
@@ -309,7 +309,7 @@ export async function validatePatToken(
         ...withIdentity,
         status: "network_error",
         detail:
-          `GitHub's API is degraded right now (HTTP ${repoResult.status} on /repos/${repo}) — ` +
+          `GitHub's API is degraded right now (HTTP ${repoResult.status} on /repos/${repo}); ` +
           "the token was NOT rejected. Try again in a few minutes.",
       };
     } else if (repoResult.kind === "http" && repoResult.status === 404) {
@@ -317,7 +317,7 @@ export async function validatePatToken(
         ...withIdentity,
         status: "repo_not_found",
         detail:
-          `The token cannot see \`${repo}\` — the repository does not exist, ` +
+          `The token cannot see \`${repo}\`: the repository does not exist, ` +
           "the token was not granted access to it, or a required organization " +
           "approval is still pending (GitHub reports all three as 404).",
       };
@@ -365,7 +365,7 @@ export async function validatePatToken(
               ...check,
               // Say WHICH nothing this is: "missing scope" reads like a partial
               // grant, and the operator would go looking for one checkbox.
-              note: "this classic token was created with no scopes at all — regenerate it with `repo`",
+              note: "this classic token was created with no scopes at all; regenerate it with `repo`",
             }
           : check,
       );
@@ -479,7 +479,7 @@ export async function validatePatToken(
           // and what the operator can turn on to prove it. `permissions.push`
           // is deliberately not read as proof here — a fine-grained token can
           // hold Contents:write while Pull requests stays read-only.
-          note: "read proven; write needs a write request to prove — set VIBERR_GITHUB_WRITE_PROBE=1 to allow an authorization-only dry-run",
+          note: "read proven; write needs a write request to prove (set VIBERR_GITHUB_WRITE_PROBE=1 to allow an authorization-only dry-run)",
         });
       } else {
         scopes.push({

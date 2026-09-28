@@ -44,7 +44,7 @@ describe("splitFrontmatterMapping", () => {
       {
         severity: "error",
         code: "frontmatter.not_a_map",
-        message: "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
+        message: "Frontmatter is not a YAML mapping; all fields fall back to defaults.",
         hardStop: true,
       },
     ]);

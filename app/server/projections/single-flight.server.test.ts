@@ -77,7 +77,7 @@ describe("runSingleFlight", () => {
 describe("throttledMessage", () => {
   it("rounds up to whole seconds and never says 0s", () => {
     expect(throttledMessage("The store re-scan", 6_200)).toBe(
-      "The store re-scan already ran a moment ago — try again in 7s.",
+      "The store re-scan already ran a moment ago; try again in 7s.",
     );
     expect(throttledMessage("The projection rebuild", 40)).toContain("in 1s.");
   });

@@ -64,7 +64,7 @@ function goalExcerpt(goal: string | null): string | null {
   if (goal.length <= BOARD_READ_GOAL_CHARS) return goal;
   return (
     `${goal.slice(0, BOARD_READ_GOAL_CHARS)}\n\n` +
-    `[excerpt — this goal is ${goal.length.toLocaleString("en-US")} characters and this is ` +
+    `[excerpt: this goal is ${goal.length.toLocaleString("en-US")} characters and this is ` +
     `its first ${BOARD_READ_GOAL_CHARS.toLocaleString("en-US")}. Do not treat what is above ` +
     `as the whole contract; the task's own page has all of it.]`
   );
@@ -75,7 +75,7 @@ function outcomeExcerpt(text: string, what: string): string {
   if (text.length <= BOARD_READ_OUTCOME_CHARS) return text;
   return (
     `${text.slice(0, BOARD_READ_OUTCOME_CHARS)}\n\n` +
-    `[excerpt — this ${what} is ${text.length.toLocaleString("en-US")} characters and this is ` +
+    `[excerpt: this ${what} is ${text.length.toLocaleString("en-US")} characters and this is ` +
     `its first ${BOARD_READ_OUTCOME_CHARS.toLocaleString("en-US")}. The task's own page has all of it.]`
   );
 }
@@ -160,7 +160,7 @@ export function readBoardTask(
   if (!row) {
     return (
       `[noop] No task ${taskKey} in this project. If a document, a directive or a ` +
-      `report named it, that claim is wrong — say so rather than acting on it.`
+      `report named it, that claim is wrong; say so rather than acting on it.`
     );
   }
   const file = readTaskFile({

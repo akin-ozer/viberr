@@ -91,21 +91,21 @@ const CLAUDE_MODELS: CatalogModel[] = [
   {
     value: "sonnet",
     displayName: "Claude Sonnet",
-    description: "Balanced speed and capability — the everyday default.",
+    description: "Balanced speed and capability. The everyday default.",
     supportsEffort: true,
     efforts: [...CLAUDE_EFFORTS],
   },
   {
     value: "opus",
     displayName: "Claude Opus",
-    description: "Most capable — deepest reasoning for the hardest work.",
+    description: "Most capable. Deepest reasoning for the hardest work.",
     supportsEffort: true,
     efforts: [...CLAUDE_EFFORTS],
   },
   {
     value: "haiku",
     displayName: "Claude Haiku",
-    description: "Fastest and lightest — quick, cheap turns.",
+    description: "Fastest and lightest. Quick, cheap turns.",
     supportsEffort: true,
     efforts: [...CLAUDE_EFFORTS],
   },
@@ -785,13 +785,13 @@ export async function getModelCatalog(
   let launch: AgentLaunch | null = null;
   if (launchesAgents()) {
     if (!deps.db || !deps.userId) {
-      logger.info("model catalog live fetch skipped — no viewer to run the probe as", { backend });
+      logger.info("model catalog live fetch skipped: no viewer to run the probe as", { backend });
       return stamp(curatedCatalog("claude"));
     }
     try {
       launch = agentLaunchFor(deps.db, deps.userId, credential.homeDir, undefined, credential.ownDirs);
     } catch (error) {
-      logger.info("model catalog live fetch skipped — the probe cannot run as the viewer", {
+      logger.info("model catalog live fetch skipped: the probe cannot run as the viewer", {
         backend,
         err: errorMessage(error),
       });
@@ -810,7 +810,7 @@ export async function getModelCatalog(
     cache.set("claude", { at: Date.now(), catalog, accountHome: credential.accountHome });
     return stamp(cloneCatalog(catalog));
   } catch (error) {
-    logger.info("model catalog live fetch failed — using curated", {
+    logger.info("model catalog live fetch failed, using curated", {
       backend,
       err: errorMessage(error),
     });

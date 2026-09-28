@@ -370,11 +370,11 @@ describe("scheduleTaskAction", () => {
     const due = new Date(Date.now() + 3_600_000).toISOString();
     await expect(
       scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-2", dueAt: due }, actor(), dctx()),
-    ).rejects.toThrow("VIB-2 is closed (Shipped is the terminal stage) — move it back to an open stage before scheduling a run on it.");
+    ).rejects.toThrow("VIB-2 is closed (Shipped is the terminal stage). Move it back to an open stage before scheduling a run on it.");
     // Archived is closed too — the old guard read the stage only.
     await expect(
       scheduleTaskAction(store.db, { projectSlug: store.slug, taskKey: "VIB-4", dueAt: due }, actor(), dctx()),
-    ).rejects.toThrow("VIB-4 is archived — restore it before scheduling a run on it.");
+    ).rejects.toThrow("VIB-4 is archived. Restore it before scheduling a run on it.");
     expect(schedules("VIB-2")).toHaveLength(0);
     expect(schedules("VIB-4")).toHaveLength(0);
   });
@@ -1206,7 +1206,7 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
     const note = timeline("VIB-1")[0]!;
     expect(note.actor).toEqual({ kind: "operator" });
     expect(note.text).toBe(
-      `**Scheduled:** a **dev** run for **VIB-1** at ${entry.dueAt} — Read the 12:17Z cron run's output and report it. It runs on the profile deployed when it fires.`,
+      `**Scheduled:** a **dev** run for **VIB-1** at ${entry.dueAt}: Read the 12:17Z cron run's output and report it. It runs on the profile deployed when it fires.`,
     );
     // The same audit row, with the operator as its actor.
     const created = listAuditEvents(store.db, { action: "task.schedule.created" })[0]!;

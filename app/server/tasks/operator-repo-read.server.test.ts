@@ -46,7 +46,7 @@ describe("ruling 436: a default-branch read comes in pages the CLI will carry", 
     const page = pageOfText(goLines(1_930));
     if (!page.ok) throw new Error("unreachable");
     const note = defaultBranchPageNote({ kind: "found", refreshed: true, ...page });
-    expect(note.range).toBe(`, lines 1–${page.toLine} of 1930`);
+    expect(note.range).toBe(`, lines 1-${page.toLine} of 1930`);
     expect(note.note).toBe(`\n\n[The file continues: read on with fromLine: ${page.toLine + 1}.]`);
     // A file that fits says nothing about pages.
     const whole = pageOfText("the guide\n");

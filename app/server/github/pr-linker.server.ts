@@ -581,7 +581,7 @@ export async function findPrForBranch(
       // The DIAGNOSTIC half of the tolerant-parsing rule: the summary degrades
       // the pill on its own, and this names the payload that caused it.
       if (checks.unknown) {
-        logger.warn("check-runs payload partly unreadable — CI reads unknown", {
+        logger.warn("check-runs payload partly unreadable; CI reads unknown", {
           repo,
           headSha,
           total: checks.total,

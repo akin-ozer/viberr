@@ -103,7 +103,7 @@ export function resolveContainedSkillFile(
   if (dirStat.isSymbolicLink()) {
     return {
       reason:
-        "its store folder is a symlink — Viberr does not follow links out of the store",
+        "its store folder is a symlink; Viberr does not follow links out of the store",
     };
   }
   if (!dirStat.isDirectory()) {
@@ -115,7 +115,7 @@ export function resolveContainedSkillFile(
   if (fileStat.isSymbolicLink()) {
     return {
       reason:
-        "its SKILL.md is a symlink — Viberr does not follow links out of the store",
+        "its SKILL.md is a symlink; Viberr does not follow links out of the store",
     };
   }
   if (!fileStat.isFile()) return { reason: "its SKILL.md is not a file" };
@@ -125,7 +125,7 @@ export function resolveContainedSkillFile(
   if (root === null || real === null || !real.startsWith(root + path.sep)) {
     return {
       reason:
-        "its SKILL.md resolves outside the skills store — Viberr does not follow links out of the store",
+        "its SKILL.md resolves outside the skills store; Viberr does not follow links out of the store",
     };
   }
   return { file };
@@ -147,7 +147,7 @@ export function readSkillBodyDetailed(
     resolved = resolveContainedSkillFile(name, dataRoot);
   } catch (error) {
     // `skillDirPath` throws on a traversal-shaped name (resolveStoreSegment).
-    logger.warn("declared agent skill name is unsafe — run proceeds WITHOUT it", {
+    logger.warn("declared agent skill name is unsafe; run proceeds WITHOUT it", {
       skill: name,
       err: toError(error),
     });
@@ -157,7 +157,7 @@ export function readSkillBodyDetailed(
     };
   }
   if ("reason" in resolved) {
-    logger.warn("declared agent skill did not resolve — run proceeds WITHOUT it", {
+    logger.warn("declared agent skill did not resolve; run proceeds WITHOUT it", {
       skill: name,
       reason: resolved.reason,
     });
@@ -168,7 +168,7 @@ export function readSkillBodyDetailed(
     const { body } = splitFrontmatter(readFileSync(resolved.file, "utf8"));
     trimmed = body.trim();
   } catch (error) {
-    logger.warn("declared agent skill unreadable — run proceeds WITHOUT it", {
+    logger.warn("declared agent skill unreadable; run proceeds WITHOUT it", {
       skill: name,
       err: toError(error),
     });
@@ -185,24 +185,24 @@ export function readSkillBodyDetailed(
     // The shared budget is already spent. Say so in the prompt rather than let
     // the skill disappear — the KB leg's P14-KM-05 rule, now on this leg too.
     logger.warn(
-      "declared agent skill did not fit the run's injection budget — NOTHING of it reached the run",
+      "declared agent skill did not fit the run's injection budget; NOTHING of it reached the run",
       { skill: name, chars: trimmed.length },
     );
     return {
-      body: `_(skill omitted entirely — SKILL.md is ${trimmed.length} chars and none of the shared skill budget was left)_`,
+      body: `_(skill omitted entirely: SKILL.md is ${trimmed.length} chars and none of the shared skill budget was left)_`,
       unresolved: {
         name,
-        reason: `it did not fit the shared ${SKILL_INJECTION_BUDGET}-char skill budget — none of its content reached this run`,
+        reason: `it did not fit the shared ${SKILL_INJECTION_BUDGET}-char skill budget; none of its content reached this run`,
       },
     };
   }
-  logger.warn("declared agent skill exceeds the injection budget — clipped", {
+  logger.warn("declared agent skill exceeds the injection budget (clipped)", {
     skill: name,
     chars: trimmed.length,
     budgetChars,
   });
   return {
-    body: `${trimmed.slice(0, budgetChars)}\n\n_(skill truncated — SKILL.md is ${trimmed.length} chars and exceeds the ${budgetChars}-char injection budget)_`,
+    body: `${trimmed.slice(0, budgetChars)}\n\n_(skill truncated: SKILL.md is ${trimmed.length} chars and exceeds the ${budgetChars}-char injection budget)_`,
   };
 }
 

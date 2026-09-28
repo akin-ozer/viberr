@@ -580,7 +580,7 @@ describe("operatorDispatchAgent", () => {
     // CANARY: restore the unconditional "pick a Codex profile" and this reads
     // as advice on a fixture where no Codex account exists.
     expect(bare.message).toContain(
-      "there is no Codex fallback either — this task's runs bill its owner, who has no Codex account connected",
+      "there is no Codex fallback either. This task's runs bill its owner, who has no Codex account connected",
     );
     // …and with the other backend actually reachable for the owner, the
     // fallback is real and is offered. Both arms of ruling 207(h) in one test,
@@ -6035,7 +6035,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       authority("full"),
     );
     expect(r.outcome).toBe("noop");
-    expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
+    expect(r.message).toContain('goalDraft only fits an edit_goal option. "Have the developer redo it" is redirect');
     expect(task().packet).toBeNull();
   });
 
@@ -7568,7 +7568,7 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
       expect(withTools.text).not.toContain("Bare command names");
       expect(withTools.text.length).toBe(1498);
       expect(withTools.clipped).toBe(
-        "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole",
+        "cut at 1,500 chars; read_timeline_entry with this occurredAt returns it whole",
       );
     });
 

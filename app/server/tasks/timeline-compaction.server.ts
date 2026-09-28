@@ -88,7 +88,7 @@ export function compactTimelineEvents(
     type: "comment",
     actor: { kind: "operator" },
     title: COMPACTION_TITLE,
-    text: `_${count} earlier routine comments compacted to keep the task readable — human comments are never compacted._`,
+    text: `_${count} earlier routine comments compacted to keep the task readable; human comments are never compacted._`,
     toAgent: false,
     evidence: null,
   });

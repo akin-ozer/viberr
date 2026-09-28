@@ -230,7 +230,7 @@ export function startFileWatcher(
     const attempt = attempts.get(absPath) ?? 0;
     const delay = backoff[attempt];
     if (delay === undefined) {
-      logger.warn("giving up on a projection rebuild — health reports it instead", {
+      logger.warn("giving up on a projection rebuild; health reports it instead", {
         path: absPath,
         attempts: attempt,
       });
@@ -375,7 +375,7 @@ export function startFileWatcher(
     // E8: the handle can no longer be trusted to deliver events — clear it so
     // isFileWatcherAlive() (and /resources/health) reports the truth instead
     // of a zombie watcher.
-    logger.error("file watcher error — clearing watcher handle", {
+    logger.error("file watcher error; clearing watcher handle", {
       err: toError(error),
       code,
     });

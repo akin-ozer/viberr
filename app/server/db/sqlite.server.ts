@@ -110,7 +110,7 @@ function copyStorePair(dbPath: string, copyPath: string): void {
     const after = readWalIdentity(wal);
     if (before === after) return;
     straddled = `${before ?? "no wal"} then ${after ?? "no wal"}`;
-    logger.info("reader copy straddled a WAL reset — retaking it", {
+    logger.info("reader copy straddled a WAL reset; retaking it", {
       dbPath,
       attempt,
       wal: straddled,
@@ -303,7 +303,7 @@ export function getDb(): DatabaseSync {
   if (!db || !db.isOpen) {
     if (isDatabaseShuttingDown()) {
       throw new Error(
-        "The server is shutting down — the database is closed and will not be reopened.",
+        "The server is shutting down; the database is closed and will not be reopened.",
       );
     }
     const dbPath = getProjectionDbPath();
@@ -339,7 +339,7 @@ function ensureSingleFlightIndexes(db: DatabaseSync): void {
     );
   } catch (error) {
     logger.warn(
-      "single-flight index for supporting runs could not be ensured — duplicate live rows may exist; it will be retried next boot",
+      "single-flight index for supporting runs could not be ensured: duplicate live rows may exist; it will be retried next boot",
       { err: toError(error) },
     );
   }
@@ -701,7 +701,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
             backfill(db);
           } catch (error) {
             logger.warn(
-              "a baseline column was added but its backfill did not run — rows that predate the column keep the column default",
+              "a baseline column was added but its backfill did not run: rows that predate the column keep the column default",
               {
                 table,
                 column: column.name,
@@ -713,7 +713,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       }
     } catch (error) {
       logger.warn(
-        "baseline columns could not be ensured — writers that name them will fail until the root is re-baselined",
+        "baseline columns could not be ensured: writers that name them will fail until the root is re-baselined",
         { table, err: toError(error) },
       );
     }
@@ -723,7 +723,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       db.exec(ddl);
     } catch (error) {
       logger.warn(
-        "a baseline table could not be ensured — readers that name it degrade until the root is re-baselined",
+        "a baseline table could not be ensured: readers that name it degrade until the root is re-baselined",
         { err: toError(error) },
       );
     }
@@ -737,7 +737,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
     }
   } catch (error) {
     logger.warn(
-      "user_backend_credentials could not be brought to the several-accounts shape — connecting a second account fails until it is; it is retried next boot",
+      "user_backend_credentials could not be brought to the several-accounts shape: connecting a second account fails until it is; it is retried next boot",
       { err: toError(error) },
     );
   }
@@ -746,7 +746,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       db.exec(ddl);
     } catch (error) {
       logger.warn(
-        "a baseline index could not be ensured — reads stay correct but unindexed; it is retried next boot",
+        "a baseline index could not be ensured: reads stay correct but unindexed; it is retried next boot",
         { err: toError(error) },
       );
     }

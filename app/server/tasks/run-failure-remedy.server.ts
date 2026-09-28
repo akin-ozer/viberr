@@ -459,7 +459,7 @@ function specialistOptions(
         title: `Wait for the window and pick ${handle} back up automatically${resetLabel ? ` (${resetLabel})` : ""}`,
         detail:
           `Closes this decision and schedules an operator run for just after ${resetLabel ?? "the window reopens"}, ` +
-          `on the same account and the same model. The operator re-reads the task then and continues it — which is ` +
+          `on the same account and the same model. The operator re-reads the task then and continues it, which is ` +
           `what a gap of hours needs, because the board may have moved while it waited. Nothing runs until then and ` +
           `the board says so. No account, model or project policy changes.`,
         recommended: true,

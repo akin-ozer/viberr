@@ -269,7 +269,7 @@ export async function mountGrantedSkills(input: {
       `${JSON.stringify(PLUGIN_MANIFEST)}\n`,
     );
   } catch (error) {
-    logger.warn("could not build the run's skill plugin — injected as prompt text", {
+    logger.warn("could not build the run's skill plugin; injected as prompt text", {
       pluginRoot,
       err: toError(error),
     });
@@ -294,7 +294,7 @@ export async function mountGrantedSkills(input: {
     removePluginQuietly(pluginRoot, person);
   }
   if (skipped.length > 0) {
-    logger.warn("granted skills did not mount natively — injected as prompt text", {
+    logger.warn("granted skills did not mount natively; injected as prompt text", {
       workspaceDir: dir,
       skipped,
     });

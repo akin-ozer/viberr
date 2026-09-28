@@ -240,7 +240,7 @@ export async function scheduleTaskAction(
     parsed.timeline.unshift(
       scheduleEvent(
         schedulerEventActor(actor, ctx),
-        `**Scheduled:** ${what} for **${input.taskKey}** at ${schedule.dueAt}${schedule.prompt ? ` — ${schedule.prompt}` : ""}. It runs on the profile deployed when it fires.`,
+        `**Scheduled:** ${what} for **${input.taskKey}** at ${schedule.dueAt}${schedule.prompt ? `: ${schedule.prompt}` : ""}. It runs on the profile deployed when it fires.`,
       ),
     );
   });
@@ -521,10 +521,10 @@ export async function fireDueSchedules(
                   // `skipped-archived` from `skipped-done`, and the note a human
                   // reads must not tell an archived task it was "already Done".
                   projectFrozen
-                    ? `**Scheduled action skipped:** the project has been archived (read-only) — the scheduled run is moot.`
+                    ? `**Scheduled action skipped:** the project has been archived (read-only); the scheduled run is moot.`
                     : parsed.frontmatter.archived === true
-                      ? `**Scheduled action skipped:** ${row.task_key} has been archived — the scheduled run is moot.`
-                      : `**Scheduled action skipped:** ${row.task_key} is already ${terminalNameFor(row.project_slug)} — the scheduled run is moot.`,
+                      ? `**Scheduled action skipped:** ${row.task_key} has been archived; the scheduled run is moot.`
+                      : `**Scheduled action skipped:** ${row.task_key} is already ${terminalNameFor(row.project_slug)}; the scheduled run is moot.`,
                 ),
               );
             } else {
@@ -533,7 +533,7 @@ export async function fireDueSchedules(
               parsed.timeline.unshift(
                 scheduleEvent(
                   { kind: "system", systemId: "schedule-runner" },
-                  `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled ${s.action === "run-agent" ? "agent run" : "operator re-run"} for ${row.task_key}${s.prompt ? ` — ${s.prompt}` : ""}.`,
+                  `**Scheduled action starting:** ${staleClaim ? "recovering a stalled claim and re-" : ""}running the scheduled ${s.action === "run-agent" ? "agent run" : "operator re-run"} for ${row.task_key}${s.prompt ? `: ${s.prompt}` : ""}.`,
                 ),
               );
             }
@@ -801,21 +801,21 @@ export async function fireDueSchedules(
                   parsed.timeline.unshift(
                     scheduleEvent(
                       { kind: "system", systemId: "schedule-runner" },
-                      `**Scheduled action skipped:** ${t.taskKey} reached Done before its scheduled run started — no run was started.`,
+                      `**Scheduled action skipped:** ${t.taskKey} reached Done before its scheduled run started; no run was started.`,
                     ),
                   );
                 } else if (refusedHeld) {
                   parsed.timeline.unshift(
                     scheduleEvent(
                       { kind: "system", systemId: "schedule-runner" },
-                      `**Scheduled action skipped:** ${t.taskKey} waits on other work (${holdEntriesSentence(resolveDependencies(db, t.projectSlug, parsed.frontmatter.blockedBy))}) — no operator run was started; Viberr releases the task when every entry is done.`,
+                      `**Scheduled action skipped:** ${t.taskKey} waits on other work (${holdEntriesSentence(resolveDependencies(db, t.projectSlug, parsed.frontmatter.blockedBy))}). No operator run was started; Viberr releases the task when every entry is done.`,
                     ),
                   );
                 } else if (refusedPacket) {
                   parsed.timeline.unshift(
                     scheduleEvent(
                       { kind: "system", systemId: "schedule-runner" },
-                      `**Scheduled action skipped:** a decision packet is open on ${t.taskKey}${parsed.packet ? ` ("${parsed.packet.title}")` : ""} and coordination is paused until it is resolved — no operator run was started, and the occurrence spends no retry.`,
+                      `**Scheduled action skipped:** a decision packet is open on ${t.taskKey}${parsed.packet ? ` ("${parsed.packet.title}")` : ""} and coordination is paused until it is resolved; no operator run was started, and the occurrence spends no retry.`,
                     ),
                   );
                 }

@@ -243,7 +243,7 @@ function ambiguousMentionNote(handles: readonly string[]): string {
   if (handles.length === 0) return "";
   const list = handles.map((h) => `@${h}`).join(", ");
   const subject = handles.length === 1 ? "matches" : "match";
-  return `_${list} ${subject} more than one person here, so nobody was notified — mention the full name (“@First Last”) or the email handle._`;
+  return `_${list} ${subject} more than one person here, so nobody was notified; mention the full name (“@First Last”) or the email handle._`;
 }
 
 /**
@@ -258,7 +258,7 @@ function nonMemberMentionNote(handles: readonly string[]): string {
   if (handles.length === 0) return "";
   const list = handles.map((h) => `@${h}`).join(", ");
   const subject = handles.length === 1 ? "is not a member" : "are not members";
-  return `_${list} ${subject} of this project, so nobody was notified — add them to the project first, or mention a member._`;
+  return `_${list} ${subject} of this project, so nobody was notified; add them to the project first, or mention a member._`;
 }
 
 /** `users.id` is the TEXT primary key; `email` and `name` are TEXT NOT NULL. */
@@ -481,7 +481,7 @@ export function notifyMentionedUsers(
     const notification: CreateNotificationInput = {
       userId,
       kind: "mention",
-      text: `mentioned you — “${quoteForUser(input.text, userId, matchedBy, knownNames)}”`,
+      text: `mentioned you: “${quoteForUser(input.text, userId, matchedBy, knownNames)}”`,
       from: input.from,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

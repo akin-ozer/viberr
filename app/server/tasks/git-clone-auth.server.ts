@@ -341,7 +341,7 @@ export function cloneFailureSentence(
       return `git is not installed on the Viberr server, so the workspace checkout could not be created. ${cred}`;
     case "clone_terminated":
       return (
-        `The workspace checkout was cancelled after ${Math.round((opts.timeoutMs ?? cloneTimeoutMs()) / 1000)}s — ` +
+        `The workspace checkout was cancelled after ${Math.round((opts.timeoutMs ?? cloneTimeoutMs()) / 1000)}s: ` +
         `the clone ran past its time limit rather than failing. ${cred}`
       );
     default:

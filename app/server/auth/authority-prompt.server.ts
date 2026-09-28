@@ -116,9 +116,9 @@ export function projectAuthorityPrompt(): string {
   const tiers = authorityTiers().filter((t) => t.gains.length > 0);
   return (
     "## What a project role may do\n\n" +
-    "Project roles are a strict tier — " +
+    "Project roles are a strict tier (" +
     ASCENDING.join(" ⊂ ") +
-    " — and every action the server gates names the lowest role that holds " +
+    "), and every action the server gates names the lowest role that holds " +
     "it, so a role holds everything at or below its own tier. This list is generated from the " +
     "server's authorization map, so it is what will actually be enforced on your " +
     "call, not a summary of it.\n\n" +
@@ -144,12 +144,12 @@ export function projectAuthorityPrompt(): string {
     "- RUNNING AN AGENT has a second gate that is not about role at all. A task run " +
     "bills the TASK OWNER's accounts, never the asker's, so it is refused when the " +
     "task has no owner, or when the owner has not connected that backend or their " +
-    "sign-in is unhealthy — however senior the person asking is. Expect this one: " +
+    "sign-in is unhealthy, however senior the person asking is. Expect this one: " +
     "the list says yes and the server says no, and the useful sentence names the " +
     "owner's account rather than anybody's role.\n" +
     "- THE INSTANCE is a separate question with a simpler answer: everything " +
-    "outside a project — users, knowledge bases, skills, MCP connections, global " +
-    "agent templates, the audit log, run analytics — is ORG ADMIN ONLY, reads " +
+    "outside a project (users, knowledge bases, skills, MCP connections, global " +
+    "agent templates, the audit log, run analytics) is ORG ADMIN ONLY, reads " +
     "included. Open to any signed-in person: creating a project, `whoami`, " +
     "`list_capabilities`, and reading a document out of a knowledge base ALREADY " +
     "ATTACHED to this conversation (that attachment is the grant; reading any other " +
@@ -158,7 +158,7 @@ export function projectAuthorityPrompt(): string {
     "- This list is the PERSON's authority, not your toolkit. Some of what it grants " +
     "them you have no tool for and never will: accepting a completion, forcing past " +
     "the review gate, resolving a decision, merging. Reading that they hold it is " +
-    "not you offering to do it — say they can, on the task page, themselves.\n\n" +
+    "not you offering to do it. Say they can, on the task page, themselves.\n\n" +
     "USE IT FOR PLANNING, SEQUENCING AND EXPLANATION. It is never grounds for " +
     "refusing something the person asked you to do. This list is static and the " +
     "role you were given is a read taken when the turn began; the server decides at " +
@@ -169,12 +169,12 @@ export function projectAuthorityPrompt(): string {
     "strength of a table in your own prompt.\n\n" +
     "What it is genuinely for: not offering what will be refused, ordering a " +
     "multi-step request so the step most likely to be refused goes first, and " +
-    "explaining a denial well enough to act on — which tier is missing, and who " +
+    "explaining a denial well enough to act on: which tier is missing, and who " +
     "could do it instead.\n\n" +
     "One way this list can make you WORSE, so watch for it. It hands you tier " +
     "vocabulary, and most of the refusals above are not about tier: an archived " +
     "project, a disabled account, a non-member, a name already taken. If a " +
-    "refusal's own words do not name a role, it was not a role that stopped it — " +
+    "refusal's own words do not name a role, it was not a role that stopped it; " +
     "do not supply one from here. Report what the server said and name the gate " +
     "you could not identify. \"You need maintainer, ask an admin\" is not an " +
     "incomplete explanation of an archived-project refusal, it is a false one, and " +
@@ -216,6 +216,6 @@ export function askerAuthorityLine(role: ProjectRole | null, orgAdmin: boolean):
   // into knowing where to look, which is what ruling 297 settled for tools.
   return (
     `your authority: ${here} · your role on any OTHER project is not in this ` +
-    `read — whoami has it, and the tier list in your instructions says what a role holds`
+    `read; whoami has it, and the tier list in your instructions says what a role holds`
   );
 }

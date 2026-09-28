@@ -228,7 +228,7 @@ export function agentUidFor(db: DatabaseSync, userId: string): number {
       status: 409,
       userMessage:
         `This server has no agent user left for this person (uid ${row.os_uid} is outside ` +
-        `${AGENT_UID_FLOOR}–${AGENT_UID_MAX}), so no agent can run for them.`,
+        `${AGENT_UID_FLOOR}-${AGENT_UID_MAX}), so no agent can run for them.`,
     });
   }
   return row.os_uid;
@@ -242,7 +242,7 @@ function launchRefusal(what: string, detail: string): AppError {
     status: 409,
     userMessage:
       `The agent could not be started as its person's own user (ruling 460): ${what}` +
-      (detail ? ` — ${detail}` : "") +
+      (detail ? ` (${detail})` : "") +
       ". Nothing ran; nothing falls back to the server's own user.",
   });
 }

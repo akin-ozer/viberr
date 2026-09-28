@@ -601,7 +601,7 @@ function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   if (granted.length === 0) return { native: [], dropped: [] };
   if (skillPluginInPlace(spec.skillPlugin)) return { native: granted, dropped: [] };
   logger.warn(
-    "the run's skill plugin is missing — starting with NO native skills",
+    "the run's skill plugin is missing; starting with NO native skills",
     { runId: spec.runId, plugin: spec.skillPlugin?.path ?? null, skills: granted },
   );
   return { native: [], dropped: granted };
@@ -615,7 +615,7 @@ function droppedSkillsNotice(dropped: readonly string[]): string {
     `The skills named above as attached to this run (${dropped.join(", ")}) ` +
     "could NOT be enabled: the plugin directory Viberr built for them was gone " +
     "by the time this run started, and Viberr enables no skill it cannot " +
-    "account for. Treat them as unavailable — do not invoke them by name — " +
+    "account for. Treat them as unavailable (do not invoke them by name) " +
     "and say so in your report if the work needed them."
   );
 }
@@ -901,7 +901,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     return {
       kind: "session_missing",
       message:
-        "The Claude session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+        "The Claude session could not be resumed: its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
       providerText: "",
       facts: failureFacts("session_missing", evidence),
     };
@@ -1617,7 +1617,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         interruptTimer = setTimeout(() => {
           if (settled) return;
           logger.warn(
-            "claude run did not stop cooperatively — aborting the subprocess",
+            "claude run did not stop cooperatively; aborting the subprocess",
             { runId: spec.runId, graceMs: INTERRUPT_GRACE_MS },
           );
           try {
@@ -1634,7 +1634,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           interruptTimer = setTimeout(() => {
             if (settled) return;
             logger.warn(
-              "claude subprocess abort did not settle the run — forcing it",
+              "claude subprocess abort did not settle the run; forcing it",
               { runId: spec.runId, graceMs: INTERRUPT_ABORT_GRACE_MS },
             );
             onBackstop();
@@ -1648,7 +1648,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         idleTimer = setTimeout(() => {
           if (settled || interrupted) return;
           idleTimedOut = true;
-          logger.warn("claude run idle-timeout — no activity within the window", {
+          logger.warn("claude run idle-timeout: no activity within the window", {
             runId: spec.runId,
             idleMs,
           });
@@ -1823,8 +1823,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               ev: "err",
               tag: "run·error·idle_timeout",
               text:
-                `The run produced no output for ${idleMs} ms and was stopped as hung — ` +
-                "not a task failure. Re-prompt the agent to continue from its " +
+                `The run produced no output for ${idleMs} ms and was stopped as hung (` +
+                "not a task failure). Re-prompt the agent to continue from its " +
                 "session, or raise VIBERR_CLAUDE_IDLE_TIMEOUT_MS.",
             },
             facts: {},
@@ -1931,8 +1931,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 ev: "err",
                 tag: "run·error·max_turns",
                 text:
-                  `The run hit its ${resolveMaxTurns()}-turn cap and was cut off — ` +
-                  "not a task failure. Re-prompt the agent to continue from its " +
+                  `The run hit its ${resolveMaxTurns()}-turn cap and was cut off (` +
+                  "not a task failure). Re-prompt the agent to continue from its " +
                   "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
               },
               facts: {},
@@ -1956,8 +1956,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 tag: "run·error·max_budget",
                 text:
                   `The run reached ${spec.maxSpendUsd ? `its ${formatUsd(spec.maxSpendUsd)} spending cap` : "its spending cap"}` +
-                  `${resultCostUsd !== null ? ` after spending ${formatUsd(resultCostUsd)}` : ""} and was cut off — ` +
-                  "not a task failure. Re-prompt the agent to continue from its session, or " +
+                  `${resultCostUsd !== null ? ` after spending ${formatUsd(resultCostUsd)}` : ""} and was cut off (` +
+                  "not a task failure). Re-prompt the agent to continue from its session, or " +
                   "raise the cap in Instance settings (Max spend per Claude run).",
                 failure,
               },

@@ -153,8 +153,8 @@ describe("getMentionables", () => {
       // "primary" as the DELIVERING engagement is exactly what `@agent` resolves
       // to. This assertion is the pin: restoring the old label fails it.
       { handle: "agent", label: "Delivering agent" },
-      { handle: "claude", label: "Claude specialist — dev" },
-      { handle: "codex", label: "Codex specialist — qa" },
+      { handle: "claude", label: "Claude specialist (dev)" },
+      { handle: "codex", label: "Codex specialist (qa)" },
     ]);
     // Belt and braces on the whole directory, not just this row: no reserved
     // subline may reintroduce the retired phrase.

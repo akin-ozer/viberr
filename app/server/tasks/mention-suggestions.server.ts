@@ -103,7 +103,7 @@ function backendHandles(
     out.push({
       handle: backend,
       label: covered[0]
-        ? `${BACKEND_LABEL[backend]} specialist — ${covered[0].name}`
+        ? `${BACKEND_LABEL[backend]} specialist (${covered[0].name})`
         : `${BACKEND_LABEL[backend]} specialist`,
     });
   }

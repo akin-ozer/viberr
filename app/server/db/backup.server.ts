@@ -348,15 +348,15 @@ function contains(
   const list = [
     ...(projection !== null
       ? [
-          `state/projection.sqlite — users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included; ${projectionProvenance(projection)})`,
+          `state/projection.sqlite: users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included; ${projectionProvenance(projection)})`,
         ]
       : []),
     ...(instanceSecrets
       ? [
-          "state/instance-secrets.json — the VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY this instance generated for itself (ruling 504). They open every sealed secret in the database, so treat this artefact as a secret. A value the environment sets overrides the file and is not in here.",
+          "state/instance-secrets.json: the VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY this instance generated for itself (ruling 504). They open every sealed secret in the database, so treat this artefact as a secret. A value the environment sets overrides the file and is not in here.",
         ]
       : []),
-    ...dirs.map((dir) => `${dir}/ — the canonical files, copied verbatim`),
+    ...dirs.map((dir) => `${dir}/: the canonical files, copied verbatim`),
   ];
   return list;
 }
@@ -366,16 +366,16 @@ function excludes(includeRuntimes: boolean, instanceSecrets: boolean): string[] 
     ...(includeRuntimes
       ? []
       : [
-          "runtimes/ — each person's agent CLI logins (every users/<id>/codex-home/accounts/<account>/auth.json is a LIVE credential) and run transcripts. Everyone re-authenticates after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
+          "runtimes/: each person's agent CLI logins (every users/<id>/codex-home/accounts/<account>/auth.json is a LIVE credential) and run transcripts. Everyone re-authenticates after a restore, or pass --include-runtimes to carry them (and then treat the artefact as a secret).",
         ]),
-    "state/writer.lock — the running process's lock; restoring one would refuse the next boot.",
+    "state/writer.lock: the running process's lock; restoring one would refuse the next boot.",
     ...(instanceSecrets
       ? []
       : [
           "The encryption key itself. VIBERR_SECRET_ENCRYPTION_KEY lives in the environment, NOT in this artefact: without it every sealed secret in the database is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys). Back the key up separately.",
         ]),
-    "*.tmp — atomic writes in flight, never content.",
-    "projects/*/tasks/*/workspace/ and projects/*/.repo-mirror/ — each task's git checkout and each project's bare mirror. Re-derivable from the remote (the next run re-clones and re-fetches), and a live run may be mid-write, so a copy would be torn as well as large.",
+    "*.tmp: atomic writes in flight, never content.",
+    "projects/*/tasks/*/workspace/ and projects/*/.repo-mirror/: each task's git checkout and each project's bare mirror. Re-derivable from the remote (the next run re-clones and re-fetches), and a live run may be mid-write, so a copy would be torn as well as large.",
   ];
 }
 
@@ -391,7 +391,7 @@ function readmeText(manifest: BackupManifest): string {
     ...manifest.excludes.map((line) => `  - ${line}`),
     "",
     "RESTORE",
-    "  Whole data root (stop the app first — the restore takes the writer lock):",
+    "  Whole data root (stop the app first; the restore takes the writer lock):",
     "    npm run restore -- --from <this directory>",
     "  One canonical file, without rolling back users/sessions/audit:",
     "    npm run restore -- --from <this directory> --file projects/<slug>/tasks/<KEY>/task.md",
@@ -409,7 +409,7 @@ function renderBackup(dir: string, manifest: BackupManifest): string {
   if (manifest.projection) {
     lines.push(
       "",
-      `  projection.sqlite — ${manifest.projection.bytes} bytes, sha256 ${manifest.projection.sha256.slice(0, 16)}…`,
+      `  projection.sqlite: ${manifest.projection.bytes} bytes, sha256 ${manifest.projection.sha256.slice(0, 16)}…`,
       ...Object.entries(manifest.projection.rows).map(
         ([table, count]) => `    ${table}: ${count} rows`,
       ),
@@ -669,13 +669,13 @@ function occupiedPaths(
 
 function renderRestore(result: Omit<RestoreResult, "text">): string {
   const lines = [
-    `viberr restore complete — ${result.dataRoot} now holds the backup taken ${result.manifest.createdAt}`,
+    `viberr restore complete: ${result.dataRoot} now holds the backup taken ${result.manifest.createdAt}`,
     `  projection.sqlite ${result.projectionRestored ? "restored" : "NOT in this artefact"}`,
     `  store directories: ${result.restoredDirs.join(", ") || "none"}`,
   ];
   if (result.removedSidecars.length > 0) {
     lines.push(
-      `  removed stale ${result.removedSidecars.join(" and ")} — they belonged to the replaced database`,
+      `  removed stale ${result.removedSidecars.join(" and ")}; they belonged to the replaced database`,
     );
   }
   if (result.displacedTo) {
@@ -686,13 +686,13 @@ function renderRestore(result: Omit<RestoreResult, "text">): string {
   // person's live agent CLI logins. Say which of the two actually happened.
   lines.push(
     result.restoredDirs.includes("runtimes")
-      ? "  runtimes/ WAS REPLACED from the artefact — everyone's agent CLI logins are now the ones this backup was taken with, and each person may need to reconnect on Profile → Agent accounts"
-      : "  runtimes/ was left exactly as it was — this restore did not touch anyone's agent CLI logins",
+      ? "  runtimes/ WAS REPLACED from the artefact: everyone's agent CLI logins are now the ones this backup was taken with, and each person may need to reconnect on Profile → Agent accounts"
+      : "  runtimes/ was left exactly as it was: this restore did not touch anyone's agent CLI logins",
     "",
     result.instanceSecretsRestored
       ? "state/instance-secrets.json came back from the artefact: the secrets this instance generated for itself, which open the restored credentials (ruling 504). A value the environment sets still overrides them."
       : "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed secret is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys).",
-    "Start the app — boot reconciles the projection against the restored files.",
+    "Start the app; boot reconciles the projection against the restored files.",
   );
   return lines.join("\n");
 }
@@ -748,7 +748,7 @@ export function restoreStoreFile(options: {
     ...(displacedTo
       ? [`  the file it replaced was moved to ${displacedTo} (not deleted)`]
       : []),
-    "  the database was NOT touched — users, sessions, PATs, audit and notifications are unchanged",
+    "  the database was NOT touched: users, sessions, PATs, audit and notifications are unchanged",
     "  the watcher re-projects it within ~1s while the app runs; otherwise `npm run rescan`",
   ].join("\n");
   // Ruling 466: a size in bytes is a UTF-8 byte count, never a string length.
@@ -763,7 +763,7 @@ function normalizeStoreRelPath(relPath: string): string {
   const root = rel.split(/[/\\]/)[0] ?? "";
   if (!FILE_RESTORE_ROOTS.some((allowed) => allowed === root)) {
     throw new Error(
-      `single-file restore only writes into ${FILE_RESTORE_ROOTS.join("/, ")}/ — ` +
+      `single-file restore only writes into ${FILE_RESTORE_ROOTS.join("/, ")}/; ` +
         `got "${relPath}". The database (state/) is a whole-root restore: drop --file.`,
     );
   }

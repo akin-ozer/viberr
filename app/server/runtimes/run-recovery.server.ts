@@ -662,19 +662,19 @@ function abandonedWaitNote(
   if (!last) {
     return (
       `${head}No agent run has ever been started on it, so nothing was interrupted and nothing ` +
-      `was lost — the wait was recorded without a dispatch ever reaching a process.${tail}`
+      `was lost; the wait was recorded without a dispatch ever reaching a process.${tail}`
     );
   }
   if (last.started_at === null) {
     return (
-      `${head}Its most recent run \`${last.id}\` never started — it was ${last.state} and had ` +
+      `${head}Its most recent run \`${last.id}\` never started: it was ${last.state} and had ` +
       `no process, so there is no work to have lost.${tail}`
     );
   }
   const when = last.finished_at ? ` at ${last.finished_at}` : "";
   return (
     `${head}The run it was waiting for, \`${last.id}\`, ended${when} (${last.state}), and the ` +
-    `follow-up that would have moved the task did not run — which is why the wait outlived it. ` +
+    `follow-up that would have moved the task did not run, which is why the wait outlived it. ` +
     `The run's own record is intact; what is missing is the step after it.${tail}`
   );
 }
