@@ -528,11 +528,11 @@ describe("ruling 565: files sent with a controller message", () => {
       const before = listConversations(app.db, { userId: arda }).length;
       const refused = returnedRefusal.parse(
         await post(arda, { intent: "send", text: "Look at this.", project: SLUG }, undefined, [
-          new File(["<p>hi</p>"], "page.html"),
+          new File([new Uint8Array(10 * 1024 * 1024 + 1)], "memory.dmp"),
         ]),
       );
       expect(refused.init?.status).toBe(400);
-      expect(refused.data.error).toContain(".html");
+      expect(refused.data.error).toContain("memory.dmp");
       expect(listConversations(app.db, { userId: arda }).length).toBe(before);
     } finally {
       await disconnectFakeBackend(app.db, arda, "claude");

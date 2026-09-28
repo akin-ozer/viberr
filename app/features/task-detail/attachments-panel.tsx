@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import { useFetcher } from "react-router";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
-import { UPLOADABLE_EXTENSIONS } from "~/shared/attachment-kinds";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { prettySize } from "~/shared/text/byte-size";
 import { Collapsible } from "~/ui/collapsible";
@@ -179,9 +178,8 @@ export function AttachmentsPanel({
  * screen reader without any script; the fetcher posts the same `attach-file`
  * intent a `curl` would.
  *
- * `accept` is built from the server's own whitelist, so the picker cannot offer
- * a file the writer would refuse — the refusal still exists server-side, this
- * just stops a person meeting it.
+ * Ruling 566: the picker offers any kind of file; the writer refuses only a
+ * name it cannot store and a file over the size cap.
  */
 function AttachFile() {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -202,7 +200,6 @@ function AttachFile() {
           ref={input}
           type="file"
           disabled={busy}
-          accept={[...UPLOADABLE_EXTENSIONS].sort().join(",")}
           onChange={(event) => {
             const file = event.currentTarget.files?.[0];
             if (!file) return;

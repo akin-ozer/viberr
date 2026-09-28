@@ -3,7 +3,6 @@ import {
   ATTACHMENT_BATCH_MAX_BYTES,
   type AttachmentBatchWording,
   MAX_UPLOAD_BYTES,
-  UPLOADABLE_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import { prettySize } from "~/shared/text/byte-size";
 
@@ -14,8 +13,6 @@ import { prettySize } from "~/shared/text/byte-size";
  * form that draws its own (the New task dialog, ruling 533) ships none of it.
  * A refusal here is the one the server would give, said before the request.
  */
-
-export const ATTACH_ACCEPT = [...UPLOADABLE_EXTENSIONS].sort().join(",");
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -53,11 +50,6 @@ export function addPickedFiles(
   let files = [...current];
   let problem: string | null = null;
   for (const file of incoming) {
-    const ext = extensionOf(file.name);
-    if (!UPLOADABLE_EXTENSIONS.has(ext)) {
-      problem ??= `Viberr can't store “${file.name}”. It takes ${[...UPLOADABLE_EXTENSIONS].sort().join(", ")}.`;
-      continue;
-    }
     if (file.size > MAX_UPLOAD_BYTES) {
       problem ??= `“${file.name}” is ${prettySize(file.size)}; a file may be up to ${prettySize(MAX_UPLOAD_BYTES)}.`;
       continue;

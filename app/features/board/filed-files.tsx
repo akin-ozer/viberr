@@ -1,6 +1,6 @@
 import { prettySize } from "~/shared/text/byte-size";
 import { FILING_BATCH } from "~/shared/attachment-kinds";
-import { ATTACH_ACCEPT, addPickedFiles, type PickedFiles } from "~/ui/picked-files";
+import { addPickedFiles, type PickedFiles } from "~/ui/picked-files";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -9,8 +9,8 @@ import { Icon } from "~/ui/icon";
  * screenshot of a portal) is the task, and it used to reach the task only
  * after the operator had already triaged a goal that could not show it.
  *
- * The picker offers exactly what the server stores, and the rules that keep or
- * refuse a pick are the composers' own (`~/ui/attach-files`, ruling 565); a
+ * The picker offers any kind of file (ruling 566), and the rules that keep or
+ * refuse a pick are the composers' own (`~/ui/picked-files`, ruling 565); a
  * filing only words its limits for the dialog.
  */
 
@@ -53,7 +53,6 @@ export function FiledFiles({
           <input
             type="file"
             multiple
-            accept={ATTACH_ACCEPT}
             onChange={(e) => {
               const picked = Array.from(e.currentTarget.files ?? []);
               // Let the same file be picked again after it was removed.

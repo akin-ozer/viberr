@@ -65,6 +65,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher; signed out answers a 401 with the `signedOut` view (GET, which names only the scope asked about and reads nothing) or `{ ok:false, error }` (POST), never a login redirect | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448). Its `clientLoader` answers a failed load with null (the open panel's loading lines) and its `clientAction` a failed send with `{ ok:false }` (the send's toast), never root's error page (ruling 457) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
 | `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false; a signed-out request gets a 401, never a login redirect, and its `clientLoader` turns any failed load into the bell's failure row (ruling 457) | |
 | `/resources/attention` | `resources.attention.ts` | user; a signed-out request (or a pending password reset) gets a 401, never a login redirect | ruling 481(c): `{ waiting, items }` (`attentionSnapshot`), the viewer's unread decisions (an operator packet, an agent question, a recommendation to approve) that lead somewhere, and the newest ten worded for a desktop notification with the bell's destination. `Cache-Control: no-store`; `shouldRevalidate` false. The root's attention watcher reads it with a plain `fetch` | |
+| `/resources/controller-file/:id` | `resources.controller-file.ts` | the conversation's owner or a live org admin; anyone else, and a file that does not exist, 404 | one file sent with a controller message (ruling 565): the task route's serving rules (`nosniff`, a sandbox CSP, only the inline whitelist rendered, `?download=1` for the save dialog), the name in an ASCII `filename` and a UTF-8 `filename*` | |
 | `/resources/controller-unseen` | `resources.controller-unseen.ts` | user; signed out answers a 401 with an empty status, never a login redirect | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 457). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself, and its `clientLoader` answers a failed load with null (no dot, no working poll) | |
 | `/resources/mcp-oauth/callback` | `resources.mcp-oauth.callback.ts` | org admin (a signed-out admin goes through `/login` and back with the query) | where an MCP server's authorization server sends the browser after an OAuth sign-in started in Instance settings (ruling 469): spends the `state` once (bound to the session that started it), exchanges the code with the PKCE verifier, seals the tokens, probes the connection, and answers a plain page (`MCP sign-in`, no-store, no referrer, no token, code or state in it) that says the tab can be closed; a refused callback is a 400 page with the reason | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user; signed out answers a 401 `{ error: { code: "unauthorized", message } }`, never a login redirect | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts, whose card keeps what its page drew when a poll answers 401 or fails (its `clientLoader` answers a failed poll with null); an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
@@ -542,12 +543,20 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   Controller"; ruling 524(c)).
 - **A person may attach a file to a task** (ruling 379): the Attachments panel renders
   for every task and carries an "Attach a file" control for a viewer holding
-  `attach-file` (contributor and above) on a task that is not archived. `accept` comes
-  from the server's own whitelist, so the picker cannot offer a file the writer would
-  refuse; the writer also refuses a traversing or dot-prefixed name and anything over
-  10 MB (`MAX_UPLOAD_BYTES`). Every file name carries its whole self in `title`, and under
+  `attach-file` (contributor and above) on a task that is not archived. The picker offers
+  any kind of file (ruling 566); the writer refuses a traversing or dot-prefixed name and
+  anything over 10 MB (`MAX_UPLOAD_BYTES`). Every file name carries its whole self in `title`, and under
   the 720px breakpoint a file row gives the name its own line, whole, with "by <actor> ·
   <time>" and the size under it (ruling 478(b)).
+- **Every chat takes files** (rulings 565 and 566): the controller page, the controller
+  dock and a task's comment composer (for a viewer holding `attach-file`) share one tray
+  (`app/ui/attach-files.tsx`): a paperclip, a drop on the composer (its frame dashed while
+  files are held over it) and a pasted screenshot, shown as removable chips, a picture as
+  its thumbnail. Any kind of file; a pick over 10 MB, or past 10 files or 25 MB together,
+  is refused in the tray before the request, in the server's own words. Files alone are a
+  message, and a file leaves the tray only once the server took it. A controller
+  message's files show under it (a picture as itself, any other file as the tray's chip);
+  a comment's show under it as the timeline's tiles.
 - **A long attachment list folds the way a long comment does** (ruling 510): past 340px
   (the comment's fold, `Collapsible` in `app/ui/collapsible.tsx`) the panel's pictures and
   files clamp under a soft fade with "Show more" / "Show less" (`aria-expanded`) below them,

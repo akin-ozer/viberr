@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, type DragEvent } from "react";
 import { ATTACHMENT_BATCH_MAX } from "~/shared/attachment-kinds";
 import { prettySize } from "~/shared/text/byte-size";
 import { Icon } from "./icon";
-import { ATTACH_ACCEPT, PICTURE_RE } from "./picked-files";
+import { PICTURE_RE } from "./picked-files";
 
 /**
  * Ruling 565: the files a person hands over with a message, picked, dropped or
@@ -16,8 +16,8 @@ import { ATTACH_ACCEPT, PICTURE_RE } from "./picked-files";
  * thumbnail or the file glyph, the name, the size, a remove button), a drop on
  * the composer's frame, and a pasted screenshot.
  *
- * The picker offers exactly what the server stores; the rules for what a
- * composer keeps are `picked-files.ts`.
+ * The picker offers any kind of file (ruling 566); the rules for what a
+ * composer keeps, sizes and counts, are `picked-files.ts`.
  */
 
 /** What a drop target spreads on its element. */
@@ -100,7 +100,6 @@ export const AttachButton = /* @__PURE__ */ memo(function AttachButton({
         type="file"
         multiple
         hidden
-        accept={ATTACH_ACCEPT}
         tabIndex={-1}
         onChange={(event) => {
           const picked = Array.from(event.currentTarget.files ?? []);

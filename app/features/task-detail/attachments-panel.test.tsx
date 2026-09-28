@@ -209,12 +209,9 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(container.textContent).toContain("read by the agents");
     const input = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).not.toBeNull();
-    // The picker offers exactly what the server will accept, and never the
-    // types the serving route refuses to render inline.
-    expect(input!.accept).toContain(".yaml");
-    expect(input!.accept).toContain(".png");
-    expect(input!.accept).not.toContain(".html");
-    expect(input!.accept).not.toContain(".svg");
+    // Ruling 566: the picker offers any kind of file; what may render inline
+    // is the serving route's business, not the picker's.
+    expect(input!.accept).toBe("");
   });
 
   // Ruling 368: the upload in flight is `aria-busy` on the control that

@@ -4,7 +4,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_UPLOAD_BYTES,
-  UPLOADABLE_EXTENSIONS,
   attachmentClaimsInFlight,
   attachmentContentType,
   attachmentNamesSince,
@@ -303,20 +302,17 @@ describe("writeTaskAttachment", () => {
     expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
   });
 
-  it("refuses an extension this product can neither render nor read back", () => {
+  it("ruling 566: stores a file of any kind, and serves one a browser could run only as a download", () => {
     setRoot();
-    // CANARY: widen UPLOADABLE_EXTENSIONS to allow these and a stored page is
-    // served from the app origin — the stored XSS the serving rules prevent.
-    for (const bad of ["page.html", "icon.svg", "run.js", "tool.sh", "blob.bin", "noext"]) {
-      expect(() => write(bad), bad).toThrow(/does not store/);
-    }
-    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
-    // And the whitelist is exactly what the two read paths can handle.
-    for (const good of [".png", ".pdf", ".txt", ".md", ".json", ".yaml", ".csv", ".diff", ".patch"]) {
-      expect(UPLOADABLE_EXTENSIONS.has(good), good).toBe(true);
-    }
-    for (const bad of [".html", ".svg", ".js"]) {
-      expect(UPLOADABLE_EXTENSIONS.has(bad), bad).toBe(false);
+    // CANARY: put an extension check back in `checkAttachmentUpload` and a
+    // person's `.tf` or `.docx` is refused before any agent could read it.
+    const kinds = ["main.tf", "report.docx", "page.html", "icon.svg", "run.js", "tool.sh", "blob.bin", "Dockerfile"];
+    for (const name of kinds) write(name);
+    expect(countTaskAttachments("p1", "VIB-1", root)).toBe(kinds.length);
+    // What keeps a stored page from running is the serving route's inline
+    // list, never the store's: every kind a browser would execute downloads.
+    for (const name of ["page.html", "icon.svg", "run.js"]) {
+      expect(attachmentContentType(name), name).toEqual({ type: "application/octet-stream", inline: false });
     }
   });
 
@@ -446,5 +442,31 @@ describe("ruling 558: a file put down for someone else", () => {
     take.open();
     await taking;
     expect(attachmentClaimsInFlight("p1", "VIB-1").size).toBe(0);
+  });
+});
+
+/**
+ * Ruling 566: a reader takes a file by its bytes, not its name. Any file whose
+ * head holds no NUL byte (git's own `-text` test) reads as text, and a binary
+ * one is named, with what the reader takes instead.
+ */
+describe("ruling 566: readTaskAttachment reads any text file", () => {
+  it("reads a text file of any name, and names a binary one rather than guessing", () => {
+    // CANARY: gate the text read on `READABLE_TEXT_EXTENSIONS` again and the
+    // `.tf` is refused as an unknown kind.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-566-"));
+    try {
+      const put = (name: string, bytes: Uint8Array) => writeTaskAttachment("p1", "VIB-1", name, bytes, root);
+      put("main.tf", new TextEncoder().encode('resource "aws_instance" "web" {}\n'));
+      put("report.docx", new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]));
+      const tf = readTaskAttachment("p1", "VIB-1", "main.tf", root);
+      expect(tf).toMatchObject({ kind: "text", text: 'resource "aws_instance" "web" {}\n' });
+      const docx = readTaskAttachment("p1", "VIB-1", "report.docx", root);
+      expect(docx).toEqual({
+        unreadable: expect.stringContaining("`report.docx` is a binary .docx file (6 bytes): its bytes are not text."),
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

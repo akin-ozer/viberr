@@ -3,7 +3,6 @@ import {
   constants as fsConstants,
   existsSync,
   fstatSync,
-  lstatSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -20,10 +19,10 @@ import {
   ATTACHMENT_BATCH_MAX,
   ATTACHMENT_BATCH_MAX_BYTES,
   type AttachmentBatchWording,
+  BINARY_EXTENSIONS,
   INLINE_TYPES,
   MAX_UPLOAD_BYTES,
   READABLE_TEXT_EXTENSIONS,
-  UPLOADABLE_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import path from "node:path";
 import { isGateLogName } from "~/shared/project-gates";
@@ -424,11 +423,7 @@ export function attachmentContentType(name: string): {
 
 // ------------------------------------------------------- the human writer
 
-export {
-  MAX_UPLOAD_BYTES,
-  READABLE_TEXT_EXTENSIONS,
-  UPLOADABLE_EXTENSIONS,
-} from "~/shared/attachment-kinds";
+export { MAX_UPLOAD_BYTES, READABLE_TEXT_EXTENSIONS } from "~/shared/attachment-kinds";
 
 export interface WrittenAttachment {
   name: string;
@@ -439,9 +434,9 @@ export interface WrittenAttachment {
 
 /**
  * The refusals every person's upload meets, before anything is written: an
- * empty or dot-prefixed name the store scanner would then hide, an extension
- * outside {@link UPLOADABLE_EXTENSIONS}, and anything over
- * {@link MAX_UPLOAD_BYTES}. Returns the name as it will be stored. Ruling 533:
+ * empty or dot-prefixed name the store scanner would then hide, a name that
+ * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
+ * 566: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored. Ruling 533:
  * a task filed with its input checks every file here before its key is
  * allocated, so a refused file costs no key.
  */
@@ -463,12 +458,6 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
   if (/[\\/\0]/.test(cleaned)) {
     throw AppError.validation(
       `A file name cannot hold “/”, “\\” or a null character: “${cleaned.replaceAll("\0", "")}” is not one name.`,
-    );
-  }
-  const ext = path.extname(cleaned).toLowerCase();
-  if (!UPLOADABLE_EXTENSIONS.has(ext)) {
-    throw AppError.validation(
-      `Viberr does not store “${ext || cleaned}” attachments. It takes the files it can show or read back: ${[...UPLOADABLE_EXTENSIONS].sort().join(", ")}.`,
     );
   }
   if (byteLength > MAX_UPLOAD_BYTES) {
@@ -828,12 +817,16 @@ function readCap(ext: string): number {
   return IMAGE_READ_TYPES.has(ext) ? IMAGE_READ_MAX_BYTES : ext === ".xlsx" ? XLSX_READ_MAX_BYTES : TEXT_READ_MAX_BYTES;
 }
 
-/** The kinds a reader takes, said to a reader asked for another. */
-function unreadableKind(name: string, ext: string, bytes: number, where: string): AttachmentContent {
+/** How much of a file's head the text test reads: git's own window. */
+const BINARY_SNIFF_BYTES = 8_000;
+
+/** Ruling 566: a file whose bytes are not text, named with what a reader
+ *  takes instead of guessed at from its name. */
+function binaryFile(name: string, ext: string, bytes: number, where: string): AttachmentContent {
   return {
     unreadable:
-      `\`${name}\` is a ${ext || "typeless"} file (${bytes.toLocaleString("en-US")} bytes). ` +
-      `This reads text (${[...READABLE_TEXT_EXTENSIONS].join(", ")}), spreadsheets (.xlsx) and images ` +
+      `\`${name}\` is a binary ${ext || "typeless"} file (${bytes.toLocaleString("en-US")} bytes): its bytes are not text. ` +
+      `This reads text files of any name, spreadsheets (.xlsx) and images ` +
       `(${[...IMAGE_READ_TYPES.keys()].join(", ")}). Open it ${where} rather than describing it from its name.`,
   };
 }
@@ -853,16 +846,13 @@ function tooLargeToRead(name: string, ext: string, bytes: number, where: string)
 /**
  * Ruling 565: one file for a reader, from bytes already in hand: text as
  * text, a spreadsheet as its sheets in CSV (ruling 533), an image as the image
- * after its own header is checked. The task's reader and the controller's
+ * after its own header is checked, and (ruling 566) any other file as text
+ * unless its bytes are binary. The task's reader and the controller's
  * reader of a message's files share it; `where` says where a person opens the
  * file instead ("on the task page", "in the conversation").
  */
 export function readAttachmentContent(name: string, bytes: Buffer, offset: number, where: string): AttachmentContent {
   const ext = path.extname(name).toLowerCase();
-  const mimeType = IMAGE_READ_TYPES.get(ext);
-  if (!mimeType && ext !== ".xlsx" && !READABLE_TEXT_EXTENSIONS.has(ext)) {
-    return unreadableKind(name, ext, bytes.length, where);
-  }
   if (bytes.length > readCap(ext)) return tooLargeToRead(name, ext, bytes.length, where);
   return decodeAttachment(name, ext, bytes, offset, where);
 }
@@ -894,6 +884,15 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
     if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
     return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
   }
+  // Ruling 566: any other name reads as text unless it names a binary kind
+  // or its bytes say otherwise: a NUL in its head (git's own `-text` test,
+  // ruling 363's) marks a binary.
+  if (
+    !READABLE_TEXT_EXTENSIONS.has(ext) &&
+    (BINARY_EXTENSIONS.has(ext.slice(1)) || bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0))
+  ) {
+    return binaryFile(name, ext, bytes.length, where);
+  }
   const raw = bytes.toString("utf8");
   if (offset > 0 && offset >= raw.length) return pastTheEnd(name, raw.length, offset);
   return { kind: "text", name, bytes: bytes.length, ...textPage(raw, false, offset) };
@@ -924,17 +923,6 @@ export function readTaskAttachment(
   }
   const where = "on the task page";
   const ext = path.extname(wanted).toLowerCase();
-  if (!IMAGE_READ_TYPES.has(ext) && ext !== ".xlsx" && !READABLE_TEXT_EXTENSIONS.has(ext)) {
-    let st;
-    try {
-      // `lstat`: a link at this name is not the file it points to.
-      st = lstatSync(abs);
-    } catch {
-      return null;
-    }
-    if (!st.isFile()) return null;
-    return unreadableKind(wanted, ext, st.size, where);
-  }
   const read = readAttachmentBytes(abs, readCap(ext));
   if (!read) return null;
   if ("tooLarge" in read) return tooLargeToRead(wanted, ext, read.tooLarge, where);

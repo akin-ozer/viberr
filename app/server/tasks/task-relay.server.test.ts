@@ -343,13 +343,13 @@ describe("ruling 538: a relay carries files", () => {
 
   it("refuses the whole relay for a file the source does not hold or the target could not read, and writes nothing", async () => {
     save("VIB-1", "inventory.csv", "vm\n");
-    save("VIB-1", "notes.docx", "binary");
+    save("VIB-1", "dump.log", "x".repeat(10 * 1024 * 1024 + 1));
     const before = timeline("VIB-2").length;
     expect(await relay("VIB-2", "Inputs.", { files: ["inventory.csv", "missing.csv"] })).toMatch(
       /^\[noop\] Nothing was relayed to VIB-2: VIB-1 has no attachment `missing.csv`\. It holds: /,
     );
-    expect(await relay("VIB-2", "Inputs.", { files: ["inventory.csv", "notes.docx"] })).toContain(
-      "Viberr does not store “.docx” attachments",
+    expect(await relay("VIB-2", "Inputs.", { files: ["inventory.csv", "dump.log"] })).toMatch(
+      /^\[noop\] Nothing was relayed to VIB-2: /,
     );
     expect(timeline("VIB-2")).toHaveLength(before);
     expect(existsSync(path.join(attachmentsOf("VIB-2"), "inventory.csv"))).toBe(false);

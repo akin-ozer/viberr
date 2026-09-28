@@ -459,7 +459,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 |---|---|---|
 | `get_task` | `operatorSnapshot` (§4) | always |
 | `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 282) | always |
-| `read_task_attachment` | one of this task's attachments: text as text, an `.xlsx` as its sheets in CSV, an image as the picture (rulings 293, 533), 40,000 characters at a time with `offset` reading on from a truncated read's `nextOffset` (ruling 551) | always |
+| `read_task_attachment` | one of this task's attachments: an `.xlsx` as its sheets in CSV, an image as the picture, any other file whose bytes are text as text whatever its name, a binary one named and refused (rulings 293, 533, 566), 40,000 characters at a time with `offset` reading on from a truncated read's `nextOffset` (ruling 551) | always |
 | `read_timeline_entry` | one timeline entry in full, by its `occurredAt` stamp (ruling 285) | always |
 | `read_knowledge_doc` | one document of a KB attached to the operator (ruling 283) | always, when it holds a KB |
 | `read_default_branch_file` | anchored default-branch read (§4) | always, when the run has a checkout |

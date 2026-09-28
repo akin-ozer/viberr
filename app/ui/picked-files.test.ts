@@ -13,16 +13,17 @@ function file(name: string, bytes = 4, type = ""): File {
 }
 
 describe("addPickedFiles", () => {
-  it("keeps what the server stores and names the first file it would refuse", () => {
-    // CANARY: drop the extension check and `page.html` is kept, to be refused
-    // by the server after the person pressed Send.
+  it("keeps a file of any kind, and names the first one the server would refuse", () => {
+    // CANARY: drop the size check and `memory.dmp` is kept, to be refused by
+    // the server after the person pressed Send. Ruling 566: `main.tf` and
+    // `report.docx` are kept whatever their kind.
     const { files, problem } = addPickedFiles(
       [],
-      [file("inventory.csv"), file("page.html"), file("portal.png")],
+      [file("main.tf"), file("memory.dmp", MAX_UPLOAD_BYTES + 1), file("report.docx")],
       MESSAGE_BATCH,
     );
-    expect(files.map((f) => f.name)).toEqual(["inventory.csv", "portal.png"]);
-    expect(problem).toContain("“page.html”");
+    expect(files.map((f) => f.name)).toEqual(["main.tf", "report.docx"]);
+    expect(problem).toContain("“memory.dmp”");
   });
 
   it("replaces a file picked again under the same name, and stops at the count", () => {
@@ -34,7 +35,6 @@ describe("addPickedFiles", () => {
     expect(capped.problem).toBe(
       `A message can carry up to ${ATTACHMENT_BATCH_MAX} files. Send the rest in another message.`,
     );
-    expect(addPickedFiles([], [file("huge.csv", MAX_UPLOAD_BYTES + 1)], MESSAGE_BATCH).files).toEqual([]);
   });
 });
 

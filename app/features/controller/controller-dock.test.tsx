@@ -1216,8 +1216,8 @@ describe("ruling 565: files from the dock", () => {
       view: () => taskView(),
       action: () => ({ ok: false, error: "That request expired." }),
     });
-    await pickIntoDock([file("a", "notes.txt"), file("<p>", "page.html")]);
-    expect(screen.getByRole("alert").textContent).toContain("page.html");
+    await pickIntoDock([file("a", "notes.txt"), file("x".repeat(10 * 1024 * 1024 + 1), "memory.dmp")]);
+    expect(screen.getByRole("alert").textContent).toContain("memory.dmp");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByText("That request expired.");
     expect(screen.getByRole("list", { name: "1 of 10 files attached" }).textContent).toContain("notes.txt");

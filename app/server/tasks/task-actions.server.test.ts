@@ -27,7 +27,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
-import { listTaskAttachments } from "~/server/files/task-attachments.server";
+import { listTaskAttachments, MAX_UPLOAD_BYTES } from "~/server/files/task-attachments.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -4294,16 +4294,16 @@ describe("ruling 533: a task filed with its input", () => {
         store.db,
         {
           projectSlug: store.slug,
-          title: "Filed with a page",
+          title: "Filed with a dump",
           attachments: [
             { name: "inventory.csv", data: new TextEncoder().encode("vm\n") },
-            { name: "page.html", data: new TextEncoder().encode("<script>") },
+            { name: "memory.dmp", data: new Uint8Array(MAX_UPLOAD_BYTES + 1) },
           ],
         },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/does not store/);
+    ).rejects.toThrow(/may be up to/);
     // A name the store's resolver would refuse is refused by the same check,
     // before the key: it used to pass it, take the key, and fail on the write.
     // CANARY: drop the separator test from checkAttachmentUpload and this
@@ -4382,16 +4382,16 @@ describe("ruling 565: a comment with files", () => {
         {
           projectSlug: store.slug,
           taskKey: task.key,
-          text: "And this page.",
+          text: "And this dump.",
           files: [
             { name: "notes.txt", data: new TextEncoder().encode("ok") },
-            { name: "page.html", data: new TextEncoder().encode("<p>") },
+            { name: "memory.dmp", data: new Uint8Array(MAX_UPLOAD_BYTES + 1) },
           ],
         },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(".html");
+    ).rejects.toThrow(/may be up to/);
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: task.key, dataRoot: store.dataRoot })!.parsed;
     expect(parsed.timeline.some((e) => e.type === "comment")).toBe(false);
     expect(listTaskAttachments(store.slug, task.key, store.dataRoot)).toEqual([]);
