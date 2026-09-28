@@ -16,7 +16,7 @@ import {
   type CodexThread,
 } from "./codex-runtime.server";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { codexVendor } from "./codex-app-server.server";
 import path from "node:path";
 import { backendAccountHome, ensureUserBackendHome } from "./user-homes.server";
@@ -1640,6 +1640,146 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
     await drain();
     expect(run.factoryOptions()?.env?.CODEX_HOME).toBeUndefined();
     expect(run.factoryOptions()?.env?.CODEX_SQLITE_HOME).toBeUndefined();
+  });
+});
+
+/**
+ * Ruling 541: a Viberr run is one Codex turn, and the SDK streams that turn's
+ * usage once, at its end, so the Live run strip read Turns 0 and Tokens
+ * "pending" for twenty minutes of a working run. The pinned CLI writes a
+ * `token_usage_record` into the rollout as each model call completes; these
+ * fakes write the rollout the way it does (shapes and figures from a real
+ * 0.156.0 run against a scripted model), into the person's shared home.
+ */
+describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
+  const homes = createTestDbContext();
+  afterEach(homes.cleanup);
+  const THREAD = "01a0e71b-194e-75c1-a7bd-b59033305da2";
+
+  /** One record: the turn's running total and the thread's, as [input,
+   *  cached, output]. */
+  const record = (turn: [number, number, number], thread = turn) => {
+    const usage = ([input, cached, output]: [number, number, number]) => ({
+      input_tokens: input,
+      cached_input_tokens: cached,
+      cache_write_input_tokens: 0,
+      output_tokens: output,
+      reasoning_output_tokens: 0,
+      total_tokens: input + output,
+    });
+    return `${JSON.stringify({
+      timestamp: "2026-09-28T08:21:48.487Z",
+      type: "token_usage_record",
+      payload: { thread_id: THREAD, turn_token_usage: usage(turn), thread_token_usage: usage(thread) },
+    })}\n`;
+  };
+
+  /** A fake whose stream appends `write` steps to the rollout before it
+   *  yields the event after them, in the person's shared codex home. */
+  function rolloutCodex(shared: string, steps: ({ write: string } | { event: unknown })[]) {
+    const dir = path.join(shared, "sessions", "2026", "09", "28");
+    const rollout = path.join(dir, `rollout-2026-09-28T08-21-47-${THREAD}.jsonl`);
+    const thread: CodexThread = {
+      id: THREAD,
+      async runStreamed() {
+        const gen = (async function* () {
+          for (const step of steps) {
+            if ("write" in step) {
+              mkdirSync(dir, { recursive: true });
+              appendFileSync(rollout, step.write);
+              continue;
+            }
+            yield step.event;
+            await new Promise((r) => setTimeout(r, 0));
+          }
+        })();
+        return { events: asSdkEvents(gen) };
+      },
+    };
+    const client: CodexClient = { startThread: () => thread, resumeThread: () => thread };
+    return { factory: () => client, rollout, dir };
+  }
+
+  async function linesOf(shared: string, steps: Parameters<typeof rolloutCodex>[1], spec: Partial<RunSpec> = {}) {
+    const run = rolloutCodex(shared, steps);
+    const lines: EmittedLine[] = [];
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      { ...SPEC, runId: "run_live", env: { CODEX_HOME: shared }, ...spec },
+      { onLine: (l) => lines.push(l), onExit: () => {} },
+    );
+    await drain();
+    return lines;
+  }
+
+  const TOOL = { type: "item.started", item: { type: "command_execution", command: "npm test", aggregated_output: "", status: "in_progress" } };
+  const TOOL_DONE = { type: "item.completed", item: { type: "command_execution", command: "npm test", aggregated_output: "ok\n", exit_code: 0, status: "completed" } };
+
+  it("each call's record reaches the line that follows it: Turns counts the calls, Tokens is the turn's running total", async () => {
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    const second = record([23_000, 11_000, 300]);
+    const lines = await linesOf(shared, [
+      { event: { type: "thread.started", thread_id: THREAD } },
+      { write: `${JSON.stringify({ type: "session_meta", payload: { id: THREAD } })}\n${record([11_000, 0, 100])}` },
+      { event: TOOL },
+      { event: TOOL_DONE },
+      // The CLI is mid-write on the second call's record.
+      { write: second.slice(0, 90) },
+      { event: TOOL },
+      { write: second.slice(90) },
+      { event: TOOL_DONE },
+      { write: record([36_000, 23_000, 600]) },
+      { event: { type: "item.completed", item: { type: "agent_message", text: "done" } } },
+      { event: { type: "turn.completed", usage: { input_tokens: 36_000, cached_input_tokens: 23_000, output_tokens: 600 } } },
+    ]);
+
+    // CANARY: read the rollout at turn.completed only (or not at all) and
+    // every line before it carries nothing: Turns 0, Tokens "pending".
+    // CANARY: parse the unterminated tail instead of reading it again whole
+    // and the second call never counts (Turns 2 at the end).
+    expect(lines.map((l) => [l.facts.turns ?? null, l.facts.usage?.input_tokens ?? null])).toEqual([
+      [null, null],
+      [1, 11_000],
+      [1, null],
+      [1, null],
+      [2, 23_000],
+      [3, 36_000],
+      [3, 36_000],
+    ]);
+    // The provider's own figures, so the strip prints them plain from the
+    // first call on.
+    expect(lines[1]!.facts.usage).toEqual({ input_tokens: 11_000, cached_input_tokens: 0, output_tokens: 100, outputEstimated: false });
+  });
+
+  it("a resumed thread counts only this run's calls, and its turn.completed carries the turn's total, not the thread's", async () => {
+    // Measured on the real 0.156.0 CLI: a first run of two calls (23k input),
+    // then a resume of one call (13k), whose `turn.completed` said 36k.
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    const earlier = rolloutCodex(shared, []);
+    mkdirSync(earlier.dir, { recursive: true });
+    writeFileSync(
+      earlier.rollout,
+      `${JSON.stringify({ type: "session_meta", payload: { id: THREAD } })}\n${record([11_000, 0, 100])}${record([23_000, 11_000, 300])}`,
+    );
+    const lines = await linesOf(
+      shared,
+      [
+        { event: { type: "thread.started", thread_id: THREAD } },
+        { write: record([13_000, 12_000, 300], [36_000, 23_000, 600]) },
+        { event: { type: "item.completed", item: { type: "agent_message", text: "done" } } },
+        { event: { type: "turn.completed", usage: { input_tokens: 36_000, cached_input_tokens: 23_000, output_tokens: 600 } } },
+      ],
+      { resumeSessionId: THREAD },
+    );
+
+    // CANARY: read a resumed rollout from its start and the earlier run's two
+    // calls are this run's (Turns 3).
+    expect(lines.map((l) => l.facts.turns ?? null)).toEqual([null, 1, 1]);
+    // CANARY: keep the SDK's figure and the run stores the thread's 36k.
+    const done = lines.at(-1)!;
+    expect(done.facts.usage).toEqual({ input_tokens: 13_000, cached_input_tokens: 12_000, output_tokens: 300, outputEstimated: false });
+    expect(done.display?.usage).toEqual({ input_tokens: 13_000, cached_input_tokens: 12_000, output_tokens: 300 });
+    // The raw line is what the CLI said.
+    expect(z.object({ usage: z.object({ input_tokens: z.number() }) }).parse(JSON.parse(done.raw)).usage.input_tokens).toBe(36_000);
   });
 });
 

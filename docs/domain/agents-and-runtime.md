@@ -537,8 +537,8 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   new compaction appears there. Codex keeps `developer_instructions` and recent user
   messages within a 20k budget plus the summary across a compaction and drops earlier
   assistant turns, tool calls, outputs and reasoning.
-- Rollout statistics (rulings 369, 403, 414). The SDK's `turn.completed` is a turn TOTAL,
-  so the run's per-call prompt sizes and compactions are read off the principal's rollout
+- Rollout statistics (rulings 369, 403, 414). The SDK's `turn.completed` is a turn TOTAL
+  (on a resumed thread the thread's, ruling 541), so the run's per-call prompt sizes and compactions are read off the principal's rollout
   once the CLI has exited (`codexRolloutRunStats`, `session-export.server.ts`): every
   `token_count` line from the run's start, the first one being the run's first call (the
   turn total's cached slice sums every call of the turn and says nothing about the
@@ -551,6 +551,21 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   one event. The pre size is the last prompt before the marker; the post size is the size
   line, else the next real call's prompt, else NULL, which a note prints as "a summary"
   and never as 0. `compactions` is the length of that event list.
+- Live usage (ruling 541). A Viberr run is one Codex turn, and the SDK streams its usage
+  once, on `turn.completed`, so the adapter reads the rollout while the run works
+  (`codexUsageTail`, `session-export.server.ts`). The pinned CLI (0.156.0) writes a
+  top-level `token_usage_record` line the moment a model call completes, before the tool
+  the call asked for runs (the `token_count` event waits for the tool's output), carrying
+  the call's usage, the turn's running total and the thread's. On every SDK event the
+  adapter reads the whole lines written since its last read; when a record has landed it
+  puts the turn's running total on that line as the run's usage (the provider's figures,
+  so `usage_final` is 1 from the first call on) and the number of records as the run's
+  `turns`. A new thread's rollout is found by its id once `thread.started` names it; a
+  resumed thread's is found before the CLI starts and read from its end, so the thread's
+  earlier runs stay out. On `turn.completed` a new thread's figure stands, being the
+  turn's total; a resumed thread's is the thread's running total, every earlier run's
+  calls included, so the run stores its turn's own from the rollout and the raw line keeps
+  the CLI's figure.
 - `shell_environment_policy` is `inherit: "core"` with `ignore_default_excludes: false`,
   and its `set` table (written only when it has keys) re-exports at most six env keys:
   `GIT_CEILING_DIRECTORIES`, `GIT_AUTHOR_NAME/EMAIL`, `GIT_COMMITTER_NAME/EMAIL` and the
@@ -677,8 +692,9 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   compaction's own cost and tokens add to the run's totals (ruling 376).
   `credential_kind` is the kind of credential the run billed at start (`login`,
   `api_key`, `access_token`), which decides the TTL ruling 372 assumes; NULL on a refused
-  run. Codex's `turn.completed.usage` is the TURN's total over its calls, not the
-  thread's (a thread's first run stored 3.46M input tokens and its resumed run 67k).
+  run. A Codex run's usage is its turn's total over its calls. On a resumed thread the
+  pinned CLI's `turn.completed.usage` is the thread's running total, so the run takes its
+  own off the rollout (ruling 541; ruling 369(g) had measured the turn's on older runs).
 - **Token columns mean the same thing on both backends.** `input_tokens` is the total
   input the provider processed for the run, cache reads and cache writes included: Codex
   `usage.input_tokens` verbatim (its cache figures are subsets of it); Claude Σ over
@@ -694,8 +710,8 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   `input_tokens` served from the prompt cache (Codex `cached_input_tokens`, Claude
   `cache_read_input_tokens`) and is never larger than `input_tokens`. `output_tokens` is
   the provider's figure. `turns` is Claude's `result.num_turns` (one plus the `user`-type
-  messages that flowed through the SDK loop, so every tool result counts) and Codex's
-  count of completed turns. The strip's **Tokens** is `input_tokens + output_tokens`:
+  messages that flowed through the SDK loop, so every tool result counts) and, on Codex,
+  the model calls the run made, counted as their rollout records land (ruling 541). The strip's **Tokens** is `input_tokens + output_tokens`:
   total tokens processed. During a Claude run the row holds the adapter's live figure:
   each API message's whole prompt summed once per `message.id` (exact; it reproduced
   `result.usage` on every stored run) and an **estimate** of the output from the streamed
@@ -704,15 +720,16 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   placeholder of a few tokens (F35-1: a twelve-minute Opus run writing 20k characters read
   "49 tokens" until its result said 54,759). The prompt figures fold by max; the estimate
   folds by max while it is an estimate and is **replaced** by the provider's figure when
-  one lands (a Claude `result`, a Codex `turn.completed`), which also sets `usage_final =
-  1`. While `usage_final` is 0 the row is not a total: the Live run panel prints it as
-  `~n` with a tooltip, a Codex run whose turn has not ended prints "pending", and Insights
-  leaves the row out of its token sums. An errored result carrying an empty usage reports
+  one lands (a Claude `result`; on Codex each model call's record, from the first call
+  on, ruling 541), which also sets `usage_final = 1`. While `usage_final` is 0 the row is not a total: the Live run panel prints it as
+  `~n` with a tooltip, a Codex run before its first model call completes prints
+  "pending", and Insights leaves the row out of its token sums. An errored result carrying an empty usage reports
   nothing and leaves the estimate and the flag alone. Ending does not settle the question:
   a run somebody stopped, and one that errored before the provider replied, keep
   `usage_final = 0` for good, so the panel keeps the `~` on them and the Insights card
   names them ("N of M runs report no provider token total") instead of quietly
-  understating its sums. Adding the column to a root that predates it heals the rows it
+  understating its sums. A Codex run stopped or failed after a model call completed keeps
+  the provider's figures for the calls it made, `usage_final = 1` (ruling 541). Adding the column to a root that predates it heals the rows it
   already holds: a `finished` row's token columns were the provider's own figures before
   the estimate existed, so the boot healer stamps those 1; a stopped or errored row held
   the old placeholder and stays 0. Claude rows written before this normalization hold the
@@ -1092,7 +1109,8 @@ The strip's **Tokens** cell (F35-1) reads `RunView.tokens` and `tokensEstimated`
 with the tooltip "Estimated from the streamed text. The provider's own total replaces it
 when one lands; a run that was stopped never gets one" whenever the row's `usage_final` is
 0 (while the run is live and after it ends), "pending" while no usage envelope has landed
-at all and the run is still live (a Codex run before its turn ends), and the plain figure
+at all and the run is still live (a Codex run before its first model call completes,
+ruling 541), and the plain figure
 once the provider's total landed; on hover it says what the prompt cache wrote and read
 over the run (ruling 369).
 

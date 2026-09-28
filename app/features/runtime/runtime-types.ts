@@ -110,7 +110,8 @@ export interface LogLine {
      *  Absent when the result carried none, and on older lines. */
     models?: { model: string; in: number; cached: number; out: number; cost: number }[];
   } | null;
-  /** Codex turn.completed usage → raw `turn.completed.usage`. */
+  /** Codex turn.completed usage: the turn's own total (on a resumed thread the
+   *  raw `turn.completed.usage` is the thread's; ruling 541). */
   usage?: {
     input_tokens: number;
     cached_input_tokens: number;

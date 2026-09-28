@@ -243,15 +243,16 @@ export function createRunSink(
   let sessionId: string | null = spec.resumeSessionId ?? null;
   let started = false;
 
-  // Running usage totals. Both adapters emit CUMULATIVE figures (Codex's
-  // turn.completed carries the thread's running total; the Claude adapter sums
-  // its distinct API calls, and the result envelope then carries the SDK's own
-  // total), so max per field keeps the row monotone and lets the final figure
-  // win (tokens/cost from real envelopes ONLY — no fabrication).
+  // Running usage totals. Both adapters emit CUMULATIVE figures (the Codex
+  // adapter reads its turn's running total off the rollout after each model
+  // call, ruling 541; the Claude adapter sums its distinct API calls, and the
+  // result envelope then carries the SDK's own total), so max per field keeps
+  // the row monotone and lets the final figure win (tokens/cost from real
+  // envelopes ONLY — no fabrication).
   //
   // F35-1: output is the exception. The Claude adapter's live figure is an
   // ESTIMATE from the streamed text (`outputEstimated: true`), folded by max
-  // like the rest; a provider figure (a Claude result, a Codex turn.completed)
+  // like the rest; a provider figure (a Claude result, any Codex figure)
   // REPLACES it, because an estimate may overshoot and max would then keep the
   // wrong number for good. `usageFinal` records that a provider figure landed
   // (`agent_runs.usage_final`): the projection prints the row as an estimate

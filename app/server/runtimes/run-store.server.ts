@@ -49,9 +49,10 @@ export type AgentRunRow = {
   cached_input_tokens: number;
   output_tokens: number;
   /** F35-1: 1 once a PROVIDER usage figure landed on the row (a Claude result,
-   *  a Codex turn.completed), 0 while the token columns hold the Claude
-   *  adapter's live estimate or nothing at all. The projection prints an
-   *  estimated row as `~n`; Insights leaves it out of its token totals. */
+   *  a Codex run's first model call: ruling 541), 0 while the token columns
+   *  hold the Claude adapter's live estimate or nothing at all. The projection
+   *  prints an estimated row as `~n`; Insights leaves it out of its token
+   *  totals. */
   usage_final: number;
   total_cost_usd: number | null;
   /** The PERSON who interrupted the run (a users.id), else null. Never a

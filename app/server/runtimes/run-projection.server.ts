@@ -135,9 +135,9 @@ export function runLiveFacts(row: AgentRunRow): RunLiveFacts {
     step: row.step,
     turns: row.turns,
     // F35-1: null until a usage envelope has landed (a Codex run before its
-    // turn ends, a Claude run before its first API message) and the run is
-    // still live; a terminal row prints the figure it has rather than
-    // "pending" for ever.
+    // first model call completes, a Claude run before its first API message)
+    // and the run is still live; a terminal row prints the figure it has
+    // rather than "pending" for ever.
     tokens:
       row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
         ? null

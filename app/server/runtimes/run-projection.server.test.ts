@@ -343,8 +343,9 @@ describe("projectRunsForTask grouping", () => {
 /**
  * F35-1 (pass 35): the strip's Tokens cell tells an estimate from a total. A
  * live Claude row holds the adapter's estimate until the result lands
- * (`usage_final = 0`), a live Codex row holds nothing until its turn ends, and
- * a row the provider has totalled prints plain.
+ * (`usage_final = 0`), a live Codex row holds nothing until its first model
+ * call completes (ruling 541), and a row the provider has totalled prints
+ * plain.
  */
 describe("F35-1: tokens are marked estimated until the provider's total lands", () => {
   it("a running Claude row projects its live figure as an estimate", () => {

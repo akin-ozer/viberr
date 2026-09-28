@@ -981,9 +981,9 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
         usageText(inTok, cached, outTok) + (written > 0 ? ` · wrote ${(written / 1000).toFixed(1)}k` : "");
       return {
         display: { t, ev: "result", tag: "turn.completed", text, usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok } },
-        // Each completed turn counts as one turn (codex has no cumulative
-        // num_turns); the adapter overrides this with a running count for a
-        // multi-turn run, so the live Turns counter isn't stuck at 0.
+        // One turn; the adapter overrides it with the model calls the
+        // rollout recorded, and on a resumed thread, whose CLI figure is the
+        // THREAD's running total, it passes the turn's own usage (ruling 541).
         facts: {
           usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false },
           turns: 1,
