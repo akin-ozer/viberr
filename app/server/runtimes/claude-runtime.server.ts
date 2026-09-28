@@ -55,6 +55,13 @@ import {
   compactionMarkerEnv,
 } from "./run-processes.server";
 import { bashDenyPrefixes, deniedPrefixFor } from "./bash-policy.server";
+import {
+  DROP_FILE_TOOLS,
+  fileWriteDenyReason,
+  fileWriteRoots,
+  insideFileWriteRoots,
+  withoutConfinedFileTools,
+} from "./file-tool-policy.server";
 import { bashDenyReason } from "~/server/tasks/specialist-tool-policy";
 import {
   claudeSystemPromptBlocks,
@@ -248,7 +255,7 @@ export type ClaudeStopHook = (
 /** The SDK's `PreToolUse` callback, narrowed to the fields Viberr's hook reads
  *  and the one answer it gives. */
 export type ClaudePreToolUseHook = (
-  input: { hook_event_name: string; tool_input?: unknown },
+  input: { hook_event_name: string; tool_name?: string; tool_input?: unknown },
   toolUseId: string | undefined,
   options: { signal: AbortSignal },
 ) => Promise<ClaudeHookAnswer>;
@@ -265,6 +272,9 @@ export interface ClaudeHookAnswer {
 
 /** The Bash tool's input, read only for the command line. */
 const bashCommandSchema = z.object({ command: z.string() });
+
+/** A file tool's input, read only for the path it writes (ruling 564). */
+const filePathSchema = z.object({ file_path: z.string() });
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
   interrupt(): Promise<void>;
@@ -591,7 +601,7 @@ function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   if (granted.length === 0) return { native: [], dropped: [] };
   if (skillPluginInPlace(spec.skillPlugin)) return { native: granted, dropped: [] };
   logger.warn(
-    "the run's skill plugin is missing — starting with NO native skills",
+    "the run's skill plugin is missing; starting with NO native skills",
     { runId: spec.runId, plugin: spec.skillPlugin?.path ?? null, skills: granted },
   );
   return { native: [], dropped: granted };
@@ -605,7 +615,7 @@ function droppedSkillsNotice(dropped: readonly string[]): string {
     `The skills named above as attached to this run (${dropped.join(", ")}) ` +
     "could NOT be enabled: the plugin directory Viberr built for them was gone " +
     "by the time this run started, and Viberr enables no skill it cannot " +
-    "account for. Treat them as unavailable — do not invoke them by name — " +
+    "account for. Treat them as unavailable (do not invoke them by name) " +
     "and say so in your report if the work needed them."
   );
 }
@@ -891,7 +901,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     return {
       kind: "session_missing",
       message:
-        "The Claude session could not be resumed — its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+        "The Claude session could not be resumed: its transcript no longer exists (provider retention). Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
       providerText: "",
       facts: failureFacts("session_missing", evidence),
     };
@@ -1019,7 +1029,14 @@ interface AssembleContext {
   skillPlugin: RunSpec["skillPlugin"] | undefined;
   spawn: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
   phase: (name: string, step: string | null) => void;
-  emitPolicyDenied: (command: string, reason: string, toolUseId: string | undefined) => void;
+  /** The console's line for a hook's refusal: the tool, what it was called
+   *  on (a command line, or a file's path), and the reason. */
+  emitPolicyDenied: (
+    tool: string,
+    subject: string,
+    reason: string,
+    toolUseId: string | undefined,
+  ) => void;
   /** Ruling 527: the run's steering channel and the console's record of each
    *  delivery. Null on the completion compaction, whose single request is
    *  past the turn's final answer. */
@@ -1260,6 +1277,12 @@ function assembleClaudeOptions(
   //     just the persona prompt.
   //   - specialist: deny the git/gh commands for capabilities the profile
   //     withholds (push / PR / merge), computed upstream.
+  // Ruling 564: a run that posts files keeps its file tools when its grants
+  // withhold them; the hook below confines them to where its posting goes.
+  const writeRoots =
+    spec.kind === "operator" || spec.kind === "controller"
+      ? null
+      : fileWriteRoots(spec.disallowedTools, spec.attachmentsWritableDir);
   const denied = [
     // `Skill` leaves the base list for a run that mounted granted skills:
     // denying it would remove the tool from the model's context entirely
@@ -1282,8 +1305,10 @@ function assembleClaudeOptions(
     ...(spec.disallowedTools ?? []),
   ];
   // Ruling 370: sorted and deduplicated for the same reason as the
-  // servers above; the rules read the same whatever their order.
-  if (denied.length) options.disallowedTools = sortedNames(denied);
+  // servers above; the rules read the same whatever their order. The full
+  // list still names the withheld capability in the Bash hook's reasons.
+  const sdkDenied = writeRoots ? withoutConfinedFileTools(denied) : denied;
+  if (sdkDenied.length) options.disallowedTools = sortedNames(sdkDenied);
   // Ruling 101(e), amended (Option D PR 5): the prefix rules above match a
   // command by its leading words, and the pinned CLI, which already splits
   // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
@@ -1292,6 +1317,14 @@ function assembleClaudeOptions(
   // command reaching one, however wrapped, with a reason the model reads.
   // It runs before the rules and only ever denies, so the rules stay the
   // fence; a run whose Bash is denied outright needs none.
+  const refuse = (reason: string): ClaudeHookAnswer => ({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  });
+  const preToolUse: { matcher: string; hooks: ClaudePreToolUseHook[] }[] = [];
   const bashPrefixes = denied.includes("Bash") ? [] : bashDenyPrefixes(denied);
   if (bashPrefixes.length) {
     const policyHook: ClaudePreToolUseHook = async (input, toolUseId) => {
@@ -1299,17 +1332,24 @@ function assembleClaudeOptions(
       const prefix = deniedPrefixFor(command, bashPrefixes);
       if (!prefix) return {};
       const reason = bashDenyReason(prefix, denied, spec.kind === "reviewer");
-      ctx.emitPolicyDenied(command, reason, toolUseId);
-      return {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: reason,
-        },
-      };
+      ctx.emitPolicyDenied("Bash", command, reason, toolUseId);
+      return refuse(reason);
     };
-    options.hooks = { PreToolUse: [{ matcher: "Bash", hooks: [policyHook] }] };
+    preToolUse.push({ matcher: "Bash", hooks: [policyHook] });
   }
+  if (writeRoots) {
+    const fileHook: ClaudePreToolUseHook = async (input, toolUseId) => {
+      const tool = input.tool_name ?? "Write";
+      if (!DROP_FILE_TOOLS.some((t) => t === tool)) return {};
+      const filePath = filePathSchema.safeParse(input.tool_input).data?.file_path ?? "";
+      if (insideFileWriteRoots(filePath, writeRoots)) return {};
+      const reason = fileWriteDenyReason(tool, filePath, writeRoots);
+      ctx.emitPolicyDenied(tool, filePath, reason, toolUseId);
+      return refuse(reason);
+    };
+    preToolUse.push({ matcher: DROP_FILE_TOOLS.join("|"), hooks: [fileHook] });
+  }
+  if (preToolUse.length) options.hooks = { PreToolUse: preToolUse };
   // Ruling 371/373: the run's anchor comes back the moment its context
   // has been compacted (the `compact` source of `SessionStart`) — the
   // system prompt survives compaction, tool output and the summary's
@@ -1577,7 +1617,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         interruptTimer = setTimeout(() => {
           if (settled) return;
           logger.warn(
-            "claude run did not stop cooperatively — aborting the subprocess",
+            "claude run did not stop cooperatively; aborting the subprocess",
             { runId: spec.runId, graceMs: INTERRUPT_GRACE_MS },
           );
           try {
@@ -1594,7 +1634,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           interruptTimer = setTimeout(() => {
             if (settled) return;
             logger.warn(
-              "claude subprocess abort did not settle the run — forcing it",
+              "claude subprocess abort did not settle the run; forcing it",
               { runId: spec.runId, graceMs: INTERRUPT_ABORT_GRACE_MS },
             );
             onBackstop();
@@ -1608,7 +1648,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         idleTimer = setTimeout(() => {
           if (settled || interrupted) return;
           idleTimedOut = true;
-          logger.warn("claude run idle-timeout — no activity within the window", {
+          logger.warn("claude run idle-timeout: no activity within the window", {
             runId: spec.runId,
             idleMs,
           });
@@ -1648,18 +1688,26 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
        * Viberr writes one in that frame's shape, marked as its own, and it
        * projects exactly as a rule's deny does: an error line naming the tool.
        */
-      const emitPolicyDenied = (command: string, reason: string, toolUseId: string | undefined) => {
+      const emitPolicyDenied = (
+        tool: string,
+        subject: string,
+        reason: string,
+        toolUseId: string | undefined,
+      ) => {
         const occurredAt = new Date().toISOString();
         const envelope = {
           type: "system",
           subtype: "permission_denied",
           source: "viberr",
-          tool_name: "Bash",
+          tool_name: tool,
           tool_use_id: toolUseId ?? "",
           // The SDK's own word for a hook's decision; the reason names the policy.
           decision_reason_type: "hook",
           decision_reason: reason,
-          message: `Permission to use Bash with command ${command} has been denied.`,
+          message:
+            tool === "Bash"
+              ? `Permission to use Bash with command ${subject} has been denied.`
+              : `Permission to use ${tool} on ${subject} has been denied.`,
         };
         const { display, facts } = projectEnvelope("claude", envelope, occurredAt);
         cb.onLine({ raw: JSON.stringify(envelope), display, facts, occurredAt });
@@ -1775,8 +1823,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               ev: "err",
               tag: "run·error·idle_timeout",
               text:
-                `The run produced no output for ${idleMs} ms and was stopped as hung — ` +
-                "not a task failure. Re-prompt the agent to continue from its " +
+                `The run produced no output for ${idleMs} ms and was stopped as hung (` +
+                "not a task failure). Re-prompt the agent to continue from its " +
                 "session, or raise VIBERR_CLAUDE_IDLE_TIMEOUT_MS.",
             },
             facts: {},
@@ -1883,8 +1931,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 ev: "err",
                 tag: "run·error·max_turns",
                 text:
-                  `The run hit its ${resolveMaxTurns()}-turn cap and was cut off — ` +
-                  "not a task failure. Re-prompt the agent to continue from its " +
+                  `The run hit its ${resolveMaxTurns()}-turn cap and was cut off (` +
+                  "not a task failure). Re-prompt the agent to continue from its " +
                   "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
               },
               facts: {},
@@ -1908,8 +1956,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                 tag: "run·error·max_budget",
                 text:
                   `The run reached ${spec.maxSpendUsd ? `its ${formatUsd(spec.maxSpendUsd)} spending cap` : "its spending cap"}` +
-                  `${resultCostUsd !== null ? ` after spending ${formatUsd(resultCostUsd)}` : ""} and was cut off — ` +
-                  "not a task failure. Re-prompt the agent to continue from its session, or " +
+                  `${resultCostUsd !== null ? ` after spending ${formatUsd(resultCostUsd)}` : ""} and was cut off (` +
+                  "not a task failure). Re-prompt the agent to continue from its session, or " +
                   "raise the cap in Instance settings (Max spend per Claude run).",
                 failure,
               },

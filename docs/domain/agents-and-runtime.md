@@ -455,6 +455,19 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   and let `git -C . push` and `sh -c 'git push'` land. With the hook, all five were refused
   and nothing landed. The hook runs before the rules and only ever denies; the rules stay
   the fence.
+- File tools of a run that posts files (ruling 564). A specialist or review run with an
+  attachments folder (`spec.attachmentsWritableDir`, its profile holds
+  `attach-evidence-references`) whose grants deny `Edit`, `MultiEdit` and `Write` keeps
+  the three: `fileWriteRoots` (`file-tool-policy.server.ts`) names the folder and the temp
+  directory, the SDK is handed the denylist without them (`NotebookEdit` stays denied),
+  and a second `PreToolUse` hook, matcher `Edit|MultiEdit|Write`, refuses a call whose
+  `file_path` resolves outside both roots (symlinks resolved, so `/tmp` and `/private/tmp`
+  compare), naming the withheld grant and the folder. Its refusals write the same
+  `permission_denied` frame, named for the file tool. The Bash hook's reasons still read
+  the grants' whole denylist, so a refused `git commit` names the repo-write grant. The
+  operator and the controller never qualify. The run's disclosure takes the same
+  derivation: `tools.denied` drops the three and `tools.fileWriteRoots` lists the roots,
+  which the console's tools row states. Codex is unchanged (advisory, ruling 185).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
@@ -785,9 +798,9 @@ outcome, refusal }` with `outcome ∈ started | queued | refused` (ruling 263), 
 `admitRun` says whether it launched or parked, so every door that reports a dispatch says
 which of the three happened; a refusal quotes the run's own sentence. A queued run that
 later gets a slot writes a "Run started" note on its task ("The queued … run … got a slot
-and started — streaming to the agent logs", `noteRunStarted`, ruling 311). The cap is the
-instance setting `maxConcurrentRuns` (0 = unlimited, ceiling 64, Instance settings →
-set-concurrency).
+and started. It is streaming to the agent logs.", `noteRunStarted`, ruling 311). The cap
+is the instance setting `maxConcurrentRuns` (0 = unlimited, ceiling 64, Instance settings
+→ set-concurrency).
 
 **The coordination lane (ruling 152(b), pass 35).** A positive cap carries a lane of
 `coordinationLane(cap) = max(1, ceil(cap / 4))` extra slots for `operator` and
@@ -1169,7 +1182,7 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   dispatch sentence then says the task is pinned. F36-8 (pass 36): a run on a backend
   other than the profile's hands the profile's ORIGINAL model through to `startRun` (no
   pre-swap), so the F21-13 substitution notice opens the run log; the "Started a … run
-  (switched from …)" event names the model it ran on and the profile's own ("on `sonnet` —
+  (switched from …)" event names the model it ran on and the profile's own ("on `sonnet`:
   the profile's `gpt-5.6-luna` is a Codex model"), and a run that set the pin says later
   runs on this task stay on that backend. The `retry_other_backend` option says both
   before the human chooses.
@@ -1263,9 +1276,10 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   verdict from a run dispatched to deliver: its reply is its delivery, and its files stamp
   `deliveredAt` (ruling 555).
 - The timeline's dispatch sentence follows `startRun`'s outcome (`runDispatchLine`,
-  ruling 311): "Started a … run … — streaming to the agent logs." only when it started,
-  "Queued a … run … Nothing is streaming yet." when the cap parked it, and "Refused a …
-  run — <the run's own sentence>" when it was refused.
+  ruling 311): "Started a … run …. It is streaming to the agent logs." only when it
+  started, "Queued a … run … Nothing is streaming yet." when the cap parked it, and
+  "Refused a … run. <the run's own sentence>" when it was refused. None of the three
+  carries a dash (ruling 571).
 - The directive is on the record (R21-9): the task page's Run control writes the person's
   `@<agent> <prompt>` comment BEFORE the start, so it predates the run and no completion's
   deferred-mention window can redeliver it; a start that throws appends the person's own
@@ -1315,10 +1329,10 @@ and get the outcome envelope instead (§2.5).
 | `ask_human {title, body?, options?: [{title, detail?, reply?}]}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId`, audit `task.agent.packet_opened`, the owner's notification under the agent's name (ruling 222), filed as kind `question` with its own "Agent questions" toggle, pill and hand glyph (ruling 481(a); the Codex outcome envelope's question writes the same kind); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 298); refused while a packet is open. Only the option whose title ends "(Recommended)" is recommended; an unmarked list recommends nothing and the card preselects nothing. `reply: true` marks an option that needs the person's typed answer, which the card and `resolvePacket` require (ruling 478(e)); the Codex envelope's `question.options[]` carries the same `reply`. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 33), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 447, `answerNamesAnotherActor`) |
 | `report_outcome {summary, verdict?, evidence?, relay?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted; `relay` rides every variant | `evidence: [{label, result?, status}]` (ruling 526): what was checked, how it came out, and `pass`, `fail` or `info`; a row with no `status` is refused by the schema by name, nothing staged. Staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`}. `relay: [{taskKey, text}]` (ruling 488) is text for OTHER tasks of the same project, at most `RELAY_MAX_ENTRIES` (2); a third entry is refused by the schema by name, nothing staged, so the agent re-reports in the same run. The completion posts each entry (§4.4) |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
-| `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
+| `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
 | `read_timeline_entry {occurredAt}` | none; built with `read_board` | one entry of this task's timeline, whole, by the stamp the prompt's recent timeline prints after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)", 220 characters); read-only (ruling 563, `readTimelineEntry`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
-| `correct_knowledge_doc {kb, doc, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage, or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
+| `correct_knowledge_doc {kb, doc, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage, or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
 
 A specialist has no post tool of its own for another task (ruling 488): its reach there is
 the `relay` entries of the outcome it already reports, posted by the completion through the
@@ -1346,7 +1360,7 @@ resources, MCP server editor), per mounted server, derived from the same denylis
 
 | Withheld capability | Claude denies | Codex |
 |---|---|---|
-| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | advisory (ruling 185) |
+| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)`; a run with an attachments folder keeps `Edit MultiEdit Write`, confined by a hook to that folder and the temp directory (ruling 564) | advisory (ruling 185) |
 | `execute-code-or-write-repo`, org MCP write tools (ruling 176) | `mcp__<server>__<tool>` for each marked tool; an HTTP config also carries `always_deny` | that server's `disabled_tools` (binds) |
 | the same, on a server reached through the MCP gateway (ruling 461) | as above, and the gateway leaves the tool out of `tools/list` and refuses a call to it | as above, plus the gateway's filter and refusal |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
@@ -1806,7 +1820,8 @@ runtime's answer for a missing grant.
   any absent tool its own role description mentions (word-bounded; `go` excluded), so the
   persona and the measurement do not contradict each other in silence. The image ships
   `make`, `curl` and a pinned `pnpm` (from npm, not corepack) and deliberately no Docker
-  (`Dockerfile`, ruling 196).
+  (`Dockerfile`, ruling 196), and `poppler-utils` so a PDF an agent delivers or judges
+  can be rendered and looked at (`pdftoppm`, ruling 566).
 
 ## 7. Workspaces and git
 
@@ -1934,9 +1949,14 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    (ruling 174, §3.4): a Claude CLI leads its own group, so a server that died without
    shutting down did not take it along — in the image the launcher's PDEATHSIG now does
    (ruling 460), and the sweep, through the launcher's `--reap`, finds what a SIGKILLed
-   launcher's agent had already detached. One "Interrupted by a restart" note per task
-   lists what was running and, separately, what was queued and had not started (ruling
-   310(b)); then one `runOperator({ trigger: "manual" })` per affected task (controller
+   launcher's agent had already detached. Each specialist or review run that had started
+   first gets the completion effects a person's Stop gives it (`state: "interrupted"`,
+   replayed, ruling 567): its last words and the files it saved are posted under its
+   name, and a deliverer's files are recorded as the delivery (`deliveredAt`), unless
+   they are all browser working files (ruling 570). One
+   "Interrupted by a restart" note per task then lists what was running and, separately,
+   what was queued and had not started (ruling 310(b)); then, once every note is written,
+   one `runOperator({ trigger: "manual" })` per affected task (controller
    turns get a conversation note instead), capped at 3 per task per 30 min via
    `run.recovery.reinvoked` audit rows. **The cap is decided BEFORE the note is written**
    (ruling 198), so a capped task's note says what Viberr decided, why, and that running

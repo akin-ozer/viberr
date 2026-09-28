@@ -86,7 +86,7 @@ export function separateEvidence(
       if (lines.length <= maxLines) return whole;
       const head = lines.slice(0, 3).join("\n");
       const omitted = lines.length - 3;
-      return `\`\`\`${lang}\n${head}\n\`\`\`\n_(evidence trimmed by the evidence-separation guardrail — ${omitted} more lines in the agent logs)_`;
+      return `\`\`\`${lang}\n${head}\n\`\`\`\n_(evidence trimmed by the evidence-separation guardrail; ${omitted} more lines in the agent logs)_`;
     },
   );
 }
@@ -163,13 +163,13 @@ export function applyCommentGuardrails(input: {
  */
 export function commentOutcomeMessage(result: CommentGuardrailResult): string {
   if (result.dropped === "meaningless") {
-    return "NOT posted — the meaningful-comment guardrail dropped it as status chatter. Nothing was added to the timeline; say something substantive or stay silent.";
+    return "NOT posted: the meaningful-comment guardrail dropped it as status chatter. Nothing was added to the timeline; say something substantive or stay silent.";
   }
   if (result.dropped === "duplicate") {
-    return "NOT posted — identical to your previous comment (no-duplicate-summary guardrail). Nothing was added to the timeline.";
+    return "NOT posted: identical to your previous comment (no-duplicate-summary guardrail). Nothing was added to the timeline.";
   }
   if (result.trimmedBy.length > 0) {
-    return `Comment posted to the timeline, TRIMMED by ${result.trimmedBy.join(" + ")} — the full text is only in the agent logs.`;
+    return `Comment posted to the timeline, TRIMMED by ${result.trimmedBy.join(" + ")}; the full text is only in the agent logs.`;
   }
   return "Comment posted to the timeline.";
 }

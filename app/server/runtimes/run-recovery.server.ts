@@ -4,6 +4,7 @@ import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server"
 import { logger } from "~/server/logging/logger.server";
 import { createNotification, taskEventLink } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
+import type { runOperator } from "./operator-run.server";
 import { reapRunProcesses, type ReapRunProcesses, compactionRunId } from "./run-processes.server";
 import {
   agentGitLaunchFor,
@@ -106,6 +107,9 @@ export interface FinalizeOrphanedRunsDeps {
   /** The sweep (default: the real one), injectable so a test can see which
    *  runs it was asked to reap. */
   reapProcesses?: ReapRunProcesses;
+  /** The operator re-invoke (default: the real `runOperator`), replaceable the
+   *  way every other operator hand-off's is (`ctx.deps.runOperator`). */
+  runOperator?: typeof runOperator;
 }
 
 /**
@@ -188,7 +192,7 @@ export function finalizeOrphanedRuns(
   const orphans = db
     .prepare(
       `SELECT id, project_slug, task_key, kind, backend, credential_user_id,
-              credential_account_id, started_at
+              credential_account_id, started_at, agent_profile_id, role
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
@@ -198,6 +202,9 @@ export function finalizeOrphanedRuns(
     task_key: string;
     kind: string;
     backend: string;
+    /** Ruling 567: the agent whose saved files the restart must not orphan. */
+    agent_profile_id: string | null;
+    role: string | null;
     credential_user_id: string | null;
     /** Ruling 507: nullable — a run from before the ruling, or a refused one. */
     credential_account_id: string | null;
@@ -234,7 +241,17 @@ export function finalizeOrphanedRuns(
   // Ruling 310(b): `started` too. The sweep finalizes QUEUED runs as well as
   // running ones, and the note used to call every one of them "still running
   // when the server stopped" — false for a run that never got a slot.
-  const runsByTask = new Map<string, { id: string; kind: string; started: boolean }[]>();
+  const runsByTask = new Map<
+    string,
+    {
+      id: string;
+      kind: string;
+      started: boolean;
+      backend: string;
+      profileId: string | null;
+      role: string | null;
+    }[]
+  >();
   for (const run of orphans) {
     // Ruling 181 (pass 36): a Codex run's private CODEX_HOME is finished by the
     // adapter's settle — which a process that died never reached. Live
@@ -298,7 +315,14 @@ export function finalizeOrphanedRuns(
     });
     runsByTask.set(taskId, [
       ...(runsByTask.get(taskId) ?? []),
-      { id: run.id, kind: run.kind, started: run.started_at !== null },
+      {
+        id: run.id,
+        kind: run.kind,
+        started: run.started_at !== null,
+        backend: run.backend,
+        profileId: run.agent_profile_id,
+        role: run.role,
+      },
     ]);
   }
   // Ruling 198 (F37-19): the cap decision is taken BEFORE the restart note is
@@ -391,6 +415,18 @@ export function finalizeOrphanedRuns(
       // the row permanently, and this writer had it in hand.
       const ran = runs.filter((r) => r.started);
       const never = runs.filter((r) => !r.started);
+      // Ruling 567: an agent run the restart cut off gets the effects a
+      // person's Stop would have given it, before the note: its last words and
+      // the files it saved are posted under its name, and a deliverer's files
+      // are recorded as the delivery. Live on AWSC-7 the Calculator Builder had
+      // saved every result file when a deploy cut its run; the files belonged
+      // to nobody and `deliveredAt` stayed null, so the required reviewer's
+      // gate read "nothing delivered", the move to Review offered acceptance
+      // before the Judge had started, and its verdict could bind to nothing.
+      for (const r of ran) {
+        if ((r.kind !== "primary" && r.kind !== "reviewer") || !r.profileId) continue;
+        await replayInterruptedAgentRun(db, deps, t, r);
+      }
       const clause = (rs: typeof runs, tail: string): string =>
         `${rs.length === 1 ? "the run" : `${rs.length} runs`} ${rs.map(label).join(", ")} ${
           rs.length === 1 ? "was" : "were"
@@ -455,14 +491,21 @@ export function finalizeOrphanedRuns(
   let reinvokes: Promise<void> = Promise.resolve();
   if (toReinvoke.length > 0) {
     reinvokes = (async () => {
-      const { runOperator } = await import("./operator-run.server");
+      // Ruling 567: after the notes, so the operator reads a delivery the
+      // replay above recorded and the note that says why it ran again.
+      await notes;
+      const reinvoke = deps.runOperator ?? (await import("./operator-run.server")).runOperator;
       for (const t of toReinvoke) {
         try {
-          await runOperator(db, {
+          const input: Parameters<typeof reinvoke>[1] = {
             projectSlug: t.projectSlug,
             taskKey: t.taskKey,
             trigger: "manual",
-          });
+          };
+          // The root the notes above were written under (the process default
+          // at boot, which passes none).
+          if (deps.dataRoot) input.dataRoot = deps.dataRoot;
+          await reinvoke(db, input);
         } catch (error) {
           logger.warn("operator re-invoke after orphan finalize failed", {
             taskKey: t.taskKey,
@@ -485,6 +528,51 @@ export function finalizeOrphanedRuns(
     // run when the server came back.
     claimedTasks: new Set(realTasks.keys()),
   };
+}
+
+/**
+ * Ruling 567: the completion effects of one agent run a restart cut off, as
+ * `state: "interrupted"` (what a person's Stop gets): the reply and the files
+ * the run saved, a deliverer's recorded as the delivery. A replay, so no
+ * deferred @mention is redelivered (ruling 211(c)); an interrupted run never
+ * reacts, so the operator re-invoke below stays the only one. Best-effort: a
+ * failure is logged and the restart note still lands.
+ */
+async function replayInterruptedAgentRun(
+  db: DatabaseSync,
+  deps: FinalizeOrphanedRunsDeps,
+  t: { projectSlug: string; taskKey: string },
+  r: { id: string; kind: string; backend: string; profileId: string | null; role: string | null },
+): Promise<void> {
+  if (!r.profileId) return;
+  try {
+    const [{ applyAgentCompletionEffects }, { agentMentionHandle }] = await Promise.all([
+      import("~/server/tasks/task-actions.server"),
+      import("~/server/tasks/agent-reply.server"),
+    ]);
+    await applyAgentCompletionEffects(
+      db,
+      deps.dataRoot ? { dataRoot: deps.dataRoot } : {},
+      {
+        projectSlug: t.projectSlug,
+        taskKey: t.taskKey,
+        backend: r.backend === "codex" ? "codex" : "claude",
+        profileId: r.profileId,
+        role: r.role ?? "",
+        delivers: r.kind === "primary",
+        workdir: null,
+        agentHandle: agentMentionHandle({ profileId: r.profileId }),
+        replayed: true,
+      },
+      { id: r.id, state: "interrupted" },
+    );
+  } catch (error) {
+    logger.warn("replaying a restart-interrupted run's effects failed", {
+      runId: r.id,
+      taskKey: t.taskKey,
+      err: toError(error),
+    });
+  }
 }
 
 /**
@@ -574,19 +662,19 @@ function abandonedWaitNote(
   if (!last) {
     return (
       `${head}No agent run has ever been started on it, so nothing was interrupted and nothing ` +
-      `was lost — the wait was recorded without a dispatch ever reaching a process.${tail}`
+      `was lost; the wait was recorded without a dispatch ever reaching a process.${tail}`
     );
   }
   if (last.started_at === null) {
     return (
-      `${head}Its most recent run \`${last.id}\` never started — it was ${last.state} and had ` +
+      `${head}Its most recent run \`${last.id}\` never started: it was ${last.state} and had ` +
       `no process, so there is no work to have lost.${tail}`
     );
   }
   const when = last.finished_at ? ` at ${last.finished_at}` : "";
   return (
     `${head}The run it was waiting for, \`${last.id}\`, ended${when} (${last.state}), and the ` +
-    `follow-up that would have moved the task did not run — which is why the wait outlived it. ` +
+    `follow-up that would have moved the task did not run, which is why the wait outlived it. ` +
     `The run's own record is intact; what is missing is the step after it.${tail}`
   );
 }

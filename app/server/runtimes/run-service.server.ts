@@ -616,7 +616,7 @@ function singleFlightConflict(
       code: ERROR_CODES.CONFLICT,
       status: 409,
       userMessage:
-        "This agent already has a run in progress on this task — wait for it to finish or interrupt it before starting another.",
+        "This agent already has a run in progress on this task. Wait for it to finish or interrupt it before starting another.",
     });
   }
   return null;
@@ -672,7 +672,7 @@ export function reserveRun(
     const parsed = sqliteErrorSchema.safeParse(error);
     const conflict = singleFlightConflict(input.kind, parsed.success ? parsed.data : null);
     if (conflict) throw conflict;
-    logger.warn("run reservation could not be written — preparing invisibly", {
+    logger.warn("run reservation could not be written; preparing invisibly", {
       taskKey: input.taskKey,
       err: toError(error),
     });
@@ -935,7 +935,7 @@ export async function startRun(
       "Pick a model from this backend's list on the agent profile."
     : null;
   if (modelSubstitution) {
-    logger.warn("run model is foreign to its backend — substituted", {
+    logger.warn("run model is foreign to its backend; substituted", {
       runId,
       taskKey: input.taskKey,
       backend: input.backend,
@@ -1484,7 +1484,7 @@ function sessionMissingMessage(
 ): string {
   const label = BACKEND_LABEL[backend];
   if (reason === "owner_changed") {
-    return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
+    return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone; it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
   }
   if (reason === "transcript_damaged") {
     return `The ${label} session ${sessionId} could not be resumed: its provider transcript is damaged. The rollout does not start with the session's metadata, and the CLI refuses to resume it without that. Nothing is wrong with the credential. The agent re-anchored on task.md and continued with a fresh session.`;
@@ -1564,7 +1564,7 @@ function continuityResetPreamble(
           `The recent-conversation digest in the prompt below carries the last stored turns, and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
         ].join(" ")
       : [
-          `[continuity notice] Your previous ${label} session for this conversation is gone — the provider transcript no longer exists, so none of the earlier exchange is in your context.`,
+          `[continuity notice] Your previous ${label} session for this conversation is gone: the provider transcript no longer exists, so none of the earlier exchange is in your context.`,
           `The recent-conversation digest in the prompt below and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
         ].join(" ");
   }
@@ -1580,7 +1580,7 @@ function continuityResetPreamble(
       .join(" ");
   }
   return [
-    `[continuity notice] Your previous ${label} session for this task is gone — the provider transcript no longer exists, so none of that conversation is in your context.`,
+    `[continuity notice] Your previous ${label} session for this task is gone: the provider transcript no longer exists, so none of that conversation is in your context.`,
     `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
   ].join(" ");
 }
@@ -1648,7 +1648,7 @@ async function noteContinuityReset(
             ? // Ruling 372: a decision, said as one — the session is intact.
               `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${wholeThousands(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
             : reason === "owner_changed"
-            ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+            ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands, so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
             : reason === "transcript_damaged"
             ? // Ruling 434: there, and refused. Not a sweep, and not the credential.
               `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread has a damaged provider transcript. Its rollout does not start with the session's metadata, which the CLI needs to resume it. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`
@@ -1985,8 +1985,8 @@ export async function resumeRun(
           : "transcript_gone";
     logger.warn(
       stale
-        ? "stale large session set aside — starting fresh on task.md and the last report"
-        : "runtime continuity lost — re-anchoring on task.md",
+        ? "stale large session set aside; starting fresh on task.md and the last report"
+        : "runtime continuity lost; re-anchoring on task.md",
       {
         runId: prev.id,
         taskKey: prev.task_key,
@@ -2729,7 +2729,7 @@ export function interruptRunOnClosure(
     cause: closure.cause,
     closedBy: closure.byUserId,
   });
-  logger.info("run interrupted — the task closed", {
+  logger.info("run interrupted: the task closed", {
     runId: input.runId,
     cause: closure.cause,
     by: closure.byUserId,
@@ -2763,7 +2763,7 @@ export function interruptRunOnConversationDeletion(
     SYSTEM_ACTOR,
     { reason: "conversation-deleted", deletedBy },
   );
-  logger.info("run interrupted — its conversation was deleted", { runId, by: deletedBy });
+  logger.info("run interrupted: its conversation was deleted", { runId, by: deletedBy });
   return "interrupted";
 }
 
@@ -2848,7 +2848,7 @@ async function noteRunStarted(
         type: "note",
         actor: { kind: "system", systemId: "run-queue" },
         title: "Run started",
-        text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started — streaming to the agent logs.`,
+        text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started. It is streaming to the agent logs.`,
         toAgent: false,
         evidence: null,
       });

@@ -869,7 +869,7 @@ export async function reconcileWorkspaceDelivery(
     };
   } catch (error) {
     // Reconciliation must NEVER error the run. Log and move on.
-    logger.info("workspace delivery reconciliation failed — skipping", {
+    logger.info("workspace delivery reconciliation failed; skipping", {
       taskKey,
       err: errorMessage(error),
     });

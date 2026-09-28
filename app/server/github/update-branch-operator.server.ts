@@ -695,7 +695,7 @@ export async function operatorUpdateBranchFromBase(
     return {
       outcome: "denied",
       message:
-        "Your policy asks a human before the task branch is moved — open a decision packet proposing the update instead of performing it.",
+        "Your policy asks a human before the task branch is moved; open a decision packet proposing the update instead of performing it.",
     };
   }
   const ref = {
@@ -1057,8 +1057,8 @@ async function routeConflict(
     message:
       `${sentence} ` +
       (packet.outcome === "done"
-        ? "Opened a blocking decision packet for a human to resolve — do not retry this yourself."
-        : `A decision packet could NOT be opened (${packet.message}) — say so and ask a human to resolve the branch.`),
+        ? "Opened a blocking decision packet for a human to resolve; do not retry this yourself."
+        : `A decision packet could NOT be opened (${packet.message}); say so and ask a human to resolve the branch.`),
   };
   // Ruling 443: the packet is this step's outcome, not a refusal of it.
   if (packet.outcome === "done") conflicted.openedPacket = true;

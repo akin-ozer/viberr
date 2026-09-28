@@ -141,7 +141,7 @@ export function requireProjectMutable(
     throw new AppError({
       code: ERROR_CODES.CONFLICT,
       status: 409,
-      userMessage: `This project is archived (read-only) — restore it before you ${what}.`,
+      userMessage: `This project is archived (read-only). Restore it before you ${what}.`,
     });
   }
 }

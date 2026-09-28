@@ -302,7 +302,7 @@ describe("writeTaskAttachment", () => {
     expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
   });
 
-  it("ruling 566: stores a file of any kind, and serves one a browser could run only as a download", () => {
+  it("ruling 574: stores a file of any kind, and serves one a browser could run only as a download", () => {
     setRoot();
     // CANARY: put an extension check back in `checkAttachmentUpload` and a
     // person's `.tf` or `.docx` is refused before any agent could read it.
@@ -446,15 +446,15 @@ describe("ruling 558: a file put down for someone else", () => {
 });
 
 /**
- * Ruling 566: a reader takes a file by its bytes, not its name. Any file whose
+ * Ruling 574: a reader takes a file by its bytes, not its name. Any file whose
  * head holds no NUL byte (git's own `-text` test) reads as text, and a binary
  * one is named, with what the reader takes instead.
  */
-describe("ruling 566: readTaskAttachment reads any text file", () => {
+describe("ruling 574: readTaskAttachment reads any text file", () => {
   it("reads a text file of any name, and names a binary one rather than guessing", () => {
     // CANARY: gate the text read on `READABLE_TEXT_EXTENSIONS` again and the
     // `.tf` is refused as an unknown kind.
-    const root = mkdtempSync(path.join(tmpdir(), "viberr-566-"));
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-574-"));
     try {
       const put = (name: string, bytes: Uint8Array) => writeTaskAttachment("p1", "VIB-1", name, bytes, root);
       put("main.tf", new TextEncoder().encode('resource "aws_instance" "web" {}\n'));

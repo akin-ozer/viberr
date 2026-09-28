@@ -872,7 +872,7 @@ export function mcpStoreAccessNote(paths: readonly string[]): string | null {
     `This command is pointed at ${paths.join(", ")}, inside Viberr's own store. ` +
     "An agent holding this grant can read and (if the server offers write tools) " +
     "REWRITE the knowledge bases, skills and agent profiles Viberr injects into " +
-    "runs — including the rules its own reviewers judge it against. Ruling 176's " +
+    "runs, including the rules its own reviewers judge it against. Ruling 176's " +
     "write-tool marking does not cover this: it binds only on a run that withholds " +
     "execute-code-or-write-repo, and an agent that runs tests holds it. Grant this " +
     "server deliberately, or point it somewhere else."
@@ -975,7 +975,7 @@ function openMcpCredential(
 ): McpCredentialState {
   if (!isSecretBox(credRef)) {
     logger.error(
-      "mcp credential is in a legacy/unreadable format — the server will NOT be mounted",
+      "mcp credential is in a legacy/unreadable format; the server will NOT be mounted",
       { mcp: name },
     );
     return {
@@ -999,7 +999,7 @@ function openMcpCredential(
           mcp: name,
         });
       } catch (error) {
-        logger.warn("could not re-seal an MCP credential — read still succeeded", {
+        logger.warn("could not re-seal an MCP credential; read still succeeded", {
           mcp: name,
           err: toError(error),
         });
@@ -1008,7 +1008,7 @@ function openMcpCredential(
     return { state: "ok", token: opened.plaintext };
   } catch (error) {
     logger.error(
-      "mcp credential failed to decrypt under every configured key — the server will NOT be mounted",
+      "mcp credential failed to decrypt under every configured key; the server will NOT be mounted",
       {
         mcp: name,
         err: toError(error),
@@ -1053,7 +1053,7 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
   try {
     return { token: openSecretRotating(sealed).plaintext, unreadable: false };
   } catch (error) {
-    logger.error("mcp credential failed to decrypt on save — probing no-auth", {
+    logger.error("mcp credential failed to decrypt on save; probing no-auth", {
       mcp: name,
       err: toError(error),
     });

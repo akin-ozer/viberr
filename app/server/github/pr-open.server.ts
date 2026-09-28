@@ -237,7 +237,7 @@ function prBodyOrigin(
   const origin = ctx.appOrigin ?? appOrigin();
   if (!origin) {
     logger.debug(
-      "PR body omits the task back-link — no absolute app origin; set BETTER_AUTH_URL",
+      "PR body omits the task back-link: no absolute app origin; set BETTER_AUTH_URL",
       { taskKey: input.taskKey, projectSlug: input.projectSlug },
     );
   }

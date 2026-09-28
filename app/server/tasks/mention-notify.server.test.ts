@@ -178,7 +178,7 @@ describe("notifyMentionedUsers", () => {
     expect(row!.text).toContain("…");
     // Ruling 233: the head window stands when the mention is inside it, with no
     // leading ellipsis: the quote opens on the comment.
-    expect(String(row!.text)).toContain("mentioned you — “@arda done.");
+    expect(String(row!.text)).toContain("mentioned you: “@arda done.");
   });
 
   /**

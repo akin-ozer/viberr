@@ -7,7 +7,7 @@ import {
 import { prettySize } from "~/shared/text/byte-size";
 
 /**
- * Ruling 565: what a composer decides about files before the server sees
+ * Ruling 573: what a composer decides about files before the server sees
  * anything: which picks it keeps, and whether a paste is text or a file. The
  * rules alone, apart from the tray that draws them (`attach-files.tsx`), so a
  * form that draws its own (the New task dialog, ruling 533) ships none of it.

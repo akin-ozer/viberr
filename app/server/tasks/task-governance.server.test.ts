@@ -1027,7 +1027,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]?.text).toBe(
-      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. **Run operator** on the task page restarts it — that control belongs to a maintainer or an admin, so ask one if you do not see it.",
+      "**Decision:** hold for runtime debug. VIB-1 stays blocked while the provider-native session is inspected. Coordination is paused and no operator run was started. **Run operator** on the task page restarts it; that control belongs to a maintainer or an admin, so ask one if you do not see it.",
     );
     // A repeat confirm on the resolved packet is refused.
     await expect(
@@ -3273,7 +3273,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     expect(texts.some((t) => t.includes("was **not** moved"))).toBe(false);
     const move = texts.find((t) => t.startsWith("**Transition:**"))!;
     expect(move).toContain(
-      "> Send VIB-1 back to Implementation — The race test the rulings require is missing.",
+      "> Send VIB-1 back to Implementation: The race test the rulings require is missing.",
     );
   });
 
@@ -3624,10 +3624,10 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await answer(0);
     await answer(0);
     // CANARY: drop the `includes` guard and the goal holds the block twice.
-    expect(copies("Stripe — Hosted Stripe Checkout.")).toBe(1);
+    expect(copies("Stripe: Hosted Stripe Checkout.")).toBe(1);
     // A different answer is a new decision, and it is written.
     await answer(1);
-    expect(copies("Mock-only — Deterministic, non-monetary.")).toBe(1);
+    expect(copies("Mock-only: Deterministic, non-monetary.")).toBe(1);
     expect(copies("the decision wins")).toBe(2);
     // Each answer is still on the timeline.
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
@@ -3667,6 +3667,35 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     await answer(ask("Reviewer has requested changes 3 times running"));
     await answer(ask("Reviewer has requested changes 4 times running"));
     expect(goalOf(store).split("requested changes").length - 1).toBe(1);
+  });
+
+  /**
+   * Ruling 571 joins an option's title and detail with a colon. A goal written
+   * before it holds the same decision joined with a dash, and the first answer
+   * after the deploy must still find it there rather than write it again.
+   */
+  it("ruling 571: a decision the goal holds from before, joined with a dash, is not written again", async () => {
+    const store = setupProjectedStore(ctx);
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.goal =
+        `${parsed.goal.trimEnd()}\n\n---\n\n` +
+        "**Decision — 2026-09-20, Arda answered “Choose the payment provider”:**\n\n" +
+        "Stripe — Hosted Stripe Checkout.\n\n" +
+        "This decision is part of the task's contract from here on. Where anything " +
+        "above contradicts it, the decision wins — it was made by the person the " +
+        "question was put to, and it is not an agent overstepping.";
+    });
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: compare the stored answer without reading its dash as the colon
+    // and the goal holds this decision twice.
+    expect(goalOf(store).split("the decision wins").length - 1).toBe(1);
+    expect(goalOf(store)).not.toContain("Stripe: Hosted Stripe Checkout.");
   });
 
   it("keeps the original goal above it — the amendment adds, never replaces", async () => {

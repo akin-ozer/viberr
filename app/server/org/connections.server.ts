@@ -472,12 +472,12 @@ function failureMessage(validation: PatValidation): string {
     // sentence named `workflow` for three passes after the owner dropped it —
     // telling people to widen a token Viberr no longer wants.
     return (
-      `Validation failed — token is missing ${missing}. ` +
+      `Validation failed: token is missing ${missing}. ` +
       `Minimum scopes: ${DEFAULT_REQUIRED_SCOPES.join(" · ")}. Nothing was saved.`
     );
   }
   const detail = validation.detail.trim().replace(/\.?$/, ".");
-  return `Validation failed — ${detail} Nothing was saved.`;
+  return `Validation failed: ${detail} Nothing was saved.`;
 }
 
 interface ValidatedToken {
@@ -515,7 +515,7 @@ async function reachFor(
 function patValidationThrottle(actor: AuditActor): string | null {
   const key = actor.userId ?? actor.label;
   if (getPatValidationRateLimiter().tryConsume(key)) return null;
-  return "Too many token validations — wait a few minutes and try again. Nothing was saved.";
+  return "Too many token validations. Wait a few minutes and try again. Nothing was saved.";
 }
 
 /**
@@ -555,13 +555,13 @@ async function validateConnectionToken(
     if (user.kind === "http" && user.status === 404) {
       return {
         ok: false,
-        message: `Validation failed — github.com/${owner} was not found. Nothing was saved.`,
+        message: `Validation failed: github.com/${owner} was not found. Nothing was saved.`,
       };
     }
     if (user.kind === "network") {
       return {
         ok: false,
-        message: `Validation failed — GitHub is unreachable. Nothing was saved.`,
+        message: `Validation failed: GitHub is unreachable. Nothing was saved.`,
       };
     }
     // Other HTTP failures: keep the connection (scope validation passed).
@@ -637,7 +637,7 @@ export async function createConnection(
   return {
     status: "saved",
     connection,
-    toast: `${owner} connected — scopes verified${expiry ? `, expires ${expiry}` : ""}${reachClause(connection)}`,
+    toast: `${owner} connected: scopes verified${expiry ? `, expires ${expiry}` : ""}${reachClause(connection)}`,
   };
 }
 
@@ -702,7 +702,7 @@ export async function replaceConnectionToken(
   return {
     status: "saved",
     connection,
-    toast: `Token for ${existing.owner} replaced — scopes verified${expiry ? `, expires ${expiry}` : ""}${reachClause(connection)}`,
+    toast: `Token for ${existing.owner} replaced: scopes verified${expiry ? `, expires ${expiry}` : ""}${reachClause(connection)}`,
   };
 }
 
@@ -853,7 +853,7 @@ export function setDefaultConnection(
   });
   return {
     status: "ok",
-    toast: "Default connection updated — new projects start from it",
+    toast: "Default connection updated; new projects start from it",
   };
 }
 

@@ -65,7 +65,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher; signed out answers a 401 with the `signedOut` view (GET, which names only the scope asked about and reads nothing) or `{ ok:false, error }` (POST), never a login redirect | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448). Its `clientLoader` answers a failed load with null (the open panel's loading lines) and its `clientAction` a failed send with `{ ok:false }` (the send's toast), never root's error page (ruling 457) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
 | `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false; a signed-out request gets a 401, never a login redirect, and its `clientLoader` turns any failed load into the bell's failure row (ruling 457) | |
 | `/resources/attention` | `resources.attention.ts` | user; a signed-out request (or a pending password reset) gets a 401, never a login redirect | ruling 481(c): `{ waiting, items }` (`attentionSnapshot`), the viewer's unread decisions (an operator packet, an agent question, a recommendation to approve) that lead somewhere, and the newest ten worded for a desktop notification with the bell's destination. `Cache-Control: no-store`; `shouldRevalidate` false. The root's attention watcher reads it with a plain `fetch` | |
-| `/resources/controller-file/:id` | `resources.controller-file.ts` | the conversation's owner or a live org admin; anyone else, and a file that does not exist, 404 | one file sent with a controller message (ruling 565): the task route's serving rules (`nosniff`, a sandbox CSP, only the inline whitelist rendered, `?download=1` for the save dialog), the name in an ASCII `filename` and a UTF-8 `filename*` | |
+| `/resources/controller-file/:id` | `resources.controller-file.ts` | the conversation's owner or a live org admin; anyone else, and a file that does not exist, 404 | one file sent with a controller message (ruling 573): the task route's serving rules (`nosniff`, a sandbox CSP, only the inline whitelist rendered, `?download=1` for the save dialog), the name in an ASCII `filename` and a UTF-8 `filename*` | |
 | `/resources/controller-unseen` | `resources.controller-unseen.ts` | user; signed out answers a 401 with an empty status, never a login redirect | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 457). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself, and its `clientLoader` answers a failed load with null (no dot, no working poll) | |
 | `/resources/mcp-oauth/callback` | `resources.mcp-oauth.callback.ts` | org admin (a signed-out admin goes through `/login` and back with the query) | where an MCP server's authorization server sends the browser after an OAuth sign-in started in Instance settings (ruling 469): spends the `state` once (bound to the session that started it), exchanges the code with the PKCE verifier, seals the tokens, probes the connection, and answers a plain page (`MCP sign-in`, no-store, no referrer, no token, code or state in it) that says the tab can be closed; a refused callback is a 400 page with the reason | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user; signed out answers a 401 `{ error: { code: "unauthorized", message } }`, never a login redirect | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts, whose card keeps what its page drew when a poll answers 401 or fails (its `clientLoader` answers a failed poll with null); an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
@@ -210,7 +210,7 @@ Intents behind `project.task.tsx` are explained in
   476(a), (c), (i)). A reader scrolled away from the newest message gets a jump back at the
   foot of the box, "New reply" when one landed meanwhile and "Latest" otherwise, and both
   set the thread as one centred column with the person's messages as bubbles and each reply
-  as unframed text (ruling 564); the open panel has its
+  as unframed text (ruling 572); the open panel has its
   own always-mounted status region that says "<name> replied: <first sentence>" for the
   thread on screen, and the working row is no live region (ruling 476(d)). Root ships only the button, the panel's frame and header; the panel's body
   loads on the first open, preloaded on hover or focus (ruling 457). The dock's data
@@ -473,11 +473,13 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   `app/features`, `app/routes`, `app/ui`, `app.css` and the top-level render files), in
   any string literal under `app/server`, `app/schemas`, `app/shared` or `app/lib`, or in
   a seeded agent definition or skill doc outside its named prompt sentences; every
-  top-level entry under `app/` must be claimed by one of these scans. Em and en dashes
-  are banned from the same rendered copy and from the seed assets (P21: reword with a
-  comma, period, colon or parentheses). "primary specialist" may not appear in rendered
-  or server-built copy (the capability id `assign-primary-specialist` excepted); say
-  "delivering agent".
+  top-level entry under `app/` must be claimed by one of these scans. Em and en dashes,
+  typed or spelled as an escape or an HTML entity, are banned from the same rendered copy,
+  from the seed assets (P21: reword with a comma, period, colon or parentheses) and from
+  every string literal under the same four server roots, prompts and log lines included
+  (ruling 571; its one exemption is the task.md glyph for an empty evidence result).
+  "primary specialist" may not appear in rendered or server-built copy (the capability id
+  `assign-primary-specialist` excepted); say "delivering agent".
 - **Retired "specialist" wording** (`app/features/retired-vocabulary.test.tsx`): no
   seeded agent asset teaches the retired "primary specialist" model; no
   operator-recommendation chip renders "specialist"; the Agents
@@ -544,11 +546,11 @@ base`, `Edit MCP server`, `GitHub sign-in`).
 - **A person may attach a file to a task** (ruling 379): the Attachments panel renders
   for every task and carries an "Attach a file" control for a viewer holding
   `attach-file` (contributor and above) on a task that is not archived. The picker offers
-  any kind of file (ruling 566); the writer refuses a traversing or dot-prefixed name and
+  any kind of file (ruling 574); the writer refuses a traversing or dot-prefixed name and
   anything over 10 MB (`MAX_UPLOAD_BYTES`). Every file name carries its whole self in `title`, and under
   the 720px breakpoint a file row gives the name its own line, whole, with "by <actor> ·
   <time>" and the size under it (ruling 478(b)).
-- **Every chat takes files** (rulings 565 and 566): the controller page, the controller
+- **Every chat takes files** (rulings 573 and 574): the controller page, the controller
   dock and a task's comment composer (for a viewer holding `attach-file`) share one tray
   (`app/ui/attach-files.tsx`): a paperclip, a drop on the composer (its frame dashed while
   files are held over it) and a pasted screenshot, shown as removable chips, a picture as

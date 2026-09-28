@@ -436,7 +436,7 @@ export interface WrittenAttachment {
  * The refusals every person's upload meets, before anything is written: an
  * empty or dot-prefixed name the store scanner would then hide, a name that
  * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
- * 566: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored. Ruling 533:
+ * 574: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored. Ruling 533:
  * a task filed with its input checks every file here before its key is
  * allocated, so a refused file costs no key.
  */
@@ -450,7 +450,7 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
     // dot-files, so this one would be written, reported as saved, and then be
     // invisible to the panel and to every agent run.
     throw AppError.validation(
-      `A file name cannot start with a dot — “${cleaned}” would be hidden from this task and from every agent run.`,
+      `A file name cannot start with a dot: “${cleaned}” would be hidden from this task and from every agent run.`,
     );
   }
   // Ruling 533: every name the store's resolver refuses is refused here, by a
@@ -469,7 +469,7 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
 }
 
 /**
- * Rulings 533 and 565: every file a batch carries is checked before anything
+ * Rulings 533 and 573: every file a batch carries is checked before anything
  * is written, by the rules one upload meets, and the batch by its own: at most
  * {@link ATTACHMENT_BATCH_MAX} files and {@link ATTACHMENT_BATCH_MAX_BYTES},
  * and no two names one case apart. One refused file refuses the batch.
@@ -820,7 +820,7 @@ function readCap(ext: string): number {
 /** How much of a file's head the text test reads: git's own window. */
 const BINARY_SNIFF_BYTES = 8_000;
 
-/** Ruling 566: a file whose bytes are not text, named with what a reader
+/** Ruling 574: a file whose bytes are not text, named with what a reader
  *  takes instead of guessed at from its name. */
 function binaryFile(name: string, ext: string, bytes: number, where: string): AttachmentContent {
   return {
@@ -844,9 +844,9 @@ function tooLargeToRead(name: string, ext: string, bytes: number, where: string)
 }
 
 /**
- * Ruling 565: one file for a reader, from bytes already in hand: text as
+ * Ruling 573: one file for a reader, from bytes already in hand: text as
  * text, a spreadsheet as its sheets in CSV (ruling 533), an image as the image
- * after its own header is checked, and (ruling 566) any other file as text
+ * after its own header is checked, and (ruling 574) any other file as text
  * unless its bytes are binary. The task's reader and the controller's
  * reader of a message's files share it; `where` says where a person opens the
  * file instead ("on the task page", "in the conversation").
@@ -884,7 +884,7 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
     if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
     return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
   }
-  // Ruling 566: any other name reads as text unless it names a binary kind
+  // Ruling 574: any other name reads as text unless it names a binary kind
   // or its bytes say otherwise: a NUL in its head (git's own `-text` test,
   // ruling 363's) marks a binary.
   if (

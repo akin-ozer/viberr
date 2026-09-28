@@ -35,13 +35,13 @@ interface WaitingActionsProps {
   /** The door that answers them: the dock's resource route. Absent, the
    *  page's own route. */
   action?: string;
-  /** Ruling 565: the files the message carries, handed back with its text. */
+  /** Ruling 573: the files the message carries, handed back with its text. */
   files?: readonly MessageFile[] | undefined;
   onRetracted: (text: string, files: readonly File[]) => void;
 }
 
 /**
- * Ruling 565: a waiting message's files as the composer holds them, read back
+ * Ruling 573: a waiting message's files as the composer holds them, read back
  * BEFORE the retract, since a retracted message takes its files with it.
  */
 async function fetchBack(files: readonly MessageFile[]): Promise<File[]> {
@@ -61,7 +61,7 @@ async function fetchBack(files: readonly MessageFile[]): Promise<File[]> {
  * into the running turn at its next step (the server sends it next instead
  * when that turn can take no more). **Retract** takes back a message nothing
  * has read, queued or waiting to steer: it leaves the conversation and its
- * text goes back to the composer (ruling 565: its files to the tray). Rendered for the conversation's owner only;
+ * text goes back to the composer (ruling 573: its files to the tray). Rendered for the conversation's owner only;
  * the server re-checks both. A message that is not waiting renders nothing
  * and mounts no fetcher.
  */
@@ -86,7 +86,7 @@ function WaitingMessageActions({
 }: WaitingActionsProps & { state: WaitingState }): React.ReactNode {
   const fetcher = useFetcher<WaitingActionResult>();
   const push = useToast();
-  // Ruling 565: the files read back for a retract, until it answers.
+  // Ruling 573: the files read back for a retract, until it answers.
   const heldFiles = useRef<readonly File[]>([]);
   const [reading, setReading] = useState(false);
   useFetcherResult(fetcher, (result) => {

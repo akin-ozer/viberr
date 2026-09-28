@@ -827,7 +827,7 @@ describe("ruling 503(c): who may", () => {
     rebuilder.rebuildProject(app.db, DEPLOY, { dataRoot: app.dataRoot });
     const frozen = (what: string) => ({
       status: 409,
-      userMessage: `This project is archived (read-only) — restore it before you ${what}.`,
+      userMessage: `This project is archived (read-only). Restore it before you ${what}.`,
     });
     await expect(create({ title: "Thawed plans" }, arda, DEPLOY)).rejects.toMatchObject(frozen("create epics"));
     await expect(edit({ epicId: epic.id, title: "Thawed plans" }, arda, DEPLOY)).rejects.toMatchObject(

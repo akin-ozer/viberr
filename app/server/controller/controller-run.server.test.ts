@@ -431,7 +431,7 @@ describe("the turn carries the context read (ruling 121)", () => {
     // CANARY: drop the queue line and the model is left to guess where the
     // correction went.
     expect(prompt).toContain(
-      `1 more message from ${user.email} is queued behind this one; each is answered in its own turn, in order — do not treat them as lost.`,
+      `1 more message from ${user.email} is queued behind this one; each is answered in its own turn, in order. Do not treat them as lost.`,
     );
     expect(prompt.endsWith(`${user.email} says:\n\nDossier part 2.`)).toBe(true);
     // Nothing queued, nothing said.
@@ -709,7 +709,7 @@ describe("the turn carries the context read (ruling 121)", () => {
       const headline = listRunLines(app.db, first).find(
         (l) => l.display.tag === RUN_INPUTS_TAG,
       )!.display.text;
-      expect(headline.startsWith("Run inputs — controller turn · persona ")).toBe(true);
+      expect(headline.startsWith("Run inputs: controller turn · persona ")).toBe(true);
       expect(headline).not.toContain("anchor");
       expect(inputs!.mcp.mounted).toEqual(["viberr_controller", "viberr_ops"]);
       expect(headline).toContain("2 MCP servers");
@@ -1032,10 +1032,10 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
 });
 
 /**
- * Ruling 565: a message's files are named to the turn that reads it, whether
+ * Ruling 573: a message's files are named to the turn that reads it, whether
  * it starts a turn or steers one, and the transcript keeps the words alone.
  */
-describe("ruling 565: the turn is told what files came", () => {
+describe("ruling 573: the turn is told what files came", () => {
   it("names a steering message's files after its words", async () => {
     // CANARY: drop `withFilesNote` from `steeringText` and a file sent while
     // a turn worked reaches it as words alone.

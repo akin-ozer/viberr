@@ -879,15 +879,29 @@ describe("F18-14: the govern/governance copy ban holds on every surface a human 
  * render surface the govern ban walks — `app/features`, `app/routes`, `app/ui`,
  * `app.css` and the top-level render files, which INCLUDES the features-level
  * `.server.ts` toast/refusal copy — plus the seed assets an org admin reads and
- * edits in the definition UI. `app/server/**` prompt machinery stays ungated
- * here: those literals are dense with model-addressed prose where a dash harms
- * nobody, and gating them would take a hundred-entry allowlist that rots.
+ * edits in the definition UI.
+ *
+ * Ruling 571 (owner, 2026-09-28) closed the carve-out P21 left: `app/server/**`
+ * was ungated as "prompt machinery", and the sentence the owner then caught on
+ * a task timeline under the Operator's name, "Started a Claude run for the
+ * Estimate Judge agent — streaming to the agent logs.", was built there
+ * (`runDispatchLine`). The model never writes it, so ruling 502's writing guide
+ * never reaches it. The third test below scans every string literal under the
+ * literal roots, prompts and log lines included: an agent repeats what its
+ * prompt and its tool replies say, and a log line is read by whoever runs the
+ * instance.
  *
  * The MINUS SIGN (−, U+2212) and arrows (→) stay legal: they are typography
  * for counts and direction, not prose punctuation. Comments keep their dashes —
  * the stripper removes them before the scan, so explanations stay free.
+ *
+ * Every scan here reads source text, so a dash spelled as an escape (`\u2014`,
+ * `\u{2014}`) or an HTML entity (`&mdash;`, `&#8212;`) renders as a dash and
+ * would pass a pattern that only knows the character. Ruling 571 found both:
+ * escapes in the operator's and the controller's prompts and tool descriptions,
+ * and an `&mdash;` in the packet card's duplicate-task note.
  */
-const BANNED_DASH = /[–—]/;
+const BANNED_DASH = /[–—]|\\u(?:201[34]|\{0*201[34]\})|&(?:[mn]dash|#821[12]|#x201[34]);/i;
 
 /**
  * Empty on purpose, same contract as CLASSLESS_BY_DESIGN: an entry here is a
@@ -896,7 +910,20 @@ const BANNED_DASH = /[–—]/;
  */
 const DASH_ALLOW: readonly string[] = [];
 
-describe("P21: em/en dashes are banned in rendered copy and seed assets", () => {
+/**
+ * Ruling 571's only exemptions, each an EXACT literal in one file: a dash that
+ * is a format byte code reads back, not prose. Same rot check as the other
+ * allowlists: an entry that matches nothing fails the suite.
+ */
+const DASH_LITERAL_ALLOW: ReadonlyArray<{ file: string; exact: string; why: string }> = [
+  {
+    file: "schemas/task-file.schema.ts",
+    exact: "—",
+    why: "EVIDENCE_EMPTY_COLUMN: the task.md glyph for an evidence row with no result, which the parser reads back as empty; the page shows the row without it",
+  },
+];
+
+describe("P21 and ruling 571: em/en dashes are banned in rendered copy, seed assets and every server string", () => {
   it("no rendered line under the render roots carries an em or en dash", () => {
     const offenders: string[] = [];
     const files = [...ROOTS.flatMap(walk), ...EXTRA_RENDER_FILES];
@@ -933,6 +960,43 @@ describe("P21: em/en dashes are banned in rendered copy and seed assets", () => 
       offenders,
       `em/en dash in a seed asset an admin reads — reword:\n${offenders.join("\n")}`,
     ).toEqual([]);
+  });
+
+  it("no string literal under app/server, app/schemas, app/shared or app/lib carries one (ruling 571)", () => {
+    // CANARY: put the dash back in `runDispatchLine`'s started tail
+    // (" — streaming to the agent logs.") and this names specialist-run.server.ts.
+    // Same roots, walk and lexer as the govern literal test above, whose
+    // residue and must-see checks prove the scan reaches this copy.
+    const offenders: string[] = [];
+    const used = new Set<number>();
+    for (const file of [...LITERAL_ROOTS.flatMap(walk), ...LITERAL_FILES]) {
+      // A `.tsx` here is the govern literal test's failure to name.
+      if (file.endsWith(".tsx")) continue;
+      const rel = path.relative(APP, file);
+      const src = readFileSync(file, "utf8");
+      const lineOf = lineIndex(src);
+      for (const literal of lexLiterals(src, rel).literals) {
+        if (!BANNED_DASH.test(literal.text)) continue;
+        const allowed = DASH_LITERAL_ALLOW.findIndex(
+          (a) => a.file === rel && a.exact === literal.text,
+        );
+        if (allowed !== -1) {
+          used.add(allowed);
+          continue;
+        }
+        offenders.push(
+          `${rel}:${lineOf(literal.start)} → ${literal.text.replace(/\s+/g, " ").trim().slice(0, 140)}`,
+        );
+      }
+    }
+    expect(
+      offenders,
+      `em/en dash in a string the server writes (a timeline sentence, an error, a tool reply, a prompt or a log line) — reword (comma, period, colon, or parentheses):\n${offenders.join("\n")}`,
+    ).toEqual([]);
+    const stale = DASH_LITERAL_ALLOW.filter((_, i) => !used.has(i)).map(
+      (a) => `${a.file} → ${JSON.stringify(a.exact)}`,
+    );
+    expect(stale, `dash allowlist entries that match nothing:\n${stale.join("\n")}`).toEqual([]);
   });
 });
 

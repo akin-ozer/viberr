@@ -496,12 +496,12 @@ describe("POST /resources/controller", () => {
 });
 
 /**
- * Ruling 565: a message carries files. They are checked before any thread is
+ * Ruling 573: a message carries files. They are checked before any thread is
  * made, stored with the message, named to the turn, served to the thread's
  * owner alone from `/resources/controller-file/:id`, and a retracted message
  * takes them with it.
  */
-describe("ruling 565: files sent with a controller message", () => {
+describe("ruling 573: files sent with a controller message", () => {
   async function serve(fileId: string, userId: string) {
     const { loader } = await import("~/routes/resources.controller-file");
     const request = app.request(`/resources/controller-file/${fileId}`, {
@@ -552,7 +552,7 @@ describe("ruling 565: files sent with a controller message", () => {
     );
     await connectFakeBackend(app.db, arda, "claude");
     try {
-      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "Read it." }], sessionId: "sess-565" });
+      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "Read it." }], sessionId: "sess-573" });
       const { conversationId } = z
         .object({ ok: z.literal(true), conversationId: z.string() })
         .parse(
@@ -596,7 +596,7 @@ describe("ruling 565: files sent with a controller message", () => {
     try {
       queueFakeRun({
         lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
-        sessionId: "sess-565-retract",
+        sessionId: "sess-573-retract",
         keepRunning: true,
       });
       const sent = z.object({ ok: z.literal(true), conversationId: z.string() });

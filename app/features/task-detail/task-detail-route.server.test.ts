@@ -1827,7 +1827,7 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     expect(await attachmentsOf("VIB-141")).not.toContain("sneaky.txt");
 
     // SAFETY: a name the store would hide throws AppError, which the route
-    // renders through `appErrorResponse` — the refusal arm. (Ruling 566: any
+    // renders through `appErrorResponse` — the refusal arm. (Ruling 574: any
     // kind is stored; the name and the size are what an upload is refused by.)
     const badName = (await postFile(
       "VIB-141",

@@ -338,7 +338,9 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
 - `app/features/copy-ban.test.ts`: no "govern / governor / governance / governed" in
   copy a human reads (rendered JSX and every server string literal, with a narrow
   per-file allowlist for agent prompt text and the seeded KB doc), no em or en dash in
-  rendered copy or seed assets (P21), and no "primary specialist" (F19-12).
+  rendered copy or seed assets (P21) or in any string literal under `app/server`,
+  `app/schemas`, `app/shared` or `app/lib` (ruling 571), and no "primary specialist"
+  (F19-12).
 - `app/features/shortcut-glyph.test.ts` (ruling 419(d)): no ⌘ glyph in copy; the key is
   spelled for the platform that reads it.
 - `app/features/live-updates/one-event-source.test.ts` (ruling 457): exactly one module

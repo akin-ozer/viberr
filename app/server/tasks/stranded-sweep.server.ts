@@ -164,7 +164,7 @@ export function strandedNoteText(task: StrandedTask): string {
     `${claim}` +
     "There is no decision packet, no pending recommendation, no queued question, no scheduled " +
     "run, no agent running or queued, and nothing it is waiting on. Viberr is re-invoking the " +
-    "operator to decide what happens next — this note is the record that it had to, because a " +
+    "operator to decide what happens next; this note is the record that it had to, because a " +
     "task in this state is not paused, it has stopped."
   );
 }

@@ -5,7 +5,7 @@ import { buildReviewDeadlockPacket } from "./review-deadlock.server";
  * Ruling 329 — an option's description BECOMES the contract, so it may only
  * contain what binds.
  *
- * `resolvePacket` appends `${option.t} — ${option.d}` to the task's goal for
+ * `resolvePacket` appends `${option.t}: ${option.d}` to the task's goal for
  * every option kind outside `PROCESS_ONLY_OPTION_KINDS` (and not ending the
  * task). The deadlock card's "Let the rework continue" is one of the very few
  * SERVER-AUTHORED options on that side of the line, and its description ended

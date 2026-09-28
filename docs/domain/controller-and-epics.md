@@ -141,13 +141,13 @@ that lands is scrolled to its first line, unless the reader has scrolled up abov
 newest reply they had, and then nothing moves; the person's own message, and a turn that
 starts while they follow the thread, go to the end. A reader who has scrolled away from the
 newest message has the transcript's jump, pinned to the foot of its box
-(`TranscriptJumpButton`, `transcript-jump.tsx`, ruling 564(a)): "New reply" on the primary
+(`TranscriptJumpButton`, `transcript-jump.tsx`, ruling 572(a)): "New reply" on the primary
 face when a reply landed while they read history, which puts that reply's first line at the
 top of the box, and "Latest" otherwise, which goes where opening the thread would. It shows
 only while that place is below what they can see, leaves once it comes into view, and hands
 the focus it held to the message it showed. The thread is one reading column, 48rem at most
 and centred: the person's messages are bubbles at its end, and a reply is the column's text,
-with no frame of its own, under the header that names who wrote it (ruling 564(b)). One visually hidden `role="status"`
+with no frame of its own, under the header that names who wrote it (ruling 572(b)). One visually hidden `role="status"`
 region, mounted outside the per-thread subtree and changing only its text, says "<name> is
 working" when a turn starts and "<name> replied: <first sentence>" when the reply lands
 (`useTurnAnnouncement`, ruling 476(d)); the working row is visual only. The transcript
@@ -228,8 +228,8 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   The transcript meets a reply as the page's does (ruling 476(c) and (d), below in §2): it
   opens on the newest reply's first line and scrolls a reply that lands to its first line,
   offers the page's jump back to the newest message ("New reply" or "Latest", ruling
-  564(a)) and sets its thread the page's way, a reply unframed under its header and the
-  person's messages as bubbles (ruling 564(b)),
+  572(a)) and sets its thread the page's way, a reply unframed under its header and the
+  person's messages as bubbles (ruling 572(b)),
   and the panel's own visually hidden `role="status"` region says "<name> replied: <first
   sentence>" for the thread on screen, which the button's announcer leaves out while the
   panel is open. The "is working…" row is visual only; the button's announcer says a turn
@@ -520,7 +520,7 @@ a notification row: replies stay out of the bell (§8).
    whatever its own `seq`, ruling 527; the newest 30 of those, `CONTEXT_MESSAGES`, 24 000
    chars, each message cut at 600), then, when messages wait behind it, one line: "N more
    messages from <person> are queued behind this one; each is answered in its own turn, in
-   order — do not treat them as lost" (ruling 465, F40-10: a queued message used to reach
+   order. Do not treat them as lost." (ruling 465, F40-10: a queued message used to reach
    the running turn as a 600-character stub, which the model reported lost), then
    `<user label> says:` and the message.
 
@@ -723,8 +723,8 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 503); Done included, archived only with `includeArchived` |
 | `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
-| `read_task_attachment` | One attachment of a task: an `.xlsx` as its sheets in CSV, an image as the picture, and any other file whose bytes are text as text, whatever its name; a known binary kind or bytes with a NUL in their head are named and refused (rulings 293, 533, 566). A read returns up to 40,000 characters; a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551) |
-| `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, 40,000 characters at a time with `offset`; rulings 565 and 566); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
+| `read_task_attachment` | One attachment of a task: an `.xlsx` as its sheets in CSV, an image as the picture, and any other file whose bytes are text as text, whatever its name; a known binary kind or bytes with a NUL in their head are named and refused (rulings 293, 533, 574). A read returns up to 40,000 characters; a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551) |
+| `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, 40,000 characters at a time with `offset`; rulings 573 and 574); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
 | `read_pull_request` | A task's review PR: every changed file with status, counts and unified-diff hunks; `patches: false` for the file list, `path` for one file, a byte budget with `patchOmitted` flags (ruling 266); audited `controller.github.read` |
@@ -923,7 +923,11 @@ with its own (which also relays a Codex agent's reported correction), both throu
 [file-formats.md §8](../architecture/file-formats.md)). Nobody approves it first: the owner
 chose it on 2026-09-26 ("No human can approve all of these while inspecting them
 thoroughly"). The task records it in one `kb_correction` event (the document, the id, the
-passage before and after) and notifies nobody. The record is the
+passage before and after) and notifies nobody. Ruling 568: the event quotes the passages only
+for the project's rulings or a knowledge base every deployed specialist is given; otherwise it
+names the document and the id, says which agents are not given it, and points to the panel
+below, and an undo's event follows the same rule, because a task's timeline is read by every
+agent that can be engaged on it. The record is the
 `task.kb_correction.merged` audit row, which carries both passages, so an undo is the same
 edit in reverse.
 

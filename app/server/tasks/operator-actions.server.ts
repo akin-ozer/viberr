@@ -1398,7 +1398,7 @@ export async function operatorOpenPacket(
       return {
         outcome: "noop",
         message:
-          "accept_completion only fits a task AT the acceptance boundary with a healthy verdict — " +
+          "accept_completion only fits a task AT the acceptance boundary with a healthy verdict; " +
           (!atBoundary
             ? `${input.taskKey} is at stage ${fm.stage}, not the stage before Done. `
             : "its validation is not healthy, so acceptance would be refused. ") +
@@ -1436,7 +1436,7 @@ export async function operatorOpenPacket(
         message:
           `resolve_remote_collision only fits a FOREIGN remote under ${input.taskKey}'s branch name ` +
           `(an unrelated branch, or a pull request this task does not own). ` +
-          `${input.taskKey} records no collision — the branch carries ${own} — so the resolution ` +
+          `${input.taskKey} records no collision (the branch carries ${own}), so the resolution ` +
           `would answer "no collision to clear" and leave the block where it is. ` +
           "For a branch whose history diverged from its own PR, a person resolves the history: " +
           "offer custom naming what they must do, or archive_task with deleteBranch to abandon it.",
@@ -1549,7 +1549,7 @@ export async function operatorOpenPacket(
           outcome: "noop",
           message:
             `"${target.option.title}" retries on ${label}, and this instance already recorded ` +
-            `${label} as out of quota for ${input.taskKey}'s owner${until} — the dispatch would ` +
+            `${label} as out of quota for ${input.taskKey}'s owner${until}. The dispatch would ` +
             `be HELD and re-scheduled rather than run, so the person would spend a decision on a ` +
             `wait. Offer the OTHER backend, or offer wait_for_window with dueAt set to the reopen ` +
             `instant, which resumes by itself and says so.`,
@@ -1577,7 +1577,7 @@ export async function operatorOpenPacket(
         outcome: "noop",
         message:
           `"${emptyNewTask.title}" is a create_task option with no task on it. ` +
-          "Give newTask a title and a goal — the goal is the contract the new task is " +
+          "Give newTask a title and a goal; the goal is the contract the new task is " +
           "worked to, so write it as one (deliverable plus acceptance criteria). " +
           "Without them the confirm would create nothing.",
       };
@@ -1618,7 +1618,7 @@ export async function operatorOpenPacket(
           `"${tooLong.title}" carries a ${which.field} of ${which.len.toLocaleString("en-US")} ` +
           `characters and the limit is ${GOAL_DRAFT_MAX_CHARS.toLocaleString("en-US")}. ` +
           `Nothing was written. A goal is the contract every future run on the task ` +
-          `re-anchors on, so Viberr will not commit one that stops mid-sentence — shorten ` +
+          `re-anchors on, so Viberr will not commit one that stops mid-sentence. Shorten ` +
           `it and offer the option again. Cut narrative and worked examples before you cut ` +
           `a deliverable or an acceptance criterion; detail that does not fit belongs in ` +
           `the packet's own text or a comment, which have no such limit.`,
@@ -1682,7 +1682,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `goalDraft only fits an edit_goal option — "${strayDraft.title}" is ${strayDraft.kind}. ` +
+        `goalDraft only fits an edit_goal option. "${strayDraft.title}" is ${strayDraft.kind}. ` +
         "Put the proposed goal text on the edit_goal option, or drop it.",
     };
   }
@@ -1697,7 +1697,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `A wait_for_window option needs the instant the window reopens — "${strayWait.title}" carries none. ` +
+        `A wait_for_window option needs the instant the window reopens; "${strayWait.title}" carries none. ` +
         "Pass dueAt as an ISO timestamp, or offer a different recovery.",
     };
   }
@@ -1708,7 +1708,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `dueAt only fits a wait_for_window option — "${strayDue.title}" is ${strayDue.kind}. ` +
+        `dueAt only fits a wait_for_window option. "${strayDue.title}" is ${strayDue.kind}. ` +
         "Drop it, or offer the wait as its own option.",
     };
   }
@@ -1725,7 +1725,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `A question_reviewer option needs the reviewer it asks — "${strayQuestion.title}" names none. ` +
+        `A question_reviewer option needs the reviewer it asks; "${strayQuestion.title}" names none. ` +
         "Pass profileId, or put the question in a comment instead.",
     };
   }
@@ -1741,7 +1741,7 @@ export async function operatorOpenPacket(
       outcome: "noop",
       message:
         `"${wrongQuestion.profileId}" is not a reviewer engaged on ${input.taskKey}, so a question_reviewer ` +
-        `option cannot put a question to it — "${wrongQuestion.title}". ` +
+        `option cannot put a question to it ("${wrongQuestion.title}"). ` +
         "Name an engaged non-delivering agent, or engage one first.",
     };
   }
@@ -1759,7 +1759,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `A block_on_dependencies option needs the work it waits on — "${strayHold.title}" names none. ` +
+        `A block_on_dependencies option needs the work it waits on; "${strayHold.title}" names none. ` +
         "Pass blockedBy as task keys, or offer a different hold.",
     };
   }
@@ -1770,7 +1770,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `blockedBy only fits a block_on_dependencies option — "${strayBlockedBy.title}" is ${strayBlockedBy.kind}. ` +
+        `blockedBy only fits a block_on_dependencies option. "${strayBlockedBy.title}" is ${strayBlockedBy.kind}. ` +
         "Drop it, or offer the hold as its own option.",
     };
   }
@@ -1785,7 +1785,7 @@ export async function operatorOpenPacket(
     return {
       outcome: "noop",
       message:
-        `accept_unverified_head is not an option you can offer — "${strayWaiver.title}". ` +
+        `accept_unverified_head is not an option you can offer ("${strayWaiver.title}"). ` +
         "The acceptance gate writes it itself when GitHub refuses the head comparison, " +
         "pinned to the shas it read at that moment.",
     };
@@ -2992,10 +2992,10 @@ export const OPERATOR_POLICY_SCOPE_NOTE =
   "These capabilities are YOURS, the operator's, and nobody else's. They say NOTHING about what a " +
   "specialist agent may do: an agent's own grants are in `deployedSpecialists[].capabilities` " +
   "(delivery / verdict / askHuman / browser / web), resolved live from its profile. Never quote a " +
-  "row from here as evidence about an agent — e.g. `use-web-search-fetch: off` here means YOUR web " +
+  "row from here as evidence about an agent; e.g. `use-web-search-fetch: off` here means YOUR web " +
   "egress is withheld, not that a specialist's web grant failed to take effect. " +
   "Acceptance: `completion-for-acceptance: direct` plus task autonomy `full` IS the sanctioned " +
-  "route to Done — call `accept_completion` and say so plainly. `transition-to-done: human` is the " +
+  "route to Done. Call `accept_completion` and say so plainly. `transition-to-done: human` is the " +
   "RAW stage transition (`transition_stage` into the terminal stage), which stays human-only; it is " +
   "not a bar on the acceptance action, so never narrate that you cannot accept while you hold that grant.";
 
@@ -3497,7 +3497,7 @@ export function operatorSnapshot(
         const at = `cut at ${cap.toLocaleString("en-US")} chars`;
         row.clipped = toolless
           ? `${at}; this turn cannot fetch the rest`
-          : `${at} — read_timeline_entry with this occurredAt returns it whole`;
+          : `${at}; read_timeline_entry with this occurredAt returns it whole`;
       }
       return row;
     }),
@@ -4172,7 +4172,7 @@ function annotateUngrantedMcps(
   return (
     `${prompt}\n\n(Note from Viberr: ${agent.name} holds no MCP grant for ` +
     `${ungranted.map((n) => `\`${n}\``).join(", ")} on this project, so those ` +
-    `tools will not be available to it — any evidence from them is already on ` +
+    `tools will not be available to it; any evidence from them is already on ` +
     `the task timeline. Do not hunt for them.)`
   );
 }
@@ -4376,7 +4376,7 @@ export async function operatorDispatchAgent(
     return {
       outcome: "noop",
       message:
-        `${agent.name} IS the delivering agent on this task — its runs deliver. ` +
+        `${agent.name} IS the delivering agent on this task; its runs deliver. ` +
         `Omit \`delivers\` to run it, or hand delivery to another repo-write ` +
         `profile first (\`delivers: true\` on that profile).`,
     };
@@ -4475,7 +4475,7 @@ export async function operatorDispatchAgent(
         `${error.userMessage} Do not open a packet for this; ` +
         (fallbackReachable
           ? `pick a ${other} profile if the work cannot wait.`
-          : `there is no ${other} fallback either — this task's runs bill its owner, ` +
+          : `there is no ${other} fallback either. This task's runs bill its owner, ` +
             `who has no ${other} account connected. The retry is already scheduled.`),
     };
   };
@@ -4899,9 +4899,9 @@ export async function operatorDeliverForReview(
         message:
           `Delivery push CONFLICTED: ${outcome.message}. No PR was opened. This is a ` +
           `branch-history conflict on \`${outcome.branch}\`, not a credential problem. ` +
-          `Open a decision packet with a \`resolve_remote_collision\` option — its ` +
-          `ceremony closes the squatting PR (when one is recorded), deletes the stale ` +
-          `remote branch, and re-delivers this task's local work — or an ` +
+          `Open a decision packet with a \`resolve_remote_collision\` option (its ` +
+          `ceremony closes the squatting PR when one is recorded, deletes the stale ` +
+          `remote branch, and re-delivers this task's local work) or an ` +
           `\`archive_task\` option to abandon the task. A \`discard_branch\` option ` +
           `destroys this task's LOCAL commits: the refused push means the revision never ` +
           `left the workspace, so it MAY be offered (ruling 161) when the person's choice is ` +

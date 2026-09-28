@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 /**
  * Ruling 476(c) and (d): how a controller transcript (the page's and the
  * dock's) meets a reply, for the eye and for a screen reader. One home, so the
- * two surfaces cannot disagree about either. Ruling 564: and how a reader who
+ * two surfaces cannot disagree about either. Ruling 572: and how a reader who
  * has scrolled away gets back.
  */
 
@@ -55,7 +55,7 @@ function below(box: HTMLElement, id: string | null): boolean {
 }
 
 /**
- * Ruling 564: the way back for a reader who has scrolled away from the newest
+ * Ruling 572: the way back for a reader who has scrolled away from the newest
  * message. `reply` is a reply that landed while they read history, which
  * ruling 476(c) leaves where it is; `newest` is the place an open would show.
  */
@@ -90,7 +90,7 @@ export interface TranscriptJump {
  * `fresh` is `useFreshMessageIds` for the same messages; `openKey` names what
  * makes this a newly opened transcript.
  *
- * Ruling 564: the reader who has scrolled away is offered the way back, the
+ * Ruling 572: the reader who has scrolled away is offered the way back, the
  * transcript's jump (`TranscriptJumpButton`), null while nothing is below
  * them. A reply the rule above left where it landed is `reply` until the
  * reader has been to it, and the jump puts its first line at the top of the
@@ -106,7 +106,7 @@ export function useTranscriptFollow(
   const opened = useRef<string | null>(null);
   const newestReply = useRef<string | null>(null);
   const wasWorking = useRef(working);
-  // Ruling 564: the reply left below a reader in history, and where an open
+  // Ruling 572: the reply left below a reader in history, and where an open
   // puts the box (the newest message's first line when it is a reply, else
   // the end).
   const held = useRef<string | null>(null);
@@ -155,7 +155,7 @@ export function useTranscriptFollow(
     }
     measure();
   }, [boxRef, messages, fresh, working, openKey, measure]);
-  // Ruling 564: the reader's own scrolling brings the jump and takes it away,
+  // Ruling 572: the reader's own scrolling brings the jump and takes it away,
   // measured once a frame. `openKey` is also what names a new box.
   useEffect(() => {
     const box = boxRef.current;

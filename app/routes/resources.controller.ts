@@ -184,7 +184,7 @@ export async function action({ request }: Route.ActionArgs) {
     const surface = textField.parse(formData.get("surface")) || null;
     // U39-24: the reader's zone; normalized by the engine.
     const timeZone = textField.parse(formData.get("timeZone")) || null;
-    // Ruling 565: the files it carries, checked before any thread is made for
+    // Ruling 573: the files it carries, checked before any thread is made for
     // it (U35-4's rule for a refusal).
     const files = checkMessageFiles(await formFiles(formData));
     let conversationId = textField.parse(formData.get("conversationId")).trim();

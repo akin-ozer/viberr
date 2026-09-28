@@ -178,7 +178,7 @@ export function AttachmentsPanel({
  * screen reader without any script; the fetcher posts the same `attach-file`
  * intent a `curl` would.
  *
- * Ruling 566: the picker offers any kind of file; the writer refuses only a
+ * Ruling 574: the picker offers any kind of file; the writer refuses only a
  * name it cannot store and a file over the size cap.
  */
 function AttachFile() {

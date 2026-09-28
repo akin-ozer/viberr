@@ -211,7 +211,7 @@ export function ambiguousBackendHandleNote(
     .join(" · ");
   return (
     `No agent was engaged: **@${ambiguous.backend}** names a runtime, and ` +
-    `${ambiguous.candidates.length} profiles run on it here — ${names}. ` +
+    `${ambiguous.candidates.length} profiles run on it here: ${names}. ` +
     // F19-12: rendered copy uses the shipped vocabulary — "delivering agent".
     `Tag the profile you want (or @agent for this task's delivering agent).`
   );
@@ -426,7 +426,7 @@ export function unreachedAgentNote(
     const isAre = report.named.length === 1 ? "is an agent" : "are agents";
     const them = report.named.length === 1 ? "it" : "them";
     sentences.push(
-      `${list} ${isAre}, and ${whose} starts no run \u2014 nothing was sent to ${them}.`,
+      `${list} ${isAre}, and ${whose} starts no run; nothing was sent to ${them}.`,
     );
   }
   if (report.ambiguousBackend) {
@@ -670,7 +670,7 @@ function truncate(text: string): string {
   if (text.length <= MAX_REPLY_CHARS) return text;
   return (
     text.slice(0, MAX_REPLY_CHARS - 1).trimEnd() +
-    "…\n\n_(truncated — full report in the agent logs)_"
+    "…\n\n_(truncated; full report in the agent logs)_"
   );
 }
 

@@ -335,7 +335,7 @@ export function resolveResourceGrants(
     throw AppError.validation(
       `Nothing in the store answers to ${unresolved.join(", ")}. ` +
         "Grant a skill by its folder name, an MCP server by its registry name " +
-        "and a knowledge base by its store directory — the grantKey each " +
+        "and a knowledge base by its store directory: the grantKey each " +
         "resource list returns, never the id.",
     );
   }
@@ -626,7 +626,7 @@ export async function saveGlobalAgentProfile(
         `${textBehind.length} project cop${textBehind.length === 1 ? "y" : "ies"} still ` +
           `run${textBehind.length === 1 ? "s" : ""} the older ${fields}: ` +
           `${textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots the ` +
-          `${fields}, and ${why} — fix each copy on that project's Agents page`,
+          `${fields}, and ${why}; fix each copy on that project's Agents page`,
       );
     }
     return {
@@ -654,7 +654,7 @@ export async function saveGlobalAgentProfile(
   const localClash = projectsUsingProfileId(db, id);
   if (localClash.length > 0) {
     throw AppError.conflict(
-      `${localClash[0]} already has a project profile with the id ${id} — pick another name.`,
+      `${localClash[0]} already has a project profile with the id ${id}. Pick another name.`,
     );
   }
   const created: ParsedTemplate = {

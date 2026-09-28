@@ -70,7 +70,7 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     if (intent === "send") {
       const text = String(formData.get("text") ?? "");
-      // Ruling 565: the files it carries, checked before a thread is made for
+      // Ruling 573: the files it carries, checked before a thread is made for
       // it, so a refused file leaves no empty conversation behind.
       const files = checkMessageFiles(await formFiles(formData));
       let conversationId = String(formData.get("conversationId") ?? "");

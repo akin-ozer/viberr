@@ -1191,7 +1191,7 @@ export function TaskDetailPage({
           runPrincipal={runPrincipal}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
-          // Ruling 565: a comment carries files for whoever may attach one
+          // Ruling 573: a comment carries files for whoever may attach one
           // (the attachments panel's own rule, F39-6).
           canAttach={roleCan(role, "attach-file") && !archived}
           // U33-1 was inert: the Timeline accepted `runLive` and no production

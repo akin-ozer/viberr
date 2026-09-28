@@ -617,7 +617,7 @@ CREATE TABLE controller_messages (
   steered_into TEXT,
   UNIQUE (conversation_id, seq)
 );
--- Ruling 565: the files a person sent with a controller message. App-owned
+-- Ruling 573: the files a person sent with a controller message. App-owned
 -- like the message: kept in the row (a message carries at most ten files and
 -- 25 MB), so the backup's snapshot carries them, a Retract (ruling 527) or a
 -- deleted conversation (ruling 525) takes them with the message, and a message

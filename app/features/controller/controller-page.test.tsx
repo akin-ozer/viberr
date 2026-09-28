@@ -1441,11 +1441,11 @@ describe("ruling 476: the controller page", () => {
   });
 
   /**
-   * Ruling 564, on (c)'s box: the way back for a reader who has scrolled away.
+   * Ruling 572, on (c)'s box: the way back for a reader who has scrolled away.
    * (c) leaves a reader in history where they are when a reply lands, and
    * nothing on screen said that one had.
    */
-  describe("ruling 564: the jump back to the newest message", () => {
+  describe("ruling 572: the jump back to the newest message", () => {
     /** The reader moves the box; the jump is measured on the next frame. */
     async function scrollTo(top: number) {
       transcript().scrollTop = top;
@@ -1914,12 +1914,12 @@ describe("ruling 525: deleting a conversation from the rail", () => {
 });
 
 /**
- * Ruling 565: a person's files, on the page. A pasted screenshot joins the
+ * Ruling 573: a person's files, on the page. A pasted screenshot joins the
  * composer's tray and goes out with the message; a message's files show under
  * its words, a picture as itself and any other file as the tray's chip, each
  * linking to the conversation's own serving route.
  */
-describe("ruling 565: files on the controller page", () => {
+describe("ruling 573: files on the controller page", () => {
   const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
     id: "cnv_f",
     userId: "u1",

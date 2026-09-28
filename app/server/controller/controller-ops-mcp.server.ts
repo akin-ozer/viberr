@@ -103,7 +103,7 @@ export const CONTROLLER_OPS_MCP_NAME = "viberr_ops";
 
 const CONTROLLER_OPS_INSTRUCTIONS =
   "Viberr built-in diagnostics. READ-ONLY: nothing here changes the instance. Every call is " +
-  "checked against the ASKING PERSON's own permissions, so a [denied] answer is final — relay " +
+  "checked against the ASKING PERSON's own permissions, so a [denied] answer is final; relay " +
   "it with its reason. Use these to answer questions about how the instance and its runs are " +
   "actually doing, and quote what you read rather than inferring it.";
 
@@ -304,7 +304,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "instance_health",
-      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), the run concurrency queue, and the host toolchain (node, npm, git, python3, go versions or null when absent; and the pinned Codex CLI and Claude Agent SDK). That fixed list is npm-shaped, so pass `probe` to ask about ANY other command this host might have — up to 8 bare names, e.g. [\"golangci-lint\", \"gofmt\"] — and each answers `present` with a version, or `present: false` with the reason. PROBE BEFORE YOU PROMISE A GATE: a gate command whose binary you never checked is a promise every task on the board inherits and quietly fails. Open to anyone: agent backends are connected per person, and this reports presence and versions only, never a path, so nothing here names another person or any deployment configuration.",
+      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), the run concurrency queue, and the host toolchain (node, npm, git, python3, go versions or null when absent; and the pinned Codex CLI and Claude Agent SDK). That fixed list is npm-shaped, so pass `probe` to ask about ANY other command this host might have (up to 8 bare names, e.g. [\"golangci-lint\", \"gofmt\"]) and each answers `present` with a version, or `present: false` with the reason. PROBE BEFORE YOU PROMISE A GATE: a gate command whose binary you never checked is a promise every task on the board inherits and quietly fails. Open to anyone: agent backends are connected per person, and this reports presence and versions only, never a path, so nothing here names another person or any deployment configuration.",
       {
         probe: z
           .array(z.string())
@@ -388,7 +388,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "list_runs",
-      "Agent runs you can see, as run ids `read_run_log` takes. With no arguments: every run that is LIVE right now across every project visible to you (running, or queued behind the concurrency cap), newest first — the answer to \"which runs are those\" when instance_health reports a live count. With `projectSlug` and `taskKey` together: that task's runs instead, finished ones included, newest first, which is how you reach the log of a run that already failed. Read-only, membership gated; a run in a project you cannot see is simply absent.",
+      "Agent runs you can see, as run ids `read_run_log` takes. With no arguments: every run that is LIVE right now across every project visible to you (running, or queued behind the concurrency cap), newest first, the answer to \"which runs are those\" when instance_health reports a live count. With `projectSlug` and `taskKey` together: that task's runs instead, finished ones included, newest first, which is how you reach the log of a run that already failed. Read-only, membership gated; a run in a project you cannot see is simply absent.",
       {
         projectSlug: z.string().optional(),
         taskKey: z
@@ -626,7 +626,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           throw AppError.notFound(
             `${target.kind === "kb" ? "Knowledge base" : "Skill"} "${target.name}" has no ` +
               `\`${args.path.join("/")}\`. This reads the org KNOWLEDGE-BASE and SKILL store, ` +
-              "not a git repository — Viberr has no tool that returns repository file contents, " +
+              "not a git repository; Viberr has no tool that returns repository file contents, " +
               "so a path from the project's repo will never be found here. Open it on GitHub, or " +
               "ask an agent on a task with a checkout.",
           );

@@ -90,7 +90,7 @@ export function tolerantRowsOf<T>(
     diagnostics.push(
       diagWarning(
         code,
-        `${d.subject} is invalid (${r.error.issues[0]?.message ?? "unparseable"}) — dropping this ${d.noun}, keeping the rest.`,
+        `${d.subject} is invalid (${r.error.issues[0]?.message ?? "unparseable"}); dropping this ${d.noun}, keeping the rest.`,
         d.path,
       ),
     );
@@ -198,7 +198,7 @@ export function tolerantListField<T>(
     diagnostics.push(
       diagWarning(
         "frontmatter.invalid_field",
-        `Frontmatter field \`${path}\` is not a list — using an empty list.`,
+        `Frontmatter field \`${path}\` is not a list; using an empty list.`,
         path,
       ),
     );

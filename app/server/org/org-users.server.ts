@@ -174,7 +174,7 @@ export function whitelistGithubUser(
   });
   return {
     user: toOrgUserView(user),
-    toast: `@${handle} whitelisted — allowed at first GitHub sign-in`,
+    toast: `@${handle} whitelisted: allowed at first GitHub sign-in`,
   };
 }
 
@@ -201,7 +201,7 @@ export async function whitelistGoogleAccount(
   });
   return {
     user: toOrgUserView(flipped),
-    toast: `${email} whitelisted — allowed at first Google sign-in`,
+    toast: `${email} whitelisted: allowed at first Google sign-in`,
   };
 }
 
@@ -226,7 +226,7 @@ export async function createLocalAccount(
     // Surfaced ONCE to the admin (no mailer in V1) — they hand it over
     // out-of-band; first sign-in forces a new password (phase-2 gate).
     tempPassword,
-    toast: `Account created — temp sign-in password ready for ${record.email}`,
+    toast: `Account created; temp sign-in password ready for ${record.email}`,
   };
 }
 
@@ -384,7 +384,7 @@ export async function resetLocalPassword(
   if (!existing) throw AppError.notFound("No such user.");
   if (idpOf(existing) !== "local") {
     throw AppError.validation(
-      `${existing.name} signs in with ${idpOf(existing) === "github" ? "GitHub" : "Google"} — there is no local password to reset.`,
+      `${existing.name} signs in with ${idpOf(existing) === "github" ? "GitHub" : "Google"}; there is no local password to reset.`,
     );
   }
   const tempPassword = generateTempPassword();
@@ -392,7 +392,7 @@ export async function resetLocalPassword(
   return {
     user: toOrgUserView(updated),
     tempPassword,
-    toast: `Password reset — ${existing.name} sets a new password at next sign-in`,
+    toast: `Password reset; ${existing.name} sets a new password at next sign-in`,
   };
 }
 
@@ -602,7 +602,7 @@ export async function deleteOrgUser(
     user: toOrgUserView(existing),
     toast:
       extras.length > 0
-        ? `${existing.name} removed — also ${extras.join("; ")}`
+        ? `${existing.name} removed: also ${extras.join("; ")}`
         : `${existing.name} removed`,
     projectsPruned,
   };
@@ -702,7 +702,7 @@ export function addDomain(
   return {
     status: "added",
     domain: record,
-    toast: `Anyone with ${domain} can now sign in with Google — joins as ${input.role}`,
+    toast: `Anyone with ${domain} can now sign in with Google (joins as ${input.role})`,
   };
 }
 

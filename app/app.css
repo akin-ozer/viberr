@@ -6507,7 +6507,7 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   .ctl-wrap .ctl-transcript { max-height: calc(100dvh - 360px); min-height: 260px; }
   /* Ruling 419(d): a narrow column cannot afford a frame inside a frame. The
      transcript panel's padding, the reply card's own padding and its 92% cap
-     left a 234px text column on a 375px phone. Ruling 564(b) took the reply's
+     left a 234px text column on a 375px phone. Ruling 572(b) took the reply's
      frame away at every width, so the panel keeps a reading gutter. */
   .ctl-wrap .ctl-transcript { padding: .75rem; }
   /* One column: the rail flows after the conversation instead of pinning. */
@@ -7023,7 +7023,7 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   transition: transform .15s var(--ease-out);
 }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
-/* Ruling 565: the files a composer holds before it sends, after ReUI's
+/* Ruling 573: the files a composer holds before it sends, after ReUI's
    composer tray and shadcn's Attachment: a chip per file over the text (its
    picture or the file glyph, the name, the size, a remove), the paperclip in
    the composer's foot, and the frame dashed while files are held over it. */
@@ -7050,7 +7050,7 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .att-add { width: 30px; height: 30px; flex: none; }
 .att-add .ico { width: 16px; height: 16px; }
 .ctl-composer[data-dropping], .composer-box[data-dropping] { border-style: dashed; border-color: var(--blue); }
-/* Ruling 565: the paperclip leads a composer's foot, before its hint. */
+/* Ruling 573: the paperclip leads a composer's foot, before its hint. */
 .att-lead { display: inline-flex; align-items: center; gap: .375rem; min-width: 0; }
 /* The files sent with a message, under its words: a picture as itself in a
    frame sized before it loads (ruling 457), any other file as the tray's chip. */
@@ -7420,7 +7420,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
     .ctl-wrap:has(> .ctl-layout > .ctl-run:not([data-console="closed"])) .ctl-picker { display: block; }
   }
 }
-/* Ruling 564(b): the thread is one reading column, 48rem at most and centred
+/* Ruling 572(b): the thread is one reading column, 48rem at most and centred
    in its box, so an ask and its answer share an axis: on a desktop they stood
    at the two edges of a 1,092px transcript. */
 .ctl-msgs {
@@ -7442,7 +7442,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
   align-self: flex-end;
   background: var(--tint-well);
 }
-/* Ruling 564(b): a reply is the column's text, not a card inside the
+/* Ruling 572(b): a reply is the column's text, not a card inside the
    transcript's card (ruling 419(d)'s frame inside a frame, now at every
    width); its header says who wrote it. */
 .ctl-msg.from-controller { max-width: none; border: 0; padding: 0; }
@@ -7775,7 +7775,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    animates (the component marks it); history never does. The dock and the
    full controller page share the rule (ruling 451(d)). */
 .ctl-msg[data-fresh] { animation: dock-msg-in .2s var(--ease-out); }
-/* Ruling 564: the jump back to the newest message, the transcript's last
+/* Ruling 572: the jump back to the newest message, the transcript's last
    child, pinned to its box's foot. It takes no room (the button stands up out
    of a zero-height row), so the box's end holds still as it comes and goes,
    and it enters as a message does. */

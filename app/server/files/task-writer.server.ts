@@ -121,7 +121,7 @@ function assertTaskFileTrusted(
     code: ERROR_CODES.FILE_NOT_TRUSTED,
     status: 409,
     message: `refusing to write ${absPath}: ${why}`,
-    userMessage: `${ref.taskKey}'s file can't be read as a task file, so saving would replace what is in it. ${why} Fix the file, or put back the last good copy of it — \`npm run store:check\` names the line.`,
+    userMessage: `${ref.taskKey}'s file can't be read as a task file, so saving would replace what is in it. ${why} Fix the file, or put back the last good copy of it; \`npm run store:check\` names the line.`,
   });
 }
 

@@ -76,7 +76,12 @@ import {
   type OperatorPacketOptionInput,
   GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
-import { KB_CORRECTED_TITLE, RULINGS_CORRECTED_TITLE } from "./kb-correction-actions.server";
+import {
+  KB_CORRECTED_TITLE,
+  KB_CORRECTION_UNDONE_TITLE,
+  RULINGS_CORRECTED_TITLE,
+  undoKbCorrectionOnTask,
+} from "./kb-correction-actions.server";
 import { KB_CORRECTION_MERGED_ACTION } from "~/server/org/kb-corrections.server";
 
 /**
@@ -575,7 +580,7 @@ describe("operatorDispatchAgent", () => {
     // CANARY: restore the unconditional "pick a Codex profile" and this reads
     // as advice on a fixture where no Codex account exists.
     expect(bare.message).toContain(
-      "there is no Codex fallback either — this task's runs bill its owner, who has no Codex account connected",
+      "there is no Codex fallback either. This task's runs bill its owner, who has no Codex account connected",
     );
     // …and with the other backend actually reachable for the owner, the
     // fallback is real and is offered. Both arms of ruling 207(h) in one test,
@@ -4432,6 +4437,79 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(top.text).toContain(`${dossier}/06-platform-facts.md`);
   });
 
+  it("ruling 568: a correction to a knowledge base some deployed agents are not given quotes none of it, and neither does its undo", async () => {
+    // Live on AWSC-4 the Estimate Judge found an error in its own golden-set
+    // entry, a knowledge base granted to it alone, and could not correct it:
+    // the entry would have put the expected answers in front of the agents
+    // under test. CANARIES: pass no `leftOut` to `correctionEventText` and the
+    // passage lands on the task; build the undo from the quote alone and the
+    // undo quotes it back.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const keys = await seedKb("judge-keys", "sample-01.md", "# Keys\n\n- Expected total: 6,136.19 USD.\n");
+    engageDeveloperWithKb(keys);
+    const r = await correct({
+      kb: keys,
+      doc: "sample-01.md",
+      replaces: "- Expected total: 6,136.19 USD.",
+      text: "- Expected total: 5,614.00 USD.",
+      evidence: "the calculator's ONTAP second-generation minimum is 384 MBps",
+    });
+    expect(r.outcome).toBe("done");
+    expect(r.message).toContain("without quoting it");
+    expect(readFileSync(path.join(store.dataRoot, "kb", keys, "sample-01.md"), "utf8")).toContain("5,614.00");
+    const top = task().timeline[0]!;
+    expect(top.title).toBe(KB_CORRECTED_TITLE);
+    const id = /kc-[0-9a-f]{10}/.exec(top.text)![0];
+    expect(top.text).toBe(
+      `Corrected \`${keys}/sample-01.md\` as \`${id}\`. The passage is not quoted here: ` +
+        `\`${keys}\` is not given to Rev, who read this task. The project's Controller page shows the correction whole.`,
+    );
+    const undone = await undoKbCorrectionOnTask(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        id,
+        projectSlug: store.slug,
+        reason: null,
+        person: { userId: store.users.arda.id, label: "arda", name: "Arda" },
+      },
+    );
+    expect(undone.outcome).toBe("done");
+    const undoEntry = task().timeline[0]!;
+    expect(undoEntry.title).toBe(KB_CORRECTION_UNDONE_TITLE);
+    expect(undoEntry.text).not.toContain("6,136.19");
+    expect(undoEntry.text).not.toContain("5,614.00");
+    expect(undoEntry.text).toContain("is not given to Rev");
+  });
+
+  it("ruling 568: a correction to a knowledge base every deployed agent is given keeps its quote", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const shared = await seedKb("shared-mapping", "mapping.md", "# Mapping\n\n- SAN: FSx for ONTAP.\n");
+    engageDeveloperWithKb(shared);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "reviewer"
+          ? { ...a, definition: { ...a.definition, resources: { skills: [], mcps: [], kb: [shared] } } }
+          : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const r = await correct({
+      kb: shared,
+      doc: "mapping.md",
+      replaces: "- SAN: FSx for ONTAP.",
+      text: "- SAN: FSx for ONTAP, first generation below 384 MBps.",
+      evidence: "the calculator's ONTAP form",
+    });
+    expect(r.outcome).toBe("done");
+    expect(r.message).not.toContain("without quoting it");
+    expect(task().timeline[0]!.text).toContain("- **Was:** ~~- SAN: FSx for ONTAP.~~");
+  });
+
   it("refuses a knowledge base no run on the task was given, and a passage the document does not hold exactly", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
@@ -5957,7 +6035,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       authority("full"),
     );
     expect(r.outcome).toBe("noop");
-    expect(r.message).toContain('goalDraft only fits an edit_goal option — "Have the developer redo it" is redirect');
+    expect(r.message).toContain('goalDraft only fits an edit_goal option. "Have the developer redo it" is redirect');
     expect(task().packet).toBeNull();
   });
 
@@ -7490,7 +7568,7 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
       expect(withTools.text).not.toContain("Bare command names");
       expect(withTools.text.length).toBe(1498);
       expect(withTools.clipped).toBe(
-        "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole",
+        "cut at 1,500 chars; read_timeline_entry with this occurredAt returns it whole",
       );
     });
 

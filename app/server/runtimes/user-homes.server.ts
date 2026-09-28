@@ -562,7 +562,7 @@ function repointRunRollouts(home: CodexRunHome): void {
         const columns = columnNamesSchema.safeParse(db.prepare(`PRAGMA table_info(threads)`).all());
         if (!columns.success || !columns.data.some((c) => c.name === "rollout_path")) {
           logger.warn(
-            "codex rollout paths NOT re-pointed: this state database has no `threads.rollout_path` — " +
+            "codex rollout paths NOT re-pointed: this state database has no `threads.rollout_path`; " +
               "the vendor schema changed and thread resume will break again until ruling 199 is updated",
             { runId: home.runId, dbFile },
           );
@@ -631,7 +631,7 @@ export function repairCodexRolloutPaths(dataRoot?: string): number {
           if (!columns.success || !columns.data.some((c) => c.name === "rollout_path")) {
             logger.warn(
               "codex rollout paths NOT repaired at boot: this state database has no " +
-                "`threads.rollout_path` — the vendor schema changed and ruling 199 needs updating",
+                "`threads.rollout_path`; the vendor schema changed and ruling 199 needs updating",
               { dbFile },
             );
             continue;

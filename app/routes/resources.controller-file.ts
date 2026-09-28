@@ -10,7 +10,7 @@ import { attachmentContentType } from "~/server/files/task-attachments.server";
 
 /**
  * GET /resources/controller-file/:id — one file a person sent with a controller
- * message (ruling 565), for the transcript's thumbnails and links.
+ * message (ruling 573), for the transcript's thumbnails and links.
  *
  * Authorization is the conversation's: its owner and a live org admin, the two
  * who may read the transcript (`canAccessConversation`). Anyone else, and a

@@ -57,7 +57,7 @@ export function writeFileAtomic(
     const code = errno.success ? errno.data.code : undefined;
     if (code === "ENOSPC") {
       throw new Error(
-        `No space left on the data root — ${absPath} was not written`,
+        `No space left on the data root; ${absPath} was not written`,
         { cause: error },
       );
     }
@@ -71,8 +71,8 @@ export function writeFileAtomic(
       throw new AppError({
         code: ERROR_CODES.INTERNAL,
         status: 503,
-        message: `${code} writing ${absPath} — data root unreachable`,
-        userMessage: `The data root is unreachable (${code}) — ${absPath} was not written. Check that the storage mount is healthy, then try again.`,
+        message: `${code} writing ${absPath}: data root unreachable`,
+        userMessage: `The data root is unreachable (${code}); ${absPath} was not written. Check that the storage mount is healthy, then try again.`,
         cause: error,
       });
     }

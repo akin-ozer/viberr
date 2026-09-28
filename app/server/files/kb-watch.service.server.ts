@@ -150,7 +150,7 @@ export function startKbWatcher(
     // health reports the truth, then re-arm on transient FS-pressure errors
     // (mirrors the store file watcher) so a blip doesn't permanently stop KB
     // re-indexing until a restart.
-    logger.error("kb watcher error — clearing watcher handle", {
+    logger.error("kb watcher error; clearing watcher handle", {
       err: toError(err),
       code,
     });

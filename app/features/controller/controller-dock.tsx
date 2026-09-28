@@ -177,7 +177,7 @@ function DockShell({ context }: { context: DockContext }) {
   // tab, it hid a conversation started on the full page or on another device.
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
-  // Ruling 565: the files going with the next message. Held here with the
+  // Ruling 573: the files going with the next message. Held here with the
   // text so a close keeps both; the panel's lazy module does the picking.
   const [files, setFiles] = useState<File[]>([]);
   const restored = useRef(false);
@@ -360,7 +360,7 @@ function DockShell({ context }: { context: DockContext }) {
     const sent = pending.current;
     const sentFiles = pendingFiles.current;
     setText((cur) => (cur.trim() === sent ? "" : cur));
-    // Ruling 565: the files the same way, each one that went out.
+    // Ruling 573: the files the same way, each one that went out.
     setFiles((cur) => cur.filter((f) => !sentFiles.includes(f)));
     pending.current = null;
     pendingFiles.current = [];
@@ -563,7 +563,7 @@ function DockShell({ context }: { context: DockContext }) {
    */
   const submit = (override?: string, mode: SendMode = "steer") => {
     const value = (override ?? text).trim();
-    // Ruling 565: files alone are a message.
+    // Ruling 573: files alone are a message.
     if ((!value && files.length === 0) || busy || disabled || !current) return;
     const body = new FormData();
     for (const file of files) body.append("files", file);
@@ -599,7 +599,7 @@ function DockShell({ context }: { context: DockContext }) {
     // Ruling 457 (CTL-4): a send changes the conversation and nothing the page
     // under the dock renders, so it does not re-run the page's loaders; what
     // the turn then does to a board or a task arrives on that page's stream.
-    // Ruling 565: a message with files goes as a multipart form.
+    // Ruling 573: a message with files goes as a multipart form.
     send.submit(body, {
       method: "post",
       action: "/resources/controller",

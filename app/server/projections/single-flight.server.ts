@@ -68,5 +68,5 @@ export function runSingleFlight<T>(
 /** Human copy for a throttled outcome, e.g. "…try again in 7s." */
 export function throttledMessage(what: string, retryAfterMs: number): string {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
-  return `${what} already ran a moment ago — try again in ${seconds}s.`;
+  return `${what} already ran a moment ago; try again in ${seconds}s.`;
 }

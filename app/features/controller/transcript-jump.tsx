@@ -2,7 +2,7 @@ import type { TranscriptJump } from "./transcript-follow";
 import { Icon } from "~/ui/icon";
 
 /**
- * Ruling 564: the transcript's way back to its newest message, the last thing
+ * Ruling 572: the transcript's way back to its newest message, the last thing
  * in the box it scrolls (the page's transcript and the dock's), pinned to that
  * box's foot while the reader is above the newest message (app.css
  * `.ctl-jump`).

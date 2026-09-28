@@ -209,7 +209,7 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(container.textContent).toContain("read by the agents");
     const input = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).not.toBeNull();
-    // Ruling 566: the picker offers any kind of file; what may render inline
+    // Ruling 574: the picker offers any kind of file; what may render inline
     // is the serving route's business, not the picker's.
     expect(input!.accept).toBe("");
   });

@@ -193,7 +193,7 @@ describe("askerAuthorityLine", () => {
   it("distinguishes a role from an override, and reports both when both apply", () => {
     expect(askerAuthorityLine(null, true)).toContain("org-admin override");
     expect(askerAuthorityLine(null, false)).toBe(
-      "your authority: not a member of this project · your role on any OTHER project is not in this read — whoami has it, and the tier list in your instructions says what a role holds",
+      "your authority: not a member of this project · your role on any OTHER project is not in this read; whoami has it, and the tier list in your instructions says what a role holds",
     );
 
     // An org admin who is ALSO a plain member: the role is real and the

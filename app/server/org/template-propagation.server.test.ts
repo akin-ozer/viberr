@@ -305,7 +305,7 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
     expect(edited.toast).toBe(
       "Developer updated · running threads re-anchor on the next turn · 1 project copy keeps its own grants" +
         " · 1 project copy still runs the older summary: viberr-core. A deployment snapshots the" +
-        " summary, and propagate does not rewrite it — fix each copy on that project's Agents page",
+        " summary, and propagate does not rewrite it; fix each copy on that project's Agents page",
     );
     expect(copyOf(store).definition?.resources?.mcps).toEqual([]);
 
@@ -316,7 +316,7 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
     expect(propagated.toast).toBe(
       "Developer updated · running threads re-anchor on the next turn · grants copied to 1 project" +
         " · 1 project copy still runs the older summary: viberr-core. A deployment snapshots the" +
-        " summary, and propagate does not rewrite it — fix each copy on that project's Agents page",
+        " summary, and propagate does not rewrite it; fix each copy on that project's Agents page",
     );
     expect(copyOf(store).definition?.resources?.mcps).toEqual(["github"]);
     const updated = listAuditEvents(store.db, { action: "org.agent_profile.updated" })[0]!;

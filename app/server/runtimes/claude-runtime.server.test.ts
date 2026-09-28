@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -1855,6 +1855,139 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
     const answer = await bash(hookOf(options)!, "git -C . push");
     expect(answer.hookSpecificOutput?.permissionDecisionReason).toBe(
       "A supporting engagement never delivers: `git push` belongs to the delivering agent and Viberr's server. Say what should be delivered in your report instead.",
+    );
+  });
+});
+
+/**
+ * Ruling 564: a run that posts files keeps its file tools, confined by a
+ * PreToolUse hook to the attachments folder and the temp directory. Live on
+ * AWSC-4..7 every Claude run of the AWS calculator board read "No such tool
+ * available: Write" and wrote its deliverable through a shell heredoc. The
+ * folder and checkout below do not exist: the hook decides on the path, so a
+ * directory outside the temp root needs no disk.
+ */
+describe("the file tools of a run that posts files (ruling 564)", () => {
+  const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+  /** A result-maker as the resolver denies it: evidence granted, repo-write withheld. */
+  const WRITE_WITHHELD = resolveSpecialistDisallowedTools([
+    { capabilityId: "attach-evidence-references", mode: "direct" },
+  ]);
+  const DROP = "/srv/vib564/tasks/VIB-1/attachments";
+  const CHECKOUT = "/srv/vib564/tasks/VIB-1/workspace/repo";
+  const POSTS_FILES: RunSpec = {
+    ...SPEC,
+    disallowedTools: WRITE_WITHHELD,
+    attachmentsWritableDir: DROP,
+  };
+
+  async function started(spec: RunSpec) {
+    const lines: EmittedLine[] = [];
+    let options: ClaudeQueryOptions = {};
+    const queryFn: ClaudeQueryFn = (params) => {
+      options = params.options ?? {};
+      return fakeQuery(RESULT).q;
+    };
+    createClaudeAdapter({ queryFn }).start(spec, { onLine: (l) => lines.push(l), onExit: () => {} });
+    await drain();
+    return { options, lines };
+  }
+
+  const fileHookOf = (options: ClaudeQueryOptions): ClaudePreToolUseHook | undefined =>
+    options.hooks?.PreToolUse?.find((m) => m.matcher === "Edit|MultiEdit|Write")?.hooks[0];
+
+  const call = (hook: ClaudePreToolUseHook, tool: string, filePath: string) =>
+    hook(
+      { hook_event_name: "PreToolUse", tool_name: tool, tool_input: { file_path: filePath } },
+      "toolu_1",
+      { signal: new AbortController().signal },
+    );
+
+  it("keeps Edit, MultiEdit and Write on the run, confined, and still denies NotebookEdit", async () => {
+    // Canary: hand the SDK `denied` instead of `sdkDenied` and the three stay denied.
+    const { options } = await started(POSTS_FILES);
+    expect(options.disallowedTools).not.toEqual(expect.arrayContaining(["Write"]));
+    expect(options.disallowedTools).not.toEqual(expect.arrayContaining(["Edit"]));
+    expect(options.disallowedTools).not.toEqual(expect.arrayContaining(["MultiEdit"]));
+    expect(options.disallowedTools).toEqual(
+      expect.arrayContaining(["NotebookEdit", "Bash(git commit:*)"]),
+    );
+    expect(fileHookOf(options)).toBeDefined();
+  });
+
+  it("writes the attachments folder and the temp directory, and refuses everything else with a reason", async () => {
+    // Canary: return `{}` from the file hook and every refusal below passes through.
+    const { options, lines } = await started(POSTS_FILES);
+    const hook = fileHookOf(options)!;
+    for (const [tool, filePath] of [
+      ["Write", `${DROP}/mapping.md`],
+      ["Edit", `${DROP}/estimate/summary.md`],
+      ["MultiEdit", `${DROP}/assumptions.md`],
+      ["Write", path.join(tmpdir(), "vib564", "scratch.mjs")],
+      // The temp root spelled through its symlink (macOS: /var → /private/var)
+      // is the same directory. Canary: compare without `realpathSync`.
+      ["Write", path.join(realpathSync(tmpdir()), "vib564.md")],
+    ] as const) {
+      expect(await call(hook, tool, filePath), filePath).toEqual({});
+    }
+    for (const filePath of [
+      `${CHECKOUT}/mapping.md`,
+      `${DROP}/../task.md`,
+      `${DROP}-evil/mapping.md`,
+      DROP,
+      "mapping.md",
+    ]) {
+      const answer = await call(hook, "Write", filePath);
+      expect(answer.hookSpecificOutput?.permissionDecision, filePath).toBe("deny");
+    }
+    expect((await call(hook, "Edit", `${CHECKOUT}/mapping.md`)).hookSpecificOutput?.permissionDecisionReason).toBe(
+      'Withheld by capability policy: "Execute code or write to the repo" (execute-code-or-write-repo) ' +
+        `is not granted on this run, so Edit writes only into the task's attachments folder \`${DROP}\`, ` +
+        `where the files you post on the task go, and \`${tmpdir()}\` for scratch. ` +
+        `\`${CHECKOUT}/mapping.md\` is outside both: write the file there by its absolute path, and ` +
+        "leave the repository checkout as it is.",
+    );
+    const denials = lines.filter((l) => l.display?.tag === "permission_denied");
+    expect(denials).toHaveLength(6);
+    expect(denials[5]!.display).toMatchObject({ ev: "err", name: "Edit" });
+    // A tool the matcher should never have sent is left alone.
+    expect(await call(hook, "Read", `${CHECKOUT}/mapping.md`)).toEqual({});
+  });
+
+  it("changes nothing without a folder, with repo-write granted, or on an operator", async () => {
+    // No attachments folder: the grants' deny stands and no hook is added.
+    const noDrop = (await started({ ...SPEC, disallowedTools: WRITE_WITHHELD })).options;
+    expect(noDrop.disallowedTools).toEqual(expect.arrayContaining(["Write", "Edit", "MultiEdit"]));
+    expect(fileHookOf(noDrop)).toBeUndefined();
+    // Repo-write granted: the tools were never denied, so nothing confines them.
+    const writer = (
+      await started({
+        ...POSTS_FILES,
+        disallowedTools: resolveSpecialistDisallowedTools([
+          { capabilityId: "execute-code-or-write-repo", mode: "direct" },
+          { capabilityId: "attach-evidence-references", mode: "direct" },
+        ]),
+      })
+    ).options;
+    expect(fileHookOf(writer)).toBeUndefined();
+    // Canary: drop the kind check and the operator's own Write deny is stripped.
+    const operator = (await started({ ...POSTS_FILES, kind: "operator" })).options;
+    expect(operator.disallowedTools).toEqual(expect.arrayContaining(["Write", "Edit"]));
+    expect(fileHookOf(operator)).toBeUndefined();
+  });
+
+  it("still names the withheld repo-write grant when git commit is refused", async () => {
+    // Canary: name Bash refusals from `sdkDenied` and the repo-write grant
+    // leaves the sentence (its rule no longer reads as wholly withheld).
+    const { options } = await started(POSTS_FILES);
+    const bashHook = options.hooks?.PreToolUse?.find((m) => m.matcher === "Bash")?.hooks[0];
+    const answer = await bashHook!(
+      { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git commit -m x" } },
+      "toolu_2",
+      { signal: new AbortController().signal },
+    );
+    expect(answer.hookSpecificOutput?.permissionDecisionReason).toContain(
+      '"Execute code or write to the repo" (execute-code-or-write-repo)',
     );
   });
 });

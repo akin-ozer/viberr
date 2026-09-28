@@ -144,7 +144,7 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
     evidence: {
       type: ["array", "null"],
       description:
-        "ONLY when your role is to cite evidence: up to 8 short REFERENCES to what you checked (a suite, a file and line, a check, a source), each with how it came out and whether it passed. Never raw output — that lives in the run logs. null otherwise.",
+        "ONLY when your role is to cite evidence: up to 8 short REFERENCES to what you checked (a suite, a file and line, a check, a source), each with how it came out and whether it passed. Never raw output; that lives in the run logs. null otherwise.",
       items: {
         type: "object",
         additionalProperties: false,

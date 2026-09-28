@@ -124,12 +124,12 @@ export interface ControllerMessage {
    *  the user message that turn answered; null on every other row. */
   steeredInto: string | null;
   createdAt: string;
-  /** Ruling 565: the files a person sent with this USER message, by name and
+  /** Ruling 573: the files a person sent with this USER message, by name and
    *  size (never the bytes); absent when there are none. */
   files?: readonly MessageFile[];
 }
 
-/** Ruling 565: one file sent with a controller message, as a transcript and a
+/** Ruling 573: one file sent with a controller message, as a transcript and a
  *  turn read it. The bytes stay in the row until the serving route or the
  *  controller's reader asks for them. */
 export interface MessageFile {
@@ -184,7 +184,7 @@ const messageRowSchema = z
     // Ruling 527: optional for the same reason.
     steered_into: z.string().nullable().optional(),
     created_at: z.string(),
-    // Ruling 565: the message's files, as a JSON array a read that names
+    // Ruling 573: the message's files, as a JSON array a read that names
     // `MESSAGE_FILES_COLUMN` adds; absent from a read that does not.
     files_json: z.string().optional(),
   })
@@ -208,7 +208,7 @@ const messageRowSchema = z
   });
 
 /**
- * Ruling 565: a message's files in the same statement as the message (`m`),
+ * Ruling 573: a message's files in the same statement as the message (`m`),
  * as a JSON array of their names and sizes, so the transcript's reads cost
  * no statement more than they did. Never the bytes.
  */
@@ -518,7 +518,7 @@ export interface AppendMessageInput {
   /** Ruling 465: on a CONTROLLER row, the user message it answers. Every
    *  writer of a reply, refusal or note that answers a message passes it. */
   replyTo?: string | null;
-  /** Ruling 565: the files a person sent with a USER message, already checked
+  /** Ruling 573: the files a person sent with a USER message, already checked
    *  by the upload's rules (`checkAttachmentBatch`). They are stored with the
    *  message or not at all, under names unique in the conversation. */
   files?: readonly { name: string; data: Uint8Array }[];
@@ -552,7 +552,7 @@ export function appendMessage(
   const surface =
     input.author === "user" ? normalizeSurface(input.surface) : null;
   const replyTo = input.author === "controller" ? (input.replyTo ?? null) : null;
-  // Ruling 565: a first message of files alone is titled by their names.
+  // Ruling 573: a first message of files alone is titled by their names.
   const title =
     conversation.title ||
     (input.author === "user"
@@ -597,7 +597,7 @@ export function appendMessage(
        WHERE id = ?`,
     ).run(now, now, title, input.conversationId);
   };
-  // Ruling 565: a message and its files commit together, inside the caller's
+  // Ruling 573: a message and its files commit together, inside the caller's
   // transaction when there is one.
   if (db.isTransaction) write();
   else withTransaction(db, write);
@@ -608,7 +608,7 @@ export function appendMessage(
   );
 }
 
-/** Ruling 565: a user message's files, each under a name no other file of the
+/** Ruling 573: a user message's files, each under a name no other file of the
  *  conversation holds (case-folded), as a task's attachments name a relayed
  *  file: `screenshot.png`, then `screenshot-2.png`. */
 function storeMessageFiles(
@@ -635,7 +635,7 @@ function storeMessageFiles(
   }
 }
 
-/** Ruling 565: one file sent in a conversation, with its bytes, for the
+/** Ruling 573: one file sent in a conversation, with its bytes, for the
  *  serving route and the controller's reader. Null when the conversation has
  *  no such file. */
 export interface StoredMessageFile {
@@ -664,7 +664,7 @@ const storedFileSchema = z
     }),
   );
 
-/** Ruling 565: a file by its id, for the serving route (which then asks
+/** Ruling 573: a file by its id, for the serving route (which then asks
  *  whether the viewer may read its conversation). */
 export function getMessageFile(db: DatabaseSync, fileId: string): StoredMessageFile | null {
   const row = db
@@ -673,7 +673,7 @@ export function getMessageFile(db: DatabaseSync, fileId: string): StoredMessageF
   return row ? storedFileSchema.parse(row) : null;
 }
 
-/** Ruling 565: a conversation's file by its name, for the controller's
+/** Ruling 573: a conversation's file by its name, for the controller's
  *  reader. */
 export function findMessageFile(
   db: DatabaseSync,
@@ -689,7 +689,7 @@ export function findMessageFile(
   return row ? storedFileSchema.parse(row) : null;
 }
 
-/** Ruling 565: every file name a conversation holds, oldest first, for a
+/** Ruling 573: every file name a conversation holds, oldest first, for a
  *  reader asked for one it does not hold. */
 export function listConversationFileNames(db: DatabaseSync, conversationId: string): string[] {
   // SAFETY: `name` is the TEXT NOT NULL column of the table this selects.

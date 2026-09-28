@@ -65,7 +65,7 @@ describe("whitelisting", () => {
       role: "member",
       tone: "teal",
     });
-    expect(toast).toBe("@octocat whitelisted — allowed at first GitHub sign-in");
+    expect(toast).toBe("@octocat whitelisted: allowed at first GitHub sign-in");
     // Dedupe.
     expect(() =>
       whitelistGithubUser(db, { handle: "octocat", role: "member" }, ACTOR),
@@ -509,7 +509,7 @@ describe("google domain allowlist", () => {
     if (added.status === "added") {
       expect(added.domain.domain).toBe("@viberr.dev");
       expect(added.toast).toBe(
-        "Anyone with @viberr.dev can now sign in with Google — joins as member",
+        "Anyone with @viberr.dev can now sign in with Google (joins as member)",
       );
     }
 

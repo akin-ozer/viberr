@@ -5,7 +5,7 @@ import { Icon } from "./icon";
 import { PICTURE_RE } from "./picked-files";
 
 /**
- * Ruling 565: the files a person hands over with a message, picked, dropped or
+ * Ruling 573: the files a person hands over with a message, picked, dropped or
  * pasted, before the message is sent: the tray, the paperclip and the drop,
  * for the controller page and dock and a task's comments.
  *
@@ -16,7 +16,7 @@ import { PICTURE_RE } from "./picked-files";
  * thumbnail or the file glyph, the name, the size, a remove button), a drop on
  * the composer's frame, and a pasted screenshot.
  *
- * The picker offers any kind of file (ruling 566); the rules for what a
+ * The picker offers any kind of file (ruling 574); the rules for what a
  * composer keeps, sizes and counts, are `picked-files.ts`.
  */
 
@@ -35,7 +35,7 @@ export interface FileDrop {
 }
 
 /**
- * Ruling 565: a composer's frame takes the files dropped on it. `dropping` is
+ * Ruling 573: a composer's frame takes the files dropped on it. `dropping` is
  * true while files are held over the frame, for its highlight; a drag of text
  * or of anything but files is left to the page.
  */

@@ -741,7 +741,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // and when an agent is @mentioned (and the commenter is admin|
         // maintainer) resumes THAT agent's session — the agent's reply arrives
         // later as a new agent-authored comment via SSE revalidation.
-        // Ruling 565: the files the comment carries, as the task's attachments.
+        // Ruling 573: the files the comment carries, as the task's attachments.
         const result = await commentToAgent(
           db,
           { projectSlug, taskKey, text: String(formData.get("text") ?? ""), files: await formFiles(formData) },

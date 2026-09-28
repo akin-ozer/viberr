@@ -83,7 +83,7 @@ The boot log (structured JSON on stdout) prints one `boot integrity check` line:
 `dataRoot`, `dataRootDirsOk` (and `missingDirs` when some are gone), `migrationsApplied`,
 `latestMigration`, `projections`, `users`, `build`, `disk` and `toolchain`. When this
 root's rebuilder tables lag the shipped baseline it is followed by a separate WARN,
-`projection schema drift — this root's rebuilder tables lag the shipped baseline`, whose
+`projection schema drift: this root's rebuilder tables lag the shipped baseline`, whose
 `refuses` list names CHECK values the root will not admit and whose `missingColumns` list
 names `task_projections` / `task_events` columns it lacks, each with the impact and the
 remedy (see [deployment.md](./deployment.md#re-baselining-the-projection-database)). Grep
@@ -611,7 +611,7 @@ the next clone rebuilds. A mirror whose `HEAD` does not resolve to a branch it h
 skipped for the same reason: `git clone` warns and exits 0 on one, producing an empty tree.
 Symptoms of an older half-built mirror, all at once: a `.repo-mirror/<owner>__<repo>.git`
 with zero refs and orphaned `objects/pack/tmp_pack_*`, repeated `mirror could not be
-refreshed — serving a possibly stale mirror` warnings, and agents reporting an EMPTY
+refreshed; serving a possibly stale mirror` warnings, and agents reporting an EMPTY
 repository — after which a delivering agent commits with no ancestry and the push is refused
 as non-fast-forward. That refusal is NOT a stale remote branch: check the workspace's
 `git log` before clearing anything on GitHub. The repair is to delete the mirror directory
@@ -692,7 +692,7 @@ page, `deployment.md` and `scripts.md` to:
   runs the migrations into it and copies every table except the ones the rescan rebuilds
   (`REBUILT_FROM_FILES`), then copies the corrupt file and its `-wal`/`-shm` to
   `state/projection.sqlite.corrupt-<ts>` (preserved, never deleted) and renames the fresh
-  file into place. It logs `projection database is CORRUPT — self-healing` and
+  file into place. It logs `projection database is CORRUPT: self-healing` and
   `projection database self-healed` at error level, then boot WARNs `recovered a corrupt
   projection database at boot` with `movedTo` / `salvaged` / `skipped` (a non-empty
   `skipped` means some readable rows could only be kept in the preserved file). Projection

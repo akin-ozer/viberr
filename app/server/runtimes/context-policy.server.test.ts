@@ -199,7 +199,7 @@ describe("ruling 371/373: the compaction anchors", () => {
     expect(text).toContain("house-style, rulings");
     expect(text).toContain("read_knowledge_doc");
     expect(text).toContain("rulings (rulings) still bind you");
-    expect(text).toContain("re-read it before you act");
+    expect(text).toContain("Re-read it before you act");
   });
 
   it("says plainly when there is no branch, PR or knowledge base yet", () => {

@@ -90,7 +90,7 @@ export async function seedInitialAdmin(
   if (generated) {
     // The ONE place this password ever appears. Marked so it's easy to find.
     logger.warn(
-      `VIBERR BOOTSTRAP ADMIN — email: ${email} password: ${password} ` +
+      `VIBERR BOOTSTRAP ADMIN, email: ${email} password: ${password} ` +
         `(one-time credentials; you must set a new password at first sign-in)`,
       { bootstrap: true },
     );

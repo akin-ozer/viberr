@@ -1165,11 +1165,11 @@ describe("ruling 259: the dock compares the box with what went out, trimmed", ()
 });
 
 /**
- * Ruling 565: the dock's composer takes files. Picked ones show in its tray,
+ * Ruling 573: the dock's composer takes files. Picked ones show in its tray,
  * go out as a multipart form (files alone are a message), and leave the tray
  * only once the server took them.
  */
-describe("ruling 565: files from the dock", () => {
+describe("ruling 573: files from the dock", () => {
   /** A file the request body can carry, as a browser's can. jsdom's `File`
    *  is not one Node's `Request` encodes or parses back, and jsdom's
    *  `FormData` turns Node's `File` into a string, so these tests run on
@@ -1621,7 +1621,7 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
     }
   });
 
-  it("(ruling 564) offers a reader scrolled up in the dock the page's way back", async () => {
+  it("(ruling 572) offers a reader scrolled up in the dock the page's way back", async () => {
     // CANARY: drop the dock's <TranscriptJumpButton>, and the wheel is the
     // only way back down the panel.
     const restore = stubDockTranscript();

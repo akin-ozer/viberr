@@ -104,7 +104,7 @@ function sendForm(
   /** Ruling 527: what the message does while a turn works; the server
    *  steers when the form names none. */
   mode: SendMode = "steer",
-  /** Ruling 565: the files it carries. */
+  /** Ruling 573: the files it carries. */
   files: readonly File[] = [],
 ): FormData {
   const body = new FormData();
@@ -713,7 +713,7 @@ function Transcript({
   // rail, on every load and every new message. The transcript is its own
   // capped scroller at every width now, so only its own box moves. Ruling
   // 476(c): and a reply that lands shows its first line, not its last.
-  // Ruling 564: and a reader who scrolled away has the way back.
+  // Ruling 572: and a reader who scrolled away has the way back.
   const jump = useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
   // A reply that names an open knowledge-base proposal links it to its entry
   // in the panel beside the transcript (owner, 2026-09-25), and one that names
@@ -861,12 +861,12 @@ function Composer({
   restoreDraft?: RestoreDraft;
 }) {
   const [text, setText] = useState("");
-  // Ruling 565: the files going with the message, and the first one refused.
+  // Ruling 573: the files going with the message, and the first one refused.
   const [files, setFiles] = useState<File[]>([]);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const location = useLocation();
   // Ruling 527: the transcript's Retract puts a message back in this box.
-  // Ruling 565: and its files back in the tray.
+  // Ruling 573: and its files back in the tray.
   useEffect(() => {
     if (!restoreDraft) return;
     restoreDraft.current = (retracted, back) => {
@@ -908,7 +908,7 @@ function Composer({
     // clears like any other. `sent` is read before the ref is nulled, because
     // React may run the updater later than this line. On a failure the text
     // and the Send button both stay, so the person can retry or copy it out.
-    // Ruling 565: the files the same way, each one that went out.
+    // Ruling 573: the files the same way, each one that went out.
     const sent = pending.current;
     const sentFiles = pendingFiles.current;
     pending.current = null;
@@ -922,7 +922,7 @@ function Composer({
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
   const { dropping, dropProps } = useFileDrop(addFiles, disabled);
-  // Ruling 565: files alone are a message.
+  // Ruling 573: files alone are a message.
   const empty = !text.trim() && files.length === 0;
   const submit = (mode: SendMode = "steer") => {
     const value = text.trim();
@@ -951,7 +951,7 @@ function Composer({
         autoFocus={!disabled}
         onChange={(e) => setText(e.target.value)}
         onPaste={(e) => {
-          // Ruling 565 (ruling 533's rule): a bare screenshot goes with the
+          // Ruling 573 (ruling 533's rule): a bare screenshot goes with the
           // message; copied text, cells included, stays text.
           const pasted = filesFromPaste(e.clipboardData, true, files);
           if (!pasted) return;

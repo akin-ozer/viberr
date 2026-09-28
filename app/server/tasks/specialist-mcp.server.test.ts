@@ -269,11 +269,11 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(resolved.unresolved).toEqual([
       {
         name: "billing-api",
-        reason: "the org MCP registry could not be read — it exposes no tools",
+        reason: "the org MCP registry could not be read; it exposes no tools",
       },
       {
         name: "vm-memory",
-        reason: "the org MCP registry could not be read — it exposes no tools",
+        reason: "the org MCP registry could not be read; it exposes no tools",
       },
     ]);
   });

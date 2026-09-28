@@ -4656,7 +4656,7 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
   });
 
   // Every rule that targets an emitted <img>: the markdown embed, the
-  // lightbox picture, the two attachment tiles, and (ruling 565) a picture
+  // lightbox picture, the two attachment tiles, and (ruling 573) a picture
   // in a composer's tray and in a controller message.
   const IMAGES = [
     ".md-body img",
@@ -6259,11 +6259,11 @@ describe("app.css ruling 525: deleting a controller conversation from the rail",
 });
 
 /**
- * Ruling 564, after the shadcn chatbot template: the controller transcript
+ * Ruling 572, after the shadcn chatbot template: the controller transcript
  * reads as one column (b), and its jump back to the newest message takes no
  * room in the box it scrolls (a).
  */
-describe("app.css ruling 564: the controller transcript reads as one column", () => {
+describe("app.css ruling 572: the controller transcript reads as one column", () => {
   it("(b) centres one 48rem column, keeps the person's bubble and frames no reply", () => {
     // CANARY: put the agent-tinted border and padding back on
     // `.ctl-msg.from-controller`, and a reply is a card inside the

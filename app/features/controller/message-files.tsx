@@ -3,13 +3,13 @@ import { PICTURE_RE } from "~/ui/picked-files";
 import { Icon } from "~/ui/icon";
 import { prettySize } from "~/shared/text/byte-size";
 
-/** Ruling 565: where a file sent in a conversation is served. */
+/** Ruling 573: where a file sent in a conversation is served. */
 export function messageFileHref(file: Pick<MessageFile, "id">): string {
   return `/resources/controller-file/${encodeURIComponent(file.id)}`;
 }
 
 /**
- * Ruling 565: the files a person sent with a message, under its words, on the
+ * Ruling 573: the files a person sent with a message, under its words, on the
  * page and in the dock. A picture shows as itself; any other file as the
  * composer tray's chip (name and size), so what was sent looks like what was
  * attached. Each opens the file in a new tab from the conversation's own

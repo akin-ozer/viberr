@@ -170,7 +170,7 @@ export function causeFanOutDisclosure(siblings: readonly CauseSibling[]): string
   return (
     `The same failure stopped ${them}: ${keys}. ` +
     "Answering here answers each of them the same way, wherever that task's packet offers " +
-    "the option you pick — you are deciding about the account, not about this task alone. " +
+    "the option you pick: you are deciding about the account, not about this task alone. " +
     "A directive you write yourself applies only here."
   );
 }

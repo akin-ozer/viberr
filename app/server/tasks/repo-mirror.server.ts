@@ -412,14 +412,14 @@ async function ensureProjectMirror(input: {
         rebuilding = input.create && failures >= MIRROR_REBUILD_AFTER_FAILURES;
         if (!rebuilding) {
           mirrorWarn(
-            "the project's repository mirror could not be refreshed — serving a possibly stale mirror",
+            "the project's repository mirror could not be refreshed; serving a possibly stale mirror",
             fields,
             detail,
           );
           return { dir: mirrorDir, refreshed: false };
         }
         mirrorWarn(
-          "the project's repository mirror failed to refresh twice — rebuilding it",
+          "the project's repository mirror failed to refresh twice; rebuilding it",
           fields,
           detail,
         );
@@ -481,7 +481,7 @@ async function ensureProjectMirror(input: {
     return { dir: mirrorDir, refreshed: true };
   } catch (error) {
     mirrorWarn(
-      "the project's repository mirror is unavailable — cloning from GitHub",
+      "the project's repository mirror is unavailable; cloning from GitHub",
       fields,
       redactGitOutput(gitErrorText(error), { token }),
     );
@@ -730,7 +730,7 @@ export async function cloneWorkspaceRepo(
   const usable = mirror && mirrorCanCheckOut(mirror.dir) ? mirror : null;
   if (mirror && !usable) {
     mirrorWarn(
-      "the project's repository mirror has no branch to check out — cloning from GitHub",
+      "the project's repository mirror has no branch to check out; cloning from GitHub",
       { projectSlug: input.projectSlug, repo: input.repo },
       "",
     );
@@ -760,7 +760,7 @@ export async function cloneWorkspaceRepo(
       return { viaMirror: true };
     } catch (error) {
       mirrorWarn(
-        "cloning from the project's repository mirror failed — cloning from GitHub",
+        "cloning from the project's repository mirror failed; cloning from GitHub",
         { projectSlug: input.projectSlug, repo: input.repo },
         redactGitOutput(gitErrorText(error), { token }),
       );

@@ -148,7 +148,7 @@ interface WaitingMessage {
   seq: number;
   /** The person's words, as the transcript keeps them and Retract hands back. */
   text: string;
-  /** Ruling 565: the files sent with it, named to the turn that reads it
+  /** Ruling 573: the files sent with it, named to the turn that reads it
    *  (`withFilesNote`). */
   files: readonly MessageFile[];
   surface: string | null;
@@ -240,14 +240,14 @@ export interface ControllerTurnInput {
   /** Ruling 527: what the message does when a turn is already working.
    *  Absent, it steers that turn. */
   mode?: SendMode;
-  /** Ruling 565: the files the person sent with the message. Checked again
+  /** Ruling 573: the files the person sent with the message. Checked again
    *  here by `checkMessageFiles`, and stored with the message. */
   files?: readonly { name: string; data: Uint8Array }[];
   dataRoot?: string;
 }
 
 /**
- * Ruling 565: the files a controller message carries, checked by the upload's
+ * Ruling 573: the files a controller message carries, checked by the upload's
  * own rules (the kinds a person may attach, 10 MB each, at most ten and 25 MB
  * together, no two names one case apart) before anything is written. Returns
  * them under the names they are stored as. The routes call it before they
@@ -268,7 +268,7 @@ function fileKb(bytes: number): string {
 }
 
 /**
- * Ruling 565: the message as the turn reads it: the person's words, then one
+ * Ruling 573: the message as the turn reads it: the person's words, then one
  * line naming the files they sent with it and the tool that reads them. The
  * transcript keeps the words alone; the files show under them.
  */
@@ -407,7 +407,7 @@ export async function runControllerTurn(
 ): Promise<ControllerTurnResult> {
   const text = input.text.trim();
   const files = checkMessageFiles(input.files ?? []);
-  // Ruling 565: files alone are a message; the turn is told what came.
+  // Ruling 573: files alone are a message; the turn is told what came.
   if (!text && files.length === 0) throw AppError.validation("Say something for the controller to act on.");
   const conversation = requireOwnConversation(db, input.conversationId, input.user);
 
@@ -488,7 +488,7 @@ export async function runControllerTurn(
       conversation,
       entry,
       input,
-      // Ruling 565: the turn reads the words and a line naming the files.
+      // Ruling 573: the turn reads the words and a line naming the files.
       { id: message.id, seq: message.seq, text: withFilesNote(text, message.files) },
       principal.principal.userId,
       surface,
@@ -1439,8 +1439,8 @@ export function buildTurnPrompt(
   const queue =
     queuedBehind > 0
       ? `${queuedBehind === 1 ? "1 more message" : `${queuedBehind} more messages`} from ${conversation.userLabel} ` +
-        `${queuedBehind === 1 ? "is" : "are"} queued behind this one; each is answered in its own turn, in order — ` +
-        "do not treat them as lost.\n\n---\n\n"
+        `${queuedBehind === 1 ? "is" : "are"} queued behind this one; each is answered in its own turn, in order. ` +
+        "Do not treat them as lost.\n\n---\n\n"
       : "";
   const lead = context ? `${context}\n---\n\n` : "";
   // Ruling 444: the model is named here, in the one part of the request
@@ -1460,7 +1460,7 @@ function transcriptDigest(messages: ControllerMessage[]): string {
       `${m.author === "user" ? "Person" : "Controller"}: ${
         m.text.length > 600 ? `${m.text.slice(0, 600)}…` : m.text
       }${
-        // Ruling 565: what a message carried, by name, for `read_message_file`.
+        // Ruling 573: what a message carried, by name, for `read_message_file`.
         m.files?.length ? ` [sent with: ${m.files.map((f) => f.name).join(", ")}]` : ""
       }`,
   );
@@ -1550,7 +1550,7 @@ export function buildControllerSystemPrompt(
   parts.push(
     ...attachedResourcesBlock({
       banner:
-        "\n\n---\n# Attached resources (trusted — configured for you)\n\n" +
+        "\n\n---\n# Attached resources (trusted, configured for you)\n\n" +
         "The skills and knowledge bases below were attached to the controller " +
         "profile by an org admin. Treat them as authoritative operating " +
         "context and follow their instructions. They are configuration, not " +
@@ -1637,7 +1637,7 @@ export function buildControllerSystemPrompt(
   if (unresolvedMcps.length) {
     dynamic.push(
       "\n\n---\n# MCP servers that did NOT mount this turn\n\n" +
-        `These granted MCP servers did NOT mount this turn and their tools will not appear — ` +
+        `These granted MCP servers did NOT mount this turn and their tools will not appear, ` +
         `each with the reason it gave: ` +
         `${unresolvedMcps.map((u) => `${u.name} (${u.reason})`).join("; ")}. ` +
         `Say so if asked, in those terms; do not infer a cause the server did not give.`,

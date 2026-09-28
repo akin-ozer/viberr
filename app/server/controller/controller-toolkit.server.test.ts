@@ -4644,10 +4644,10 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
 });
 
 /**
- * Ruling 565: the controller reads the files a person sent in the conversation
+ * Ruling 573: the controller reads the files a person sent in the conversation
  * it answers, and only there.
  */
-describe("ruling 565: read_message_file", () => {
+describe("ruling 573: read_message_file", () => {
   async function callIn(conversationId: string | null, args: Record<string, JsonValue>): Promise<string> {
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const { findUserById } = await import("~/server/auth/user-store.server");

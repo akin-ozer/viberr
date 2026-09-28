@@ -7,7 +7,7 @@ import { ToastProvider } from "~/ui/toast";
 import { Timeline } from "./timeline";
 
 /**
- * Ruling 565: a task comment carries files for whoever may attach one. The
+ * Ruling 573: a task comment carries files for whoever may attach one. The
  * composer offers the paperclip and takes a pasted screenshot into its tray
  * before the editor sees the paste; a viewer who may not attach is offered
  * neither.
@@ -40,7 +40,7 @@ function renderTimeline(canAttach: boolean) {
   return render(<Stub initialEntries={["/t"]} />);
 }
 
-describe("ruling 565: files with a task comment", () => {
+describe("ruling 573: files with a task comment", () => {
   it("takes a pasted screenshot into the comment's tray", async () => {
     // CANARY: drop the composer's `onPasteCapture` and the screenshot never
     // joins the comment.

@@ -271,7 +271,7 @@ describe("ruling 471: a plain acceptance answers a decision that offers accept_c
     expect(withdrawn).toHaveLength(1);
     expect(withdrawn[0]!.details).toMatchObject({ title: OTHER_PACKET.title, by: "accept" });
     expect(withdrawalNotes()).toEqual([
-      `Withdrew the open decision "${OTHER_PACKET.title}" — this acceptance closed the task, ` +
+      `Withdrew the open decision "${OTHER_PACKET.title}": this acceptance closed the task, ` +
         `so the decision was never answered.`,
     ]);
     expect(completionText()).not.toContain("answers the open decision");

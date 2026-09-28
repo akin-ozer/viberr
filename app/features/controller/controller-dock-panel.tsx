@@ -98,7 +98,7 @@ export interface DockPanelBodyProps {
   /** A link out of the dock was followed: close without animating. */
   onLeave: () => void;
   composerRef: RefObject<HTMLTextAreaElement | null>;
-  /** Ruling 565: the files going with the next message, held by the shell. */
+  /** Ruling 573: the files going with the next message, held by the shell. */
   files: File[];
   onFiles: (update: (current: File[]) => File[]) => void;
   /** The body is on screen; focus may move into it (a lazy load lands after
@@ -139,7 +139,7 @@ export function DockPanelBody({
     onMount();
   }, [onMount]);
 
-  // Ruling 565: picked, dropped or pasted files, refused as the server would.
+  // Ruling 573: picked, dropped or pasted files, refused as the server would.
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const addFiles = (incoming: readonly File[]) => {
     const next = addPickedFiles(files, incoming, MESSAGE_BATCH);
@@ -169,7 +169,7 @@ export function DockPanelBody({
   // that lands shows its first line, not its last.
   const scrollRef = useRef<HTMLDivElement>(null);
   // The thread list swaps the transcript's box out, and the box it swaps back
-  // in starts at its top: that is an open too. Ruling 564: the page's way back
+  // in starts at its top: that is an open too. Ruling 572: the page's way back
   // to the newest message, too.
   const jump = useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
   // Ruling 476(d): a reply to the thread on screen is announced here; the
@@ -348,7 +348,7 @@ export function DockPanelBody({
             value={text}
             onChange={(e) => onText(e.target.value)}
             onPaste={(e) => {
-              // Ruling 565: a bare screenshot goes with the message; copied
+              // Ruling 573: a bare screenshot goes with the message; copied
               // text, cells included, stays text.
               const pasted = filesFromPaste(e.clipboardData, true, files);
               if (!pasted) return;

@@ -269,7 +269,7 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       // run reported "there is no p13-facts knowledge base reaching this run"
       // while every UI still showed it attached. Mirrors readSkillBodyDetailed.
       logger.warn(
-        "declared knowledge base not found in the store — run proceeds WITHOUT it",
+        "declared knowledge base not found in the store; run proceeds WITHOUT it",
         { kb: name },
       );
       return miss("no knowledge-base folder by that name in the store");
@@ -281,16 +281,16 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
     // path refuses to follow a link out of the store (P14-RV-02); so does this.
     if (lstatSync(dir).isSymbolicLink()) {
       logger.warn(
-        "declared knowledge base folder is a symlink — run proceeds WITHOUT it",
+        "declared knowledge base folder is a symlink; run proceeds WITHOUT it",
         { kb: name },
       );
       return miss(
-        "its store folder is a symlink — Viberr does not follow links out of the store",
+        "its store folder is a symlink; Viberr does not follow links out of the store",
       );
     }
     const docs = collectKbDocs(dir);
     if (docs.length === 0) {
-      logger.warn("declared knowledge base is empty — run proceeds WITHOUT it", {
+      logger.warn("declared knowledge base is empty; run proceeds WITHOUT it", {
         kb: name,
       });
       return miss("its store folder holds no documents a run can read");
@@ -332,7 +332,7 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       body: `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
     };
   } catch (error) {
-    logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {
+    logger.warn("knowledge base unreadable; run proceeds WITHOUT it", {
       kb: name,
       err: toError(error),
     });
@@ -391,7 +391,7 @@ export function readKbIndexes(
 const RULINGS_BINDING_LINE =
   "**BINDING on this run.** This is the project's settled rulings knowledge base " +
   "(ruling 239): an administrator made it binding on every run this project makes, " +
-  "you included. Read it — the obligation is not conditional on your finding it " +
+  "you included. Read it; the obligation is not conditional on your finding it " +
   "interesting.";
 
 /**
@@ -467,7 +467,7 @@ export function readKbDoc(
 const KB_INDEX_NOTE =
   "\n\n---\n# How to read a knowledge base\n\n" +
   "Each knowledge base below is listed as an INDEX: every document it holds, " +
-  "its size, and its sections. The text is NOT in this prompt — read the " +
+  "its size, and its sections. The text is NOT in this prompt: read the " +
   "documents you need. Call `read_knowledge_doc` with the knowledge base's " +
   "name and the document's path; if that tool is not mounted for you, the " +
   "index prints the folder's path on disk and you can read the file directly. " +
@@ -499,9 +499,9 @@ const KB_INDEX_NOTE =
 export const KB_PRECEDENCE_NOTE =
   "\n\n---\n# Which source wins (knowledge bases vs the repository)\n\n" +
   "The repository's OWN documented conventions outrank the knowledge bases " +
-  "below. Where a repo file states a convention — its README, CONTRIBUTING, " +
+  "below. Where a repo file states a convention (its README, CONTRIBUTING, " +
   "docs/, a linter or formatter config, or the established pattern of the " +
-  "files you are editing — follow the repository and treat the knowledge base " +
+  "files you are editing), follow the repository and treat the knowledge base " +
   "as supplementary. Use knowledge-base guidance where the repo is silent, and " +
   "when the two genuinely conflict, follow the repo and SAY SO in your report " +
   "(name the file and the conflicting knowledge base) so a human can reconcile " +
@@ -544,11 +544,11 @@ export function readKbDocForRun(
       `[noop] Knowledge base \`${wanted}\` has no document \`${docPath}\`. ` +
       (index.body
         ? `Its index:\n\n${index.body}`
-        : `It resolves to nothing this run can read${index.unresolved ? ` — ${index.unresolved.reason}` : ""}.`)
+        : `It resolves to nothing this run can read${index.unresolved ? `: ${index.unresolved.reason}` : ""}.`)
     );
   }
   return doc.truncated
-    ? `${doc.text}\n\n_(cut off here — \`${doc.rel}\` is longer than the ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters one read returns; what is above is its opening, not the whole document)_`
+    ? `${doc.text}\n\n_(cut off here: \`${doc.rel}\` is longer than the ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters one read returns; what is above is its opening, not the whole document)_`
     : doc.text;
 }
 
@@ -590,7 +590,7 @@ const KB_RULINGS_NOTE =
   "- before reporting a check as passed, or a check you could not run;\n" +
   "- before calling the work done, or judging whether someone else's is.\n\n" +
   "These are the moments the rules were written for, and they are moments you will " +
-  "feel certain rather than uncertain — which is exactly why the trigger is the " +
+  "feel certain rather than uncertain, which is exactly why the trigger is the " +
   "situation and not your sense of needing help.\n\n" +
   "In your final report, state which rulings sections you relied on, and say so " +
   "plainly if you did not open them. A delivery that contradicts a rule its author " +

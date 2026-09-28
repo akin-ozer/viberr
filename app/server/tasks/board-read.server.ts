@@ -1,6 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  reviewSubjectId,
+  VERDICT_REPORT_TITLE,
+  type ReviewVerdict,
+  type TaskFileEvent,
+  type TaskFrontmatter,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
+import { currentCompletionPacket } from "./completion-packet.server";
 import type { TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -23,6 +31,11 @@ import type { TaskMutationContext } from "./task-actions.server";
  *  answer "is this the work I was told about", not enough to make a second
  *  task's whole contract compete with the reader's own prompt. */
 const BOARD_READ_GOAL_CHARS = 2_000;
+
+/** Ruling 569: how much of a task's completion summary, and of each verdict's
+ *  report, a single-task read hands back. The outcome is what a task that
+ *  waited on this one needs, so it is read far past the goal's cap. */
+const BOARD_READ_OUTCOME_CHARS = 8_000;
 
 export interface BoardReadContext {
   db: DatabaseSync;
@@ -51,10 +64,86 @@ function goalExcerpt(goal: string | null): string | null {
   if (goal.length <= BOARD_READ_GOAL_CHARS) return goal;
   return (
     `${goal.slice(0, BOARD_READ_GOAL_CHARS)}\n\n` +
-    `[excerpt — this goal is ${goal.length.toLocaleString("en-US")} characters and this is ` +
+    `[excerpt: this goal is ${goal.length.toLocaleString("en-US")} characters and this is ` +
     `its first ${BOARD_READ_GOAL_CHARS.toLocaleString("en-US")}. Do not treat what is above ` +
     `as the whole contract; the task's own page has all of it.]`
   );
+}
+
+/** Ruling 569: one side of an outcome, or its opening with a line saying so. */
+function outcomeExcerpt(text: string, what: string): string {
+  if (text.length <= BOARD_READ_OUTCOME_CHARS) return text;
+  return (
+    `${text.slice(0, BOARD_READ_OUTCOME_CHARS)}\n\n` +
+    `[excerpt: this ${what} is ${text.length.toLocaleString("en-US")} characters and this is ` +
+    `its first ${BOARD_READ_OUTCOME_CHARS.toLocaleString("en-US")}. The task's own page has all of it.]`
+  );
+}
+
+/** Whitespace-insensitive, for matching a stored reason to the report it
+ *  was cut from (the report went through the reply's newline repair). */
+function flat(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Ruling 569, amended: the verdict's whole report. A verdict stores the first
+ * 2,000 characters of its justification and a line saying the whole report is
+ * on the task's timeline (ruling 292), which a reader on another task cannot
+ * open; live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000
+ * of 5,382 and asked Arda to paste the rest. The report is the agent's "Review
+ * verdict" comment (ruling 317), the newest at or before the verdict's stamp,
+ * and it must open with what the verdict stored, so an earlier round's report
+ * never stands in for this one. Without it the stored text is all there is.
+ */
+function verdictReport(timeline: readonly TaskFileEvent[], v: ReviewVerdict): string {
+  const opening = flat(v.reason).slice(0, 120);
+  const report = timeline.find(
+    (e) =>
+      e.type === "comment" &&
+      e.title === VERDICT_REPORT_TITLE &&
+      e.actor.kind === "agent" &&
+      e.actor.profileId === v.profileId &&
+      e.occurredAt <= v.at &&
+      flat(e.text).startsWith(opening),
+  );
+  return report?.text ?? v.reason;
+}
+
+/**
+ * Ruling 569: what a task came to, for a reader on another task. Its completion
+ * summary when one describes what it delivered, and the verdicts on that
+ * delivery with their reports; null while it has neither.
+ *
+ * A task that waits on others (`blockedBy`) is released when they finish, and
+ * its work is usually to use what they found. Its readers could learn only
+ * THAT they finished: this read stopped at the goal, and `take_from_task`
+ * carries files. Live on AWSC-8, the research task that turns four benchmark
+ * scores into workflow changes, three of the four scores had been relayed by
+ * their operators and the fourth had not: the Estimate Judge's 90/100 for
+ * sample-04 lived only in AWSC-7's verdict, and the AWSC-8 operator told its
+ * researcher "neither you nor I can read that" and to ask Arda to paste it.
+ * Verdicts bound to an earlier delivery are left out: they judged work the task
+ * no longer stands on.
+ */
+interface TaskOutcome {
+  completion: string | null;
+  verdicts: { agent: string; result: string; report: string }[];
+}
+
+function taskOutcome(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): TaskOutcome | null {
+  const subject = reviewSubjectId(fm);
+  const packet = currentCompletionPacket(fm);
+  const verdicts = subject ? fm.verdicts.filter((v) => v.revisionId === subject) : [];
+  if (!packet && verdicts.length === 0) return null;
+  return {
+    completion: packet ? outcomeExcerpt(packet.summary, "summary") : null,
+    verdicts: verdicts.map((v) => ({
+      agent: v.profileId,
+      result: v.result,
+      report: outcomeExcerpt(verdictReport(timeline, v), "report"),
+    })),
+  };
 }
 
 /**
@@ -71,7 +160,7 @@ export function readBoardTask(
   if (!row) {
     return (
       `[noop] No task ${taskKey} in this project. If a document, a directive or a ` +
-      `report named it, that claim is wrong — say so rather than acting on it.`
+      `report named it, that claim is wrong; say so rather than acting on it.`
     );
   }
   const file = readTaskFile({
@@ -79,21 +168,36 @@ export function readBoardTask(
     taskKey: row.key,
     dataRoot: deps.ctx.dataRoot,
   });
-  return JSON.stringify(
-    {
-      key: row.key,
-      title: row.title,
-      stage: row.stage,
-      readiness: row.readiness,
-      waiting: row.waiting,
-      archived: row.archived,
-      waitsOn: row.blockedBy.map((e) => `${e.label} (${e.state})`),
-      goal: goalExcerpt(file?.parsed.goal ?? null),
-    },
-    null,
-    1,
-  );
+  const read: BoardTaskRead = {
+    key: row.key,
+    title: row.title,
+    stage: row.stage,
+    readiness: row.readiness,
+    waiting: row.waiting,
+    archived: row.archived,
+    waitsOn: row.blockedBy.map((e) => `${e.label} (${e.state})`),
+    goal: goalExcerpt(file?.parsed.goal ?? null),
+  };
+  const outcome = file ? taskOutcome(file.parsed.frontmatter, file.parsed.timeline) : null;
+  if (outcome) read.outcome = outcome;
+  return JSON.stringify(read, null, 1);
 }
+
+/** One task as `read_board` answers it. */
+interface BoardTaskRead {
+  key: string;
+  title: string;
+  stage: BoardRow["stage"];
+  readiness: BoardRow["readiness"];
+  waiting: BoardRow["waiting"];
+  archived: boolean;
+  waitsOn: string[];
+  goal: string | null;
+  /** Ruling 569: absent until the task has one. */
+  outcome?: TaskOutcome;
+}
+
+type BoardRow = ReturnType<typeof boardRows>[number];
 
 /** Every task in the project, as JSON. */
 export function readBoardList(deps: BoardReadContext): string {

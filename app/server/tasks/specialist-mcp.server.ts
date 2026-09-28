@@ -147,7 +147,7 @@ export function unavailableMcpSection(grants: readonly UnresolvedMcpGrant[]): st
     `mounted on this run. Why, per server, as the server reported it:\n\n` +
     `${lines}\n\n` +
     `Do not claim or attempt tools from ${they}; report the gap, and report ` +
-    `THAT reason — do not infer one, and do not assume the grant or the ` +
+    `THAT reason: do not infer one, and do not assume the grant or the ` +
     `registration is missing unless the reason says so.`
   );
 }
@@ -276,7 +276,7 @@ export function resolveSpecialistMcpServersDetailed(
     // silence this module's own drop() path exists to prevent. A registry that
     // cannot be read means none of these tool surfaces mounted, so say so for each
     // one the run's persona promised, and log it once.
-    logger.warn("MCP registry unreadable — all declared MCP grants dropped", {
+    logger.warn("MCP registry unreadable; all declared MCP grants dropped", {
       mcps: mcpNames.filter((n) => !RESERVED_MCP_NAMES.has(n)),
       err: toError(error),
     });
@@ -284,7 +284,7 @@ export function resolveSpecialistMcpServersDetailed(
       if (RESERVED_MCP_NAMES.has(name)) continue;
       unresolved.push({
         name,
-        reason: "the org MCP registry could not be read — it exposes no tools",
+        reason: "the org MCP registry could not be read; it exposes no tools",
       });
     }
     return { servers, unresolved, toolDenials, proxied, oauthGrants };
@@ -296,8 +296,8 @@ export function resolveSpecialistMcpServersDetailed(
     unresolved.push({
       name,
       reason: lastCheckedAt
-        ? `its last connection check failed (${lastCheckedAt}) — it may expose no tools`
-        : "its last connection check failed — it may expose no tools",
+        ? `its last connection check failed (${lastCheckedAt}); it may expose no tools`
+        : "its last connection check failed; it may expose no tools",
       mounted: true,
     });
   };
@@ -306,7 +306,7 @@ export function resolveSpecialistMcpServersDetailed(
     // P13-KM-11: a declared MCP that resolves to nothing used to be dropped in
     // silence, so a run went out without a tool surface its profile promised and
     // nothing anywhere said so. Same honesty rule as skills/KBs.
-    logger.warn("declared MCP server did not resolve — run proceeds WITHOUT it", {
+    logger.warn("declared MCP server did not resolve; run proceeds WITHOUT it", {
       mcp: name,
       reason,
     });
@@ -463,13 +463,13 @@ export async function verifyStdioMcpMountsForRun(
     markMcpServerUnreachableFromRun(db, name, disc.reason);
     const entry = {
       name,
-      reason: `it failed to start for this run — ${disc.reason}`,
+      reason: `it failed to start for this run: ${disc.reason}`,
       mounted: false,
     };
     const idx = unresolved.findIndex((u) => u.name === name);
     if (idx >= 0) unresolved[idx] = entry;
     else unresolved.push(entry);
-    logger.warn("org MCP server failed to start at run-mount — dropped and flagged", {
+    logger.warn("org MCP server failed to start at run-mount; dropped and flagged", {
       mcp: name,
       reason: disc.reason,
     });

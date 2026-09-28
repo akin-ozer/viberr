@@ -64,7 +64,7 @@ export default [
   // a resource route rather than a page.
   route("resources/controller", "routes/resources.controller.ts"),
   route("resources/controller-unseen", "routes/resources.controller-unseen.ts"),
-  // Ruling 565: one file a person sent with a controller message, to the two
+  // Ruling 573: one file a person sent with a controller message, to the two
   // who may read its conversation.
   route("resources/controller-file/:id", "routes/resources.controller-file.ts"),
   // Model + effort catalog — the agent create/edit modal fetches this to

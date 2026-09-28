@@ -528,7 +528,7 @@ export function Timeline({
    *  non-members whose list the loader withheld). */
   attachmentNames?: string[];
   attachmentsBase?: string;
-  /** Ruling 565: the viewer may attach files to a comment (`attach-file`, a
+  /** Ruling 573: the viewer may attach files to a comment (`attach-file`, a
    *  task not archived). Absent ⇒ the composer takes words only. */
   canAttach?: boolean;
 }) {
@@ -581,7 +581,7 @@ export function Timeline({
 
   // Comment result: success clears the draft + toasts (server copy);
   // failure keeps the draft and shows the inline error below.
-  // Ruling 565: the files going with the comment, and the first refused.
+  // Ruling 573: the files going with the comment, and the first refused.
   const [files, setFiles] = useState<File[]>([]);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   // Stable, so the memoised paperclip and tray skip a revalidation's render
@@ -604,7 +604,7 @@ export function Timeline({
     const sentFiles = pendingFiles.current;
     pendingFiles.current = [];
     if (data.ok) {
-      // Ruling 565: the files that went out leave the tray; a failure keeps them.
+      // Ruling 573: the files that went out leave the tray; a failure keeps them.
       setFiles((cur) => cur.filter((file) => !sentFiles.includes(file)));
       setFileProblem(null);
       draftRef.current = "";
@@ -675,7 +675,7 @@ export function Timeline({
 
   const send = () => {
     const text = draftRef.current.trim();
-    // Ruling 565: files alone are a comment.
+    // Ruling 573: files alone are a comment.
     if ((!text && files.length === 0) || busy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -760,7 +760,7 @@ export function Timeline({
             className="composer-input"
             ref={composerBoxRef}
             onPasteCapture={(e) => {
-              // Ruling 565: a bare screenshot joins the comment before the
+              // Ruling 573: a bare screenshot joins the comment before the
               // editor sees the paste; copied text stays the editor's.
               if (!canAttach) return;
               const pasted = filesFromPaste(e.clipboardData, true, files);

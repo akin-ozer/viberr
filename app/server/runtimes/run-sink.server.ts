@@ -341,7 +341,7 @@ export function createRunSink(
     if (drainWarned) return;
     drainWarned = true;
     logger.warn(
-      "the database closed mid-run — run rows and lines are no longer being persisted; the raw transcript is intact and the run is finalized at boot",
+      "the database closed mid-run: run rows and lines are no longer being persisted; the raw transcript is intact and the run is finalized at boot",
       { runId: spec.runId, taskKey: spec.taskKey },
     );
   };
@@ -394,7 +394,7 @@ export function createRunSink(
     divergenceReported = true;
     const now = new Date().toISOString();
     const text =
-      "At least one line of this run could not be written to the projection database, so this console is INCOMPLETE — the run's raw .jsonl transcript under the data root holds the full stream.";
+      "At least one line of this run could not be written to the projection database, so this console is INCOMPLETE. The run's raw .jsonl transcript under the data root holds the full stream.";
     const raw = JSON.stringify({
       type: "error",
       source: "viberr",
@@ -759,7 +759,7 @@ export function createRunSink(
       const current = currentRunState(db, spec.runId);
       const state = resolveTerminalState(current, desired);
       if (state !== desired) {
-        logger.warn("run already terminal at finalize — keeping the recorded outcome", {
+        logger.warn("run already terminal at finalize; keeping the recorded outcome", {
           runId: spec.runId,
           recorded: state,
           adapterOutcome: desired,

@@ -130,7 +130,9 @@ export interface RunSpec {
    *  file on the task thread" (ruling 109). Neither adapter has to widen
    *  anything for it: Claude runs at bypassPermissions, and since ruling 185
    *  every Codex thread starts `danger-full-access`, which already writes it
-   *  (the `--add-dir` it once rode went with the `workspace-write` sandbox). */
+   *  (the `--add-dir` it once rode went with the `workspace-write` sandbox).
+   *  Ruling 564: on Claude it also keeps the file tools a withheld repo-write
+   *  grant denies, confined to it and the temp directory by a hook. */
   attachmentsWritableDir?: string | null;
   /** The GRANTED skills Viberr mounted for this run (`mountGrantedSkills`),
    *  by exact name. Claude only: the adapter turns these into the SDK's native

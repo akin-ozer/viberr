@@ -9,8 +9,8 @@ import { Icon } from "~/ui/icon";
  * screenshot of a portal) is the task, and it used to reach the task only
  * after the operator had already triaged a goal that could not show it.
  *
- * The picker offers any kind of file (ruling 566), and the rules that keep or
- * refuse a pick are the composers' own (`~/ui/picked-files`, ruling 565); a
+ * The picker offers any kind of file (ruling 574), and the rules that keep or
+ * refuse a pick are the composers' own (`~/ui/picked-files`, ruling 573); a
  * filing only words its limits for the dialog.
  */
 

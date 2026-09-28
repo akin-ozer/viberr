@@ -242,12 +242,12 @@ export function secretKeyRotationStatus(db: DatabaseSync): KeyRotationStatus {
 
 function renderStatus(status: Omit<KeyRotationStatus, "text">): string {
   const lines: string[] = [
-    `viberr secret-key status — ${status.total} stored secret(s), ${status.previousKeys} retired key(s) configured`,
+    `viberr secret-key status: ${status.total} stored secret(s), ${status.previousKeys} retired key(s) configured`,
     "",
   ];
   for (const store of status.stores) {
     lines.push(
-      `  ${store.label}: ${store.total} total — ${store.current} on the current key, ` +
+      `  ${store.label}: ${store.total} total; ${store.current} on the current key, ` +
         `${store.stale} on a retired key, ${store.unreadable} unreadable, ${store.notSealed} not sealed`,
     );
     for (const secret of store.secrets) {
@@ -262,20 +262,20 @@ function renderStatus(status: Omit<KeyRotationStatus, "text">): string {
     lines.push(
       status.unreadable > 0
         ? `${status.unreadable} secret(s) open under NO configured key. If you rotated VIBERR_SECRET_ENCRYPTION_KEY, put the old key in VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS and run this again; otherwise they must be re-entered.`
-        : "No retired keys are configured — there is no rotation in progress.",
+        : "No retired keys are configured; there is no rotation in progress.",
     );
     return lines.join("\n");
   }
 
   if (status.stale > 0) {
     lines.push(
-      `${status.stale} secret(s) still open ONLY under a retired key. Do NOT remove VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS yet — those secrets would become unreadable.`,
+      `${status.stale} secret(s) still open ONLY under a retired key. Do NOT remove VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS yet: those secrets would become unreadable.`,
       "Finish the rotation with: npm run keys -- reseal",
     );
   }
   if (status.unreadable > 0) {
     lines.push(
-      `${status.unreadable} secret(s) open under NO configured key — a key is missing from VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS, or they must be re-entered (Settings → GitHub / MCP servers).`,
+      `${status.unreadable} secret(s) open under NO configured key: a key is missing from VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS, or they must be re-entered (Settings → GitHub / MCP servers).`,
     );
   }
   if (status.converged) {
@@ -398,7 +398,7 @@ function renderReseal(
 ): string {
   const verb = dryRun ? "would re-seal" : "re-sealed";
   const lines = [
-    `viberr secret-key reseal — ${verb} ${result.resealed.length} secret(s) under the current key`,
+    `viberr secret-key reseal: ${verb} ${result.resealed.length} secret(s) under the current key`,
   ];
   for (const secret of result.resealed) {
     lines.push(`  ${secret.store}: ${secret.name} (${secret.id})`);
@@ -413,7 +413,7 @@ function renderReseal(
   if (result.failed.length > 0) {
     lines.push(
       "",
-      `${result.failed.length} secret(s) could not be written back (the read succeeded) — check the log and re-run:`,
+      `${result.failed.length} secret(s) could not be written back (the read succeeded); check the log and re-run:`,
       ...result.failed.map((s) => `  ${s.store}: ${s.name} (${s.id})`),
     );
   }

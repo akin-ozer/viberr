@@ -279,7 +279,7 @@ export function deliveryWithheld(grants: readonly CapabilityGrant[]): boolean {
 /** The one sentence every surface uses for the Codex posture (see
  *  {@link codexRepoWriteAdvisory}). */
 export const CODEX_REPO_WRITE_ADVISORY_NOTE =
-  "repo-write is withheld, and since ruling 185 Viberr does not OS-confine a Codex run — so on Codex the withholding is advisory: the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
+  "repo-write is withheld, and since ruling 185 Viberr does not OS-confine a Codex run, so on Codex the withholding is advisory: the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
 
 export interface DeliveryPermissions {
   canBranch: boolean;

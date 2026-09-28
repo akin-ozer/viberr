@@ -658,7 +658,7 @@ function classifyCodexFailure(
     return {
       kind: "session_missing",
       message:
-        `The Codex session could not be resumed — the CLI's own ${SESSION_STORE_UNREADABLE_MARK}. ` +
+        `The Codex session could not be resumed: the CLI's own ${SESSION_STORE_UNREADABLE_MARK}. ` +
         "Nothing is wrong with the credential and no rewritten directive changes it: every resume " +
         "fails until that file is repaired or removed, while fresh runs still work. Re-run the " +
         "agent to start a fresh session anchored on task.md.",
@@ -672,7 +672,7 @@ function classifyCodexFailure(
     return {
       kind: "session_missing",
       message:
-        "The Codex session could not be resumed — its rollout is damaged: the CLI says it does not " +
+        "The Codex session could not be resumed. Its rollout is damaged: the CLI says it does not " +
         "start with the session's metadata. Nothing is wrong with the credential and no rewritten " +
         "directive changes it: every resume of this session fails, while fresh runs still work. " +
         "Re-run the agent to start a fresh session anchored on task.md.",
@@ -684,7 +684,7 @@ function classifyCodexFailure(
     return {
       kind: "session_missing",
       message:
-        "The Codex session could not be resumed — its rollout no longer exists under $CODEX_HOME/sessions. Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+        "The Codex session could not be resumed: its rollout no longer exists under $CODEX_HOME/sessions. Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
       providerText,
       origin: null,
     };
@@ -997,7 +997,7 @@ export function createCodexAdapter(
           if (settled || interrupted) return;
           idleTimedOut = true;
           logger.warn(
-            "codex run idle-timeout — no activity within the window",
+            "codex run idle-timeout: no activity within the window",
             {
               runId: spec.runId,
               idleMs,
@@ -1012,7 +1012,7 @@ export function createCodexAdapter(
           // the hung run does not sit `running` until the next restart.
           armSettleDeadline(() => {
             logger.warn(
-              "codex run did not stop after the idle abort — settling it",
+              "codex run did not stop after the idle abort; settling it",
               { runId: spec.runId, graceMs: INTERRUPT_SETTLE_GRACE_MS },
             );
             emitAdapterFailure(
@@ -1429,7 +1429,7 @@ export function createCodexAdapter(
           // sweep — force-settle after a grace so Stop is never a no-op.
           armSettleDeadline(() => {
             logger.warn(
-              "codex run did not stop after an interrupt — settling it",
+              "codex run did not stop after an interrupt; settling it",
               { runId: spec.runId, graceMs: INTERRUPT_SETTLE_GRACE_MS },
             );
             settle("interrupted");

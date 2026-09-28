@@ -17,6 +17,7 @@ import {
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
+import { withoutConfinedFileTools } from "~/server/runtimes/file-tool-policy.server";
 
 /**
  * Ruling 344 — what a run was GIVEN, recorded on the run. One home, because
@@ -80,6 +81,9 @@ export function resolvedResourceInputs(input: {
    * came to be wrong.
    */
   toolkit: readonly string[] | null;
+  /** Ruling 564: `fileWriteRoots` for this run, the derivation its adapter's
+   *  hook reads. Set, the file tools leave the denied list for this one. */
+  fileWriteRoots?: string[] | null;
 }): ResolvedResourceInputs {
   const resolved: ResolvedResourceInputs = {
     cwd: input.cwd,
@@ -101,10 +105,13 @@ export function resolvedResourceInputs(input: {
     },
     unresolvedResources: input.unresolvedResources,
     tools: {
-      denied: input.deniedTools,
+      denied: input.fileWriteRoots
+        ? withoutConfinedFileTools(input.deniedTools)
+        : input.deniedTools,
       toolkit: input.toolkit ? [...input.toolkit] : [],
     },
   };
+  if (input.fileWriteRoots) resolved.tools.fileWriteRoots = [...input.fileWriteRoots];
   if (input.workspaceRefresh) resolved.workspaceRefresh = input.workspaceRefresh;
   return resolved;
 }
@@ -147,7 +154,7 @@ export function runInputsSummary(inputs: RunInputs, kind?: RunKind): string {
     inputs.mcp.unresolved.length +
     inputs.mcp.unhealthy.length;
   if (missing > 0) bits.push(`${countLabel(missing, "grant")} did NOT reach this run`);
-  return `Run inputs — ${bits.join(" · ")}`;
+  return `Run inputs: ${bits.join(" · ")}`;
 }
 
 /**

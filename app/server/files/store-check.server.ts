@@ -246,7 +246,7 @@ function renderCheckReport(
   report: Omit<StoreCheckReport, "text">,
 ): string {
   const lines: string[] = [
-    `viberr store check — ${report.files.length} canonical files under ${report.dataRoot}`,
+    `viberr store check: ${report.files.length} canonical files under ${report.dataRoot}`,
   ];
   if (report.untrusted.length === 0 && report.degraded.length === 0) {
     lines.push("", "Every project, task and epic file parsed cleanly.");
@@ -256,7 +256,7 @@ function renderCheckReport(
   if (report.untrusted.length > 0) {
     lines.push(
       "",
-      `${report.untrusted.length} file(s) the app cannot trust — the task is forced to \`blocked\` and the app REFUSES to write to it (a write would replace your content with defaults):`,
+      `${report.untrusted.length} file(s) the app cannot trust; the task is forced to \`blocked\` and the app REFUSES to write to it (a write would replace your content with defaults):`,
     );
     for (const file of report.untrusted) {
       lines.push("", `  ${file.path}`);
@@ -359,7 +359,7 @@ export function untrustedFileReport(
   if (files.length === 0) return { files, text: "" };
 
   const lines = [
-    `${files.length} file(s) are NOT trusted — parsed with fallback defaults, so their tasks read as \`blocked\` and the app refuses to write to them:`,
+    `${files.length} file(s) are NOT trusted, parsed with fallback defaults, so their tasks read as \`blocked\` and the app refuses to write to them:`,
   ];
   for (const file of files) {
     lines.push(`  ${file.path}`);

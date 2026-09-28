@@ -448,13 +448,13 @@ function refusalMessage(
         }.`;
   const remedy =
     holder !== null && holder.hostname !== self.hostname
-      ? `That is a different host from this one (“${self.hostname}”) — typically a container and a host process sharing one volume — so this process cannot check whether it is still running.`
+      ? `That is a different host from this one (“${self.hostname}”), typically a container and a host process sharing one volume, so this process cannot check whether it is still running.`
       : `Stop that process first.`;
   return [
     `Refusing to boot: another Viberr process is already writing ${dataRoot}.`,
     who,
     remedy,
-    `One app process per data root, ever — a second writer corrupts the SQLite WAL and the run pipeline's per-process run handles.`,
+    `One app process per data root, ever: a second writer corrupts the SQLite WAL and the run pipeline's per-process run handles.`,
     `If you are certain nothing else is running, delete ${lockPath} or boot once with ${FORCE_LOCK_ENV}=1 to take the lock over.`,
   ].join(" ");
 }
@@ -576,7 +576,7 @@ export function acquireDataRootLock(
   }
 
   throw new DataRootLockedError({
-    message: `Refusing to boot: lost the race for ${lockPath} — another Viberr process took the data-root lock while this one was clearing a stale entry.`,
+    message: `Refusing to boot: lost the race for ${lockPath}; another Viberr process took the data-root lock while this one was clearing a stale entry.`,
     verdict: "held",
     holder: readHolder(lockPath),
     lockPath,
@@ -627,7 +627,7 @@ function loudlyShutDownOnStolenLock(
   // survives the exit.
   writeFatalSync(
     `FATAL: this Viberr process no longer owns the data-root writer lock at ${lock.path} (${verdict}). ` +
-      `The lock file was deleted or replaced while this process held it — another process may now be ` +
+      `The lock file was deleted or replaced while this process held it; another process may now be ` +
       `writing the same data root concurrently, which clobbers the SQLite WAL and silently loses ` +
       `transactions (B-FD1/F18-5). Shutting down NOW rather than continuing to write lock-less. ` +
       `Do not wipe <dataRoot>/state while a Viberr process is running.`,

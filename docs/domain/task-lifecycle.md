@@ -294,7 +294,9 @@ run does not (ruling 216).
   reviewer; otherwise `changed`. The review subject is `reviewSubjectId` (ruling 388):
   the active work revision, or, for a task whose deliverable is not a commit, the moment
   its delivering run last saved files (`files:<deliveredAt>`), so a report or attachment
-  deliverable is reviewable like a commit and a later save stales older verdicts. A
+  deliverable is reviewable like a commit and a later save stales older verdicts. The
+  browser's working files alone (`page-….yml`, `console-….log`, `isBrowserWorkingArtifact`)
+  never move it: they are tool transport, not a delivery (ruling 570). A
   verdict binds only to the subject its run was dispatched on (`agent_runs.review_subject`,
   ruling 544): one returned after a newer delivery binds to nothing, and its note says what
   moved and to run the review again. Never
@@ -515,7 +517,7 @@ order of an epic's work is each task's own list.
   long body whose line breaks arrived as literal `\n` is repaired before the other
   guardrails run (`repairDoubledNewlines`, ruling 383).
 - `attach-file` (contributor+, ruling 379) uploads a file into the task's attachments
-  (`writeTaskAttachment`): a file of any kind (ruling 566); names that traverse or start
+  (`writeTaskAttachment`): a file of any kind (ruling 574); names that traverse or start
   with a dot, files over 10 MB (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
   timeline note that claims the file for the uploader (`attachments:`) and an audit row.
 - A task can be FILED with its files (ruling 533): the New task dialog takes a picker, a
@@ -624,19 +626,21 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   for the kinds and their effects). Resolvers: the owner, `resolve-packet` holders,
   and for `accept_completion` the acceptance tier.
   **A decision joins the task's contract** (rulings 189, 284, 329): choosing a structured
-  option appends "**Decision — <date>, <name> answered "<title>":**" and the option's
-  words to the goal in the same locked write, so every fresh run re-anchors on the
-  human's answer. The exceptions are `PROCESS_ONLY_OPTION_KINDS` (the recovery and
-  process kinds) and the resolutions that end the task (`accept_completion`,
-  `force_accept`). A typed free-text directive never amends the goal: it is written
-  verbatim to the timeline and reaches the operator in the re-queue's note. Notes and
-  directives share one limit, `PACKET_NOTE_MAX` (4,000 characters); a longer one is
-  refused and nothing is recorded (ruling 315).
+  option appends "**Decision: <date>, <name> answered "<title>":**" and the option's
+  title and detail, joined by a colon (ruling 571), to the goal in the same locked write,
+  so every fresh run re-anchors on the human's answer. The exceptions are
+  `PROCESS_ONLY_OPTION_KINDS` (the recovery and process kinds) and the resolutions that
+  end the task (`accept_completion`, `force_accept`). A typed free-text directive never
+  amends the goal: it is written verbatim to the timeline and reaches the operator in the
+  re-queue's note. Notes and directives share one limit, `PACKET_NOTE_MAX` (4,000
+  characters); a longer one is refused and nothing is recorded (ruling 315).
   An answer that names another deployed agent or the operator goes to the operator with
   the `packet-resolved` trigger rather than back to the agent that asked
   (`answerNamesAnotherActor`, ruling 447), and so does one for an asker that cannot run
   on the task now, such as a mapping agent whose question was answered after the task
-  moved on to Estimate (ruling 562).
+  moved on to Estimate (ruling 562). An asker still running when its question is
+  answered is not one of those: the answer waits for that run, a note says so, and the
+  run's completion starts the asker on it (ruling 565).
 - `edit_goal` is the only kind that keeps its packet open until the goal is saved; the
   confirm stamps `decided` beside `awaiting`, so the card, the hero, the queue and the
   rail all read the packet as decided after a reload, and the editor prefill is

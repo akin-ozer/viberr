@@ -313,12 +313,12 @@ export interface ControllerToolkit {
 const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "Viberr controller tools. Every action runs under the ASKING PERSON's own permissions, " +
   "checked by the server per call: instance tools follow their org role, board tools follow " +
-  "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +
+  "their role in that project. A [denied] answer is final; relay it with its reason. Reads " +
   "are your ground truth; call them before asserting state. Nothing here deletes a project, " +
   "task, user, template or resource (taking a deployment off a project's roster edits the " +
   "roster, ruling 464), merges, " +
-  "accepts completions, resolves decision packets, or moves a task into its final stage \u2014 " +
-  "ruling 251: those stay with the person, and `list_decisions` is how you put each one in " +
+  "accepts completions, resolves decision packets, or moves a task into its final stage. " +
+  "Ruling 251: those stay with the person, and `list_decisions` is how you put each one in " +
   "front of them, with its options and the link that opens it. " +
   "When the conversation is bound to a project, tools default to it; when it is anchored to a " +
   "task, the task tools default to that task as well.";
@@ -685,7 +685,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     add(
       tool(
         "read_knowledge_doc",
-        "Read ONE document out of a knowledge base attached to THIS conversation. Your prompt lists each one as an index — every document, its size and its sections — and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a project's settled rules before you plan against them, rather than working from what a document's title suggests it says. This reads YOUR OWN grants and needs no admin; `read_knowledge_base_doc` and `read_store_doc` read any knowledge base in the store by id and are org-admin only.",
+        "Read ONE document out of a knowledge base attached to THIS conversation. Your prompt lists each one as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a project's settled rules before you plan against them, rather than working from what a document's title suggests it says. This reads YOUR OWN grants and needs no admin; `read_knowledge_base_doc` and `read_store_doc` read any knowledge base in the store by id and are org-admin only.",
         {
           kb: z
             .string()
@@ -782,7 +782,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_knowledge_bases",
-      "List the org knowledge bases (grant key, name, folder, file count, refresh mode). Org admins only. `grantKey` is the store DIRECTORY — the only form save_global_agent's `kbs` accepts; `id` is for save_knowledge_base.",
+      "List the org knowledge bases (grant key, name, folder, file count, refresh mode). Org admins only. `grantKey` is the store DIRECTORY, the only form save_global_agent's `kbs` accepts; `id` is for save_knowledge_base.",
       {},
       run(() => {
         requireOrgAdmin("read the org knowledge bases");
@@ -854,7 +854,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Existing KB id to update — from list_knowledge_bases or this tool's own reply; omit to create.",
+            "Existing KB id to update, from list_knowledge_bases or this tool's own reply; omit to create.",
           ),
         name: z.string(),
         // The shared constant, not a hand-copied list: "nightly" was retired
@@ -868,7 +868,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             content: z
               .string()
               .describe(
-                "The WHOLE file — what you omit is gone — UNLESS `append` is set, when it is the text to add at the end.",
+                "The WHOLE file (what you omit is gone) UNLESS `append` is set, when it is the text to add at the end.",
               ),
             append: z
               .boolean()
@@ -1117,7 +1117,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_skills",
-      "List the org skills (grant key, name, summary). Org admins only. `grantKey` is the skill FOLDER NAME — the only form save_global_agent's `skills` accepts; `id` is for save_skill.",
+      "List the org skills (grant key, name, summary). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill.",
       {},
       run(() => {
         requireOrgAdmin("read the org skills");
@@ -1146,7 +1146,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Existing skill id to update — from list_skills or this tool's own reply; omit to create.",
+            "Existing skill id to update, from list_skills or this tool's own reply; omit to create.",
           ),
         name: z.string(),
         summary: z.string(),
@@ -1180,7 +1180,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. A signed-in server's `signIn.grant` is what its authorization server granted (ruling 486): `scopes` and `writes` counted, `readOnly` when no scope writes, `summary` (such as read-only · 194 scopes), and `writeScopes` by name; null when the server did not say. A read-only grant refuses every call that writes, so relay it before anyone plans a write through that server. `requestedScopes` is what the next sign-in asks for (null asks for what the server advertises). Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. A signed-in server's `signIn.grant` is what its authorization server granted (ruling 486): `scopes` and `writes` counted, `readOnly` when no scope writes, `summary` (such as read-only · 194 scopes), and `writeScopes` by name; null when the server did not say. A read-only grant refuses every call that writes, so relay it before anyone plans a write through that server. `requestedScopes` is what the next sign-in asks for (null asks for what the server advertises). Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME, the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -1319,7 +1319,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             (policy.length > 0
               ? `${countLabel(policy.length, "write tool")} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
               : suggestion.length > 0
-                ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
+                ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes, including the ones that write, reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
             (storeNote ? `${storeNote} ` : "") +
             // Ruling 469: a server that asked for an OAuth sign-in is the
@@ -1406,7 +1406,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_global_agent",
-      "Create or update a global agent template (name, backend, summary, persona, eligible stages, default model and effort, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged and an empty list clears them; an omitted or empty PERSONA leaves the stored persona unchanged, so editing a summary alone is safe — read list_global_agents first, which returns the persona and the grants, and grant by grantKey, never by id. A project deployment keeps its own copy of the grants; the reply names every copy that now differs and how to update it.",
+      "Create or update a global agent template (name, backend, summary, persona, eligible stages, default model and effort, resource grants). Org admins only. The controller itself and the operator are system profiles this tool cannot touch. Merge semantics: an omitted skills/mcps/kbs list leaves the stored grants unchanged and an empty list clears them; an omitted or empty PERSONA leaves the stored persona unchanged, so editing a summary alone is safe. Read list_global_agents first, which returns the persona and the grants, and grant by grantKey, never by id. A project deployment keeps its own copy of the grants; the reply names every copy that now differs and how to update it.",
       {
         id: z.string().optional().describe("Existing template id to update; omit to create."),
         name: z.string(),
@@ -1441,19 +1441,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .array(z.string())
           .optional()
           .describe(
-            "Skill grants by grantKey — the skill FOLDER NAME from list_skills, never its id. Omit to keep the stored grants; [] clears them.",
+            "Skill grants by grantKey: the skill FOLDER NAME from list_skills, never its id. Omit to keep the stored grants; [] clears them.",
           ),
         mcps: z
           .array(z.string())
           .optional()
           .describe(
-            "MCP grants by grantKey — the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the stored grants; [] clears them.",
+            "MCP grants by grantKey: the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the stored grants; [] clears them.",
           ),
         kbs: z
           .array(z.string())
           .optional()
           .describe(
-            "Knowledge-base grants by grantKey — the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the stored grants; [] clears them.",
+            "Knowledge-base grants by grantKey: the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the stored grants; [] clears them.",
           ),
       },
       runWith(
@@ -1527,7 +1527,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             ? "a save_global_agent call that changes the persona with propagate: true rewrites the copies' persona, " +
               "update_agent_deployment with persona sets one copy, and an org admin can edit each copy on that " +
               "project's Agents page."
-            : "propagate does not rewrite a summary — an org admin fixes each copy on that project's Agents page.";
+            : "propagate does not rewrite a summary; an org admin fixes each copy on that project's Agents page.";
           const behind =
             saved.textBehind.length > 0
               ? ` ${saved.textBehind.length} project cop${saved.textBehind.length === 1 ? "y" : "ies"} still ` +
@@ -1873,7 +1873,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), epics summary (ruling 503; list_epics and get_epic read them in full), and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks) \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247) \u2014 and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment; a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change, F39-4), epics summary (ruling 503; list_epics and get_epic read them in full), and `rulingsKb`, the knowledge base every run on this project reads (ruling 239), null when none is named; `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks); and `fileLeases`, which task owns which shared paths until it merges (ruling 245), resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247); and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -2238,7 +2238,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "read_task_attachment",
   );
 
-  // Ruling 565: the files a person sends with a message, read the way a
+  // Ruling 573: the files a person sends with a message, read the way a
   // task's attachments are. A screenshot of an error or an inventory handed
   // over in the dock was a name in the prompt and nothing the turn could open.
   add(
@@ -2628,7 +2628,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_task",
-      "Edit a task's goal text, its metadata (priority, labels, due date), what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) and/or the epic it is in (ruling 503) — the same writers the task page uses, behind the same gates: the goal needs maintainer or above; metadata, the wait and the epic need the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 295: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
+      "Edit a task's goal text, its metadata (priority, labels, due date), what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) and/or the epic it is in (ruling 503). The same writers the task page uses, behind the same gates: the goal needs maintainer or above; metadata, the wait and the epic need the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 295: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -3170,7 +3170,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_github_state",
-      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in three different cases: `checksRead` true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported); `checksRead` false with a `checksUnread` object means GitHub REFUSED the read (its status and message are there, and `at` is when that refusal was first seen, not the last check — a 403 is the credential lacking Checks: read); `checksRead` false with `checksUnread` null means nobody has looked yet. `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
+      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in three different cases: `checksRead` true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported); `checksRead` false with a `checksUnread` object means GitHub REFUSED the read (its status and message are there, and `at` is when that refusal was first seen, not the last check; a 403 is the credential lacking Checks: read); `checksRead` false with `checksUnread` null means nobody has looked yet. `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
       { projectSlug: z.string().optional() },
       runWith(async (args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -3274,7 +3274,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               // one whose branch is pushed but unreviewed need different moves.
               return (
                 `[noop] ${key} has no pull request to read` +
-                `${departure ? " yet — its branch is pushed but no PR is open" : ""}. ` +
+                `${departure ? " yet: its branch is pushed but no PR is open" : ""}. ` +
                 `Name prNumber to read another PR in this repository.`
               );
             }
@@ -3358,7 +3358,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_required_reviewers",
-      "Declare the project's REQUIRED reviewers per review stage (ruling 178): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict — get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Project admin (edit-policy).",
+      "Declare the project's REQUIRED reviewers per review stage (ruling 178): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict; get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Project admin (edit-policy).",
       {
         projectSlug: z.string().optional(),
         rules: z
@@ -3385,7 +3385,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_project_rulings_kb",
-      "Name the project's RULINGS knowledge base by store DIRECTORY (ruling 239), or pass dir: null to clear it. Project admin (edit-policy). Unlike a per-profile `kbs` grant, this one KB is injected into EVERY run the project makes — each specialist, the operator, and your own conversation while it is scoped to this project — so nobody can forget it on the one profile that needed it. Use it for rules the project has SETTLED and should not re-litigate: a convention a review established, a shared-surface protocol, an environment fact reviewers keep re-deriving. `list_knowledge_bases` gives the grantKey to pass here; a directory no knowledge base occupies is refused by name with nothing written. Promoting an existing KB into this role is the expected move, and a profile that also grants it explicitly is not charged for it twice.",
+      "Name the project's RULINGS knowledge base by store DIRECTORY (ruling 239), or pass dir: null to clear it. Project admin (edit-policy). Unlike a per-profile `kbs` grant, this one KB is injected into EVERY run the project makes (each specialist, the operator, and your own conversation while it is scoped to this project), so nobody can forget it on the one profile that needed it. Use it for rules the project has SETTLED and should not re-litigate: a convention a review established, a shared-surface protocol, an environment fact reviewers keep re-deriving. `list_knowledge_bases` gives the grantKey to pass here; a directory no knowledge base occupies is refused by name with nothing written. Promoting an existing KB into this role is the expected move, and a profile that also grants it explicitly is not charged for it twice.",
       {
         projectSlug: z.string().optional(),
         dir: z
@@ -3411,7 +3411,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_file_leases",
-      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY — another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 353). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass, and operators lease files to their own tasks too (ruling 417), so read `fileLeases` from get_project first and pass every lease you mean to keep. A lease naming a task this project does not have is refused, and so are two leases held by different unfinished tasks whose globs can match one file (ruling 417: each would refuse the other's delivery, so neither could land).",
+      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY: another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 353). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass, and operators lease files to their own tasks too (ruling 417), so read `fileLeases` from get_project first and pass every lease you mean to keep. A lease naming a task this project does not have is refused, and so are two leases held by different unfinished tasks whose globs can match one file (ruling 417: each would refuse the other's delivery, so neither could land).",
       {
         projectSlug: z.string().optional(),
         leases: z
@@ -3595,7 +3595,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "invite_member",
-      "Add a member to the project by email (an unknown email gets a new account with a one-time temporary password you must relay). Project admin. C4: `role` seats them in ONE write — members join as viewer unless you give one, and an unknown role is refused by name with nothing written.",
+      "Add a member to the project by email (an unknown email gets a new account with a one-time temporary password you must relay). Project admin. C4: `role` seats them in ONE write; members join as viewer unless you give one, and an unknown role is refused by name with nothing written.",
       {
         projectSlug: z.string().optional(),
         name: z.string(),
@@ -3707,7 +3707,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included), or its persona (ruling 467: the deployment's own system-prompt text, which a template edit does not reach). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, the deployment's own resource grants (skills, mcps, kbs; every kind, the operator included), or its persona (ruling 467: the deployment's own system-prompt text, which a template edit does not reach). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases; never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -3734,19 +3734,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .array(z.string())
           .optional()
           .describe(
-            "Skill grants by grantKey — the skill FOLDER NAME from list_skills, never its id. Omit to keep the deployment's grants; [] clears them. Every kind, the operator included.",
+            "Skill grants by grantKey: the skill FOLDER NAME from list_skills, never its id. Omit to keep the deployment's grants; [] clears them. Every kind, the operator included.",
           ),
         mcps: z
           .array(z.string())
           .optional()
           .describe(
-            "MCP grants by grantKey — the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the deployment's grants; [] clears them.",
+            "MCP grants by grantKey: the REGISTRY NAME from list_mcp_servers, never its id. Omit to keep the deployment's grants; [] clears them.",
           ),
         kbs: z
           .array(z.string())
           .optional()
           .describe(
-            "Knowledge-base grants by grantKey — the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the deployment's grants; [] clears them.",
+            "Knowledge-base grants by grantKey: the store DIRECTORY from list_knowledge_bases, never its id or display name. Omit to keep the deployment's grants; [] clears them.",
           ),
       },
       runWith(
@@ -3983,7 +3983,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_decisions",
-      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`, split by WHEN (ruling 336): `releases.direct` are the tasks whose LAST wait is this one — they move the moment it completes — and `releases.downstream` are the rest of the chain, each of which needs one of the direct ones to be built, reviewed and accepted first. Only `direct` is a number about this click: live, one acceptance freed its two direct dependents in two seconds and its one downstream task fifty-three minutes later, after another full cycle. Both count only waits that can actually clear. Read either as what a decision UNBLOCKS, never as what it FINISHES: an acceptance that releases nothing still completes real work and usually needs one click, while a design packet with two direct may be the longer road. `kind` and `notAcceptableReason` carry that other half. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
+      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`, split by WHEN (ruling 336): `releases.direct` are the tasks whose LAST wait is this one (they move the moment it completes), and `releases.downstream` are the rest of the chain, each of which needs one of the direct ones to be built, reviewed and accepted first. Only `direct` is a number about this click: live, one acceptance freed its two direct dependents in two seconds and its one downstream task fifty-three minutes later, after another full cycle. Both count only waits that can actually clear. Read either as what a decision UNBLOCKS, never as what it FINISHES: an acceptance that releases nothing still completes real work and usually needs one click, while a design packet with two direct may be the longer road. `kind` and `notAcceptableReason` carry that other half. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
       {
         projectSlug: z.string().optional().describe("One project. Omit inside a project conversation to use it; omit outside one to read every project this person can see."),
         taskKey: z.string().optional().describe("Just this task. Defaults to the conversation's task when it is anchored to one."),

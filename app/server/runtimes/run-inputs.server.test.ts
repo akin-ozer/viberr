@@ -30,7 +30,7 @@ describe("U39-25: the run-inputs headline names the kind of run", () => {
   it("a specialist keeps the engagement wording, and a missing anchor is still loud", () => {
     // A specialist with no canonical block really is missing something.
     expect(runInputsSummary(inputs({ delivers: true, anchor: "stage: build" }))).toBe(
-      "Run inputs — delivering engagement · canonical anchor 12 chars · persona 1200 chars · prompt 300 chars · 0 skills · 1 knowledge base · 0 MCP servers",
+      "Run inputs: delivering engagement · canonical anchor 12 chars · persona 1200 chars · prompt 300 chars · 0 skills · 1 knowledge base · 0 MCP servers",
     );
     expect(runInputsSummary(inputs())).toContain("supporting engagement · NO canonical anchor");
   });
@@ -38,14 +38,14 @@ describe("U39-25: the run-inputs headline names the kind of run", () => {
   it("an operator drive and a controller turn say what they are, and never flag the anchor they are not given", () => {
     // CANARY: push the anchor bit for every kind again.
     expect(runInputsSummary(inputs(), "operator")).toBe(
-      "Run inputs — operator drive · persona 1200 chars · prompt 300 chars · 0 skills · 1 knowledge base · 0 MCP servers",
+      "Run inputs: operator drive · persona 1200 chars · prompt 300 chars · 0 skills · 1 knowledge base · 0 MCP servers",
     );
     const controller = runInputsSummary(
       inputs({ mcp: { mounted: ["viberr_controller", "viberr_ops"], unresolved: [], unhealthy: [], writeToolsDenied: [] } }),
       "controller",
     );
     expect(controller).toBe(
-      "Run inputs — controller turn · persona 1200 chars · prompt 300 chars · 0 skills · 1 knowledge base · 2 MCP servers",
+      "Run inputs: controller turn · persona 1200 chars · prompt 300 chars · 0 skills · 1 knowledge base · 2 MCP servers",
     );
   });
 });

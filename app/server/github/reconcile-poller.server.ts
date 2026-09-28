@@ -110,7 +110,7 @@ async function nudgeMergePendingTasks(
         // pass: an accepted task IS terminal, so the exact rows this nudge
         // describes are the rows nothing refreshes. The figure is still worth
         // sending; it just has to say whose reading it is.
-        text: `${row.key} was accepted into Done with its merge still pending. The last state Viberr read for PR #${pr.number} was open — Viberr stops polling a task once it reaches Done (ruling 177), so that is the last thing it saw, not a live reading. If the PR is still open, merge it from the task's Complete-merge button or on GitHub. (A full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused.)`,
+        text: `${row.key} was accepted into Done with its merge still pending. The last state Viberr read for PR #${pr.number} was open. Viberr stops polling a task once it reaches Done (ruling 177), so that is the last thing it saw, not a live reading. If the PR is still open, merge it from the task's Complete-merge button or on GitHub. (A full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused.)`,
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,
@@ -167,7 +167,7 @@ function noteReconcileFailure(db: DatabaseSync, slug: string): void {
       (m) => m.role === "admin" || m.role === "maintainer",
     );
     const title = "GitHub sync is failing for this project";
-    const text = `Viberr has been unable to reach GitHub for this project's repository across ${entry.fails} checks. Branch and PR status may be stale (a merged or closed PR can still show open). Check the project's GitHub credential — the token may be expired, revoked, or missing repository access.`;
+    const text = `Viberr has been unable to reach GitHub for this project's repository across ${entry.fails} checks. Branch and PR status may be stale (a merged or closed PR can still show open). Check the project's GitHub credential: the token may be expired, revoked, or missing repository access.`;
     for (const member of recipients) {
       createNotification(db, {
         // Deterministic id → restart-safe idempotency (INSERT OR REPLACE), on
@@ -184,7 +184,7 @@ function noteReconcileFailure(db: DatabaseSync, slug: string): void {
       });
     }
     entry.alerted = true;
-    logger.warn("github reconcile failing — alerted project admins", {
+    logger.warn("github reconcile failing; alerted project admins", {
       projectSlug: slug,
       consecutiveFailures: entry.fails,
       recipients: recipients.length,

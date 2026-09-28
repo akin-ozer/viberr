@@ -200,7 +200,7 @@ export function defaultBranchPageNote(
   read: Extract<DefaultBranchRead, { kind: "found" }>,
 ): DefaultBranchPageNote {
   const whole = read.fromLine === 1 && !read.more && !read.lineCut;
-  const range = whole ? "" : `, lines ${read.fromLine}–${read.toLine} of ${read.totalLines}`;
+  const range = whole ? "" : `, lines ${read.fromLine}-${read.toLine} of ${read.totalLines}`;
   const notes: string[] = [];
   if (read.lineCut) {
     notes.push(
@@ -309,7 +309,7 @@ async function resolveReadSource(
     // Not an error path: the clone-time ref is still a real answer, and saying
     // so is what keeps the operator from substituting a working-tree read.
     logger.info(
-      "no project repository mirror for the default-branch read — reading the checkout's clone-time ref",
+      "no project repository mirror for the default-branch read, reading the checkout's clone-time ref",
       { projectSlug: input.projectSlug, repo, defaultBranch: input.defaultBranch },
     );
     return checkoutRef;
@@ -368,7 +368,7 @@ export async function readDefaultBranchFile(
     return {
       kind: "unavailable",
       reason:
-        "that is not a repository-relative file path — pass a path like `docs/guide.md`, " +
+        "that is not a repository-relative file path; pass a path like `docs/guide.md`, " +
         "with no leading slash, no `..` segment and no `ref:path` prefix",
     };
   }
@@ -453,7 +453,7 @@ export async function readProjectDefaultBranchFile(
     return {
       kind: "unavailable",
       reason:
-        "that is not a repository-relative file path — pass a path like `docs/guide.md`, " +
+        "that is not a repository-relative file path; pass a path like `docs/guide.md`, " +
         "with no leading slash, no `..` segment and no `ref:path` prefix",
     };
   }

@@ -242,7 +242,7 @@ describe("createBackup", () => {
         ),
       ),
     ).toBe(true);
-    expect(with_.manifest.excludes.join(" ")).not.toContain("runtimes/ —");
+    expect(with_.manifest.excludes.join(" ")).not.toContain("runtimes/:");
   });
 
   it("refuses to write the artefact inside the data root it is backing up", () => {

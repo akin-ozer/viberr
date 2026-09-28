@@ -317,7 +317,7 @@ export function openRequestsContextLine(dataRoot?: string): string {
   const rows = open
     .map(
       (r) =>
-        `- ${CONTROLLER_SECTION_LABEL[r.kind]}: \`${r.name}\` (asked ${r.askedAt} by ${r.askedByLabel || "someone"}) — ${resourceRequestRemedy(r.kind)}`,
+        `- ${CONTROLLER_SECTION_LABEL[r.kind]}: \`${r.name}\` (asked ${r.askedAt} by ${r.askedByLabel || "someone"}). ${resourceRequestRemedy(r.kind)}`,
     )
     .join("\n");
   return (
