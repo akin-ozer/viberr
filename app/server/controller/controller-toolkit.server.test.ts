@@ -2069,6 +2069,30 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
    * the controller the directive went into the agent's prompt and nowhere
    * else, so the timeline showed a run appearing for no stated reason.
    */
+  /**
+   * Ruling 583, amended. The controller had no `noVerdict` on its own dispatch
+   * door: on AWSC-25 it asked the task's operator to start the Estimate Judge
+   * with the verdict withheld, because it could not.
+   */
+  it("ruling 583: run_agent_on_task withholds the verdict of a run that must not judge", async () => {
+    const withheld = () =>
+      app.db
+        .prepare(
+          "SELECT verdict_withheld FROM agent_runs WHERE task_key = 'VIB-142' AND agent_profile_id = 'developer' ORDER BY rowid DESC LIMIT 1",
+        )
+        .get();
+    await call(ids.maintainer, "run_agent_on_task", { taskKey: "VIB-142", agent: "developer", prompt: "Look." });
+    expect(withheld()).toEqual({ verdict_withheld: 0 });
+    // CANARY: drop `if (args.noVerdict) runInput.withholdVerdict = true`.
+    await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: "VIB-142",
+      agent: "developer",
+      prompt: "Record no verdict.",
+      noVerdict: true,
+    });
+    expect(withheld()).toEqual({ verdict_withheld: 1 });
+  });
+
   it("run_agent_on_task: the directive is recorded on the timeline (ruling 263)", async () => {
     await call(ids.maintainer, "run_agent_on_task", {
       taskKey: "VIB-142",
