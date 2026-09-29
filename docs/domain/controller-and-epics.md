@@ -920,8 +920,10 @@ and a call that changes nothing answers `[done] … No field changed.`
 ### 4.3 Knowledge-base corrections (rulings 483 and 498)
 
 Any agent on a task corrects a knowledge base its run was given by writing the correction
-into the document (ruling 498): a Claude specialist with `correct_knowledge_doc`, the operator
-with its own (which also relays a Codex agent's reported correction), both through
+into the document (ruling 498): a Claude specialist with `correct_knowledge_doc`, a Codex
+specialist with the same tool on the gateway's `viberr_knowledge` server (ruling 585), the
+operator with its own (which also relays a Codex agent's reported correction when the gateway
+is not running), all through
 `correctKnowledgeDoc` (`app/server/tasks/kb-correction-actions.server.ts`), which calls
 `mergeKbCorrection` (`app/server/org/kb-corrections.server.ts`; the edit rules are
 [file-formats.md §8](../architecture/file-formats.md)). Nobody approves it first: the owner

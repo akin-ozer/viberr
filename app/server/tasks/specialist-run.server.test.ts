@@ -75,6 +75,7 @@ import {
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
 import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
+import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   assignReviewer,
@@ -2208,9 +2209,10 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   /**
    * Ruling 483 (F40-53): a run given a knowledge base is told how to get a
    * line of it corrected. Claude files through the tool its KB grant mounts;
-   * Codex mounts no Viberr tools, so its report carries the correction and the
-   * operator relays it. Live on WEB-3 a Codex agent wrote "the knowledge-base
-   * runbook is read-only to me".
+   * Codex without the gateway's knowledge server (ruling 585; no gateway runs
+   * here) mounts no Viberr tools, so its report carries the correction and
+   * the operator relays it. Live on WEB-3 a Codex agent wrote "the
+   * knowledge-base runbook is read-only to me".
    */
   it("rulings 483 and 498: a KB-granted run is told its correction channel, per backend", async () => {
     // Ruling 498: the correction is written, so Claude names the tool that
@@ -3221,7 +3223,7 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).toContain("do not treat the gap as your own failure");
   });
 
-  it("ruling 578: a private KB reaches a Claude run through read_knowledge_doc, and a Codex run is told it cannot", () => {
+  it("ruling 578: a private KB reaches a Claude run through read_knowledge_doc, and a Codex run only through the gateway's knowledge server (ruling 585)", () => {
     // CANARY: pass `hasKnowledgeTool: true` for every backend and the Codex
     // run is handed an index of a folder its shell is refused.
     const dataRoot = tempRoot();
@@ -3234,6 +3236,9 @@ describe("buildSpecialistPersona — attached resources", () => {
     const claude = buildSpecialistPersona({ profileId: "judge", skills: [], kb: ["answer-keys"], backend: "claude", dataRoot });
     expect(claude).toContain("read each document with `read_knowledge_doc`");
     expect(claude).not.toContain("Attached resources that did NOT fully reach this run");
+    const mounted = buildSpecialistPersona({ profileId: "judge", skills: [], kb: ["answer-keys"], backend: "codex", knowledgeTool: true, dataRoot });
+    expect(mounted).toContain("read each document with `read_knowledge_doc`");
+    expect(mounted).not.toContain("Attached resources that did NOT fully reach this run");
   });
 
   it("a skill that resolves to nothing is NAMED in the prompt too (C1)", () => {
@@ -5186,6 +5191,62 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(granted.mcpServers?.gh).toEqual({ type: "http", url: "https://mcp.example.test/gh" });
     expect(joinedPrompt(granted.systemPrompt ?? "")).toContain("You have tools from these attached MCP servers: gh");
     expect(inputsLine(grantedRun)!.mcp.writeToolsDenied).toEqual([]);
+  });
+
+  it("ruling 585: a Codex run that holds a knowledge base mounts the gateway's knowledge server, fresh and resumed", async () => {
+    // CANARY: leave the mount out of either path, index the private knowledge
+    // base as unreachable, or send its corrections to the report, and this is
+    // red.
+    const dir = path.join(store.dataRoot, "kb", "answer-keys");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "sample-01.md"), "# Sample 01");
+    chmodSync(dir, 0o700);
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["codex"],
+            model: "gpt-6-luna",
+            resources: { skills: [], mcps: [], kb: ["answer-keys"] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await startMcpGateway({ port: 0 });
+    try {
+      const runId = await assignAndRun();
+      const spec = lastRunSpec()!;
+      expect(spec.backend).toBe("codex");
+      expect(z.strictObject({ type: z.literal("http"), url: z.string(), headers: z.strictObject({ Authorization: z.string() }) }).parse(spec.mcpServers?.viberr_knowledge).url).toMatch(/\/mcp\/viberr_knowledge$/);
+      const prompt = joinedPrompt(spec.systemPrompt ?? "");
+      expect(prompt).toContain("read each document with `read_knowledge_doc`");
+      expect(prompt).not.toContain("this run has no knowledge tool to read it");
+      expect(spec.prompt).toContain(KB_CORRECTION_NOTE_CLAUDE);
+      expect(spec.prompt).not.toContain(KB_CORRECTION_NOTE_CODEX);
+      expect(inputsLine(runId)!.mcp.mounted).toContain("viberr_knowledge");
+
+      const confinement = await resolveResumeConfinement(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend: "codex", delivers: true },
+      );
+      expect(confinement.mcpServers?.viberr_knowledge).toMatchObject({
+        type: "http",
+        knowledge: { kb: ["answer-keys"], agent: { profileId: "dev" } },
+      });
+      expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain("read each document with `read_knowledge_doc`");
+    } finally {
+      await stopMcpGateway();
+    }
   });
 
   it("resolveResumeConfinement returns the SAME resolved-resource record for a resumed turn", async () => {

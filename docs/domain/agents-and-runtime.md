@@ -665,9 +665,11 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   entries are posted, with the rest named, because an envelope is the agent's last word. The Codex operator returns a plan the server
   executes ([operator.md §5](operator.md#5-tools-and-the-governed-actions-behind-them)).
 - A knowledge-base correction (rulings 483 and 498): a Codex specialist with a knowledge
-  base has no `correct_knowledge_doc` tool, so its prompt's Collaboration section
-  (`KB_CORRECTION_NOTE_CODEX`) tells it to end its report with a `Knowledge-base
-  correction` section naming the knowledge base, the document, the passage exactly as the
+  base files it with `correct_knowledge_doc` on the gateway's `viberr_knowledge` server
+  (ruling 585), and its Collaboration section names that tool as a Claude run's does. Only
+  when the gateway is not running does it have no such tool, and then its prompt's
+  Collaboration section (`KB_CORRECTION_NOTE_CODEX`) tells it to end its report with a
+  `Knowledge-base correction` section naming the knowledge base, the document, the passage exactly as the
   document has it, what it should say instead and the evidence, and the operator's
   `agent-reply` turn writes it with its own `correct_knowledge_doc`. A Claude specialist's
   note (`KB_CORRECTION_NOTE_CLAUDE`) names the tool instead.
@@ -1667,8 +1669,13 @@ runtime's answer for a missing grant.
   `private`, shown on the Instance settings row, never widened by the boot layout
   check): its index says to read it with `read_knowledge_doc`,
   `knowledgeBaseReadDirs` leaves it out of the workspace contract, and a Codex
-  specialist, which has no knowledge tool, gets it as an unresolved grant with the
-  reason. `KB_PRECEDENCE_NOTE` (repo
+  specialist reads it through `viberr_knowledge`, a server Viberr's MCP gateway answers
+  itself over the run's token (ruling 585, `knowledge-tool.server.ts`). Every Codex
+  specialist that holds a knowledge base mounts it, fresh and resumed: `read_knowledge_doc`
+  and `correct_knowledge_doc`, the same reader, writer and refusals as Claude's toolkit,
+  over exactly the knowledge bases the run was given, a correction written as the run's
+  agent on its task. With the gateway not running, a Codex run gets a private knowledge
+  base as an unresolved line with the reason. `KB_PRECEDENCE_NOTE` (repo
   conventions outrank KBs, ruling 56) is emitted only when an index is present. All three
   runtimes assemble the block (the attached-resources banner, injected skill bodies, these
   notes, the indexes) with one helper, `attachedResourcesBlock`, and pass only their own
@@ -1810,7 +1817,7 @@ runtime's answer for a missing grant.
   removed tools, and the run-inputs `mcp` row lists them too. Precedence when names
   collide: org < browser < toolkit. Reserved names: `viberr`, `viberr_agent`,
   `viberr-agent`, `viberr_browser`, `viberr-browser`, `viberr_controller`,
-  `viberr-controller`, `viberr_ops`, `viberr-ops`.
+  `viberr-controller`, `viberr_knowledge`, `viberr-knowledge`, `viberr_ops`, `viberr-ops`.
 - **Browser**: `viberr_browser` = `@playwright/mcp` cli.js run with `process.execPath`,
   `--headless --isolated --output-dir <attachments>` (+ `--image-responses omit` on
   Codex, + `--executable-path $VIBERR_BROWSER_EXECUTABLE --no-sandbox` when set), under

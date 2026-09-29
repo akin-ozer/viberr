@@ -19,7 +19,14 @@ import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.serv
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
 import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
-import { KB_DOC_OFFSET_DESCRIPTION, readKbDocForRun } from "~/server/files/kb-injection.server";
+import {
+  KB_DOC_KB_DESCRIPTION,
+  KB_DOC_OFFSET_DESCRIPTION,
+  KB_DOC_PATH_DESCRIPTION,
+  KB_DOC_TOOL_DESCRIPTION,
+  readKbDocForRun,
+} from "~/server/files/kb-injection.server";
+import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
   readTaskFile,
   updateTaskFile,
@@ -116,10 +123,6 @@ const prose = normalizeEscapedNewlines;
 
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
-
-/** Rulings 483 and 498: the specialist's half of `correct_knowledge_doc`. */
-const KB_CORRECTION_SPECIALIST_DESCRIPTION =
-  "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence; an empty `text` deletes the passage. Send only the passage that changes: the record keeps what it needs around it for an undo. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run. The task's entry quotes the passage only when every agent on the project is given that knowledge base, so correcting one given to few agents keeps its text off the task.";
 
 /** U11: the same tool for a profile granted evidence but NOT the verdict — it
  *  has no judgment to report, so the description must not ask for one. */
@@ -766,19 +769,16 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   // granted a knowledge base and nothing else still has to be able to read it,
   // and U11's gate was about collaboration, which this is not. (A Codex run
   // mounts no in-process Viberr tools at all; its channel is the folder path
-  // the index prints, which `KB_INDEX_NOTE` names.)
+  // the index prints, which `KB_INDEX_NOTE` names, and for a private knowledge
+  // base the same tool, answered by the gateway, ruling 585.)
   if (kb.length > 0) {
     tools.push(
       tool(
         "read_knowledge_doc",
-        "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name.",
+        KB_DOC_TOOL_DESCRIPTION,
         {
-          kb: z
-            .string()
-            .describe("The knowledge base's name, as its index heading gives it."),
-          path: z
-            .string()
-            .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+          kb: z.string().describe(KB_DOC_KB_DESCRIPTION),
+          path: z.string().describe(KB_DOC_PATH_DESCRIPTION),
           offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
         // eslint-disable-next-line @typescript-eslint/require-await
@@ -814,28 +814,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         "correct_knowledge_doc",
         KB_CORRECTION_SPECIALIST_DESCRIPTION,
         {
-          kb: z
-            .string()
-            .describe("The knowledge base the passage is in, by the name its index heading gives it."),
-          doc: z
-            .string()
-            .describe("The document's path inside that knowledge base, as the index lists it."),
-          replaces: z
-            .string()
-            .optional()
-            .describe(
-              "The passage the correction replaces, copied EXACTLY as the document has it; it must stand once in the document. Omit only when the correction adds something the document does not say: `text` then goes at the end of the document.",
-            ),
-          text: z
-            .string()
-            .describe(
-              "What the document should say in place of `replaces`, in its own form: the corrected fact, not the evidence. Empty to delete the passage.",
-            ),
-          evidence: z
-            .string()
-            .describe(
-              "What proves it: the command you ran and its output, the file and line you read, the check that failed.",
-            ),
+          kb: z.string().describe(KB_CORRECTION_FIELDS.kb),
+          doc: z.string().describe(KB_CORRECTION_FIELDS.doc),
+          replaces: z.string().optional().describe(KB_CORRECTION_FIELDS.replaces),
+          text: z.string().describe(KB_CORRECTION_FIELDS.text),
+          evidence: z.string().describe(KB_CORRECTION_FIELDS.evidence),
         },
         async (args) => {
           try {

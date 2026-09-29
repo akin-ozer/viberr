@@ -55,6 +55,18 @@ import { errorMessage, toError } from "~/shared/errors";
 import { mcpReadOnlyRefusal, type McpOAuthView } from "~/shared/mcp-oauth";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { MCP_GRANT_TOOL, MCP_GRANT_TOOL_NAME, mcpGrantToolResult } from "./grant-tool.server";
+import {
+  KNOWLEDGE_CORRECT_TOOL,
+  KNOWLEDGE_READ_TOOL,
+  KNOWLEDGE_TOOLS,
+  knowledgeArgsRefusal,
+  knowledgeCorrectArgsSchema,
+  knowledgeCorrectResult,
+  knowledgeMountSchema,
+  knowledgeReadArgsSchema,
+  knowledgeReadResult,
+  type KnowledgeMount,
+} from "./knowledge-tool.server";
 import { connectStdioUpstream } from "./upstream-stdio.server";
 import {
   connectHttpUpstream,
@@ -136,6 +148,9 @@ interface RunGrant {
   db: DatabaseSync;
   /** Server name → the tools this run withholds on it (ruling 176). */
   servers: Map<string, ReadonlySet<string>>;
+  /** Ruling 585: the servers this gateway answers itself (the knowledge
+   *  server), with the knowledge bases the run was given. Never upstreams. */
+  knowledge: Map<string, KnowledgeMount>;
   /** Who a write-tool call is audited as. */
   actor: AuditActor;
   projectSlug: string;
@@ -187,7 +202,8 @@ interface Session {
   server: string;
   mcp: Server;
   transport: StreamableHTTPServerTransport;
-  upstream: Upstream;
+  /** Null on a server the gateway answers itself (ruling 585). */
+  upstream: Upstream | null;
 }
 
 interface GatewayState {
@@ -334,6 +350,9 @@ const gatewayMountSchema = z.object({
   tools: z
     .array(z.object({ name: z.string(), permission_policy: z.literal("always_deny") }))
     .optional(),
+  /** Ruling 585: set only on the knowledge mount, which the gateway answers
+   *  itself. It stays here, and the run is handed the mount without it. */
+  knowledge: knowledgeMountSchema.optional(),
 });
 
 /** A run's MCP server map, as `RunSpec` carries it. */
@@ -378,7 +397,9 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
   revokeRunMcpGateway(input.runId);
   const token = randomBytes(32).toString("base64url");
   const servers = new Map<string, ReadonlySet<string>>();
+  const knowledge = new Map<string, KnowledgeMount>();
   for (const mount of mounts) {
+    if (mount.config.knowledge) knowledge.set(mount.name, mount.config.knowledge);
     const withheld = input.toolDenials
       .filter((denial) => denial.server === mount.name)
       .flatMap((denial) => denial.tools);
@@ -399,6 +420,7 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     runId: input.runId,
     db: input.db,
     servers,
+    knowledge,
     actor: input.actor,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -474,7 +496,7 @@ function closeUpstreamByKey(key: string): void {
 function closeSession(session: Session): void {
   const state = getState();
   if (session.id) state.sessions.delete(session.id);
-  session.upstream.sessions.delete(session);
+  session.upstream?.sessions.delete(session);
   void session.mcp.close().catch(() => undefined);
 }
 
@@ -491,7 +513,7 @@ function closeSession(session: Session): void {
 function retireSession(session: Session): void {
   const state = getState();
   if (session.id) state.sessions.delete(session.id);
-  session.upstream.sessions.delete(session);
+  session.upstream?.sessions.delete(session);
   setImmediate(() => {
     void session.mcp.close().catch(() => undefined);
   });
@@ -650,6 +672,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const init = initializeIn(body);
   if (!init) {
     sendJsonRpcError(res, 400, null, ErrorCode.InvalidRequest, "Bad Request: No valid session ID provided");
+    return;
+  }
+  // Ruling 585: the knowledge server has no upstream; this process answers it.
+  const knowledge = grant.knowledge.get(server);
+  if (knowledge) {
+    const session = await openKnowledgeSession(grant, server, knowledge);
+    await session.transport.handleRequest(req, res, body);
     return;
   }
   let upstream: Upstream;
@@ -1154,6 +1183,17 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
     });
   }
 
+  return connectSession(grant, server, mcp, upstream);
+}
+
+/** A session on `mcp`, routed by the id its transport mints. */
+async function connectSession(
+  grant: RunGrant,
+  server: string,
+  mcp: Server,
+  upstream: Upstream | null,
+): Promise<Session> {
+  const state = getState();
   const port = state.port ?? 0;
   const session: Session = {
     id: null,
@@ -1176,9 +1216,58 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
   };
   session.transport.onclose = () => {
     if (session.id) state.sessions.delete(session.id);
-    upstream.sessions.delete(session);
+    upstream?.sessions.delete(session);
   };
   await mcp.connect(session.transport);
-  upstream.sessions.add(session);
+  upstream?.sessions.add(session);
   return session;
+}
+
+/**
+ * Ruling 585: a session on the knowledge server, answered here. It lists the
+ * two knowledge tools and reaches only the knowledge bases the run's mount
+ * named: `read_knowledge_doc` reads, and `correct_knowledge_doc` writes a
+ * correction as the run's agent on the run's task. Like every gateway call it
+ * is logged without its arguments or its result, and a run that has ended
+ * calls nothing.
+ */
+async function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeMount): Promise<Session> {
+  const mcp = new Server({ name: server, version: "1.0.0" }, { capabilities: { tools: {} } });
+  mcp.setRequestHandler(ListToolsRequestSchema, () => ({ tools: KNOWLEDGE_TOOLS }));
+  mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+    assertCallsOpen(grant, server, "tools/call");
+    const tool = request.params.name;
+    const raw = request.params.arguments ?? {};
+    const started = Date.now();
+    let result: CallToolResult;
+    if (tool === KNOWLEDGE_READ_TOOL.name) {
+      const args = knowledgeReadArgsSchema.safeParse(raw);
+      result = args.success ? knowledgeReadResult(mount, args.data) : knowledgeArgsRefusal(KNOWLEDGE_READ_TOOL);
+    } else if (tool === KNOWLEDGE_CORRECT_TOOL.name) {
+      const args = knowledgeCorrectArgsSchema.safeParse(raw);
+      result = args.success
+        ? await knowledgeCorrectResult({
+            db: grant.db,
+            projectSlug: grant.projectSlug,
+            taskKey: grant.taskKey,
+            mount,
+            args: args.data,
+          })
+        : knowledgeArgsRefusal(KNOWLEDGE_CORRECT_TOOL);
+    } else {
+      result = {
+        content: [{ type: "text", text: `"${server}" has no tool "${tool}"; it offers ${KNOWLEDGE_TOOLS.map((t) => t.name).join(" and ")}.` }],
+        isError: true,
+      };
+    }
+    logger.info("mcp gateway call", {
+      runId: grant.runId,
+      mcp: server,
+      tool,
+      durationMs: Date.now() - started,
+      outcome: result.isError ? "tool_error" : "ok",
+    });
+    return result;
+  });
+  return connectSession(grant, server, mcp, null);
 }
