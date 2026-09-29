@@ -1622,6 +1622,9 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     const item = schema.properties.actions.items;
     expect(item.properties.completeness.type).toEqual(["boolean", "null"]);
     expect(item.required).toContain("completeness");
+    // Ruling 583: and `noVerdict`, the same way.
+    expect(item.properties.noVerdict.type).toEqual(["boolean", "null"]);
+    expect(item.required).toContain("noVerdict");
   });
 
   it("dispatchGate: an ABSENT dispatch-agents grant keeps run_agent — pre-rework deployments store only the retired ids (hunt 2026-08-29)", () => {
@@ -4115,7 +4118,8 @@ describe("pending trigger queue", () => {
     rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
     await drive({ trigger: "manual" });
     // CANARY: drop `if (a.completeness) dispatch.completeness = true` from the
-    // executor and the engagement carries no question.
+    // executor and the engagement carries no question; drop ruling 583's
+    // `if (a.noVerdict) dispatch.noVerdict = true` and the run may judge.
     adapter3.finish(
       store3,
       JSON.stringify({
@@ -4135,6 +4139,7 @@ describe("pending trigger queue", () => {
             blockedBy: null,
             paths: null,
             completeness: true,
+            noVerdict: true,
           },
         ],
       }),
@@ -4144,9 +4149,10 @@ describe("pending trigger queue", () => {
       const task = readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!;
       const engaged = task.parsed.frontmatter.engagements.find((e) => e.profileId === "reviewer");
       const reviewerRun = store3.db
-        .prepare(`SELECT id FROM agent_runs WHERE agent_profile_id = 'reviewer' ORDER BY rowid DESC LIMIT 1`)
+        .prepare(`SELECT id, verdict_withheld FROM agent_runs WHERE agent_profile_id = 'reviewer' ORDER BY rowid DESC LIMIT 1`)
         .get();
       expect(engaged?.question).toMatchObject({ kind: "completeness", runId: String(reviewerRun?.id) });
+      expect(reviewerRun?.verdict_withheld).toBe(1);
     });
   });
 

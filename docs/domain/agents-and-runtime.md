@@ -1276,7 +1276,9 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   channel on both backends for that run only (the Claude `report_outcome` field, the Codex
   envelope schema and the persona's collaboration notes) and records `verdict_withheld`
   on the run, so the completion's prose fallback cannot manufacture one either (rulings
-  313, 316). The engagement stays `verdictCapable`. A delivering run, fresh or resumed,
+  313, 316). The operator withholds it the same way with `run_agent`'s `noVerdict` (the
+  Codex plan's `noVerdict` field, and a recommendation card's), for any run it tells not to
+  judge (ruling 583). The engagement stays `verdictCapable`. A delivering run, fresh or resumed,
   gets no verdict channel at all, whatever its profile grants, and completion discards a
   verdict from a run dispatched to deliver: its reply is its delivery, and its files stamp
   `deliveredAt` (ruling 555).
@@ -1418,9 +1420,10 @@ write grant.
    `verdictAuthorized` is the engagement's `verdictCapable === true` when the run has an
    engagement, else the live verdict grant. No verdict at all is recorded for a run whose
    checkout failed (`no_checkout`, ruling 248, with a note naming that condition) or whose
-   dispatch withheld the verdict (`verdict_withheld`, ruling 316), and the prose fallback
-   is for SILENCE only: an envelope that left the verdict empty and asked a question has
-   answered. A verdict from the run a completeness stamp names is recorded as
+   dispatch withheld the verdict (`verdict_withheld`, rulings 316 and 583), and the prose
+   fallback is for SILENCE only: an envelope that left the verdict empty and asked a
+   question has answered. A request-changes with nothing delivered to bind to is recorded
+   in words only, and its note says so (ruling 583), as an approval with none does. A verdict from the run a completeness stamp names is recorded as
    `answers: "completeness"` (ruling 421).
 4. Question → packet using the live ask grant; evidence rows are written; browser
    working artifacts not cited are pruned (ruling 105). Ruling 159: the run's workspace

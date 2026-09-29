@@ -28,7 +28,7 @@ import {
   interruptRun,
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
-import { upsertRun } from "~/server/runtimes/run-store.server";
+import { getRun, upsertRun } from "~/server/runtimes/run-store.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
@@ -1325,6 +1325,93 @@ describe("ruling 421: a dispatch that puts the completeness question says so", (
     expect(
       task().frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question,
     ).toMatchObject({ kind: "completeness", runId: run.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+});
+
+/**
+ * Ruling 583. On AWSC-19 the operator told the Estimate Judge "Record no
+ * verdict" in its directive, the Judge kept to it, and Viberr read one into its
+ * report all the same: a heading, "Not done or not checked", matched the prose
+ * fallback. A directive is a request; `noVerdict` withholds the verdict the way
+ * ruling 313 does for the deadlock question, which ruling 316 honours.
+ */
+describe("ruling 583: a dispatch that must not judge withholds the verdict", () => {
+  const newestReviewerWithheld = () => {
+    const newest = listRunsForTask(store.db, store.slug, "VIB-1")
+      .filter((r) => r.kind === "reviewer")
+      .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""))
+      .at(-1)!;
+    return getRun(store.db, newest.serverRunId)?.verdict_withheld;
+  };
+
+  it("withholds it on a prompted run and on a bare one; a plain dispatch withholds nothing", async () => {
+    // CANARY: stop threading `noVerdict` through `operatorDispatchAgent` and
+    // the run can return a verdict the directive said it must not.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const dispatch = async (extra: { prompt?: string; noVerdict?: boolean }) => {
+      const r = await operatorDispatchAgent(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", ...extra },
+        authority("supervised"),
+      );
+      expect(r.outcome).toBe("done");
+      const withheld = newestReviewerWithheld();
+      await interruptRunningRuns("VIB-1");
+      return withheld;
+    };
+    expect(await dispatch({ prompt: "Review the revision." })).toBe(0);
+    expect(await dispatch({ prompt: "Correct the golden entry. Record no verdict.", noVerdict: true })).toBe(1);
+    expect(await dispatch({ noVerdict: true })).toBe(1);
+  });
+
+  it("the Claude operator's run_agent tool threads it", async () => {
+    // CANARY: drop `if (args.noVerdict) input.noVerdict = true` from the handler.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("supervised"),
+    });
+    const runAgent = toolkit.tools.find((t) => t.name === "run_agent")!;
+    // SAFETY: the handler validates its own arguments; this is the shape the
+    // tool's schema declares.
+    await runAgent.handler(
+      { profileId: "reviewer", prompt: "Write the floor clause. Record no verdict.", noVerdict: true } as never,
+      {} as never,
+    );
+    expect(newestReviewerWithheld()).toBe(1);
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("a recommended run carries it on its card, and Apply withholds it", async () => {
+    // CANARY: drop `rec.noVerdict` from the recommend arm or from Apply.
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Record no verdict.", noVerdict: true },
+      authority("supervised"),
+    );
+    const card = task().frontmatter.recommendations[0]!;
+    expect(card).toMatchObject({ kind: "run_agent", profileId: "reviewer", noVerdict: true });
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: card.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    expect(newestReviewerWithheld()).toBe(1);
     await interruptRunningRuns("VIB-1");
   });
 });

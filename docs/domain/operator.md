@@ -473,7 +473,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |
 | `set_epic` | `operatorSetEpic` → `setTasksEpic` (ruling 503: puts THIS task in an epic, moves it to another or takes it out with `""`; an unknown epic or an archived task is a `noop` with the writer's sentence, an unchanged one a `noop`; the Codex plan carries it in `epicId`) | `append-typed-events` |
-| `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`) | `dispatch-agents` |
+| `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`, `noVerdict`: ruling 583, the run's verdict is withheld) | `dispatch-agents` |
 | `schedule_task_action` | `operatorScheduleRun` → `scheduleTaskAction` (ruling 487: THIS task's own re-run or a deployed agent's run with a directive, `delayMinutes` 1..40320 or an ISO `dueAt`, refused as `noop` for an agent it could not dispatch now) | `dispatch-agents: direct` only |
 | `cancel_task_schedule` | `operatorCancelSchedule` → `cancelScheduledAction` (ruling 487: a pending entry the operator scheduled itself; a person's is `denied`) | `dispatch-agents: direct` only |
 | `deliver_for_review` | `operatorDeliverForReview` → `performDelivery` | `deliver-review-pr` |

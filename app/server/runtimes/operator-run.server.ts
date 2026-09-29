@@ -2458,6 +2458,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             type: ["boolean", "null"],
             description: "For run_agent ONLY (ruling 421): true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
           },
+          noVerdict: {
+            type: ["boolean", "null"],
+            description: "For run_agent ONLY (ruling 583): true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict and reads nothing it writes as one; a directive saying \"record no verdict\" is not enforced without it. Null for every other run and every other tool.",
+          },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
           // default set. Null → use the packet type's default options.
@@ -2568,7 +2572,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "files", "screenshots", "completeness", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "files", "screenshots", "completeness", "noVerdict", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
       },
     },
   },
@@ -2611,6 +2615,9 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 421: run_agent's completeness question — `.optional()` for the same
   // replay reason.
   completeness: z.boolean().nullable().optional(),
+  // Ruling 583: run_agent's no-verdict switch, `.optional()` for the same
+  // replay reason.
+  noVerdict: z.boolean().nullable().optional(),
   // Ruling 487: schedule_task_action's time and cancel_task_schedule's entry —
   // `.optional()` for the same replay reason.
   dueAt: z.string().nullable().optional(),
@@ -3302,6 +3309,7 @@ async function executeCodexPlan(
             if (a.delivers != null) dispatch.delivers = a.delivers;
             if (a.reason) dispatch.reason = a.reason;
             if (a.completeness) dispatch.completeness = true;
+            if (a.noVerdict) dispatch.noVerdict = true;
             const dispatched = await operatorDispatchAgent(db, ctx, dispatch, authority);
             // R20-9: only a dispatch that actually LANDED is a consultation — a
             // denied or no-op one consulted nobody (noteConsultedProfile).

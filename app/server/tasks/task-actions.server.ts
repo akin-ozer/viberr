@@ -4743,7 +4743,13 @@ export async function recordAgentCompletion(
             "deliver the work, or another reviewer judge it.";
         } else if (verdict === "request_changes") {
           title = VERDICT_NOTE_TITLE.changesRequested;
-          summary = `${roleDisplay} requested changes${onRevision}.`;
+          // Ruling 583: with nothing delivered, the objection binds to nothing
+          // and says so, as an approval with nothing to bind to does below.
+          // On AWSC-19 the event read "Validation: none. Estimate Judge
+          // requested changes." over a record that held no verdict at all.
+          summary = verdictBound
+            ? `${roleDisplay} requested changes${onRevision}.`
+            : `${roleDisplay} requested changes, but nothing on this task has been delivered for the verdict to bind to, so it does not count.`;
         } else if (!subjectId || !reviewerProfileId) {
           // Approve with nothing to bind to — nothing delivered yet. Record
           // the prose but never claim a pass.
@@ -6980,6 +6986,8 @@ export async function operatorPromptAgent(
     handle: string;
     /** Ruling 421: this directive puts the completeness question. */
     completeness?: boolean;
+    /** Ruling 583: the run records no verdict. */
+    noVerdict?: boolean;
   },
   ctx: TaskMutationContext = {},
 ): Promise<StartAgentRunResult> {
@@ -7048,6 +7056,7 @@ export async function operatorPromptAgent(
     };
     if (input.delivers !== undefined) dispatch.delivers = input.delivers;
     if (input.completeness) dispatch.completeness = true;
+    if (input.noVerdict) dispatch.withholdVerdict = true;
     started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
@@ -15888,6 +15897,8 @@ export async function applyRecommendation(
     if (rec.delivers !== undefined) dispatch.delivers = rec.delivers;
     // Ruling 421: a recommended completeness question is stamped on Apply too.
     if (rec.completeness) dispatch.completeness = true;
+    // Ruling 583: and a run recommended not to judge runs without a verdict.
+    if (rec.noVerdict) dispatch.withholdVerdict = true;
     await startAgentRun(db, dispatch, runActor, runCtx);
   } else if (rec.kind === "transition" && rec.toStageId) {
     // Owner ruling 2026-07-26: the operator may recommend a move OFF the

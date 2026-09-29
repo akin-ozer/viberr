@@ -1041,6 +1041,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe(
               "Ruling 421: true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING you would still block on, including anything you would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Omit for any other run.",
             ),
+          noVerdict: z
+            .boolean()
+            .optional()
+            .describe(
+              "Ruling 583: true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict tool and reads nothing it writes as a verdict. A `prompt` that says \"record no verdict\" is a request the agent can keep while Viberr still reads a verdict into its words; this is what enforces it.",
+            ),
         },
         async (args) => {
           const input: DispatchAgentInput = {
@@ -1051,6 +1057,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.delivers !== undefined) input.delivers = args.delivers;
           if (args.reason) input.reason = prose(args.reason);
           if (args.completeness) input.completeness = true;
+          if (args.noVerdict) input.noVerdict = true;
           const result = await operatorDispatchAgent(db, ctx, input, authority);
           // R20-9: remember the consultation so a packet opened later in THIS
           // run discloses it without the model having to remember.

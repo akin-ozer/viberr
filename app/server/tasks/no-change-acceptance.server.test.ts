@@ -376,6 +376,28 @@ describe("the verdict binds — a verification revision is minted at review time
     );
   });
 
+  it("ruling 583: an objection with nothing delivered says it binds to nothing", async () => {
+    // Live on AWSC-19 the event read "Validation: none. Estimate Judge
+    // requested changes." over a record that held no verdict at all.
+    // CANARY: word the unbound objection like a bound one again.
+    deployAgents();
+    seedVerificationTask();
+    await recordAgentCompletion(store.db, dataCtx(), store.slug, "VIB-1", {
+      actorRef: REVIEWER_ACTOR,
+      runId: "run_review_1",
+      delivers: false,
+      replyText: "The smoke file is missing from main.",
+      verdict: "request_changes",
+      question: null,
+    });
+    expect(task().frontmatter.verdicts).toEqual([]);
+    const quality = task().timeline.find((e) => e.type === "quality");
+    expect(quality?.title).toBe("Changes requested");
+    expect(quality?.text).toContain(
+      "requested changes, but nothing on this task has been delivered for the verdict to bind to, so it does not count.",
+    );
+  });
+
   it("ruling 543: an approval of the files a result was delivered in says it bound to them", async () => {
     // Ruling 388 bound it all along; the note read "there is no delivered
     // revision to bind the verdict to yet" beside a healthy validation.
