@@ -8,7 +8,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
-import { strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
+import { imageResult, strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import {
   EVIDENCE_STATUSES,
   normalizeEvidenceRows,
@@ -18,7 +18,7 @@ import {
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
-import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
+import { readAgentTaskAttachment, readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
 import {
   KB_DOC_KB_DESCRIPTION,
   KB_DOC_OFFSET_DESCRIPTION,
@@ -30,6 +30,8 @@ import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/se
 import {
   READ_BOARD_DESCRIPTION,
   READ_BOARD_TASK_KEY_DESCRIPTION,
+  READ_TASK_ATTACHMENT_DESCRIPTION,
+  READ_TASK_ATTACHMENT_FIELDS,
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
 } from "~/server/mcp-proxy/board-tool.server";
@@ -757,6 +759,32 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent read_timeline_entry failed", { taskKey, err: toError(error) });
             return textResult("[error] The timeline could not be read.");
+          }
+        },
+      ),
+      // Ruling 594: one file of any task in this project. Same gate, read-only;
+      // the Codex twin is the gateway's board server.
+      tool(
+        "read_task_attachment",
+        READ_TASK_ATTACHMENT_DESCRIPTION,
+        {
+          name: z.string().describe(READ_TASK_ATTACHMENT_FIELDS.name),
+          taskKey: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.taskKey),
+          offset: z.number().int().min(0).optional().describe(READ_TASK_ATTACHMENT_FIELDS.offset),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            const read = readAgentTaskAttachment(
+              { db, ctx, projectSlug },
+              args.taskKey?.trim() || taskKey,
+              args.name,
+              args.offset ?? 0,
+            );
+            return "text" in read ? textResult(read.text) : imageResult(read.header, read.image);
+          } catch (error) {
+            logger.warn("agent read_task_attachment failed", { taskKey, err: toError(error) });
+            return textResult("[error] The attachment could not be read.");
           }
         },
       ),

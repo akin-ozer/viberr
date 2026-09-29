@@ -676,9 +676,9 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
 - The board (ruling 589): a Codex specialist that holds any collaboration grant
   (`holdsCollaborationGrant`, the gate a Claude toolkit builds `read_board` on) mounts
   `viberr_board`, a second server the gateway answers itself over the run's token
-  (`board-tool.server.ts`), fresh and resumed. It has `read_board` and
-  `read_timeline_entry`, the same readers and descriptions as Claude's toolkit, over the
-  run's own project and task; the mount carries only the store, and the run is handed the
+  (`board-tool.server.ts`), fresh and resumed. It has `read_board`,
+  `read_timeline_entry` and `read_task_attachment` (ruling 594), the same readers and
+  descriptions as Claude's toolkit, over the run's own project and task; the mount carries only the store, and the run is handed the
   URL and its token. A profile with no collaboration grant mounts nothing, and neither
   does a run when the gateway is not running.
 
@@ -1264,7 +1264,9 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   task whose deliverable is a result rather than a change to the repository the result's
   files go there and never into a commit, ruling 530; the contract names the folder as
   the run's to READ as well as to copy into, and names it read-only to a run that cannot
-  post files, with why (`ATTACHMENTS_READ_SENTENCE`, ruling 592); the workspace contract also lets
+  post files, with why (`ATTACHMENTS_READ_SENTENCE`, ruling 592), and a run that holds
+  `read_task_attachment` is told another task's files are read with it, never from that
+  task's folder (`OTHER_TASK_FILES_SENTENCE`, ruling 594); the workspace contract also lets
   the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
   `knowledgeBaseReadDirs`, ruling 422, and never write them; a run that holds
   `correct_knowledge_doc` is told there that the tool is how a passage changes,
@@ -1352,6 +1354,7 @@ which Viberr's gateway answers for a Codex run (rulings 585 and 589).
 | `report_outcome {summary, verdict?, evidence?, relay?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted; `relay` rides every variant | `evidence: [{label, result?, status}]` (ruling 526): what was checked, how it came out, and `pass`, `fail` or `info`; a row with no `status` is refused by the schema by name, nothing staged. Staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`}. `relay: [{taskKey, text}]` (ruling 488) is text for OTHER tasks of the same project, at most `RELAY_MAX_ENTRIES` (2); a third entry is refused by the schema by name, nothing staged, so the agent re-reports in the same run. The completion posts each entry (§4.4) |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 589) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
+| `read_task_attachment {name, taskKey?, offset?}` | none; built with `read_board`, on both backends | one attachment of this task, or of another task of the project with `taskKey`, read where it is: text in pages of 40 000 characters, a spreadsheet as CSV, an image as the picture, a binary refused (the operator's reader, `readAgentTaskAttachment`, ruling 594); `read_board` lists each task's `files` for it |
 | `read_timeline_entry {occurredAt}` | none; built with `read_board`, on both backends | one entry of this task's timeline, whole, by the stamp the prompt's recent timeline prints after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)", 220 characters); read-only (ruling 563, `readTimelineEntry`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
 | `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 581), or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |

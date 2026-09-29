@@ -6,6 +6,12 @@ import {
   type TaskFileEvent,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
+import {
+  attachmentImageHeader,
+  isBrowserWorkingArtifact,
+  listTaskAttachments,
+  readTaskAttachment,
+} from "~/server/files/task-attachments.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { currentCompletionPacket } from "./completion-packet.server";
@@ -198,6 +204,9 @@ export function readBoardTask(
   };
   const outcome = file ? taskOutcome(file.parsed.frontmatter, file.parsed.timeline) : null;
   if (outcome) read.outcome = outcome;
+  // Ruling 594: what `read_task_attachment` can open on this task.
+  const files = taskFileNames(deps, row.key);
+  if (files.length > 0) read.files = files;
   return JSON.stringify(read, null, 1);
 }
 
@@ -213,6 +222,57 @@ interface BoardTaskRead {
   goal: string | null;
   /** Ruling 569: absent until the task has one. */
   outcome?: TaskOutcome;
+  /** Ruling 594: the task's files, without the browser's working files;
+   *  absent when it has none. */
+  files?: string[];
+}
+
+/** Ruling 594: a task's attachment names, less the browser's working files. */
+function taskFileNames(deps: BoardReadContext, taskKey: string): string[] {
+  return listTaskAttachments(deps.projectSlug, taskKey, deps.ctx.dataRoot)
+    .map((a) => a.name)
+    .filter((name) => !isBrowserWorkingArtifact(name));
+}
+
+/** Ruling 594: what an agent's attachment reader answers: text, or a line and
+ *  the picture. */
+export type AgentAttachmentRead =
+  | { text: string }
+  | { header: string; image: { data: string; mimeType: string } };
+
+/**
+ * Ruling 594: one attachment of a task in this project, for an agent. The
+ * operator's `read_task_attachment` reads its own task's files, and a Claude
+ * specialist read nothing but its prompt; live on AWSC-33 the Estimate Judge
+ * was told to read two registers on AWSC-24 and AWSC-31 "where they are",
+ * which its workspace contract puts off-limits, and asked a person for
+ * access. The same reader as the operator's, over any task of the project.
+ */
+export function readAgentTaskAttachment(
+  deps: BoardReadContext,
+  taskKey: string,
+  name: string,
+  offset = 0,
+): AgentAttachmentRead {
+  const key = taskKey.trim();
+  if (!boardRows(deps).some((t) => t.key === key)) {
+    return { text: `[noop] No task ${key} in this project; \`read_board\` lists the project's tasks.` };
+  }
+  const read = readTaskAttachment(deps.projectSlug, key, name, deps.ctx.dataRoot, offset);
+  if (!read) {
+    const have = taskFileNames(deps, key);
+    return {
+      text:
+        `[noop] ${key} has no attachment \`${name.trim()}\`. ` +
+        (have.length ? `It holds: ${have.join(", ")}.` : "It has no attachments."),
+    };
+  }
+  if ("unreadable" in read) return { text: `[noop] ${read.unreadable}` };
+  if (read.kind === "image") {
+    return { header: attachmentImageHeader(key, read), image: { data: read.data, mimeType: read.mimeType } };
+  }
+  const { kind: _text, ...body } = read;
+  return { text: JSON.stringify(body, null, 1) };
 }
 
 type BoardRow = ReturnType<typeof boardRows>[number];

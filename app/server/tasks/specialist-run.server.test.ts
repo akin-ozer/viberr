@@ -100,6 +100,7 @@ import {
   REREVIEW_RESTATES_NOTE,
   KB_CONTRACT_CORRECTION_SENTENCE,
   ATTACHMENTS_READ_SENTENCE,
+  OTHER_TASK_FILES_SENTENCE,
   type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
@@ -2983,6 +2984,29 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(readOnly).not.toContain("COPY files INTO");
   });
 
+  it("ruling 594: the contract names read_task_attachment for another task's files, only for a run that holds it", () => {
+    // CANARY: drop the sentence, or give it to a run without the tool.
+    const dir = "/data/projects/aws-cost-calculator/tasks/AWSC-33/attachments";
+    const base = {
+      role: "Estimate Judge",
+      taskKey: "AWSC-33",
+      title: "t",
+      goal: "g",
+      repo: "akin-ozer/aws-calculator",
+      branch: "awsc-33",
+      cloned: true,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+      delivers: false,
+    };
+    expect(buildAnalyzePrompt({ ...base, attachmentsDropDir: dir, taskFileReader: true })).toContain(
+      `(see "Files on the task thread").${OTHER_TASK_FILES_SENTENCE} Everything else`,
+    );
+    expect(buildAnalyzePrompt({ ...base, attachmentsReadDir: dir, taskFileReader: true })).toContain(
+      `Never write into it.${OTHER_TASK_FILES_SENTENCE} Everything else`,
+    );
+    expect(buildAnalyzePrompt({ ...base, attachmentsDropDir: dir })).not.toContain("read_task_attachment");
+  });
+
   it("ruling 422: the contract lets a run READ the knowledge-base folders its index points at", () => {
     // Live on ax-clone: a Codex run has no `read_knowledge_doc`, its index says
     // "read the file directly" at /data/kb/..., and the contract said everything
@@ -5393,6 +5417,44 @@ describe("P19-G11 — the run records what it was given", () => {
     await startMcpGateway({ port: 0 });
     try {
       expect(await contract("codex")).toContain(KB_CONTRACT_CORRECTION_SENTENCE);
+    } finally {
+      await stopMcpGateway();
+    }
+  });
+
+  it("ruling 594: a run that holds read_task_attachment is told to read another task's files with it, on either backend", async () => {
+    // CANARY: never set the flag, or set it on a Codex run the gateway does
+    // not serve.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const contract = async (backend: "claude" | "codex") => {
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev",
+            capabilities: [{ capabilityId: "comment-on-task", mode: "direct" as const }],
+            extras: [],
+            definition: {
+              kind: "specialist" as const,
+              name: "dev",
+              role: "developer",
+              backends: [backend],
+              model: backend === "codex" ? "gpt-6-luna" : "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignAndRun();
+      return lastRunSpec()!.prompt;
+    };
+    expect(await contract("claude")).toContain(OTHER_TASK_FILES_SENTENCE);
+    expect(await contract("codex")).not.toContain(OTHER_TASK_FILES_SENTENCE);
+    await startMcpGateway({ port: 0 });
+    try {
+      expect(await contract("codex")).toContain(OTHER_TASK_FILES_SENTENCE);
     } finally {
       await stopMcpGateway();
     }

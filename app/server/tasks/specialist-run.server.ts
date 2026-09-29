@@ -428,6 +428,15 @@ export const KB_CORRECTION_NOTE_CODEX =
   "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read. For a knowledge base some agents on this project are not given, name only the document and what is wrong, and quote none of it: your report is on the task, where they read it.";
 
 /**
+ * Ruling 594: the contract's word on another task's files. Every folder but
+ * the run's own task's is off-limits to its shell, and a directive can still
+ * send it to a report on another task; live on AWSC-33 the Estimate Judge was
+ * told to read two registers "where they are" and asked a person for access.
+ */
+export const OTHER_TASK_FILES_SENTENCE =
+  " Another task's files are read with `read_task_attachment` and that task's `taskKey`, never from its folder.";
+
+/**
  * Ruling 592: why the workspace contract lets a run read the task's
  * attachments folder.
  *
@@ -2036,6 +2045,10 @@ async function dispatchAgentRun(
     ctx.dataRoot,
   );
   if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
+  // Ruling 594: the same condition that mounts the board readers.
+  if (realBackend && holdsCollaborationGrant(collab) && (backend === "claude" || boardMount)) {
+    promptInput.taskFileReader = true;
+  }
   // Ruling 591: the same condition as the correction note below.
   if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
     promptInput.kbCorrectionTool = true;
@@ -3322,6 +3335,10 @@ export interface AnalyzePromptInput {
    * (for `attachmentsDropDir`) and put everything else off-limits.
    */
   attachmentsReadDir?: string;
+  /** Ruling 594: the run holds `read_task_attachment` (Claude's toolkit, or
+   *  the gateway's board server on Codex), so the contract names it as the way
+   *  to another task's files. */
+  taskFileReader?: boolean;
   /**
    * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
    * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
@@ -3453,7 +3470,9 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           `and never commit it), is yours to READ and to COPY files INTO. ` +
           ATTACHMENTS_READ_SENTENCE +
           ` Copying a file into it is how a file is posted on the task ` +
-          `thread (see "Files on the task thread"). Everything else ` +
+          `thread (see "Files on the task thread").` +
+          (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+          ` Everything else ` +
           `outside the working directory` +
           (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
           ` stays off-limits.\n`
@@ -3461,7 +3480,9 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           ? `- Read-only exception: the task's attachments folder, \`${input.attachmentsReadDir}\` ` +
             `(an absolute path outside this checkout), is yours to READ. ` +
             ATTACHMENTS_READ_SENTENCE +
-            ` Never write into it. Everything else outside the working directory` +
+            ` Never write into it.` +
+            (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+            ` Everything else outside the working directory` +
             (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
             ` stays off-limits.\n`
           : ``) +

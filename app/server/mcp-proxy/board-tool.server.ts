@@ -31,7 +31,7 @@ export type BoardMount = z.infer<typeof boardMountSchema>;
 
 /** Ruling 281: what `read_board` says it does, on either backend. */
 export const READ_BOARD_DESCRIPTION =
-  "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered). Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
+  "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered), and the names of its files (`files`), which `read_task_attachment` opens. Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
 
 export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Omit to list the whole board.";
 
@@ -67,12 +67,46 @@ export const TIMELINE_ENTRY_TOOL: Tool = {
   annotations: { title: "Read one timeline entry in full", ...READ_ONLY },
 };
 
-/** Both tools, in the order the gateway lists them. */
-export const BOARD_TOOLS: Tool[] = [BOARD_READ_TOOL, TIMELINE_ENTRY_TOOL];
+/** Ruling 594: what `read_task_attachment` says it does, on either backend. */
+export const READ_TASK_ATTACHMENT_DESCRIPTION =
+  "Read ONE attachment of a task in this project: this task's by default, or another task's with `taskKey`, such as a report or a register a directive tells you to read where it is. `read_board` with a task's key lists its `files`. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image as the picture itself, and any other file whose bytes are text as text; a binary file (a .pdf, a .docx, a zip) is named and refused. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset`. Read-only: nothing is copied onto your task.";
+
+export const READ_TASK_ATTACHMENT_FIELDS = {
+  name: "The attachment's file name, exactly as `read_board` or the timeline lists it.",
+  taskKey: "The task the file is on, e.g. AWSC-24. Omit for this task.",
+  offset: "Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start.",
+} as const;
+
+export const TASK_ATTACHMENT_TOOL: Tool = {
+  name: "read_task_attachment",
+  title: "Read one attachment of a task",
+  description: READ_TASK_ATTACHMENT_DESCRIPTION,
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.name },
+      taskKey: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.taskKey },
+      offset: { type: "integer", minimum: 0, description: READ_TASK_ATTACHMENT_FIELDS.offset },
+    },
+    required: ["name"],
+  },
+  annotations: { title: "Read one attachment of a task", ...READ_ONLY },
+};
+
+/** The three tools, in the order the gateway lists them. */
+export const BOARD_TOOLS: Tool[] = [BOARD_READ_TOOL, TIMELINE_ENTRY_TOOL, TASK_ATTACHMENT_TOOL];
 
 /** `read_board`'s arguments, parsed where the gateway receives the call. */
 export const boardReadArgsSchema = z.object({ taskKey: z.string().optional() });
 export type BoardReadArgs = z.infer<typeof boardReadArgsSchema>;
+
+/** `read_task_attachment`'s arguments, parsed where the gateway receives the call. */
+export const taskAttachmentArgsSchema = z.object({
+  name: z.string(),
+  taskKey: z.string().optional(),
+  offset: z.number().int().min(0).optional(),
+});
+export type TaskAttachmentArgs = z.infer<typeof taskAttachmentArgsSchema>;
 
 /** `read_timeline_entry`'s arguments, parsed where the gateway receives the call. */
 export const timelineEntryArgsSchema = z.object({ occurredAt: z.string() });
@@ -127,6 +161,27 @@ export async function timelineEntryResult(
   } catch (error) {
     logger.warn("gateway read_timeline_entry failed", { taskKey: input.taskKey, err: toError(error) });
     return textResult("[error] The timeline could not be read.", true);
+  }
+}
+
+/** `read_task_attachment`: the same reader a Claude run's calls. */
+export async function taskAttachmentResult(
+  input: BoardCallContext,
+  args: TaskAttachmentArgs,
+): Promise<CallToolResult> {
+  try {
+    const { readAgentTaskAttachment } = await import("~/server/tasks/board-read.server");
+    const read = readAgentTaskAttachment(readContext(input), args.taskKey?.trim() || input.taskKey, args.name, args.offset ?? 0);
+    if ("text" in read) return textResult(read.text);
+    return {
+      content: [
+        { type: "text", text: read.header },
+        { type: "image", data: read.image.data, mimeType: read.image.mimeType },
+      ],
+    };
+  } catch (error) {
+    logger.warn("gateway read_task_attachment failed", { taskKey: input.taskKey, err: toError(error) });
+    return textResult("[error] The attachment could not be read.", true);
   }
 }
 

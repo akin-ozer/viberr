@@ -35,7 +35,9 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
   Codex (ruling 589), also gets `read_board`, which answers any task's stage, readiness, waits
   and goal and, once it has them, its completion summary and each standing verdict's report,
   and `read_timeline_entry`, which returns one entry of this task whole by the stamp its anchor
-  prints. Nothing lets it read the rest of the timeline. So "see the comment above" and "act on
+  prints, and `read_task_attachment`, which opens any file of any task in this project where it
+  is (ruling 594): name the task and the file rather than copying it over. Nothing lets it read
+  the rest of the timeline. So "see the comment above" and "act on
   what Arda said" are instructions it cannot follow: carry the words. A directive that
   delegates reading costs a run and, if the agent is careful, a decision packet asking you for
   what you already had.

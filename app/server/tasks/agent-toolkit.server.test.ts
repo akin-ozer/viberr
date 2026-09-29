@@ -655,6 +655,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       "github_read",
       "read_board",
       "read_knowledge_doc",
+      "read_task_attachment",
       "read_timeline_entry",
       "report_outcome",
     ]);
@@ -749,6 +750,36 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       content: { text: string }[];
     };
     expect(out.content[0]!.text).toContain(JSON.stringify(answer));
+  });
+
+  it("ruling 594: read_task_attachment reads one file of this task or another, and read_board lists a task's files", async () => {
+    // Live on AWSC-33 the Estimate Judge was told to read two registers on
+    // other tasks "where they are", which its workspace contract puts
+    // off-limits, and asked a person for access. CANARY: leave the tool
+    // unbuilt, or read only this task's files.
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_files");
+    const read = tools.read_task_attachment!;
+    expect(read).toBeTruthy();
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "done" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const dir = taskAttachmentsDir(store.slug, "VIB-9", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "round-3-comparison.md"), "# Round 3\n\n## Exposure register\n\n| Run | Passage |\n");
+    writeFileSync(path.join(dir, "page-2026-09-29T16-02-40-517Z.yml"), "- snapshot\n");
+    // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (tool: RegisteredTool, args: Record<string, string>) =>
+      ((await tool.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
+    expect(await text(read, { taskKey: "VIB-9", name: "round-3-comparison.md" })).toContain("## Exposure register");
+    // Without a key it reads this task, which has no such file.
+    expect(await text(read, { name: "round-3-comparison.md" })).toContain("[noop] VIB-3 has no attachment");
+    expect(await text(read, { taskKey: "VIB-404", name: "x.md" })).toContain("[noop] No task VIB-404 in this project");
+    // `read_board` names the files, less the browser's working files.
+    const one = z.object({ files: z.array(z.string()) }).parse(JSON.parse(await text(tools.read_board!, { taskKey: "VIB-9" })));
+    expect(one.files).toEqual(["round-3-comparison.md"]);
   });
 
   it("declares `evidence` only when the profile holds attach-evidence-references", () => {

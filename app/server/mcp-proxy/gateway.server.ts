@@ -72,11 +72,14 @@ import {
 import {
   BOARD_READ_TOOL,
   BOARD_TOOLS,
+  TASK_ATTACHMENT_TOOL,
   TIMELINE_ENTRY_TOOL,
   boardArgsRefusal,
   boardMountSchema,
   boardReadArgsSchema,
   boardReadResult,
+  taskAttachmentArgsSchema,
+  taskAttachmentResult,
   timelineEntryArgsSchema,
   timelineEntryResult,
   type BoardMount,
@@ -1316,7 +1319,8 @@ function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeM
 /**
  * Ruling 589: the board server. `read_board` reads the run's project, and
  * `read_timeline_entry` one entry of the run's own task, with the readers a
- * Claude run's toolkit calls.
+ * Claude run's toolkit calls; ruling 594 adds `read_task_attachment`, one
+ * file of any task in the project.
  */
 function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
   const context = { db: grant.db, projectSlug: grant.projectSlug, taskKey: grant.taskKey, mount };
@@ -1328,6 +1332,11 @@ function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): P
     if (tool === TIMELINE_ENTRY_TOOL.name) {
       const args = timelineEntryArgsSchema.safeParse(raw);
       return args.success ? await timelineEntryResult(context, args.data) : boardArgsRefusal(TIMELINE_ENTRY_TOOL);
+    }
+    // Ruling 594: one attachment of a task in the run's project.
+    if (tool === TASK_ATTACHMENT_TOOL.name) {
+      const args = taskAttachmentArgsSchema.safeParse(raw);
+      return args.success ? await taskAttachmentResult(context, args.data) : boardArgsRefusal(TASK_ATTACHMENT_TOOL);
     }
     return null;
   });
