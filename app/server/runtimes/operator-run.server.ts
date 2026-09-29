@@ -2397,7 +2397,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
           // Ruling 492: `set_goal` drafts the task's goal in `text`, so this
           // field is one of the doors that write a goal.
-          text: { type: ["string", "null"], description: "For post_comment: the comment text (narration the HUMANS read, which starts no agent, so an @name in it reaches nobody); put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for take_from_task: optional, one line on what the files are for, on the comment that claims them here (an @name in it is notified), or null for the default line; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 521), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text (narration the HUMANS read, which starts no agent, so an @name in it reaches nobody); put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), an empty string to delete that passage (ruling 581), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for take_from_task: optional, one line on what the files are for, on the comment that claims them here (an @name in it is notified), or null for the default line; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 521), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE },
           reason: { type: ["string", "null"], description: "Short why: recommendation-card reasoning (for a transition_stage that moves the task, shown on the move in its history), or the packet body for open_packet. For write_completion_packet: your summary of the code changes by area, naming the files that matter, required when the snapshot's `completionPacket.changesSummaryRequired` is true (more than 200 changed lines), else null so the diff is shown whole. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For correct_knowledge_doc: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For correct_knowledge_doc: the EVIDENCE that proves the passage wrong or the convention missing: the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
@@ -3407,8 +3407,9 @@ async function executeCodexPlan(
           // should say, `reason` the exact passage it replaces, `repoSource`
           // the evidence that proves it. Reuses the plan's existing string
           // fields rather than growing the schema — the two knowledge-base-
-          // shaped actions then read alike.
-          if (a.kbSource && a.text && a.repoSource) {
+          // shaped actions then read alike. Ruling 581: an empty `text` with a
+          // `reason` deletes that passage.
+          if (a.kbSource && (a.text || a.reason) && a.repoSource) {
             record(
               a.tool,
               await operatorCorrectKnowledgeDoc(
@@ -3418,7 +3419,7 @@ async function executeCodexPlan(
                   ...base,
                   ...splitKbSource(a.kbSource, ctx.dataRoot),
                   replaces: a.reason ?? null,
-                  text: a.text,
+                  text: a.text ?? "",
                   evidence: a.repoSource,
                 },
                 authority,

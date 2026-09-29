@@ -414,7 +414,7 @@ async function mcpServersFor(
 /** Rulings 483 and 498: the collaboration note a Claude run with a knowledge
  *  base gets. */
 export const KB_CORRECTION_NOTE_CLAUDE =
-  "- `correct_knowledge_doc`: when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say. It is written at once, for every later run to read, and a person undoes it if they disagree. The task's entry quotes the passage only when every agent on the project is given that knowledge base.";
+  "- `correct_knowledge_doc`: when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say (empty to delete it). It is written at once, for every later run to read, and a person undoes it if they disagree. The task's entry quotes the passage only when every agent on the project is given that knowledge base.";
 
 /** Rulings 483 and 498: the same channel on Codex, which mounts no Viberr
  *  tools. */
