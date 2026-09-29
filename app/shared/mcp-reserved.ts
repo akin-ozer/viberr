@@ -4,8 +4,9 @@
  * `viberr` is the operator's server, `viberr_agent` the specialist toolkit,
  * `viberr_browser` the R19-19 browser server, `viberr_controller` the
  * controller's toolkit (ruling 99), `viberr_ops` its built-in diagnostics
- * (ruling 107) and `viberr_knowledge` the knowledge server Viberr's gateway
- * answers for a Codex run (ruling 585). Each is listed in BOTH spellings,
+ * (ruling 107), and `viberr_knowledge` and `viberr_board` the knowledge and
+ * board servers Viberr's gateway answers for a Codex run (rulings 585 and
+ * 589). Each is listed in BOTH spellings,
  * because a Codex run sees the hyphen form of a name the Claude side writes
  * with an underscore.
  *
@@ -32,6 +33,8 @@ export const RESERVED_MCP_NAMES: ReadonlySet<string> = new Set([
   "viberr",
   "viberr_agent",
   "viberr-agent",
+  "viberr_board",
+  "viberr-board",
   "viberr_browser",
   "viberr-browser",
   "viberr_controller",

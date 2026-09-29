@@ -28,6 +28,12 @@ import {
 } from "~/server/files/kb-injection.server";
 import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
+  READ_BOARD_DESCRIPTION,
+  READ_BOARD_TASK_KEY_DESCRIPTION,
+  READ_TIMELINE_ENTRY_AT_DESCRIPTION,
+  READ_TIMELINE_ENTRY_DESCRIPTION,
+} from "~/server/mcp-proxy/board-tool.server";
+import {
   readTaskFile,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
@@ -38,6 +44,7 @@ import {
   RELAY_FIELD_NOTE,
   askedEntryText,
   buildAgentQuestionPacket,
+  holdsCollaborationGrant,
   runIdForOutcomeKey,
   stageOutcome,
   type AgentCollab,
@@ -708,18 +715,14 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   // its OWN task already — the gap was only ever the other tasks beside it.
   // Mounted only when this profile already has a Viberr server — a profile
   // holding no collaboration grant at all still gets nothing, which is the
-  // gate U11 pinned and this must not widen.
-  if (tools.length > 0) {
+  // gate U11 pinned and this must not widen. Ruling 589: the same predicate
+  // mounts the gateway's board server for a Codex run.
+  if (holdsCollaborationGrant(collab)) {
     tools.push(
       tool(
         "read_board",
-        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered). Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
-        {
-          taskKey: z
-            .string()
-            .optional()
-            .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
-        },
+        READ_BOARD_DESCRIPTION,
+        { taskKey: z.string().optional().describe(READ_BOARD_TASK_KEY_DESCRIPTION) },
         // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
@@ -745,12 +748,8 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       // read-only, nothing a member could not read on the task page.
       tool(
         "read_timeline_entry",
-        "Read ONE entry of this task's timeline in full, by its `occurredAt` stamp. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp: call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you. Read-only.",
-        {
-          occurredAt: z
-            .string()
-            .describe("The entry's stamp, exactly as your prompt prints it (ISO, to the millisecond)."),
-        },
+        READ_TIMELINE_ENTRY_DESCRIPTION,
+        { occurredAt: z.string().describe(READ_TIMELINE_ENTRY_AT_DESCRIPTION) },
         // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {

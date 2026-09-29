@@ -32,12 +32,14 @@ import {
   ReadResourceResultSchema,
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
+  type CallToolRequest,
   type CallToolResult,
   type JSONRPCMessage,
   type ListToolsResult,
   type RequestMeta,
   type ServerCapabilities,
   type ServerNotification,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SseError } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -67,6 +69,18 @@ import {
   knowledgeReadResult,
   type KnowledgeMount,
 } from "./knowledge-tool.server";
+import {
+  BOARD_READ_TOOL,
+  BOARD_TOOLS,
+  TIMELINE_ENTRY_TOOL,
+  boardArgsRefusal,
+  boardMountSchema,
+  boardReadArgsSchema,
+  boardReadResult,
+  timelineEntryArgsSchema,
+  timelineEntryResult,
+  type BoardMount,
+} from "./board-tool.server";
 import { connectStdioUpstream } from "./upstream-stdio.server";
 import {
   connectHttpUpstream,
@@ -151,6 +165,9 @@ interface RunGrant {
   /** Ruling 585: the servers this gateway answers itself (the knowledge
    *  server), with the knowledge bases the run was given. Never upstreams. */
   knowledge: Map<string, KnowledgeMount>;
+  /** Ruling 589: the board server, answered here too, with the store the
+   *  run's task files are in. */
+  board: Map<string, BoardMount>;
   /** Who a write-tool call is audited as. */
   actor: AuditActor;
   projectSlug: string;
@@ -353,6 +370,8 @@ const gatewayMountSchema = z.object({
   /** Ruling 585: set only on the knowledge mount, which the gateway answers
    *  itself. It stays here, and the run is handed the mount without it. */
   knowledge: knowledgeMountSchema.optional(),
+  /** Ruling 589: set only on the board mount, kept here the same way. */
+  board: boardMountSchema.optional(),
 });
 
 /** A run's MCP server map, as `RunSpec` carries it. */
@@ -398,8 +417,10 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
   const token = randomBytes(32).toString("base64url");
   const servers = new Map<string, ReadonlySet<string>>();
   const knowledge = new Map<string, KnowledgeMount>();
+  const board = new Map<string, BoardMount>();
   for (const mount of mounts) {
     if (mount.config.knowledge) knowledge.set(mount.name, mount.config.knowledge);
+    if (mount.config.board) board.set(mount.name, mount.config.board);
     const withheld = input.toolDenials
       .filter((denial) => denial.server === mount.name)
       .flatMap((denial) => denial.tools);
@@ -421,6 +442,7 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     db: input.db,
     servers,
     knowledge,
+    board,
     actor: input.actor,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -674,10 +696,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     sendJsonRpcError(res, 400, null, ErrorCode.InvalidRequest, "Bad Request: No valid session ID provided");
     return;
   }
-  // Ruling 585: the knowledge server has no upstream; this process answers it.
+  // Rulings 585 and 589: the knowledge and board servers have no upstream;
+  // this process answers them.
   const knowledge = grant.knowledge.get(server);
-  if (knowledge) {
-    const session = await openKnowledgeSession(grant, server, knowledge);
+  const board = grant.board.get(server);
+  if (knowledge || board) {
+    const session = knowledge
+      ? await openKnowledgeSession(grant, server, knowledge)
+      : await openBoardSession(grant, server, board!);
     await session.transport.handleRequest(req, res, body);
     return;
   }
@@ -1223,43 +1249,31 @@ async function connectSession(
   return session;
 }
 
+/** A tool call's arguments as the MCP request carries them. */
+type ToolCallArguments = NonNullable<CallToolRequest["params"]["arguments"]>;
+
 /**
- * Ruling 585: a session on the knowledge server, answered here. It lists the
- * two knowledge tools and reaches only the knowledge bases the run's mount
- * named: `read_knowledge_doc` reads, and `correct_knowledge_doc` writes a
- * correction as the run's agent on the run's task. Like every gateway call it
- * is logged without its arguments or its result, and a run that has ended
- * calls nothing.
+ * Rulings 585 and 589: a session on a server this process answers itself. It
+ * lists `tools`, and `call` answers a call to one of them. Like every gateway
+ * call it is logged without its arguments or its result, and a run that has
+ * ended calls nothing.
  */
-async function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeMount): Promise<Session> {
+async function openOwnSession(
+  grant: RunGrant,
+  server: string,
+  tools: Tool[],
+  call: (tool: string, raw: ToolCallArguments) => Promise<CallToolResult | null>,
+): Promise<Session> {
   const mcp = new Server({ name: server, version: "1.0.0" }, { capabilities: { tools: {} } });
-  mcp.setRequestHandler(ListToolsRequestSchema, () => ({ tools: KNOWLEDGE_TOOLS }));
+  mcp.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
   mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     assertCallsOpen(grant, server, "tools/call");
     const tool = request.params.name;
-    const raw = request.params.arguments ?? {};
     const started = Date.now();
-    let result: CallToolResult;
-    if (tool === KNOWLEDGE_READ_TOOL.name) {
-      const args = knowledgeReadArgsSchema.safeParse(raw);
-      result = args.success ? knowledgeReadResult(mount, args.data) : knowledgeArgsRefusal(KNOWLEDGE_READ_TOOL);
-    } else if (tool === KNOWLEDGE_CORRECT_TOOL.name) {
-      const args = knowledgeCorrectArgsSchema.safeParse(raw);
-      result = args.success
-        ? await knowledgeCorrectResult({
-            db: grant.db,
-            projectSlug: grant.projectSlug,
-            taskKey: grant.taskKey,
-            mount,
-            args: args.data,
-          })
-        : knowledgeArgsRefusal(KNOWLEDGE_CORRECT_TOOL);
-    } else {
-      result = {
-        content: [{ type: "text", text: `"${server}" has no tool "${tool}"; it offers ${KNOWLEDGE_TOOLS.map((t) => t.name).join(" and ")}.` }],
-        isError: true,
-      };
-    }
+    const result = (await call(tool, request.params.arguments ?? {})) ?? {
+      content: [{ type: "text", text: `"${server}" has no tool "${tool}"; it offers ${tools.map((t) => t.name).join(" and ")}.` }],
+      isError: true,
+    };
     logger.info("mcp gateway call", {
       runId: grant.runId,
       mcp: server,
@@ -1270,4 +1284,51 @@ async function openKnowledgeSession(grant: RunGrant, server: string, mount: Know
     return result;
   });
   return connectSession(grant, server, mcp, null);
+}
+
+/**
+ * Ruling 585: the knowledge server. It reaches only the knowledge bases the
+ * run's mount named: `read_knowledge_doc` reads, and `correct_knowledge_doc`
+ * writes a correction as the run's agent on the run's task.
+ */
+function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeMount): Promise<Session> {
+  return openOwnSession(grant, server, KNOWLEDGE_TOOLS, async (tool, raw) => {
+    if (tool === KNOWLEDGE_READ_TOOL.name) {
+      const args = knowledgeReadArgsSchema.safeParse(raw);
+      return args.success ? knowledgeReadResult(mount, args.data) : knowledgeArgsRefusal(KNOWLEDGE_READ_TOOL);
+    }
+    if (tool === KNOWLEDGE_CORRECT_TOOL.name) {
+      const args = knowledgeCorrectArgsSchema.safeParse(raw);
+      return args.success
+        ? await knowledgeCorrectResult({
+            db: grant.db,
+            projectSlug: grant.projectSlug,
+            taskKey: grant.taskKey,
+            mount,
+            args: args.data,
+          })
+        : knowledgeArgsRefusal(KNOWLEDGE_CORRECT_TOOL);
+    }
+    return null;
+  });
+}
+
+/**
+ * Ruling 589: the board server. `read_board` reads the run's project, and
+ * `read_timeline_entry` one entry of the run's own task, with the readers a
+ * Claude run's toolkit calls.
+ */
+function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
+  const context = { db: grant.db, projectSlug: grant.projectSlug, taskKey: grant.taskKey, mount };
+  return openOwnSession(grant, server, BOARD_TOOLS, async (tool, raw) => {
+    if (tool === BOARD_READ_TOOL.name) {
+      const args = boardReadArgsSchema.safeParse(raw);
+      return args.success ? await boardReadResult(context, args.data) : boardArgsRefusal(BOARD_READ_TOOL);
+    }
+    if (tool === TIMELINE_ENTRY_TOOL.name) {
+      const args = timelineEntryArgsSchema.safeParse(raw);
+      return args.success ? await timelineEntryResult(context, args.data) : boardArgsRefusal(TIMELINE_ENTRY_TOOL);
+    }
+    return null;
+  });
 }

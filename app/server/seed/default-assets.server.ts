@@ -422,6 +422,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 589 (AWSC-24, 2026-09-29): before a Codex agent read the board
+    // and a timeline entry through Viberr's gateway, and before the skill said
+    // `read_board` returns each standing verdict's report (ruling 569).
+    "1189f5a7ef226e5c7fc7514b5b6f7052b3b4ac313bee6350f585422bb081b80a",
     // Ruling 588 (AWSC-29, 2026-09-29): before it said only a Codex run
     // without Viberr's gateway has no correction tool (ruling 585).
     "ed747472c439b25857d173e7ab845b8d6e2044237d431b9628fd0b6dce39de49",

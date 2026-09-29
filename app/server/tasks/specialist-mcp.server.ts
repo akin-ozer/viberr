@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { BOARD_MCP_NAME, type BoardMount } from "~/server/mcp-proxy/board-tool.server";
 import { KNOWLEDGE_MCP_NAME, type KnowledgeMount } from "~/server/mcp-proxy/knowledge-tool.server";
 import { logger } from "~/server/logging/logger.server";
 import { mcpGatewayMountUrl } from "~/server/mcp-proxy/gateway.server";
@@ -92,6 +93,8 @@ export interface HttpMcpServerConfig {
    *  it (the knowledge bases it may read for the run) and hands the run the
    *  mount without it. */
   knowledge?: KnowledgeMount;
+  /** Ruling 589: set only on the gateway's board mount, kept the same way. */
+  board?: BoardMount;
 }
 
 /** The portable per-server config both adapters accept; the Codex adapter
@@ -429,6 +432,31 @@ export function resolveKnowledgeMcp(input: {
   const knowledge: KnowledgeMount = { kb: [...input.kb], agent: input.agent };
   if (input.dataRoot) knowledge.dataRoot = input.dataRoot;
   return { type: "http", url, knowledge };
+}
+
+/**
+ * Ruling 589: the board server a Codex specialist that holds a collaboration
+ * grant mounts, or null.
+ *
+ * A Claude run with any collaboration grant has `read_board` and
+ * `read_timeline_entry` in its toolkit; a Codex run had neither (ruling 422),
+ * so it could not read another task's verdicts or a clipped entry of its own
+ * task. The mount is the gateway's own URL for `viberr_board`, carrying the
+ * run's store; the gateway already holds the run's project and task. A run
+ * with no collaboration grant mounts nothing, as on Claude, and so does a
+ * Claude run or a gateway that is not running.
+ */
+export function resolveBoardMcp(input: {
+  backend: string | undefined;
+  collaborates: boolean;
+  dataRoot?: string | undefined;
+}): HttpMcpServerConfig | null {
+  if (input.backend !== "codex" || !input.collaborates) return null;
+  const url = mcpGatewayMountUrl(BOARD_MCP_NAME);
+  if (!url) return null;
+  const board: BoardMount = {};
+  if (input.dataRoot) board.dataRoot = input.dataRoot;
+  return { type: "http", url, board };
 }
 
 /**
