@@ -11,10 +11,11 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import type {
-  Engagement,
-  PacketOption,
-  WorkRevision,
+import {
+  currentVerdicts,
+  type Engagement,
+  type PacketOption,
+  type WorkRevision,
 } from "~/schemas/task-file.schema";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
@@ -1174,6 +1175,91 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.frontmatter.verdicts).toEqual([]);
     const note = parsed.timeline.find((e) => e.type === "quality");
     expect(note?.text).toContain("but it made what is delivered, so its verdict does not count");
+  });
+
+  /** Ruling 587: `dev` delivered two files at `savedAt`, and `reviewer` asked
+   *  for a change to one of them. */
+  function writeDeliveredAndObjectedTask(savedAt: string): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "mapping",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_DELIVERS_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+        workRevision: null,
+        deliveredAt: savedAt,
+        validation: "failing",
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${savedAt}`,
+            result: "request_changes",
+            reason: "assumptions.md omits the cost of the 20%-free size.",
+            at: savedAt,
+            rounds: 1,
+            reviews: 1,
+          },
+        ],
+      }),
+      goal: "Price the estate.",
+      timeline: [
+        {
+          occurredAt: savedAt,
+          type: "comment",
+          actor: { kind: "agent", backend: "claude", profileId: "dev", roleHint: "Calculator Builder" },
+          title: null,
+          text: "The estimate is saved on the task.",
+          toAgent: false,
+          evidence: null,
+          attachments: ["assumptions.md", "estimate-link.md"],
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const completeSupportingRun = (runId: string) =>
+    applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Review & validation",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+
+  it("ruling 587: a supporting run that rewrites a delivered file moves the delivery, and the verdict on it goes stale", async () => {
+    // Live on AWSC-28 the Architect rewrote the delivered assumptions.md at
+    // Mapping and the subject stayed put, so the Judge's re-review landed on
+    // the revision it had already objected to. CANARY: return early for every
+    // run not dispatched to deliver, as before, and `deliveredAt` stays put.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeDeliveredAndObjectedTask(savedAt);
+    const runId = await finishedRunWith("Added the missing 20%-free line to assumptions.md.");
+    saveInRunWindow(runId, ["assumptions.md"]);
+    await completeSupportingRun(runId);
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.deliveredAt).not.toBe(savedAt);
+    expect(currentVerdicts(fm)).toEqual([]);
+  });
+
+  it("ruling 587: a file the delivery does not hold moves nothing", async () => {
+    // A supporting agent's own notes are not the delivery (ruling 555).
+    // CANARY: stamp on any saved file and the objection is dropped with no
+    // change to what it objected to.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeDeliveredAndObjectedTask(savedAt);
+    const runId = await finishedRunWith("Wrote my mapping notes to architect-notes.md.");
+    saveInRunWindow(runId, ["architect-notes.md"]);
+    await completeSupportingRun(runId);
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.deliveredAt).toBe(savedAt);
+    expect(currentVerdicts(fm).map((v) => v.result)).toEqual(["request_changes"]);
   });
 
   it("ruling 538: a file a relay carries here while a deliverer runs is the relay's, and delivers nothing", async () => {
