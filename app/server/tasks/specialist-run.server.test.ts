@@ -98,6 +98,7 @@ import {
   RELAY_NOTE_CLAUDE,
   RELAY_NOTE_CODEX,
   REREVIEW_RESTATES_NOTE,
+  KB_CONTRACT_CORRECTION_SENTENCE,
   type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
@@ -2994,6 +2995,29 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(without).toContain("Everything else outside the working directory stays off-limits.");
   });
 
+  it("ruling 591: the contract names correct_knowledge_doc for a run that holds it, and only then", () => {
+    // Live on AWSC-32 the Workflow Researcher's rework run read "Never write,
+    // create or delete anything" in the knowledge-base folders against its
+    // directive's corrections, made none of them and asked which governs.
+    // CANARY: drop the sentence, or give it to a run without the tool.
+    const base = {
+      role: "Workflow Researcher",
+      taskKey: "AWSC-32",
+      title: "t",
+      goal: "g",
+      repo: "akin-ozer/aws-calculator",
+      branch: "awsc-32",
+      cloned: true,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+      delivers: true,
+      kbReadDirs: ["/data/kb/aws-migration-mapping"],
+    };
+    expect(buildAnalyzePrompt({ ...base, kbCorrectionTool: true })).toContain(
+      `Never write, create or delete anything in it.${KB_CONTRACT_CORRECTION_SENTENCE}\n`,
+    );
+    expect(buildAnalyzePrompt(base)).not.toContain("correct_knowledge_doc");
+  });
+
   it("ruling 422: knowledgeBaseReadDirs keeps real folders only, once each, in order", () => {
     const root = mkdtempSync(path.join(tmpdir(), "kb-read-"));
     mkdirSync(path.join(root, "kb", "rulings"), { recursive: true });
@@ -5298,6 +5322,50 @@ describe("P19-G11 — the run records what it was given", () => {
         knowledge: { kb: ["answer-keys"], agent: { profileId: "dev" } },
       });
       expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain("read each document with `read_knowledge_doc`");
+    } finally {
+      await stopMcpGateway();
+    }
+  });
+
+  it("ruling 591: a run that can correct its knowledge bases is told so in its workspace contract, on either backend", async () => {
+    // CANARY: never set the flag, or set it on a Codex run the gateway does not
+    // serve (it has no correction tool to name).
+    mkdirSync(path.join(store.dataRoot, "kb", "house-style"), { recursive: true });
+    writeFileSync(path.join(store.dataRoot, "kb", "house-style", "style.md"), "# Style");
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const contract = async (backend: "claude" | "codex") => {
+      writeProject(store.dataRoot, {
+        ...fm,
+        // The contract is written only for a task with a repository.
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev",
+            capabilities: [],
+            extras: [],
+            definition: {
+              kind: "specialist" as const,
+              name: "dev",
+              role: "developer",
+              backends: [backend],
+              model: backend === "codex" ? "gpt-6-luna" : "sonnet",
+              resources: { skills: [], mcps: [], kb: ["house-style"] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignAndRun();
+      return lastRunSpec()!.prompt;
+    };
+    const claude = await contract("claude");
+    expect(claude).toContain("Read-only exception: the knowledge-base folder");
+    expect(claude).toContain(KB_CONTRACT_CORRECTION_SENTENCE);
+    // A Codex run with no gateway has no correction tool, so the contract names none.
+    expect(await contract("codex")).not.toContain(KB_CONTRACT_CORRECTION_SENTENCE);
+    await startMcpGateway({ port: 0 });
+    try {
+      expect(await contract("codex")).toContain(KB_CONTRACT_CORRECTION_SENTENCE);
     } finally {
       await stopMcpGateway();
     }
