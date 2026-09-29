@@ -4484,6 +4484,89 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(event.text).not.toMatch(/\.\./);
   });
 
+  it("ruling 595: a specialist run the idle guard stopped opens a stall packet that recommends running it again, in the leaf's words", async () => {
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            backends: ["claude"],
+            model: "sonnet",
+            autonomy: "supervised",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = "run_595_hung";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-595",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "codex",
+      model: "gpt-6-luna",
+      sdk: "codex",
+      state: "error",
+    });
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-09-29T19:40:56.000Z",
+      raw: JSON.stringify({ ev: "err", tag: "error·idle_timeout" }),
+      display: {
+        t: "19:40:56",
+        ev: "err",
+        tag: "error·idle_timeout",
+        text: "Codex stopped after 900000 ms without producing an event or writing to its session.",
+        failure: emptyRunFailureFacts("idle_timeout"),
+      },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    const parsed = taskFile().parsed;
+    const packet = parsed.packet!;
+    expect(packet.title).toBe("Work stalled: pick a recovery path");
+    // CANARY: keep the stock set for a hung run and "Redirect with sharper
+    // guidance" is the recommendation again.
+    expect(packet.options.map((o) => [o.kind, o.rec])).toEqual([
+      ["request_edit", true],
+      ["redirect", false],
+      ["hold_runtime_debug", false],
+    ]);
+    expect(packet.options[0]!.t).toBe("Run @dev again on Codex: the run hung, nothing was changed");
+    const event = parsed.timeline.find((e) => e.type === "blocked" && /did not complete/.test(e.text))!;
+    expect(event.text).toContain("The agent run was stopped as hung: Codex produced nothing for the whole idle window.");
+    expect(event.text).toContain("Run it again");
+    expect(event.text).not.toMatch(/\.\./);
+  });
+
   /**
    * T13's other half: the dedupe must not become silence. When no packet
    * notification goes out — here because no operator is deployed, so the

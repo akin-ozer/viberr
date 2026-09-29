@@ -101,7 +101,7 @@ A value that does not parse fails boot with "Invalid environment configuration".
 |---|---|---|
 | `VIBERR_CLAUDE_MAX_TURNS` | `2000` | Runaway turn cap for a Claude run; hitting it ends the run as `run·error·max_turns` (`resolveMaxTurns`, `claude-runtime.server.ts`, via `getEnv()`). |
 | `VIBERR_CLAUDE_IDLE_TIMEOUT_MS` | `900000` (15 min) | Idle window before a Claude run is treated as hung and interrupted (`claudeIdleTimeoutMs`, `claude-runtime.server.ts`, via `getEnv()`). |
-| `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex (`codexIdleTimeoutMs`, `codex-runtime.server.ts`, via `getEnv()`). |
+| `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex (`codexIdleTimeoutMs`, `codex-runtime.server.ts`, via `getEnv()`), counted from the later of the last stream event and the last write to the run's rollout (ruling 595). |
 | `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs`, `git-clone-auth.server.ts`, via `getEnv()`); the schedule claim lease is sized against it. |
 | `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned (`transcript-retention.server.ts`, via `getEnv()`). `0` keeps forever. Aligned with the 30-day `run_log_lines` window. |
 | `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window and rules for the per-person provider session files (`runtimes/users/*/claude-home/projects/**`, `runtimes/users/*/codex-home/sessions/**`). `*.jsonl` only, so a sign-in file is never pruned. |

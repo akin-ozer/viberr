@@ -253,8 +253,12 @@ export function describeRunFailure(
       break;
     }
     case "idle_timeout":
-      reason = `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} produced nothing for the whole idle window and was stopped.`;
-      remedy = "Re-run it; if it hangs again, inspect the session for what it was waiting on.";
+      // Ruling 595: nothing marks the directive or the account as the cause
+      // of a hang, so the remedy is a plain re-run. The adapter's own line,
+      // with the window and what was watched, stays on the run's console.
+      reason = `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} was stopped as hung: ${backend} produced nothing for the whole idle window.`;
+      remedy =
+        "Nothing marks the directive or the account as the cause. Run it again; if it hangs again, inspect the session for what it was waiting on.";
       break;
     case "session_missing":
       // Ruling 221 (F37-41): two roads to one class, and the difference is
@@ -383,8 +387,8 @@ function operatorOptions(
 
 /** A specialist's recovery options: the other backend first when the owner
  *  has it (rule unchanged), else "send the agent back to continue"; `redirect`
- *  present and NOT recommended for a backend failure (the agent did nothing
- *  wrong). */
+ *  present and NOT recommended for a backend failure or a hung run (the agent
+ *  did nothing wrong, ruling 595). */
 function specialistOptions(
   kind: RunFailure["kind"],
   backend: string,
@@ -543,6 +547,24 @@ function specialistOptions(
     options.push(sendBack);
     options.push(redirect);
     return options;
+  }
+  if (kind === "idle_timeout") {
+    // Ruling 595: a hung run is not a wrong directive. Live, both stall
+    // packets of round 4 recommended "Redirect with sharper guidance" for a
+    // run the idle guard had stopped, and the person answered each with the
+    // plain send-back. The same agent, the same directive, is the remedy;
+    // redirect stays for a person who knows better.
+    return [
+      {
+        kind: "request_edit",
+        title: `Run ${handle} again on ${backend}: the run hung, nothing was changed`,
+        detail:
+          "Closes this decision and re-runs the agent on the same account with the same directive. If it hangs again you get a new decision packet.",
+        recommended: true,
+        ev: `**Decision:** the ${backend} run hung and the agent is run again as it was. No directive, account or project policy was changed.`,
+      },
+      redirect,
+    ];
   }
   return [{ ...redirect, recommended: true }];
 }

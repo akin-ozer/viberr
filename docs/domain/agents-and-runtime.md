@@ -621,7 +621,12 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
 - No `maxTurns` and no budget option: the instance's spending cap (ruling 175) does not
   bind a Codex run, and its run-inputs disclosure says so ("Codex has no budget option:
   this run is bounded by its idle timer only"). Idle 15 min
-  (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s. The SDK spawns the CLI itself
+  (`VIBERR_CODEX_IDLE_TIMEOUT_MS`), counted from the later of the last stream event and
+  the last write to the run's rollout (ruling 595): the CLI streams no event for a
+  reasoning step whose summary is empty, and writes every one to the rollout, so a model
+  reasoning for many minutes in one call is working, not hung. The rollout is read through
+  the ruling 541 tail (`lastWriteMs`); a run with no shared home is watched on its stream
+  alone. Interrupt settle 20 s. The SDK spawns the CLI itself
   with a plain `spawn()` and only ever SIGTERMs it, so the settle sweep (§3.4) is what
   reaches a CLI that outlived its abort and everything its shell started.
 - **As the principal's own OS user (ruling 460).** On a launched run the SDK is given

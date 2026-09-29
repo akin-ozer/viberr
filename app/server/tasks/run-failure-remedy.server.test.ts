@@ -375,6 +375,37 @@ describe("describeRunFailure", () => {
   });
 
   /**
+   * Ruling 595: a hung run is not a wrong directive. Live in round 4 both
+   * stall packets for an idle-timed-out Inventory Analyst recommended
+   * "Redirect with sharper guidance", and the person answered each with the
+   * plain send-back.
+   */
+  it("ruling 595: a hung specialist run recommends running the same agent again, the directive unchanged; redirect stays, unrecommended", () => {
+    const store = setupTestStore(ctx);
+    const hung: RunFailure = {
+      kind: "idle_timeout",
+      text: "Codex stopped after 900000 ms without producing an event or writing to its session.",
+      facts: emptyRunFailureFacts("idle_timeout"),
+    };
+    const d = describe_(store, { role: "specialist", backend: "codex", agentHandle: "inventory-analyst", failure: hung });
+    // CANARY: let `idle_timeout` fall to the default set and redirect is the
+    // only option, recommended.
+    expect(d.options.map((o) => [o.kind, o.recommended ?? false])).toEqual([
+      ["request_edit", true],
+      ["redirect", false],
+    ]);
+    expect(d.options[0]!.title).toBe("Run @inventory-analyst again on Codex: the run hung, nothing was changed");
+    expect(d.options[0]!.ev).toContain("No directive, account or project policy was changed");
+    // It asserts nothing about quota, so it names no backend to clear.
+    expect(d.options[0]!.backend).toBeUndefined();
+    expect(d.reason).toBe("The agent run was stopped as hung: Codex produced nothing for the whole idle window.");
+    expect(d.remedy).toContain("Run it again");
+    // The operator's own hang keeps its re-run.
+    const op = describe_(store, { backend: "codex", failure: hung });
+    expect(op.options.find((o) => o.recommended)?.title).toBe("Re-run the operator now");
+  });
+
+  /**
    * U35-11 (pass 35): a local TLS or connection failure keeps the overload
    * class and its retry, but is attributed to this deployment's own network
    * path, never to "the provider's own side". Canary: drop the `origin ===

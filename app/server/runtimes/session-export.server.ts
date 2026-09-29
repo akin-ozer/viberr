@@ -756,6 +756,11 @@ export interface CodexUsageTail {
    *  call; null before the first. `sessionId` is the thread the run streamed,
    *  once it has named it. */
   read(sessionId: string | null): CodexLiveUsage | null;
+  /** Ruling 595: when the CLI last wrote to the rollout (its mtime, epoch ms),
+   *  or null while the file is not known. The CLI appends a line for every
+   *  item the model completes, a reasoning step included, and the stream
+   *  carries no event for a reasoning step whose summary is empty. */
+  lastWriteMs(sessionId: string | null): number | null;
 }
 
 /**
@@ -779,11 +784,24 @@ export function codexUsageTail(codexHome: string, resumeSessionId: string | null
       file = null;
     }
   }
+  const locate = (sessionId: string | null): string | null => {
+    if (!file && !resumeSessionId && sessionId) file = rolloutByFilename(roots, sessionId);
+    return file;
+  };
   return {
+    lastWriteMs(sessionId) {
+      const at = locate(sessionId);
+      if (!at) return null;
+      try {
+        return statSync(at).mtimeMs;
+      } catch {
+        return null;
+      }
+    },
     read(sessionId) {
-      if (!file && !resumeSessionId && sessionId) file = rolloutByFilename(roots, sessionId);
-      if (!file) return live;
-      const chunk = bytesFrom(file, offset);
+      const at = locate(sessionId);
+      if (!at) return live;
+      const chunk = bytesFrom(at, offset);
       // Only whole lines: the CLI may be mid-write on the last one, which is
       // read again, whole, next time.
       const end = chunk.lastIndexOf(0x0a);
