@@ -709,7 +709,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     tools.push(
       tool(
         "read_board",
-        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal, and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered). Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
+        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered). Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
         {
           taskKey: z
             .string()

@@ -782,6 +782,52 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
+   * Ruling 579: live on AWSC-16 the round-2 comparison read AWSC-15's goal,
+   * 2,751 characters, and got its first 2,000; the Workflow Researcher said it
+   * "cannot say whether a third decision is recorded in the clipped tail".
+   * Decisions are appended at a goal's end (ruling 189), the part the cap cut.
+   * CANARY: return the bare excerpt and both decisions are gone.
+   */
+  it("ruling 579: a clipped goal keeps every decision recorded on it, whole", async () => {
+    const store = setupTestStore(ctxDb);
+    const text = `Deliverable: the estimate. ${"detail ".repeat(400)}END-OF-TEXT`;
+    const older =
+      "\n\n---\n\n**Decision — 2026-09-28, Arda answered “Headline which total?”:**\n\n" +
+      "Calculator's total — the Price List total beside it\n\n" +
+      "This decision is part of the task's contract from here on. Where anything above contradicts it, the decision wins.";
+    const newer =
+      "\n\n---\n\n**Decision: 2026-09-29, Arda answered “Which CloudFront model?”:**\n\n" +
+      "Business: the flat-rate plan fits\n\n" +
+      "This decision is part of the task's contract from here on. Where anything above contradicts it, the decision wins.";
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }),
+      goal: `${text}${older}${newer}`,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const read = toolkit.tools.find((t) => t.name === "read_board")!;
+    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`.
+    const answer = (await read.handler({ taskKey: "VIB-2" } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    // SAFETY: readBoardTask answers one task's JSON; only `goal` is read here.
+    const goal = (JSON.parse(answer.content[0]!.text) as { goal: string }).goal;
+    expect(goal).toContain("Deliverable: the estimate.");
+    expect(goal).not.toContain("END-OF-TEXT");
+    expect(goal).toContain("every decision recorded on it follows, whole");
+    expect(goal).toContain("Calculator's total — the Price List total beside it");
+    expect(goal).toContain("Business: the flat-rate plan fits");
+    expect(goal.endsWith("the decision wins.")).toBe(true);
+  });
+
+  /**
    * Ruling 569: a task that waited on others could learn only THAT they
    * finished. Live on AWSC-8 the research task's operator told its researcher
    * "neither you nor I can read that" about sample-04's 90/100, which lived only
