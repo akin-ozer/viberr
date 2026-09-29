@@ -234,6 +234,28 @@ export interface UnresolvedKbGrant {
   reason: string;
 }
 
+/**
+ * Ruling 578: a knowledge base is private when its store folder grants nothing
+ * to its group or to others (0700, the server's alone). Every agent of a person
+ * runs as that person's uid and can read `kb/` (ruling 460(d)), so a grant only
+ * decides what a run is given; this is what keeps a document from the shell of
+ * a run it was not given to. The runs it is granted to read it through their
+ * knowledge tool, which the server answers.
+ */
+export function isPrivateKbFolder(dir: string): boolean {
+  try {
+    return (statSync(dir).mode & 0o077) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Ruling 578: whether the run an index is for can read a document without
+ *  its shell (`read_knowledge_doc`); a Codex specialist cannot (ruling 422). */
+export interface KbIndexReader {
+  hasKnowledgeTool?: boolean;
+}
+
 export interface KbInjection {
   /** The index text to inject ("" when this KB resolved to nothing). */
   body: string;
@@ -254,7 +276,11 @@ export interface KbInjection {
  * prompt instead of living in a server log nobody reads while every UI still
  * shows the grant attached.
  */
-export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjection {
+export function readKbIndexDetailed(
+  name: string,
+  dataRoot?: string,
+  reader: KbIndexReader = {},
+): KbInjection {
   const miss = (reason: string): KbInjection => ({
     body: "",
     unresolved: { name, reason },
@@ -295,6 +321,14 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       });
       return miss("its store folder holds no documents a run can read");
     }
+    // Ruling 578: a private folder is the server's alone, so a run with no
+    // knowledge tool has no way in, and its index must not send it to a path.
+    const hidden = isPrivateKbFolder(dir);
+    if (hidden && reader.hasKnowledgeTool === false) {
+      return miss(
+        "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
+      );
+    }
     const listed = docs.slice(0, KB_INDEX_MAX_DOCS);
     let outlineBudget = KB_INDEX_OUTLINE_BUDGET;
     const entries = listed.map((doc) => {
@@ -329,7 +363,10 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       );
     }
     return {
-      body: `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
+      body: hidden
+        ? `Folder \`${dir}\` is private (ruling 578): no shell on this run can open it, so read each document with \`read_knowledge_doc\`. ` +
+          `${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`
+        : `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
     };
   } catch (error) {
     logger.warn("knowledge base unreadable; run proceeds WITHOUT it", {
@@ -362,7 +399,7 @@ export function readKbIndexes(
    *  this argument used to feed, and it is back for the opposite reason: to say
    *  which index the run is OBLIGED to read rather than which one may take the
    *  most characters. */
-  opts: { rulingsKb?: string | null } = {},
+  opts: { rulingsKb?: string | null } & KbIndexReader = {},
 ): KbInjectionSet {
   const parts: { name: string; body: string }[] = [];
   const unresolved: UnresolvedKbGrant[] = [];
@@ -371,7 +408,7 @@ export function readKbIndexes(
   // is a reading order now, not an allocation. Ruling 261's floor existed only
   // to survive the allocation and is retired with it.
   for (const name of names) {
-    const index = readKbIndexDetailed(name, dataRoot);
+    const index = readKbIndexDetailed(name, dataRoot, opts);
     if (index.unresolved) unresolved.push(index.unresolved);
     if (!index.body) continue;
     parts.push({

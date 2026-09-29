@@ -96,6 +96,7 @@ import {
   KB_REFRESH_MODES,
   type KbRefreshMode,
   saveKnowledgeBase,
+  setKnowledgeBasePrivacy,
   saveMcpServer,
   saveSkill,
   resolveMcpServerId,
@@ -803,6 +804,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // path, `conventions.md`, is the live rulings file on this very
             // instance.
             documents: kbDocumentNames(kb.id),
+            // Ruling 578: closed to every agent's shell; only granted runs
+            // read it, through their knowledge tool.
+            private: kb.private,
           })),
         );
       }),
@@ -848,7 +852,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
+      "Create or update a knowledge base (name, refresh mode, `private`), optionally writing one document into its folder. Org admins only. Ruling 578: every agent can read an open knowledge base from its shell, granted or not (a grant decides what a run is given, not what it can read), so anything the agents under test must not see, such as a benchmark's answer key, goes into a private one. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
       {
         id: z
           .string()
@@ -862,6 +866,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // but this tool kept advertising it, so the controller could pick a
         // mode that was silently coerced to "on change" behind its back.
         refresh: z.enum(KB_REFRESH_MODES).optional(),
+        private: z
+          .boolean()
+          .optional()
+          .describe(
+            "Ruling 578: true closes the KB's folder to every agent's shell; the runs it is granted to read it through read_knowledge_doc, and a Codex specialist, which has no such tool, is told the grant cannot reach it. false opens it again. Omit to leave it as it is.",
+          ),
         doc: z
           .strictObject({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
@@ -897,6 +907,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           id?: string;
           name: string;
           refresh?: KbRefreshMode;
+          private?: boolean;
           doc?: {
             path: string;
             content: string;
@@ -915,7 +926,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // U36-4 (pass 36): the reply carries what the next call needs — the
           // id for a save, the grantKey for a grant. The toast alone named the
           // folder, and the controller then guessed `disk:<dir>`.
-          const head = `[done] ${saved.toast} (id ${saved.kb.id}, grantKey ${saved.kb.dir}).`;
+          // Ruling 578: the folder's own mode is the flag.
+          const privacy =
+            args.private === undefined
+              ? ""
+              : setKnowledgeBasePrivacy(db, { id: saved.kb.id, private: args.private }, auditActor, { dataRoot }).changed
+                ? args.private
+                  ? " It is now private: no agent's shell can open its folder, and the runs it is granted to read it through read_knowledge_doc."
+                  : " It is open again: every agent can read its folder."
+                : args.private
+                  ? " It was already private."
+                  : " It was already open.";
+          const head = `[done] ${saved.toast} (id ${saved.kb.id}, grantKey ${saved.kb.dir}).${privacy}`;
           let docNote = "";
           if (args.doc) {
             const target = resolveStoreTarget(db, "kb", saved.kb.id, { dataRoot });

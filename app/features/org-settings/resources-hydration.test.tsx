@@ -49,12 +49,12 @@ const KBS: KbView[] = [
   {
     id: "kb1", name: "Architecture notes", dir: "architecture-notes",
     refresh: "on change", lastIndexedAt: "2026-07-03T23:30:00.000Z", tree: [],
-    fileCount: 2, injectableCount: 2, folderExists: true, uri: "store://kb/architecture-notes",
+    fileCount: 2, injectableCount: 2, folderExists: true, private: false, uri: "store://kb/architecture-notes",
   },
   {
     id: "kb2", name: "Gone", dir: "gone", refresh: "manual",
     lastIndexedAt: "2026-07-03T09:41:00.000Z", tree: [],
-    fileCount: 0, injectableCount: 0, folderExists: false, uri: "store://kb/gone",
+    fileCount: 0, injectableCount: 0, folderExists: false, private: false, uri: "store://kb/gone",
   },
 ];
 const MCP_BASE: McpView = {

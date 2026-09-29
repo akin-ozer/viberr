@@ -554,7 +554,7 @@ const KBS: KbView[] = [
       ] },
       { type: "file", name: "overview.md", sizeBytes: 9100, mtime: new Date().toISOString() },
     ],
-    fileCount: 2, injectableCount: 2, folderExists: true, uri: "store://kb/architecture-notes",
+    fileCount: 2, injectableCount: 2, folderExists: true, private: false, uri: "store://kb/architecture-notes",
   },
 ];
 const MCPS: McpView[] = [

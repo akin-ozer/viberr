@@ -583,6 +583,37 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
+  it("ruling 578: private closes a knowledge base's folder to every agent's shell, and false opens it again", async () => {
+    // Every agent of a person runs as that person's uid and can read `kb/`
+    // (ruling 460(d)): on the AWS calculator board the golden set, granted to
+    // the Estimate Judge alone, was 0775 on disk. CANARY: drop the privacy
+    // call and the folder stays open while the reply calls it private.
+    const { statSync } = await import("node:fs");
+    const { kbDirPath } = await import("~/server/files/file-store-root.server");
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "answer-keys",
+      private: true,
+      doc: { path: "sample-01.md", content: "# Sample 01" },
+    });
+    expect(created).toContain("It is now private: no agent's shell can open its folder");
+    const folder = kbDirPath("answer-keys", app.dataRoot);
+    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    // SAFETY: list_knowledge_bases answers `json(...)` of an array of objects
+    // that always carry `dir` and `private`; the two are compared below.
+    const listed = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as { dir: string; private: boolean }[];
+    expect(listed.find((kb) => kb.dir === "answer-keys")?.private).toBe(true);
+    const kbId = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kbId, created).toBeTruthy();
+    // SAFETY: the expectation above fails the test when the reply carried no
+    // id, so every use below is on the matched group.
+    const kb = kbId!;
+    const opened = await call(ids.orgAdmin, "save_knowledge_base", { id: kb, name: "answer-keys", private: false });
+    expect(opened).toContain("It is open again");
+    expect(statSync(folder).mode & 0o777).toBe(0o755);
+    expect(await call(ids.orgAdmin, "save_knowledge_base", { id: kb, name: "answer-keys", private: false })).toContain(
+      "It was already open.",
+    );
+  });
   /**
    * F39-1 (pass 39): a long rulings document is BUILT, not sent whole.
    *

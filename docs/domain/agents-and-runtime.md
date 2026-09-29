@@ -1656,7 +1656,15 @@ runtime's answer for a missing grant.
   one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
   workspace contract allows those reads, ruling 422; `kb/` stays readable, and never
-  writable, to the agent's own OS user, ruling 460). `KB_PRECEDENCE_NOTE` (repo
+  writable, to the agent's own OS user, ruling 460). A grant decides what a run is
+  given, not what it can read: every agent of a person runs as that person's uid, so any
+  of them can read an open knowledge base from its shell. A private one (ruling 578) is
+  a folder the server keeps 0700 (`isPrivateKbFolder`; set with `save_knowledge_base`'s
+  `private`, shown on the Instance settings row, never widened by the boot layout
+  check): its index says to read it with `read_knowledge_doc`,
+  `knowledgeBaseReadDirs` leaves it out of the workspace contract, and a Codex
+  specialist, which has no knowledge tool, gets it as an unresolved grant with the
+  reason. `KB_PRECEDENCE_NOTE` (repo
   conventions outrank KBs, ruling 56) is emitted only when an index is present. All three
   runtimes assemble the block (the attached-resources banner, injected skill bodies, these
   notes, the indexes) with one helper, `attachedResourcesBlock`, and pass only their own

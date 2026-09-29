@@ -77,7 +77,7 @@ import {
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import { attachedResourcesBlock, readKbIndexes } from "~/server/files/kb-injection.server";
+import { attachedResourcesBlock, isPrivateKbFolder, readKbIndexes } from "~/server/files/kb-injection.server";
 import { readSkillBodies } from "~/server/files/skill-body.server";
 import {
   mountGrantedSkills,
@@ -2946,7 +2946,12 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
   // every declared KB now names every document it holds, and the run pulls the
   // ones it needs through `read_knowledge_doc`.
   const rulingsKb = input.rulingsKb ?? null;
-  const kbSet = readKbIndexes(kbNames, input.dataRoot, { rulingsKb });
+  // Ruling 578: a Codex specialist has no knowledge tool, so a private
+  // knowledge base is a grant it cannot use, and its prompt says so.
+  const kbSet = readKbIndexes(kbNames, input.dataRoot, {
+    rulingsKb,
+    hasKnowledgeTool: input.backend !== "codex",
+  });
   parts.push(
     ...attachedResourcesBlock({
       // Provenance banner: the skills/KBs below are TRUSTED operating context an
@@ -3266,7 +3271,9 @@ export function knowledgeBaseReadDirs(
     if (!name) continue;
     try {
       const dir = kbDirPath(name, dataRoot);
-      if (existsSync(dir)) dirs.add(dir);
+      // Ruling 578: a private folder is closed to the run's shell, so the
+      // workspace contract never names it as one to read.
+      if (existsSync(dir) && !isPrivateKbFolder(dir)) dirs.add(dir);
     } catch {
       // A name the store refuses (traversal) resolves to no folder at all.
     }
