@@ -32,6 +32,11 @@ import type { TaskMutationContext } from "./task-actions.server";
  *  task's whole contract compete with the reader's own prompt. */
 const BOARD_READ_GOAL_CHARS = 2_000;
 
+/** Ruling 579: where the decisions written into a goal begin. `resolvePacket`
+ *  appends each after a rule; ruling 571 made its dash a colon, and a goal
+ *  written before that keeps the dash. */
+const GOAL_DECISIONS_RE = /\n---\n\n\*\*Decision(?: —|:) \d{4}-\d{2}-\d{2}, /;
+
 /** Ruling 569: how much of a task's completion summary, and of each verdict's
  *  report, a single-task read hands back. The outcome is what a task that
  *  waited on this one needs, so it is read far past the goal's cap. */
@@ -62,11 +67,24 @@ export interface BoardReadContext {
 function goalExcerpt(goal: string | null): string | null {
   if (goal === null) return null;
   if (goal.length <= BOARD_READ_GOAL_CHARS) return goal;
+  // Ruling 579: the cap is for the goal's own text. The decisions people wrote
+  // into it (ruling 189) bind the task and are appended at its end, the part
+  // the cap used to cut, so they ride whole after the excerpt.
+  const at = goal.search(GOAL_DECISIONS_RE);
+  const text = at === -1 ? goal : goal.slice(0, at);
+  const decisions = at === -1 ? "" : goal.slice(at);
+  if (text.length <= BOARD_READ_GOAL_CHARS) return goal;
+  const size = goal.length.toLocaleString("en-US");
+  const cap = BOARD_READ_GOAL_CHARS.toLocaleString("en-US");
   return (
-    `${goal.slice(0, BOARD_READ_GOAL_CHARS)}\n\n` +
-    `[excerpt: this goal is ${goal.length.toLocaleString("en-US")} characters and this is ` +
-    `its first ${BOARD_READ_GOAL_CHARS.toLocaleString("en-US")}. Do not treat what is above ` +
-    `as the whole contract; the task's own page has all of it.]`
+    `${text.slice(0, BOARD_READ_GOAL_CHARS)}\n\n` +
+    (decisions
+      ? `[excerpt: this goal is ${size} characters. Above are the first ${cap} of its own text, and ` +
+        `every decision recorded on it follows, whole. Do not treat what is above as the whole ` +
+        `contract; the task's own page has all of it.]\n` +
+        decisions
+      : `[excerpt: this goal is ${size} characters and this is its first ${cap}. Do not treat ` +
+        `what is above as the whole contract; the task's own page has all of it.]`)
   );
 }
 

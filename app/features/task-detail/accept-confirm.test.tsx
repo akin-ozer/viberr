@@ -200,14 +200,16 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
 describe("the no-change row states what is true of THIS task", () => {
   it("names the empty branch when there is one (the R17-2/F17-L9 shape)", () => {
     const text = open({ noChanges: true, task: { branch: "vib-151" } });
-    expect(text).toContain("completed with no changes");
+    // Ruling 576: the row says what merges and names no outcome, since "no
+    // changes" is false of a task that corrected a knowledge base.
+    expect(text).not.toContain("with no changes");
     expect(text).toContain("vib-151 carries no commits");
     expect(text).toContain("no pull request was opened");
   });
 
   it("claims NO branch when the task never opened one (the F19-21 shape)", () => {
     const text = open({ noChanges: true, task: { branch: null } });
-    expect(text).toContain("completed with no changes");
+    expect(text).not.toContain("with no changes");
     expect(text).toContain("VIB-151 never opened a branch or a pull request");
     // The false sentence, in either of its readings.
     expect(text).not.toContain("branch is empty");
@@ -217,7 +219,7 @@ describe("the no-change row states what is true of THIS task", () => {
   it("is not shown at all for an ordinary acceptance with no PR", () => {
     const text = open({ noChanges: false, task: { branch: "vib-151" } });
     expect(text).toContain("No linked pull request");
-    expect(text).not.toContain("completed with no changes");
+    expect(text).not.toContain("carries no commits");
     // Nor is F20-6's auto-detect arm, which needs its own flag. Canary: derive
     // `noPullRequest` from `!task.pr` inside the component and this ordinary
     // accept flips to the auto-detect copy.
@@ -258,7 +260,7 @@ describe("F20-6: the no-PR auto-detect arm", () => {
     const text = openAutoDetect({ branch: "vib-151" });
     expect(text).toContain("Nothing to merge yet");
     expect(text).toContain("vib-151");
-    expect(text).toContain("completed with no changes");
+    expect(text).toContain("if it carries no commits the task closes with nothing merged");
     // It must NOT fall back to the ordinary "closes without a merge" line, and
     // it must NOT claim the merge is one-way (nothing merges here).
     expect(text).not.toContain(
@@ -303,7 +305,7 @@ describe("ruling 550: a task delivered as files", () => {
         ?.textContent ?? "";
     expect(text).toContain("the delivery is the files saved on this task, so no pull request merges");
     expect(text).toContain("The files delivered on this task at 2026-09-28 08:44 UTC.");
-    expect(text).not.toContain("completed with no changes");
+    expect(text).not.toContain("never opened a branch");
     expect(text).not.toContain("No delivered revision recorded.");
   });
 });

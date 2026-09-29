@@ -115,8 +115,11 @@ export function KbPanel({
                 {kb.folderExists ? (
                   <>
                     {kb.injectableCount} doc
-                    {kb.injectableCount === 1 ? "" : "s"} · agents read the live
-                    folder
+                    {kb.injectableCount === 1 ? "" : "s"} ·{" "}
+                    {/* Ruling 578: a private folder is closed to every shell. */}
+                    {kb.private
+                      ? "private: only the runs it is granted read it"
+                      : "agents read the live folder"}
                     {kb.fileCount > kb.injectableCount
                       ? " · " +
                         countLabel(kb.fileCount - kb.injectableCount, "non-text file") +

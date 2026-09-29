@@ -234,6 +234,28 @@ export interface UnresolvedKbGrant {
   reason: string;
 }
 
+/**
+ * Ruling 578: a knowledge base is private when its store folder grants nothing
+ * to its group or to others (0700, the server's alone). Every agent of a person
+ * runs as that person's uid and can read `kb/` (ruling 460(d)), so a grant only
+ * decides what a run is given; this is what keeps a document from the shell of
+ * a run it was not given to. The runs it is granted to read it through their
+ * knowledge tool, which the server answers.
+ */
+export function isPrivateKbFolder(dir: string): boolean {
+  try {
+    return (statSync(dir).mode & 0o077) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Ruling 578: whether the run an index is for can read a document without
+ *  its shell (`read_knowledge_doc`); a Codex specialist cannot (ruling 422). */
+export interface KbIndexReader {
+  hasKnowledgeTool?: boolean;
+}
+
 export interface KbInjection {
   /** The index text to inject ("" when this KB resolved to nothing). */
   body: string;
@@ -254,7 +276,11 @@ export interface KbInjection {
  * prompt instead of living in a server log nobody reads while every UI still
  * shows the grant attached.
  */
-export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjection {
+export function readKbIndexDetailed(
+  name: string,
+  dataRoot?: string,
+  reader: KbIndexReader = {},
+): KbInjection {
   const miss = (reason: string): KbInjection => ({
     body: "",
     unresolved: { name, reason },
@@ -295,6 +321,14 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       });
       return miss("its store folder holds no documents a run can read");
     }
+    // Ruling 578: a private folder is the server's alone, so a run with no
+    // knowledge tool has no way in, and its index must not send it to a path.
+    const hidden = isPrivateKbFolder(dir);
+    if (hidden && reader.hasKnowledgeTool === false) {
+      return miss(
+        "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
+      );
+    }
     const listed = docs.slice(0, KB_INDEX_MAX_DOCS);
     let outlineBudget = KB_INDEX_OUTLINE_BUDGET;
     const entries = listed.map((doc) => {
@@ -329,7 +363,10 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       );
     }
     return {
-      body: `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
+      body: hidden
+        ? `Folder \`${dir}\` is private (ruling 578): no shell on this run can open it, so read each document with \`read_knowledge_doc\`. ` +
+          `${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`
+        : `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
     };
   } catch (error) {
     logger.warn("knowledge base unreadable; run proceeds WITHOUT it", {
@@ -362,7 +399,7 @@ export function readKbIndexes(
    *  this argument used to feed, and it is back for the opposite reason: to say
    *  which index the run is OBLIGED to read rather than which one may take the
    *  most characters. */
-  opts: { rulingsKb?: string | null } = {},
+  opts: { rulingsKb?: string | null } & KbIndexReader = {},
 ): KbInjectionSet {
   const parts: { name: string; body: string }[] = [];
   const unresolved: UnresolvedKbGrant[] = [];
@@ -371,7 +408,7 @@ export function readKbIndexes(
   // is a reading order now, not an allocation. Ruling 261's floor existed only
   // to survive the allocation and is retired with it.
   for (const name of names) {
-    const index = readKbIndexDetailed(name, dataRoot);
+    const index = readKbIndexDetailed(name, dataRoot, opts);
     if (index.unresolved) unresolved.push(index.unresolved);
     if (!index.body) continue;
     parts.push({
@@ -443,18 +480,23 @@ export function readKbDoc(
   kb: string,
   docPath: string,
   dataRoot?: string,
-): { text: string; truncated: boolean; rel: string } | null {
+  /** Ruling 580: the character a read starts at, so a long document is read in pages. */
+  offset = 0,
+): { text: string; rel: string; start: number; end: number; length: number } | null {
   const doc = resolveKbDocPath(kb, docPath, dataRoot);
   if (!doc) return null;
   const raw = readFileSync(doc.abs, "utf8");
-  return {
-    rel: doc.rel,
-    text: raw.slice(0, KB_DOC_READ_CHARS),
-    // Reported, never hidden: a clipped document that reads as complete is how
-    // a model states a half-read file as fact.
-    truncated: raw.length > KB_DOC_READ_CHARS,
-  };
+  const start = Math.min(Math.max(0, Math.floor(offset)), raw.length);
+  const end = Math.min(raw.length, start + KB_DOC_READ_CHARS);
+  // Reported, never hidden: a clipped document that reads as complete is how
+  // a model states a half-read file as fact.
+  return { rel: doc.rel, text: raw.slice(start, end), start, end, length: raw.length };
 }
+
+/** Ruling 580: what a knowledge-base reader's `offset` does, one sentence for every tool that takes it. */
+export const KB_DOC_OFFSET_DESCRIPTION =
+  `Ruling 580: the character to start at. A read returns ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters; ` +
+  "when a document is longer, the read says which characters it returned and the offset to pass to read on.";
 
 /**
  * The instruction that ships WITH every knowledge-base index (ruling 283).
@@ -523,6 +565,7 @@ export function readKbDocForRun(
   kb: string,
   docPath: string,
   dataRoot?: string,
+  offset = 0,
 ): string {
   const wanted = kb.trim();
   if (!granted.includes(wanted)) {
@@ -537,7 +580,7 @@ export function readKbDocForRun(
         : "None are attached to this run at all.")
     );
   }
-  const doc = readKbDoc(wanted, docPath, dataRoot);
+  const doc = readKbDoc(wanted, docPath, dataRoot, offset);
   if (!doc) {
     const index = readKbIndexDetailed(wanted, dataRoot);
     return (
@@ -547,8 +590,21 @@ export function readKbDocForRun(
         : `It resolves to nothing this run can read${index.unresolved ? `: ${index.unresolved.reason}` : ""}.`)
     );
   }
-  return doc.truncated
-    ? `${doc.text}\n\n_(cut off here: \`${doc.rel}\` is longer than the ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters one read returns; what is above is its opening, not the whole document)_`
+  // Ruling 580: a long document is read in pages. It used to stop at its
+  // opening with no way on, and a private knowledge base (ruling 578) has no
+  // shell to finish it from.
+  const n = (count: number) => count.toLocaleString("en-US");
+  if (offset > 0 && doc.start >= doc.length) {
+    return `[noop] \`${doc.rel}\` is ${n(doc.length)} characters, so offset ${n(offset)} is past its end.`;
+  }
+  if (doc.end < doc.length) {
+    return (
+      `${doc.text}\n\n_(characters ${n(doc.start)} to ${n(doc.end)} of ${n(doc.length)} in \`${doc.rel}\`: ` +
+      `what is above is not the whole document; read on with offset ${doc.end})_`
+    );
+  }
+  return doc.start > 0
+    ? `${doc.text}\n\n_(characters ${n(doc.start)} to ${n(doc.end)} of ${n(doc.length)} in \`${doc.rel}\`: the end of the document)_`
     : doc.text;
 }
 

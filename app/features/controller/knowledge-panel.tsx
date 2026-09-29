@@ -255,7 +255,7 @@ export function KnowledgePanel({
             setConfirmUndo(null);
           }}
         >
-          <label className="field ctl-confirm-reason">
+          <label className="field confirm-reason">
             <span className="flabel">Why (optional; an agent that tries again is shown this)</span>
             <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
           </label>

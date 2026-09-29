@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
-import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import { KB_DOC_OFFSET_DESCRIPTION, readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   attachmentImageHeader,
   listTaskAttachments,
@@ -91,7 +91,7 @@ import {
 const KB_CORRECTION_TOOL_DESCRIPTION =
   "Correct a KNOWLEDGE BASE when work on this task has PROVEN a passage of it wrong or unachievable: the project's settled rulings (omit `kb`), or any knowledge base a run on this task was given, yours or an engaged agent's (a dossier's platform fact, a runbook step). The correction is WRITTEN into the document at once (ruling 498): every run that reads the document from then on reads your text, and a person undoes it from the project's Controller page if they disagree. Use it when your own answer to a human would otherwise be \"this needs a ruling change before X\" or \"the knowledge base is out of date\": a gate command the host cannot run, a convention a review has settled differently, a version or path an agent measured, an environment fact agents keep re-deriving. " +
   "When an agent's report says a knowledge-base passage is wrong and no correction of it is on the timeline, make it for them with their evidence: an agent on Codex has no tool to make one itself. " +
-  "Read the document first (read_knowledge_doc) and send `replaces` EXACTLY as it stands there, list marker and emphasis included, and `text` as the document should read instead, in its own form: the corrected fact, not the story of how you found it (that goes in `evidence`). Replace the smallest passage that is wrong, with enough of the line that it stands once. Bring evidence: the command and its output, or the run and verdict that showed it. A refusal writes nothing and says what to fix. Never write back a correction a person undid: the refusal names them, so put your evidence to them instead. " +
+  "Read the document first (read_knowledge_doc) and send `replaces` EXACTLY as it stands there, list marker and emphasis included, and `text` as the document should read instead, in its own form: the corrected fact, not the story of how you found it (that goes in `evidence`). Replace the smallest passage that is wrong, with enough of the line that it stands once; an empty `text` deletes it, and the record keeps what it needs around it for an undo. Bring evidence: the command and its output, or the run and verdict that showed it. A refusal writes nothing and says what to fix. Never write back a correction a person undid: the refusal names them, so put your evidence to them instead. " +
   "It is also how a MISSING convention gets written (ruling 418): when a reviewer blocks on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings say nothing about it, write the convention into the rulings document it belongs to, with the verdict as the evidence, alongside the rework you dispatch: omit `replaces` to add it at the end of the document, or send the passage it belongs after as `replaces` and that passage followed by the convention as `text`. One convention per class, never one per finding.";
 
 /**
@@ -371,7 +371,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_board",
-      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, its goal, and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered: how a task this one waited on ended). Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about (in a document, a report or a directive) is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 503: `get_task`'s `epic` lists the other tasks of this task's epic, the work planned beside it, so read it as well before you offer to create anything. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
+      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered: how a task this one waited on ended). Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about (in a document, a report or a directive) is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 503: `get_task`'s `epic` lists the other tasks of this task's epic, the work planned beside it, so read it as well before you offer to create anything. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
       {
         taskKey: z
           .string()
@@ -477,10 +477,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           path: z
             .string()
             .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+          offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
         // eslint-disable-next-line @typescript-eslint/require-await
-        async (args: { kb: string; path: string }) =>
-          textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot)),
+        async (args: { kb: string; path: string; offset?: number }) =>
+          textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot, args.offset ?? 0)),
       ),
       "read_knowledge_doc",
     );
@@ -745,7 +746,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           text: z
             .string()
             .describe(
-              "What the document should say in place of `replaces`, in the document's own form: the corrected fact, not the complaint and not the evidence.",
+              "What the document should say in place of `replaces`, in the document's own form: the corrected fact, not the complaint and not the evidence. Empty to delete the passage.",
             ),
           evidence: z
             .string()
@@ -1040,6 +1041,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe(
               "Ruling 421: true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING you would still block on, including anything you would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Omit for any other run.",
             ),
+          noVerdict: z
+            .boolean()
+            .optional()
+            .describe(
+              "Ruling 583: true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict tool and reads nothing it writes as a verdict. A `prompt` that says \"record no verdict\" is a request the agent can keep while Viberr still reads a verdict into its words; this is what enforces it.",
+            ),
         },
         async (args) => {
           const input: DispatchAgentInput = {
@@ -1050,6 +1057,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.delivers !== undefined) input.delivers = args.delivers;
           if (args.reason) input.reason = prose(args.reason);
           if (args.completeness) input.completeness = true;
+          if (args.noVerdict) input.noVerdict = true;
           const result = await operatorDispatchAgent(db, ctx, input, authority);
           // R20-9: remember the consultation so a packet opened later in THIS
           // run discloses it without the model having to remember.

@@ -1,6 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { publishResourceUpdated } from "./resource-events.server";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -36,7 +37,7 @@ import {
   skillDirPath,
   skillsRootDir,
 } from "~/server/files/file-store-root.server";
-import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
+import { isInjectableKbDoc, isPrivateKbFolder } from "~/server/files/kb-injection.server";
 import {
   assertSkillBodyWellFormed,
   lstatOr,
@@ -218,6 +219,9 @@ export interface KbView {
    * "folder missing" instead of pretending it is a normal empty KB.
    */
   folderExists: boolean;
+  /** Ruling 578: its folder is closed to every agent's shell (0700), so only
+   *  the runs it is granted to read it, through their knowledge tool. */
+  private: boolean;
   /** "store://kb/<dir>" (no trailing slash — mock root prop contract). */
   uri: string;
 }
@@ -252,6 +256,7 @@ function buildKb(
     fileCount: countKbFiles(tree),
     injectableCount: countInjectableDocs(tree),
     folderExists: existsSync(kbDirPath(dir, ctx.dataRoot)),
+    private: isPrivateKbFolder(kbDirPath(dir, ctx.dataRoot)),
     uri: `store://kb/${dir}`,
   };
 }
@@ -352,6 +357,40 @@ export function getKnowledgeBase(
     return buildKb(dir, null, ctx);
   }
   return null;
+}
+
+/**
+ * Ruling 578: make a knowledge base private, or open it again. Private is its
+ * folder closed to group and others (0700, the server's alone); open is 0755,
+ * what ruling 460(d) gives `kb/` itself. The flag is the folder's own mode, so
+ * it needs no column, survives a backup, and no boot widens it: the layout
+ * check sets `kb/` and never the folders inside it.
+ */
+export function setKnowledgeBasePrivacy(
+  db: DatabaseSync,
+  input: { id: string; private: boolean },
+  actor: AuditActor,
+  ctx: OrgSeedContext = {},
+) {
+  const row = kbRowForId(db, input.id);
+  const dir = row ? row.dir : diskNameFromId(input.id);
+  if (!dir) throw AppError.notFound("No such knowledge base.");
+  const folder = kbDirPath(dir, ctx.dataRoot);
+  if (!existsSync(folder)) throw AppError.notFound(`Knowledge base ${dir} has no folder in the store.`);
+  const changed = isPrivateKbFolder(folder) !== input.private;
+  if (changed) {
+    chmodSync(folder, input.private ? 0o700 : 0o755);
+    const subjectId = row ? row.id : diskId(dir);
+    recordAudit(db, {
+      action: "org.kb.privacy",
+      actor,
+      subjectKind: "org_kb",
+      subjectId,
+      details: { dir, private: input.private },
+    });
+    publishResourceUpdated("kb", subjectId);
+  }
+  return { kb: buildKb(dir, row, ctx), changed };
 }
 
 /** Audit payload for a KB create (see `adopted` at the write below). */

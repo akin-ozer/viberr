@@ -583,6 +583,37 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
+  it("ruling 578: private closes a knowledge base's folder to every agent's shell, and false opens it again", async () => {
+    // Every agent of a person runs as that person's uid and can read `kb/`
+    // (ruling 460(d)): on the AWS calculator board the golden set, granted to
+    // the Estimate Judge alone, was 0775 on disk. CANARY: drop the privacy
+    // call and the folder stays open while the reply calls it private.
+    const { statSync } = await import("node:fs");
+    const { kbDirPath } = await import("~/server/files/file-store-root.server");
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "answer-keys",
+      private: true,
+      doc: { path: "sample-01.md", content: "# Sample 01" },
+    });
+    expect(created).toContain("It is now private: no agent's shell can open its folder");
+    const folder = kbDirPath("answer-keys", app.dataRoot);
+    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    // SAFETY: list_knowledge_bases answers `json(...)` of an array of objects
+    // that always carry `dir` and `private`; the two are compared below.
+    const listed = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as { dir: string; private: boolean }[];
+    expect(listed.find((kb) => kb.dir === "answer-keys")?.private).toBe(true);
+    const kbId = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kbId, created).toBeTruthy();
+    // SAFETY: the expectation above fails the test when the reply carried no
+    // id, so every use below is on the matched group.
+    const kb = kbId!;
+    const opened = await call(ids.orgAdmin, "save_knowledge_base", { id: kb, name: "answer-keys", private: false });
+    expect(opened).toContain("It is open again");
+    expect(statSync(folder).mode & 0o777).toBe(0o755);
+    expect(await call(ids.orgAdmin, "save_knowledge_base", { id: kb, name: "answer-keys", private: false })).toContain(
+      "It was already open.",
+    );
+  });
   /**
    * F39-1 (pass 39): a long rulings document is BUILT, not sent whole.
    *
@@ -669,6 +700,35 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
    * between them, so a table whose rows straddled a part boundary split in
    * two, and a non-ASCII document was reported 50 bytes short.
    */
+  it("ruling 580: read_knowledge_base_doc returns a long document in pages, with where the next one starts", async () => {
+    // Live on the AWS calculator board the controller could not take in a
+    // 94 KB document whole, and so could not safely change it. CANARY: return
+    // the whole text again and the first page carries all of it.
+    const { KB_DOC_READ_CHARS } = await import("~/server/files/kb-injection.server");
+    const body = "a".repeat(KB_DOC_READ_CHARS) + "b".repeat(500);
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "paged-read",
+      doc: { path: "long.md", content: body },
+    });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    type Page = { text: string; characters: number; offset: number; nextOffset: number | null };
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built; these are its own fields.
+    const first = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "long.md" }),
+    ) as Page;
+    expect(first.characters).toBe(body.length);
+    expect(first.text).toBe("a".repeat(KB_DOC_READ_CHARS));
+    expect(first.nextOffset).toBe(KB_DOC_READ_CHARS);
+    // SAFETY: as above.
+    const second = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "long.md", offset: first.nextOffset }),
+    ) as Page;
+    expect(second.offset).toBe(KB_DOC_READ_CHARS);
+    expect(second.text).toBe("b".repeat(500));
+    expect(second.nextOffset).toBeNull();
+  });
+
   it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
     const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
     const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
@@ -4206,6 +4266,32 @@ describe("set_required_reviewers (ruling 178)", () => {
     );
     expect(row?.kind).toBe("change");
     expect(row?.text).toContain("(via the controller) set the required reviewers to **Reviewer at Review**.");
+  });
+
+  it("ruling 575: tells the planner the required reviewer never delivers, and how work only it can do runs", async () => {
+    // Live on AWSC-11 the controller wrote "the Estimate Judge delivers" into
+    // a goal on a board whose required reviewer is the Estimate Judge, and
+    // promised the owner a force-accept once it had. Ruling 556 refuses that
+    // hand-off, so the operator's first act was a decision packet. The
+    // controller read `requiredReviewers` with nothing saying what it means
+    // for a plan. CANARY: drop either sentence and this goes red.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.projectAdmin, email: "elif@viberr.dev", name: "Elif" },
+      projectSlug: SLUG,
+    });
+    const describe = (name: string) => toolkit.tools.find((t) => t.name === name)?.description ?? "";
+    expect(describe("set_required_reviewers")).toContain(
+      "Ruling 556: the agent a rule names never delivers on this project",
+    );
+    expect(describe("set_required_reviewers")).toContain(
+      "runs it as a supporting agent, and the task closes when a project admin force-accepts it",
+    );
+    expect(describe("get_project")).toContain(
+      "`requiredReviewers`, the agent each review stage requires on every task (ruling 178), which never delivers on this project",
+    );
   });
 });
 

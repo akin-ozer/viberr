@@ -2,7 +2,7 @@ import type { FetcherWithComponents } from "react-router";
 import { useToast } from "./toast";
 import { useFetcherResult } from "./use-fetcher-result";
 
-type ActionResult =
+export type ActionResult =
   | { ok: true; toast?: string }
   | { ok: false; error?: string };
 

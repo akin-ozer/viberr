@@ -1,8 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, unlinkSync } from "node:fs";
 import {
   checkAttachmentBatch,
   checkAttachmentUpload,
   isBrowserWorkingArtifact,
+  resolveTaskAttachment,
   withAttachmentClaims,
   writeTaskAttachment,
   type WrittenAttachment,
@@ -168,8 +169,11 @@ import {
 import {
   acceptanceNoChangeCheck,
   assertVerifiedNoChangeStillApplies,
+  kbCorrectionsOutcome,
+  noChangeApplies,
   noChangeCompletionEvent,
   probeNothingToDeliver,
+  standingKbCorrections,
   type AcceptanceNoChangeCheck,
   type NoChangeVerification,
 } from "./no-change-completion.server";
@@ -228,6 +232,7 @@ import {
   type ClosedDecision,
   followClosedDecision,
   markTaskPacketApprovalRead,
+  retextEventNotifications,
 } from "~/server/projections/notifications.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
@@ -1216,6 +1221,119 @@ export async function attachTaskFile(
     },
   });
   return { attachment };
+}
+
+/**
+ * Ruling 582: a project admin takes a file off a task's record.
+ *
+ * Round 1 of the AWS calculator board left its answer key, `golden-files.md`,
+ * in AWSC-3's attachments, where every agent's shell and every `read_board` of
+ * that task can read it, and round 3 re-runs the same samples. Nothing short of
+ * a shell in the container could remove it.
+ *
+ * The file goes, and so does its name on every entry that claimed it, so no
+ * tile on the timeline opens nothing. A note says who removed what and why;
+ * the audit row keeps the name and the size. An archived task allows it: what
+ * has to come off the record comes off whatever the task's state.
+ */
+export async function removeTaskAttachment(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; name: string; reason: string | null },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ name: string; bytes: number }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "remove-from-record", "remove a file from a task");
+  const name = input.name.trim();
+  const missing = () => AppError.notFound(`${input.taskKey} has no attachment “${name}”.`);
+  let abs: string;
+  let bytes: number;
+  try {
+    abs = resolveTaskAttachment(input.projectSlug, input.taskKey, name, ctx.dataRoot);
+    const stat = lstatSync(abs);
+    if (stat.isDirectory()) throw missing();
+    bytes = stat.size;
+  } catch {
+    throw missing();
+  }
+  const reason = input.reason?.trim() || null;
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    for (const event of parsed.timeline) {
+      if (event.attachments?.includes(name)) event.attachments = event.attachments.filter((n) => n !== name);
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Attachment removed",
+      text:
+        `Removed \`${name}\` (${attachmentKb(bytes)}) from this task's attachments.` +
+        (reason ? ` Why: ${endSentence(reason)}` : ""),
+      toAgent: false,
+      evidence: null,
+    });
+    // Last, so a file that cannot be removed leaves the task file unwritten.
+    unlinkSync(abs);
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.attachment.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { name, bytes, reason },
+  });
+  return { name, bytes };
+}
+
+/**
+ * Ruling 582: a project admin takes a comment's words off a task's record.
+ *
+ * On AWSC-19 the Estimate Judge's first report said in words which golden
+ * entries price no load-balancer line, on a task every agent can read, and the
+ * operator answered that a comment was not something it could remove. Nobody
+ * could.
+ *
+ * The entry stays where it stood, under its author and its time, and says who
+ * removed its words and why. Its title and evidence go with its text, and so
+ * do the copies its notifications made. The files it carried stay; each is
+ * removed on its own.
+ */
+export async function removeTaskComment(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; at: string; reason: string | null },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ at: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "remove-from-record", "remove a comment from a task");
+  const reason = input.reason?.trim() || null;
+  const text =
+    `Removed by ${userName(db, actor.userId)} on ${new Date().toISOString().slice(0, 10)}.` +
+    (reason ? ` Why: ${endSentence(reason)}` : "");
+  let author = "";
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    const entry = parsed.timeline.find((e) => e.occurredAt === input.at && e.type === "comment");
+    if (!entry) throw AppError.notFound(`${input.taskKey} has no comment at ${input.at}.`);
+    entry.title = null;
+    entry.text = text;
+    entry.evidence = null;
+    author = encodeActorRef(entry.actor);
+  });
+  retextEventNotifications(db, input.projectSlug, input.taskKey, input.at, text);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.comment.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { at: input.at, author, reason },
+  });
+  return { at: input.at };
 }
 
 /**
@@ -4625,7 +4743,13 @@ export async function recordAgentCompletion(
             "deliver the work, or another reviewer judge it.";
         } else if (verdict === "request_changes") {
           title = VERDICT_NOTE_TITLE.changesRequested;
-          summary = `${roleDisplay} requested changes${onRevision}.`;
+          // Ruling 583: with nothing delivered, the objection binds to nothing
+          // and says so, as an approval with nothing to bind to does below.
+          // On AWSC-19 the event read "Validation: none. Estimate Judge
+          // requested changes." over a record that held no verdict at all.
+          summary = verdictBound
+            ? `${roleDisplay} requested changes${onRevision}.`
+            : `${roleDisplay} requested changes, but nothing on this task has been delivered for the verdict to bind to, so it does not count.`;
         } else if (!subjectId || !reviewerProfileId) {
           // Approve with nothing to bind to — nothing delivered yet. Record
           // the prose but never claim a pass.
@@ -4646,12 +4770,23 @@ export async function recordAgentCompletion(
           // actually judged — there is no "work" to have approved. The two
           // bases are different facts (no branch at all vs. a branch carrying
           // nothing), so the sentence must not state one for the other.
+          // Ruling 576: a task that corrected a knowledge base changed
+          // something, so the approval says what, and whether the reviewer
+          // made it: then it verified the repository, not its own corrections.
+          const corrections = noChangeMint ? standingKbCorrections(db, projectSlug, taskKey) : [];
+          const ownCorrections =
+            corrections.length > 0 && corrections.every((c) => c.filedBy === roleDisplay);
           summary = noChangeMint
-            ? `${roleDisplay} approved: there is nothing to deliver. ` +
+            ? `${roleDisplay} approved: ${corrections.length > 0 ? "nothing goes to the repository" : "there is nothing to deliver"}. ` +
               (noChangeMint.basis === "no_branch"
                 ? `No \`${noChangeMint.branch}\` branch exists on the remote`
                 : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
-              `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
+              `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. ` +
+              (corrections.length > 0
+                ? `This task's outcome is ${kbCorrectionsOutcome(corrections)}` +
+                  (ownCorrections ? ", so this approval is not a review of them" : "") +
+                  ". Accepting completes this task with no repository changes."
+                : "Accepting completes this task with no changes.")
             : `${roleDisplay} approved the work${onRevision}.`;
         } else {
           // Approved, but not yet cleared. Ruling 478(g) (F40-58): WHY decides
@@ -6851,6 +6986,8 @@ export async function operatorPromptAgent(
     handle: string;
     /** Ruling 421: this directive puts the completeness question. */
     completeness?: boolean;
+    /** Ruling 583: the run records no verdict. */
+    noVerdict?: boolean;
   },
   ctx: TaskMutationContext = {},
 ): Promise<StartAgentRunResult> {
@@ -6919,6 +7056,7 @@ export async function operatorPromptAgent(
     };
     if (input.delivers !== undefined) dispatch.delivers = input.delivers;
     if (input.completeness) dispatch.completeness = true;
+    if (input.noVerdict) dispatch.withholdVerdict = true;
     started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
@@ -7918,7 +8056,9 @@ export async function transitionStage(
     // Ruling 546: a task delivered as the files its deliverer saved on it
     // (rulings 388, 531) has nothing a pull request would carry, and the note
     // told the person the operator was deciding a push and a PR for it.
-    if (!livePr && !deliveredAsFiles(moved)) {
+    // Ruling 576: nor does a task a reviewer verified has nothing to deliver
+    // (R19-8); live on AWSC-11 the note followed that verification by 30s.
+    if (!livePr && !deliveredAsFiles(moved) && !noChangeApplies(moved)) {
       void surfaceDeliveryEvent(
         db,
         ctx,
@@ -11000,6 +11140,7 @@ export async function resolvePacket(
             by: "human",
             verification: noChange.verification,
             autoDetected: noChange.autoDetected,
+            kbCorrections: standingKbCorrections(db, input.projectSlug, input.taskKey),
           })
         : {
             occurredAt: acceptedAt,
@@ -15250,6 +15391,7 @@ async function acceptCompletion(
         verification: noChange.verification,
         forcedRefusal: noChange.refusal,
         autoDetected: noChange.autoDetected,
+        kbCorrections: standingKbCorrections(db, input.projectSlug, input.taskKey),
       })
     : {
         occurredAt: new Date().toISOString(),
@@ -15755,6 +15897,8 @@ export async function applyRecommendation(
     if (rec.delivers !== undefined) dispatch.delivers = rec.delivers;
     // Ruling 421: a recommended completeness question is stamped on Apply too.
     if (rec.completeness) dispatch.completeness = true;
+    // Ruling 583: and a run recommended not to judge runs without a verdict.
+    if (rec.noVerdict) dispatch.withholdVerdict = true;
     await startAgentRun(db, dispatch, runActor, runCtx);
   } else if (rec.kind === "transition" && rec.toStageId) {
     // Owner ruling 2026-07-26: the operator may recommend a move OFF the

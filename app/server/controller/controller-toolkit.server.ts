@@ -4,7 +4,7 @@ import {
   type StageColor,
 } from "~/shared/workflow/stage-colors";
 import type { DatabaseSync } from "node:sqlite";
-import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import { KB_DOC_OFFSET_DESCRIPTION, KB_DOC_READ_CHARS, readKbDocForRun } from "~/server/files/kb-injection.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
@@ -96,6 +96,7 @@ import {
   KB_REFRESH_MODES,
   type KbRefreshMode,
   saveKnowledgeBase,
+  setKnowledgeBasePrivacy,
   saveMcpServer,
   saveSkill,
   resolveMcpServerId,
@@ -693,9 +694,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           path: z
             .string()
             .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+          offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
-        runWith((args: { kb: string; path: string }) =>
-          readKbDocForRun(grantedKb, args.kb, args.path, dataRoot),
+        runWith((args: { kb: string; path: string; offset?: number }) =>
+          readKbDocForRun(grantedKb, args.kb, args.path, dataRoot, args.offset ?? 0),
         ),
       ),
       "read_knowledge_doc",
@@ -803,6 +805,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // path, `conventions.md`, is the live rulings file on this very
             // instance.
             documents: kbDocumentNames(kb.id),
+            // Ruling 578: closed to every agent's shell; only granted runs
+            // read it, through their knowledge tool.
+            private: kb.private,
           })),
         );
       }),
@@ -813,12 +818,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_knowledge_base_doc",
-      "Read one document out of a knowledge base, so a `save_knowledge_base` write can carry the text forward instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type).",
+      "Read one document out of a knowledge base, so a `save_knowledge_base` write can carry the text forward instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type). Ruling 580: a long document comes back in pages; `nextOffset` is where the next read starts, null at the end, and a whole-document replace needs every page.",
       {
         id: z.string().describe("KB id, from list_knowledge_bases."),
         path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
+        offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
       },
-      runWith((args: { id: string; path: string }) => {
+      runWith((args: { id: string; path: string; offset?: number }) => {
         requireOrgAdmin("read the org knowledge bases");
         const target = resolveStoreTarget(db, "kb", args.id, { dataRoot });
         if (!target) return `[denied] No knowledge base with id ${args.id}.`;
@@ -829,6 +835,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             `list_knowledge_bases names what it holds.`
           );
         }
+        // Ruling 580: a long document comes back in pages. Whole, a 94 KB
+        // document was more than the controller could take in, and it could
+        // not safely change what it could not read.
+        const start = Math.min(Math.max(0, args.offset ?? 0), doc.text.length);
+        const end = Math.min(doc.text.length, start + KB_DOC_READ_CHARS);
         return json({
           path: args.path,
           // Ruling 466: UTF-8 bytes, the unit the write replies use.
@@ -838,7 +849,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // say which one it is replacing and Viberr can refuse when the
           // document moved underneath it.
           version: storeDocVersion(target, [args.path]),
-          text: doc.text,
+          characters: doc.text.length,
+          offset: start,
+          nextOffset: end < doc.text.length ? end : null,
+          text: doc.text.slice(start, end),
         });
       }),
     ),
@@ -848,7 +862,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
+      "Create or update a knowledge base (name, refresh mode, `private`), optionally writing one document into its folder. Org admins only. Ruling 578: every agent can read an open knowledge base from its shell, granted or not (a grant decides what a run is given, not what it can read), so anything the agents under test must not see, such as a benchmark's answer key, goes into a private one. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
       {
         id: z
           .string()
@@ -862,6 +876,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // but this tool kept advertising it, so the controller could pick a
         // mode that was silently coerced to "on change" behind its back.
         refresh: z.enum(KB_REFRESH_MODES).optional(),
+        private: z
+          .boolean()
+          .optional()
+          .describe(
+            "Ruling 578: true closes the KB's folder to every agent's shell; the runs it is granted to read it through read_knowledge_doc, and a Codex specialist, which has no such tool, is told the grant cannot reach it. false opens it again. Omit to leave it as it is.",
+          ),
         doc: z
           .strictObject({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
@@ -897,6 +917,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           id?: string;
           name: string;
           refresh?: KbRefreshMode;
+          private?: boolean;
           doc?: {
             path: string;
             content: string;
@@ -915,7 +936,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // U36-4 (pass 36): the reply carries what the next call needs — the
           // id for a save, the grantKey for a grant. The toast alone named the
           // folder, and the controller then guessed `disk:<dir>`.
-          const head = `[done] ${saved.toast} (id ${saved.kb.id}, grantKey ${saved.kb.dir}).`;
+          // Ruling 578: the folder's own mode is the flag.
+          const privacy =
+            args.private === undefined
+              ? ""
+              : setKnowledgeBasePrivacy(db, { id: saved.kb.id, private: args.private }, auditActor, { dataRoot }).changed
+                ? args.private
+                  ? " It is now private: no agent's shell can open its folder, and the runs it is granted to read it through read_knowledge_doc."
+                  : " It is open again: every agent can read its folder."
+                : args.private
+                  ? " It was already private."
+                  : " It was already open.";
+          const head = `[done] ${saved.toast} (id ${saved.kb.id}, grantKey ${saved.kb.dir}).${privacy}`;
           let docNote = "";
           if (args.doc) {
             const target = resolveStoreTarget(db, "kb", saved.kb.id, { dataRoot });
@@ -1873,7 +1905,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment; a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change, F39-4), epics summary (ruling 503; list_epics and get_epic read them in full), and `rulingsKb`, the knowledge base every run on this project reads (ruling 239), null when none is named; `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks); and `fileLeases`, which task owns which shared paths until it merges (ruling 245), resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247); and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment; a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change, F39-4), epics summary (ruling 503; list_epics and get_epic read them in full), and `rulingsKb`, the knowledge base every run on this project reads (ruling 239), null when none is named; `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks); and `fileLeases`, which task owns which shared paths until it merges (ruling 245), resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247); and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates); and `requiredReviewers`, the agent each review stage requires on every task (ruling 178), which never delivers on this project (ruling 556; set_required_reviewers says what that means for a plan). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -3358,7 +3390,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_required_reviewers",
-      "Declare the project's REQUIRED reviewers per review stage (ruling 178): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict; get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Project admin (edit-policy).",
+      "Declare the project's REQUIRED reviewers per review stage (ruling 178): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict; get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Ruling 556: the agent a rule names never delivers on this project, because its verdict on its own work would not count, so Viberr refuses to make it any task's deliverer. Work only that agent can do, such as correcting a knowledge base only it is granted, runs it as a supporting agent, and the task closes when a project admin force-accepts it. Write such a task's goal, and what you tell people about it, that way. Project admin (edit-policy).",
       {
         projectSlug: z.string().optional(),
         rules: z

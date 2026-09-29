@@ -19,7 +19,7 @@ import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.serv
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
 import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
-import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import { KB_DOC_OFFSET_DESCRIPTION, readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   readTaskFile,
   updateTaskFile,
@@ -119,7 +119,7 @@ const REPORT_OUTCOME_DESCRIPTION =
 
 /** Rulings 483 and 498: the specialist's half of `correct_knowledge_doc`. */
 const KB_CORRECTION_SPECIALIST_DESCRIPTION =
-  "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run. The task's entry quotes the passage only when every agent on the project is given that knowledge base, so correcting one given to few agents keeps its text off the task.";
+  "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence; an empty `text` deletes the passage. Send only the passage that changes: the record keeps what it needs around it for an undo. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run. The task's entry quotes the passage only when every agent on the project is given that knowledge base, so correcting one given to few agents keeps its text off the task.";
 
 /** U11: the same tool for a profile granted evidence but NOT the verdict — it
  *  has no judgment to report, so the description must not ask for one. */
@@ -709,7 +709,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     tools.push(
       tool(
         "read_board",
-        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal, and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered). Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
+        "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered). Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.",
         {
           taskKey: z
             .string()
@@ -779,11 +779,12 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           path: z
             .string()
             .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+          offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
         // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
-            return textResult(readKbDocForRun(kb, args.kb, args.path, ctx.dataRoot));
+            return textResult(readKbDocForRun(kb, args.kb, args.path, ctx.dataRoot, args.offset ?? 0));
           } catch (error) {
             logger.warn("agent read_knowledge_doc failed", {
               taskKey,
@@ -827,7 +828,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             ),
           text: z
             .string()
-            .describe("What the document should say in place of `replaces`, in its own form: the corrected fact, not the evidence."),
+            .describe(
+              "What the document should say in place of `replaces`, in its own form: the corrected fact, not the evidence. Empty to delete the passage.",
+            ),
           evidence: z
             .string()
             .describe(

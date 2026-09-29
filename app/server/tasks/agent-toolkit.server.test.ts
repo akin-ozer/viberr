@@ -988,7 +988,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         { dataRoot: store.dataRoot },
       );
       const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
-      writeStoreDoc(store.db, target, [], "06-platform-facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
+      writeStoreDoc(
+        store.db,
+        target,
+        [],
+        "06-platform-facts.md",
+        "# Facts\n\n- T-003: wrangler 4.138.0\n- T-013: dist/server/ (see run 12)\n",
+        admin,
+      );
       const built = buildAgentToolkit({
         db: store.db,
         ctx: { dataRoot: store.dataRoot },
@@ -1023,8 +1030,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       expect(filed).toMatch(new RegExp(`^\\[done\\] Corrected \`${kb.dir}/06-platform-facts.md\` as kc-[0-9a-f]{10}`));
       const { readFileSync } = await import("node:fs");
       const path = await import("node:path");
-      const body = readFileSync(path.join(store.dataRoot, "kb", kb.dir, "06-platform-facts.md"), "utf8");
-      expect(body).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n");
+      const factsPath = path.join(store.dataRoot, "kb", kb.dir, "06-platform-facts.md");
+      expect(readFileSync(factsPath, "utf8")).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n- T-013: dist/server/ (see run 12)\n");
       const top = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!
         .parsed.timeline[0]!;
       expect(top.type).toBe("kb_correction");
@@ -1034,6 +1041,24 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         filedBy: "Security review",
         taskKey: "VIB-3",
       });
+
+      // Ruling 581: an empty `text` deletes the passage. Live on AWSC-18 the
+      // tool refused all 39 deletions a Researcher had to apply.
+      const deleted = textResult.parse(
+        await client.callTool({
+          name: "correct_knowledge_doc",
+          arguments: {
+            kb: kb.dir,
+            doc: "06-platform-facts.md",
+            replaces: " (see run 12)",
+            text: "",
+            evidence: "Run 12 was deleted with its workspace.",
+          },
+        }),
+      );
+      // CANARY: require `text` in correctKnowledgeDoc again and this is refused.
+      expect(deleted).toMatch(/^\[done\] Corrected/);
+      expect(readFileSync(factsPath, "utf8")).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n- T-013: dist/server/\n");
 
       // A knowledge base this run was not given is not its to correct.
       const refused = textResult.parse(

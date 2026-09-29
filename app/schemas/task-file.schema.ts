@@ -445,6 +445,9 @@ const recommendationSchema = z
     /** run_agent — ruling 421: the recommended run puts the completeness
      *  question, so Apply stamps it exactly as a direct dispatch would. */
     completeness: z.boolean().optional(),
+    /** run_agent — ruling 583: the recommended run records no verdict, so
+     *  Apply withholds its verdict tool exactly as a direct dispatch would. */
+    noVerdict: z.boolean().optional(),
     /** transition — the target stage id. */
     toStageId: z.string().optional(),
     /** Button label, e.g. "Run Developer". */

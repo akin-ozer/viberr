@@ -378,7 +378,8 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
  * specialist and controller run and nothing else, and the set of keys Viberr
  * ADDS to a child env is pinned by name — the credential (ruling 127), the
  * home, the run marker (ruling 174) and the window (`CONTEXT_ENV_KEYS`). A key
- * added anywhere on the run path without a line here fails this test.
+ * added anywhere on the run path without a line here fails this test. Ruling
+ * 577 adds one to every Claude run: the switch that keeps auto-memory off.
  */
 describe("the keys Viberr adds to a run's child env are named (ruling 371)", () => {
   const ctx = createTestDbContext();
@@ -431,12 +432,13 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     return { added, seen: seen ?? {} };
   }
 
-  it("ruling 376: no kind carries a window key — the child env is the credential, the home, git and the marker", async () => {
+  it("ruling 376: no kind carries a window key — the child env is the credential, the home, git, the marker and the auto-memory switch", async () => {
     for (const kind of ["primary", "reviewer", "controller", "operator"] as const) {
       const env = await childEnvFor(kind, "claude");
       expect(env.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
       expect(env.added).toEqual([
         "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
         "CLAUDE_CONFIG_DIR",
         "GIT_CEILING_DIRECTORIES",
         "VIBERR_RUN_ID",

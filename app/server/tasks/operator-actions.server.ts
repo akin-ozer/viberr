@@ -169,9 +169,11 @@ import {
 } from "./task-actions.server";
 import {
   acceptanceNoChangeCheck,
+  kbCorrectionsOutcome,
   noChangeApplies,
   noChangeCandidate,
   noChangeCompletionEvent,
+  standingKbCorrections,
 } from "./no-change-completion.server";
 import {
   canOwnDelivery,
@@ -969,6 +971,8 @@ interface RecommendationInput {
   forHeadSha?: string;
   /** run_agent — ruling 421: the run puts the completeness question. */
   completeness?: boolean;
+  /** run_agent — ruling 583: the run records no verdict. */
+  noVerdict?: boolean;
 }
 
 async function addRecommendation(
@@ -991,6 +995,7 @@ async function addRecommendation(
   if (rec.prompt) recommendation.prompt = rec.prompt;
   if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
   if (rec.completeness) recommendation.completeness = true;
+  if (rec.noVerdict) recommendation.noVerdict = true;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
   if (rec.forHeadSha) recommendation.forHeadSha = rec.forHeadSha;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
@@ -1015,6 +1020,7 @@ async function addRecommendation(
       existing.prompt !== recommendation.prompt ||
       existing.delivers !== recommendation.delivers ||
       existing.completeness !== recommendation.completeness ||
+      existing.noVerdict !== recommendation.noVerdict ||
       existing.label !== recommendation.label ||
       existing.forHeadSha !== recommendation.forHeadSha
     ) {
@@ -1036,6 +1042,8 @@ async function addRecommendation(
       }
       if (recommendation.completeness) existing.completeness = true;
       else delete existing.completeness;
+      if (recommendation.noVerdict) existing.noVerdict = true;
+      else delete existing.noVerdict;
       // Ruling 137: a re-recommended acceptance re-binds to the revision it
       // was authored against, or the card keeps a stale binding.
       if (recommendation.forHeadSha !== undefined) {
@@ -4334,6 +4342,9 @@ export async function operatorDispatchAgent(
     /** Ruling 421: this run puts ruling 410's completeness question, so the
      *  verdict it returns is recorded as the reviewer's complete set. */
     completeness?: boolean;
+    /** Ruling 583: this run must not judge, so its verdict tool is withheld
+     *  and nothing it writes is read as a verdict. */
+    noVerdict?: boolean;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -4416,6 +4427,7 @@ export async function operatorDispatchAgent(
     // the card used to drop it and Apply re-derived, sometimes the opposite.
     if (input.delivers !== undefined) rec.delivers = input.delivers;
     if (input.completeness) rec.completeness = true;
+    if (input.noVerdict) rec.noVerdict = true;
     await addRecommendation(
       db,
       ctx,
@@ -4492,6 +4504,7 @@ export async function operatorDispatchAgent(
     // assignSpecialist for a delivery hand-off.
     if (input.delivers !== undefined) promptInput.delivers = input.delivers;
     if (input.completeness) promptInput.completeness = true;
+    if (input.noVerdict) promptInput.noVerdict = true;
     let prompted: Awaited<ReturnType<typeof operatorPromptAgent>>;
     try {
       prompted = await operatorPromptAgent(db, promptInput, ctx);
@@ -4531,6 +4544,7 @@ export async function operatorDispatchAgent(
   };
   if (input.delivers !== undefined) dispatch.delivers = input.delivers;
   if (input.completeness) dispatch.completeness = true;
+  if (input.noVerdict) dispatch.withholdVerdict = true;
   let result: Awaited<ReturnType<typeof startAgentRun>>;
   try {
     result = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx(ctx));
@@ -5510,6 +5524,8 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
+    // Ruling 576: what such a task did change, named on the card.
+    const corrections = isNoChange ? standingKbCorrections(db, input.projectSlug, input.taskKey) : [];
     const requiredHere = readRequiredReviewers(input.projectSlug, ctx);
     // Ruling 137: the offer binds to the revision it describes, so a later
     // delivery can withdraw it by name and the card can say which one.
@@ -5517,7 +5533,7 @@ export async function operatorAcceptCompletion(
       kind: "accept_completion",
       toStageId: doneStageId,
       label: isNoChange
-        ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
+        ? `Complete ${input.taskKey} with no ${corrections.length > 0 ? "repository " : ""}changes and move it to ${doneName}`
         : `Accept completion and move ${input.taskKey} to ${doneName}`,
     };
     const offeredHeadSha =
@@ -5540,7 +5556,9 @@ export async function operatorAcceptCompletion(
       // flag).
       `${acceptanceOfferBasis(file.parsed.frontmatter, requiredHere)} ` +
         (isNoChange
-          ? `There is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+          ? corrections.length > 0
+            ? `Nothing goes to the repository: no branch carries work for ${input.taskKey}. Its outcome is ${kbCorrectionsOutcome(corrections)}. Accepting moves it to ${doneName} as **completed with no repository changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+            : `There is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
           : noChangeCandidate(file.parsed.frontmatter)
             ? `Accepting completion moves ${input.taskKey} to ${doneName}. There is no pull request on this task, so nothing is merged.`
             : `Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`),
@@ -5589,6 +5607,7 @@ export async function operatorAcceptCompletion(
           occurredAt: new Date().toISOString(),
           by: "operator",
           verification: noChange.verification,
+          kbCorrections: standingKbCorrections(db, input.projectSlug, input.taskKey),
         })
       : {
           occurredAt: new Date().toISOString(),

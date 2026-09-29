@@ -468,6 +468,11 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   operator and the controller never qualify. The run's disclosure takes the same
   derivation: `tools.denied` drops the three and `tools.fileWriteRoots` lists the roots,
   which the console's tools row states. Codex is unchanged (advisory, ruling 185).
+- No auto-memory (ruling 577). Every Claude run (operator, controller, specialist, and the
+  completion compaction) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (`AUTO_MEMORY_OFF_ENV`)
+  over its base and per-run env. Claude Code's auto-memory keeps notes in the account
+  home, outside every root a run may write, and a note one agent keeps on one task reaches
+  no other; a board learns through its knowledge bases (ruling 498).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
@@ -1271,7 +1276,9 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   channel on both backends for that run only (the Claude `report_outcome` field, the Codex
   envelope schema and the persona's collaboration notes) and records `verdict_withheld`
   on the run, so the completion's prose fallback cannot manufacture one either (rulings
-  313, 316). The engagement stays `verdictCapable`. A delivering run, fresh or resumed,
+  313, 316). The operator withholds it the same way with `run_agent`'s `noVerdict` (the
+  Codex plan's `noVerdict` field, and a recommendation card's), for any run it tells not to
+  judge (ruling 583). The engagement stays `verdictCapable`. A delivering run, fresh or resumed,
   gets no verdict channel at all, whatever its profile grants, and completion discards a
   verdict from a run dispatched to deliver: its reply is its delivery, and its files stamp
   `deliveredAt` (ruling 555).
@@ -1332,7 +1339,7 @@ and get the outcome envelope instead (§2.5).
 | `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
 | `read_timeline_entry {occurredAt}` | none; built with `read_board` | one entry of this task's timeline, whole, by the stamp the prompt's recent timeline prints after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)", 220 characters); read-only (ruling 563, `readTimelineEntry`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
-| `correct_knowledge_doc {kb, doc, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage, or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
+| `correct_knowledge_doc {kb, doc, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 581), or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
 
 A specialist has no post tool of its own for another task (ruling 488): its reach there is
 the `relay` entries of the outcome it already reports, posted by the completion through the
@@ -1413,9 +1420,10 @@ write grant.
    `verdictAuthorized` is the engagement's `verdictCapable === true` when the run has an
    engagement, else the live verdict grant. No verdict at all is recorded for a run whose
    checkout failed (`no_checkout`, ruling 248, with a note naming that condition) or whose
-   dispatch withheld the verdict (`verdict_withheld`, ruling 316), and the prose fallback
-   is for SILENCE only: an envelope that left the verdict empty and asked a question has
-   answered. A verdict from the run a completeness stamp names is recorded as
+   dispatch withheld the verdict (`verdict_withheld`, rulings 316 and 583), and the prose
+   fallback is for SILENCE only: an envelope that left the verdict empty and asked a
+   question has answered. A request-changes with nothing delivered to bind to is recorded
+   in words only, and its note says so (ruling 583), as an approval with none does. A verdict from the run a completeness stamp names is recorded as
    `answers: "completeness"` (ruling 421).
 4. Question → packet using the live ask grant; evidence rows are written; browser
    working artifacts not cited are pruned (ruling 105). Ruling 159: the run's workspace
@@ -1648,10 +1656,19 @@ runtime's answer for a missing grant.
   index, and so every cached prefix on the project, as it was. `KB_INDEX_NOTE` tells the
   run to read what it needs: `read_knowledge_doc {kb, path}` (the specialist, operator and
   controller toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
-  one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
+  one document in pages of `KB_DOC_READ_CHARS` 48 000 chars, each saying which characters
+  it holds and the `offset` to read on with, ruling 580), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
   workspace contract allows those reads, ruling 422; `kb/` stays readable, and never
-  writable, to the agent's own OS user, ruling 460). `KB_PRECEDENCE_NOTE` (repo
+  writable, to the agent's own OS user, ruling 460). A grant decides what a run is
+  given, not what it can read: every agent of a person runs as that person's uid, so any
+  of them can read an open knowledge base from its shell. A private one (ruling 578) is
+  a folder the server keeps 0700 (`isPrivateKbFolder`; set with `save_knowledge_base`'s
+  `private`, shown on the Instance settings row, never widened by the boot layout
+  check): its index says to read it with `read_knowledge_doc`,
+  `knowledgeBaseReadDirs` leaves it out of the workspace contract, and a Codex
+  specialist, which has no knowledge tool, gets it as an unresolved grant with the
+  reason. `KB_PRECEDENCE_NOTE` (repo
   conventions outrank KBs, ruling 56) is emitted only when an index is present. All three
   runtimes assemble the block (the attached-resources banner, injected skill bodies, these
   notes, the indexes) with one helper, `attachedResourcesBlock`, and pass only their own

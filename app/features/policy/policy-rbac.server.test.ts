@@ -20,6 +20,8 @@ import {
   releaseOwner,
   setOwner,
   attachTaskFile,
+  removeTaskAttachment,
+  removeTaskComment,
   setTaskMetadata,
   transitionStage,
   updateTaskGoal,
@@ -682,6 +684,32 @@ function matrixDrivers() {
           await setProjectArchived(store.db, { projectSlug: store.slug, archived: false }, actor, {
             dataRoot: store.dataRoot,
           });
+        },
+      },
+    ],
+    // Ruling 582: both writers refuse by role before they look for the file or
+    // the comment, so a name and a time the task does not hold still prove it.
+    "remove-from-record": [
+      {
+        label: "removeTaskAttachment",
+        run: async (actor) => {
+          await removeTaskAttachment(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", name: "absent.md", reason: null },
+            actor,
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+      {
+        label: "removeTaskComment",
+        run: async (actor) => {
+          await removeTaskComment(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-1", at: "2026-01-01T00:00:00.000Z", reason: null },
+            actor,
+            { dataRoot: store.dataRoot },
+          );
         },
       },
     ],

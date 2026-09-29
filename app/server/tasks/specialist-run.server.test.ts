@@ -2949,6 +2949,17 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("ruling 578: knowledgeBaseReadDirs never names a private folder, which no shell on the run can open", () => {
+    // CANARY: drop the `isPrivateKbFolder` term and the workspace contract
+    // tells the run to read a folder its shell is refused.
+    const root = mkdtempSync(path.join(tmpdir(), "kb-read-"));
+    mkdirSync(path.join(root, "kb", "rulings"), { recursive: true });
+    mkdirSync(path.join(root, "kb", "keys"), { recursive: true });
+    chmodSync(path.join(root, "kb", "keys"), 0o700);
+    expect(knowledgeBaseReadDirs(["keys", "rulings"], root)).toEqual([path.join(root, "kb", "rulings")]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("the task-files section rides the evidence grant (owner ask 2026-08-20)", () => {
     // The live gap: an agent committed its screenshot into the PR because
     // nothing told it the task thread could carry files. The section names the
@@ -3208,6 +3219,21 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(persona).toContain("was-renamed-away");
     expect(persona).toContain("no knowledge-base folder by that name in the store");
     expect(persona).toContain("do not treat the gap as your own failure");
+  });
+
+  it("ruling 578: a private KB reaches a Claude run through read_knowledge_doc, and a Codex run is told it cannot", () => {
+    // CANARY: pass `hasKnowledgeTool: true` for every backend and the Codex
+    // run is handed an index of a folder its shell is refused.
+    const dataRoot = tempRoot();
+    mkdirSync(path.join(dataRoot, "kb", "answer-keys"), { recursive: true });
+    writeFileSync(path.join(dataRoot, "kb", "answer-keys", "sample-01.md"), "# Sample 01");
+    chmodSync(path.join(dataRoot, "kb", "answer-keys"), 0o700);
+    const codex = buildSpecialistPersona({ profileId: "judge", skills: [], kb: ["answer-keys"], backend: "codex", dataRoot });
+    expect(codex).toContain("Attached resources that did NOT fully reach this run");
+    expect(codex).toContain("this run has no knowledge tool to read it");
+    const claude = buildSpecialistPersona({ profileId: "judge", skills: [], kb: ["answer-keys"], backend: "claude", dataRoot });
+    expect(claude).toContain("read each document with `read_knowledge_doc`");
+    expect(claude).not.toContain("Attached resources that did NOT fully reach this run");
   });
 
   it("a skill that resolves to nothing is NAMED in the prompt too (C1)", () => {

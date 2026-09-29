@@ -138,6 +138,22 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
     return root;
   }
 
+  it("ruling 578: never opens a private knowledge base, and leaves an open one as it is", () => {
+    // `kb/` itself is set 0755 at every boot; the folders inside it keep their
+    // own mode, which is the privacy flag. CANARY: have the layout walk `kb/`
+    // and set its folders, and the private one opens on the next restart.
+    const root = preRulingStore();
+    mkdirSync(path.join(root, "kb", "golden"));
+    mkdirSync(path.join(root, "kb", "mapping"));
+    // Exact modes, whatever the host's umask.
+    chmodSync(path.join(root, "kb", "golden"), 0o700);
+    chmodSync(path.join(root, "kb", "mapping"), 0o775);
+    expect(enforceStoreLayout(root, { gid }).failures).toEqual([]);
+    expect(mode(path.join(root, "kb"))).toBe(0o755);
+    expect(mode(path.join(root, "kb", "golden"))).toBe(0o700);
+    expect(mode(path.join(root, "kb", "mapping"))).toBe(0o775);
+  });
+
   it("closes what holds secrets, opens what runs write, and hands a pre-460 checkout over once", () => {
     const root = preRulingStore();
     const homes: string[] = [];

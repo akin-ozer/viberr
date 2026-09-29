@@ -390,6 +390,13 @@ function claudeIdleTimeoutMs(): number {
 }
 
 /**
+ * Ruling 577: the CLI's switch for its auto-memory. Live on 2026-09-28, 13 of
+ * 138 Claude runs tried to keep notes there, 32 writes in all; ruling 564's
+ * hook refused every one, and each refusal cost the run a turn.
+ */
+export const AUTO_MEMORY_OFF_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+
+/**
  * How long a cooperative stop is given to take effect before the adapter
  * ABORTS the SDK subprocess. `interrupt()` is a cooperative control request to
  * the CLI; a wedged one never answers, and it also disarms the idle guard, so
@@ -1201,7 +1208,11 @@ function assembleClaudeOptions(
   // Base adapter env, overlaid with any per-run env (e.g. the specialist's
   // GIT_CEILING_DIRECTORIES workspace confinement).
   if (deps.env || spec.env) {
-    options.env = { ...deps.env, ...spec.env };
+    // Ruling 577: no run keeps Claude Code's auto-memory. Its notes live in
+    // the account home, outside every root a run may write (ruling 564), and
+    // a note one agent keeps on one task reaches no other; a board learns
+    // through its knowledge bases (ruling 498).
+    options.env = { ...deps.env, ...spec.env, [AUTO_MEMORY_OFF_ENV]: "1" };
   }
   // System prompt strategy differs by run kind:
   //  · OPERATOR — its persona REPLACES the default. The operator never

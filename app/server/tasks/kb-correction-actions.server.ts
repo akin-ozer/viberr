@@ -46,7 +46,7 @@ export interface KbCorrectionRequest {
    *  null adds `text` at the end of the document. */
   replaces: string | null;
   /** The text that takes its place: the corrected fact, in the document's own
-   *  form. */
+   *  form; empty to delete the passage (ruling 581). */
   text: string;
   /** What proves it: the command and its output, a run, a verdict. */
   evidence: string;
@@ -178,11 +178,12 @@ export async function correctKnowledgeDoc(
   const text = input.text.trim();
   const evidence = withoutEvidenceLabel(input.evidence);
   const replaces = input.replaces?.trim() ? input.replaces : null;
-  if (!doc || !text || !evidence) {
+  // Ruling 581: an empty `text` deletes the passage `replaces` names.
+  if (!doc || (!text && !replaces) || !evidence) {
     return {
       outcome: "noop",
       message:
-        "A correction needs the document to correct, the text to write, and the evidence that proves it. Nothing was written.",
+        "A correction needs the document to correct, the text to write (empty only to delete the passage in `replaces`), and the evidence that proves it. Nothing was written.",
     };
   }
   const rulingsKb = projectRulingsKb(input.projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});

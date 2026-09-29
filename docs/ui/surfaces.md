@@ -550,6 +550,13 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   anything over 10 MB (`MAX_UPLOAD_BYTES`). Every file name carries its whole self in `title`, and under
   the 720px breakpoint a file row gives the name its own line, whole, with "by <actor> ·
   <time>" and the size under it (ruling 478(b)).
+- **A project admin takes a file, or a comment's words, off a task's record** (ruling
+  582): the card a file opens in carries Remove, and so does a comment's row (at its end,
+  shown on the row a pointer is over, or focused); both ask first, in the shared confirm,
+  with an optional reason. A removed file leaves the attachments and every entry that
+  claimed it, and a note says who removed it and why. A comment keeps its author and time,
+  and its words become "Removed by <person> on <day>. Why: <reason>", in its notifications
+  too; the files it carried stay.
 - **Every chat takes files** (rulings 573 and 574): the controller page, the controller
   dock and a task's comment composer (for a viewer holding `attach-file`) share one tray
   (`app/ui/attach-files.tsx`): a paperclip, a drop on the composer (its frame dashed while

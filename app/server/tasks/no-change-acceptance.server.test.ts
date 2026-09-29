@@ -376,6 +376,28 @@ describe("the verdict binds — a verification revision is minted at review time
     );
   });
 
+  it("ruling 583: an objection with nothing delivered says it binds to nothing", async () => {
+    // Live on AWSC-19 the event read "Validation: none. Estimate Judge
+    // requested changes." over a record that held no verdict at all.
+    // CANARY: word the unbound objection like a bound one again.
+    deployAgents();
+    seedVerificationTask();
+    await recordAgentCompletion(store.db, dataCtx(), store.slug, "VIB-1", {
+      actorRef: REVIEWER_ACTOR,
+      runId: "run_review_1",
+      delivers: false,
+      replyText: "The smoke file is missing from main.",
+      verdict: "request_changes",
+      question: null,
+    });
+    expect(task().frontmatter.verdicts).toEqual([]);
+    const quality = task().timeline.find((e) => e.type === "quality");
+    expect(quality?.title).toBe("Changes requested");
+    expect(quality?.text).toContain(
+      "requested changes, but nothing on this task has been delivered for the verdict to bind to, so it does not count.",
+    );
+  });
+
   it("ruling 543: an approval of the files a result was delivered in says it bound to them", async () => {
     // Ruling 388 bound it all along; the note read "there is no delivered
     // revision to bind the verdict to yet" beside a healthy validation.
@@ -668,6 +690,145 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(task().frontmatter.stage).toBe("done");
     expect(completionEvent()?.title).toBe("Completed with no changes");
     expect(completionEvent()?.text).not.toMatch(/merged/i);
+  });
+});
+
+/**
+ * Ruling 576: live on AWSC-11 the Estimate Judge, the board's required
+ * reviewer, ran as a supporting agent (ruling 556), corrected its golden-set
+ * entry three times and approved. Nothing went to the repository, so the task
+ * read as R19-8's shape: the approval said "there is nothing to deliver", the
+ * operator's card offered "Complete AWSC-11 with no changes" and the record
+ * says "completed with no changes", of a task whose whole outcome was the
+ * three corrections.
+ */
+describe("ruling 576: a task that corrected a knowledge base did not complete with no changes", () => {
+  /** A correction written on VIB-1 by `actorRef`, the way the agent tool writes it. */
+  async function correctOnTask(actorRef: FileActorRef, filedBy: string): Promise<{ id: string; dir: string }> {
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const { correctKnowledgeDoc } = await import("./kb-correction-actions.server");
+    const { kb } = await saveKnowledgeBase(store.db, { name: "judge-keys", refresh: "on change" }, arda(), {
+      dataRoot: store.dataRoot,
+    });
+    const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+    writeStoreDoc(store.db, target, [], "sample-01.md", "# Keys\n\n- SAN: as written.\n", arda());
+    const result = await correctKnowledgeDoc(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      kb: kb.dir,
+      doc: "sample-01.md",
+      replaces: "- SAN: as written.",
+      text: "- SAN: priceable as the calculator prices it today.",
+      evidence: "the calculator's form for the service",
+      actorRef,
+      filedBy,
+      auditActor: { userId: null, label: "agent" },
+      allowedKbs: [kb.dir],
+    });
+    expect(result.outcome).toBe("done");
+    return { id: /kc-[0-9a-f]{10}/.exec(result.message)![0], dir: kb.dir };
+  }
+
+  it("the approval, the operator's card and the completion record name the correction, and say its reviewer made it", async () => {
+    // CANARIES: drop the corrections from the verdict note, from the card, or
+    // from any writer's completion event, and its assertion goes red; drop the
+    // `every` check on who made them and the second test goes red.
+    deployAgents(true);
+    seedVerificationTask();
+    const { id, dir } = await correctOnTask(REVIEWER_ACTOR, "Review & validation");
+    await reviewerApproves();
+    const named = `\`${id}\` in \`${dir}/sample-01.md\`, by Review & validation`;
+
+    const quality = task().timeline.find((e) => e.type === "quality");
+    expect(quality?.text).toContain("Review & validation approved: nothing goes to the repository.");
+    expect(quality?.text).toContain(
+      `This task's outcome is the knowledge-base corrections made on it, which stand: ${named}, so this approval is not a review of them. ` +
+        "Accepting completes this task with no repository changes.",
+    );
+    expect(quality?.text).not.toContain("there is nothing to deliver");
+
+    const offered = await operatorAcceptCompletion(
+      store.db,
+      dataCtx(),
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      resolveOperatorAuthority(dataCtx(), store.slug, { autonomy: "supervised" }),
+    );
+    expect(offered.outcome).toBe("recommended");
+    const card = task().frontmatter.recommendations[0];
+    expect(card?.label).toBe("Complete VIB-1 with no repository changes and move it to Done");
+    expect(card?.detail).toContain(`Its outcome is the knowledge-base corrections made on it, which stand: ${named}.`);
+
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+    const completion = completionEvent();
+    expect(completion?.title).toBe("Completed with no repository changes");
+    expect(completion?.text).toContain(
+      `**VIB-1 completed with no repository changes**. Its outcome is the knowledge-base corrections made on it, which stand: ${named}. Nothing was delivered`,
+    );
+  });
+
+  it.each([
+    {
+      door: "the packet path",
+      packet: ACCEPT_PACKET,
+      close: () =>
+        resolvePacket(store.db, { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 }, arda(), dataCtx()),
+    },
+    {
+      door: "the operator under full autonomy",
+      packet: null,
+      close: () =>
+        operatorAcceptCompletion(
+          store.db,
+          dataCtx(),
+          { projectSlug: store.slug, taskKey: "VIB-1" },
+          resolveOperatorAuthority(dataCtx(), store.slug, { autonomy: "full" }),
+        ),
+    },
+  ])("$door names the correction on the completion record too", async ({ packet, close }) => {
+    deployAgents(true);
+    seedVerificationTask({}, packet);
+    const { id } = await correctOnTask(REVIEWER_ACTOR, "Review & validation");
+    await reviewerApproves();
+    await close();
+    expect(task().frontmatter.stage).toBe("done");
+    expect(completionEvent()?.title).toBe("Completed with no repository changes");
+    expect(completionEvent()?.text).toContain(`Its outcome is the knowledge-base corrections made on it, which stand: \`${id}\``);
+  });
+
+  it("names another agent's correction without claiming the approval skipped it, and forgets one a person undid", async () => {
+    deployAgents(true);
+    seedVerificationTask();
+    const developer: FileActorRef = { kind: "agent", backend: "claude", profileId: "developer", roleHint: "Implementation" };
+    const { id } = await correctOnTask(developer, "Implementation");
+    await reviewerApproves();
+    const quality = task().timeline.find((e) => e.type === "quality");
+    expect(quality?.text).toContain(`\`${id}\``);
+    expect(quality?.text).toContain("by Implementation. Accepting completes this task with no repository changes.");
+    expect(quality?.text).not.toContain("not a review of them");
+
+    const { undoKbCorrectionOnTask } = await import("./kb-correction-actions.server");
+    const undone = await undoKbCorrectionOnTask(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { id, projectSlug: store.slug, reason: null, person: { userId: store.users.arda.id, label: "arda", name: "Arda" } },
+    );
+    expect(undone.outcome).toBe("done");
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      arda(),
+      dataCtx(),
+    );
+    const completion = completionEvent();
+    expect(completion?.title).toBe("Completed with no changes");
+    expect(completion?.text).toContain("**VIB-1 completed with no changes**.");
+    expect(completion?.text).not.toContain(id);
   });
 });
 

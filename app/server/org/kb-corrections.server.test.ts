@@ -167,14 +167,57 @@ describe("mergeKbCorrection", () => {
     expect(read(kb)).toContain("  Line: T-003: wrangler 4.138.0");
   });
 
-  it("refuses a passage that stands twice, and text that would stand twice after the write", async () => {
+  it("refuses a passage that stands twice", async () => {
     const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- node 22\n- node 22\n- bun 1.2\n");
     const twice = await merge(kb, { replaces: "- node 22", text: "- node 26" });
     expect(twice.ok ? "" : twice.message).toContain("stands 2 times");
-    // An undo could not tell the written text from the one already there.
-    const ambiguous = await merge(kb, { replaces: "- bun 1.2", text: "- node 22" });
-    expect(ambiguous.ok ? "" : ambiguous.message).toContain("would stand 3 times");
     expect(read(kb)).toBe("# Facts\n\n- node 22\n- node 22\n- bun 1.2\n");
+  });
+
+  /**
+   * Ruling 581: an undo finds a correction by the text it wrote, which used to
+   * refuse any corrected text the document already held. Live on AWSC-18 a
+   * Researcher's `live forms` would have stood 4 times in the calculator
+   * research. The record now names the lines around it instead.
+   */
+  it("ruling 581: text another line repeats is written, and the record names the lines that make it stand once", async () => {
+    const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- node 22\n- node 22\n- bun 1.2\n");
+    const c = await merged(kb, { replaces: "- bun 1.2", text: "- node 22" });
+    expect(read(kb)).toBe("# Facts\n\n- node 22\n- node 22\n- node 22\n");
+    // CANARY: count matches with a split, which misses overlapping ones, and
+    // the record stops at two lines that stand twice: the undo then puts
+    // `- bun 1.2` back in the middle.
+    expect(c).toMatchObject({ replaced: "- node 22\n- node 22\n- bun 1.2\n", text: "- node 22\n- node 22\n- node 22\n" });
+    expect((await undo(c.id)).outcome).toBe("done");
+    expect(read(kb)).toBe("# Facts\n\n- node 22\n- node 22\n- bun 1.2\n");
+  });
+
+  /**
+   * Ruling 581: a correction deletes a passage with an empty `text`. Live on
+   * AWSC-18, 39 of the 138 corrections a Researcher applied were deletions,
+   * and the tool refused every empty `text`.
+   */
+  it("ruling 581: an empty text deletes the passage, a retry finds its record, and an undo puts it back for good", async () => {
+    const body = "# Rules\n\n- R1: price the ALB. Evidence: AWSC-6 summary.md.\n- R2: one AZ. Evidence: AWSC-5 mapping.md.\n";
+    const kb = await seedKb("research", "calculator.md", body);
+    const deletion = { doc: "calculator.md", replaces: " Evidence: AWSC-6 summary.md.", text: "" };
+    const c = await merged(kb, deletion);
+    expect(read(kb, "calculator.md")).toBe("# Rules\n\n- R1: price the ALB.\n- R2: one AZ. Evidence: AWSC-5 mapping.md.\n");
+    // CANARY: record the bare `text` and it is empty, which an undo cannot find.
+    expect(c).toMatchObject({
+      replaced: "- R1: price the ALB. Evidence: AWSC-6 summary.md.\n",
+      text: "- R1: price the ALB.\n",
+    });
+    // CANARY: judge a retry by the text alone and an empty one finds nothing.
+    const retry = await merge(kb, deletion);
+    expect(retry.ok ? "" : retry.message).toContain(`${c.id} made this correction of ${kb}/calculator.md`);
+    expect((await undo(c.id, "We keep the evidence.")).outcome).toBe("done");
+    expect(read(kb, "calculator.md")).toBe(body);
+    // CANARY: check an undone correction by the bare `text` alone and the
+    // deletion a person undid is written again.
+    const again = await merge(kb, deletion);
+    expect(again.ok ? "" : again.message).toContain('Arda Kaya undid this same correction');
+    expect(read(kb, "calculator.md")).toBe(body);
   });
 
   it("refuses a document the knowledge base does not hold, naming what it does hold", async () => {
@@ -185,10 +228,24 @@ describe("mergeKbCorrection", () => {
 
   it("needs nothing when the document already says it", async () => {
     const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- T-003: wrangler 4.139.0\n");
-    const replaced = await merge(kb, { replaces: "- T-003: wrangler 4.138.0", text: "- T-003: wrangler 4.139.0" });
-    expect(replaced.ok ? "" : replaced.message).toContain("already reads as your `text`");
     const added = await merge(kb, { text: "- T-003: wrangler 4.139.0" });
     expect(added.ok ? "" : added.message).toContain("already says that");
+  });
+
+  /**
+   * Ruling 581: text standing in the document does not prove a correction is
+   * in. " Evidence:" stood 56 times in the calculator research when a
+   * Researcher's passage was one character off.
+   */
+  it("ruling 581: a passage that is not there is not taken for a made correction because its text stands", async () => {
+    const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- T-003: wrangler 4.139.0. Evidence: run 1.\n- T-004: pnpm 9. Evidence: run 2.\n");
+    const r = await merge(kb, { replaces: "- T-005: bun 1.2. Evidence: run 3.", text: " Evidence:" });
+    const message = r.ok ? "" : r.message;
+    // CANARY: answer "already reads as your `text`" and the filer stops with
+    // the wrong passage still in the document.
+    expect(message).not.toContain("Nothing needed writing");
+    expect(message).toContain("is not in");
+    expect(message).toContain("Your `text` stands there 2 times already");
   });
 
   it("keeps `$&` and `$$` literal, and matches and writes in the document's own line endings", async () => {

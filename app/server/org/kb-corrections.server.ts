@@ -96,9 +96,16 @@ function asDocText(value: string, eol: string): string {
     .join(eol);
 }
 
-/** How many times `needle` stands in `hay`, without overlaps. */
+/**
+ * How many times `needle` stands in `hay`, overlapping ones included (ruling
+ * 581): an undo takes the first match, so "\n- a\n" in "\n- a\n- a\n" stands
+ * twice, not the once a split sees.
+ */
 function occurrences(hay: string, needle: string): number {
-  return needle ? hay.split(needle).length - 1 : 0;
+  if (!needle) return 0;
+  let count = 0;
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) count += 1;
+  return count;
 }
 
 /**
@@ -325,17 +332,74 @@ export type MergeKbCorrectionResult =
   | { ok: true; correction: KbCorrection }
   | { ok: false; message: string };
 
+/** Ruling 581: the most neighbouring characters a record takes on each side. */
+const ANCHOR_MAX_CHARS = 400;
+
+/** Not whitespace, and not a masked proposals character. */
+const isWordChar = (ch: string | undefined) => ch !== undefined && ch !== "\u0000" && !/\s/.test(ch);
+
+/**
+ * Ruling 581: the span of `doc` a record names for the text written at
+ * `doc[start, start + length)`, so that it stands once and is not blank: the
+ * text itself when it does; else the lines it sits in, taking the lines after
+ * and before in turn until they do; else, where lines run long, characters
+ * after and before in turn, finishing the word it cut. It never reaches into
+ * a masked proposals section. Null when {@link ANCHOR_MAX_CHARS} on each side
+ * is not enough.
+ */
+function anchorAround(doc: string, start: number, length: number): { from: number; to: number } | null {
+  const end = start + length;
+  const standsOnce = (from: number, to: number) => {
+    const span = doc.slice(from, to);
+    return span.trim() !== "" && !span.includes("\u0000") && occurrences(doc, span) === 1;
+  };
+  if (standsOnce(start, end)) return { from: start, to: end };
+  const lineStart = (at: number) => doc.lastIndexOf("\n", at - 1) + 1;
+  const lineEnd = (at: number) => {
+    const nl = doc.indexOf("\n", at);
+    return nl === -1 ? doc.length : nl + 1;
+  };
+  let from = lineStart(start);
+  let to = length > 0 && doc[end - 1] === "\n" ? end : lineEnd(end);
+  for (let takeAfter = true; start - from <= ANCHOR_MAX_CHARS && to - end <= ANCHOR_MAX_CHARS; takeAfter = !takeAfter) {
+    if (standsOnce(from, to)) return { from, to };
+    if (doc.slice(from, to).includes("\u0000")) break;
+    const after = lineEnd(to);
+    const before = from > 0 ? lineStart(from - 1) : 0;
+    if (after === to && before === from) break;
+    if ((takeAfter && after !== to) || before === from) to = after;
+    else from = before;
+  }
+  let before = 0;
+  let after = 0;
+  const canTakeAfter = () => after < ANCHOR_MAX_CHARS && end + after < doc.length && doc[end + after] !== "\u0000";
+  const canTakeBefore = () => before < ANCHOR_MAX_CHARS && start - before > 0 && doc[start - before - 1] !== "\u0000";
+  while (!standsOnce(start - before, end + after)) {
+    if (canTakeAfter() && (after <= before || !canTakeBefore())) after += 1;
+    else if (canTakeBefore()) before += 1;
+    else return null;
+  }
+  // A longer span holds the one that stands once, so it stands once too.
+  while (before > 0 && isWordChar(doc[start - before]) && isWordChar(doc[start - before - 1]) && canTakeBefore()) before += 1;
+  while (after > 0 && isWordChar(doc[end + after - 1]) && isWordChar(doc[end + after]) && canTakeAfter()) after += 1;
+  return { from: start - before, to: end + after };
+}
+
 /**
  * Write one correction into a document the knowledge base already holds, and
  * keep the record an undo reads.
  *
+ * An empty `text` deletes the passage `replaces` names (ruling 581). When the
+ * text written would not stand once, the record takes the lines around it
+ * until it does, so an undo can still find it; the document is written the
+ * same.
+ *
  * Refuses, writing nothing: a document the knowledge base does not hold (a
  * typo would otherwise CREATE a settled-looking document, ruling 378); a
  * passage that does not stand exactly once in the settled text, handing back
- * the document's closest lines; text that would stand more than once after the
- * write, since an undo could not find it; a side over
- * {@link KB_CORRECTION_MAX_BYTES}; and text a person already undid in this
- * document. A document that already says `text` needs nothing, and says so.
+ * the document's closest lines; an addition the document already holds; a
+ * side over {@link KB_CORRECTION_MAX_BYTES}; and a correction a person already
+ * undid in this document.
  */
 export async function mergeKbCorrection(
   db: DatabaseSync,
@@ -370,31 +434,32 @@ export async function mergeKbCorrection(
     };
   }
   const where = `${input.kb}/${located.rel}`;
-  const refused = listKbCorrections(db).find(
-    (c) =>
-      c.undone &&
-      c.kb === input.kb &&
-      c.doc === located.rel &&
-      looseText(c.text) === looseText(input.text),
-  );
-  if (refused?.undone) {
+  const undoneBefore = (text: string) => {
+    const refused = listKbCorrections(db).find(
+      (c) => c.undone && c.kb === input.kb && c.doc === located.rel && looseText(c.text) === looseText(text),
+    );
+    if (!refused?.undone) return null;
     return {
-      ok: false,
+      ok: false as const,
       message:
         `${refused.undone.by} undid this same correction of ${where} on ${dayOf(refused.undone.at)} ` +
         `(${refused.id}${refused.undone.reason ? `: "${refused.undone.reason}"` : ""}). Nothing was written. ` +
         "Do not write it again. If your evidence says they are wrong, put it to a person (a question, or a decision packet) and let them decide.",
     };
-  }
+  };
+  const refused = undoneBefore(input.text);
+  if (refused) return refused;
   return withFileLock(`kb-doc:${located.abs}`, () => {
     const raw = readFileSync(located.abs, "utf8");
     const eol = eolOf(raw);
     const text = asDocText(input.text, eol);
     const replaces = input.replaces === null ? null : asDocText(input.replaces, eol);
-    if (!text.trim()) {
+    // Ruling 581: an empty `text` deletes the passage `replaces` names; with
+    // no passage there is nothing to delete and nothing to add.
+    if (!text.trim() && !replaces) {
       return {
         ok: false as const,
-        message: "A correction needs the text to write. Nothing was written.",
+        message: "A correction needs the text to write, or the passage to delete in `replaces`. Nothing was written.",
       };
     }
     // The settled view masks a proposals section with NUL, which no text
@@ -407,21 +472,41 @@ export async function mergeKbCorrection(
     }
     const settled = settledView(raw);
     let next: string;
+    /** What the record names, which an undo swaps back: ruling 581 widens it. */
+    let recorded = { replaced: replaces, text };
     if (replaces) {
       const count = occurrences(settled, replaces);
       if (count === 0) {
-        if (occurrences(settled, text) > 0) {
+        // Ruling 581: a retry finds its own record. Text that merely stands
+        // in the document proves nothing: " Evidence:" stood 56 times in the
+        // calculator research when a Researcher's passage was one character
+        // off, and a deletion writes no text at all.
+        const made = listKbCorrections(db).find(
+          (c) =>
+            !c.undone &&
+            c.kb === input.kb &&
+            c.doc === located.rel &&
+            c.replaced !== null &&
+            asDocText(c.replaced, eol).includes(replaces) &&
+            asDocText(c.text, eol).includes(text) &&
+            occurrences(settled, asDocText(c.text, eol)) === 1,
+        );
+        if (made) {
           return {
             ok: false as const,
-            message: `${where} already reads as your \`text\`, and the passage it would replace is gone. Nothing needed writing.`,
+            message: `${made.id} made this correction of ${where} on ${dayOf(made.at)}, and it stands. Nothing needed writing.`,
           };
         }
+        const standing = occurrences(settled, text);
         const near = closestLines(settled, replaces);
         return {
           ok: false as const,
           message:
             `The passage you sent as \`replaces\` is not in ${where} exactly as you sent it. Nothing was written. ` +
-            "Copy it character for character from the document (read_knowledge_doc returns it), list marker and emphasis included" +
+            (standing > 0
+              ? `Your \`text\` stands there ${standing === 1 ? "once" : `${standing} times`} already: if the correction you meant is in, it needs nothing more. If not, copy`
+              : "Copy") +
+            " the passage character for character from the document (read_knowledge_doc returns it), list marker and emphasis included" +
             (near.length > 0
               ? `; the lines closest to it read:\n${fenceFor(near.join("\n"))}\n${near.join("\n")}\n${fenceFor(near.join("\n"))}`
               : ". No line of the document is close to it."),
@@ -441,6 +526,25 @@ export async function mergeKbCorrection(
       }
       const at = settled.indexOf(replaces);
       next = raw.slice(0, at) + text + raw.slice(at + replaces.length);
+      // Ruling 581: an undo finds a correction by the text it wrote, so that
+      // text has to stand once. A deletion writes none, and a corrected line
+      // can repeat one the document holds elsewhere, so the record takes the
+      // lines around it until it does. The document written is the same
+      // either way; only what the record names grows.
+      const anchor = anchorAround(settledView(next), at, text.length);
+      if (!anchor) {
+        return {
+          ok: false as const,
+          message:
+            `Your \`text\` would not stand once in ${where} after the write, even with the lines around it, so an undo could not tell which one is yours. ` +
+            "Nothing was written. Correct a longer passage, so the corrected text is one of a kind.",
+        };
+      }
+      // The written text and the passage share what lies around them.
+      recorded = {
+        replaced: raw.slice(anchor.from, anchor.to - text.length + replaces.length),
+        text: next.slice(anchor.from, anchor.to),
+      };
     } else {
       if (occurrences(settled, text) > 0) {
         return {
@@ -450,7 +554,7 @@ export async function mergeKbCorrection(
       }
       next = withAppended(raw, text, eol);
     }
-    const standing = occurrences(settledView(next), text);
+    const standing = occurrences(settledView(next), recorded.text);
     if (standing !== 1) {
       return {
         ok: false as const,
@@ -459,17 +563,21 @@ export async function mergeKbCorrection(
           "Nothing was written. Include more of the line in `replaces` and `text`, so the corrected text stands once.",
       };
     }
+    // Ruling 581: the same correction made again takes the same lines around
+    // it, so a person's undo still refuses its repeat.
+    const undoneAnchored = recorded.text === text ? null : undoneBefore(recorded.text);
+    if (undoneAnchored) return undoneAnchored;
     const segments = located.rel.split("/");
     const name = segments.pop()!;
     writeStoreDoc(db, target, segments, name, next, input.actor, { overwrite: true });
     const at = (input.now ?? new Date()).toISOString();
     const correction: KbCorrection = {
-      id: `kc-${sha256Hex(`${input.kb}\n${located.rel}\n${replaces ?? ""}\n${text}\n${at}`).slice(0, 10)}`,
+      id: `kc-${sha256Hex(`${input.kb}\n${located.rel}\n${recorded.replaced ?? ""}\n${recorded.text}\n${at}`).slice(0, 10)}`,
       kb: input.kb,
       doc: located.rel,
       rulings: input.rulings,
-      replaced: replaces,
-      text,
+      replaced: recorded.replaced,
+      text: recorded.text,
       evidence: clipEvidence(input.evidence.trim()),
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

@@ -182,6 +182,28 @@ export function followClosedDecision(
   );
 }
 
+/**
+ * Ruling 582: the rows about one timeline event say `text` in place of what
+ * they copied from it (a mention quotes the comment), when a person took that
+ * event's words off the task's record. Returns how many changed.
+ */
+export function retextEventNotifications(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  occurredAt: string,
+  text: string,
+): number {
+  return Number(
+    db
+      .prepare(
+        `UPDATE notifications SET text = ?
+         WHERE project_slug = ? AND task_key = ? AND href = ?`,
+      )
+      .run(text, projectSlug, taskKey, taskEventLink(projectSlug, taskKey, occurredAt)).changes,
+  );
+}
+
 /** The task's pending recommendations, each a decision to apply. */
 export function taskRecommendationsLink(projectSlug: string, taskKey: string): string {
   return `${taskPath(projectSlug, taskKey)}#${TASK_RECOMMENDATIONS_ANCHOR}`;

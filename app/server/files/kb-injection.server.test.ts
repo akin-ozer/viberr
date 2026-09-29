@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -11,6 +12,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   KB_DOC_READ_CHARS,
   isInjectableKbDoc,
+  isPrivateKbFolder,
   kbSizeClass,
   readKbDocForRun,
   readKbIndexDetailed,
@@ -272,6 +274,50 @@ describe("readKbIndexes — every declared KB, no shared budget (ruling 283)", (
   });
 });
 
+/**
+ * Ruling 578: every agent of a person runs as that person's uid and can read
+ * `kb/` (ruling 460(d)), so a grant decided what a run is given and nothing
+ * kept a benchmark's answer key from the shells of the agents it scores. A
+ * private folder (0700, the server's alone) is closed to every shell; the runs
+ * it is granted to read it through their knowledge tool.
+ */
+describe("a private knowledge base (ruling 578)", () => {
+  it("is the folder's own mode: 0700 is private, anything the group or others may read is not", () => {
+    const { kbDir } = freshKb("keys");
+    expect(isPrivateKbFolder(kbDir)).toBe(false);
+    chmodSync(kbDir, 0o700);
+    expect(isPrivateKbFolder(kbDir)).toBe(true);
+    chmodSync(kbDir, 0o750);
+    expect(isPrivateKbFolder(kbDir)).toBe(false);
+    expect(isPrivateKbFolder(path.join(kbDir, "missing"))).toBe(false);
+  });
+
+  it("sends a run with a knowledge tool to read_knowledge_doc, and tells a run without one it cannot reach it", () => {
+    // CANARIES: drop the private sentence and the index sends the run to a
+    // folder its shell cannot open; drop the `hasKnowledgeTool === false`
+    // miss and a Codex run is handed an index it has no way to use.
+    const { dataRoot, kbDir } = freshKb("keys");
+    writeFileSync(path.join(kbDir, "sample-01.md"), "# Sample 01\n\nEXPECTED-TOTAL", "utf8");
+    chmodSync(kbDir, 0o700);
+    const tooled = readKbIndexDetailed("keys", dataRoot, { hasKnowledgeTool: true });
+    expect(tooled.body).toContain("is private (ruling 578): no shell on this run can open it, so read each document with `read_knowledge_doc`.");
+    expect(tooled.body).toContain("`sample-01.md`");
+    expect(tooled.body).not.toContain("EXPECTED-TOTAL");
+    const bare = readKbIndexes(["keys"], dataRoot, { hasKnowledgeTool: false });
+    expect(bare.parts).toEqual([]);
+    expect(bare.unresolved).toEqual([
+      {
+        name: "keys",
+        reason:
+          "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
+      },
+    ]);
+    // An open folder reads as it always did, on either backend.
+    chmodSync(kbDir, 0o755);
+    expect(readKbIndexes(["keys"], dataRoot, { hasKnowledgeTool: false }).parts[0]?.body).toMatch(/^Folder `[^`]+`\. 1 document/);
+  });
+});
+
 describe("readKbDocForRun — the pull half of ruling 283", () => {
   it("returns the document whole", () => {
     const { dataRoot, kbDir } = freshKb();
@@ -348,8 +394,28 @@ describe("readKbDocForRun — the pull half of ruling 283", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(path.join(kbDir, "big.md"), "z".repeat(KB_DOC_READ_CHARS + 500), "utf8");
     const out = readKbDocForRun(["notes"], "notes", "big.md", dataRoot);
-    expect(out).toContain("cut off here");
     expect(out).toContain("not the whole document");
+  });
+
+  it("ruling 580: a long document is read in pages, each saying where it stands and where to read on", () => {
+    // Live on the AWS calculator board the controller could not take in a
+    // 94 KB document whole, and agents read past 48,000 characters from disk,
+    // which a private knowledge base (ruling 578) closes. CANARY: ignore
+    // `offset` and every page is the opening again.
+    const { dataRoot, kbDir } = freshKb();
+    const size = KB_DOC_READ_CHARS * 2 + 1_000;
+    writeFileSync(path.join(kbDir, "big.md"), "a".repeat(KB_DOC_READ_CHARS) + "b".repeat(KB_DOC_READ_CHARS) + "c".repeat(1_000), "utf8");
+    const first = readKbDocForRun(["notes"], "notes", "big.md", dataRoot);
+    expect(first.startsWith("a")).toBe(true);
+    expect(first).toContain(`characters 0 to 48,000 of ${size.toLocaleString("en-US")} in \`big.md\``);
+    expect(first).toContain(`read on with offset ${KB_DOC_READ_CHARS}`);
+    const second = readKbDocForRun(["notes"], "notes", "big.md", dataRoot, KB_DOC_READ_CHARS);
+    expect(second.startsWith("b")).toBe(true);
+    expect(second).toContain(`read on with offset ${KB_DOC_READ_CHARS * 2}`);
+    const last = readKbDocForRun(["notes"], "notes", "big.md", dataRoot, KB_DOC_READ_CHARS * 2);
+    expect(last.startsWith("c")).toBe(true);
+    expect(last).toContain("the end of the document");
+    expect(readKbDocForRun(["notes"], "notes", "big.md", dataRoot, size + 5)).toContain("is past its end");
   });
 });
 

@@ -976,7 +976,7 @@ Raised by agents from evidence on a task. **Nothing here is binding.** A person,
   in it exactly once, and so must the passage a ruling-498 correction replaces. Promoting or
   dismissing the last entry removes the heading and the intro with it.
 
-## 8. A knowledge-base correction (ruling 498)
+## 8. A knowledge-base correction (rulings 498 and 581)
 
 An agent that proves a passage of a knowledge-base document wrong writes the correction into
 the document (`mergeKbCorrection`, `app/server/org/kb-corrections.server.ts`); a person undoes
@@ -985,17 +985,23 @@ corrected, or as it did before. The record is the audit row (below).
 
 - **Replace.** `replaces` must stand exactly once in the settled text (§7: an unmerged
   proposals section is not part of it), compared exactly once the two normalizations below
-  are applied; `text` takes its place. A refusal hands back the document's closest lines verbatim, fenced, for the agent to
-  copy.
+  are applied; `text` takes its place, and an empty `text` deletes the passage (ruling 581). A
+  refusal hands back the document's closest lines verbatim, fenced, for the agent to copy; when
+  a standing correction's record holds the passage and text sent, it names that correction
+  instead, and text that merely stands elsewhere is reported as that, never as a correction made.
 - **Add.** With no `replaces`, `text` goes at the end of the settled text (before a proposals
   section the document still holds) after one blank line, and ends with a newline.
 - **Both.** Leading and trailing blank lines are dropped from both sides, and both are written
-  in the document's own line endings (CRLF when the document has any). After the write `text`
-  must stand exactly once in the settled text, so an undo can find it; each side is at most
-  8 KB (`KB_CORRECTION_MAX_BYTES`, UTF-8 bytes). A document that already reads as `text` is
-  left alone.
-- **Undo.** The written `text` must still stand exactly once: the undo puts `replaces` back in
-  its place, or removes an addition with the blank line that set it apart. A document edited
+  in the document's own line endings (CRLF when the document has any). An undo finds a
+  correction by what the record says was written, which must stand exactly once in the settled
+  text (matches counted with overlaps). When the written `text` is blank or would not stand
+  once, the record takes the lines it sits in, then the lines after and before in turn, until
+  it does (past 400 characters on a side, characters instead, finishing the word it cut), and
+  records the passage with the same lines around it (ruling 581); the document is written the
+  same either way. Each side the filer sends is at most 8 KB (`KB_CORRECTION_MAX_BYTES`, UTF-8
+  bytes). An addition the document already holds is left alone.
+- **Undo.** The recorded `text` must still stand exactly once: the undo puts the recorded
+  passage back in its place, or removes an addition with the blank line that set it apart. A document edited
   since is refused and left to be changed by hand.
 - **Record.** `task.kb_correction.merged` (subject the task; details `id` = `kc-` and ten hex
   characters, `kb`, `doc`, `rulings`, `replaced`, `text`, `evidence` clipped to 4,000
