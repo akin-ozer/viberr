@@ -23,6 +23,7 @@ import {
 import { settle, waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
@@ -422,7 +423,11 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
 
     const client = new Client({ name: "codex-cli", version: "1.0.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["read_board", "read_timeline_entry"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "read_board",
+      "read_timeline_entry",
+      "read_task_attachment",
+    ]);
     const call = async (name: string, args: Record<string, string>) => {
       const result = await client.callTool({ name, arguments: args });
       return z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
@@ -439,6 +444,16 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     expect(entry.text).toBe(answer);
     const refused = await client.callTool({ name: "read_timeline_entry", arguments: { at: "2026-09-29T11:11:33.126Z" } });
     expect(refused.isError).toBe(true);
+    // Ruling 594: another task's file, read where it is; `read_board` names it.
+    const vib2 = taskAttachmentsDir(store.slug, "VIB-2", store.dataRoot);
+    mkdirSync(vib2, { recursive: true });
+    writeFileSync(path.join(vib2, "holdout-comparison.md"), "# Hold-outs\n\n## Exposure register\n");
+    expect(z.object({ files: z.array(z.string()) }).parse(JSON.parse(await call("read_board", { taskKey: "VIB-2" }))).files).toEqual([
+      "holdout-comparison.md",
+    ]);
+    // CANARY: route read_task_attachment nowhere and this is refused.
+    expect(await call("read_task_attachment", { taskKey: "VIB-2", name: "holdout-comparison.md" })).toContain("## Exposure register");
+    expect(await call("read_task_attachment", { name: "holdout-comparison.md" })).toContain("[noop] VIB-1 has no attachment");
     await client.close();
 
     await interrupt(runId);
