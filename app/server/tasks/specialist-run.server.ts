@@ -428,6 +428,23 @@ export const KB_CORRECTION_NOTE_CODEX =
   "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read. For a knowledge base some agents on this project are not given, name only the document and what is wrong, and quote none of it: your report is on the task, where they read it.";
 
 /**
+ * Ruling 590: what a reviewer that has judged this task before is told.
+ *
+ * A reviewer's newest verdict is the one every later reader gets: the board
+ * read returns only the verdicts on the current delivery, one per reviewer
+ * (ruling 569), and a reviewer that judges the same delivery again replaces
+ * its own verdict. Nothing told the reviewer. Live on AWSC-31 the Workflow
+ * Researcher, reading the hold-outs' verdicts, reported two knowledge-base
+ * passages as "Not fixed" that the Estimate Judge had corrected on AWSC-29:
+ * its first verdict named the corrections, and its re-review, the verdict
+ * that stands, did not. It also said AWSC-28's verdict left one Questions
+ * point unexplained: the explanation was in the verdict its supplemental one
+ * replaced.
+ */
+export const REREVIEW_RESTATES_NOTE =
+  "- You have recorded a verdict on this task before, and the one you record now replaces it for every later reader: the board read and the task's outcome carry only a reviewer's newest verdict. Restate in it everything from your earlier verdict that still stands (a score and each of its deductions, the findings, each knowledge-base correction you made on this task with its id), not only what changed.";
+
+/**
  * Ruling 488 (F40-67): the relay, named where a specialist reads its channels.
  * Live on WEB-9 a goal said to post the deployed CPU numbers on WEB-8, and the
  * Platform Engineer, with no way to, wrote them into attachments "for WEB-8"
@@ -2155,6 +2172,15 @@ async function dispatchAgentRun(
         '- Your ask-human capability on THIS backend is that `question` field: filling it in is how you raise a question for the humans; there is no separate ask_human tool here, so never say ask-human is unavailable. Set `question` when a human decision blocks you; the answer arrives on a later resumed run, not during this one, so note it and finish.',
       );
     }
+  }
+  // Ruling 590: a reviewer that has judged this task before is told its new
+  // verdict replaces the old one for every reader, on either backend.
+  if (
+    realBackend &&
+    collab.verdict &&
+    existing.parsed.frontmatter.verdicts.some((v) => v.profileId === engagement.profileId)
+  ) {
+    collabNotes.push(REREVIEW_RESTATES_NOTE);
   }
   // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the

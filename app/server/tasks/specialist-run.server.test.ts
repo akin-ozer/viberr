@@ -97,6 +97,7 @@ import {
   KB_CORRECTION_NOTE_CODEX,
   RELAY_NOTE_CLAUDE,
   RELAY_NOTE_CODEX,
+  REREVIEW_RESTATES_NOTE,
   type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
@@ -2073,6 +2074,59 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // work is told to approve it.
     expect(prompt).not.toContain("REQUIRED at the end of your review");
     expect(prompt).not.toContain("report `approve` or `request_changes`");
+  });
+
+  it("ruling 590: a reviewer that has judged the task before is told its new verdict replaces the old one, on either backend", async () => {
+    // Live on AWSC-31 the Workflow Researcher reported two knowledge-base
+    // passages as not fixed that the Estimate Judge's first verdict on AWSC-29
+    // said it had corrected: the re-review that stands did not say so.
+    // CANARY: drop the note, or give it to a first review.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const review = async () => {
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      return specs.at(-1)!.prompt;
+    };
+    for (const backend of ["claude", "codex"] as const) {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        repo: null,
+        agents: ["dev", "critic"].map((profileId) => ({
+          profileId,
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "specialist" as const,
+            name: profileId,
+            role: "reviewer",
+            backends: [backend],
+            model: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
+          },
+        })),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.verdicts = [];
+      });
+      expect(await review(), backend).not.toContain(REREVIEW_RESTATES_NOTE);
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.verdicts.push({
+          profileId: "critic",
+          revisionId: "files:2026-09-29T11:00:00.000Z",
+          result: "request_changes",
+          reason: "Mapping never asked two questions.",
+          at: "2026-09-29T11:07:48.057Z",
+          rounds: 1,
+        });
+      });
+      expect(await review(), backend).toContain(REREVIEW_RESTATES_NOTE);
+    }
   });
 
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
