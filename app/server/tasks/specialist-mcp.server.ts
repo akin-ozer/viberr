@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { KNOWLEDGE_MCP_NAME, type KnowledgeMount } from "~/server/mcp-proxy/knowledge-tool.server";
 import { logger } from "~/server/logging/logger.server";
 import { mcpGatewayMountUrl } from "~/server/mcp-proxy/gateway.server";
 import { MCP_GRANT_TOOL_NAME } from "~/server/mcp-proxy/grant-tool.server";
@@ -87,6 +88,10 @@ export interface HttpMcpServerConfig {
    *  write. The `disallowedTools` name `startRun` adds is what binds on every
    *  transport; this is the SDK's own channel for HTTP, carried as well. */
   tools?: { name: string; permission_policy: "always_deny" }[];
+  /** Ruling 585: set only on the gateway's knowledge mount. The gateway keeps
+   *  it (the knowledge bases it may read for the run) and hands the run the
+   *  mount without it. */
+  knowledge?: KnowledgeMount;
 }
 
 /** The portable per-server config both adapters accept; the Codex adapter
@@ -395,6 +400,35 @@ export function resolveSpecialistMcpServersDetailed(
     if (row.up === false) flagDown(name, row.lastCheckedAt ?? null);
   }
   return { servers, unresolved, toolDenials, proxied, oauthGrants };
+}
+
+/**
+ * Ruling 585: the knowledge server a Codex specialist that holds a knowledge
+ * base mounts, or null.
+ *
+ * A Claude run's toolkit gives it `read_knowledge_doc` and
+ * `correct_knowledge_doc`; a Codex run mounts no in-process tools (ruling
+ * 422), so it could not read a private knowledge base (ruling 578) and had to
+ * put a correction in its report for the operator to write. The mount is the
+ * gateway's own URL for `viberr_knowledge`, carrying the run's knowledge bases
+ * and its agent for the gateway; `startRun` binds the run's token onto it and
+ * hands the run the mount without them. A Claude run mounts nothing here, and
+ * a gateway that is not running mounts nothing: the run then reads open
+ * knowledge bases at their folders, reports corrections, and gets a private
+ * one as an unresolved grant, as before.
+ */
+export function resolveKnowledgeMcp(input: {
+  backend: string | undefined;
+  kb: readonly string[];
+  dataRoot?: string | undefined;
+  agent: { profileId: string; roleHint: string | null };
+}): HttpMcpServerConfig | null {
+  if (input.backend !== "codex" || input.kb.length === 0) return null;
+  const url = mcpGatewayMountUrl(KNOWLEDGE_MCP_NAME);
+  if (!url) return null;
+  const knowledge: KnowledgeMount = { kb: [...input.kb], agent: input.agent };
+  if (input.dataRoot) knowledge.dataRoot = input.dataRoot;
+  return { type: "http", url, knowledge };
 }
 
 /**

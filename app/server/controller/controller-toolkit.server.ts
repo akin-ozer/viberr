@@ -880,7 +880,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .boolean()
           .optional()
           .describe(
-            "Ruling 578: true closes the KB's folder to every agent's shell; the runs it is granted to read it through read_knowledge_doc, and a Codex specialist, which has no such tool, is told the grant cannot reach it. false opens it again. Omit to leave it as it is.",
+            "Ruling 578: true closes the KB's folder to every agent's shell; the runs it is granted to read it through read_knowledge_doc, which a Codex specialist gets from Viberr's MCP gateway (ruling 585). false opens it again. Omit to leave it as it is.",
           ),
         doc: z
           .strictObject({

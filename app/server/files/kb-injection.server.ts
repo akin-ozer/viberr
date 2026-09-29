@@ -251,7 +251,8 @@ export function isPrivateKbFolder(dir: string): boolean {
 }
 
 /** Ruling 578: whether the run an index is for can read a document without
- *  its shell (`read_knowledge_doc`); a Codex specialist cannot (ruling 422). */
+ *  its shell (`read_knowledge_doc`). A Codex specialist has it only through
+ *  the gateway's knowledge server (ruling 585). */
 export interface KbIndexReader {
   hasKnowledgeTool?: boolean;
 }
@@ -493,6 +494,12 @@ export function readKbDoc(
   return { rel: doc.rel, text: raw.slice(start, end), start, end, length: raw.length };
 }
 
+/** What a run's `read_knowledge_doc` says it does, on either backend (ruling 585). */
+export const KB_DOC_TOOL_DESCRIPTION =
+  "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name.";
+export const KB_DOC_KB_DESCRIPTION = "The knowledge base's name, as its index heading gives it.";
+export const KB_DOC_PATH_DESCRIPTION = "The document's path inside that knowledge base, e.g. 'conventions.md'.";
+
 /** Ruling 580: what a knowledge-base reader's `offset` does, one sentence for every tool that takes it. */
 export const KB_DOC_OFFSET_DESCRIPTION =
   `Ruling 580: the character to start at. A read returns ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters; ` +
@@ -505,6 +512,8 @@ export const KB_DOC_OFFSET_DESCRIPTION =
  * channels are named because the toolkit tool is Claude-only — a Codex run
  * mounts no in-process Viberr tools at all, and its channel is the folder path
  * the index prints, which is a real path on the machine the run executes on.
+ * A private knowledge base has no path a shell can open, so a Codex run that
+ * holds one gets `read_knowledge_doc` from the gateway (ruling 585).
  */
 const KB_INDEX_NOTE =
   "\n\n---\n# How to read a knowledge base\n\n" +

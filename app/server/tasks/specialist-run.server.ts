@@ -145,7 +145,9 @@ import {
   resolveUndeployedDisallowedTools,
   specialistGrantModes,
 } from "./specialist-tool-policy";
+import { KNOWLEDGE_MCP_NAME } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
+  resolveKnowledgeMcp,
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
@@ -411,13 +413,14 @@ async function mcpServersFor(
   return mounts;
 }
 
-/** Rulings 483 and 498: the collaboration note a Claude run with a knowledge
- *  base gets. */
+/** Rulings 483 and 498: the collaboration note a run with a knowledge base
+ *  and the correction tool gets: a Claude run, or a Codex run with the
+ *  gateway's knowledge server (ruling 585). */
 export const KB_CORRECTION_NOTE_CLAUDE =
   "- `correct_knowledge_doc`: when your work PROVES a passage in one of your knowledge bases wrong (a version you measured, a path, a command, a step), correct it in that document with your evidence instead of only reporting the discrepancy: `replaces` is the passage exactly as the document has it, `text` what it should say (empty to delete it). It is written at once, for every later run to read, and a person undoes it if they disagree. The task's entry quotes the passage only when every agent on the project is given that knowledge base.";
 
-/** Rulings 483 and 498: the same channel on Codex, which mounts no Viberr
- *  tools. */
+/** Rulings 483 and 498: the same channel on a Codex run without the
+ *  gateway's knowledge server, which mounts no Viberr tools. */
 export const KB_CORRECTION_NOTE_CODEX =
   "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read. For a knowledge base some agents on this project are not given, name only the document and what is wrong, and quote none of it: your report is on the task, where they read it.";
 
@@ -1617,6 +1620,16 @@ async function dispatchAgentRun(
   const resolvedMcps: RunMcpMounts = realBackend
     ? await mcpServersFor(db, mcpNames, repoWriteWithheldFromDenylist(disallowedTools))
     : { unresolved: [], unhealthy: [], toolDenials: [], proxied: [], oauthGrants: [] };
+  // Ruling 585: a Codex run that holds a knowledge base reads and corrects it
+  // through the gateway's knowledge server, and its prompt says so.
+  const knowledgeMount = realBackend
+    ? resolveKnowledgeMcp({
+        backend,
+        kb,
+        dataRoot: ctx.dataRoot,
+        agent: { profileId: engagement.profileId, roleHint: engagement.role },
+      })
+    : null;
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1868,6 +1881,7 @@ async function dispatchAgentRun(
     skills,
     nativeSkills: skillMount.mounted,
     kb,
+    knowledgeTool: backend !== "codex" || knowledgeMount !== null,
     mcps: [
       ...Object.keys(resolvedMcps.mcpServers ?? {}),
       ...(browser.server ? [BROWSER_MCP_NAME] : []),
@@ -2135,11 +2149,12 @@ async function dispatchAgentRun(
   }
   // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the
-  // KB grant mounts; Codex mounts no Viberr tools, so its report carries it
-  // and the operator relays it (its agent-reply turn says so).
+  // KB grant mounts, and Codex with the same tool on the gateway's knowledge
+  // server (ruling 585); a Codex run without that server reports it, and the
+  // operator relays it (its agent-reply turn says so).
   if (realBackend && kb.length > 0) {
     collabNotes.push(
-      backend === "claude"
+      backend === "claude" || knowledgeMount
         ? KB_CORRECTION_NOTE_CLAUDE
         : KB_CORRECTION_NOTE_CODEX,
     );
@@ -2176,6 +2191,7 @@ async function dispatchAgentRun(
   // shadow viberr's own governance tools. That precedence is the order below.
   const grantedMcpServers = { ...declaredMcps.mcpServers };
   if (browser.server) grantedMcpServers[BROWSER_MCP_NAME] = browser.server;
+  if (knowledgeMount) grantedMcpServers[KNOWLEDGE_MCP_NAME] = knowledgeMount;
   const mergedMcpServers = { ...grantedMcpServers, ...toolkit?.mcpServers };
   // P13-D-26: `collab.evidence` joins the gate. Codex has no `report_outcome`
   // tool, so the envelope is its ONLY structured channel — without this an
@@ -2833,6 +2849,11 @@ export interface SpecialistPersonaInput {
    *  prompt as text, so no grant is ever fed twice and none is ever dropped. */
   nativeSkills?: readonly string[];
   kb?: string[];
+  /** Ruling 585: whether the run reads a knowledge-base document through a
+   *  tool the server answers (a Claude run's toolkit, or the gateway's
+   *  knowledge server on Codex). Absent means a Claude run has it and a Codex
+   *  run does not. */
+  knowledgeTool?: boolean;
   /** MCP servers mounted for this run — used for the governance rule below. */
   mcps?: string[];
   /** Declared MCP grants that resolved to NO server (P14-LV-09). */
@@ -2946,11 +2967,12 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
   // every declared KB now names every document it holds, and the run pulls the
   // ones it needs through `read_knowledge_doc`.
   const rulingsKb = input.rulingsKb ?? null;
-  // Ruling 578: a Codex specialist has no knowledge tool, so a private
-  // knowledge base is a grant it cannot use, and its prompt says so.
+  // Ruling 578: a run with no knowledge tool cannot use a private knowledge
+  // base, and its prompt says so. A Codex run has one only when the gateway's
+  // knowledge server is mounted (ruling 585).
   const kbSet = readKbIndexes(kbNames, input.dataRoot, {
     rulingsKb,
-    hasKnowledgeTool: input.backend !== "codex",
+    hasKnowledgeTool: input.knowledgeTool ?? input.backend !== "codex",
   });
   parts.push(
     ...attachedResourcesBlock({
@@ -3224,7 +3246,9 @@ export interface AnalyzePromptInput {
   /**
    * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
    * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
-   * contract. A Codex run mounts no `read_knowledge_doc` tool, so ruling 283's
+   * contract. A Codex run mounts no `read_knowledge_doc` tool for an open
+   * knowledge base (it gets one from the gateway only for a private one,
+   * ruling 585), so ruling 283's
    * index tells it to read each document at its folder path, and ruling 286
    * says the rulings bind it; the contract said "everything else outside the
    * working directory stays off-limits". Live on ax-clone the careful runs
@@ -3866,6 +3890,13 @@ export async function resolveResumeConfinement(
           backend: input.backend,
         })
       : { server: null, refused: null };
+    // Ruling 585: the knowledge server re-mounts on resume from the same list.
+    const resumeKnowledge = resolveKnowledgeMcp({
+      backend: input.backend,
+      kb,
+      dataRoot: ctx.dataRoot,
+      agent: { profileId: input.profileId, roleHint: input.role ?? resolved.role },
+    });
     const resumeUnresolved: { name: string; reason: string }[] = [];
     // Resolve the collaboration gates up-front: the persona's github_read
     // section (F4) needs `collab.githubRead`, and the toolkit below reuses the
@@ -3882,6 +3913,7 @@ export async function resolveResumeConfinement(
       skills: resolved.skills,
       nativeSkills: skillMount.mounted,
       kb,
+      knowledgeTool: input.backend !== "codex" || resumeKnowledge !== null,
       mcps: [
         ...Object.keys(mcpServers),
         ...(resumeBrowser.server ? [BROWSER_MCP_NAME] : []),
@@ -3974,6 +4006,7 @@ export async function resolveResumeConfinement(
     if (resumeBrowser.server) {
       grantedServers[BROWSER_MCP_NAME] = resumeBrowser.server;
     }
+    if (resumeKnowledge) grantedServers[KNOWLEDGE_MCP_NAME] = resumeKnowledge;
     const merged = { ...grantedServers, ...toolkit?.mcpServers };
     const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey, support);
     // C02-R3: the fresh path creates the drop BEFORE the run so a plain `cp`

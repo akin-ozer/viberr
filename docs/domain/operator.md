@@ -346,10 +346,12 @@ about knowledge bases. A reviewer's objection to a defect CLASS the rulings have
 convention for is written into the rulings as that convention (ruling 418). And a report
 that says a passage in a knowledge base is wrong (a version, a path, a command, a step it
 measured), with no correction of it on the timeline, is relayed with
-`correct_knowledge_doc` into that document with the agent's evidence (rulings 483 and 498):
-a Codex agent has no tool to make one itself, and its prompt tells it to end its report
-with a `Knowledge-base correction` section, the passage exactly as the document has it,
-for exactly this. Either is written at once; a person undoes what they disagree with.
+`correct_knowledge_doc` into that document with the agent's evidence (rulings 483 and 498).
+A Codex agent makes its own through the gateway's `viberr_knowledge` server (ruling 585);
+only when the gateway is not running does it have no tool, and then its prompt tells it to
+end its report with a `Knowledge-base correction` section, the passage exactly as the
+document has it, for exactly this. Either is written at once; a person undoes what they
+disagree with.
 
 `get_task` returns the `OperatorTaskSnapshot` (JSON-embedded in the Codex prompt):
 

@@ -1,3 +1,5 @@
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -20,12 +22,13 @@ import {
 } from "../../../test-support/fake-runtime";
 import { settle, waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { sealSecret } from "~/server/secrets/secret-box.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
-import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { resolveKnowledgeMcp, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { errorMessage } from "~/shared/errors";
@@ -285,5 +288,70 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
     await interrupt(first.runId);
     await settle();
     expect(mcpGatewayStatus().liveTokens).toBe(0);
+  });
+});
+
+describe("ruling 585: the gateway answers a Codex run's knowledge server itself", () => {
+  it("reads and corrects the knowledge bases the run holds, a private one included, and nothing else, while the run lives", async () => {
+    const dir = path.join(store.dataRoot, "kb", "answer-keys");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "sample-01.md"), "# Sample 01\n\nThe expected total is 1234.56.\n");
+    chmodSync(dir, 0o700);
+    const agent = { profileId: "estimate-judge", roleHint: "Estimate Judge" };
+    // A Claude run has these tools in its toolkit, and a run with no
+    // knowledge base needs none.
+    expect(resolveKnowledgeMcp({ backend: "claude", kb: ["answer-keys"], dataRoot: store.dataRoot, agent })).toBeNull();
+    expect(resolveKnowledgeMcp({ backend: "codex", kb: [], dataRoot: store.dataRoot, agent })).toBeNull();
+    const mount = resolveKnowledgeMcp({ backend: "codex", kb: ["answer-keys"], dataRoot: store.dataRoot, agent });
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "scoring" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Estimate Judge",
+      kind: "reviewer",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      mcpServers: { viberr_knowledge: mount! },
+      agentProfileId: "estimate-judge",
+      credentialUserId: store.users.arda.id,
+    });
+    await settle();
+    // CANARY: leave the mount's list on the run's config and this parse fails:
+    // the run is handed the URL and its token, never the list or the store.
+    const knowledge = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_knowledge);
+    expect(knowledge.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/viberr_knowledge$/);
+
+    const client = new Client({ name: "codex-cli", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(knowledge.url), { requestInit: { headers: knowledge.headers } }));
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["read_knowledge_doc", "correct_knowledge_doc"]);
+    const call = async (name: string, args: Record<string, string>) => {
+      const result = await client.callTool({ name, arguments: args });
+      return z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+    };
+    // CANARY: route the knowledge server to an upstream and nothing answers.
+    expect(await call("read_knowledge_doc", { kb: "answer-keys", path: "sample-01.md" })).toContain("The expected total is 1234.56.");
+    expect(await call("read_knowledge_doc", { kb: "aws-calculator-research", path: "calculator.md" })).toContain(
+      "No knowledge base `aws-calculator-research` is attached to this run",
+    );
+    // The correction is written as the run's agent, on the run's task.
+    expect(
+      await call("correct_knowledge_doc", {
+        kb: "answer-keys",
+        doc: "sample-01.md",
+        replaces: "The expected total is 1234.56.",
+        text: "The expected total is 1250.00.",
+        evidence: "The calculator's own total for the saved estimate.",
+      }),
+    ).toMatch(/^\[done\]/);
+    expect(readFileSync(path.join(dir, "sample-01.md"), "utf8")).toContain("The expected total is 1250.00.");
+    const [entry] = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline;
+    expect(entry).toMatchObject({ type: "kb_correction", actor: { kind: "agent", backend: "codex", profileId: "estimate-judge" } });
+    await client.close();
+
+    await interrupt(runId);
+    await settle();
+    expect(await gatewayAnswers(knowledge.url, knowledge.headers.Authorization)).toBe(401);
   });
 });
