@@ -2738,6 +2738,40 @@ describe("operatorAcceptCompletion", () => {
     expect("deleteBranch" in packet.options[0]!).toBe(false);
   });
 
+  it("ruling 586: the operator's decision entry carries its card: body, observations and options", async () => {
+    // CANARY: write the one-line entry again and the question is on no record
+    // once a person answers it.
+    deployRoster([
+      ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
+      { capabilityId: "generate-packets", mode: "direct" },
+    ]);
+    seedTask("impl");
+    await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Which region do we price?",
+        body: "The inventory names two datacenters.",
+        observations: [{ k: "Datacenters", v: "fra-1, ams-2", code: true }],
+        options: [
+          { kind: "custom", title: "eu-central-1", recommended: true },
+          { kind: "custom", title: "eu-west-1" },
+        ],
+      },
+      authority("full"),
+    );
+    const entry = task().timeline.find((e) => e.actor.kind === "operator" && e.text.startsWith("**Decision packet:**"));
+    expect(entry?.text).toBe(
+      "**Decision packet:** Which region do we price? Awaiting a human decision.\n\n" +
+        "The inventory names two datacenters.\n\n" +
+        "- **Datacenters:** `fra-1, ams-2`\n\n" +
+        "Options: eu-central-1 (recommended) · eu-west-1",
+    );
+  });
+
   it("full autonomy does NOT accept a task with an OPEN blocked decision (F7-VAL1 mirror)", async () => {
     // The human accept path refuses a task with an open blocked packet; the
     // full-autonomy operator must refuse it too, or it silently buries the

@@ -602,6 +602,45 @@ export const AGENT_QUESTION_PACKET_KIND = "Agent question";
 /** A trailing "(Recommended)" an agent writes on the option it recommends. */
 const RECOMMENDED_MARK = /\s*\(\s*recommended\s*\)\s*$/i;
 
+/**
+ * Ruling 586: the entry that records a question when it is asked carries the
+ * card itself: its body, its observations and its options, under `heading`.
+ *
+ * A packet leaves the task when it is answered. The entry for an agent's
+ * question named only its title ("AWSC-22 Intake batch: accept the proposed
+ * defaults, or change numbered items?"), the operator's only its title too,
+ * and the decision records the option and the person's words, so the questions
+ * themselves, twenty-five numbered items with their proposed defaults, were on
+ * no record once answered. Live on AWSC-22 the Estimate Judge could not check
+ * that each intake question asked one thing: "the card text, which is not on
+ * the task". The entry is the asker's own, so the body stands as it wrote it.
+ */
+export function askedEntryText(
+  heading: string,
+  packet: Pick<TaskPacket, "body" | "observations" | "options">,
+): string {
+  const parts = [heading];
+  const body = packet.body.trim();
+  if (body) parts.push(body);
+  if (packet.observations.length > 0) {
+    parts.push(packet.observations.map((o) => `- **${o.k}:** ${o.code ? inlineCode(o.v) : o.v}`).join("\n"));
+  }
+  // One option is no choice: an agent that offered none gets "Answer the
+  // question", which the entry does not need to say.
+  if (packet.options.length > 1) {
+    parts.push(`Options: ${packet.options.map((o) => (o.rec ? `${o.t} (recommended)` : o.t)).join(" · ")}`);
+  }
+  return parts.join("\n\n");
+}
+
+/** Inline code that holds its own backticks. */
+function inlineCode(text: string): string {
+  let longest = 0;
+  for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+  const ticks = "`".repeat(longest + 1);
+  return longest > 0 ? `${ticks} ${text} ${ticks}` : `${ticks}${text}${ticks}`;
+}
+
 /** The agent-question decision packet (ask-human, G3): type `input`, from =
  * the agent's own ref, choices as resolvable `custom` options. Shared by the
  * live Claude toolkit and the completion-time Codex envelope path. */

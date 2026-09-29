@@ -359,7 +359,9 @@ export const TimelineItem = memo(function TimelineItem({
                 <strong>{ev.title}</strong>
               </div>
             )}
-            <div className="tl-text md-body">
+            {/* Ruling 586: a long entry folds like a comment, behind its own
+                Show more (a decision now carries the card it answered). */}
+            <Collapsible className="tl-text md-body" contentKey={ev.text}>
               {/* Ruling 478(a) (F40-30): typed-event text is markdown too. Its
                   writers put the tool's own words in a fenced block ("What the
                   checkout reported", "What the push reported") and separate
@@ -379,7 +381,7 @@ export const TimelineItem = memo(function TimelineItem({
                 {...(attachmentsBase ? { attachmentsBase } : {})}
                 onAttachmentOpen={lightbox}
               />
-            </div>
+            </Collapsible>
             {/* Ruling 483 (F40-59): a proposal is a decision a person owes, and
                 the project's Controller page is where it is promoted or
                 dismissed and where its document opens. Ruling 498: a

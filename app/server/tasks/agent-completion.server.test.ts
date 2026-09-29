@@ -3671,6 +3671,43 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(rows[0]!.details).toMatchObject({ cause: "packet", surviving: 1 });
   });
 
+  it("ruling 586: the question's entry carries the card, which leaves the task when it is answered", async () => {
+    // CANARY: write the title alone again and the numbered questions are on
+    // no record once Arda answers.
+    writeReviewTask();
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Intake is ready for Arda.",
+        question: {
+          title: "Intake batch: accept the proposed defaults?",
+          body: "1. Region: us-east-1 (default).\n2. Hours: 730 a month (default).",
+          options: [{ title: "Keep the defaults (Recommended)" }, { title: "Change some items", reply: true }],
+        },
+      }),
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "dev",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "finished" },
+    );
+    const asked = taskFile().parsed.timeline.find((e) => e.type === "blocked");
+    expect(asked?.text).toBe(
+      "**Question for a human:** Intake batch: accept the proposed defaults?\n\n" +
+        "1. Region: us-east-1 (default).\n2. Hours: 730 a month (default).\n\n" +
+        "Options: Keep the defaults (recommended) · Change some items",
+    );
+  });
+
   it("R15-7: an UNRESOLVABLE profile's finished run opens no question packet and asserts no evidence", async () => {
     const runId = await finishedRunWith(
       JSON.stringify({

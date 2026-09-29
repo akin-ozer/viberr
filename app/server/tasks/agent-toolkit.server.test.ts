@@ -574,6 +574,13 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       [true, false],
       [false, false],
     ]);
+    // Ruling 586: the question's entry carries the card, which leaves the task
+    // when it is answered. CANARY: write the title alone again.
+    const asked = readTaskFile({ projectSlug: lastStore.slug, taskKey: "VIB-3", dataRoot: lastStore.dataRoot })!
+      .parsed.timeline.find((e) => e.type === "blocked");
+    expect(asked?.text).toBe(
+      "**Question for a human:** Is Workers Builds connected?\n\nOptions: Connected; the first build succeeded · Not yet",
+    );
   });
 
   let lastStore: ReturnType<typeof setupTestStore>;

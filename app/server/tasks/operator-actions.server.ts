@@ -52,7 +52,7 @@ import type {
   CapabilityMode,
 } from "~/schemas/project-file.schema";
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
-import { effectiveCollabMode } from "./agent-outcome.server";
+import { askedEntryText, effectiveCollabMode } from "./agent-outcome.server";
 import {
   currentVerdicts,
   deliveringEngagement,
@@ -1274,6 +1274,11 @@ function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolea
 }
 
 /** Open a typed human-decision packet and notify the task's supervisors. */
+/** A title as a sentence: its own closing mark, or a full stop. */
+function sentence(title: string): string {
+  return /[.?!]$/.test(title) ? title : `${title}.`;
+}
+
 /**
  * Ruling 161: the one sentence naming why a `discard_branch` option cannot be
  * offered, from the fact that says the revision left the workspace.
@@ -1925,10 +1930,13 @@ export async function operatorOpenPacket(
       type: input.packetType === "blocked" ? "blocked" : "comment",
       actor: { kind: "operator" },
       title,
-      text:
+      // Ruling 586: the entry carries the card, which leaves when answered.
+      text: askedEntryText(
         input.packetType === "blocked"
-          ? `**Blocked:** ${title}. Opened a decision packet for the owner to resolve.`
-          : `**Decision packet:** ${title}. Awaiting a human decision.`,
+          ? `**Blocked:** ${sentence(title)} Opened a decision packet for the owner to resolve.`
+          : `**Decision packet:** ${sentence(title)} Awaiting a human decision.`,
+        packet,
+      ),
       toAgent: false,
       evidence: null,
     });

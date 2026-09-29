@@ -723,6 +723,15 @@ a `task.recommendation.withdrawn` row records it, and the "Waiting on you" bell 
 only when no card survives. The operator re-recommends acceptance on its next turn if the
 offer still holds.
 
+The same three writers put the card itself on the entry that records it (ruling 586,
+`askedEntryText`): the heading ("**Question for a human:** <title>", "**Decision packet:**
+<title> Awaiting a human decision.", "**Blocked:** <title> Opened a decision packet…"), then
+the body, the observations and the options, the recommended one marked. A packet leaves the
+task when it is answered, and the decision entry names only the option and the person's
+words, so this entry is where what was asked stays. Viberr's own recovery packets restate
+facts already on the timeline and keep their one-line entries. A long entry folds behind
+Show more, as a comment does.
+
 Choosing a structured option is a decision and amends the task's goal contract; a typed
 free-text directive answers the packet without amending the goal and reaches the operator
 in its own `note` (rulings 189, 284), and every such decision stays in the operator's

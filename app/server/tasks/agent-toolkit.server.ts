@@ -36,6 +36,7 @@ import {
   ASK_HUMAN_RECOMMEND_NOTE,
   ASK_HUMAN_REPLY_NOTE,
   RELAY_FIELD_NOTE,
+  askedEntryText,
   buildAgentQuestionPacket,
   runIdForOutcomeKey,
   stageOutcome,
@@ -304,7 +305,7 @@ export async function openAgentQuestionPacket(
       type: "blocked",
       actor: input.actorRef,
       title: null,
-      text: `**Question for a human:** ${packet.title}`,
+      text: askedEntryText(`**Question for a human:** ${packet.title}`, packet),
       toAgent: false,
       evidence: null,
     });

@@ -163,6 +163,7 @@ import {
 } from "~/server/files/actor-ref.server";
 import {
   AGENT_QUESTION_PACKET_KIND,
+  askedEntryText,
   buildAgentQuestionPacket,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
@@ -4883,8 +4884,9 @@ export async function recordAgentCompletion(
       // Claude toolkit opens its packet live mid-run). One packet slot per
       // task — never clobber an open decision.
       if (question && !parsed.packet) {
-        parsed.packet = buildAgentQuestionPacket(actorRef, question);
-        questionPacketId = parsed.packet.id;
+        const asked = buildAgentQuestionPacket(actorRef, question);
+        parsed.packet = asked;
+        questionPacketId = asked.id;
         parsed.frontmatter.waiting = "human";
         if (questionCause) {
           questionWithdrawal.offers = withdrawAcceptanceOffers(
@@ -4899,7 +4901,7 @@ export async function recordAgentCompletion(
           type: "blocked",
           actor: actorRef,
           title: null,
-          text: `**Question for a human:** ${question.title.trim()}`,
+          text: askedEntryText(`**Question for a human:** ${asked.title}`, asked),
           toAgent: false,
           evidence: null,
         });
