@@ -1359,6 +1359,14 @@ the outcome channel exists (`RELAY_NOTE_CLAUDE` beside `report_outcome`, `RELAY_
 beside the envelope): put what the goal says belongs on another task there, never in an
 attachment or a report for a person to copy over.
 
+A reviewer that already has a verdict on the task (any entry of its own in `verdicts`)
+gets one more Collaboration note on either backend, `REREVIEW_RESTATES_NOTE` (ruling 590):
+the verdict it records now replaces its earlier one for every later reader, because the
+board read and the task's outcome carry only a reviewer's newest verdict, so it restates
+what still stands (a score and each deduction, the findings, each knowledge-base
+correction it made on the task with its id), not only what changed. A first review gets
+no such note.
+
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands
 against a later call. The `count` is the run's refusals so far; it is cleared when
