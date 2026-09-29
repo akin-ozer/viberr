@@ -468,6 +468,11 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   operator and the controller never qualify. The run's disclosure takes the same
   derivation: `tools.denied` drops the three and `tools.fileWriteRoots` lists the roots,
   which the console's tools row states. Codex is unchanged (advisory, ruling 185).
+- No auto-memory (ruling 577). Every Claude run (operator, controller, specialist, and the
+  completion compaction) sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (`AUTO_MEMORY_OFF_ENV`)
+  over its base and per-run env. Claude Code's auto-memory keeps notes in the account
+  home, outside every root a run may write, and a note one agent keeps on one task reaches
+  no other; a board learns through its knowledge bases (ruling 498).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
   SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.

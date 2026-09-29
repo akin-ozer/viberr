@@ -14,6 +14,7 @@ import {
   type RunSteering,
 } from "./adapter.server";
 import {
+  AUTO_MEMORY_OFF_ENV,
   createClaudeAdapter,
   resetSessionTotalsForTests,
   INTERRUPT_ABORT_GRACE_MS,
@@ -1867,6 +1868,30 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
  * folder and checkout below do not exist: the hook decides on the path, so a
  * directory outside the temp root needs no disk.
  */
+describe("Claude Code's auto-memory (ruling 577)", () => {
+  it("is off on every run, over the base env and the run's own", async () => {
+    // Live on 2026-09-28, 13 of 138 Claude runs spent turns writing notes
+    // into the account home's auto-memory, where ruling 564's hook refuses
+    // every write. CANARY: drop the switch from the run env and this goes red.
+    const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
+    for (const spec of [SPEC, { ...SPEC, kind: "operator" as const }]) {
+      let options: ClaudeQueryOptions = {};
+      const queryFn: ClaudeQueryFn = (params) => {
+        options = params.options ?? {};
+        return fakeQuery(RESULT).q;
+      };
+      createClaudeAdapter({ queryFn, env: { PATH: "/usr/bin", [AUTO_MEMORY_OFF_ENV]: "0" } }).start(
+        { ...spec, env: { VIBERR_RUN_ID: "r1" } },
+        { onLine: () => {}, onExit: () => {} },
+      );
+      await drain();
+      expect(options.env?.[AUTO_MEMORY_OFF_ENV]).toBe("1");
+      expect(options.env?.PATH).toBe("/usr/bin");
+      expect(options.env?.VIBERR_RUN_ID).toBe("r1");
+    }
+  });
+});
+
 describe("the file tools of a run that posts files (ruling 564)", () => {
   const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
   /** A result-maker as the resolver denies it: evidence granted, repo-write withheld. */
@@ -2241,6 +2266,8 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(captured!.options.maxTurns).toBe(1);
     // The epilogue's own marker: the run's settle sweep reaps `r1`, not this.
     expect(captured!.options.env?.VIBERR_RUN_ID).toBe("r1:compaction");
+    // Ruling 577: the compaction builds its options as the run did.
+    expect(captured!.options.env?.[AUTO_MEMORY_OFF_ENV]).toBe("1");
     // The same system prompt shape the run used: the preset with the static append.
     expect(captured!.options.systemPrompt).toMatchObject({ type: "preset", preset: "claude_code", append: "persona" });
     const prompt = await readPrompt(captured!.prompt);
