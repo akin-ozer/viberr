@@ -339,7 +339,8 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     expect(
       await call("correct_knowledge_doc", {
         kb: "answer-keys",
-        doc: "sample-01.md",
+        // Ruling 588: the document is `path`, as read_knowledge_doc names it.
+        path: "sample-01.md",
         replaces: "The expected total is 1234.56.",
         text: "The expected total is 1250.00.",
         evidence: "The calculator's own total for the saved estimate.",
