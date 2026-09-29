@@ -1264,7 +1264,9 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   task whose deliverable is a result rather than a change to the repository the result's
   files go there and never into a commit, ruling 530; the workspace contract also lets
   the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
-  `knowledgeBaseReadDirs`, ruling 422), resolve delivery permissions, compute the
+  `knowledgeBaseReadDirs`, ruling 422, and never write them; a run that holds
+  `correct_knowledge_doc` is told there that the tool is how a passage changes,
+  `KB_CONTRACT_CORRECTION_SENTENCE`, ruling 591), resolve delivery permissions, compute the
   denylist (or the "everything off" list when the profile vanished, ruling 26), write the
   redacted `run·inputs` line (with the toolkit's `toolNames`, ruling 339), flag a
   directive that asks the specialist to push or open or merge a PR

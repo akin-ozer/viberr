@@ -428,6 +428,21 @@ export const KB_CORRECTION_NOTE_CODEX =
   "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read. For a knowledge base some agents on this project are not given, name only the document and what is wrong, and quote none of it: your report is on the task, where they read it.";
 
 /**
+ * Ruling 591: the workspace contract's word on the correction tool.
+ *
+ * The contract's read-only exception says "Never write, create or delete
+ * anything" in the knowledge-base folders, and the Collaboration section tells
+ * a run with `correct_knowledge_doc` to correct a passage its work proves
+ * wrong. Live on AWSC-32 the Workflow Researcher, on its rework run, read the
+ * two as a conflict, made none of the ten corrections its directive asked for
+ * and raised a packet asking which instruction governs. Its first run on the
+ * same task had made 43. The tool writes through Viberr, never through the
+ * folder, and the contract now says so.
+ */
+export const KB_CONTRACT_CORRECTION_SENTENCE =
+  " To change a passage your work proves wrong, use `correct_knowledge_doc`: it writes the correction through Viberr and records it, which is how a knowledge base is changed, not a write into the folder.";
+
+/**
  * Ruling 590: what a reviewer that has judged this task before is told.
  *
  * A reviewer's newest verdict is the one every later reader gets: the board
@@ -2007,6 +2022,10 @@ async function dispatchAgentRun(
     ctx.dataRoot,
   );
   if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
+  // Ruling 591: the same condition as the correction note below.
+  if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
+    promptInput.kbCorrectionTool = true;
+  }
   if (collab.evidence && realBackend) {
     promptInput.attachmentsDropDir = attachmentsDir;
   }
@@ -3292,6 +3311,13 @@ export interface AnalyzePromptInput {
    * the AX-24 reviewer), the same shape as VIB-2's refused attachment copy.
    */
   kbReadDirs?: string[];
+  /**
+   * Ruling 591: the run corrects its knowledge bases with
+   * `correct_knowledge_doc` (Claude's toolkit, or the gateway's knowledge
+   * server on Codex, ruling 585). The read-only exception then names the tool,
+   * so "never write" does not read as forbidding the one sanctioned write.
+   */
+  kbCorrectionTool?: boolean;
   /** An operator directive that becomes the run's turn focus (when present). */
   directive?: string;
   /** The human who wrote `directive`, when it is a person's comment rather than
@@ -3393,7 +3419,9 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           ` yours to READ. ${kbDirs.length === 1 ? "It holds" : "They hold"} the rulings and conventions this work is held to, ` +
           `indexed in your instructions, and reading the documents you need there is ` +
           `part of the task, not a step outside it. Never write, create or delete ` +
-          `anything in ${kbDirs.length === 1 ? "it" : "them"}.\n`
+          `anything in ${kbDirs.length === 1 ? "it" : "them"}.` +
+          (input.kbCorrectionTool ? KB_CONTRACT_CORRECTION_SENTENCE : ``) +
+          `\n`
         : ``) +
       (input.attachmentsDropDir
         ? `- One deliberate write exception: you may COPY files INTO the task's ` +
