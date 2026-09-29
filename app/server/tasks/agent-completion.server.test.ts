@@ -1495,6 +1495,94 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(path.join(dir, siblingFile))).toBe(true);
   });
 
+  it("ruling 593: beside a live sibling a run deletes nothing and claims only the working files it cited", async () => {
+    // Live on AWSC-32 the Estimate Judge finished while the Workflow Researcher
+    // was still running, and its verdict claimed twenty browser snapshots it
+    // never cited; the researcher's completion would then have deleted them
+    // from under that entry. CANARY: claim every file in the window again.
+    writeReviewTask();
+    const cited = "page-2026-09-29T15-57-08-711Z.yml";
+    const uncited = "page-2026-09-29T16-02-40-517Z.yml";
+    const screenshot = "page-2026-09-29T16-03-02-723Z.png";
+    const runId = await finishedRunWith(
+      `Checked the live form; the field list is in \`${cited}\`.\nVerdict: approve — the rows match.`,
+    );
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
+         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Developer', 'primary',
+           'claude', 'sonnet', 'running', ?, ?, ?, 'developer')`,
+      )
+      .run(store.slug, now, now, now);
+    const dir = saveInRunWindow(runId, [cited, uncited, screenshot]);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    for (const name of [cited, uncited, screenshot]) expect(existsSync(path.join(dir, name))).toBe(true);
+    const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
+    expect(claimed).toContain(cited);
+    expect(claimed).toContain(screenshot);
+    expect(claimed).not.toContain(uncited);
+  });
+
+  it("ruling 593: the prune keeps a working file another entry of its window cites in evidence or claims", async () => {
+    // The Judge's verdict cited its snapshots in evidence rows, not in its
+    // text, and claimed them on its entry. CANARY: read only each entry's text
+    // into the citation corpus again.
+    writeReviewTask();
+    const inEvidence = "page-2026-09-29T15-57-08-711Z.yml";
+    const claimedByOther = "page-2026-09-29T16-01-03-523Z.yml";
+    const nobodys = "page-2026-09-29T16-02-40-517Z.yml";
+    const runId = await finishedRunWith("Reworked the report.");
+    const dir = saveInRunWindow(runId, [inEvidence, claimedByOther, nobodys]);
+    const { appendTimelineEvent } = await import("~/server/files/task-writer.server");
+    await appendTimelineEvent(
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+      {
+        occurredAt: new Date().toISOString(),
+        type: "quality",
+        actor: { kind: "agent", backend: "codex", profileId: "estimate-judge", roleHint: "Estimate Judge" },
+        title: "Changes requested",
+        text: "**Validation:** failing.",
+        toAgent: false,
+        evidence: [{ label: `Live EFS form, ${inEvidence}`, result: "four fields missing", status: "fail" }],
+        attachments: [claimedByOther],
+      },
+    );
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Reviewer",
+        delivers: false,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    expect(existsSync(path.join(dir, inEvidence))).toBe(true);
+    expect(existsSync(path.join(dir, claimedByOther))).toBe(true);
+    expect(existsSync(path.join(dir, nobodys))).toBe(false);
+  });
+
   it("still detects a verbatim repeat when the report tags an AMBIGUOUS name (G-A-1)", async () => {
     // The stored comment carries `withAmbiguityDisclosure`, but the no-progress
     // check compared that stored form against the RAW reply — so any repeating
