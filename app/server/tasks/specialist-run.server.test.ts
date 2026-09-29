@@ -99,6 +99,7 @@ import {
   RELAY_NOTE_CODEX,
   REREVIEW_RESTATES_NOTE,
   KB_CONTRACT_CORRECTION_SENTENCE,
+  ATTACHMENTS_READ_SENTENCE,
   type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
@@ -2941,19 +2942,45 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       ...base,
       attachmentsDropDir: "/data/projects/p/tasks/VIB-2/attachments",
     });
-    expect(withDrop).toContain("One deliberate write exception");
+    expect(withDrop).toContain("is yours to READ and to COPY files INTO");
     expect(withDrop).toContain("`/data/projects/p/tasks/VIB-2/attachments`");
     // Ruling 159: the exception names an absolute path outside the checkout
     // and forbids creating it inside the working directory.
     expect(withDrop).toContain("never create it inside the working directory");
     expect(withDrop).toContain("never commit it");
     // The exception sits INSIDE the contract, after the confinement rule.
-    expect(withDrop.indexOf("One deliberate write exception")).toBeGreaterThan(
+    expect(withDrop.indexOf("is yours to READ and to COPY files INTO")).toBeGreaterThan(
       withDrop.indexOf("Work ONLY inside the current working directory"),
     );
     const without = buildAnalyzePrompt(base);
-    expect(without).not.toContain("One deliberate write exception");
+    expect(without).not.toContain("COPY files INTO");
     expect(without).toContain("Work ONLY inside the current working directory");
+  });
+
+  it("ruling 592: the contract lets a run READ the task's attachments folder, with or without the drop", () => {
+    // Live on AWSC-32 the Estimate Judge obeyed a contract that named only the
+    // write half of the attachments folder, never opened the delivery it was
+    // asked to judge, and raised a packet asking permission to read it.
+    // CANARY: drop the read from either variant.
+    const dir = "/data/projects/aws-cost-calculator/tasks/AWSC-32/attachments";
+    const base = {
+      role: "Estimate Judge",
+      taskKey: "AWSC-32",
+      title: "t",
+      goal: "g",
+      repo: "akin-ozer/aws-calculator",
+      branch: "awsc-32",
+      cloned: true,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+      delivers: false,
+    };
+    expect(buildAnalyzePrompt({ ...base, attachmentsDropDir: dir })).toContain(
+      `is yours to READ and to COPY files INTO. ${ATTACHMENTS_READ_SENTENCE}`,
+    );
+    const readOnly = buildAnalyzePrompt({ ...base, attachmentsReadDir: dir });
+    expect(readOnly).toContain(`- Read-only exception: the task's attachments folder, \`${dir}\``);
+    expect(readOnly).toContain(`${ATTACHMENTS_READ_SENTENCE} Never write into it.`);
+    expect(readOnly).not.toContain("COPY files INTO");
   });
 
   it("ruling 422: the contract lets a run READ the knowledge-base folders its index points at", () => {
@@ -6193,6 +6220,8 @@ describe("ruling 422: a dispatched run's contract names the knowledge-base folde
     const house = path.join(store.dataRoot, "kb", "house-rules");
     const rulings = path.join(store.dataRoot, "kb", "project-rulings");
     expect(prompt).toContain("- Read-only exception: the knowledge-base folders");
+    // Ruling 592: `critic` cannot post files and is still told it may read them.
+    expect(prompt).toContain("- Read-only exception: the task's attachments folder");
     expect(prompt).toContain(`\`${house}\``);
     expect(prompt).toContain(`\`${rulings}\``);
     // Ruling 239: `critic` grants only `house-rules`, so the rulings index can
