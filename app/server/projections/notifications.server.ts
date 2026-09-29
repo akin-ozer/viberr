@@ -183,24 +183,35 @@ export function followClosedDecision(
 }
 
 /**
- * Ruling 582: the rows about one timeline event say `text` in place of what
- * they copied from it (a mention quotes the comment), when a person took that
- * event's words off the task's record. Returns how many changed.
+ * Ruling 584: the operator edited or deleted an agent's comment. A mention
+ * that quoted it quotes the new words; a row about a deleted comment goes,
+ * since it would open an entry the timeline no longer holds. Returns how many
+ * rows changed.
  */
-export function retextEventNotifications(
+export function followEditedComment(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   occurredAt: string,
-  text: string,
+  text: string | null,
 ): number {
+  const href = taskEventLink(projectSlug, taskKey, occurredAt);
+  if (text === null) {
+    return Number(
+      db
+        .prepare(`DELETE FROM notifications WHERE project_slug = ? AND task_key = ? AND href = ?`)
+        .run(projectSlug, taskKey, href).changes,
+    );
+  }
+  const flat = text.replace(/\s+/g, " ").trim();
+  const quote = flat.length > 200 ? `${flat.slice(0, 199).trimEnd()}…` : flat;
   return Number(
     db
       .prepare(
         `UPDATE notifications SET text = ?
-         WHERE project_slug = ? AND task_key = ? AND href = ?`,
+         WHERE project_slug = ? AND task_key = ? AND href = ? AND kind = 'mention'`,
       )
-      .run(text, projectSlug, taskKey, taskEventLink(projectSlug, taskKey, occurredAt)).changes,
+      .run(`mentioned you: “${quote}”`, projectSlug, taskKey, href).changes,
   );
 }
 

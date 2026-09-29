@@ -2862,9 +2862,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .describe('"operator", or a deployed profile id from get_project.'),
         prompt: z.string().optional().describe("The directive: what to do for this task."),
+        noVerdict: z
+          .boolean()
+          .optional()
+          .describe(
+            "Ruling 583: for a deployed agent, true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict and reads nothing it writes as one. The operator never judges, so it ignores this.",
+          ),
       },
       runWith(
-        async (args: { projectSlug?: string; taskKey?: string; agent: string; prompt?: string }) => {
+        async (args: { projectSlug?: string; taskKey?: string; agent: string; prompt?: string; noVerdict?: boolean }) => {
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "run agents");
@@ -2974,6 +2980,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             runInput.directive = prose(args.prompt);
             runInput.directiveFrom = display;
           }
+          // Ruling 583, amended: the controller dispatches a run that must not
+          // judge the way the operator's `run_agent` does. On AWSC-25 it had
+          // to ask the operator to do it for it.
+          if (args.noVerdict) runInput.withholdVerdict = true;
           // Ruling 263 (F37-93), second half: R21-9's law applied to the
           // dispatch prompt, on the one door that skipped it. Through the
           // controller the words went into the prompt and NOWHERE else: the

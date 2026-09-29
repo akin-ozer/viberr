@@ -232,7 +232,6 @@ import {
   type ClosedDecision,
   followClosedDecision,
   markTaskPacketApprovalRead,
-  retextEventNotifications,
 } from "~/server/projections/notifications.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
@@ -1286,54 +1285,6 @@ export async function removeTaskAttachment(
     details: { name, bytes, reason },
   });
   return { name, bytes };
-}
-
-/**
- * Ruling 582: a project admin takes a comment's words off a task's record.
- *
- * On AWSC-19 the Estimate Judge's first report said in words which golden
- * entries price no load-balancer line, on a task every agent can read, and the
- * operator answered that a comment was not something it could remove. Nobody
- * could.
- *
- * The entry stays where it stood, under its author and its time, and says who
- * removed its words and why. Its title and evidence go with its text, and so
- * do the copies its notifications made. The files it carried stay; each is
- * removed on its own.
- */
-export async function removeTaskComment(
-  db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; at: string; reason: string | null },
-  actor: TaskActor,
-  ctx: TaskMutationContext = {},
-): Promise<{ at: string }> {
-  const project = loadProjectContext(ctx, input.projectSlug);
-  requireAction(db, project, actor, "remove-from-record", "remove a comment from a task");
-  const reason = input.reason?.trim() || null;
-  const text =
-    `Removed by ${userName(db, actor.userId)} on ${new Date().toISOString().slice(0, 10)}.` +
-    (reason ? ` Why: ${endSentence(reason)}` : "");
-  let author = "";
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    const entry = parsed.timeline.find((e) => e.occurredAt === input.at && e.type === "comment");
-    if (!entry) throw AppError.notFound(`${input.taskKey} has no comment at ${input.at}.`);
-    entry.title = null;
-    entry.text = text;
-    entry.evidence = null;
-    author = encodeActorRef(entry.actor);
-  });
-  retextEventNotifications(db, input.projectSlug, input.taskKey, input.at, text);
-  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  recordAudit(db, {
-    action: "task.comment.removed",
-    actor: { userId: actor.userId, label: actor.label },
-    subjectKind: "task",
-    subjectId: input.taskKey,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    details: { at: input.at, author, reason },
-  });
-  return { at: input.at };
 }
 
 /**

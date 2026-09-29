@@ -245,7 +245,7 @@ describe("the matrix is a policy decision, pinned by hand", () => {
     // Ruling 525: somebody else's controller conversation about the project.
     "delete-controller-conversations": "admin",
     "edit-policy": "admin",
-    // Ruling 582: a file, or a comment's words, off a task's record.
+    // Ruling 582: a file off a task's record.
     "remove-from-record": "admin",
     "force-accept-completion": "admin",
   } satisfies Record<RbacAction, ProjectRole>;

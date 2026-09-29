@@ -1540,9 +1540,11 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // task in an epic, in-Viberr like `set_dependencies`, so it is 12.
     // Ruling 521's `write_completion_packet` writes the task's own file, so
     // it is 13. Ruling 557's `take_from_task` is the relay's other direction,
-    // in-Viberr like it, so it is 14.
-    expect(tools).toHaveLength(14);
+    // in-Viberr like it, so it is 14. Ruling 584's `edit_comment` edits a
+    // comment on this task, in-Viberr like `post_comment`, so it is 15.
+    expect(tools).toHaveLength(15);
     expect(tools).toContain("take_from_task");
+    expect(tools).toContain("edit_comment");
     expect(tools).toContain("set_epic");
     expect(tools).toContain("write_completion_packet");
     expect(tools).toContain("relay_to_task");
@@ -1625,6 +1627,12 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // Ruling 583: and `noVerdict`, the same way.
     expect(item.properties.noVerdict.type).toEqual(["boolean", "null"]);
     expect(item.required).toContain("noVerdict");
+    // Ruling 584: and edit_comment's `commentAt`, with the tool itself.
+    expect(item.properties.commentAt.type).toEqual(["string", "null"]);
+    expect(item.required).toContain("commentAt");
+    // The tool itself rides the timeline grant, as on Claude.
+    const withTimeline = operatorPlanSchemaFor(authority({ "append-typed-events": "direct" }));
+    expect(withTimeline.properties.actions.items.properties.tool.enum).toContain("edit_comment");
   });
 
   it("dispatchGate: an ABSENT dispatch-agents grant keeps run_agent — pre-rework deployments store only the retired ids (hunt 2026-08-29)", () => {

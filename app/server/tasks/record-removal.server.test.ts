@@ -13,16 +13,14 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskFilePath } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { createNotification, taskEventLink } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { removeTaskAttachment, removeTaskComment } from "./task-actions.server";
+import { removeTaskAttachment } from "./task-actions.server";
 
 /**
- * Ruling 582: a project admin takes a file, or a comment's words, off a task's
- * record. Round 1 of the AWS calculator board left its answer key in AWSC-3's
- * attachments, and on AWSC-19 a Judge's report named expected rows in words,
- * both where every agent reads; only a shell in the container could take
- * either away. Who may is the policy matrix's (`policy-rbac.server.test.ts`).
+ * Ruling 582: a project admin takes a file off a task's record. Round 1 of the
+ * AWS calculator board left its answer key in AWSC-3's attachments, where
+ * every agent reads, and only a shell in the container could take it away.
+ * Who may is the policy matrix's (`policy-rbac.server.test.ts`).
  */
 
 let ctx: TestDbContext;
@@ -100,66 +98,5 @@ describe("removeTaskAttachment (ruling 582)", () => {
     }
     expect(readFileSync(taskFilePath(store.slug, "VIB-1", store.dataRoot), "utf8")).toBe(before);
     expect(listAuditEvents(store.db, { action: "task.attachment.removed" })).toEqual([]);
-  });
-});
-
-describe("removeTaskComment (ruling 582)", () => {
-  it("replaces a comment's words, title and evidence where it stands, and in the notifications that quoted it", async () => {
-    const at = "2026-09-29T03:34:51.000Z";
-    seedTask([
-      comment(at, {
-        title: "Golden entries",
-        text: "sample-02 and sample-03 price no load-balancer line. @Arda",
-        evidence: [{ label: "golden-set", result: "rows", status: "info" }],
-        attachments: ["golden-alternatives.md"],
-      }),
-    ]);
-    createNotification(store.db, {
-      userId: store.users.arda.id,
-      kind: "mention",
-      text: "mentioned you: “sample-02 and sample-03 price no load-balancer line.”",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      href: taskEventLink(store.slug, "VIB-1", at),
-    });
-    await removeTaskComment(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", at, reason: "it states the expected configuration" },
-      arda(),
-      ctxOf(),
-    );
-    const day = new Date().toISOString().slice(0, 10);
-    const words = `Removed by ${store.users.arda.name} on ${day}. Why: it states the expected configuration.`;
-    expect(timeline()).toEqual([
-      {
-        occurredAt: at,
-        type: "comment",
-        actor: JUDGE,
-        title: null,
-        text: words,
-        toAgent: false,
-        evidence: null,
-        // Its files stay: each comes off the record on its own.
-        attachments: ["golden-alternatives.md"],
-      },
-    ]);
-    // CANARY: leave the notifications and the inbox still quotes the words.
-    const texts = store.db.prepare("SELECT text FROM notifications WHERE task_key = 'VIB-1'").all();
-    expect(texts).toEqual([{ text: words }]);
-    const [row] = listAuditEvents(store.db, { action: "task.comment.removed" });
-    expect(row!.details).toEqual({
-      at,
-      author: "agent:claude/estimate-judge (Estimate Judge)",
-      reason: "it states the expected configuration",
-    });
-  });
-
-  it("refuses a time that holds no comment", async () => {
-    const at = "2026-09-29T03:34:51.000Z";
-    seedTask([{ ...comment(at), type: "note" }]);
-    await expect(
-      removeTaskComment(store.db, { projectSlug: store.slug, taskKey: "VIB-1", at, reason: null }, arda(), ctxOf()),
-    ).rejects.toMatchObject({ status: 404 });
-    expect(timeline()[0]!.text).toBe("x");
   });
 });

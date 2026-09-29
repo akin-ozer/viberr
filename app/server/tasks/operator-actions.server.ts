@@ -95,6 +95,7 @@ import {
 } from "./timeline-compaction.server";
 import {
   applyCommentGuardrails,
+  repairDoubledNewlines,
   COMMENT_DROPPED_AUDIT_ACTION,
   commentOutcomeMessage,
   type CommentGuardrailResult,
@@ -204,11 +205,13 @@ import {
 import {
   type ClosedDecision,
   followClosedDecision,
+  followEditedComment,
   markTaskPacketApprovalRead,
 } from "~/server/projections/notifications.server";
 import { liveMergeable } from "~/features/github/github-pills";
 import { correctKnowledgeDoc, type KbCorrectionRequest } from "./kb-correction-actions.server";
 import { relayToTask, takeFromTask, type TakeRequest } from "./task-relay.server";
+import { encodeActorRef } from "~/server/files/actor-ref.server";
 import {
   listKnowledgeBaseNames,
   listMcpServerNames,
@@ -2184,6 +2187,93 @@ export async function operatorCorrectKnowledgeDoc(
     auditActor: OPERATOR_AUDIT_ACTOR,
     allowedKbs: kbsGivenToTaskRuns(ctx, input.projectSlug, input.taskKey, authority.kb),
   });
+}
+
+/**
+ * Ruling 584 (owner, 2026-09-29): "operator decides if it's own comments needs
+ * deleting or editing. Don't expose this to the end user, fixes the problem
+ * silently with mcp and doing it itself, not asking the user."
+ *
+ * On AWSC-19 the Estimate Judge's report said which golden entries price no
+ * load-balancer line, on a task every agent can read, and the operator told
+ * Arda "A comment is not something I can remove". Ruling 582 gave a person a
+ * Remove on the comment's row; the owner gave the comment to the operator.
+ *
+ * Only a comment the operator or an agent wrote: a person's words are theirs.
+ * An edit replaces its text, keeping its author, time, title and files; a
+ * delete takes the entry off the timeline. The notifications that link to it
+ * follow. Nothing on the task or in anyone's inbox says so: the audit row
+ * keeps the time, the author and the reason, never the words.
+ */
+export async function operatorEditComment(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    /** The comment's time, as the timeline gives it. */
+    at: string;
+    /** The words that replace the comment's; null or blank deletes it. */
+    text: string | null;
+    /** Why, for the audit row. */
+    reason: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "append-typed-events") === "deny") {
+    return { outcome: "denied", message: "The operator cannot post events in this project." };
+  }
+  const text = input.text?.trim() ? repairDoubledNewlines(input.text.trim()) : null;
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
+  const commentAt = (timeline: readonly TaskFileEvent[]) =>
+    timeline.findIndex((e) => e.occurredAt === input.at && e.type === "comment");
+  const found = readTaskFile(ref)?.parsed.timeline.find(
+    (e) => e.occurredAt === input.at && e.type === "comment",
+  );
+  if (!found) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} has no comment at ${input.at}. Nothing changed; read_timeline_entry gives each comment's time.`,
+    };
+  }
+  if (found.actor.kind !== "agent" && found.actor.kind !== "operator") {
+    return {
+      outcome: "noop",
+      message: `The comment at ${input.at} is a person's, so it is theirs to change. Nothing changed.`,
+    };
+  }
+  if (text !== null && text === found.text) {
+    return { outcome: "noop", message: "The comment already says that. Nothing changed." };
+  }
+  const author = encodeActorRef(found.actor);
+  await updateTaskFile(ref, (parsed) => {
+    const index = commentAt(parsed.timeline);
+    const entry = parsed.timeline[index];
+    // The read above raced every other writer: it is still the same comment.
+    if (!entry || encodeActorRef(entry.actor) !== author) {
+      throw AppError.conflict(`The comment at ${input.at} changed while it was being edited.`);
+    }
+    if (text === null) parsed.timeline.splice(index, 1);
+    else entry.text = text;
+  });
+  followEditedComment(db, input.projectSlug, input.taskKey, input.at, text);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: text === null ? "task.comment.deleted" : "task.comment.edited",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { at: input.at, author, reason: input.reason.trim() },
+  });
+  return {
+    outcome: "done",
+    message:
+      text === null
+        ? `Deleted the comment at ${input.at}; nothing on the task says so.`
+        : `Edited the comment at ${input.at}; nothing on the task says so.`,
+  };
 }
 
 /** Ruling 417: the audit action shared with the settings page's lease writer. */
