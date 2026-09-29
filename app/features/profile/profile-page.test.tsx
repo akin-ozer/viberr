@@ -186,10 +186,11 @@ describe("ProfilePage", () => {
   it("Your access renders the shared RBAC table for the REAL role", () => {
     const { container, getByText } = renderProfile();
     expect(getByText("Your access")).toBeTruthy();
-    // Maintainer holds 16 of the 22 rows — all but the 6 admin-only actions
+    // Maintainer holds 16 of the 23 rows — all but the 7 admin-only actions
     // (release-any-owner, manage members, manage agent profiles, delete another
-    // person's controller conversation, edit workflow/policy, and force-accept
-    // past the review gate) — the total table (R8-2)
+    // person's controller conversation, edit workflow/policy, remove a file or a
+    // comment from a task, and force-accept past the review gate) — the total
+    // table (R8-2)
     // surfaces every enforced action. edit-task-meta (contributor+) is one of
     // the 16.
     // Ruling 309(a): the same scope line the Policy table carries. This list is
@@ -204,8 +205,9 @@ describe("ProfilePage", () => {
     // ruling 503 `manage-epics` (the same tiers), so a maintainer holds two more.
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(16);
     // Ruling 525 added `delete-controller-conversations`, which admins alone
-    // hold, so a maintainer is refused one more.
-    expect(container.querySelectorAll(".rbac-no")).toHaveLength(6);
+    // hold, so a maintainer is refused one more, and ruling 582
+    // `remove-from-record` one more again.
+    expect(container.querySelectorAll(".rbac-no")).toHaveLength(7);
     // Ruling 148: each cell says the fact. The check is aria-hidden, so a
     // glyph-only pair announced nothing at all, and the denied "−" read as a
     // collapse control in the value slot.

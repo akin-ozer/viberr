@@ -60,7 +60,7 @@ Roles are a strict tier: `viewer ⊂ contributor ⊂ maintainer ⊂ admin`.
 | `view`, `comment` | ✓ | ✓ | ✓ | ✓ |
 | `create-task`, `own-task`, `edit-task-meta`, `attach-file`, `manage-epics` | ✓ | ✓ | ✓ | |
 | `approve-transition`, `resolve-packet`, `accept-completion`, `update-goal`, `run-agents`, `reorder-board`, `reconcile-github`, `grant-github-scope`, `rescan-project` | ✓ | ✓ | | |
-| `release-any-ownership`, `manage-members`, `manage-agents`, `delete-controller-conversations`, `edit-policy`, `force-accept-completion` | ✓ | | | |
+| `release-any-ownership`, `manage-members`, `manage-agents`, `delete-controller-conversations`, `edit-policy`, `remove-from-record`, `force-accept-completion` | ✓ | | | |
 
 Two grants gate more than their labels name, and each definition carries a `covers`
 line saying so (ruling 309(a)): `edit-task-meta` also gates what a task waits on
@@ -520,6 +520,15 @@ order of an epic's work is each task's own list.
   (`writeTaskAttachment`): a file of any kind (ruling 574); names that traverse or start
   with a dot, files over 10 MB (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
   timeline note that claims the file for the uploader (`attachments:`) and an audit row.
+- `remove-from-record` (admin, ruling 582) takes a file, or a comment's words, off a
+  task's record: `removeTaskAttachment` deletes the file, takes its name off every entry
+  that claimed it and writes an "Attachment removed" note (audit `task.attachment.removed`,
+  with the name, the size and the reason); `removeTaskComment` puts "Removed by <person>
+  on <day>. Why: <reason>" in place of a comment's text, title and evidence, and of the
+  text of the notifications that link to it (audit `task.comment.removed`, with the time,
+  the author and the reason). The entry keeps its time, author and files. An archived task
+  allows either; an archived project allows neither. An agent's own run log keeps what
+  the run wrote.
 - A task can be FILED with its files (ruling 533): the New task dialog takes a picker, a
   drop and a pasted screenshot, and `createTask` checks every file before it allocates a
   key (at most 10 files and 25 MB, the upload's own rules, the `attach-file` tier) and

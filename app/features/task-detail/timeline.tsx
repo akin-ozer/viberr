@@ -24,6 +24,7 @@ import { fileExtension, fileFamily } from "./attachment-kind";
 import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { useRemoveFromRecord } from "./remove-from-record";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
@@ -196,8 +197,11 @@ export const TimelineItem = memo(function TimelineItem({
   attachmentsBase,
   taskLinks,
   knowledgeHref,
+  onRemove,
 }: {
   ev: TimelineEventRender;
+  /** Ruling 582: the viewer may take a comment's words off the record. */
+  onRemove?: (at: string) => void;
   /** Ruling 497: the id a link to this event names (`timelineEventAnchor`).
    *  Only the first of the events that share a time carries it. */
   anchor?: string;
@@ -302,6 +306,11 @@ export const TimelineItem = memo(function TimelineItem({
           <span className="tl-time">
             <LocalDayDotTime iso={ev.occurredAt} />
           </span>
+          {onRemove && !isTyped && (
+            <button type="button" className="linkish tl-remove" onClick={() => onRemove(ev.occurredAt)}>
+              Remove
+            </button>
+          )}
         </div>
 
         {ev.type === "comment" ? (
@@ -487,6 +496,7 @@ export function Timeline({
   knowledgeHref,
   landed = false,
   canAttach = false,
+  canRemove = false,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
@@ -531,6 +541,9 @@ export function Timeline({
   /** Ruling 573: the viewer may attach files to a comment (`attach-file`, a
    *  task not archived). Absent ⇒ the composer takes words only. */
   canAttach?: boolean;
+  /** Ruling 582: the viewer holds `remove-from-record`, so each comment
+   *  offers Remove. */
+  canRemove?: boolean;
 }) {
   const [f, setF] = useState<TimelineFilterId>(tlDefault);
   // The raw draft, synced synchronously from the editor. A ref, not state:
@@ -546,6 +559,11 @@ export function Timeline({
   // all of these; kept while their content is the same, so the memoised items
   // below re-render only for an event that changed.
   const rows = useStableRows(events, eventKeyOf);
+  const [askRemove, removeDialog] = useRemoveFromRecord();
+  const onRemove = useMemo(
+    () => (canRemove ? (at: string) => askRemove({ at }) : null),
+    [canRemove, askRemove],
+  );
   const directory = useStableValue(mentionables);
   const links = useStableValue(taskLinks);
   const fileNames = useStableValue(attachmentNames);
@@ -859,9 +877,11 @@ export function Timeline({
               {...(attachmentsBase ? { attachmentsBase } : {})}
               {...(links ? { taskLinks: links } : {})}
               {...(knowledgeHref ? { knowledgeHref } : {})}
+              {...(onRemove ? { onRemove } : {})}
             />
           ))
         )}
+        {removeDialog}
         {hasMore && (
           <button
             type="button"

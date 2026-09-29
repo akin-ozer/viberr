@@ -102,7 +102,8 @@ describe("HumanAccess", () => {
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
     // Grant rows (one per RBAC_DEFINITIONS entry) — the whole table, every enforced action.
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(22);
+    // Ruling 582 added `remove-from-record`.
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(23);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Edit task priority, labels & due date")).toBeTruthy();
     // Ruling 309(a): two grants gate more than their name says. The name stays

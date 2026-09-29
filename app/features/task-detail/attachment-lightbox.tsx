@@ -1,5 +1,6 @@
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -11,6 +12,7 @@ import { languageForName } from "~/ui/code-language";
 import { CodeView } from "~/ui/code-view";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
+import { useRemoveFromRecord } from "./remove-from-record";
 import { attachmentKind, IMAGE_RE, looksBinary } from "./attachment-kind";
 
 /**
@@ -231,9 +233,12 @@ function LightboxTextBody({
 function Lightbox({
   img,
   onClose,
+  onRemove,
 }: {
   img: LightboxImage;
   onClose: () => void;
+  /** Ruling 582: the viewer may take this file off its task's record. */
+  onRemove?: () => void;
 }) {
   const { ref, close } = useDialog(onClose);
   // The picture may not load — rotated/removed on disk (404), over the serving
@@ -342,6 +347,11 @@ function Lightbox({
         <a className="btn ghost sm" href={img.url} target="_blank" rel="noreferrer">
           Open original
         </a>
+        {onRemove && (
+          <button type="button" className="btn ghost sm" onClick={onRemove}>
+            Remove
+          </button>
+        )}
         {/* F22-11: focus the Close control on open, not "Open original" (the
             first focusable) — that link navigates AWAY, so a reflex Enter on a
             freshly-opened lightbox would open the raw file in a new tab. A
@@ -370,14 +380,53 @@ function Lightbox({
  *  task page). Renders the popup; `useAttachmentLightbox` triggers it. */
 export function AttachmentLightboxProvider({
   children,
+  removable = false,
 }: {
   children: ReactNode;
+  /** Ruling 582: the viewer holds `remove-from-record`, so the card offers
+   *  Remove on a task attachment. */
+  removable?: boolean;
 }) {
   const [img, setImg] = useState<LightboxImage | null>(null);
   return (
     <LightboxContext.Provider value={setImg}>
       {children}
-      {img && <Lightbox img={img} onClose={() => setImg(null)} />}
+      {removable ? (
+        <RemovableLightbox img={img} setImg={setImg} />
+      ) : (
+        img && <Lightbox img={img} onClose={() => setImg(null)} />
+      )}
     </LightboxContext.Provider>
   );
 }
+
+/** Ruling 582: the card with Remove on a task attachment, and the confirm it
+ *  asks. Its own component, so only a page that offers removal needs the data
+ *  router the confirm's fetcher posts through; memoised, so a revalidation
+ *  that leaves no card open renders nothing more (ruling 457). */
+const RemovableLightbox = memo(function RemovableLightbox({
+  img,
+  setImg,
+}: {
+  img: LightboxImage | null;
+  setImg: (img: LightboxImage | null) => void;
+}) {
+  const [askRemove, removeDialog] = useRemoveFromRecord();
+  // The task that serves the file takes its removal: its URL ends in
+  // `/attachments/<name>`, and anything else the card opens is not one.
+  const cut = img ? img.url.lastIndexOf("/attachments/") : -1;
+  const remove =
+    img && cut > 0
+      ? () => {
+          // A hand-off to the confirm, so the card goes at once (useDialog).
+          setImg(null);
+          askRemove({ name: img.name, action: img.url.slice(0, cut) });
+        }
+      : null;
+  return (
+    <>
+      {img && <Lightbox img={img} onClose={() => setImg(null)} {...(remove ? { onRemove: remove } : {})} />}
+      {removeDialog}
+    </>
+  );
+});

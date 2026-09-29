@@ -1,8 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, unlinkSync } from "node:fs";
 import {
   checkAttachmentBatch,
   checkAttachmentUpload,
   isBrowserWorkingArtifact,
+  resolveTaskAttachment,
   withAttachmentClaims,
   writeTaskAttachment,
   type WrittenAttachment,
@@ -231,6 +232,7 @@ import {
   type ClosedDecision,
   followClosedDecision,
   markTaskPacketApprovalRead,
+  retextEventNotifications,
 } from "~/server/projections/notifications.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
@@ -1219,6 +1221,119 @@ export async function attachTaskFile(
     },
   });
   return { attachment };
+}
+
+/**
+ * Ruling 582: a project admin takes a file off a task's record.
+ *
+ * Round 1 of the AWS calculator board left its answer key, `golden-files.md`,
+ * in AWSC-3's attachments, where every agent's shell and every `read_board` of
+ * that task can read it, and round 3 re-runs the same samples. Nothing short of
+ * a shell in the container could remove it.
+ *
+ * The file goes, and so does its name on every entry that claimed it, so no
+ * tile on the timeline opens nothing. A note says who removed what and why;
+ * the audit row keeps the name and the size. An archived task allows it: what
+ * has to come off the record comes off whatever the task's state.
+ */
+export async function removeTaskAttachment(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; name: string; reason: string | null },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ name: string; bytes: number }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "remove-from-record", "remove a file from a task");
+  const name = input.name.trim();
+  const missing = () => AppError.notFound(`${input.taskKey} has no attachment “${name}”.`);
+  let abs: string;
+  let bytes: number;
+  try {
+    abs = resolveTaskAttachment(input.projectSlug, input.taskKey, name, ctx.dataRoot);
+    const stat = lstatSync(abs);
+    if (stat.isDirectory()) throw missing();
+    bytes = stat.size;
+  } catch {
+    throw missing();
+  }
+  const reason = input.reason?.trim() || null;
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    for (const event of parsed.timeline) {
+      if (event.attachments?.includes(name)) event.attachments = event.attachments.filter((n) => n !== name);
+    }
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Attachment removed",
+      text:
+        `Removed \`${name}\` (${attachmentKb(bytes)}) from this task's attachments.` +
+        (reason ? ` Why: ${endSentence(reason)}` : ""),
+      toAgent: false,
+      evidence: null,
+    });
+    // Last, so a file that cannot be removed leaves the task file unwritten.
+    unlinkSync(abs);
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.attachment.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { name, bytes, reason },
+  });
+  return { name, bytes };
+}
+
+/**
+ * Ruling 582: a project admin takes a comment's words off a task's record.
+ *
+ * On AWSC-19 the Estimate Judge's first report said in words which golden
+ * entries price no load-balancer line, on a task every agent can read, and the
+ * operator answered that a comment was not something it could remove. Nobody
+ * could.
+ *
+ * The entry stays where it stood, under its author and its time, and says who
+ * removed its words and why. Its title and evidence go with its text, and so
+ * do the copies its notifications made. The files it carried stay; each is
+ * removed on its own.
+ */
+export async function removeTaskComment(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; at: string; reason: string | null },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ at: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "remove-from-record", "remove a comment from a task");
+  const reason = input.reason?.trim() || null;
+  const text =
+    `Removed by ${userName(db, actor.userId)} on ${new Date().toISOString().slice(0, 10)}.` +
+    (reason ? ` Why: ${endSentence(reason)}` : "");
+  let author = "";
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    const entry = parsed.timeline.find((e) => e.occurredAt === input.at && e.type === "comment");
+    if (!entry) throw AppError.notFound(`${input.taskKey} has no comment at ${input.at}.`);
+    entry.title = null;
+    entry.text = text;
+    entry.evidence = null;
+    author = encodeActorRef(entry.actor);
+  });
+  retextEventNotifications(db, input.projectSlug, input.taskKey, input.at, text);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.comment.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { at: input.at, author, reason },
+  });
+  return { at: input.at };
 }
 
 /**

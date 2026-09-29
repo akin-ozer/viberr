@@ -2218,6 +2218,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-meta { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .tl-actor { font-size: .75rem; font-weight: 800; font-family: var(--font-display); }
 .tl-time { font-size: .75rem; color: var(--placeholder); font-family: var(--font-mono); }
+/* Ruling 582: an admin's Remove ends the row, and where a pointer hovers it
+   shows on the entry under it or when focused. */
+.tl-remove { margin-left: auto; font-size: .75rem; }
+@media (hover: hover) { .tl-item:not(:hover) .tl-remove:not(:focus-visible) { opacity: 0; } }
 .tl-text { font-size: .88rem; color: var(--muted); line-height: 1.5; margin-top: .25rem; max-width: 70ch; }
 .tl-text strong { color: var(--fg); }
 
@@ -7604,7 +7608,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
 .ctl-unavailable { margin-bottom: .375rem; }
 /* Ruling 419(c): the reason a confirm records (an undo's), under its
    consequence. */
-.ctl-confirm-reason { margin-top: 1rem; }
+.confirm-reason { margin-top: 1rem; }
 /* Ruling 419(d): a touch screen has no key to name. */
 @media (pointer: coarse) {
   .kbd-hint { display: none; }

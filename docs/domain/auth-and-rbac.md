@@ -136,6 +136,7 @@ access share; `app/shared/rbac.test.ts` holds this table to it row by row:
 | `manage-agents`: manage agent profiles | ✓ | | | |
 | `delete-controller-conversations`: delete another person's controller conversation about this project, its board's or one of its tasks'; everyone may delete their own (ruling 525) | ✓ | | | |
 | `edit-policy`: edit workflow and policy, and archive or restore the project itself | ✓ | | | |
+| `remove-from-record`: remove a file, or a comment's words, from a task (ruling 582) | ✓ | | | |
 | `force-accept-completion`: force-accept past the review gate | ✓ | | | |
 
 Beyond the table: a task's **owner** (contributor or above) may accept their own
