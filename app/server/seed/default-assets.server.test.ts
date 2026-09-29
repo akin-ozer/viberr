@@ -844,9 +844,10 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       expect(skill).toContain(`\`${id}\``);
     }
     expect(skill).toContain("Missing from `operatorPolicy`: withheld, except four capabilities");
-    // `read_board` is a Claude toolkit tool, built only beside another one.
-    expect(skill).toContain("An agent on Claude that holds any other Viberr tool also");
-    expect(skill).toContain("an agent on Codex gets no board read");
+    // `read_board` is built only beside another Viberr tool, on either backend:
+    // on Codex through Viberr's gateway (ruling 589).
+    expect(skill).toContain("An agent that holds any other Viberr tool, on Claude or on");
+    expect(skill).not.toContain("an agent on Codex gets no board read");
   });
 
   it("ruling 503: the controller's doctrine, guide and handbook say an epic holds nothing back and order is each task's own wait", async () => {

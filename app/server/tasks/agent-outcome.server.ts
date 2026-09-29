@@ -529,6 +529,16 @@ export interface AgentCollab {
 }
 
 /**
+ * Ruling 589: whether an engagement holds any collaboration grant. It is the
+ * condition a Claude run's toolkit mounts `read_board` and `read_timeline_entry`
+ * on, and a Codex run the gateway's board server: a profile with none reads no
+ * more of the board than its own prompt holds (U11).
+ */
+export function holdsCollaborationGrant(collab: AgentCollab): boolean {
+  return collab.comment || collab.ask || collab.verdict || collab.evidence || collab.githubRead;
+}
+
+/**
  * Effective mode for a collaboration capability on one engagement.
  *
  * Explicit grant → its mode (specialist `recommend` coerces to `direct`,

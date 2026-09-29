@@ -38,6 +38,7 @@ import {
 import {
   AGENT_OUTCOME_JSON_SCHEMA,
   effectiveCollabMode,
+  holdsCollaborationGrant,
   resolveAgentCollab,
 } from "./agent-outcome.server";
 import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
@@ -145,8 +146,10 @@ import {
   resolveUndeployedDisallowedTools,
   specialistGrantModes,
 } from "./specialist-tool-policy";
+import { BOARD_MCP_NAME } from "~/server/mcp-proxy/board-tool.server";
 import { KNOWLEDGE_MCP_NAME } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
+  resolveBoardMcp,
   resolveKnowledgeMcp,
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
@@ -1673,6 +1676,12 @@ async function dispatchAgentRun(
    * were never recorded as the delivery.
    */
   const collab = input.withholdVerdict || delivers ? { ...granted, verdict: false } : granted;
+  // Ruling 589: a Codex run that holds a collaboration grant reads the board
+  // and its own timeline through the gateway's board server, as a Claude run's
+  // toolkit does.
+  const boardMount = realBackend
+    ? resolveBoardMcp({ backend, collaborates: holdsCollaborationGrant(collab), dataRoot: ctx.dataRoot })
+    : null;
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
     kind: "agent",
@@ -2192,6 +2201,7 @@ async function dispatchAgentRun(
   const grantedMcpServers = { ...declaredMcps.mcpServers };
   if (browser.server) grantedMcpServers[BROWSER_MCP_NAME] = browser.server;
   if (knowledgeMount) grantedMcpServers[KNOWLEDGE_MCP_NAME] = knowledgeMount;
+  if (boardMount) grantedMcpServers[BOARD_MCP_NAME] = boardMount;
   const mergedMcpServers = { ...grantedMcpServers, ...toolkit?.mcpServers };
   // P13-D-26: `collab.evidence` joins the gate. Codex has no `report_outcome`
   // tool, so the envelope is its ONLY structured channel — without this an
@@ -3904,6 +3914,12 @@ export async function resolveResumeConfinement(
     // Ruling 555: a resumed deliverer is offered no verdict either.
     const resumeGranted = resolveAgentCollab(resolved.capabilities);
     const collab = input.delivers ? { ...resumeGranted, verdict: false } : resumeGranted;
+    // Ruling 589: and the board server, from the same grants.
+    const resumeBoard = resolveBoardMcp({
+      backend: input.backend,
+      collaborates: holdsCollaborationGrant(collab),
+      dataRoot: ctx.dataRoot,
+    });
     const resumeRepo = projectRepo(ctx, input.projectSlug);
     const personaInput: SpecialistPersonaInput = {
       profileId: input.profileId,
@@ -4007,6 +4023,7 @@ export async function resolveResumeConfinement(
       grantedServers[BROWSER_MCP_NAME] = resumeBrowser.server;
     }
     if (resumeKnowledge) grantedServers[KNOWLEDGE_MCP_NAME] = resumeKnowledge;
+    if (resumeBoard) grantedServers[BOARD_MCP_NAME] = resumeBoard;
     const merged = { ...grantedServers, ...toolkit?.mcpServers };
     const cloneDir = taskCloneDir(ctx, input.projectSlug, input.taskKey, support);
     // C02-R3: the fresh path creates the drop BEFORE the run so a plain `cp`

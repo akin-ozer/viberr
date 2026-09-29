@@ -28,7 +28,7 @@ import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { sealSecret } from "~/server/secrets/secret-box.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
-import { resolveKnowledgeMcp, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { resolveBoardMcp, resolveKnowledgeMcp, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { errorMessage } from "~/shared/errors";
@@ -354,5 +354,95 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     await interrupt(runId);
     await settle();
     expect(await gatewayAnswers(knowledge.url, knowledge.headers.Authorization)).toBe(401);
+  });
+});
+
+describe("ruling 589: the gateway answers a Codex run's board server itself", () => {
+  it("reads the board, another task's verdict and one entry of the run's own task, while the run lives", async () => {
+    // Live on AWSC-24 the Workflow Researcher, on Codex, could not read the
+    // Judge's verdicts on the tasks it compared and used the operator's
+    // summaries instead.
+    const deliveredAt = "2026-09-29T10:06:43.529Z";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "done",
+        ownerUserId: store.users.arda.id,
+        deliveredAt,
+        verdicts: [
+          {
+            profileId: "estimate-judge",
+            revisionId: `files:${deliveredAt}`,
+            result: "approve",
+            reason: "## Verdict: approve, 95/100",
+            at: "2026-09-29T10:10:00.000Z",
+            rounds: 1,
+          },
+        ],
+      }),
+    });
+    const answer = `1: Yes, the owner approves the redesign. ${"2: the address is app01's own. ".repeat(12).trim()}`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
+      timeline: [
+        {
+          occurredAt: "2026-09-29T11:11:33.126Z",
+          type: "comment",
+          actor: { kind: "human", userId: store.users.arda.id, nameHint: "Arda" },
+          title: null,
+          text: answer,
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // A Claude run has these tools in its toolkit, and a run that holds no
+    // collaboration grant reads no more of the board than its prompt.
+    expect(resolveBoardMcp({ backend: "claude", collaborates: true, dataRoot: store.dataRoot })).toBeNull();
+    expect(resolveBoardMcp({ backend: "codex", collaborates: false, dataRoot: store.dataRoot })).toBeNull();
+    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "comparing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Workflow Researcher",
+      kind: "primary",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      mcpServers: { viberr_board: mount! },
+      agentProfileId: "workflow-researcher",
+      credentialUserId: store.users.arda.id,
+    });
+    await settle();
+    // CANARY: leave the store on the run's config and this parse fails.
+    const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+    expect(board.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/viberr_board$/);
+
+    const client = new Client({ name: "codex-cli", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["read_board", "read_timeline_entry"]);
+    const call = async (name: string, args: Record<string, string>) => {
+      const result = await client.callTool({ name, arguments: args });
+      return z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+    };
+    // CANARY: route the board server to an upstream and nothing answers.
+    const list = z.array(z.object({ key: z.string() })).parse(JSON.parse(await call("read_board", {})));
+    expect(list.map((task) => task.key).sort()).toEqual(["VIB-1", "VIB-2"]);
+    const other = z
+      .object({ outcome: z.object({ verdicts: z.array(z.object({ agent: z.string(), result: z.string(), report: z.string() })) }) })
+      .parse(JSON.parse(await call("read_board", { taskKey: "VIB-2" })));
+    expect(other.outcome.verdicts).toEqual([{ agent: "estimate-judge", result: "approve", report: "## Verdict: approve, 95/100" }]);
+    // CANARY: read another task's timeline and the whole answer is not there.
+    const entry = z.object({ text: z.string() }).parse(JSON.parse(await call("read_timeline_entry", { occurredAt: "2026-09-29T11:11:33.126Z" })));
+    expect(entry.text).toBe(answer);
+    const refused = await client.callTool({ name: "read_timeline_entry", arguments: { at: "2026-09-29T11:11:33.126Z" } });
+    expect(refused.isError).toBe(true);
+    await client.close();
+
+    await interrupt(runId);
+    await settle();
+    expect(await gatewayAnswers(board.url, board.headers.Authorization)).toBe(401);
   });
 });

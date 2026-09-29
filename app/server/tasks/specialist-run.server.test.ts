@@ -5249,6 +5249,49 @@ describe("P19-G11 — the run records what it was given", () => {
     }
   });
 
+  it("ruling 589: a Codex run that holds a collaboration grant mounts the gateway's board server, fresh and resumed", async () => {
+    // Live on AWSC-24 the Workflow Researcher, on Codex, could not read the
+    // Judge's verdicts on the tasks it compared. CANARY: leave the mount out of
+    // either path, or mount it for a profile with no collaboration grant.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const dev = (mode: "direct" | "off") => ({
+      profileId: "dev",
+      capabilities: ["comment-on-task", "ask-human", "report-validation-verdict", "attach-evidence-references", "read-github-api"].map(
+        (capabilityId) => ({ capabilityId, mode }),
+      ),
+      extras: [],
+      definition: {
+        kind: "specialist" as const,
+        name: "dev",
+        role: "developer",
+        backends: ["codex" as const],
+        model: "gpt-6-luna",
+        resources: { skills: [], mcps: [], kb: [] },
+      },
+    });
+    writeProject(store.dataRoot, { ...fm, agents: [dev("direct")] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await startMcpGateway({ port: 0 });
+    try {
+      const runId = await assignAndRun();
+      const spec = lastRunSpec()!;
+      expect(spec.backend).toBe("codex");
+      expect(z.strictObject({ type: z.literal("http"), url: z.string(), headers: z.strictObject({ Authorization: z.string() }) }).parse(spec.mcpServers?.viberr_board).url).toMatch(/\/mcp\/viberr_board$/);
+      expect(inputsLine(runId)!.mcp.mounted).toContain("viberr_board");
+      const resume = { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend: "codex" as const, delivers: true };
+      const confinement = await resolveResumeConfinement(store.db, { dataRoot: store.dataRoot }, resume);
+      expect(confinement.mcpServers?.viberr_board).toMatchObject({ type: "http", board: { dataRoot: store.dataRoot } });
+
+      // No collaboration grant, no board: the gate a Claude toolkit keeps (U11).
+      writeProject(store.dataRoot, { ...fm, agents: [dev("off")] });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const bare = await resolveResumeConfinement(store.db, { dataRoot: store.dataRoot }, resume);
+      expect(bare.mcpServers?.viberr_board).toBeUndefined();
+    } finally {
+      await stopMcpGateway();
+    }
+  });
+
   it("resolveResumeConfinement returns the SAME resolved-resource record for a resumed turn", async () => {
     // The resume half of the disclosure. `resolveResumeConfinement` exists
     // because resume kept silently dropping half of a run's policy (XS-1) — a

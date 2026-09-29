@@ -673,6 +673,14 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   document has it, what it should say instead and the evidence, and the operator's
   `agent-reply` turn writes it with its own `correct_knowledge_doc`. A Claude specialist's
   note (`KB_CORRECTION_NOTE_CLAUDE`) names the tool instead.
+- The board (ruling 589): a Codex specialist that holds any collaboration grant
+  (`holdsCollaborationGrant`, the gate a Claude toolkit builds `read_board` on) mounts
+  `viberr_board`, a second server the gateway answers itself over the run's token
+  (`board-tool.server.ts`), fresh and resumed. It has `read_board` and
+  `read_timeline_entry`, the same readers and descriptions as Claude's toolkit, over the
+  run's own project and task; the mount carries only the store, and the run is handed the
+  URL and its token. A profile with no collaboration grant mounts nothing, and neither
+  does a run when the gateway is not running.
 
 ## 3. A run's life
 
@@ -1330,7 +1338,8 @@ on every attempt; the run still starts in its workspace and delivery retries the
 gates and mounts the server only when at least one was built, with `alwaysLoad: true`
 (§2.4). It returns `toolNames`, read off the definitions it pushed, which is the tool list
 the run's `run·inputs` record discloses (ruling 339). Codex specialists mount none of it
-and get the outcome envelope instead (§2.5).
+and get the outcome envelope instead (§2.5), except the board and knowledge readers,
+which Viberr's gateway answers for a Codex run (rulings 585 and 589).
 
 | Tool | Gate | Effect |
 |---|---|---|
@@ -1338,8 +1347,8 @@ and get the outcome envelope instead (§2.5).
 | `ask_human {title, body?, options?: [{title, detail?, reply?}]}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId` and a `blocked` entry that carries the card (its body and options, ruling 586), audit `task.agent.packet_opened`, the owner's notification under the agent's name (ruling 222), filed as kind `question` with its own "Agent questions" toggle, pill and hand glyph (ruling 481(a); the Codex outcome envelope's question writes the same kind); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 298); refused while a packet is open. Only the option whose title ends "(Recommended)" is recommended; an unmarked list recommends nothing and the card preselects nothing. `reply: true` marks an option that needs the person's typed answer, which the card and `resolvePacket` require (ruling 478(e)); the Codex envelope's `question.options[]` carries the same `reply`. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 33), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 447, `answerNamesAnotherActor`) |
 | `report_outcome {summary, verdict?, evidence?, relay?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted; `relay` rides every variant | `evidence: [{label, result?, status}]` (ruling 526): what was checked, how it came out, and `pass`, `fail` or `info`; a row with no `status` is refused by the schema by name, nothing staged. Staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`}. `relay: [{taskKey, text}]` (ruling 488) is text for OTHER tasks of the same project, at most `RELAY_MAX_ENTRIES` (2); a third entry is refused by the schema by name, nothing staged, so the agent re-reports in the same run. The completion posts each entry (§4.4) |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
-| `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
-| `read_timeline_entry {occurredAt}` | none; built with `read_board` | one entry of this task's timeline, whole, by the stamp the prompt's recent timeline prints after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)", 220 characters); read-only (ruling 563, `readTimelineEntry`) |
+| `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 589) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
+| `read_timeline_entry {occurredAt}` | none; built with `read_board`, on both backends | one entry of this task's timeline, whole, by the stamp the prompt's recent timeline prints after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)", 220 characters); read-only (ruling 563, `readTimelineEntry`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
 | `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 581), or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
 
