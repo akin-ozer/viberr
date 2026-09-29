@@ -5752,10 +5752,15 @@ export async function applyAgentCompletionEffects(
     outcome?.question?.title ?? "",
     outcome?.question?.body ?? "",
     savedFilesText(input.projectSlug, input.taskKey, runSaved, ctx.dataRoot),
+    // Ruling 593: an entry cites a file in its evidence rows as well as its
+    // text, and an entry that claims a file keeps it. Live on AWSC-32 a
+    // researcher's run was still going when the Estimate Judge's verdict
+    // cited two browser snapshots in its evidence and claimed twenty; the
+    // researcher's completion would have deleted every one of them.
     ...(thisRunStartedAt && completionFile
       ? completionFile.timeline
           .filter((e) => e.occurredAt >= thisRunStartedAt)
-          .map((e) => e.text)
+          .map((e) => [e.text, JSON.stringify(e.evidence ?? []), ...(e.attachments ?? [])].join("\n"))
       : []),
   ].join("\n");
   const attachmentsPrune =
@@ -5767,7 +5772,12 @@ export async function applyAgentCompletionEffects(
           citationCorpus,
           ctx.dataRoot,
         )
-      : { kept: [...runSaved], pruned: [] };
+      : finished.state === "finished"
+        ? // Ruling 593: beside a live sibling nothing is deleted, and this run
+          // claims no working file it did not cite: the sibling decides the
+          // rest when it completes, so no entry names a file that later goes.
+          { kept: runSaved.filter((name) => !isBrowserWorkingArtifact(name) || citationCorpus.includes(name)), pruned: [] }
+        : { kept: [...runSaved], pruned: [] };
   if (finished.state === "finished" && siblingLiveRuns > 0) {
     logger.info("browser working-artifact prune skipped: sibling run live", {
       taskKey: input.taskKey,
