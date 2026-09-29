@@ -3266,13 +3266,48 @@ function stampNonCommitDelivery(
   attachments: readonly string[] | null,
   at: string,
   dispatchedToDeliver: boolean,
+  delivered: ReadonlySet<string>,
 ): void {
-  if (!dispatchedToDeliver) return;
   if (!attachments || attachments.every(isBrowserWorkingArtifact)) return;
   if (actorRef.kind !== "agent") return;
+  if (!dispatchedToDeliver) {
+    // Ruling 587: a file the delivery already holds, saved again by a run not
+    // dispatched to deliver, changed what the review binds to.
+    if (fm.deliveredAt && attachments.some((name) => delivered.has(name))) fm.deliveredAt = at;
+    return;
+  }
   const deliverer = deliveringEngagement(fm);
   if (!deliverer || deliverer.profileId !== actorRef.profileId) return;
   fm.deliveredAt = at;
+}
+
+/**
+ * Ruling 587: the files the task's delivery holds: those the delivering
+ * engagement's runs saved, as the timeline claims them, less the browser's
+ * working files (ruling 570) and what a relay carried in (ruling 538).
+ *
+ * A delivery that is not a commit is reviewed as `files:<deliveredAt>` (ruling
+ * 388), and only the deliverer's saves moved it. Live on AWSC-28 the Estimate
+ * Judge asked for one line in `assumptions.md`, the operator sent the fix to
+ * the Cloud Solutions Architect at Mapping, and the Architect rewrote the
+ * delivered file. The subject stayed where it was, so the Judge's second
+ * verdict landed on the same revision as its first: had it objected again,
+ * that would have counted as a second consecutive objection to unchanged
+ * work (ruling 237), and an approval made before such an edit would have gone
+ * on vouching for content its reviewer never read.
+ */
+function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
+  const names = new Set<string>();
+  const deliverer = deliveringEngagement(fm);
+  if (!fm.deliveredAt || !deliverer) return names;
+  for (const e of timeline) {
+    if (e.actor.kind !== "agent" || e.actor.profileId !== deliverer.profileId) continue;
+    if (isRelayComment(e)) continue;
+    for (const name of e.attachments ?? []) {
+      if (!isBrowserWorkingArtifact(name)) names.add(name);
+    }
+  }
+  return names;
 }
 
 /** Build the reply event without writing so completion effects can land atomically. */
@@ -3480,6 +3515,7 @@ export async function postAgentReplyComment(
   // The reply write, on its own so it can be RETRIED (C3).
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      const delivered = deliveredFileNames(parsed.frontmatter, parsed.timeline);
       parsed.timeline.unshift(event);
       stampNonCommitDelivery(
         parsed.frontmatter,
@@ -3487,6 +3523,7 @@ export async function postAgentReplyComment(
         attachments,
         event.occurredAt,
         input.delivers,
+        delivered,
       );
       if (compactOn) {
         parsed.timeline = compactTimelineEvents(
@@ -4430,6 +4467,8 @@ export async function recordAgentCompletion(
   }
   try {
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      // Ruling 587: read before this completion adds its own entries.
+      const delivered = deliveredFileNames(parsed.frontmatter, parsed.timeline);
       if (verdict) {
         // Ruling 544: a delivery that landed while this run was reviewing is a
         // subject it never read, so its verdict binds to nothing.
@@ -4822,6 +4861,7 @@ export async function recordAgentCompletion(
           replyEvent.attachments ?? null,
           replyEvent.occurredAt,
           input.delivers,
+          delivered,
         );
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
@@ -4849,6 +4889,7 @@ export async function recordAgentCompletion(
           attachments,
           producing.occurredAt,
           input.delivers,
+          delivered,
         );
       }
       if (verdict) {

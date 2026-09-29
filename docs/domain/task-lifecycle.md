@@ -296,7 +296,11 @@ run does not (ruling 216).
   its delivering run last saved files (`files:<deliveredAt>`), so a report or attachment
   deliverable is reviewable like a commit and a later save stales older verdicts. The
   browser's working files alone (`page-….yml`, `console-….log`, `isBrowserWorkingArtifact`)
-  never move it: they are tool transport, not a delivery (ruling 570). A
+  never move it: they are tool transport, not a delivery (ruling 570). A run not
+  dispatched to deliver moves it when it saves again a file the delivery already holds
+  (`deliveredFileNames`: the names the delivering engagement's entries claim), because the
+  delivered content changed under the verdicts bound to it; a file of its own moves
+  nothing (ruling 587). A
   verdict binds only to the subject its run was dispatched on (`agent_runs.review_subject`,
   ruling 544): one returned after a newer delivery binds to nothing, and its note says what
   moved and to run the review again. Never
@@ -598,7 +602,8 @@ through a `discard_branch` packet, and the discard retires the revision (`kind:
 discarded`, verdicts kept as history, `validation: none`); readers of "the revision
 under review" go through `activeWorkRevision`, so no verdict binds to a retired head and
 a re-created head mints a fresh id. A task whose deliverable is not a commit stamps
-`deliveredAt` when its delivering run saves files (ruling 388).
+`deliveredAt` when its delivering run saves files (ruling 388), and when any other
+agent's run rewrites one of the delivered files (ruling 587).
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned
