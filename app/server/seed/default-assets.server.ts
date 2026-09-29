@@ -422,6 +422,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 588 (AWSC-29, 2026-09-29): before it said only a Codex run
+    // without Viberr's gateway has no correction tool (ruling 585).
+    "ed747472c439b25857d173e7ab845b8d6e2044237d431b9628fd0b6dce39de49",
     // Ruling 584 (owner, 2026-09-29): before `edit_comment`, when a comment's
     // words were a project admin's to remove (ruling 582).
     "cd431119ac1f2379c1703aee285044854605dffc6213100085209da34409fb34",

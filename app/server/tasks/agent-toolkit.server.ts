@@ -816,7 +816,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         KB_CORRECTION_SPECIALIST_DESCRIPTION,
         {
           kb: z.string().describe(KB_CORRECTION_FIELDS.kb),
-          doc: z.string().describe(KB_CORRECTION_FIELDS.doc),
+          path: z.string().describe(KB_CORRECTION_FIELDS.path),
           replaces: z.string().optional().describe(KB_CORRECTION_FIELDS.replaces),
           text: z.string().describe(KB_CORRECTION_FIELDS.text),
           evidence: z.string().describe(KB_CORRECTION_FIELDS.evidence),
@@ -829,7 +829,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               projectSlug,
               taskKey,
               kb: prose(args.kb),
-              doc: prose(args.doc),
+              doc: prose(args.path),
               replaces: args.replaces ? prose(args.replaces) : null,
               text: prose(args.text),
               evidence: prose(args.evidence),

@@ -91,7 +91,7 @@ import {
  */
 const KB_CORRECTION_TOOL_DESCRIPTION =
   "Correct a KNOWLEDGE BASE when work on this task has PROVEN a passage of it wrong or unachievable: the project's settled rulings (omit `kb`), or any knowledge base a run on this task was given, yours or an engaged agent's (a dossier's platform fact, a runbook step). The correction is WRITTEN into the document at once (ruling 498): every run that reads the document from then on reads your text, and a person undoes it from the project's Controller page if they disagree. Use it when your own answer to a human would otherwise be \"this needs a ruling change before X\" or \"the knowledge base is out of date\": a gate command the host cannot run, a convention a review has settled differently, a version or path an agent measured, an environment fact agents keep re-deriving. " +
-  "When an agent's report says a knowledge-base passage is wrong and no correction of it is on the timeline, make it for them with their evidence: an agent on Codex has no tool to make one itself. " +
+  "When an agent's report says a knowledge-base passage is wrong and no correction of it is on the timeline, make it for them with their evidence: a Codex run without Viberr's gateway (ruling 585) has no tool to make one itself. " +
   "Read the document first (read_knowledge_doc) and send `replaces` EXACTLY as it stands there, list marker and emphasis included, and `text` as the document should read instead, in its own form: the corrected fact, not the story of how you found it (that goes in `evidence`). Replace the smallest passage that is wrong, with enough of the line that it stands once; an empty `text` deletes it, and the record keeps what it needs around it for an undo. Bring evidence: the command and its output, or the run and verdict that showed it. A refusal writes nothing and says what to fix. Never write back a correction a person undid: the refusal names them, so put your evidence to them instead. " +
   "It is also how a MISSING convention gets written (ruling 418): when a reviewer blocks on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings say nothing about it, write the convention into the rulings document it belongs to, with the verdict as the evidence, alongside the rework you dispatch: omit `replaces` to add it at the end of the document, or send the passage it belongs after as `replaces` and that passage followed by the convention as `text`. One convention per class, never one per finding.";
 
@@ -733,7 +733,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe(
               "The knowledge base the passage is in, by the name its index heading gives it. Omit for the project's rulings knowledge base. Any knowledge base a run on this task was given is allowed, yours or an engaged agent's.",
             ),
-          doc: z
+          path: z
             .string()
             .describe(
               "The document to correct, by its path as that knowledge base's index lists it, e.g. 'environment-and-gates.md'.",
@@ -763,7 +763,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               {
                 ...base,
                 kb: args.kb ? prose(args.kb) : null,
-                doc: prose(args.doc),
+                doc: prose(args.path),
                 replaces: args.replaces ? prose(args.replaces) : null,
                 text: prose(args.text),
                 evidence: prose(args.evidence),

@@ -65,10 +65,11 @@ export const KNOWLEDGE_READ_TOOL: Tool = {
 export const KB_CORRECTION_SPECIALIST_DESCRIPTION =
   "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence; an empty `text` deletes the passage. Send only the passage that changes: the record keeps what it needs around it for an undo. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run. The task's entry quotes the passage only when every agent on the project is given that knowledge base, so correcting one given to few agents keeps its text off the task.";
 
-/** The correction's fields, described once for both backends. */
+/** The correction's fields, described once for both backends. The document is
+ *  `path`, as `read_knowledge_doc` names it (ruling 588). */
 export const KB_CORRECTION_FIELDS = {
   kb: "The knowledge base the passage is in, by the name its index heading gives it.",
-  doc: "The document's path inside that knowledge base, as the index lists it.",
+  path: KB_DOC_PATH_DESCRIPTION,
   replaces:
     "The passage the correction replaces, copied EXACTLY as the document has it; it must stand once in the document. Omit only when the correction adds something the document does not say: `text` then goes at the end of the document.",
   text: "What the document should say in place of `replaces`, in its own form: the corrected fact, not the evidence. Empty to delete the passage.",
@@ -83,12 +84,12 @@ export const KNOWLEDGE_CORRECT_TOOL: Tool = {
     type: "object",
     properties: {
       kb: { type: "string", description: KB_CORRECTION_FIELDS.kb },
-      doc: { type: "string", description: KB_CORRECTION_FIELDS.doc },
+      path: { type: "string", description: KB_CORRECTION_FIELDS.path },
       replaces: { type: "string", description: KB_CORRECTION_FIELDS.replaces },
       text: { type: "string", description: KB_CORRECTION_FIELDS.text },
       evidence: { type: "string", description: KB_CORRECTION_FIELDS.evidence },
     },
-    required: ["kb", "doc", "text", "evidence"],
+    required: ["kb", "path", "text", "evidence"],
   },
   annotations: {
     title: "Correct a knowledge-base document",
@@ -113,7 +114,7 @@ export type KnowledgeReadArgs = z.infer<typeof knowledgeReadArgsSchema>;
 /** `correct_knowledge_doc`'s arguments, parsed where the gateway receives the call. */
 export const knowledgeCorrectArgsSchema = z.object({
   kb: z.string(),
-  doc: z.string(),
+  path: z.string(),
   replaces: z.string().optional(),
   text: z.string(),
   evidence: z.string(),
@@ -170,7 +171,7 @@ export async function knowledgeCorrectResult(input: {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       kb: prose(args.kb),
-      doc: prose(args.doc),
+      doc: prose(args.path),
       replaces: args.replaces ? prose(args.replaces) : null,
       text: prose(args.text),
       evidence: prose(args.evidence),

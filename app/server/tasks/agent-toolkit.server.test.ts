@@ -1026,7 +1026,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           name: "correct_knowledge_doc",
           arguments: {
             kb: kb.dir,
-            doc: "06-platform-facts.md",
+            // Ruling 588: the document is `path`, as read_knowledge_doc names it.
+            // CANARY: name it `doc` again and the call is refused as invalid.
+            path: "06-platform-facts.md",
             replaces: "- T-003: wrangler 4.138.0",
             text: "- T-003: wrangler 4.139.0",
             evidence: "`npx wrangler --version` printed 4.139.0.",
@@ -1056,7 +1058,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           name: "correct_knowledge_doc",
           arguments: {
             kb: kb.dir,
-            doc: "06-platform-facts.md",
+            path: "06-platform-facts.md",
             replaces: " (see run 12)",
             text: "",
             evidence: "Run 12 was deleted with its workspace.",
@@ -1071,7 +1073,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       const refused = textResult.parse(
         await client.callTool({
           name: "correct_knowledge_doc",
-          arguments: { kb: "someone-elses", doc: "x.md", text: "y", evidence: "z" },
+          arguments: { kb: "someone-elses", path: "x.md", text: "y", evidence: "z" },
         }),
       );
       expect(refused).toContain("[noop] No knowledge base `someone-elses` was given to a run on this task");

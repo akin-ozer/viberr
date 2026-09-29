@@ -470,6 +470,30 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
  * to touch it by another can resolve that either way, and the way that loses is
  * exactly F19-4: describing the empty task folder as "the repo".
  */
+describe("buildOperatorToolkit — the knowledge tools name the document alike (ruling 588)", () => {
+  it("correct_knowledge_doc takes the document as `path`, the field read_knowledge_doc takes", async () => {
+    // Live on AWSC-29 the Estimate Judge read mapping.md with `path` and sent
+    // its two corrections with `path` too; the tool took `doc`, and both came
+    // back refused. CANARY: name the operator's field `doc` again.
+    const auth = authority([]);
+    auth.kb = ["rulings"];
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+    const schemas = await publishedSchemas(toolkit.mcpServers.viberr);
+    const fields = z.object({ properties: z.record(z.string(), z.unknown()) });
+    const read = Object.keys(fields.parse(schemas.get("read_knowledge_doc")).properties);
+    const correct = Object.keys(fields.parse(schemas.get("correct_knowledge_doc")).properties);
+    expect(read).toContain("path");
+    expect(correct).toContain("path");
+    expect(correct).not.toContain("doc");
+  });
+});
+
 describe("the viberr server's instructions — reading is expected, writing is not (R19-1)", () => {
   const wired = () =>
     wiredInstructions.parse(
