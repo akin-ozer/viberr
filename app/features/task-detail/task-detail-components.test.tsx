@@ -579,6 +579,22 @@ describe("TimelineItem: an entry's pictures show their first row, and fold with 
     expect(tiles(container)).toEqual(shots(4));
   });
 
+  it("ruling 586: a long typed entry folds its text behind its own Show more", () => {
+    // CANARY: render a typed entry's text in a plain box again and a question
+    // entry carrying its card runs the whole height of the timeline.
+    layout(900);
+    const { container } = render(
+      <TimelineItem ev={ev({ type: "blocked", text: "**Question for a human:** Intake batch?\n\n1. Region.\n2. Hours." })} />,
+    );
+    const text = container.querySelector(".tl-text.md-body")!;
+    const toggles = container.querySelectorAll(".md-collapse-toggle");
+    expect(toggles).toHaveLength(1);
+    expect(text.classList.contains("clamped")).toBe(true);
+    expect(toggles[0]!.textContent).toBe("Show more");
+    fireEvent.click(toggles[0]!);
+    expect(text.classList.contains("clamped")).toBe(false);
+  });
+
   it("a typed event's pictures fold behind a toggle under them, which counts files once one is not a picture", () => {
     // CANARY: drop the typed event's FoldToggle and its last two files have
     // nothing that shows them.
