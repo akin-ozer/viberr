@@ -428,6 +428,20 @@ export const KB_CORRECTION_NOTE_CODEX =
   "- A passage in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to correct it on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the passage exactly as the document has it, what it should say instead and your evidence. The operator writes it into the document for every later run to read. For a knowledge base some agents on this project are not given, name only the document and what is wrong, and quote none of it: your report is on the task, where they read it.";
 
 /**
+ * Ruling 592: why the workspace contract lets a run read the task's
+ * attachments folder.
+ *
+ * The contract named only the write half of that folder ("you may COPY files
+ * INTO"), then put everything else outside the checkout off-limits, while the
+ * persona's "Files on the task thread" section (ruling 306) says it is read as
+ * well as written. Live on AWSC-32 the Estimate Judge, re-reviewing the
+ * Researcher's `ask-cells-checked.md`, obeyed the contract, never opened the
+ * file it was asked to judge, and raised a packet asking permission to read it.
+ */
+export const ATTACHMENTS_READ_SENTENCE =
+  "It holds the files people attached to this task and what earlier runs attached, such as an input your goal names or a delivery you are asked to review, and reading the ones you need is part of the task, not a step outside it.";
+
+/**
  * Ruling 591: the workspace contract's word on the correction tool.
  *
  * The contract's read-only exception says "Never write, create or delete
@@ -2028,6 +2042,9 @@ async function dispatchAgentRun(
   }
   if (collab.evidence && realBackend) {
     promptInput.attachmentsDropDir = attachmentsDir;
+  } else if (realBackend) {
+    // Ruling 592: a run that cannot post still reads what the task holds.
+    promptInput.attachmentsReadDir = attachmentsDir;
   }
   if (cloneFailure) {
     const promptFailure: PromptCloneFailure = {
@@ -3299,6 +3316,13 @@ export interface AnalyzePromptInput {
    *  refused the copy twice. */
   attachmentsDropDir?: string;
   /**
+   * Ruling 592: the task's attachments folder (ABSOLUTE), named READABLE in the
+   * contract for every run. It holds the inputs people attached and every
+   * delivery a reviewer judges; the contract used to name only the write half
+   * (for `attachmentsDropDir`) and put everything else off-limits.
+   */
+  attachmentsReadDir?: string;
+  /**
    * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
    * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
    * contract. A Codex run mounts no `read_knowledge_doc` tool for an open
@@ -3424,15 +3448,23 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           `\n`
         : ``) +
       (input.attachmentsDropDir
-        ? `- One deliberate write exception: you may COPY files INTO the task's ` +
-          `attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
+        ? `- The task's attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
           `outside this checkout; never create it inside the working directory ` +
-          `and never commit it). That is how a file is posted on the task ` +
-          `thread (see "Posting files on the task thread"). Everything else ` +
+          `and never commit it), is yours to READ and to COPY files INTO. ` +
+          ATTACHMENTS_READ_SENTENCE +
+          ` Copying a file into it is how a file is posted on the task ` +
+          `thread (see "Files on the task thread"). Everything else ` +
           `outside the working directory` +
           (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
           ` stays off-limits.\n`
-        : ``) +
+        : input.attachmentsReadDir
+          ? `- Read-only exception: the task's attachments folder, \`${input.attachmentsReadDir}\` ` +
+            `(an absolute path outside this checkout), is yours to READ. ` +
+            ATTACHMENTS_READ_SENTENCE +
+            ` Never write into it. Everything else outside the working directory` +
+            (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
+            ` stays off-limits.\n`
+          : ``) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
           // Ruling 129: a REUSED checkout says what its refresh did, so an

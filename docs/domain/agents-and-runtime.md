@@ -1257,12 +1257,14 @@ operator bursts under it (ruling 505; ui/surfaces.md).
 - Then: mount granted skills (Claude), resolve the browser MCP, build the persona and
   the analyze prompt (task text, comments and repo content are **data**, never
   authority; ruling 159: every path the prompt hands the agent is ABSOLUTE, so the
-  "Posting files on the task thread" section, the browser section and the workspace
-  contract's write exception all name `taskAttachmentsDir` in full and say it is outside
+  "Files on the task thread" section, the browser section and the workspace
+  contract's attachments exception all name `taskAttachmentsDir` in full and say it is outside
   the checkout and never committed; that section also says the folder holds what people
   attached to the task (an input the goal names) beside earlier runs' files, and that on a
   task whose deliverable is a result rather than a change to the repository the result's
-  files go there and never into a commit, ruling 530; the workspace contract also lets
+  files go there and never into a commit, ruling 530; the contract names the folder as
+  the run's to READ as well as to copy into, and names it read-only to a run that cannot
+  post files, with why (`ATTACHMENTS_READ_SENTENCE`, ruling 592); the workspace contract also lets
   the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
   `knowledgeBaseReadDirs`, ruling 422, and never write them; a run that holds
   `correct_knowledge_doc` is told there that the tool is how a passage changes,
