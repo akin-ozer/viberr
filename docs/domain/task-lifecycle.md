@@ -962,7 +962,12 @@ them.
    the **Completed, no changes** ending (still verdict-gated, ruling 62); `noChanges`
    is re-verified against the remote inside the lock so a branch that gained commits
    cannot ride a stale flag into Done. An empty task branch is deleted after a no-change
-   acceptance, through the same guarded door as every branch cleanup.
+   acceptance, through the same guarded door as every branch cleanup. A task that
+   corrected a knowledge base (ruling 498) and nobody undid it did change something:
+   the approval, the operator's card and the completion record say "no repository
+   changes" and name the corrections by id and document, with who made them, and the
+   approval says when its own reviewer made them all; the accept dialog names no outcome,
+   only what merges (ruling 576).
 7. **Merge, then write.** A **human** acceptance attempts the real merge before the
    completion is written (`github.pr.merged`, or `github.pr.merge_refused`); GitHub
    refusing the merge (not mergeable, or a head that changed during the acceptance)

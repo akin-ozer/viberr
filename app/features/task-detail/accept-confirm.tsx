@@ -474,9 +474,11 @@ export function AcceptConfirm({
                 // had a branch to be empty, so "the branch is empty" was simply
                 // false on the dialog that authorizes the close. Say what is
                 // true of the task in hand — the branch when there is one, its
-                // absence when there is not.
+                // absence when there is not. Ruling 576: and no outcome name,
+                // since "no changes" is false of a task that corrected a
+                // knowledge base; this row says only what merges.
                 <>
-                  Nothing: <strong>completed with no changes</strong>.{" "}
+                  Nothing.{" "}
                   {task.branch ? (
                     <>
                       <span className="mono">{task.branch}</span> carries no
@@ -511,9 +513,9 @@ export function AcceptConfirm({
                   ) : (
                     "the branch"
                   )}{" "}
-                  on GitHub: if it carries no commits the task closes as{" "}
-                  <strong>completed with no changes</strong>; if it carries work
-                  the acceptance is refused and says how many commits.
+                  on GitHub: if it carries no commits the task closes with
+                  nothing merged; if it carries work the acceptance is refused
+                  and says how many commits.
                 </>
               ) : (
                 <>No linked pull request. The task closes without a merge.</>

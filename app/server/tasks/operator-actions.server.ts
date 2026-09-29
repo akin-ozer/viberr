@@ -169,9 +169,11 @@ import {
 } from "./task-actions.server";
 import {
   acceptanceNoChangeCheck,
+  kbCorrectionsOutcome,
   noChangeApplies,
   noChangeCandidate,
   noChangeCompletionEvent,
+  standingKbCorrections,
 } from "./no-change-completion.server";
 import {
   canOwnDelivery,
@@ -5510,6 +5512,8 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
+    // Ruling 576: what such a task did change, named on the card.
+    const corrections = isNoChange ? standingKbCorrections(db, input.projectSlug, input.taskKey) : [];
     const requiredHere = readRequiredReviewers(input.projectSlug, ctx);
     // Ruling 137: the offer binds to the revision it describes, so a later
     // delivery can withdraw it by name and the card can say which one.
@@ -5517,7 +5521,7 @@ export async function operatorAcceptCompletion(
       kind: "accept_completion",
       toStageId: doneStageId,
       label: isNoChange
-        ? `Complete ${input.taskKey} with no changes and move it to ${doneName}`
+        ? `Complete ${input.taskKey} with no ${corrections.length > 0 ? "repository " : ""}changes and move it to ${doneName}`
         : `Accept completion and move ${input.taskKey} to ${doneName}`,
     };
     const offeredHeadSha =
@@ -5540,7 +5544,9 @@ export async function operatorAcceptCompletion(
       // flag).
       `${acceptanceOfferBasis(file.parsed.frontmatter, requiredHere)} ` +
         (isNoChange
-          ? `There is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+          ? corrections.length > 0
+            ? `Nothing goes to the repository: no branch carries work for ${input.taskKey}. Its outcome is ${kbCorrectionsOutcome(corrections)}. Accepting moves it to ${doneName} as **completed with no repository changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+            : `There is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
           : noChangeCandidate(file.parsed.frontmatter)
             ? `Accepting completion moves ${input.taskKey} to ${doneName}. There is no pull request on this task, so nothing is merged.`
             : `Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`),
@@ -5589,6 +5595,7 @@ export async function operatorAcceptCompletion(
           occurredAt: new Date().toISOString(),
           by: "operator",
           verification: noChange.verification,
+          kbCorrections: standingKbCorrections(db, input.projectSlug, input.taskKey),
         })
       : {
           occurredAt: new Date().toISOString(),

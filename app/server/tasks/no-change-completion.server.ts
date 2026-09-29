@@ -6,6 +6,7 @@ import {
   readTaskFile,
 } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
+import { listKbCorrections, type KbCorrection } from "~/server/org/kb-corrections.server";
 import type { GithubContextOptions } from "~/server/github/github-context.server";
 import {
   deliveredAsFiles,
@@ -369,6 +370,39 @@ export function assertVerifiedNoChangeStillApplies(
   );
 }
 
+const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
+/**
+ * Ruling 576: the knowledge-base corrections made on a task that still stand
+ * (nobody has undone them), oldest first. They are work the task did, so a
+ * task that made them did not complete "with no changes", whatever its branch
+ * says. Read from the correction records the Controller page lists.
+ */
+export function standingKbCorrections(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): KbCorrection[] {
+  return listKbCorrections(db, { projectSlug })
+    .filter((c) => c.taskKey === taskKey && c.undone === null)
+    .reverse();
+}
+
+/**
+ * Ruling 576: what such a task produced, by id and document, with who made
+ * it. Never the passage (ruling 568): the ids and the Controller page carry it.
+ */
+export function kbCorrectionsOutcome(corrections: readonly KbCorrection[]): string {
+  const byDoc = new Map<string, string[]>();
+  for (const c of corrections) {
+    const where = `\`${c.kb}/${c.doc}\``;
+    byDoc.set(where, [...(byDoc.get(where) ?? []), `\`${c.id}\``]);
+  }
+  const places = [...byDoc].map(([where, ids]) => `${LIST_AND.format(ids)} in ${where}`);
+  const makers = LIST_AND.format([...new Set(corrections.map((c) => c.filedBy))]);
+  return `the knowledge-base corrections made on it, which stand: ${places.join("; ")}, by ${makers}`;
+}
+
 /**
  * The ONE "Completed — no changes" completion event, for all three writers to
  * Done. Its title is distinct from the merge path's "Completion accepted", and
@@ -388,8 +422,15 @@ export function noChangeCompletionEvent(input: {
   /** R20-2 (F20-6): the completion did NOT claim `noChanges` — the server proved
    *  it at acceptance. Disclosed so the record states who established the fact. */
   autoDetected?: boolean;
+  /** Ruling 576: the task's standing knowledge-base corrections
+   *  ({@link standingKbCorrections}). With any, nothing went to the repository
+   *  but the task did change something, and the record names what. */
+  kbCorrections?: readonly KbCorrection[];
 }): TaskFileEvent {
   const { taskKey, verification } = input;
+  const kb = input.kbCorrections ?? [];
+  const completed = kb.length > 0 ? "completed with no repository changes" : "completed with no changes";
+  const outcome = kb.length > 0 ? `Its outcome is ${kbCorrectionsOutcome(kb)}. ` : "";
   // R20-2: one clause naming the server as the verifier, only when auto-detected
   // and only for the two branch-shaped bases (no_repo names its own cause).
   const autoClause =
@@ -406,18 +447,19 @@ export function noChangeCompletionEvent(input: {
   let text: string;
   if (verification === null) {
     text =
-      `${who}: **${taskKey} closed as "no changes"** WITHOUT a passing remote re-check. ` +
+      `${who}: **${taskKey} closed as "${kb.length > 0 ? "no repository changes" : "no changes"}"** WITHOUT a passing remote re-check. ` +
+      outcome +
       (input.forcedRefusal
         ? `The check said: ${input.forcedRefusal} `
         : `The re-check could not be performed. `) +
       `Nothing verified this outcome; nothing was delivered and there was no pull request to merge.`;
   } else if (verification.basis === "no_repo") {
     text =
-      `${who}: **${taskKey} completed with no changes**. This project has no GitHub ` +
+      `${who}: **${taskKey} ${completed}**. ${outcome}This project has no GitHub ` +
       `repository, so there was nothing to deliver and no pull request to merge.`;
   } else if (verification.basis === "no_branch") {
     text =
-      `${who}: **${taskKey} completed with no changes**. Nothing was delivered and there was ` +
+      `${who}: **${taskKey} ${completed}**. ${outcome}Nothing was delivered and there was ` +
       `no pull request to merge: no \`${verification.branch}\` branch exists on the remote, ` +
       `checked against \`${verification.baseBranch}\`` +
       (verification.baseSha ? ` at \`${verification.baseSha.slice(0, 12)}\`` : "") +
@@ -425,7 +467,7 @@ export function noChangeCompletionEvent(input: {
       autoClause;
   } else {
     text =
-      `${who}: **${taskKey} completed with no changes**. Branch \`${verification.branch}\` ` +
+      `${who}: **${taskKey} ${completed}**. ${outcome}Branch \`${verification.branch}\` ` +
       `carries no commits ahead of \`${verification.baseBranch}\`` +
       (verification.baseSha ? ` (\`${verification.baseSha.slice(0, 12)}\`)` : "") +
       `, re-checked at acceptance, so there was nothing to deliver and no pull request to merge.` +
@@ -436,7 +478,7 @@ export function noChangeCompletionEvent(input: {
     occurredAt: input.occurredAt,
     type: "completion",
     actor: input.actor,
-    title: "Completed with no changes",
+    title: kb.length > 0 ? "Completed with no repository changes" : "Completed with no changes",
     text,
     toAgent: false,
     evidence: null,

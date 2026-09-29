@@ -168,8 +168,11 @@ import {
 import {
   acceptanceNoChangeCheck,
   assertVerifiedNoChangeStillApplies,
+  kbCorrectionsOutcome,
+  noChangeApplies,
   noChangeCompletionEvent,
   probeNothingToDeliver,
+  standingKbCorrections,
   type AcceptanceNoChangeCheck,
   type NoChangeVerification,
 } from "./no-change-completion.server";
@@ -4646,12 +4649,23 @@ export async function recordAgentCompletion(
           // actually judged — there is no "work" to have approved. The two
           // bases are different facts (no branch at all vs. a branch carrying
           // nothing), so the sentence must not state one for the other.
+          // Ruling 576: a task that corrected a knowledge base changed
+          // something, so the approval says what, and whether the reviewer
+          // made it: then it verified the repository, not its own corrections.
+          const corrections = noChangeMint ? standingKbCorrections(db, projectSlug, taskKey) : [];
+          const ownCorrections =
+            corrections.length > 0 && corrections.every((c) => c.filedBy === roleDisplay);
           summary = noChangeMint
-            ? `${roleDisplay} approved: there is nothing to deliver. ` +
+            ? `${roleDisplay} approved: ${corrections.length > 0 ? "nothing goes to the repository" : "there is nothing to deliver"}. ` +
               (noChangeMint.basis === "no_branch"
                 ? `No \`${noChangeMint.branch}\` branch exists on the remote`
                 : `\`${noChangeMint.branch}\` carries no commits ahead of \`${noChangeMint.baseBranch}\``) +
-              `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
+              `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. ` +
+              (corrections.length > 0
+                ? `This task's outcome is ${kbCorrectionsOutcome(corrections)}` +
+                  (ownCorrections ? ", so this approval is not a review of them" : "") +
+                  ". Accepting completes this task with no repository changes."
+                : "Accepting completes this task with no changes.")
             : `${roleDisplay} approved the work${onRevision}.`;
         } else {
           // Approved, but not yet cleared. Ruling 478(g) (F40-58): WHY decides
@@ -7918,7 +7932,9 @@ export async function transitionStage(
     // Ruling 546: a task delivered as the files its deliverer saved on it
     // (rulings 388, 531) has nothing a pull request would carry, and the note
     // told the person the operator was deciding a push and a PR for it.
-    if (!livePr && !deliveredAsFiles(moved)) {
+    // Ruling 576: nor does a task a reviewer verified has nothing to deliver
+    // (R19-8); live on AWSC-11 the note followed that verification by 30s.
+    if (!livePr && !deliveredAsFiles(moved) && !noChangeApplies(moved)) {
       void surfaceDeliveryEvent(
         db,
         ctx,
@@ -11000,6 +11016,7 @@ export async function resolvePacket(
             by: "human",
             verification: noChange.verification,
             autoDetected: noChange.autoDetected,
+            kbCorrections: standingKbCorrections(db, input.projectSlug, input.taskKey),
           })
         : {
             occurredAt: acceptedAt,
@@ -15250,6 +15267,7 @@ async function acceptCompletion(
         verification: noChange.verification,
         forcedRefusal: noChange.refusal,
         autoDetected: noChange.autoDetected,
+        kbCorrections: standingKbCorrections(db, input.projectSlug, input.taskKey),
       })
     : {
         occurredAt: new Date().toISOString(),

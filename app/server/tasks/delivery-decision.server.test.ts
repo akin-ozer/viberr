@@ -226,6 +226,37 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
       fm().timeline.some((e) => e.text.includes("no live review pull request")),
     ).toBe(false);
   });
+
+  it("ruling 576: no safety-net event for a task a reviewer verified has nothing to deliver", async () => {
+    // Live on AWSC-11 the note told the owner the operator decides a push and
+    // a review PR, 30 seconds after the reviewer's approval verified there was
+    // nothing to deliver (R19-8). CANARY: drop `noChangeApplies` from the
+    // condition and the note is written.
+    seed({
+      stage: "impl",
+      noChanges: true,
+      workRevision: {
+        id: "rev_verified",
+        headSha: "b".repeat(40),
+        treeSha: null,
+        branch: null,
+        createdAt: "2026-09-28T23:10:22.590Z",
+        sourceProfileId: null,
+        kind: "verified",
+      },
+    });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actorOf(store.users.arda),
+      dataCtx(),
+    );
+    await new Promise((r) => setTimeout(r, 80));
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(
+      fm().timeline.some((e) => e.text.includes("no live review pull request")),
+    ).toBe(false);
+  });
 });
 
 /**
