@@ -34,7 +34,11 @@ import { listProjectTasks } from "~/server/projections/board-query.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { waitFor } from "../../../test-support/polling";
-import { listNotifications } from "~/server/projections/notifications.server";
+import {
+  createNotification,
+  listNotifications,
+  taskEventLink,
+} from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   RECOMMENDATION_DECLINED_TITLE,
@@ -62,6 +66,7 @@ import {
   operatorOpenPacket,
   operatorPostComment,
   operatorCorrectKnowledgeDoc,
+  operatorEditComment,
   operatorLeaseFiles,
   operatorSetGoal,
   operatorResolvePacket,
@@ -7689,3 +7694,122 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
   });
 });
 
+/**
+ * Ruling 584 (owner, 2026-09-29): "operator decides if it's own comments needs
+ * deleting or editing. Don't expose this to the end user, fixes the problem
+ * silently". On AWSC-19 the Estimate Judge's report named expected rows in
+ * words and the operator said a comment was not something it could remove.
+ */
+describe("ruling 584: the operator edits or deletes an agent's comment, silently", () => {
+  const AT = "2026-09-29T03:34:51.668Z";
+  const PERSON_AT = "2026-09-29T03:40:00.000Z";
+  const JUDGE = { kind: "agent", backend: "claude", profileId: "estimate-judge", roleHint: "Estimate Judge" } as const;
+
+  function seedComments(): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.arda.id }),
+      goal: "Correct the golden entries.",
+      timeline: [
+        {
+          occurredAt: PERSON_AT,
+          type: "comment",
+          actor: { kind: "human", userId: store.users.arda.id, nameHint: "Arda" },
+          title: null,
+          text: "Thanks.",
+          toAgent: false,
+          evidence: null,
+        },
+        {
+          occurredAt: AT,
+          type: "comment",
+          actor: JUDGE,
+          title: null,
+          text: "sample-02 prices no load-balancer line. @Arda",
+          toAgent: false,
+          evidence: null,
+          attachments: ["golden-alternatives.md"],
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const about = { projectSlug: store.slug, taskKey: "VIB-1", href: taskEventLink(store.slug, "VIB-1", AT), bypassPrefs: true };
+    createNotification(store.db, { userId: store.users.arda.id, kind: "mention", text: "mentioned you: “sample-02 prices no load-balancer line.”", ...about });
+    createNotification(store.db, { userId: store.users.arda.id, kind: "quality", text: "Estimate Judge posted its report.", ...about });
+  }
+  const edit = (at: string, text: string | null) =>
+    operatorEditComment(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", at, text, reason: "It stated an expected configuration." },
+      authority("supervised"),
+    );
+  const inbox = () =>
+    listNotifications(store.db, store.users.arda.id)
+      .filter((n) => n.taskKey === "VIB-1")
+      .map((n) => [n.kind, n.text]);
+
+  it("rewrites the words where they stand, requotes the mention, and says nothing on the task", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedComments();
+    const r = await edit(AT, "Sample-02's row is written. @Arda");
+    expect(r.outcome).toBe("done");
+    // CANARY: write a note about the edit and it is announced to everyone.
+    expect(task().timeline.map((e) => [e.occurredAt, e.type])).toEqual([
+      [PERSON_AT, "comment"],
+      [AT, "comment"],
+    ]);
+    expect(task().timeline[1]).toMatchObject({ actor: JUDGE, text: "Sample-02's row is written. @Arda", attachments: ["golden-alternatives.md"] });
+    // CANARY: leave the mention and the inbox still quotes the old words.
+    expect(inbox()).toEqual(
+      expect.arrayContaining([
+        ["mention", "mentioned you: “Sample-02's row is written. @Arda”"],
+        ["quality", "Estimate Judge posted its report."],
+      ]),
+    );
+    const [row] = listAuditEvents(store.db, { action: "task.comment.edited" });
+    expect(row!.details).toEqual({ at: AT, author: "agent:claude/estimate-judge (Estimate Judge)", reason: "It stated an expected configuration." });
+  });
+
+  it("deletes the entry and every notification that would open it", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedComments();
+    expect((await edit(AT, null)).outcome).toBe("done");
+    expect(task().timeline.map((e) => e.occurredAt)).toEqual([PERSON_AT]);
+    // CANARY: keep the rows and they open an entry that is gone.
+    expect(inbox()).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.comment.deleted" })).toHaveLength(1);
+  });
+
+  it("refuses a person's comment and a time that holds no comment, changing nothing", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedComments();
+    // CANARY: drop the author check and the operator rewrites a person's words.
+    const person = await edit(PERSON_AT, "Edited.");
+    expect(person.outcome).toBe("noop");
+    expect(person.message).toContain("is a person's");
+    expect((await edit("2026-01-01T00:00:00.000Z", null)).outcome).toBe("noop");
+    expect(task().timeline.map((e) => e.text)).toEqual(["Thanks.", "sample-02 prices no load-balancer line. @Arda"]);
+  });
+
+  it("is the Claude operator's edit_comment tool, which a withheld timeline grant does not mount", async () => {
+    // CANARY: drop the tool from the toolkit and the operator can only say so.
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkitFor = () =>
+      buildOperatorToolkit({
+        db: store.db,
+        ctx: { dataRoot: store.dataRoot },
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        authority: authority("supervised"),
+      });
+    deployRoster(DEFAULT_POLICY);
+    seedComments();
+    const tool = toolkitFor().tools.find((t) => t.name === "edit_comment")!;
+    // SAFETY: the handler validates its own arguments; this is the shape the
+    // tool's schema declares.
+    await tool.handler({ at: AT, reason: "It stated an expected configuration." } as never, {} as never);
+    expect(task().timeline.map((e) => e.occurredAt)).toEqual([PERSON_AT]);
+    deployRoster([{ capabilityId: "append-typed-events", mode: "off" }]);
+    expect(toolkitFor().tools.some((t) => t.name === "edit_comment")).toBe(false);
+  });
+});

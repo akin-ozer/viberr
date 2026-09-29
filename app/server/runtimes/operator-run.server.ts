@@ -76,6 +76,7 @@ import {
   operatorPostComment,
   operatorRelayToTask,
   operatorTakeFromTask,
+  operatorEditComment,
   operatorSetDependencies,
   operatorSetEpic,
   operatorSetGoal,
@@ -2253,6 +2254,11 @@ const OPERATOR_PLAN_TOOLS = [
   // holds the files, `files` which of them to take onto this task, `text` an
   // optional line on what they are for.
   "take_from_task",
+  // Ruling 584: edit or delete a comment the operator or an agent wrote on
+  // THIS task, silently. The plan mirror of the Claude toolkit's
+  // `edit_comment`: `commentAt` names the comment, `text` the words that
+  // replace it (null deletes it), `reason` why.
+  "edit_comment",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -2305,6 +2311,8 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   relay_to_task: ["append-typed-events"],
   // Ruling 557: a take writes the relay's claim comment on this task.
   take_from_task: ["append-typed-events"],
+  // Ruling 584: a comment's words are a timeline write, like the comment.
+  edit_comment: ["append-typed-events"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
@@ -2428,6 +2436,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           scheduleId: {
             type: ["string", "null"],
             description: "For cancel_task_schedule ONLY (ruling 487): the pending entry to cancel (`schedules[].id` in the snapshot); only one marked `yours` is yours to cancel. Null for every other tool.",
+          },
+          commentAt: {
+            type: ["string", "null"],
+            description: "For edit_comment ONLY (ruling 584): the time of a comment the operator or an agent wrote on THIS task, exactly as the timeline gives it. Use it yourself, without asking anyone and without saying so on the task, when a comment should not stand as written: it states an expected answer or a golden entry's configuration agents on a benchmark must not read, holds a secret, or misleads the next run. `text` is the words that replace it in full (null deletes it) and `reason` why, for the audit log. A person's comment is refused. Null for every other tool.",
           },
           // Ruling 488: the task a relay posts on.
           taskKey: {
@@ -2572,7 +2584,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "files", "screenshots", "completeness", "noVerdict", "dueAt", "delayMinutes", "scheduleId", "taskKey"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "files", "screenshots", "completeness", "noVerdict", "dueAt", "delayMinutes", "scheduleId", "commentAt", "taskKey"],
       },
     },
   },
@@ -2623,6 +2635,8 @@ const operatorPlanActionSchema = z.strictObject({
   dueAt: z.string().nullable().optional(),
   delayMinutes: z.number().nullable().optional(),
   scheduleId: z.string().nullable().optional(),
+  // Ruling 584: edit_comment's comment, `.optional()` for the same replay reason.
+  commentAt: z.string().nullable().optional(),
   // Ruling 488: relay_to_task's target — `.optional()` for the same replay
   // reason.
   taskKey: z.string().nullable().optional(),
@@ -3503,6 +3517,21 @@ async function executeCodexPlan(
             if (a.text) take.text = a.text;
             record(a.tool, await operatorTakeFromTask(db, ctx, take, authority));
           } else skippedMalformed(a.tool, "the task to take from and the files");
+          break;
+        case "edit_comment":
+          // Ruling 584: `commentAt` names the comment, `text` replaces its
+          // words (null deletes it), `reason` is why.
+          if (a.commentAt && a.reason) {
+            record(
+              a.tool,
+              await operatorEditComment(
+                db,
+                ctx,
+                { ...base, at: a.commentAt, text: a.text ?? null, reason: a.reason },
+                authority,
+              ),
+            );
+          } else skippedMalformed(a.tool, "the comment's time and the reason");
           break;
       }
     } catch (error) {

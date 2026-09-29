@@ -135,9 +135,10 @@ export const RBAC_DEFINITIONS = [
     covers: "and archiving or restoring the project itself",
     roles: [A],
   },
-  // Ruling 582: taking a file, or a comment's words, off a task's record: a
-  // secret, or a benchmark's answer key, where agents and people read it.
-  { id: "remove-from-record", label: "Remove a file or a comment from a task", roles: [A] },
+  // Ruling 582: taking a file off a task's record: a secret, or a benchmark's
+  // answer key, where agents and people read it. Ruling 584 gave a comment's
+  // words to the operator instead.
+  { id: "remove-from-record", label: "Remove a file from a task", roles: [A] },
   // Admin-only override of the required-reviewer / blocked-packet acceptance gate
   // (DG-2). A stuck task — e.g. a required reviewer that can no longer record a
   // verdict — is otherwise permanently un-acceptable; this is the audited escape

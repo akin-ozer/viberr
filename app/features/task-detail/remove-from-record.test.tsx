@@ -9,10 +9,10 @@ import { AttachmentLightboxProvider, useAttachmentLightbox } from "./attachment-
 import { Timeline } from "./timeline";
 
 /**
- * Ruling 582: a project admin takes a file, or a comment's words, off a task's
- * record from where it shows: a comment's own row, and the card a file opens
- * in. Anyone else is offered neither. The writers and their refusals are
- * `record-removal.server.test.ts`'s.
+ * Ruling 582: a project admin takes a file off a task's record from the card
+ * it opens in; anyone else is not offered it. Ruling 584 gave a comment's
+ * words to the operator, so no comment offers Remove. The writer and its
+ * refusals are `record-removal.server.test.ts`'s.
  */
 
 afterEach(cleanup);
@@ -47,7 +47,7 @@ function renderOn(page: () => React.JSX.Element) {
   return posted;
 }
 
-function timeline(canRemove: boolean) {
+function timeline() {
   return (
     <Timeline
       events={[COMMENT]}
@@ -57,7 +57,6 @@ function timeline(canRemove: boolean) {
       tlDefault="all"
       ask={0}
       mentionables={MENTIONABLES}
-      canRemove={canRemove}
     />
   );
 }
@@ -73,19 +72,6 @@ function OpenFile() {
 }
 
 describe("ruling 582: removing from a task's record", () => {
-  it("offers an admin Remove on a comment, and sends its time and the reason once confirmed", async () => {
-    const posted = renderOn(() => timeline(true));
-    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
-    await screen.findByRole("alertdialog", { name: /Remove this comment's words/ });
-    fireEvent.change(screen.getByRole("textbox", { name: /Why/ }), { target: { value: "states the key" } });
-    fireEvent.click(screen.getByRole("button", { name: "Remove words" }));
-    await waitFor(() => expect(posted).toHaveLength(1));
-    expect(posted[0]).toMatchObject({
-      path: "/projects/p/tasks/K",
-      body: { intent: "remove-comment", at: AT, reason: "states the key" },
-    });
-  });
-
   it("offers an admin Remove on a file's card, posted to the task that serves it", async () => {
     // CANARY: drop `removable` from the provider's card and the file has no
     // way off the record but a shell.
@@ -104,11 +90,11 @@ describe("ruling 582: removing from a task's record", () => {
     });
   });
 
-  it("offers neither to a viewer without the grant", async () => {
+  it("offers no Remove to a viewer without the grant, and none on a comment (ruling 584)", async () => {
     renderOn(() => (
       <AttachmentLightboxProvider>
         <OpenFile />
-        {timeline(false)}
+        {timeline()}
       </AttachmentLightboxProvider>
     ));
     fireEvent.click(await screen.findByRole("link", { name: "golden-files.md" }));

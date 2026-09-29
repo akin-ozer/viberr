@@ -56,7 +56,6 @@ import {
   setOwner,
   attachTaskFile,
   removeTaskAttachment,
-  removeTaskComment,
   setTaskArchived,
   setTaskMetadata,
   transitionStage,
@@ -1110,8 +1109,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "remove-attachment": {
-        // Ruling 582: admin-only (`remove-from-record`), enforced in the writer,
-        // like the comment's words below.
+        // Ruling 582: admin-only (`remove-from-record`), enforced in the writer.
         const { name } = await removeTaskAttachment(
           db,
           {
@@ -1123,19 +1121,6 @@ export async function action({ request, params }: Route.ActionArgs) {
           actor,
         );
         return { ok: true as const, intent, toast: `${name} removed from ${taskKey}` };
-      }
-      case "remove-comment": {
-        await removeTaskComment(
-          db,
-          {
-            projectSlug,
-            taskKey,
-            at: String(formData.get("at") ?? ""),
-            reason: String(formData.get("reason") ?? ""),
-          },
-          actor,
-        );
-        return { ok: true as const, intent, toast: "The comment's words are removed" };
       }
       case "archive-task":
       case "restore-task": {

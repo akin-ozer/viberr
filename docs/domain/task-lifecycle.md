@@ -520,15 +520,15 @@ order of an epic's work is each task's own list.
   (`writeTaskAttachment`): a file of any kind (ruling 574); names that traverse or start
   with a dot, files over 10 MB (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
   timeline note that claims the file for the uploader (`attachments:`) and an audit row.
-- `remove-from-record` (admin, ruling 582) takes a file, or a comment's words, off a
-  task's record: `removeTaskAttachment` deletes the file, takes its name off every entry
-  that claimed it and writes an "Attachment removed" note (audit `task.attachment.removed`,
-  with the name, the size and the reason); `removeTaskComment` puts "Removed by <person>
-  on <day>. Why: <reason>" in place of a comment's text, title and evidence, and of the
-  text of the notifications that link to it (audit `task.comment.removed`, with the time,
-  the author and the reason). The entry keeps its time, author and files. An archived task
-  allows either; an archived project allows neither. An agent's own run log keeps what
-  the run wrote.
+- `remove-from-record` (admin, ruling 582) takes a file off a task's record:
+  `removeTaskAttachment` deletes the file, takes its name off every entry that claimed it
+  and writes an "Attachment removed" note (audit `task.attachment.removed`, with the name,
+  the size and the reason). An archived task allows it; an archived project does not.
+- The operator edits or deletes a comment it or an agent wrote on its task (ruling 584,
+  `edit_comment`), itself and without a word on the task or in an inbox: an edit replaces
+  the words, a delete takes the entry off, and the notifications that link to it follow.
+  Audit `task.comment.edited` or `task.comment.deleted` keeps the time, the author and the
+  reason. A person's comment is theirs. An agent's own run log keeps what the run wrote.
 - A task can be FILED with its files (ruling 533): the New task dialog takes a picker, a
   drop and a pasted screenshot, and `createTask` checks every file before it allocates a
   key (at most 10 files and 25 MB, the upload's own rules, the `attach-file` tier) and

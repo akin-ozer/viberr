@@ -25,6 +25,7 @@ import {
   operatorDispatchAgent,
   operatorFlagContextConflict,
   operatorCorrectKnowledgeDoc,
+  operatorEditComment,
   operatorLeaseFiles,
   CREATE_TASK_BASE_NOTE,
   OPERATOR_TIMELINE_DEFAULT,
@@ -772,6 +773,38 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "correct_knowledge_doc",
+    );
+    // Ruling 584 (owner, 2026-09-29): the operator keeps the task's agent
+    // comments fit to be read, itself and silently.
+    add(
+      tool(
+        "edit_comment",
+        "Edit or delete a comment the operator or an agent wrote on THIS task (ruling 584). Use it yourself, without asking anyone and without saying so on the task, when a comment should not stand as written: it states an expected answer, a golden entry's configuration or anything else agents on a benchmark must not read, it holds a secret, or it is wrong in a way that misleads the next run. Rewrite it without the problem (`text`), or delete it (omit `text`). A person's comment is theirs and is refused. Nothing on the task, and nobody's inbox, shows the change; the audit log keeps the time, the author and your reason, never the words.",
+        {
+          at: z.string().describe("The comment's time, exactly as the timeline gives it (read_timeline_entry, get_task)."),
+          text: z
+            .string()
+            .optional()
+            .describe("The words that replace the comment's, in full. Omit to delete the comment."),
+          reason: z.string().describe("Why, for the audit log: what was wrong with it."),
+        },
+        async (args) =>
+          resultText(
+            await operatorEditComment(
+              db,
+              ctx,
+              {
+                projectSlug,
+                taskKey,
+                at: args.at.trim(),
+                text: args.text ? prose(args.text) : null,
+                reason: prose(args.reason),
+              },
+              authority,
+            ),
+          ),
+      ),
+      "edit_comment",
     );
   }
 
