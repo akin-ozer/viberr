@@ -480,18 +480,23 @@ export function readKbDoc(
   kb: string,
   docPath: string,
   dataRoot?: string,
-): { text: string; truncated: boolean; rel: string } | null {
+  /** Ruling 580: the character a read starts at, so a long document is read in pages. */
+  offset = 0,
+): { text: string; rel: string; start: number; end: number; length: number } | null {
   const doc = resolveKbDocPath(kb, docPath, dataRoot);
   if (!doc) return null;
   const raw = readFileSync(doc.abs, "utf8");
-  return {
-    rel: doc.rel,
-    text: raw.slice(0, KB_DOC_READ_CHARS),
-    // Reported, never hidden: a clipped document that reads as complete is how
-    // a model states a half-read file as fact.
-    truncated: raw.length > KB_DOC_READ_CHARS,
-  };
+  const start = Math.min(Math.max(0, Math.floor(offset)), raw.length);
+  const end = Math.min(raw.length, start + KB_DOC_READ_CHARS);
+  // Reported, never hidden: a clipped document that reads as complete is how
+  // a model states a half-read file as fact.
+  return { rel: doc.rel, text: raw.slice(start, end), start, end, length: raw.length };
 }
+
+/** Ruling 580: what a knowledge-base reader's `offset` does, one sentence for every tool that takes it. */
+export const KB_DOC_OFFSET_DESCRIPTION =
+  `Ruling 580: the character to start at. A read returns ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters; ` +
+  "when a document is longer, the read says which characters it returned and the offset to pass to read on.";
 
 /**
  * The instruction that ships WITH every knowledge-base index (ruling 283).
@@ -560,6 +565,7 @@ export function readKbDocForRun(
   kb: string,
   docPath: string,
   dataRoot?: string,
+  offset = 0,
 ): string {
   const wanted = kb.trim();
   if (!granted.includes(wanted)) {
@@ -574,7 +580,7 @@ export function readKbDocForRun(
         : "None are attached to this run at all.")
     );
   }
-  const doc = readKbDoc(wanted, docPath, dataRoot);
+  const doc = readKbDoc(wanted, docPath, dataRoot, offset);
   if (!doc) {
     const index = readKbIndexDetailed(wanted, dataRoot);
     return (
@@ -584,8 +590,21 @@ export function readKbDocForRun(
         : `It resolves to nothing this run can read${index.unresolved ? `: ${index.unresolved.reason}` : ""}.`)
     );
   }
-  return doc.truncated
-    ? `${doc.text}\n\n_(cut off here: \`${doc.rel}\` is longer than the ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters one read returns; what is above is its opening, not the whole document)_`
+  // Ruling 580: a long document is read in pages. It used to stop at its
+  // opening with no way on, and a private knowledge base (ruling 578) has no
+  // shell to finish it from.
+  const n = (count: number) => count.toLocaleString("en-US");
+  if (offset > 0 && doc.start >= doc.length) {
+    return `[noop] \`${doc.rel}\` is ${n(doc.length)} characters, so offset ${n(offset)} is past its end.`;
+  }
+  if (doc.end < doc.length) {
+    return (
+      `${doc.text}\n\n_(characters ${n(doc.start)} to ${n(doc.end)} of ${n(doc.length)} in \`${doc.rel}\`: ` +
+      `what is above is not the whole document; read on with offset ${doc.end})_`
+    );
+  }
+  return doc.start > 0
+    ? `${doc.text}\n\n_(characters ${n(doc.start)} to ${n(doc.end)} of ${n(doc.length)} in \`${doc.rel}\`: the end of the document)_`
     : doc.text;
 }
 

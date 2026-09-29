@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
-import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import { KB_DOC_OFFSET_DESCRIPTION, readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   attachmentImageHeader,
   listTaskAttachments,
@@ -477,10 +477,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           path: z
             .string()
             .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+          offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
         // eslint-disable-next-line @typescript-eslint/require-await
-        async (args: { kb: string; path: string }) =>
-          textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot)),
+        async (args: { kb: string; path: string; offset?: number }) =>
+          textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot, args.offset ?? 0)),
       ),
       "read_knowledge_doc",
     );

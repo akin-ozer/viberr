@@ -700,6 +700,35 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
    * between them, so a table whose rows straddled a part boundary split in
    * two, and a non-ASCII document was reported 50 bytes short.
    */
+  it("ruling 580: read_knowledge_base_doc returns a long document in pages, with where the next one starts", async () => {
+    // Live on the AWS calculator board the controller could not take in a
+    // 94 KB document whole, and so could not safely change it. CANARY: return
+    // the whole text again and the first page carries all of it.
+    const { KB_DOC_READ_CHARS } = await import("~/server/files/kb-injection.server");
+    const body = "a".repeat(KB_DOC_READ_CHARS) + "b".repeat(500);
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "paged-read",
+      doc: { path: "long.md", content: body },
+    });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    type Page = { text: string; characters: number; offset: number; nextOffset: number | null };
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built; these are its own fields.
+    const first = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "long.md" }),
+    ) as Page;
+    expect(first.characters).toBe(body.length);
+    expect(first.text).toBe("a".repeat(KB_DOC_READ_CHARS));
+    expect(first.nextOffset).toBe(KB_DOC_READ_CHARS);
+    // SAFETY: as above.
+    const second = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "long.md", offset: first.nextOffset }),
+    ) as Page;
+    expect(second.offset).toBe(KB_DOC_READ_CHARS);
+    expect(second.text).toBe("b".repeat(500));
+    expect(second.nextOffset).toBeNull();
+  });
+
   it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
     const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
     const kb = /id (kb_[\w-]+)/.exec(created)?.[1];

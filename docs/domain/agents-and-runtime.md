@@ -1653,7 +1653,8 @@ runtime's answer for a missing grant.
   index, and so every cached prefix on the project, as it was. `KB_INDEX_NOTE` tells the
   run to read what it needs: `read_knowledge_doc {kb, path}` (the specialist, operator and
   controller toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
-  one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
+  one document in pages of `KB_DOC_READ_CHARS` 48 000 chars, each saying which characters
+  it holds and the `offset` to read on with, ruling 580), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
   workspace contract allows those reads, ruling 422; `kb/` stays readable, and never
   writable, to the agent's own OS user, ruling 460). A grant decides what a run is

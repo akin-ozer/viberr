@@ -4,7 +4,7 @@ import {
   type StageColor,
 } from "~/shared/workflow/stage-colors";
 import type { DatabaseSync } from "node:sqlite";
-import { readKbDocForRun } from "~/server/files/kb-injection.server";
+import { KB_DOC_OFFSET_DESCRIPTION, KB_DOC_READ_CHARS, readKbDocForRun } from "~/server/files/kb-injection.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
@@ -694,9 +694,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           path: z
             .string()
             .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
+          offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
-        runWith((args: { kb: string; path: string }) =>
-          readKbDocForRun(grantedKb, args.kb, args.path, dataRoot),
+        runWith((args: { kb: string; path: string; offset?: number }) =>
+          readKbDocForRun(grantedKb, args.kb, args.path, dataRoot, args.offset ?? 0),
         ),
       ),
       "read_knowledge_doc",
@@ -817,12 +818,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_knowledge_base_doc",
-      "Read one document out of a knowledge base, so a `save_knowledge_base` write can carry the text forward instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type).",
+      "Read one document out of a knowledge base, so a `save_knowledge_base` write can carry the text forward instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type). Ruling 580: a long document comes back in pages; `nextOffset` is where the next read starts, null at the end, and a whole-document replace needs every page.",
       {
         id: z.string().describe("KB id, from list_knowledge_bases."),
         path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
+        offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
       },
-      runWith((args: { id: string; path: string }) => {
+      runWith((args: { id: string; path: string; offset?: number }) => {
         requireOrgAdmin("read the org knowledge bases");
         const target = resolveStoreTarget(db, "kb", args.id, { dataRoot });
         if (!target) return `[denied] No knowledge base with id ${args.id}.`;
@@ -833,6 +835,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             `list_knowledge_bases names what it holds.`
           );
         }
+        // Ruling 580: a long document comes back in pages. Whole, a 94 KB
+        // document was more than the controller could take in, and it could
+        // not safely change what it could not read.
+        const start = Math.min(Math.max(0, args.offset ?? 0), doc.text.length);
+        const end = Math.min(doc.text.length, start + KB_DOC_READ_CHARS);
         return json({
           path: args.path,
           // Ruling 466: UTF-8 bytes, the unit the write replies use.
@@ -842,7 +849,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // say which one it is replacing and Viberr can refuse when the
           // document moved underneath it.
           version: storeDocVersion(target, [args.path]),
-          text: doc.text,
+          characters: doc.text.length,
+          offset: start,
+          nextOffset: end < doc.text.length ? end : null,
+          text: doc.text.slice(start, end),
         });
       }),
     ),
