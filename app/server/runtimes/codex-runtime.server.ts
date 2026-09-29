@@ -991,10 +991,34 @@ export function createCodexAdapter(
       // stuck-loop packet fires and a human is notified.
       const idleMs = codexIdleTimeoutMs();
       let idleTimer: ReturnType<typeof setTimeout> | null = null;
-      const armIdle = () => {
+      /**
+       * Ruling 595: the stream is not the run's only sign of life. The CLI
+       * streams no event for a reasoning step whose summary is empty, and at
+       * a high effort one model call reasons for many minutes in such steps,
+       * each one a line in the rollout. Live, two Inventory Analysts on
+       * `gpt-6-luna` wrote a reasoning step every ten seconds for fifteen
+       * minutes and were stopped as hung with the work under way. Set once
+       * the rollout tail exists; null (the stream alone) without a shared home.
+       */
+      let rolloutWrittenAt: (() => number | null) | null = null;
+      /** The hang's sentence: it names the rollout only when it was watched. */
+      const idleSentence = () =>
+        `Codex stopped after ${idleMs} ms without producing an event${rolloutWrittenAt ? " or writing to its session" : ""}.`;
+      const armIdle = (delayMs = idleMs) => {
         if (idleTimer) clearTimeout(idleTimer);
         idleTimer = setTimeout(() => {
           if (settled || interrupted) return;
+          const writtenAt = rolloutWrittenAt?.() ?? null;
+          const quietMs = writtenAt === null ? Infinity : Math.max(0, Date.now() - writtenAt);
+          if (quietMs < idleMs) {
+            // The model is still working: the window runs from its last write.
+            logger.info("codex run quiet on its stream; its rollout is still growing", {
+              runId: spec.runId,
+              quietMs,
+            });
+            armIdle(idleMs - quietMs);
+            return;
+          }
           idleTimedOut = true;
           logger.warn(
             "codex run idle-timeout: no activity within the window",
@@ -1016,12 +1040,12 @@ export function createCodexAdapter(
               { runId: spec.runId, graceMs: INTERRUPT_SETTLE_GRACE_MS },
             );
             emitAdapterFailure(
-              `Codex stopped after ${idleMs} ms without producing an event.`,
+              idleSentence(),
               "idle_timeout",
             );
             settle("error");
           });
-        }, idleMs);
+        }, delayMs);
       };
       const disarmIdle = () => {
         if (idleTimer) {
@@ -1251,6 +1275,7 @@ export function createCodexAdapter(
         // the moment it completes; it is read on every event below. Opened
         // before the CLI spawns, so a resumed thread's earlier runs stay out.
         const usageTail = sharedHome ? codexUsageTail(sharedHome, spec.resumeSessionId ?? null) : null;
+        if (usageTail) rolloutWrittenAt = () => usageTail.lastWriteMs(sessionId);
 
         try {
           armIdle();
@@ -1343,7 +1368,7 @@ export function createCodexAdapter(
             // Classified so the timeline copy can say "hung", not "failed" —
             // and so it reads the same as the Claude idle guard (P13-RT-11).
             emitAdapterFailure(
-              `Codex stopped after ${idleMs} ms without producing an event.`,
+              idleSentence(),
               "idle_timeout",
             );
             return settle("error");

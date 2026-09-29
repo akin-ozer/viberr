@@ -6134,8 +6134,12 @@ export async function applyAgentCompletionEffects(
     // 127's refusal sentence, already naming the person and the remedy. A
     // provider-side `overloaded` failure is worded by the leaf too: its remedy
     // (retry; nothing to fix) is the same one for operator and specialist.
+    // Ruling 595: so is a hung run, whose remedy is the same plain retry.
     const classified =
-      failure?.kind === "quota" || failure?.kind === "auth" || failure?.kind === "overloaded";
+      failure?.kind === "quota" ||
+      failure?.kind === "auth" ||
+      failure?.kind === "overloaded" ||
+      failure?.kind === "idle_timeout";
     const reasonText = classified
       ? described.reason
       : failure?.kind === "unavailable"
@@ -6227,7 +6231,8 @@ export async function applyAgentCompletionEffects(
     // task OWNER has it connected, ruling 127; the switch STICKS per F27-B1,
     // owner ruling 2026-08-24, via the retry run's per-engagement
     // `pinnedBackend`; else "send the agent back to continue"; redirect
-    // present and not recommended). Any other kind keeps the stock set.
+    // present and not recommended). A hung run takes the leaf's set as well
+    // (ruling 595); any other kind keeps the stock set.
     const backendFailure =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
@@ -6259,7 +6264,9 @@ export async function applyAgentCompletionEffects(
         : `The ${input.role} ${roleLabel} run failed: ${endSentence(reasonText)}`,
     };
     if (classified) stuck.remedy = described.remedy;
-    if (backendFailure) stuck.options = described.options;
+    // Ruling 595: a hung run takes the leaf's options too, which recommend
+    // running the same agent again rather than redirecting it.
+    if (backendFailure || failure?.kind === "idle_timeout") stuck.options = described.options;
     if (accountCause) stuck.cause = accountCause;
     if (providerText) stuck.providerText = providerText;
     const escalation = await openStuckLoopPacket(

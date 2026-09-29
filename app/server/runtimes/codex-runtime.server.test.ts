@@ -18,7 +18,7 @@ import {
 } from "./codex-runtime.server";
 import { shareFileForAgentsToRead } from "./agent-isolation.server";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { codexVendor } from "./codex-app-server.server";
 import path from "node:path";
 import { backendAccountHome, ensureUserBackendHome } from "./user-homes.server";
@@ -1792,6 +1792,87 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
     expect(done.display?.usage).toEqual({ input_tokens: 13_000, cached_input_tokens: 12_000, output_tokens: 300 });
     // The raw line is what the CLI said.
     expect(z.object({ usage: z.object({ input_tokens: z.number() }) }).parse(JSON.parse(done.raw)).usage.input_tokens).toBe(36_000);
+  });
+});
+
+/**
+ * Ruling 595: the Codex CLI streams no event for a reasoning step whose
+ * summary is empty, and at a high effort one model call reasons in such steps
+ * for many minutes, each one a line in the rollout. Live, two Inventory
+ * Analysts on `gpt-6-luna` wrote a reasoning step every ten seconds for
+ * fifteen minutes and the idle guard stopped them as hung. The guard now reads
+ * the rollout before it calls a quiet stream a hang.
+ */
+describe("ruling 595: a Codex run still writing its rollout is working, not hung", () => {
+  const homes = createTestDbContext();
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS;
+    resetEnvCacheForTests();
+    homes.cleanup();
+  });
+  const THREAD = "01a0ee9e-fd2a-71f1-aa50-c6a95e1f51bc";
+
+  it("a quiet stream over a growing rollout keeps running, and the window runs from the last write", async () => {
+    process.env.VIBERR_CODEX_IDLE_TIMEOUT_MS = "1000";
+    resetEnvCacheForTests();
+    vi.useFakeTimers({ now: Date.parse("2026-09-29T19:25:56.000Z") });
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    const dir = path.join(shared, "sessions", "2026", "09", "29");
+    const rollout = path.join(dir, `rollout-2026-09-29T19-23-12-${THREAD}.jsonl`);
+    /** The CLI finishing one reasoning step: a line, written now. */
+    const reasoningStep = () => {
+      mkdirSync(dir, { recursive: true });
+      const now = new Date();
+      appendFileSync(
+        rollout,
+        `${JSON.stringify({ timestamp: now.toISOString(), type: "response_item", payload: { type: "reasoning", summary: [] } })}\n`,
+      );
+      utimesSync(rollout, now, now); // the file's clock is the faked one
+    };
+    const thread: CodexThread = {
+      id: THREAD,
+      async runStreamed(_input, turnOptions) {
+        const signal = turnOptions?.signal;
+        const gen = (async function* () {
+          yield { type: "thread.started", thread_id: THREAD };
+          // The model reasons: nothing more on the stream until the abort.
+          await new Promise<void>((_, reject) => {
+            signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          });
+        })();
+        return { events: asSdkEvents(gen) };
+      },
+    };
+    const client: CodexClient = { startThread: () => thread, resumeThread: () => thread };
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createCodexAdapter({ codexFactory: () => client, env: { PATH: "/usr/bin" } }).start(
+      { ...SPEC, runId: "run_reasoning", env: { CODEX_HOME: shared } },
+      { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) },
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    // Four windows of reasoning steps, one every 400 ms, and no stream event.
+    for (let step = 0; step < 10; step++) {
+      reasoningStep();
+      await vi.advanceTimersByTimeAsync(400);
+    }
+    // CANARY: drop the rollout check and the guard stops the run in its
+    // first window, as it did live.
+    expect(exit).toBeNull();
+
+    // The steps stop. The run is hung one window after the last write, 400 ms
+    // of which have already passed.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(exit).toBeNull();
+    // CANARY: re-arm a whole window from the check instead of from the last
+    // write and the run is still standing here.
+    await vi.advanceTimersByTimeAsync(200);
+    expect(exit).toMatchObject({ outcome: "error" });
+    const last = lines.at(-1)?.display;
+    expect(last?.tag).toBe("error·idle_timeout");
+    expect(last?.text).toBe("Codex stopped after 1000 ms without producing an event or writing to its session.");
   });
 });
 
