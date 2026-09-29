@@ -86,6 +86,10 @@ own pieces:
   operator's playbook skill names it, because only the delivering agent's saved files are
   the delivery. The operator's own turn already says such a task is delivered on the
   task and never through `deliver_for_review` (ruling 531, [operator.md §4](operator.md)).
+- The required reviewer never delivers (ruling 556). Work only it can do, such as
+  correcting a knowledge base only it is granted, runs it as a supporting agent and closes
+  when a project admin force-accepts it. `set_required_reviewers` and `get_project` tell
+  the controller so, and it writes such a task's goal that way (ruling 575).
 - What a task on the board is goes into the rulings knowledge base; research lands in
   knowledge bases and skills; the workflow improves by running sample inputs as ordinary
   tasks, the expected answers given only to the judging agent, and changing skills,

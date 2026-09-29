@@ -4207,6 +4207,32 @@ describe("set_required_reviewers (ruling 178)", () => {
     expect(row?.kind).toBe("change");
     expect(row?.text).toContain("(via the controller) set the required reviewers to **Reviewer at Review**.");
   });
+
+  it("ruling 575: tells the planner the required reviewer never delivers, and how work only it can do runs", async () => {
+    // Live on AWSC-11 the controller wrote "the Estimate Judge delivers" into
+    // a goal on a board whose required reviewer is the Estimate Judge, and
+    // promised the owner a force-accept once it had. Ruling 556 refuses that
+    // hand-off, so the operator's first act was a decision packet. The
+    // controller read `requiredReviewers` with nothing saying what it means
+    // for a plan. CANARY: drop either sentence and this goes red.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.projectAdmin, email: "elif@viberr.dev", name: "Elif" },
+      projectSlug: SLUG,
+    });
+    const describe = (name: string) => toolkit.tools.find((t) => t.name === name)?.description ?? "";
+    expect(describe("set_required_reviewers")).toContain(
+      "Ruling 556: the agent a rule names never delivers on this project",
+    );
+    expect(describe("set_required_reviewers")).toContain(
+      "runs it as a supporting agent, and the task closes when a project admin force-accepts it",
+    );
+    expect(describe("get_project")).toContain(
+      "`requiredReviewers`, the agent each review stage requires on every task (ruling 178), which never delivers on this project",
+    );
+  });
 });
 
 /**
