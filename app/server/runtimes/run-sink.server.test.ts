@@ -916,10 +916,22 @@ describe("ruling 604: a Codex line's usage reading", () => {
     const sink = createRunSink(store.db, { ...spec(runId), backend: "codex", model: "gpt-6-luna" });
     sink.markRunning();
     try {
-      const reading = { status: "allowed", rateLimitType: "five_hour", utilization: 0.64, resetsAt: 1_790_782_378, isUsingOverage: false };
+      const reading = {
+        status: "allowed",
+        rateLimitType: "seven_day",
+        utilization: 0.42,
+        resetsAt: 1_791_333_093,
+        isUsingOverage: false,
+        windows: [
+          { rateLimitType: "five_hour", utilization: 0.12, resetsAt: 1_790_800_000 },
+          { rateLimitType: "seven_day", utilization: 0.42, resetsAt: 1_791_333_093 },
+        ],
+      };
       sink.line({ ...emitted({ t: "13:00:00", ev: "tool", tag: "codex·tool", text: "npm test" }, "{}", "2026-09-30T13:00:00.000Z"), facts: { rateLimit: reading } });
       // CANARY: record the reading for Claude runs only and Profile's Codex
       // card has nothing to show before a refusal.
+      // CANARY (ruling 608): drop `windows` from the stored schema and the
+      // five-hour figure never reaches instance_health.
       const row = latestBackendRateLimits(store.db, "2026-09-30T13:01:00.000Z").find((q) => q.backend === "codex")!;
       expect(row.reading).toMatchObject({ ...reading, observedAt: "2026-09-30T13:00:00.000Z", credentialUserId: store.users.arda.id });
     } finally {

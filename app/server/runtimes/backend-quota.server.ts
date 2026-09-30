@@ -77,6 +77,18 @@ const readingSchema = z.object({
   /** Unix seconds when the window resets; null when omitted. */
   resetsAt: z.number().nullable(),
   isUsingOverage: z.boolean(),
+  /** Ruling 608: every window the provider reported with this reading,
+   *  shortest first (Codex's five-hour and weekly windows); the fields above
+   *  are the one closest to its limit. Absent on a reading that knew one. */
+  windows: z
+    .array(
+      z.object({
+        rateLimitType: z.string(),
+        utilization: z.number().nullable(),
+        resetsAt: z.number().nullable(),
+      }),
+    )
+    .optional(),
   /** ISO instant of the run line that carried this reading. */
   observedAt: z.string(),
 });
