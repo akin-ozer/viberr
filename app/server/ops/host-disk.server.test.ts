@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildRoomRefusal,
   MIN_FREE_FOR_BUILD_BYTES,
+  supersededImagesToRemove,
   tightestHostDisk,
 } from "./host-disk.server";
 
@@ -62,5 +63,25 @@ describe("buildRoomRefusal", () => {
     expect(
       buildRoomRefusal({ path: "/x", freeBytes: MIN_FREE_FOR_BUILD_BYTES, totalBytes: 239 * GB }),
     ).toBeNull();
+  });
+});
+
+describe("supersededImagesToRemove (ruling 605)", () => {
+  // The three untagged builds deploys 37 to 39 left on 2026-09-30.
+  const left = [
+    { id: "c0b73aaaece8", created: "2026-09-30T14:03:54.097576918Z" },
+    { id: "09daab8b7d2c", created: "2026-09-30T14:19:38.504847633Z" },
+    { id: "74a5bd442e3d", created: "2026-09-30T13:33:29.42972417Z" },
+  ];
+
+  it("keeps the build the deploy replaced and removes the older ones", () => {
+    // CANARY: keep none (drop the slice) and the rollback image goes too.
+    // CANARY: sort oldest first and the rollback image is the one removed.
+    expect(supersededImagesToRemove(left)).toEqual(["c0b73aaaece8", "74a5bd442e3d"]);
+  });
+
+  it("removes nothing when the replaced build is the only one left", () => {
+    expect(supersededImagesToRemove(left.slice(0, 1))).toEqual([]);
+    expect(supersededImagesToRemove([])).toEqual([]);
   });
 });

@@ -669,6 +669,16 @@ remounted its disk read-only under the running instance. Nothing inside the VM c
 because the volume there reported 940.8 GB free. `--skip-disk-check` builds without the
 measurement.
 
+After the instance reports the new build, it removes the older builds of this project's
+app that earlier deploys left untagged, keeping the one this deploy replaced (ruling 605):
+each is about 0.9 GB of its own layers, and three deploys left 2.6 GB. To roll back to the
+kept build, tag it and restart without building:
+
+```bash
+docker images --filter dangling=true --filter label=com.docker.compose.service=app
+docker tag <image id> viberr-app:latest && docker compose up -d --no-build
+```
+
 It runs `git` on the host, sets `VIBERR_BUILD_VERSION` (from `package.json`),
 `VIBERR_BUILD_SHA` (`git rev-parse HEAD`) and `VIBERR_BUILD_TIME` (now) for `docker compose
 build`, warns (without refusing) when there is no git revision or the working tree is dirty,

@@ -52,3 +52,23 @@ export function buildRoomRefusal(
     `and deploy again, or pass --skip-disk-check to build anyway.`
   );
 }
+
+/** An image a build left untagged: its id and when it was built (RFC 3339). */
+export interface SupersededImage {
+  id: string;
+  created: string;
+}
+
+/**
+ * Ruling 605: the images a verified deploy removes. Every build moves the tag
+ * to the new image and leaves the one it replaced untagged, about 0.9 GB of
+ * its own layers each: three deploys on 2026-09-30 left 2.6 GB on a host with
+ * 20 GB free. The newest of them is the build this deploy replaced, kept so a
+ * one-step rollback needs no rebuild; the older ones go.
+ */
+export function supersededImagesToRemove(images: readonly SupersededImage[]): string[] {
+  return [...images]
+    .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))
+    .slice(1)
+    .map((image) => image.id);
+}
