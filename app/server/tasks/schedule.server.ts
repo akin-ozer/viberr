@@ -26,7 +26,7 @@ import {
   type TaskSchedule,
 } from "~/schemas/task-file.schema";
 import { toError } from "~/shared/errors";
-import { indefiniteArticle } from "~/shared/text/sentence";
+import { endSentence, indefiniteArticle } from "~/shared/text/sentence";
 
 /**
  * Governed SCHEDULED task actions (O-3). A maintainer schedules a future
@@ -237,7 +237,9 @@ export async function scheduleTaskAction(
     parsed.timeline.unshift(
       scheduleEvent(
         schedulerEventActor(actor, ctx),
-        `**Scheduled:** ${what} for **${input.taskKey}** at ${schedule.dueAt}${schedule.prompt ? `: ${schedule.prompt}` : ""}. It runs on the profile deployed when it fires.`,
+        // A prompt that already ends its sentence keeps one period, not two
+        // (live on AWSC-65: "hours passed.. It runs").
+        `**Scheduled:** ${what} for **${input.taskKey}** at ${schedule.dueAt}${schedule.prompt ? `: ${endSentence(schedule.prompt)}` : "."} It runs on the profile deployed when it fires.`,
       ),
     );
   });
