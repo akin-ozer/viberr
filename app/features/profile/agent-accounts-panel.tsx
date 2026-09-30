@@ -1078,8 +1078,8 @@ function AgentAccountCard({
                 Observed <LocalDayDotTime iso={usage.observedAt} />, from the last{" "}
                 {label} run billed to this account. Viberr cannot ask{" "}
                 {VENDOR[backend]} how much of a window is left, so this is the
-                last figure a run reported and not a live reading: it moves only
-                when another run finishes.
+                last figure a run reported and not a live reading: it moves when
+                a run reports another.
                 {usage.resetsAt && usage.windowReset ? (
                   // Ruling 481(d) (F40-50): past tense once the reset has
                   // passed. "The window resets 03:30" at 09:00 claimed a

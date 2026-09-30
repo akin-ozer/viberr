@@ -916,6 +916,9 @@ describe("ruling 294: copy the sign-in link", () => {
     // morning reading as current.
     expect(getByText(/Observed/)).toBeTruthy();
     expect(getByText(/not a live reading/)).toBeTruthy();
+    // Runs report readings as they work (Codex's on each call, ruling 604), so
+    // it is not "only when another run finishes".
+    expect(getByText(/it moves when a run reports another/)).toBeTruthy();
     expect(getByText(/running on overage/)).toBeTruthy();
   });
 
