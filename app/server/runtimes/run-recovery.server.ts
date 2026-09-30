@@ -533,7 +533,8 @@ export function finalizeOrphanedRuns(
 /**
  * Ruling 567: the completion effects of one agent run a restart cut off, as
  * `state: "interrupted"` (what a person's Stop gets): the reply and the files
- * the run saved, a deliverer's recorded as the delivery. A replay, so no
+ * the run saved, posted under its name. Ruling 601: never as the delivery,
+ * which only a run that finished reports. A replay, so no
  * deferred @mention is redelivered (ruling 211(c)); an interrupted run never
  * reacts, so the operator re-invoke below stays the only one. Best-effort: a
  * failure is logged and the restart note still lands.

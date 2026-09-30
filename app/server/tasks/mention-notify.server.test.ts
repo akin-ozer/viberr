@@ -728,7 +728,6 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
             projectSlug: store.slug,
             taskKey: "VIB-1",
             runId: "run_reply",
-            delivers: true,
             actorRef: AGENT,
             replyText: `${tag} I stopped at the migration — your call on the schema.`,
           },

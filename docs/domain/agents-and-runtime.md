@@ -2019,8 +2019,8 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    launcher's agent had already detached. Each specialist or review run that had started
    first gets the completion effects a person's Stop gives it (`state: "interrupted"`,
    replayed, ruling 567): its last words and the files it saved are posted under its
-   name, and a deliverer's files are recorded as the delivery (`deliveredAt`), unless
-   they are all browser working files (ruling 570). One
+   name. They are its work in progress and never the delivery (ruling 601): only a run
+   that finished reports one, so `deliveredAt` stays where it was. One
    "Interrupted by a restart" note per task then lists what was running and, separately,
    what was queued and had not started (ruling 310(b)); then, once every note is written,
    one `runOperator({ trigger: "manual" })` per affected task (controller
