@@ -1499,6 +1499,7 @@ describe("C9: instance storage line", () => {
             totalBytes: 20_000_000_000,
             usedPercent: 95.5,
             status: "low",
+            source: "data-root",
             lowThresholdBytes: 1_000_000_000,
             criticalThresholdBytes: 200_000_000,
           },
@@ -1518,6 +1519,34 @@ describe("C9: instance storage line", () => {
     expect(getByText(/· low/)).toBeTruthy();
     // D32-1: opens a sentence after the disk line's full stop, so it is capitalised.
     expect(getByText(/Automatic cleanup runs every 6h/)).toBeTruthy();
+  });
+
+  it("names the host disk when that is the tighter reading (ruling 603)", () => {
+    const { getByText } = renderPanel(
+      orgPage({
+        view: viewWith({
+          disk: {
+            freeBytes: 19_900_000_000,
+            totalBytes: 245_000_000_000,
+            usedPercent: 91.9,
+            status: "ok",
+            source: "host",
+            lowThresholdBytes: 2_147_483_648,
+            criticalThresholdBytes: 536_870_912,
+          },
+          maintenance: {
+            intervalMs: 6 * 3_600_000,
+            diskCheckIntervalMs: 5 * 60_000,
+            lastPassAt: null,
+            lastPassReason: null,
+            lastFreedBytes: 0,
+            scheduled: true,
+          },
+        }),
+      }),
+    );
+    // CANARY: always print "data volume" and the host's 19.9 GB reads as the volume's.
+    expect(getByText(/free of 245\.0 GB on the host disk \(91\.9% used\)/)).toBeTruthy();
   });
 
   it("says cleanup is not scheduled when the maintenance timer is not live", () => {

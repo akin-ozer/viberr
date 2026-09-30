@@ -962,8 +962,9 @@ function StorageLine({
         {disk ? (
           <>
             <strong>{fmtBytes(disk.freeBytes)}</strong> free of{" "}
-            {fmtBytes(disk.totalBytes)} on the data volume ({disk.usedPercent}%
-            used)
+            {fmtBytes(disk.totalBytes)} on the{" "}
+            {disk.source === "host" ? "host disk" : "data volume"} (
+            {disk.usedPercent}% used)
             {disk.status !== "ok" && (
               <strong>
                 {" "}

@@ -315,11 +315,29 @@ describe("checkDiskPressure (gap 16)", () => {
     const store = storeWithTerminalTask();
     const workspace = seedWorkspace(store, "VIB-1");
     const warn = vi.spyOn(logger, "warn");
+    const info = vi.spyOn(logger, "info");
     pinThresholds(store.dataRoot, "ok");
     expect(checkDiskPressure(store.db, store.dataRoot)?.status).toBe("ok");
     expect(warn).not.toHaveBeenCalled();
+    // The first sample after boot is a baseline: live on 2026-09-30 it logged
+    // "data root free space recovered" five minutes after a clean boot.
+    // CANARY: log every status change, the first sample included.
+    expect(info).not.toHaveBeenCalledWith("data root free space recovered", expect.anything());
     expect(maintenanceState().lastPassAt).toBeNull();
     expect(existsSync(workspace)).toBe(true);
+  });
+
+  it("says the space recovered only after a low reading", () => {
+    const store = storeWithTerminalTask();
+    pinThresholds(store.dataRoot, "low");
+    checkDiskPressure(store.db, store.dataRoot);
+    const info = vi.spyOn(logger, "info");
+    pinThresholds(store.dataRoot, "ok");
+    checkDiskPressure(store.db, store.dataRoot);
+    expect(info).toHaveBeenCalledWith(
+      "data root free space recovered",
+      expect.objectContaining({ source: "data-root" }),
+    );
   });
 
   it("reports nothing when the volume cannot be measured (never a false alarm)", () => {

@@ -49,7 +49,10 @@ state on the local filesystem. There is no external database, cache, or queue to
 
 What `compose.yml` adds around it: `env_file: .env`, optional (ruling 504); `NODE_ENV=production` and
 `VIBERR_DATA_ROOT=/data` forced over whatever `.env` says; the four controller unlock
-flags defaulting to `disabled`; the three `VIBERR_BUILD_*` build args (ruling 345);
+flags defaulting to `disabled`; the three `VIBERR_BUILD_*` build args (ruling 345); an
+empty `./.host-disk` mounted read-only at `/host-disk` and named in
+`VIBERR_HOST_DISK_PATH`, so the free-space check reads the host disk under Docker
+Desktop's volume (ruling 603, [configuration.md](configuration.md));
 `hostname: viberr` (the writer lock's holder identity, see
 [Single-writer safety](#single-writer-safety-b-fd1--f18-5)); `ports:
 "${PORT:-3000}:${PORT:-3000}"`; a healthcheck that fetches `/resources/health` every 30 s
@@ -655,6 +658,16 @@ unless the running instance names the sha it just built:
 npm run deploy              # stamp from git, build, up -d, verify
 npm run deploy -- --no-up   # stamp and build only, nothing restarted
 ```
+
+Before it builds, it measures the host (ruling 603, `app/server/ops/host-disk.server.ts`):
+the checkout's disk, Docker Desktop's directory (`~/Library/Containers/com.docker.docker/Data`
+on a Mac, `~/.docker/desktop` on Linux) and Docker's root directory when it is on this
+host. With less than 8 GB free on the tightest, it refuses and names that disk. A build
+writes into Docker's disk, which on Docker Desktop is a sparse image file growing on the
+host: on 2026-09-30 a cold build (about 5-6 GB) filled the Mac, and the Docker VM
+remounted its disk read-only under the running instance. Nothing inside the VM could warn,
+because the volume there reported 940.8 GB free. `--skip-disk-check` builds without the
+measurement.
 
 It runs `git` on the host, sets `VIBERR_BUILD_VERSION` (from `package.json`),
 `VIBERR_BUILD_SHA` (`git rev-parse HEAD`) and `VIBERR_BUILD_TIME` (now) for `docker compose

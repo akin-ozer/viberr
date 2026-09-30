@@ -123,6 +123,7 @@ per process: restart to apply a change.
 | `VIBERR_DISK_CHECK_INTERVAL_SECONDS` | `300` (5 min) | Cadence of the free-space check on the data root, in seconds (`maintenance.server.ts`). |
 | `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`diskThresholds`, `app/server/ops/disk-space.server.ts`). |
 | `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes (`MIN_PRESSURE_PASS_GAP_MS`). |
+| `VIBERR_HOST_DISK_PATH` | unset; `compose.yml` sets `/host-disk` | A directory on the host disk under the data root, measured beside it; when it has less room, it is the reading, with `source: host` (ruling 603, `measureDataRootSpace`). Compose mounts `./.host-disk` there read-only, because Docker Desktop's named volume reports its disk image's virtual size, not the host's free space. On a Linux host whose Docker storage is on another disk than the checkout, set it empty in `.env` to measure the data root alone. |
 | `VIBERR_GITHUB_WRITE_PROBE` | off | `1`, `true` or `yes` opts the PAT validator into an empty-payload write probe; `0`, `false` or `no` leaves it off, and any other spelling fails boot. Off, write access is proved read-only from the repo `permissions` block (`writeProbeEnabled`, `pat-validator.server.ts`). |
 
 ### Governed browser

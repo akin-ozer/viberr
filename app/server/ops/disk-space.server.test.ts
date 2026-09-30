@@ -132,6 +132,62 @@ describe("measureDataRootSpace (gap 16)", () => {
   });
 });
 
+describe("the host disk under the data root (ruling 603)", () => {
+  // Live on 2026-09-30, Docker Desktop: the named volume's ext4 is a sparse
+  // image that reported 940.8 GB free, while the host disk it grows on had
+  // 19.9 GB (the `/host-disk` bind mount reads the host's own df).
+  const vmVolume = { totalBytes: 1006.9 * 1024 ** 3, freeBytes: 940.8 * 1024 ** 3 };
+  const hostDisk = { totalBytes: 239 * 1024 ** 3, freeBytes: 1.5 * 1024 ** 3 };
+
+  function probesFor(dataRoot: string, host: string, hostReading = hostDisk) {
+    const byPath = (path: string) =>
+      path === dataRoot ? vmVolume : path === host ? hostReading : null;
+    return { df: byPath, statfs: () => null };
+  }
+
+  afterEach(() => {
+    delete process.env.VIBERR_HOST_DISK_PATH;
+  });
+
+  it("reports the host disk when it has less room, and names it", () => {
+    const dataRoot = ctx.makeTempDir();
+    const host = ctx.makeTempDir();
+    // Through the env the compose file sets. CANARY: drop the default that
+    // reads VIBERR_HOST_DISK_PATH and the volume's 940.8 GB comes back.
+    process.env.VIBERR_HOST_DISK_PATH = host;
+    resetEnvCacheForTests();
+    const space = measureDataRootSpace(dataRoot, probesFor(dataRoot, host));
+    expect(space).toEqual(
+      expect.objectContaining({
+        freeBytes: hostDisk.freeBytes,
+        totalBytes: hostDisk.totalBytes,
+        status: "low",
+        source: "host",
+      }),
+    );
+  });
+
+  it("keeps the data root's reading when the host has more room", () => {
+    const dataRoot = ctx.makeTempDir();
+    const host = ctx.makeTempDir();
+    const roomy = { totalBytes: 2000 * 1024 ** 3, freeBytes: 1500 * 1024 ** 3 };
+    const space = measureDataRootSpace(dataRoot, probesFor(dataRoot, host, roomy), host);
+    expect(space).toEqual(
+      expect.objectContaining({ freeBytes: vmVolume.freeBytes, source: "data-root" }),
+    );
+  });
+
+  it("measures the data root alone when the host path is unset or not mounted", () => {
+    const dataRoot = ctx.makeTempDir();
+    const host = ctx.makeTempDir();
+    const probes = probesFor(dataRoot, host);
+    expect(measureDataRootSpace(dataRoot, probes, undefined)?.source).toBe("data-root");
+    expect(measureDataRootSpace(dataRoot, probes, `${host}/not-mounted`)?.source).toBe(
+      "data-root",
+    );
+  });
+});
+
 describe("dfReading", () => {
   it("reads the host's df -kP output", () => {
     const dataRoot = ctx.makeTempDir();

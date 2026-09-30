@@ -75,6 +75,10 @@ services:
       VIBERR_UNLOCK_CONTROLLER_KB: "${VIBERR_UNLOCK_CONTROLLER_KB:-disabled}"
       VIBERR_UNLOCK_CONTROLLER_MCPS: "${VIBERR_UNLOCK_CONTROLLER_MCPS:-disabled}"
       VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "${VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS:-disabled}"
+      # Ruling 603: the host disk the free-space check measures beside the
+      # data root (the `/host-disk` mount below). An empty value in .env turns
+      # it off, for a Linux host whose Docker storage is on another disk.
+      VIBERR_HOST_DISK_PATH: "${VIBERR_HOST_DISK_PATH-/host-disk}"
     ports:
       # Compose interpolates ${PORT} from the same .env it injects into the
       # container, so the mapping always matches what the server listens on.
@@ -94,6 +98,11 @@ services:
       # store still on the bind mount boots `agentIsolation: degraded`. Moving
       # it once: `npm run store:to-volume` (docs/operations/deployment.md).
       - viberr-data:/data
+      # Ruling 603: an empty host directory, read-only, measured and never
+      # read. On Docker Desktop the volume above lives in a sparse disk image
+      # and reports the image's virtual size (940.8 GB free while the Mac had
+      # 19.9 GB, 2026-09-30); a bind mount reports the host disk itself.
+      - ./.host-disk:/host-disk:ro
     # A run is not the unit of load. The instance's run-concurrency cap counts
     # RUNS, and one run is an agent that will happily `pnpm -r test` — which
     # forks a vitest worker per host CPU. Measured on a 10-core / 16 GB Mac

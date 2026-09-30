@@ -45,14 +45,22 @@ const GB = 1024 * MB;
 
 export type DiskStatus = "ok" | "low" | "critical";
 
+/** Which filesystem a reading measured (ruling 603). */
+export type DiskSource = "data-root" | "host";
+
 export interface DiskSpace {
-  /** Bytes available to this (non-root) process on the data root's filesystem. */
+  /** Bytes available to this (non-root) process on the measured filesystem. */
   freeBytes: number;
   /** Total size of that filesystem. */
   totalBytes: number;
   /** 0-100, rounded to one decimal. */
   usedPercent: number;
   status: DiskStatus;
+  /**
+   * `data-root` is the data root's own filesystem. `host` is the host disk
+   * under it (`VIBERR_HOST_DISK_PATH`), reported when it has less room.
+   */
+  source: DiskSource;
   /** The thresholds in force, so a reader never has to guess why it is "low". */
   lowThresholdBytes: number;
   criticalThresholdBytes: number;
@@ -156,21 +164,36 @@ function statfsReading(path: string): RawDiskReading | null {
 
 const DEFAULT_PROBES: DiskProbes = { df: dfReading, statfs: statfsReading };
 
+function readPath(path: string, probes: DiskProbes): RawDiskReading | null {
+  // A path that does not exist measures as nothing, whichever source answers:
+  // `df` would happily report the parent volume of a typo'd root.
+  if (!existsSync(path)) return null;
+  return probes.df(path) ?? probes.statfs(path);
+}
+
 /**
  * One measurement of the data root. Returns null when the filesystem cannot be
  * measured by either source (path gone, platform without statfs) — the caller
  * reports "not measured", never "0 bytes free".
+ *
+ * Ruling 603: the data root's own filesystem is not always the disk that fills.
+ * On Docker Desktop the store's named volume (ruling 460) lives on the VM's
+ * ext4, a sparse disk image on the host that reports its virtual size: live on
+ * 2026-09-30 it read 940.8 GB free while the Mac had 19.9 GB, and a build
+ * filled the Mac until the VM remounted read-only. Compose mounts an empty host
+ * directory read-only and names it in `VIBERR_HOST_DISK_PATH`. When that disk
+ * has less room, it is the reading.
  */
 export function measureDataRootSpace(
   dataRoot?: string,
   probes: DiskProbes = DEFAULT_PROBES,
+  hostDiskPath: string | undefined = getEnv().VIBERR_HOST_DISK_PATH,
 ): DiskSpace | null {
-  const path = getDataRoot(dataRoot);
-  // A path that does not exist measures as nothing, whichever source answers:
-  // `df` would happily report the parent volume of a typo'd root.
-  if (!existsSync(path)) return null;
-  const raw = probes.df(path) ?? probes.statfs(path);
-  if (!raw) return null;
+  const root = readPath(getDataRoot(dataRoot), probes);
+  if (!root) return null;
+  const host = hostDiskPath ? readPath(hostDiskPath, probes) : null;
+  const [raw, source]: [RawDiskReading, DiskSource] =
+    host && host.freeBytes < root.freeBytes ? [host, "host"] : [root, "data-root"];
   const { freeBytes, totalBytes } = raw;
   const thresholds = diskThresholds();
   return {
@@ -181,6 +204,7 @@ export function measureDataRootSpace(
         ? Math.round(((totalBytes - freeBytes) / totalBytes) * 1000) / 10
         : 0,
     status: classifyFreeBytes(freeBytes, thresholds),
+    source,
     lowThresholdBytes: thresholds.low,
     criticalThresholdBytes: thresholds.critical,
   };

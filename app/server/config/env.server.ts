@@ -287,6 +287,12 @@ const envSchema = z.object({
     "MB",
     DEFAULT_DISK_CRITICAL_FREE_MB,
   ),
+  // Ruling 603: a directory on the host disk the data root's filesystem lives
+  // on, measured beside the data root (`measureDataRootSpace`). Compose sets
+  // it to its read-only `/host-disk` mount, because Docker Desktop's volume
+  // reports the VM disk image's virtual size, not the host's free space.
+  // Unset, only the data root is measured.
+  VIBERR_HOST_DISK_PATH: z.string().min(1).optional(),
   VIBERR_GITHUB_WRITE_PROBE: z
     .enum(["1", "true", "yes", "0", "false", "no"], {
       error:

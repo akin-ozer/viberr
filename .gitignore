@@ -2,6 +2,7 @@ node_modules/
 /build/
 /data/
 /docker-data/
+/.host-disk/
 .env
 .env.*
 !.env.example
