@@ -64,6 +64,19 @@ describe("the build stamp is wired end to end (ruling 345)", () => {
     expect(dockerfile).toContain(`ENV ${name}=$${name}`);
   });
 
+  it.each(namesTheModuleReads())("the Dockerfile stamps %s after the final stage's last COPY (ruling 607)", (name) => {
+    // An ENV whose value changes rebuilds every layer after it, and a deploy
+    // stamps a new sha and time each time: declared before the node_modules
+    // COPY, every deploy re-copied 829 MB of unchanged dependencies (seven such
+    // layers in the build cache on 2026-09-30). CANARY: move the block back
+    // above the COPYs and this fails.
+    const dockerfile = read("Dockerfile");
+    const finalStage = dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
+    const lastCopy = finalStage.lastIndexOf("\nCOPY ");
+    expect(lastCopy).toBeGreaterThan(0);
+    expect(finalStage.indexOf(`ENV ${name}=`)).toBeGreaterThan(lastCopy);
+  });
+
   it.each(namesTheModuleReads())("the compose build PASSES %s", (name) => {
     // CANARY: this is the assertion that was red for the whole of pass 37.
     // Revert `compose.yml` to `build: .` and every case here fails.
