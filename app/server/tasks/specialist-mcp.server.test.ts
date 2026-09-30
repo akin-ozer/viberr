@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
@@ -425,6 +425,43 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(row.up).toBe(false);
     expect(row.tools).toBeNull();
     expect(row.lastError).toContain("Cannot find module 'ajv'");
+  });
+
+  it("ruling 606: a mount the probe caught mid-install is dropped for this run and installs in the background", async () => {
+    // Live 2026-09-30: the run's probe gave up on `uvx …@latest` after 20 s
+    // while it was still downloading, killed it, and every later run did the
+    // same, so no run got the server until a person pressed Retest.
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "aws-pricing", "stdio", "uvx awslabs.aws-pricing-mcp-server@latest");
+    const resolved = resolveSpecialistMcpServersDetailed(store.db, ["aws-pricing"]);
+    const downloading: McpSpawn = () => {
+      const err = new EventEmitter();
+      queueMicrotask(() => err.emit("data", Buffer.from("Downloading cryptography (4.5MiB)\n")));
+      return {
+        stdin: { write() {}, end() {} },
+        stdout: { on() {} },
+        stderr: { on: (e, cb) => err.on(e, cb) },
+        on() {},
+        kill() {},
+      };
+    };
+    // The run's probe meets the download; the background install's own
+    // handshake then answers, as the finished install does.
+    let spawns = 0;
+    const installed = handshakeSpawn(9);
+    const spawnImpl: McpSpawn = (...args) => (spawns++ === 0 ? downloading(...args) : installed(...args));
+
+    const verified = await verifyStdioMcpMountsForRun(store.db, resolved, { spawnImpl, timeoutMs: 50, capMs: 2000 });
+
+    expect(Object.keys(verified.servers)).toEqual([]);
+    expect(verified.unresolved.find((u) => u.name === "aws-pricing")!.reason).toContain(
+      "installing in the background for a later run",
+    );
+    // CANARY: drop the warm-up and the row stays down until a person retests.
+    await vi.waitFor(() => {
+      const row = listMcpServers(store.db).find((m) => m.name === "aws-pricing")!;
+      expect([row.up, row.tools, row.warmingSince]).toEqual([true, 9, null]);
+    });
   });
 
   it("F20-10: a healthy stdio mount and a clean disclosure are left untouched", async () => {
