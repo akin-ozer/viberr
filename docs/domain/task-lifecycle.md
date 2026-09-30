@@ -1002,7 +1002,10 @@ them.
    `force-accept`), the decision notifications (packet, agent question, approval) marked read, no operator
    hand-off, and one clause on the completion event ("This acceptance answers the open
    decision "…" with "…"."). Any other open packet is withdrawn (F32-11): a "Withdrew the
-   open decision" note and a `task.packet.withdrawn` row with `by`. The operator's own
+   open decision" note and a `task.packet.withdrawn` row with `by`. Whichever way the
+   packet closes, and with every recommendation card consumed, every acceptance marks
+   the task's decision notifications read for everyone (ruling 600): nothing on a Done
+   task waits on a person. The operator's own
    full-autonomy acceptance answers nothing, so it always withdraws; it is refused instead
    while that decision offers a `create_task` whose new task waits on this one (ruling
    492). A full-autonomy

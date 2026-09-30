@@ -805,7 +805,9 @@ answers `force_accept`, or `accept_completion` when no `force_accept` is offered
 record is the packet door's: the packet cleared, a `task.packet.resolved` row under the
 person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
 `force-accept`), the packet notifications marked read, and no operator hand-off. A
-decision offering neither kind is withdrawn by the acceptance (F32-11). The operator's own
+decision offering neither kind is withdrawn by the acceptance (F32-11). Answered or not,
+every acceptance marks the task's decision notifications read for everyone, since the
+acceptance consumed every recommendation card too (ruling 600). The operator's own
 full-autonomy acceptance answers nothing and withdraws as before, except that it is refused
 while the decision offers a `create_task` whose new task waits on this one (ruling 492, §5).
 
