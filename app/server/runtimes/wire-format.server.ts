@@ -65,6 +65,10 @@ export interface EnvelopeFacts {
     utilization: number | null;
     resetsAt: number | null;
     isUsingOverage: boolean;
+    /** Ruling 608: every window the provider reported, shortest first (Codex
+     *  names its five-hour and weekly windows at once); the fields above are
+     *  the one closest to its limit. Absent when only that one is known. */
+    windows?: { rateLimitType: string; utilization: number | null; resetsAt: number | null }[];
   } | null;
   /** Ruling 369: what the prompt cache did for ONE model call (a Claude
    *  main-loop assistant envelope; the Claude adapter keeps only the first

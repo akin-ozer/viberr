@@ -797,17 +797,31 @@ function windowName(minutes: number | null): string {
   return `${minutes}_minute`;
 }
 
+const utilizationOf = (window: CodexRateWindow) =>
+  Math.min(1, Math.max(0, window.used_percent / 100));
+
 /**
  * Ruling 604: the window closest to its limit across the account's latest
  * snapshots, one per limit. Null while no snapshot has named a window.
+ *
+ * Ruling 608: and every window beside it, shortest first. The weekly window
+ * at 42% hid the five-hour one a controller pacing runs to it needs.
  */
 export function codexRateLimitReading(
   snapshots: Iterable<CodexRateSnapshot>,
 ): CodexRateLimitReading | null {
   let binding: { window: CodexRateWindow; reached: boolean } | null = null;
+  const windows: { name: string; minutes: number; window: CodexRateWindow }[] = [];
   for (const snapshot of snapshots) {
     for (const window of [snapshot.primary, snapshot.secondary]) {
       if (!window) continue;
+      const name = windowName(window.window_minutes);
+      windows.push({
+        // A second limit's windows (an alias like "premium") keep its name.
+        name: snapshot.limit_id && snapshot.limit_id !== "codex" ? `${snapshot.limit_id}_${name}` : name,
+        minutes: window.window_minutes ?? Number.MAX_SAFE_INTEGER,
+        window,
+      });
       if (!binding || window.used_percent > binding.window.used_percent) {
         binding = { window, reached: snapshot.rate_limit_reached_type !== null };
       }
@@ -818,9 +832,12 @@ export function codexRateLimitReading(
   return {
     status: reached || window.used_percent >= 100 ? "rejected" : "allowed",
     rateLimitType: windowName(window.window_minutes),
-    utilization: Math.min(1, Math.max(0, window.used_percent / 100)),
+    utilization: utilizationOf(window),
     resetsAt: window.resets_at,
     isUsingOverage: false,
+    windows: windows
+      .sort((a, b) => a.minutes - b.minutes)
+      .map(({ name, window: w }) => ({ rateLimitType: name, utilization: utilizationOf(w), resetsAt: w.resets_at })),
   };
 }
 

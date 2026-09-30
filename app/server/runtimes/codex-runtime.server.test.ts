@@ -1827,6 +1827,8 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
     });
     const readings = (lines: EmittedLine[]) =>
       lines.flatMap((l) => (l.facts.rateLimit ? [[z.object({ type: z.string() }).parse(JSON.parse(l.raw)).type, l.facts.rateLimit]] : []));
+    const fiveHour = (utilization: number) => ({ rateLimitType: "five_hour", utilization, resetsAt: 1_790_782_378 });
+    const weekly = (utilization: number) => ({ rateLimitType: "seven_day", utilization, resetsAt: 1_791_333_093 });
 
     it("records the window closest to its limit when it changes, through sparse updates, until it is spent", async () => {
       const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
@@ -1836,10 +1838,11 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
           write: `${JSON.stringify({ type: "session_meta", payload: { id: THREAD } })}\n${record([11_000, 0, 100])}${tokenCount(codex(64, 37))}`,
         },
         { event: TOOL },
-        // The same reading again, a sparse update that leaves the five-hour
-        // window out, and a limit with no windows at all: nothing new.
+        // The same reading again, then a sparse update that leaves the
+        // five-hour window out and moves the weekly one to 38%.
         { write: tokenCount(codex(64, 37)) + tokenCount(codex(null, 38)) },
         { event: TOOL_DONE },
+        // A limit with no windows at all: nothing new.
         { write: tokenCount({ limit_id: "premium", primary: null, secondary: null, rate_limit_reached_type: null }) },
         { event: TOOL },
         { write: tokenCount(codex(100, 38)) },
@@ -1849,10 +1852,14 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
 
       // CANARY: never read the rate limits and no Codex line carries one.
       // CANARY: let a null window clear the last one and the sparse update
-      // records the weekly 38% as the account's usage.
+      // records the weekly 38% as the account's usage, with no five-hour window.
+      // CANARY (ruling 608): report only the binding window and the five-hour
+      // one disappears whenever the weekly one is fuller.
+      const binding = { status: "allowed", rateLimitType: "five_hour", utilization: 0.64, resetsAt: 1_790_782_378, isUsingOverage: false };
       expect(readings(lines)).toEqual([
-        ["item.started", { status: "allowed", rateLimitType: "five_hour", utilization: 0.64, resetsAt: 1_790_782_378, isUsingOverage: false }],
-        ["item.completed", { status: "rejected", rateLimitType: "five_hour", utilization: 1, resetsAt: 1_790_782_378, isUsingOverage: false }],
+        ["item.started", { ...binding, windows: [fiveHour(0.64), weekly(0.37)] }],
+        ["item.completed", { ...binding, windows: [fiveHour(0.64), weekly(0.38)] }],
+        ["item.completed", { ...binding, status: "rejected", utilization: 1, windows: [fiveHour(1), weekly(0.38)] }],
       ]);
     });
 
@@ -1866,8 +1873,20 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
         { event: { type: "item.completed", item: { type: "agent_message", text: "done" } } },
         { event: { type: "turn.completed", usage: { input_tokens: 11_000, cached_input_tokens: 0, output_tokens: 100 } } },
       ]);
+      // Ruling 608: the five-hour window a pacing controller needs is listed
+      // beside it.
       expect(readings(lines)).toEqual([
-        ["item.completed", { status: "allowed", rateLimitType: "seven_day", utilization: 0.37, resetsAt: 1_791_333_093, isUsingOverage: false }],
+        [
+          "item.completed",
+          {
+            status: "allowed",
+            rateLimitType: "seven_day",
+            utilization: 0.37,
+            resetsAt: 1_791_333_093,
+            isUsingOverage: false,
+            windows: [fiveHour(0.2), weekly(0.37)],
+          },
+        ],
       ]);
     });
   });
