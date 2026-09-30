@@ -13,6 +13,7 @@ import {
   listTaskAttachments,
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
+import { keptDeliveryMiss, listKeptDeliveries, type KeptDelivery } from "~/server/files/kept-deliveries.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { currentCompletionPacket } from "./completion-packet.server";
@@ -208,6 +209,9 @@ export function readBoardTask(
   // Ruling 594: what `read_task_attachment` can open on this task.
   const files = taskFileNames(deps, row.key);
   if (files.length > 0) read.files = files;
+  // Ruling 597: the files deliveries, as each was delivered.
+  const deliveries = listKeptDeliveries(deps.projectSlug, row.key, deps.ctx.dataRoot);
+  if (deliveries.length > 0) read.deliveries = deliveries;
   // Ruling 596: what `read_timeline_entry` can open on this task.
   const timeline = file ? timelineIndex(file.parsed.timeline) : [];
   if (timeline.length > 0) read.timeline = timeline;
@@ -269,6 +273,8 @@ interface BoardTaskRead {
   /** Ruling 594: the task's files, without the browser's working files;
    *  absent when it has none. */
   files?: string[];
+  /** Ruling 597: the deliveries kept as delivered, newest first; absent when none. */
+  deliveries?: KeptDelivery[];
   /** Ruling 596: the timeline's index, newest first; absent when it is empty. */
   timeline?: string[];
 }
@@ -299,12 +305,15 @@ export function readAgentTaskAttachment(
   taskKey: string,
   name: string,
   offset = 0,
+  /** Ruling 597: a kept delivery's stamp. */
+  delivery?: string,
 ): AgentAttachmentRead {
   const key = taskKey.trim();
   if (!boardRows(deps).some((t) => t.key === key)) {
     return { text: `[noop] No task ${key} in this project; \`read_board\` lists the project's tasks.` };
   }
-  const read = readTaskAttachment(deps.projectSlug, key, name, deps.ctx.dataRoot, offset);
+  const read = readTaskAttachment(deps.projectSlug, key, name, deps.ctx.dataRoot, offset, delivery);
+  if (!read && delivery) return { text: keptDeliveryMiss(deps.projectSlug, key, delivery, name, deps.ctx.dataRoot) };
   if (!read) {
     const have = taskFileNames(deps, key);
     return {

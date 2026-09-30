@@ -8,6 +8,7 @@ import {
   writeTaskAttachment,
   type WrittenAttachment,
 } from "~/server/files/task-attachments.server";
+import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { FILING_BATCH, MESSAGE_BATCH } from "~/shared/attachment-kinds";
 import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
@@ -3326,6 +3327,34 @@ function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEven
   return names;
 }
 
+/**
+ * Ruling 597: once a write that stamped the delivery has landed, keep its
+ * files as they stand, so every later reader can open the delivery a verdict
+ * bound to after a rework saves the same names again. A failed copy is
+ * logged; the delivery stands without it.
+ */
+function keepStampedDelivery(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  stampBefore: string | null,
+  written: ParsedTaskFile,
+): void {
+  const stamp = written.frontmatter.deliveredAt;
+  if (!stamp || stamp === stampBefore) return;
+  try {
+    keepDelivery(
+      projectSlug,
+      taskKey,
+      stamp,
+      deliveredFileNames(written.frontmatter, written.timeline),
+      ctx.dataRoot,
+    );
+  } catch (error) {
+    logger.warn("a files delivery could not be kept", { projectSlug, taskKey, stamp, err: toError(error) });
+  }
+}
+
 /** Build the reply event without writing so completion effects can land atomically. */
 async function prepareAgentReplyEvent(
   db: DatabaseSync,
@@ -3529,8 +3558,10 @@ export async function postAgentReplyComment(
   const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
   const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
   // The reply write, on its own so it can be RETRIED (C3).
+  let replyStampBefore: string | null = null;
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      replyStampBefore = parsed.frontmatter.deliveredAt ?? null;
       const delivered = deliveredFileNames(parsed.frontmatter, parsed.timeline);
       parsed.timeline.unshift(event);
       stampNonCommitDelivery(
@@ -3607,10 +3638,9 @@ export async function postAgentReplyComment(
   // hazard in this repo), posting a reply that had ALREADY landed a SECOND time:
   // `writeReply` unconditionally unshifts the event (the F22-12 dedup is upstream,
   // deciding whether to run this at all). Retry only the write; finalize once.
-  let wrote = false;
+  let wrote: ParsedTaskFile | null = null;
   try {
-    await writeReply();
-    wrote = true;
+    wrote = await writeReply();
   } catch (cause: unknown) {
     logger.error("agent reply comment write failed; retrying once", {
       taskKey: input.taskKey,
@@ -3618,8 +3648,7 @@ export async function postAgentReplyComment(
       err: toError(cause),
     });
     try {
-      await writeReply();
-      wrote = true;
+      wrote = await writeReply();
     } catch (retryCause) {
       logger.error("agent reply comment write failed on retry", {
         taskKey: input.taskKey,
@@ -3656,6 +3685,7 @@ export async function postAgentReplyComment(
     }
     return;
   }
+  keepStampedDelivery(ctx, input.projectSlug, input.taskKey, replyStampBefore, wrote);
   // The reply IS posted. Finalize (reproject + audit + @mention fan-out) is
   // best-effort and must NEVER re-run `writeReply` — a finalize failure loses the
   // audit row and the human notifications, not the reply, and re-posting the
@@ -4482,7 +4512,9 @@ export async function recordAgentCompletion(
     }
   }
   try {
-    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    let stampBefore: string | null = null;
+    const written = await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+      stampBefore = parsed.frontmatter.deliveredAt ?? null;
       // Ruling 587: read before this completion adds its own entries.
       const delivered = deliveredFileNames(parsed.frontmatter, parsed.timeline);
       if (verdict) {
@@ -4986,6 +5018,7 @@ export async function recordAgentCompletion(
         });
       }
     });
+    keepStampedDelivery(ctx, projectSlug, taskKey, stampBefore, written);
     reprojectTask(db, ctx, projectSlug, taskKey);
     // Ruling 237 (F37-57): the packet itself was written inside the verdict's
     // own lock above, so the objection and the escalation it raised can never

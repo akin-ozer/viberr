@@ -6,6 +6,8 @@ import {
   listTaskAttachments,
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
+import { keptDeliveryMiss } from "~/server/files/kept-deliveries.server";
+import { READ_TASK_ATTACHMENT_FIELDS } from "~/server/mcp-proxy/board-tool.server";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -399,7 +401,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_task_attachment",
-      "Read ONE of this task's attachments. Attachments are where the agents you dispatch put their PROOF - a mutation run with both outputs, before/after captures, a cold-stack log - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A report names them without carrying their contents. Call it before you scope a task from what a person attached, before you tell a person something was proved, before you recommend acceptance on the strength of evidence you have not read, and before you repeat a report's claim about what its own attachment shows. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .pdf, a .docx, a zip) is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). Read-only.",
+      "Read ONE of this task's attachments. Attachments are where the agents you dispatch put their PROOF - a mutation run with both outputs, before/after captures, a cold-stack log - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A report names them without carrying their contents. Call it before you scope a task from what a person attached, before you tell a person something was proved, before you recommend acceptance on the strength of evidence you have not read, and before you repeat a report's claim about what its own attachment shows. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .pdf, a .docx, a zip) is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). With `delivery`, a stamp `read_board` lists under this task's `deliveries`, it reads the file as that delivery held it, not as a rework left it (ruling 597). Read-only.",
       {
         name: z
           .string()
@@ -410,10 +412,15 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           .min(0)
           .optional()
           .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
+        delivery: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.delivery),
       },
       // eslint-disable-next-line @typescript-eslint/require-await
-      async (args: { name: string; offset?: number }) => {
-        const read = readTaskAttachment(projectSlug, taskKey, args.name, ctx.dataRoot, args.offset);
+      async (args: { name: string; offset?: number; delivery?: string }) => {
+        const delivery = args.delivery?.trim() || undefined;
+        const read = readTaskAttachment(projectSlug, taskKey, args.name, ctx.dataRoot, args.offset, delivery);
+        if (!read && delivery) {
+          return textResult(keptDeliveryMiss(projectSlug, taskKey, delivery, args.name, ctx.dataRoot));
+        }
         if (!read) {
           const have = listTaskAttachments(projectSlug, taskKey, ctx.dataRoot).map(
             (a) => a.name,

@@ -10,6 +10,7 @@ import {
 } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -263,6 +264,19 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     const note = parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
     expect(note.occurredAt >= producing!.occurredAt).toBe(true);
     expect(deliveredAtWhenCalled).toEqual([producing!.occurredAt]);
+  });
+
+  it("ruling 597: the delivery a restart records for a deliverer it cut off is kept as saved", async () => {
+    // The files reach the timeline through the reply path (ruling 567), which
+    // stamps the delivery apart from a finished run's completion. CANARY: drop
+    // the keep after the reply's write and nothing is kept.
+    cutRunWithFiles("primary", "developer", ["estimate-link.md", "summary.md"]);
+    await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).notes;
+    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.deliveredAt).not.toBeNull();
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
+      { deliveredAt: fm.deliveredAt, files: ["estimate-link.md", "summary.md"] },
+    ]);
   });
 
   it("ruling 570: a deliverer cut off mid-browse has its working files posted under its name, and they are not the delivery", async () => {

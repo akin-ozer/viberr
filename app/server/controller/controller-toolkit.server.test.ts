@@ -376,6 +376,33 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     expect(wide.timelineOlder).toBeUndefined();
   });
 
+  it("ruling 597: get_task lists a task's kept deliveries, and read_task_attachment reads a file as one held it", async () => {
+    // CANARIES: leave `deliveries` off get_task and no stamp is offered; drop
+    // `delivery` on the way to the reader and the rework comes back instead.
+    const { mkdirSync, rmSync } = await import("node:fs");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { keepDelivery, taskDeliveriesDir } = await import("~/server/files/kept-deliveries.server");
+    const file = path.join(taskAttachmentsDir(SLUG, "VIB-148", app.dataRoot), "ruling-597-summary.md");
+    const stamp = "2026-09-29T23:35:25.588Z";
+    mkdirSync(path.dirname(file), { recursive: true });
+    try {
+      writeFileSync(file, "Score of record: 75/100");
+      keepDelivery(SLUG, "VIB-148", stamp, ["ruling-597-summary.md"], app.dataRoot);
+      writeFileSync(file, "Rework: 79/100");
+      const read = z
+        .object({ deliveries: z.array(z.object({ deliveredAt: z.string(), files: z.array(z.string()) })) })
+        .parse(JSON.parse(await call(ids.maintainer, "get_task", { taskKey: "VIB-148" })));
+      expect(read.deliveries).toEqual([{ deliveredAt: stamp, files: ["ruling-597-summary.md"] }]);
+      const attachment = (args: Record<string, JsonValue>) =>
+        call(ids.maintainer, "read_task_attachment", { taskKey: "VIB-148", name: "ruling-597-summary.md", ...args });
+      expect(await attachment({ delivery: stamp })).toContain("Score of record: 75/100");
+      expect(await attachment({})).toContain("Rework: 79/100");
+    } finally {
+      rmSync(file, { force: true });
+      rmSync(taskDeliveriesDir(SLUG, "VIB-148", app.dataRoot), { recursive: true, force: true });
+    }
+  });
+
   it("ruling 300 (+336): every decision says what answering it releases, and when", async () => {
     await openPacketOn(PACKET_TASK);
     const { updateTaskFile } = await import("~/server/files/task-writer.server");

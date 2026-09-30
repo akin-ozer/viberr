@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -9,6 +11,8 @@ import {
 } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
+import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
+import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
@@ -970,6 +974,36 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       JSON.parse(await text("read_timeline_entry", { taskKey: "VIB-2", occurredAt: timeline[204]!.occurredAt })),
     );
     expect(oldest).toMatchObject({ text: "entry 204", title: "Review verdict" });
+  });
+
+  it("ruling 597: read_task_attachment reads this task's file as a kept delivery held it", async () => {
+    // CANARY: drop `delivery` on the way to the reader and the rework's text
+    // comes back for the first delivery.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "summary.md"), "Score of record: 75/100");
+    keepDelivery(store.slug, "VIB-1", "2026-09-29T23:35:25.588Z", ["summary.md"], store.dataRoot);
+    writeFileSync(path.join(dir, "summary.md"), "Rework: 79/100");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    // SAFETY: every answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (args: Record<string, string>) =>
+      ((await toolkit.tools.find((t) => t.name === "read_task_attachment")!.handler(args as never, {} as never)) as {
+        content: { text: string }[];
+      }).content[0]!.text;
+    expect(await text({ name: "summary.md", delivery: "2026-09-29T23:35:25.588Z" })).toContain("Score of record: 75/100");
+    expect(await text({ name: "summary.md" })).toContain("Rework: 79/100");
+    expect(await text({ name: "summary.md", delivery: "2026-09-30T01:55:33.089Z" })).toContain(
+      "[noop] VIB-1 kept no delivery at `2026-09-30T01:55:33.089Z`.",
+    );
   });
 
   it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {

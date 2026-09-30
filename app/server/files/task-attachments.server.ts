@@ -30,6 +30,7 @@ import {
   resolveStoreSegment,
   taskAttachmentsDir,
 } from "./file-store-root.server";
+import { resolveKeptDeliveryFile } from "./kept-deliveries.server";
 import { xlsxToText } from "./xlsx-text.server";
 
 /**
@@ -910,18 +911,27 @@ export function readTaskAttachment(
   name: string,
   dataRoot?: string,
   offset = 0,
+  /** Ruling 597: a `deliveredAt` stamp, to read the file as that delivery
+   *  held it rather than as the attachments folder holds it now. */
+  delivery?: string,
 ): AttachmentContent | null {
   const wanted = name.trim();
   if (!wanted) return null;
   let abs: string;
-  try {
-    // `resolveStoreSegment` is the containment check every store path uses —
-    // a name with a separator or a `..` never leaves the task's own folder.
-    abs = resolveTaskAttachment(slug, key, wanted, dataRoot);
-  } catch {
-    return null;
+  if (delivery) {
+    const kept = resolveKeptDeliveryFile(slug, key, delivery, wanted, dataRoot);
+    if (!kept) return null;
+    abs = kept;
+  } else {
+    try {
+      // `resolveStoreSegment` is the containment check every store path uses —
+      // a name with a separator or a `..` never leaves the task's own folder.
+      abs = resolveTaskAttachment(slug, key, wanted, dataRoot);
+    } catch {
+      return null;
+    }
   }
-  const where = "on the task page";
+  const where = delivery ? "on the task page, which shows its current version," : "on the task page";
   const ext = path.extname(wanted).toLowerCase();
   const read = readAttachmentBytes(abs, readCap(ext));
   if (!read) return null;

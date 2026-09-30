@@ -12,6 +12,8 @@ import {
   readAttachmentContent,
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
+import { keptDeliveryMiss, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { READ_TASK_ATTACHMENT_FIELDS } from "~/server/mcp-proxy/board-tool.server";
 import { findMessageFile, listConversationFileNames } from "./controller-conversations.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel } from "~/shared/text/plural";
@@ -2098,7 +2100,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_task",
-      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 153), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way.",
+      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 153), the files deliveries it kept as each was delivered (`deliveries`, ruling 597), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2208,6 +2210,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             ? { id: summary.epicId, title: getEpic(db, slug, summary.epicId)?.title ?? null }
             : null,
           schedules,
+          // Ruling 597: the files deliveries, as each was delivered, which
+          // `read_task_attachment` opens with `delivery`.
+          deliveries: listKeptDeliveries(slug, key, dataRoot),
           // Ruling 302, extended to the sibling it was first written without.
           // It fixed the OPERATOR's window and left this one, which is the
           // defect shape ruling 292's own comment had already named inside
@@ -2231,7 +2236,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_task_attachment",
-      "Read ONE of a task's attachments. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .pdf, a .docx, a zip) is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). Read-only, membership gated.",
+      "Read ONE of a task's attachments. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .pdf, a .docx, a zip) is named and refused rather than guessed at. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). With `delivery`, a stamp `get_task` lists under the task's `deliveries`, it reads the file as that delivery held it, not as a rework left it (ruling 597). Read-only, membership gated.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2244,12 +2249,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .min(0)
           .optional()
           .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
+        delivery: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.delivery),
       },
-      runWith((args: { projectSlug?: string; taskKey?: string; name: string; offset?: number }) => {
+      runWith((args: { projectSlug?: string; taskKey?: string; name: string; offset?: number; delivery?: string }) => {
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "read this task");
-        const read = readTaskAttachment(slug, key, args.name, dataRoot, args.offset);
+        const delivery = args.delivery?.trim() || undefined;
+        const read = readTaskAttachment(slug, key, args.name, dataRoot, args.offset, delivery);
+        if (!read && delivery) return keptDeliveryMiss(slug, key, delivery, args.name, dataRoot);
         if (!read) {
           const have = listTaskAttachments(slug, key, dataRoot).map((a) => a.name);
           // Ruling 246's shape: say what this reader IS and what it holds,
