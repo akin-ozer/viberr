@@ -58,7 +58,8 @@ Created by the code that needs them:
   projects/<slug>/tasks/<KEY>/attachments/          files agents save and people upload on the task
                                                     (member-only served; ruling 96, ruling 379)
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/   each files delivery as it was delivered, copied
-                                                    when `deliveredAt` is stamped (ruling 597)
+                                                    when `deliveredAt` is stamped (ruling 597): every
+                                                    file on the task then (ruling 610)
   projects/<slug>/tasks/<KEY>/workspace/<repo-name>/ the delivering engagement's git clone, shared by the
                                                     operator (a cache, not canonical)
   projects/<slug>/tasks/<KEY>/workspace/support/<profileId>/<repo-name>/

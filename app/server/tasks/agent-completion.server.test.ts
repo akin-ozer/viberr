@@ -1322,6 +1322,52 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(read("2026-09-29T09:47:34.900Z")).toBeNull();
   });
 
+  it("ruling 610: a kept delivery holds every file on the task, a supporting agent's included", async () => {
+    // Live on AWSC-52 the Estimate Judge's J4 audit read the first delivery
+    // without the Architect's mapping.md and called its Deliverable score
+    // unsupported. CANARY: keep only the deliverer's files and mapping.md is
+    // missing from the kept delivery.
+    writeReviewTask({
+      stage: "impl",
+      workRevision: null,
+      validation: "none",
+      engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+    });
+    // Saved before this run by another stage's agent, and a browser snapshot.
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    const earlier = new Date(Date.now() - 60 * 60_000);
+    for (const [name, body] of [["mapping.md", "the Architect's mapping"], ["page-2026-09-30T12-00-00-000Z.yml", "- snapshot"]]) {
+      writeFileSync(path.join(dir, name!), body!);
+      utimesSync(path.join(dir, name!), earlier, earlier);
+    }
+    const runId = await finishedRunWith("Built the estimate; the link and exports are on this task.");
+    saveInRunWindow(runId, ["assumptions.md"]);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "reviewer",
+        role: "Calculator Builder",
+        delivers: true,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const stamp = taskFile().parsed.frontmatter.deliveredAt!;
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
+      { deliveredAt: stamp, files: ["assumptions.md", "mapping.md"] },
+    ]);
+    expect(readTaskAttachment(store.slug, "VIB-1", "mapping.md", store.dataRoot, 0, stamp)).toMatchObject({
+      kind: "text",
+      text: "the Architect's mapping",
+    });
+  });
+
   it("ruling 587: a file the delivery does not hold moves nothing", async () => {
     // A supporting agent's own notes are not the delivery (ruling 555).
     // CANARY: stamp on any saved file and the objection is dropped with no

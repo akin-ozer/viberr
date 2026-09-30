@@ -3,6 +3,7 @@ import {
   checkAttachmentBatch,
   checkAttachmentUpload,
   isBrowserWorkingArtifact,
+  listTaskAttachmentNames,
   resolveTaskAttachment,
   withAttachmentClaims,
   writeTaskAttachment,
@@ -3348,6 +3349,14 @@ function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEven
  * files as they stand, so every later reader can open the delivery a verdict
  * bound to after a rework saves the same names again. A failed copy is
  * logged; the delivery stands without it.
+ *
+ * Ruling 610: every file on the task, not only the deliverer's. A results
+ * board's deliverable is several agents' files (the Architect's `mapping.md`,
+ * the Analyst's `inventory.md`, the Builder's estimate), and a snapshot of the
+ * deliverer's alone read as a delivery missing its mapping: live on AWSC-52
+ * the Estimate Judge's J4 audit found no `mapping.md` in the first delivery and
+ * called its Deliverable 10/10 unsupported. The browser's working files stay
+ * out, as they stay out of the delivery (ruling 570).
  */
 function keepStampedDelivery(
   ctx: TaskMutationContext,
@@ -3363,7 +3372,9 @@ function keepStampedDelivery(
       projectSlug,
       taskKey,
       stamp,
-      deliveredFileNames(written.frontmatter, written.timeline),
+      listTaskAttachmentNames(projectSlug, taskKey, ctx.dataRoot).filter(
+        (name) => !isBrowserWorkingArtifact(name),
+      ),
       ctx.dataRoot,
     );
   } catch (error) {
