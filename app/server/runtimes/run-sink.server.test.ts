@@ -905,6 +905,29 @@ describe("quota exhaustion from a refused run (D5)", () => {
  * gate; gate on `window` instead of `windowRejected`; remove the clock arm;
  * stop reading the run's `credential_user_id`.
  */
+describe("ruling 604: a Codex line's usage reading", () => {
+  it("is stored as the codex backend's reading, naming the account that ran it", () => {
+    const runId = `run_codex_rl_${randomBytes(6).toString("hex")}`;
+    upsertRun(store.db, {
+      id: runId, projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary", role: "developer", kind: "primary",
+      backend: "codex", model: "gpt-6-luna", sdk: "Codex SDK", agentProfileId: "dev", state: "queued",
+      credentialUserId: store.users.arda.id,
+    });
+    const sink = createRunSink(store.db, { ...spec(runId), backend: "codex", model: "gpt-6-luna" });
+    sink.markRunning();
+    try {
+      const reading = { status: "allowed", rateLimitType: "five_hour", utilization: 0.64, resetsAt: 1_790_782_378, isUsingOverage: false };
+      sink.line({ ...emitted({ t: "13:00:00", ev: "tool", tag: "codex·tool", text: "npm test" }, "{}", "2026-09-30T13:00:00.000Z"), facts: { rateLimit: reading } });
+      // CANARY: record the reading for Claude runs only and Profile's Codex
+      // card has nothing to show before a refusal.
+      const row = latestBackendRateLimits(store.db, "2026-09-30T13:01:00.000Z").find((q) => q.backend === "codex")!;
+      expect(row.reading).toMatchObject({ ...reading, observedAt: "2026-09-30T13:00:00.000Z", credentialUserId: store.users.arda.id });
+    } finally {
+      rmSync(rawLogPath("codex", runId), { force: true });
+    }
+  });
+});
+
 describe("ruling 130(d): structured refusals and the principal", () => {
   const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
     kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, ...over,

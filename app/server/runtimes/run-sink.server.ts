@@ -537,7 +537,8 @@ export function createRunSink(
             });
           }
         }
-        // Backend quota telemetry (pass 29): a rate_limit_event's reading is
+        // Backend quota telemetry (pass 29): a rate_limit_event's reading, or
+        // the Codex rollout snapshot the adapter reads (ruling 604), is
         // folded into the instance-wide store so approaching exhaustion is
         // visible on /insights BEFORE a run fails on it. `recordBackendRateLimit`
         // is internally best-effort — it can never fail this persist path.
@@ -555,9 +556,10 @@ export function createRunSink(
         const raw = redact(line.raw);
         const display = line.display ? redactDisplay(line.display, redact) : null;
 
-        // D5 (pass 31): the OTHER half of quota telemetry. The live
-        // `rate_limit_event` channel above is Claude-only, so an already-spent
-        // Codex subscription produced no reading at all and /insights read "no
+        // D5 (pass 31): the OTHER half of quota telemetry. The live channel
+        // above has no reading from a run refused before its first model call
+        // (and before ruling 604, none from Codex at all), so an already-spent
+        // Codex subscription produced no reading and /insights read "no
         // reading yet" for a backend that had been refusing every run for days
         // — with the reset date sitting in the failure the human just read.
         //

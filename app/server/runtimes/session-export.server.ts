@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { RealBackend } from "./runtime-registry.server";
 import { createLineRedactor } from "./run-sink.server";
 import { userBackendHome } from "./user-homes.server";
+import type { EnvelopeFacts } from "./wire-format.server";
 
 /**
  * Locate the on-disk provider session transcript for a run so it can be
@@ -750,12 +751,88 @@ export interface CodexLiveUsage {
   usage: z.infer<typeof codexUsageRecordSchema>["payload"]["turn_token_usage"];
 }
 
+/**
+ * Ruling 604: the account's rate-limit snapshot a rollout `token_count` event
+ * carries beside each call's usage (0.156.0: `limit_id` "codex", a five-hour
+ * `primary` and a seven-day `secondary` window, `resets_at` in unix seconds).
+ * The protocol calls these sparse updates: a null window is unavailable in
+ * this snapshot, not cleared.
+ */
+const codexRateWindowSchema = z
+  .object({
+    used_percent: z.number(),
+    window_minutes: z.number().nullable().catch(null),
+    resets_at: z.number().nullable().catch(null),
+  })
+  .nullable()
+  .catch(null);
+const codexTokenCountSchema = z.object({
+  type: z.literal("event_msg"),
+  payload: z.object({
+    type: z.literal("token_count"),
+    rate_limits: z.object({
+      limit_id: z.string().nullable().catch(null),
+      primary: codexRateWindowSchema,
+      secondary: codexRateWindowSchema,
+      rate_limit_reached_type: z.string().nullable().catch(null),
+    }),
+  }),
+});
+type CodexRateSnapshot = z.infer<typeof codexTokenCountSchema>["payload"]["rate_limits"];
+type CodexRateWindow = NonNullable<CodexRateSnapshot["primary"]>;
+
+/** What a rate-limit line holds, verbatim, for the same one-mark scan. */
+const RATE_LIMITS_MARK = '"rate_limits"';
+
+/** Ruling 604: a Codex account's usage, in the reading shape Claude's
+ *  `rate_limit_event` fills (`EnvelopeFacts.rateLimit`). */
+export type CodexRateLimitReading = NonNullable<EnvelopeFacts["rateLimit"]>;
+
+function windowName(minutes: number | null): string {
+  if (minutes === 300) return "five_hour";
+  if (minutes === 10_080) return "seven_day";
+  if (minutes === null || minutes <= 0) return "window";
+  if (minutes % 1440 === 0) return `${minutes / 1440}_day`;
+  if (minutes % 60 === 0) return `${minutes / 60}_hour`;
+  return `${minutes}_minute`;
+}
+
+/**
+ * Ruling 604: the window closest to its limit across the account's latest
+ * snapshots, one per limit. Null while no snapshot has named a window.
+ */
+export function codexRateLimitReading(
+  snapshots: Iterable<CodexRateSnapshot>,
+): CodexRateLimitReading | null {
+  let binding: { window: CodexRateWindow; reached: boolean } | null = null;
+  for (const snapshot of snapshots) {
+    for (const window of [snapshot.primary, snapshot.secondary]) {
+      if (!window) continue;
+      if (!binding || window.used_percent > binding.window.used_percent) {
+        binding = { window, reached: snapshot.rate_limit_reached_type !== null };
+      }
+    }
+  }
+  if (!binding) return null;
+  const { window, reached } = binding;
+  return {
+    status: reached || window.used_percent >= 100 ? "rejected" : "allowed",
+    rateLimitType: windowName(window.window_minutes),
+    utilization: Math.min(1, Math.max(0, window.used_percent / 100)),
+    resetsAt: window.resets_at,
+    isUsingOverage: false,
+  };
+}
+
 /** Ruling 541: a live Codex run's rollout, read as the CLI writes it. */
 export interface CodexUsageTail {
   /** The run's records so far, reading only what the CLI wrote since the last
    *  call; null before the first. `sessionId` is the thread the run streamed,
    *  once it has named it. */
   read(sessionId: string | null): CodexLiveUsage | null;
+  /** Ruling 604: the account's usage as the rollout lines `read` has consumed
+   *  report it; null before the first snapshot that names a window. */
+  rateLimit(): CodexRateLimitReading | null;
   /** Ruling 595: when the CLI last wrote to the rollout (its mtime, epoch ms),
    *  or null while the file is not known. The CLI appends a line for every
    *  item the model completes, a reasoning step included, and the stream
@@ -776,6 +853,7 @@ export function codexUsageTail(codexHome: string, resumeSessionId: string | null
   let file: string | null = null;
   let offset = 0;
   let live: CodexLiveUsage | null = null;
+  const rates = new Map<string, CodexRateSnapshot>();
   if (resumeSessionId) {
     file = rolloutByFilename(roots, resumeSessionId);
     try {
@@ -798,6 +876,9 @@ export function codexUsageTail(codexHome: string, resumeSessionId: string | null
         return null;
       }
     },
+    rateLimit() {
+      return codexRateLimitReading(rates.values());
+    },
     read(sessionId) {
       const at = locate(sessionId);
       if (!at) return live;
@@ -808,11 +889,26 @@ export function codexUsageTail(codexHome: string, resumeSessionId: string | null
       if (end === -1) return live;
       offset += end + 1;
       for (const line of chunk.toString("utf8", 0, end).split("\n")) {
-        if (!line.includes(USAGE_RECORD_MARK)) continue;
+        const usageLine = line.includes(USAGE_RECORD_MARK);
+        if (!usageLine && !line.includes(RATE_LIMITS_MARK)) continue;
         let json: unknown;
         try {
           json = JSON.parse(line);
         } catch {
+          continue;
+        }
+        if (!usageLine) {
+          const counted = codexTokenCountSchema.safeParse(json);
+          if (!counted.success) continue;
+          const snapshot = counted.data.payload.rate_limits;
+          const key = snapshot.limit_id ?? "";
+          const prior = rates.get(key);
+          // Sparse: a window this snapshot does not carry keeps its last value.
+          rates.set(key, {
+            ...snapshot,
+            primary: snapshot.primary ?? prior?.primary ?? null,
+            secondary: snapshot.secondary ?? prior?.secondary ?? null,
+          });
           continue;
         }
         const record = codexUsageRecordSchema.safeParse(json);

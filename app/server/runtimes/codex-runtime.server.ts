@@ -1286,6 +1286,8 @@ export function createCodexAdapter(
           const { events } = await thread.runStreamed(spec.prompt, turnOptions);
           // The model calls the rollout has recorded: a Codex run's Turns.
           let calls = 0;
+          // Ruling 604: the account reading the last line carried.
+          let sentLimit: string | null = null;
           for await (const event of events) {
             armIdle(); // reset the inactivity window on every event
             const occurredAt = new Date().toISOString();
@@ -1320,6 +1322,14 @@ export function createCodexAdapter(
             if (live) {
               calls = live.calls;
               facts.turns = calls;
+            }
+            // Ruling 604: the account's usage window, from the same rollout
+            // lines, rides the line when it changes, and the sink records it
+            // as Claude's `rate_limit_event` is recorded.
+            const limit = usageTail?.rateLimit() ?? null;
+            if (limit && JSON.stringify(limit) !== sentLimit) {
+              sentLimit = JSON.stringify(limit);
+              facts.rateLimit = limit;
             }
             if (type === "turn.started" || type === "item.started") {
               // Ruling 394: something is in flight again.

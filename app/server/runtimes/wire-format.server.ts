@@ -55,7 +55,8 @@ export interface EnvelopeFacts {
   apiErrorStatus?: number | null;
   /** Ruling 130(a): the result envelope's `terminal_reason` (`api_error`, …). */
   terminalReason?: string | null;
-  /** A `rate_limit_event`'s live quota reading (claude only today) — folded
+  /** A live quota reading — Claude's `rate_limit_event`, or the Codex
+   *  rollout's rate-limit snapshot the adapter reads (ruling 604) — folded
    *  into the instance-wide backend-quota store by the sink, so approaching
    *  exhaustion is visible BEFORE a run fails on it (pass-29 gap 3.2). */
   rateLimit?: {
