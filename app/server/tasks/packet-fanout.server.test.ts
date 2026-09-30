@@ -16,6 +16,7 @@ import {
   fanOutOutcomeText,
   siblingOptionIndex,
   siblingPacketsSharingCause,
+  standingDecisionFor,
   FANNED_OUT_OPTION_KINDS,
 } from "./packet-fanout.server";
 
@@ -369,6 +370,60 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
     expect(file(store, "VIB-2").packet).not.toBeNull();
     expect(timelineText(store, "VIB-1")).not.toContain("The same answer was applied");
     expect(timelineText(store, "VIB-1")).not.toContain("was **not** answered");
+  });
+});
+
+/**
+ * Ruling 602: a person's answer to a quota packet stands until its window
+ * reopens, for the packets later refusals open (the answering half is pinned
+ * through the real escalation in `agent-completion.server.test.ts`).
+ */
+describe("a standing decision (ruling 602)", () => {
+  const inHours = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
+  function windowOptions(until: string): PacketOption[] {
+    return [
+      { kind: "wait_for_window", t: "Wait for the window to reopen", d: "", rec: true, dueAt: until },
+      { kind: "request_edit", t: "The window has reset: send the agent back", d: "", rec: false, backend: "claude" },
+      { kind: "hold_runtime_debug", t: "Hold for runtime debugging", d: "", rec: false },
+    ];
+  }
+
+  it("a wait stands for a later packet with the same cause and window, and for nothing else", async () => {
+    // CANARY: drop `recordStandingDecision` from resolvePacket and nothing stands.
+    const until = inHours(2);
+    const store = prepared([{ key: "VIB-1", options: windowOptions(until) }]);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const later = packet(windowOptions(until));
+    expect(standingDecisionFor(store.db, later, Date.now())).toMatchObject({
+      optionKind: "wait_for_window",
+      fromTaskKey: "VIB-1",
+      until,
+    });
+    // A new reset instant, another account, or the window reopened: nothing stands.
+    expect(standingDecisionFor(store.db, packet(windowOptions(inHours(7))), Date.now())).toBeNull();
+    expect(
+      standingDecisionFor(store.db, packet(windowOptions(until), "backend:claude:quota:u_murat2"), Date.now()),
+    ).toBeNull();
+    expect(standingDecisionFor(store.db, later, Date.parse(until) + 1)).toBeNull();
+  });
+
+  it("an answer that re-runs the agent on the refused account never stands", async () => {
+    // Standing, "send it back now" would answer its own next refusal, in a
+    // loop. CANARY: let every fanned-out kind stand and this one does.
+    const until = inHours(2);
+    const store = prepared([{ key: "VIB-1", options: windowOptions(until) }]);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(standingDecisionFor(store.db, packet(windowOptions(until)), Date.now())).toBeNull();
   });
 });
 

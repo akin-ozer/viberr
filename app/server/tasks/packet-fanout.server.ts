@@ -1,11 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  PACKET_OPTION_KINDS,
   taskPacketSchema,
   type PacketOption,
   type PacketOptionKind,
   type TaskPacket,
 } from "~/schemas/task-file.schema";
+import { deleteSetting, getSetting, setSetting } from "~/server/settings/instance-settings.server";
+import type { TaskActor } from "./task-mutation.server";
 
 /**
  * Ruling 319 — one account failure, one decision.
@@ -215,4 +218,105 @@ export function fanOutArrivalText(input: {
     `Answered from ${input.fromTaskKey}: ${input.byName} chose "${input.optionTitle}" there for ` +
     "the account failure that stopped both tasks, and the same choice was applied here."
   );
+}
+
+/**
+ * Ruling 602: one account window, one decision, for the rest of the window.
+ *
+ * Ruling 319 answers the siblings that are open when a person decides. A run
+ * already in flight when the window closed is refused later, at its next
+ * model call, and opens its own packet after the decision was made. Live on
+ * AWSC-52 at 13:20 a Judge run was refused two minutes after Arda had chosen to
+ * wait out the same Codex window on AWSC-51, and the owner answered the same
+ * question a third time.
+ *
+ * So a person's answer to a quota packet whose window is known stands until
+ * that window reopens, for every later packet with the same cause and the same
+ * window. Only answers that run nothing on the refused account inside the
+ * window may stand: waiting, retrying on the other backend, holding.
+ * "Send back now" and "redirect" re-run the agent on the account that just
+ * refused it; standing, they would answer their own next refusal, in a loop.
+ */
+export const STANDING_OPTION_KINDS: ReadonlySet<PacketOptionKind> = new Set([
+  "wait_for_window",
+  "retry_other_backend",
+  "hold_runtime_debug",
+]);
+
+const STANDING_KEY_PREFIX = "packetCauseDecision:";
+
+const standingDecisionSchema = z.object({
+  optionKind: z.enum(PACKET_OPTION_KINDS),
+  optionTitle: z.string(),
+  optionBackend: z.enum(["codex", "claude"]).nullable(),
+  byUserId: z.string(),
+  byLabel: z.string(),
+  fromTaskKey: z.string(),
+  decidedAt: z.string(),
+  /** The window's reopen instant: the packet's `wait_for_window` `dueAt`. */
+  until: z.string(),
+});
+export type StandingDecision = z.infer<typeof standingDecisionSchema>;
+
+/** The reopen instant a QUOTA packet names (its wait option's `dueAt`); null
+ *  for any other cause, and for a quota whose reset the provider never named. */
+export function quotaWindowEnd(packet: TaskPacket): string | null {
+  if (!packet.cause || !/^backend:[^:]+:quota:/.test(packet.cause)) return null;
+  return packet.options.find((o) => o.kind === "wait_for_window" && o.dueAt)?.dueAt ?? null;
+}
+
+/** Keep a person's answer to a quota packet standing for the rest of its window. */
+export function recordStandingDecision(
+  db: DatabaseSync,
+  input: { packet: TaskPacket; option: PacketOption; actor: TaskActor; fromTaskKey: string; nowMs: number },
+): void {
+  const until = quotaWindowEnd(input.packet);
+  if (!until || !input.packet.cause || !STANDING_OPTION_KINDS.has(input.option.kind)) return;
+  if (!(Date.parse(until) > input.nowMs)) return;
+  const decision: StandingDecision = {
+    optionKind: input.option.kind,
+    optionTitle: input.option.t,
+    optionBackend: input.option.backend ?? null,
+    byUserId: input.actor.userId,
+    byLabel: input.actor.label,
+    fromTaskKey: input.fromTaskKey,
+    decidedAt: new Date(input.nowMs).toISOString(),
+    until,
+  };
+  setSetting(db, `${STANDING_KEY_PREFIX}${input.packet.cause}`, decision);
+}
+
+/** The standing answer for this packet: same cause, same window, still closed. */
+export function standingDecisionFor(
+  db: DatabaseSync,
+  packet: TaskPacket,
+  nowMs: number,
+): StandingDecision | null {
+  const until = quotaWindowEnd(packet);
+  if (!until || !packet.cause) return null;
+  const key = `${STANDING_KEY_PREFIX}${packet.cause}`;
+  const decision = getSetting(db, key, standingDecisionSchema);
+  if (!decision) return null;
+  if (!(Date.parse(decision.until) > nowMs)) {
+    deleteSetting(db, key);
+    return null;
+  }
+  // A new reset instant is a new window, and a new question.
+  return decision.until === until ? decision : null;
+}
+
+/** The note left on a packet a standing decision answered. */
+export function standingArrivalText(decision: StandingDecision): string {
+  return (
+    `Answered from ${decision.fromTaskKey}: ${decision.byLabel} chose "${decision.optionTitle}" there ` +
+    `at ${decision.decidedAt.slice(11, 16)} UTC for this account's usage window, which stays closed ` +
+    `until ${decision.until.slice(11, 16)} UTC, and the same choice was applied here.`
+  );
+}
+
+/** The option a standing decision chose, in the shape `siblingOptionIndex` matches. */
+export function standingOption(decision: StandingDecision): PacketOption {
+  const option: PacketOption = { kind: decision.optionKind, t: decision.optionTitle, d: "", rec: false };
+  if (decision.optionBackend) option.backend = decision.optionBackend;
+  return option;
 }
