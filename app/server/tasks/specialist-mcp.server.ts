@@ -17,6 +17,7 @@ import {
 } from "~/server/org/resources.server";
 import { toError } from "~/shared/errors";
 import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
+import { startMcpWarmup } from "~/server/org/mcp-warmup.server";
 
 /**
  * Resolve a specialist profile's declared MCP names to portable runtime
@@ -494,11 +495,11 @@ export function resolveBoardMcp(input: {
 export async function verifyStdioMcpMountsForRun(
   db: DatabaseSync,
   resolution: SpecialistMcpResolution,
-  options: { spawnImpl?: McpSpawn; timeoutMs?: number } = {},
+  options: { spawnImpl?: McpSpawn; timeoutMs?: number; capMs?: number } = {},
 ): Promise<SpecialistMcpResolution> {
   const names = Object.keys(resolution.servers);
   if (names.length === 0) return resolution;
-  let registry: { name: string; transport: "HTTP" | "stdio"; target: string }[];
+  let registry: { id: string; name: string; transport: "HTTP" | "stdio"; target: string }[];
   try {
     registry = listMcpServers(db);
   } catch {
@@ -523,9 +524,29 @@ export async function verifyStdioMcpMountsForRun(
     // correct the shared row so Settings stops calling it healthy.
     delete servers[name];
     markMcpServerUnreachableFromRun(db, name, disc.reason);
+    // Ruling 606: the probe gave up on a visible install and killed it, and uv
+    // commits to its cache only when an install completes, so every run
+    // restarted the same download and lost the server (R19-18's loop, on the
+    // run path; live 2026-09-30, `uvx awslabs.aws-pricing-mcp-server@latest`).
+    // The install finishes in the background, as a Retest's does.
+    const installing = disc.installing === true;
+    if (installing) {
+      startMcpWarmup(
+        db,
+        {
+          id: row.id,
+          name,
+          target: row.target,
+          token: credential.state === "ok" ? credential.token : null,
+        },
+        { spawnImpl: options.spawnImpl, capMs: options.capMs },
+      );
+    }
     const entry = {
       name,
-      reason: `it failed to start for this run: ${disc.reason}`,
+      reason: installing
+        ? `it failed to start for this run: ${disc.reason}. It is installing in the background for a later run`
+        : `it failed to start for this run: ${disc.reason}`,
       mounted: false,
     };
     const idx = unresolved.findIndex((u) => u.name === name);

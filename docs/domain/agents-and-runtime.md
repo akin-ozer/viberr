@@ -1852,7 +1852,10 @@ runtime's answer for a missing grant.
   reported "unresolved"; an unhealthy row is still mounted but flagged; a credential that
   cannot be opened drops the server; stdio servers get a real discovery handshake, WITH
   the credential on both backends, before the run and are dropped (and marked
-  unreachable) on failure.
+  unreachable) on failure. A handshake that timed out on a visible install (a first-run
+  or `@latest` download) also starts the background install a Retest starts (ruling 606,
+  ruling 74's `startMcpWarmup`), so a later run finds the server installed; the run's
+  prompt says so.
   Every grant that produced no usable server is listed in the prompt with the reason its
   own probe returned and an instruction not to infer another cause
   (`unavailableMcpSection`, `specialist-mcp.server.ts`, shared by the specialist and
