@@ -1234,6 +1234,16 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
       /^\[done\] Scheduled your own re-run on VIB-1 for .*, in 90 minutes \(sch_/,
     );
     expect(schedules("VIB-1")[1]).toMatchObject({ action: "run-operator", profileId: null, createdBy: "operator" });
+    // A prompt that ends its own sentence keeps one period (live on AWSC-65:
+    // "hours passed.. It runs"). CANARY: interpolate the prompt raw again.
+    await call("VIB-1", "schedule_task_action", {
+      agent: "operator",
+      delayMinutes: 120,
+      prompt: "Pick it back up where it stopped.",
+    });
+    expect(timeline("VIB-1")[0]!.text).toMatch(
+      /: Pick it back up where it stopped\. It runs on the profile deployed when it fires\.$/,
+    );
   });
 
   it("refuses a time outside 1 minute to 28 days, and says what now is", async () => {
