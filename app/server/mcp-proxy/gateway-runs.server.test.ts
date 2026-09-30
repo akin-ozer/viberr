@@ -380,6 +380,17 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
           },
         ],
       }),
+      timeline: [
+        {
+          occurredAt: "2026-09-29T10:10:00.000Z",
+          type: "comment",
+          actor: { kind: "agent", backend: "codex", profileId: "estimate-judge", roleHint: "Estimate Judge" },
+          title: "Review verdict",
+          text: "## Verdict: approve, 95/100",
+          toAgent: false,
+          evidence: null,
+        },
+      ],
     });
     const answer = `1: Yes, the owner approves the redesign. ${"2: the address is app01's own. ".repeat(12).trim()}`;
     writeTask(store.dataRoot, store.slug, {
@@ -444,6 +455,15 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     expect(entry.text).toBe(answer);
     const refused = await client.callTool({ name: "read_timeline_entry", arguments: { at: "2026-09-29T11:11:33.126Z" } });
     expect(refused.isError).toBe(true);
+    // Ruling 596: another task's entry, by the stamp read_board lists for it.
+    // CANARY: bind the gateway's reader to the run's own task and this reads a miss.
+    expect(z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await call("read_board", { taskKey: "VIB-2" }))).timeline).toEqual([
+      "2026-09-29T10:10:00.000Z · comment · agent:estimate-judge · Review verdict",
+    ]);
+    const verdictEntry = z
+      .object({ text: z.string() })
+      .parse(JSON.parse(await call("read_timeline_entry", { taskKey: "VIB-2", occurredAt: "2026-09-29T10:10:00.000Z" })));
+    expect(verdictEntry.text).toBe("## Verdict: approve, 95/100");
     // Ruling 594: another task's file, read where it is; `read_board` names it.
     const vib2 = taskAttachmentsDir(store.slug, "VIB-2", store.dataRoot);
     mkdirSync(vib2, { recursive: true });

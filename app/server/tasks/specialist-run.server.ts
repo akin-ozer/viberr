@@ -637,12 +637,14 @@ async function freshRunAnchor(
   ctx: TaskMutationContext,
   projectSlug: string,
   parsed: ParsedTaskFile,
+  boardReader: boolean,
 ): Promise<string | null> {
   try {
     const { canonicalTaskAnchor } = await import("./task-actions.server");
     return canonicalTaskAnchor({
       parsed,
       stageName: stageDisplayName(ctx, projectSlug, parsed.frontmatter.stage),
+      boardReader,
       // Ruling 245: read at anchor time, so a lease set mid-flight binds the
       // very next run rather than the one after a restart.
       // Ruling 245(b): resolved, so a run is never warned off a file whose
@@ -2020,9 +2022,12 @@ async function dispatchAgentRun(
           prNumber: existing.parsed.frontmatter.pr?.number ?? null,
         }
       : null;
+  // Ruling 594: the same condition that mounts the board readers.
+  const boardReader =
+    realBackend && holdsCollaborationGrant(collab) && (backend === "claude" || !!boardMount);
   // P19-G0: EVERY fresh run re-anchors on the canonical task artifact. This is
   // the one thing `buildAnalyzePrompt` never carried — see `freshRunAnchor`.
-  const anchor = await freshRunAnchor(ctx, input.projectSlug, existing.parsed);
+  const anchor = await freshRunAnchor(ctx, input.projectSlug, existing.parsed, boardReader);
   // Every optional field below is OMITTED rather than set to undefined: the
   // prompt builder renders a section per key it was actually given.
   const promptInput: AnalyzePromptInput = {
@@ -2045,10 +2050,7 @@ async function dispatchAgentRun(
     ctx.dataRoot,
   );
   if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
-  // Ruling 594: the same condition that mounts the board readers.
-  if (realBackend && holdsCollaborationGrant(collab) && (backend === "claude" || boardMount)) {
-    promptInput.taskFileReader = true;
-  }
+  if (boardReader) promptInput.taskFileReader = true;
   // Ruling 591: the same condition as the correction note below.
   if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
     promptInput.kbCorrectionTool = true;

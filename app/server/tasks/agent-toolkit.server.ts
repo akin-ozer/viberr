@@ -34,6 +34,7 @@ import {
   READ_TASK_ATTACHMENT_FIELDS,
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
+  READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
 } from "~/server/mcp-proxy/board-tool.server";
 import {
   readTaskFile,
@@ -746,16 +747,21 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       // characters, and nothing here returned one whole, the gap ruling 285
       // closed for the operator. Live on AWSC-4 a retried run got a person's
       // four-item answer as "1=Shared … 2=RDS for SQL Server 2…" and raised a
-      // packet asking for it again. Same gate as `read_board`: this task only,
-      // read-only, nothing a member could not read on the task page.
+      // packet asking for it again. Same gate as `read_board`: read-only,
+      // nothing a member could not read on the task page. Ruling 596: another
+      // task's entry too, by the stamp `read_board` lists in its `timeline`.
       tool(
         "read_timeline_entry",
         READ_TIMELINE_ENTRY_DESCRIPTION,
-        { occurredAt: z.string().describe(READ_TIMELINE_ENTRY_AT_DESCRIPTION) },
+        {
+          occurredAt: z.string().describe(READ_TIMELINE_ENTRY_AT_DESCRIPTION),
+          taskKey: z.string().optional().describe(READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION),
+        },
         // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
-            return textResult(readTimelineEntry({ db, ctx, projectSlug }, taskKey, args.occurredAt));
+            const entryTask = args.taskKey?.trim() || taskKey;
+            return textResult(readTimelineEntry({ db, ctx, projectSlug }, entryTask, args.occurredAt));
           } catch (error) {
             logger.warn("agent read_timeline_entry failed", { taskKey, err: toError(error) });
             return textResult("[error] The timeline could not be read.");

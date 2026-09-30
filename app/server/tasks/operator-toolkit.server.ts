@@ -372,7 +372,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_board",
-      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered: how a task this one waited on ended). Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about (in a document, a report or a directive) is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 503: `get_task`'s `epic` lists the other tasks of this task's epic, the work planned beside it, so read it as well before you offer to create anything. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
+      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered: how a task this one waited on ended), and its `timeline` as an index of stamps, types, authors and titles, newest first, which read_timeline_entry opens (ruling 596). Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about (in a document, a report or a directive) is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 503: `get_task`'s `epic` lists the other tasks of this task's epic, the work planned beside it, so read it as well before you offer to create anything. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
       {
         taskKey: z
           .string()
@@ -443,18 +443,22 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_timeline_entry",
-      "Read ONE timeline entry of this task in full, addressed by the `occurredAt` stamp `get_task` prints for it. The agent report in your prompt is clipped at 4,000 characters and every `recentTimeline` entry is clipped at 1,500; this is how you read the rest. Call it before you summarise a report for a human, before you raise a packet about one, and before you conclude a report did not mention something: an agent's findings are routinely past the clip, and a report you only half-read is a report you cannot coordinate from. Read-only.",
+      "Read ONE timeline entry in full, addressed by its `occurredAt` stamp: this task's, as `get_task` prints it, or another task's in this project with `taskKey`, as `read_board` lists it in that task's `timeline` (ruling 596). The agent report in your prompt is clipped at 4,000 characters and every `recentTimeline` entry is clipped at 1,500; this is how you read the rest. Call it before you summarise a report for a human, before you raise a packet about one, and before you conclude a report did not mention something: an agent's findings are routinely past the clip, and a report you only half-read is a report you cannot coordinate from. Read-only.",
       {
         occurredAt: z
           .string()
           .describe(
-            "The entry's `occurredAt` stamp, exactly as get_task prints it (ISO, to the millisecond).",
+            "The entry's `occurredAt` stamp, exactly as get_task prints it or read_board lists it (ISO, to the millisecond).",
           ),
+        taskKey: z
+          .string()
+          .optional()
+          .describe("The task the entry is on, e.g. AWSC-24. Omit for this task."),
       },
       // eslint-disable-next-line @typescript-eslint/require-await
-      async (args: { occurredAt: string }) =>
+      async (args: { occurredAt: string; taskKey?: string }) =>
         textResult(
-          readTimelineEntry({ db, ctx, projectSlug }, taskKey, args.occurredAt),
+          readTimelineEntry({ db, ctx, projectSlug }, args.taskKey?.trim() || taskKey, args.occurredAt),
         ),
     ),
     "read_timeline_entry",

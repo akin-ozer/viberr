@@ -31,16 +31,20 @@ export type BoardMount = z.infer<typeof boardMountSchema>;
 
 /** Ruling 281: what `read_board` says it does, on either backend. */
 export const READ_BOARD_DESCRIPTION =
-  "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered), and the names of its files (`files`), which `read_task_attachment` opens. Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
+  "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered), the names of its files (`files`), which `read_task_attachment` opens, and its timeline as an index (`timeline`: each entry's stamp, type, author and title, newest first), whose entries `read_timeline_entry` opens. Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
 
 export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Omit to list the whole board.";
 
 /** Ruling 563: what `read_timeline_entry` says it does, on either backend. */
 export const READ_TIMELINE_ENTRY_DESCRIPTION =
-  "Read ONE entry of this task's timeline in full, by its `occurredAt` stamp. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp: call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you. Read-only.";
+  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline` (ruling 596). Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. Read-only.";
 
 export const READ_TIMELINE_ENTRY_AT_DESCRIPTION =
-  "The entry's stamp, exactly as your prompt prints it (ISO, to the millisecond).";
+  "The entry's stamp, exactly as your prompt or `read_board`'s `timeline` prints it (ISO, to the millisecond).";
+
+/** Ruling 596: the other task whose entry to read. */
+export const READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION =
+  "The task the entry is on, e.g. AWSC-24. Omit for this task.";
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
@@ -61,7 +65,10 @@ export const TIMELINE_ENTRY_TOOL: Tool = {
   description: READ_TIMELINE_ENTRY_DESCRIPTION,
   inputSchema: {
     type: "object",
-    properties: { occurredAt: { type: "string", description: READ_TIMELINE_ENTRY_AT_DESCRIPTION } },
+    properties: {
+      occurredAt: { type: "string", description: READ_TIMELINE_ENTRY_AT_DESCRIPTION },
+      taskKey: { type: "string", description: READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION },
+    },
     required: ["occurredAt"],
   },
   annotations: { title: "Read one timeline entry in full", ...READ_ONLY },
@@ -109,7 +116,7 @@ export const taskAttachmentArgsSchema = z.object({
 export type TaskAttachmentArgs = z.infer<typeof taskAttachmentArgsSchema>;
 
 /** `read_timeline_entry`'s arguments, parsed where the gateway receives the call. */
-export const timelineEntryArgsSchema = z.object({ occurredAt: z.string() });
+export const timelineEntryArgsSchema = z.object({ occurredAt: z.string(), taskKey: z.string().optional() });
 export type TimelineEntryArgs = z.infer<typeof timelineEntryArgsSchema>;
 
 /** The run a board call reads for: its database, project and task. */
@@ -150,14 +157,16 @@ export async function boardReadResult(input: BoardCallContext, args: BoardReadAr
   }
 }
 
-/** `read_timeline_entry`: one entry of the run's own task, whole. */
+/** `read_timeline_entry`: one entry, whole, of the run's own task or, with
+ *  `taskKey`, of another task in the project (ruling 596). */
 export async function timelineEntryResult(
   input: BoardCallContext,
   args: TimelineEntryArgs,
 ): Promise<CallToolResult> {
   try {
     const { readTimelineEntry } = await import("~/server/tasks/board-read.server");
-    return textResult(readTimelineEntry(readContext(input), input.taskKey, args.occurredAt));
+    const taskKey = args.taskKey?.trim() || input.taskKey;
+    return textResult(readTimelineEntry(readContext(input), taskKey, args.occurredAt));
   } catch (error) {
     logger.warn("gateway read_timeline_entry failed", { taskKey: input.taskKey, err: toError(error) });
     return textResult("[error] The timeline could not be read.", true);

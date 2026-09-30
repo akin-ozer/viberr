@@ -46,7 +46,7 @@ import {
 } from "~/features/runtime/runtime-types";
 import { resolveDeliveryPermissions } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -5458,6 +5458,52 @@ describe("P19-G11 — the run records what it was given", () => {
     } finally {
       await stopMcpGateway();
     }
+  });
+
+  it("ruling 596: a fresh run's anchor names the readers of the entries it leaves out, only for a run that holds them", async () => {
+    // CANARY: pass false to freshRunAnchor, or name the readers to a Codex run
+    // the gateway does not serve.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    for (let i = 0; i < 6; i++) {
+      await appendTimelineEvent(ref, {
+        occurredAt: `2026-09-30T01:0${i}:00.000Z`,
+        type: "comment",
+        actor: { kind: "operator" },
+        title: null,
+        text: `Entry ${i}.`,
+        toAgent: false,
+        evidence: null,
+      });
+    }
+    const prompt = async (backend: "claude" | "codex") => {
+      writeProject(store.dataRoot, {
+        ...fm,
+        agents: [
+          {
+            profileId: "dev",
+            capabilities: [{ capabilityId: "comment-on-task", mode: "direct" as const }],
+            extras: [],
+            definition: {
+              kind: "specialist" as const,
+              name: "dev",
+              role: "developer",
+              backends: [backend],
+              model: backend === "codex" ? "gpt-6-luna" : "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignAndRun();
+      return lastRunSpec()!.prompt;
+    };
+    const older = (text: string) => text.split("\n").find((l) => l.includes("older entries are not shown."));
+    expect(older(await prompt("claude"))).toMatch(
+      /^\d+ older entries are not shown\. `read_board` on this task lists every entry by its stamp, and `read_timeline_entry` opens one whole\.$/,
+    );
+    expect(older(await prompt("codex"))).toMatch(/^\d+ older entries are not shown\.$/);
   });
 
   it("ruling 589: a Codex run that holds a collaboration grant mounts the gateway's board server, fresh and resumed", async () => {

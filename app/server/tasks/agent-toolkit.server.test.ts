@@ -782,6 +782,69 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(one.files).toEqual(["round-3-comparison.md"]);
   });
 
+  it("ruling 596: read_board lists a task's timeline by stamp, and read_timeline_entry opens an entry on it or on another task", async () => {
+    // Live in round 4, three Estimate Judges re-reviewing a rework could not
+    // find their own first verdict: the prompt carries only recent entries,
+    // read_board listed none, and read_timeline_entry read this task only.
+    // One wrote the rework's score as the score of record.
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_index");
+    const store = lastStore;
+    const judge = { kind: "agent" as const, backend: "codex" as const, profileId: "estimate-judge", roleHint: "Estimate Judge" };
+    const firstVerdict = "## Verdict: request changes\n\n**Score of record: 75/100.** Mapping 35/40.";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }),
+      timeline: [
+        {
+          occurredAt: "2026-09-30T01:55:33.089Z",
+          type: "comment",
+          actor: judge,
+          title: "Review verdict",
+          text: "## Verdict: approve. Rework 79/100.",
+          toAgent: false,
+          evidence: null,
+        },
+        {
+          occurredAt: "2026-09-30T01:10:00.000Z",
+          type: "comment",
+          actor: { kind: "human", userId: store.users.arda.id, nameHint: "Arda" },
+          title: null,
+          text: "The score of record is 75/100.",
+          toAgent: false,
+          evidence: null,
+        },
+        {
+          occurredAt: "2026-09-29T23:35:25.588Z",
+          type: "comment",
+          actor: judge,
+          title: "Review verdict",
+          text: firstVerdict,
+          toAgent: false,
+          evidence: null,
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (tool: RegisteredTool, args: Record<string, string>) =>
+      ((await tool.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
+    // CANARY: drop the index from the single-task read and no older stamp is findable.
+    const index = z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await text(tools.read_board!, { taskKey: "VIB-9" })));
+    expect(index.timeline).toEqual([
+      "2026-09-30T01:55:33.089Z · comment · agent:estimate-judge · Review verdict",
+      "2026-09-30T01:10:00.000Z · comment · Arda",
+      "2026-09-29T23:35:25.588Z · comment · agent:estimate-judge · Review verdict",
+    ]);
+    // CANARY: bind the reader to this task only and the first verdict stays out of reach.
+    const entry = z
+      .object({ text: z.string() })
+      .parse(JSON.parse(await text(tools.read_timeline_entry!, { taskKey: "VIB-9", occurredAt: "2026-09-29T23:35:25.588Z" })));
+    expect(entry.text).toBe(firstVerdict);
+    // Without a key it reads this task, which has no such entry, and says where stamps are.
+    const miss = await text(tools.read_timeline_entry!, { occurredAt: "2026-09-29T23:35:25.588Z" });
+    expect(miss).toContain("[noop] VIB-3 has no timeline entry stamped");
+    expect(miss).toContain("`read_board` lists it");
+  });
+
   it("declares `evidence` only when the profile holds attach-evidence-references", () => {
     const granted = toolkitTools({ ...BASE, evidence: true }, "oc_a").report_outcome!;
     const withheld = toolkitTools({ ...BASE, evidence: false }, "oc_b").report_outcome!;

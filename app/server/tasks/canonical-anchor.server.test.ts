@@ -365,6 +365,32 @@ describe("canonicalTaskAnchor", () => {
     expect(answer.endsWith("(clipped; the whole entry is at `2026-09-28T18:43:03.831Z`)")).toBe(true);
     expect(lines.find((l) => l.includes("The mapping is posted."))).toBe("- comment · operator: The mapping is posted.");
   });
+
+  it("ruling 596: the recent timeline says how many entries it leaves out, and names their readers only to a run that holds them", () => {
+    // Live on AWSC-36 the Estimate Judge, re-reviewing, wrote that the first
+    // verdict's breakdown was "not present in the accessible AWSC-36 files or
+    // timeline entries"; it was past the five this block shows, and nothing
+    // said there were more. CANARY: drop the line and the window reads as the
+    // whole history again; name the tools for every run and one that cannot
+    // call them is sent nowhere (ruling 415).
+    const timeline = Array.from({ length: 7 }, (_, i) => ({
+      occurredAt: `2026-09-30T01:0${6 - i}:00.000Z`,
+      type: "comment" as const,
+      actor: { kind: "operator" as const },
+      title: null,
+      text: `Entry ${6 - i}.`,
+      toAgent: false,
+      evidence: null,
+    }));
+    const reader = canonicalTaskAnchor({ parsed: parsed({ timeline }), stageName: "Review", boardReader: true });
+    expect(reader.split("\n").at(-1)).toBe(
+      "2 older entries are not shown. `read_board` on this task lists every entry by its stamp, and `read_timeline_entry` opens one whole.",
+    );
+    const other = canonicalTaskAnchor({ parsed: parsed({ timeline }), stageName: "Review" });
+    expect(other.split("\n").at(-1)).toBe("2 older entries are not shown.");
+    const whole = canonicalTaskAnchor({ parsed: parsed({ timeline: timeline.slice(0, 5) }), stageName: "Review", boardReader: true });
+    expect(whole).not.toContain("not shown");
+  });
 });
 
 describe("specialistReplyDirective", () => {
