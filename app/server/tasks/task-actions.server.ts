@@ -6188,7 +6188,9 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
       failure?.kind === "overloaded" ||
-      failure?.kind === "idle_timeout";
+      failure?.kind === "idle_timeout" ||
+      // Ruling 598: the leaf's sentence is the gateway's, naming the call.
+      failure?.kind === "tool_loop";
     const reasonText = classified
       ? described.reason
       : failure?.kind === "unavailable"

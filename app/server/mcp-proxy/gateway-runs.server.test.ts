@@ -22,7 +22,7 @@ import {
 } from "../../../test-support/fake-runtime";
 import { settle, waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -34,7 +34,8 @@ import { resolveBoardMcp, resolveKnowledgeMcp, resolveSpecialistMcpServersDetail
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { errorMessage } from "~/shared/errors";
-import { mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
+import { runFailureReason } from "~/server/tasks/agent-reply.server";
+import { LOOP_REPEATS, mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
 
 /**
  * Ruling 461 through the run service: `startRun` is the one funnel that puts a
@@ -487,5 +488,98 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     await interrupt(runId);
     await settle();
     expect(await gatewayAnswers(board.url, board.headers.Authorization)).toBe(401);
+  });
+});
+
+describe("ruling 598: a run that keeps sending one call and getting one answer is stopped", () => {
+  it("fails the run with the call and its answer as the cause, and lets a call whose answer changes run on", async () => {
+    // Live on AWSC-49 the Estimate Judge's code-mode script sent one refused
+    // correction 44,725 times in twenty minutes, reading the entry between
+    // tries, until a person stopped the run. CANARIES: skip the guard and the
+    // hundredth answer is the tool's own; key the count on the call without
+    // its answer and the changing reads below are stopped.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "correcting" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Estimate Judge",
+      kind: "reviewer",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      mcpServers: { viberr_board: mount! },
+      agentProfileId: "estimate-judge",
+      credentialUserId: store.users.arda.id,
+    });
+    await settle();
+    const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+    const client = new Client({ name: "codex-cli", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+    const call = async (name: string, args: Record<string, string>) => {
+      const result = await client.callTool({ name, arguments: args });
+      return { isError: result.isError === true, text: z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text };
+    };
+
+    // Read, act, read: the same call, a new answer each time, never stopped.
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    for (let i = 0; i < LOOP_REPEATS + 5; i++) {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date(Date.parse("2026-09-30T00:00:00.000Z") + i * 1000).toISOString(),
+        type: "comment",
+        actor: { kind: "operator" },
+        title: null,
+        text: `Step ${i}.`,
+        toAgent: false,
+        evidence: null,
+      });
+      expect((await call("read_board", { taskKey: "VIB-1" })).isError).toBe(false);
+    }
+    // The same refused call, again and again: the hundredth is stopped.
+    const missing = { occurredAt: "2026-09-29T00:00:00.000Z" };
+    for (let i = 1; i < LOOP_REPEATS; i++) expect((await call("read_timeline_entry", missing)).text).toMatch(/^\[noop\]/);
+    const stopped = await call("read_timeline_entry", missing);
+    expect(stopped.isError).toBe(true);
+    expect(stopped.text).toMatch(
+      /^\[stopped\] Viberr stopped the run: it sent `read_timeline_entry` \(viberr_board\) with the same arguments 100 times in \d+ s and got the same answer each time: "\[noop\] /,
+    );
+    await waitFor(() => getRun(store.db, runId)?.state === "error", "the stopped run to end failed");
+    const cause = runFailureReason(store.db, runId);
+    expect(cause?.kind).toBe("tool_loop");
+    expect(cause?.text).toBe(stopped.text.replace(/^\[stopped\] /, ""));
+    await client.close().catch(() => undefined);
+  });
+
+  it("stops a run that repeats a call to an upstream server the same way, an error answer included", async () => {
+    // A proxied call answers through its own path, and an upstream can answer
+    // with an error a script catches and retries. CANARIES: leave the guard
+    // off the forwarded answer, or off the error, and the hundredth answer
+    // comes back as it was.
+    for (const { tool, thrown, taskKey } of [
+      { tool: "whoami", thrown: false, taskKey: "VIB-1" },
+      { tool: "fail", thrown: true, taskKey: "VIB-2" },
+    ]) {
+      const { runId } = await startWithMounts("codex", { keepRunning: true, taskKey });
+      const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(cloudflare.url), { requestInit: { headers: cloudflare.headers } }));
+      for (let i = 1; i < LOOP_REPEATS; i++) {
+        if (thrown) await expect(client.callTool({ name: tool, arguments: {} })).rejects.toThrow("no such zone");
+        else expect((await client.callTool({ name: tool, arguments: {} })).isError).not.toBe(true);
+      }
+      const stopped = await client.callTool({ name: tool, arguments: {} });
+      expect(stopped.isError).toBe(true);
+      expect(z.array(z.object({ text: z.string() })).parse(stopped.content)[0]!.text).toMatch(
+        new RegExp(`^\\[stopped\\] Viberr stopped the run: it sent \`${tool}\` \\(cloudflare\\) with the same arguments 100 times`),
+      );
+      await waitFor(() => getRun(store.db, runId)?.state === "error", `the ${tool} run to end failed`);
+      expect(runFailureReason(store.db, runId)?.kind).toBe("tool_loop");
+      await client.close().catch(() => undefined);
+    }
   });
 });

@@ -260,6 +260,17 @@ export function describeRunFailure(
       remedy =
         "Nothing marks the directive or the account as the cause. Run it again; if it hangs again, inspect the session for what it was waiting on.";
       break;
+    case "tool_loop":
+      // Ruling 598: the gateway's own sentence names the call and what it
+      // answered, which is the guidance the agent was missing. Neither the
+      // account nor the backend is the cause, and a plain re-run repeats the
+      // loop, so the default option, a redirect, stays recommended.
+      reason =
+        input.failure?.text.trim() ||
+        `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} was stopped: it repeated one tool call with the same arguments and got the same answer each time.`;
+      remedy =
+        "Nothing marks the account or the backend as the cause. Redirect the agent: tell it what the tool answered, and to read each answer and change the call rather than send it again.";
+      break;
     case "session_missing":
       // Ruling 221 (F37-41): two roads to one class, and the difference is
       // what a human does next. A vanished session heals itself on the next

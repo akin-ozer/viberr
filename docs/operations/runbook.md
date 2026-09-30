@@ -171,7 +171,7 @@ a readiness downgrade (tolerant parsing):
   run kind (ruling 130(a)): "refused this run: the account's usage window is spent" or
   "the account was rejected by the provider"; `continuity error` is only an
   unclassified failure. The terminal line in the log console carries the kind on its
-  tag (`quota`, `auth`, `overloaded`, `idle_timeout`, `max_turns`, `max_budget`,
+  tag (`quota`, `auth`, `overloaded`, `idle_timeout`, `tool_loop`, `max_turns`, `max_budget`,
   `session_missing`, `unavailable`), the typed facts (the window, the absolute reset, the
   API status and code) and the provider's own words (`The provider reported: …`). A 403
   `oauth_org_not_allowed` means the connected Claude account's organization does not allow

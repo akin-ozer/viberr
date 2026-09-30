@@ -4599,6 +4599,75 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(event.text).not.toMatch(/\.\./);
   });
 
+  it("ruling 598: a specialist run the gateway stopped for repeating one call opens a stall packet that names the call and recommends a redirect", async () => {
+    // Live on AWSC-49 the Estimate Judge's script repeated a refused
+    // correction 44,725 times. A plain re-run repeats the loop, so the
+    // recommendation is guidance. CANARIES: leave tool_loop out of the leaf's
+    // kinds and the packet says only that the run failed; recommend the
+    // re-run and the loop comes back.
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      agents: [
+        ...pf.parsed.frontmatter.agents,
+        {
+          profileId: "operator",
+          capabilities: [
+            { capabilityId: "generate-packets", mode: "direct" },
+            { capabilityId: "append-typed-events", mode: "direct" },
+          ],
+          extras: [],
+          definition: { kind: "operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = "run_598_loop";
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t-598",
+      role: "Developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "codex",
+      model: "gpt-6-luna",
+      sdk: "codex",
+      state: "error",
+    });
+    const sentence =
+      'Viberr stopped the run: it sent `correct_knowledge_doc` (viberr_knowledge) with the same arguments 100 times in 2 s and got the same answer each time: "[noop] The passage you sent as `replaces` stands 3 times in golden/sample-03.md. Nothing was written. Send more of it, so it stands once." Sending it again cannot change the answer; the call has to change.';
+    insertRunLine(store.db, {
+      runId,
+      seq: 0,
+      occurredAt: "2026-09-30T04:16:40.000Z",
+      raw: JSON.stringify({ type: "error", source: "viberr", reason: "tool_loop", message: sentence }),
+      display: { t: "04:16:40", ev: "err", tag: "run·error·tool_loop", text: sentence, failure: emptyRunFailureFacts("tool_loop") },
+    });
+    await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "developer",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.packet!.options.find((o) => o.rec)?.t).toBe("Redirect with sharper guidance");
+    const event = parsed.timeline.find((e) => e.type === "blocked" && /did not complete/.test(e.text))!;
+    expect(event.text).toContain("it sent `correct_knowledge_doc` (viberr_knowledge) with the same arguments 100 times");
+    expect(event.text).toContain("Redirect the agent: tell it what the tool answered");
+  });
+
   /**
    * T13's other half: the dedupe must not become silence. When no packet
    * notification goes out — here because no operator is deployed, so the

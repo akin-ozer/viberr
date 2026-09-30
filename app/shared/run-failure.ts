@@ -36,6 +36,12 @@ export type RunFailureKind =
   /** The stream produced nothing for the whole idle window — the run was HUNG,
    *  not failed by the task. Both adapters emit it (P13-RT-11). */
   | "idle_timeout"
+  /** Ruling 598: the gateway stopped the run because it kept sending one tool
+   *  call with the same arguments and getting the same answer, a script or
+   *  loop that never read the answer. Not the account's fault and not a hang:
+   *  the remedy is guidance, so the run's own sentence names the tool and
+   *  what it answered. */
+  | "tool_loop"
   /** P13-D-2 (FR22 / NFR17): the provider session this run tried to resume no
    *  longer exists — Claude Code's ~30-day transcript retention, or a wiped
    *  `$CODEX_HOME/sessions`. Its own class because it is neither a credential
@@ -56,6 +62,7 @@ export const TAGGED_FAILURE_KINDS = [
   "max_turns",
   "max_budget",
   "idle_timeout",
+  "tool_loop",
   "session_missing",
   "unknown",
 ] as const satisfies readonly RunFailureKind[];

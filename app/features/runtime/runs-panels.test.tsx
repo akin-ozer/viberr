@@ -1438,6 +1438,17 @@ describe("ruling 130(a): the classified footer", () => {
     expect(queryByText(/Retry on/)).toBeNull();
   });
 
+  it("ruling 598: a run the gateway stopped for repeating one call says so in the footer and the pill", () => {
+    // CANARY: drop either arm and the run reads as a continuity error.
+    const run = mkRun({ state: "error", lifecycle: "error", failureKind: "tool_loop" });
+    const { getByText, queryByText } = render(
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+    );
+    expect(getByText(/stopped for sending one tool call and getting the same answer again and again/)).toBeTruthy();
+    expect(getByText("stopped · repeated call")).toBeTruthy();
+    expect(queryByText(/continuity error/)).toBeNull();
+  });
+
   it("an auth refusal on a specialist names the provider's rejection", () => {
     const run = mkRun({ state: "error", lifecycle: "error", failureKind: "auth", failedBackendUnavailable: true });
     const { getByText } = render(

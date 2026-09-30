@@ -703,7 +703,9 @@ after a failed agent run, whose reason and options come from `describeRunFailure
 `quota | auth | unavailable | overloaded` (a spent window with a known reset offers
 `wait_for_window`, ruling 224; a recovery onto a backend already known to be spent is not
 offered, ruling 273) or a hung run's `idle_timeout`, whose recommended option runs the same
-agent again with the same directive and keeps `redirect` unrecommended (ruling 595); a
+agent again with the same directive and keeps `redirect` unrecommended (ruling 595), or a
+`tool_loop`, whose reason is the gateway's own sentence naming the call and its answer and
+whose recommended option stays `redirect`, since a plain re-run repeats the loop (ruling 598); a
 failed operator run (`escalateFailedOperatorRun`: "Operator run failed: pick a
 recovery path", the classified reason, "No coordination was performed.", the owner's own
 remedy, the provider's redacted words, a "Window reopens" observation when the reset

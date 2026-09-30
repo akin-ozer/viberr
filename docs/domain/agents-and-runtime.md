@@ -648,7 +648,8 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   flight settles `finished`, recorded on a `run·transport·after-turn` meta line (live, the
   socket died under Viberr's own completion compaction and two finished deliveries were
   written up as failures). A failure is an `err` line tagged `error·<kind>` (`kind ∈ quota |
-  auth | overloaded | idle_timeout | session_missing | unknown`) carrying the typed
+  auth | overloaded | idle_timeout | session_missing | unknown`, and the service's own
+  `run·error·tool_loop`, ruling 598) carrying the typed
   `failure` record.
   Classification runs the session classes first, both `session_missing` with their own
   sentence: a session store the CLI cannot open (`SESSION_STORE_UNREADABLE_RE`, ruling
@@ -949,7 +950,7 @@ of restart-orphaned runs (§8) goes through the same `--reap`.
 ### 3.5 Failure kinds
 
 `RunFailureKind = quota | auth | unavailable | overloaded | max_turns | max_budget |
-idle_timeout | session_missing | unknown` (`app/shared/run-failure.ts`), read from the
+idle_timeout | tool_loop | session_missing | unknown` (`app/shared/run-failure.ts`), read from the
 terminal line's typed `failure` record first, the tag suffix second and regexes last
 (ruling 130(a)). How a run ENDED (finished, a provider refusal, a crash) is one
 classification, `classifyRunEnd` (`provider-refusal.server.ts`), read by the run card and
@@ -1759,7 +1760,13 @@ runtime's answer for a missing grant.
   a queued run the drain drops, a launch that throws) and dies with the process, and the
   gateway also refuses it once the run's row is no longer running or queued. An unknown,
   revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
-  forwarded. The gateway speaks MCP to the run (Streamable HTTP, SDK server transport)
+  forwarded. A run that sends one call and gets one answer (an error included) 100 times
+  within 60 seconds is stopped (ruling 598, `repeatedCallStop`): the hundredth call is
+  answered `[stopped] …` with `isError`, and the run service ends the run failed as
+  `tool_loop`, its error line naming the tool, the server and the answer
+  (`stopRunForToolLoop`). A script in Codex's code mode calls tools at machine speed
+  between two model turns, and nothing else bounds it; a poll once a second never reaches
+  the bound, and a call whose answer changes is a new call. The gateway speaks MCP to the run (Streamable HTTP, SDK server transport)
   and MCP to the real server with the credential attached in the server process
   (`app/server/mcp-proxy/upstream*.server.ts`): an HTTP server over Streamable HTTP with
   `Authorization: Bearer <credential>`, falling back to the legacy SSE transport on a
