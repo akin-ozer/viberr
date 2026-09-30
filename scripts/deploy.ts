@@ -5,6 +5,9 @@
  *   npm run deploy -- --no-up — stamp and build only
  *   --skip-disk-check         — build without measuring the host first (ruling 603)
  *
+ * After the verify, it removes the older untagged builds of this project's app
+ * and keeps the one it replaced, to roll back to (ruling 605).
+ *
  * `build-info.server.ts` has resolved build identity from env since gap 18, and
  * says plainly that env "is the only source a container can have" —
  * `.dockerignore` excludes `.git`, so its file-reading fallback cannot fire
@@ -37,7 +40,12 @@ import path from "node:path";
 import { z } from "zod";
 import { composePort } from "../app/server/ops/compose-port.server";
 import { formatBytes } from "../app/server/ops/disk-space.server";
-import { buildRoomRefusal, tightestHostDisk } from "../app/server/ops/host-disk.server";
+import {
+  buildRoomRefusal,
+  supersededImagesToRemove,
+  tightestHostDisk,
+  type SupersededImage,
+} from "../app/server/ops/host-disk.server";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -220,3 +228,44 @@ if (sha && serving.revision !== sha.slice(0, 12)) {
   process.exit(1);
 }
 console.log("ok — the running instance reports the build that was just made.");
+
+/** `docker` with its output captured; null when it fails. */
+function dockerOut(...args: string[]): string | null {
+  try {
+    return execFileSync("docker", args, {
+      cwd: ROOT,
+      env: buildEnv,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** The untagged images earlier builds of this compose project's app left. */
+function supersededImages(): SupersededImage[] {
+  const config = dockerOut("compose", "config", "--format", "json");
+  const project = config ? z.object({ name: z.string() }).safeParse(JSON.parse(config)) : null;
+  if (!project?.success) return [];
+  const ids = dockerOut(
+    "images", "-q", "--no-trunc", "--filter", "dangling=true",
+    "--filter", `label=com.docker.compose.project=${project.data.name}`,
+    "--filter", "label=com.docker.compose.service=app",
+  );
+  if (!ids) return [];
+  const inspected = dockerOut("image", "inspect", "--format", "{{.Id}} {{.Created}}", ...ids.split("\n"));
+  return (inspected ?? "")
+    .split("\n")
+    .map((line) => line.split(" "))
+    .flatMap(([id, created]) => (id && created ? [{ id, created }] : []));
+}
+
+// Ruling 605: every build leaves the image it replaced untagged. Keep that one
+// to roll back to and remove the older ones; a removal that fails (an image a
+// container still uses) is left alone.
+const removable = supersededImagesToRemove(supersededImages());
+const removed = removable.filter((id) => dockerOut("image", "rm", id) !== null);
+if (removed.length > 0) {
+  console.log(`removed ${removed.length} older build(s) of this app; kept the one this deploy replaced to roll back to.`);
+}
