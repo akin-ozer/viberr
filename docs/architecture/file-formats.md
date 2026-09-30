@@ -27,6 +27,9 @@ ${VIBERR_DATA_ROOT}/
   projects/<slug>/tasks/<KEY>/attachments/ ← files agents save and people upload on the task
                                              (canonical bytes, served member-only, not
                                              projected; ruling 96, ruling 379)
+  projects/<slug>/tasks/<KEY>/deliveries/<stamp>/ ← each files delivery as it was delivered,
+                                             copied when `deliveredAt` is stamped, the stamp's
+                                             colons as dashes (a record, not projected; ruling 597)
   projects/<slug>/tasks/<KEY>/workspace/  ← git clones (deliverer + operator share
                                              <repo-name>/; each supporting run gets
                                              support/<profileId>/<repo-name>/). NOT canonical,

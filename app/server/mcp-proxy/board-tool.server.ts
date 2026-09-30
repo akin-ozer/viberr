@@ -31,7 +31,7 @@ export type BoardMount = z.infer<typeof boardMountSchema>;
 
 /** Ruling 281: what `read_board` says it does, on either backend. */
 export const READ_BOARD_DESCRIPTION =
-  "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered), the names of its files (`files`), which `read_task_attachment` opens, and its timeline as an index (`timeline`: each entry's stamp, type, author and title, newest first), whose entries `read_timeline_entry` opens. Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
+  "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered), the names of its files (`files`), which `read_task_attachment` opens, the deliveries it kept (`deliveries`: each stamp, newest first, with the files as that delivery held them), and its timeline as an index (`timeline`: each entry's stamp, type, author and title, newest first), whose entries `read_timeline_entry` opens. Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
 
 export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Omit to list the whole board.";
 
@@ -76,12 +76,14 @@ export const TIMELINE_ENTRY_TOOL: Tool = {
 
 /** Ruling 594: what `read_task_attachment` says it does, on either backend. */
 export const READ_TASK_ATTACHMENT_DESCRIPTION =
-  "Read ONE attachment of a task in this project: this task's by default, or another task's with `taskKey`, such as a report or a register a directive tells you to read where it is. `read_board` with a task's key lists its `files`. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image as the picture itself, and any other file whose bytes are text as text; a binary file (a .pdf, a .docx, a zip) is named and refused. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset`. Read-only: nothing is copied onto your task.";
+  "Read ONE attachment of a task in this project: this task's by default, or another task's with `taskKey`, such as a report or a register a directive tells you to read where it is. `read_board` with a task's key lists its `files`. A spreadsheet (.xlsx) comes back as its sheets in CSV, an image as the picture itself, and any other file whose bytes are text as text; a binary file (a .pdf, a .docx, a zip) is named and refused. A read returns up to 40,000 characters; when it says `truncated`, call again with `offset` set to its `nextOffset`. With `delivery`, one of the stamps `read_board` lists under a task's `deliveries`, it reads the file as that delivery held it: a rework saves the same names again, and a verdict scored the delivery it was given. Read-only: nothing is copied onto your task.";
 
 export const READ_TASK_ATTACHMENT_FIELDS = {
   name: "The attachment's file name, exactly as `read_board` or the timeline lists it.",
   taskKey: "The task the file is on, e.g. AWSC-24. Omit for this task.",
   offset: "Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start.",
+  delivery:
+    "A delivery's stamp, as the task's `deliveries` in `read_board` lists it, to read the file as that delivery held it. Omit for the file as it is now.",
 } as const;
 
 export const TASK_ATTACHMENT_TOOL: Tool = {
@@ -94,6 +96,7 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
       name: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.name },
       taskKey: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.taskKey },
       offset: { type: "integer", minimum: 0, description: READ_TASK_ATTACHMENT_FIELDS.offset },
+      delivery: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.delivery },
     },
     required: ["name"],
   },
@@ -112,6 +115,7 @@ export const taskAttachmentArgsSchema = z.object({
   name: z.string(),
   taskKey: z.string().optional(),
   offset: z.number().int().min(0).optional(),
+  delivery: z.string().optional(),
 });
 export type TaskAttachmentArgs = z.infer<typeof taskAttachmentArgsSchema>;
 
@@ -180,7 +184,13 @@ export async function taskAttachmentResult(
 ): Promise<CallToolResult> {
   try {
     const { readAgentTaskAttachment } = await import("~/server/tasks/board-read.server");
-    const read = readAgentTaskAttachment(readContext(input), args.taskKey?.trim() || input.taskKey, args.name, args.offset ?? 0);
+    const read = readAgentTaskAttachment(
+      readContext(input),
+      args.taskKey?.trim() || input.taskKey,
+      args.name,
+      args.offset ?? 0,
+      args.delivery?.trim() || undefined,
+    );
     if ("text" in read) return textResult(read.text);
     return {
       content: [

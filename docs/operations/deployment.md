@@ -427,7 +427,8 @@ under `runtimes/`:
 
 ```
 projects/       canonical project.md, task.md, epics/*.md (the source of truth — editable);
-                per task: workspace/ (git clones, a cache) and attachments/ (evidence files);
+                per task: workspace/ (git clones, a cache), attachments/ (evidence files) and
+                deliveries/ (each files delivery as it was delivered, ruling 597);
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files

@@ -24,6 +24,7 @@ import { settle, waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
+import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
@@ -474,6 +475,13 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     // CANARY: route read_task_attachment nowhere and this is refused.
     expect(await call("read_task_attachment", { taskKey: "VIB-2", name: "holdout-comparison.md" })).toContain("## Exposure register");
     expect(await call("read_task_attachment", { name: "holdout-comparison.md" })).toContain("[noop] VIB-1 has no attachment");
+    // Ruling 597: the file as a kept delivery held it. CANARY: drop `delivery`
+    // on the way to the reader and this reads the current text.
+    keepDelivery(store.slug, "VIB-2", "2026-09-29T10:00:00.000Z", ["holdout-comparison.md"], store.dataRoot);
+    writeFileSync(path.join(vib2, "holdout-comparison.md"), "# Hold-outs, reworked\n");
+    expect(
+      await call("read_task_attachment", { taskKey: "VIB-2", name: "holdout-comparison.md", delivery: "2026-09-29T10:00:00.000Z" }),
+    ).toContain("## Exposure register");
     await client.close();
 
     await interrupt(runId);

@@ -26,6 +26,8 @@ import {
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
+import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { readTaskAttachment } from "~/server/files/task-attachments.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -1246,6 +1248,36 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const fm = taskFile().parsed.frontmatter;
     expect(fm.deliveredAt).not.toBe(savedAt);
     expect(currentVerdicts(fm)).toEqual([]);
+  });
+
+  it("ruling 597: each files delivery is kept as delivered, and a rework leaves the first one readable", async () => {
+    // Live in round 4 the Estimate Judge re-reviewing AWSC-43 scored the first
+    // delivery as "a reconstruction from the surviving first-delivery exports":
+    // the rework had saved mapping.md and assumptions.md again. CANARY: drop the
+    // keep after the completion's write and nothing is kept.
+    writeDeliveredAndObjectedTask("2026-09-29T09:47:34.900Z");
+    const first = await finishedRunWith("Added the missing 20%-free line to assumptions.md.");
+    const dir = saveInRunWindow(first, ["assumptions.md"]);
+    await completeSupportingRun(first);
+    const firstStamp = taskFile().parsed.frontmatter.deliveredAt!;
+    const second = await finishedRunWith("Rewrote assumptions.md for the rework.");
+    saveInRunWindow(second, ["assumptions.md"]);
+    const finishedAt = new Date(getRun(store.db, second)!.finished_at!);
+    writeFileSync(path.join(dir, "assumptions.md"), "the rework's assumptions");
+    utimesSync(path.join(dir, "assumptions.md"), finishedAt, finishedAt);
+    await completeSupportingRun(second);
+    const secondStamp = taskFile().parsed.frontmatter.deliveredAt!;
+
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
+      { deliveredAt: secondStamp, files: ["assumptions.md"] },
+      { deliveredAt: firstStamp, files: ["assumptions.md"] },
+    ]);
+    const read = (delivery?: string) =>
+      readTaskAttachment(store.slug, "VIB-1", "assumptions.md", store.dataRoot, 0, delivery);
+    expect(read(firstStamp)).toMatchObject({ kind: "text", text: "content of assumptions.md" });
+    expect(read(secondStamp)).toMatchObject({ kind: "text", text: "the rework's assumptions" });
+    expect(read()).toMatchObject({ kind: "text", text: "the rework's assumptions" });
+    expect(read("2026-09-29T09:47:34.900Z")).toBeNull();
   });
 
   it("ruling 587: a file the delivery does not hold moves nothing", async () => {

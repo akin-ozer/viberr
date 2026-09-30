@@ -782,6 +782,48 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(one.files).toEqual(["round-3-comparison.md"]);
   });
 
+  it("ruling 597: read_task_attachment reads a file as a kept delivery held it, and read_board lists the kept deliveries", async () => {
+    // Live on AWSC-46 the Estimate Judge "could not independently diff it
+    // against the prior version": the rework had saved the same name. CANARY:
+    // drop `delivery` on the way to the reader and the first delivery reads as
+    // the rework; leave `deliveries` off read_board and no stamp is offered.
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_kept");
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const dir = taskAttachmentsDir(store.slug, "VIB-9", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    const first = "2026-09-30T02:40:12.567Z";
+    const rework = "2026-09-30T02:55:47.995Z";
+    writeFileSync(path.join(dir, "comparison.md"), "Six-run total: 535/600");
+    keepDelivery(store.slug, "VIB-9", first, ["comparison.md"], store.dataRoot);
+    writeFileSync(path.join(dir, "comparison.md"), "Six-run total: 531/600");
+    keepDelivery(store.slug, "VIB-9", rework, ["comparison.md"], store.dataRoot);
+    // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (tool: RegisteredTool, args: Record<string, string>) =>
+      ((await tool.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
+    const board = z
+      .object({ deliveries: z.array(z.object({ deliveredAt: z.string(), files: z.array(z.string()) })) })
+      .parse(JSON.parse(await text(tools.read_board!, { taskKey: "VIB-9" })));
+    expect(board.deliveries).toEqual([
+      { deliveredAt: rework, files: ["comparison.md"] },
+      { deliveredAt: first, files: ["comparison.md"] },
+    ]);
+    const read = tools.read_task_attachment!;
+    expect(await text(read, { taskKey: "VIB-9", name: "comparison.md", delivery: first })).toContain("535/600");
+    expect(await text(read, { taskKey: "VIB-9", name: "comparison.md" })).toContain("531/600");
+    expect(await text(read, { taskKey: "VIB-9", name: "comparison.md", delivery: "2026-09-30T01:00:00.000Z" })).toBe(
+      `[noop] VIB-9 kept no delivery at \`2026-09-30T01:00:00.000Z\`. Its kept deliveries, newest first: ${rework}, ${first}.`,
+    );
+    expect(await text(read, { taskKey: "VIB-9", name: "mapping.md", delivery: first })).toBe(
+      `[noop] VIB-9's delivery of ${first} held no \`mapping.md\`. It held: comparison.md.`,
+    );
+  });
+
   it("ruling 596: read_board lists a task's timeline by stamp, and read_timeline_entry opens an entry on it or on another task", async () => {
     // Live in round 4, three Estimate Judges re-reviewing a rework could not
     // find their own first verdict: the prompt carries only recent entries,
