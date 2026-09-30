@@ -460,9 +460,9 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | Tool (`viberr`) | Action | Capability |
 |---|---|---|
 | `get_task` | `operatorSnapshot` (§4) | always |
-| `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 282); one task carries its `outcome` once it has one, the current completion summary and each current verdict's report (read whole from its "Review verdict" comment, not the 2,000-character stored excerpt), each up to 8,000 characters (ruling 569); a goal past 2,000 characters comes back as its opening with every decision recorded on it kept whole (rulings 289, 579) | always |
+| `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 282); one task carries its `outcome` once it has one, the current completion summary and each current verdict's report (read whole from its "Review verdict" comment, not the 2,000-character stored excerpt), each up to 8,000 characters (ruling 569); a goal past 2,000 characters comes back as its opening with every decision recorded on it kept whole (rulings 289, 579); one task also lists its `timeline`, every entry by stamp, type, author and title, newest first, the newest 200 (ruling 596) | always |
 | `read_task_attachment` | one of this task's attachments: an `.xlsx` as its sheets in CSV, an image as the picture, any other file whose bytes are text as text whatever its name, a binary one named and refused (rulings 293, 533, 574), 40,000 characters at a time with `offset` reading on from a truncated read's `nextOffset` (ruling 551) | always |
-| `read_timeline_entry` | one timeline entry in full, by its `occurredAt` stamp (ruling 285) | always |
+| `read_timeline_entry` | one timeline entry in full, by its `occurredAt` stamp: this task's, or with `taskKey` another task's, by the stamp `read_board` lists in that task's `timeline` (rulings 285, 596) | always |
 | `read_knowledge_doc` | one document of a KB attached to the operator (ruling 283) | always, when it holds a KB |
 | `read_default_branch_file` | anchored default-branch read (§4) | always, when the run has a checkout |
 | `post_comment` | `operatorPostComment` (guardrails applied, §7; narration stored verbatim, ruling 104) | `append-typed-events` |

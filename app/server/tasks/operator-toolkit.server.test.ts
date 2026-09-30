@@ -930,6 +930,48 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(await call("VIB-3")).not.toHaveProperty("outcome");
   });
 
+  it("ruling 596: read_board indexes a task's timeline (capped), and read_timeline_entry opens another task's entry by that stamp", async () => {
+    // The operator reads its own task with get_task; another task's history
+    // was out of reach, so a results task could not see the first verdict on a
+    // benchmark run, where its score of record lives. CANARIES: drop the cap
+    // and a long task floods a board-wide read; bind the reader to this task
+    // and the other task's entry is a miss.
+    const store = setupTestStore(ctxDb);
+    const timeline = Array.from({ length: 205 }, (_, i) => ({
+      occurredAt: new Date(Date.parse("2026-09-30T02:00:00.000Z") - i * 1000).toISOString(),
+      type: "comment" as const,
+      actor: { kind: "operator" as const },
+      title: i === 204 ? "Review verdict" : null,
+      text: `entry ${i}`,
+      toAgent: false,
+      evidence: null,
+    }));
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }), timeline });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`.
+    const text = async (name: string, args: Record<string, string>) =>
+      ((await toolkit.tools.find((t) => t.name === name)!.handler(args as never, {} as never)) as {
+        content: { text: string }[];
+      }).content[0]!.text;
+    const index = z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await text("read_board", { taskKey: "VIB-2" }))).timeline;
+    expect(index).toHaveLength(201);
+    expect(index[0]).toBe("2026-09-30T02:00:00.000Z · comment · operator");
+    expect(index.at(-1)).toBe("[5 older entries not listed]");
+    // An entry past the cap is still readable by its stamp.
+    const oldest = z.object({ text: z.string(), title: z.string().nullable() }).parse(
+      JSON.parse(await text("read_timeline_entry", { taskKey: "VIB-2", occurredAt: timeline[204]!.occurredAt })),
+    );
+    expect(oldest).toMatchObject({ text: "entry 204", title: "Review verdict" });
+  });
+
   it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {
     // Live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000 of
     // 5,382: a verdict stores 2,000 characters and points at the timeline

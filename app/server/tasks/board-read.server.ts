@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   reviewSubjectId,
   VERDICT_REPORT_TITLE,
+  type FileActorRef,
   type ReviewVerdict,
   type TaskFileEvent,
   type TaskFrontmatter,
@@ -207,7 +208,50 @@ export function readBoardTask(
   // Ruling 594: what `read_task_attachment` can open on this task.
   const files = taskFileNames(deps, row.key);
   if (files.length > 0) read.files = files;
+  // Ruling 596: what `read_timeline_entry` can open on this task.
+  const timeline = file ? timelineIndex(file.parsed.timeline) : [];
+  if (timeline.length > 0) read.timeline = timeline;
   return JSON.stringify(read, null, 1);
+}
+
+/** Ruling 596: how many entries the index lists, newest first. The longest
+ *  task on the AWS calculator board ran to 184 entries and a round-4 one to
+ *  84; the cap keeps a board-wide research read bounded. */
+const BOARD_READ_TIMELINE_ENTRIES = 200;
+
+/** Who wrote an entry, as one word the index can print. */
+function timelineAuthor(actor: FileActorRef): string {
+  switch (actor.kind) {
+    case "agent":
+      return `agent:${actor.profileId}`;
+    case "human":
+      return actor.nameHint ?? "human";
+    case "system":
+      return `system:${actor.systemId}`;
+    default:
+      return actor.kind;
+  }
+}
+
+/**
+ * Ruling 596: a task's timeline as an index, one line per entry: its stamp,
+ * type, author and title. `read_timeline_entry` opens an entry by that stamp,
+ * and an agent had no other way to learn it: its prompt carries only the
+ * recent entries, and this read carried none. Live in round 4, two Estimate
+ * Judges re-reviewing a rework (AWSC-36, AWSC-43) wrote that their own first
+ * verdict, which holds the score of record, was out of their reach, and a
+ * third (AWSC-38) wrote the rework's score in its place.
+ */
+function timelineIndex(timeline: readonly TaskFileEvent[]): string[] {
+  const lines = timeline
+    .slice(0, BOARD_READ_TIMELINE_ENTRIES)
+    .map(
+      (e) =>
+        `${e.occurredAt} · ${e.type} · ${timelineAuthor(e.actor)}${e.title ? ` · ${e.title}` : ""}`,
+    );
+  const older = timeline.length - lines.length;
+  if (older > 0) lines.push(`[${older.toLocaleString("en-US")} older entries not listed]`);
+  return lines;
 }
 
 /** One task as `read_board` answers it. */
@@ -225,6 +269,8 @@ interface BoardTaskRead {
   /** Ruling 594: the task's files, without the browser's working files;
    *  absent when it has none. */
   files?: string[];
+  /** Ruling 596: the timeline's index, newest first; absent when it is empty. */
+  timeline?: string[];
 }
 
 /** Ruling 594: a task's attachment names, less the browser's working files. */
@@ -326,7 +372,7 @@ function boardRows(deps: BoardReadContext) {
 const TIMELINE_ENTRY_READ_CHARS = 40_000;
 
 /** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
- *  prints. */
+ *  prints or `read_board` lists (ruling 596). */
 export function readTimelineEntry(
   deps: BoardReadContext,
   taskKey: string,
@@ -351,8 +397,8 @@ export function readTimelineEntry(
       .map((e) => `${e.occurredAt} · ${e.type} · ${e.actor.kind}`);
     return (
       `[noop] ${taskKey} has no timeline entry stamped \`${wanted}\`. The stamp must ` +
-      `match exactly, to the millisecond, as \`get_task\` prints it. The eight most ` +
-      `recent:\n${recent.join("\n")}`
+      `match exactly, to the millisecond, as \`read_board\` lists it in the task's ` +
+      `\`timeline\` (or \`get_task\` prints it). The eight most recent:\n${recent.join("\n")}`
     );
   }
   const text = entry.text;

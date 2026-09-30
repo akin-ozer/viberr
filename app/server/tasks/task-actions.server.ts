@@ -2121,6 +2121,9 @@ export function canonicalTaskAnchor(input: {
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
   events?: number;
+  /** Ruling 596: the run holds `read_board` and `read_timeline_entry`, so the
+   *  entries past the window are named with the tools that read them. */
+  boardReader?: boolean;
 }): string {
   const { frontmatter: fm, goal, packet, timeline } = input.parsed;
   const lines: string[] = [];
@@ -2246,6 +2249,19 @@ export function canonicalTaskAnchor(input: {
       lines.push(
         `- ${e.type} · ${anchorActorLabel(e.actor)}: ${anchorClamp(e.text, ANCHOR_EVENT_MAX_CHARS)}` +
           (clipped ? ` (clipped; the whole entry is at \`${e.occurredAt}\`)` : ""),
+      );
+    }
+    // Ruling 596: the window says it is a window (ruling 302's rule for the
+    // operator). Live on AWSC-36 the Estimate Judge, re-reviewing, wrote that
+    // the first verdict's breakdown was "not present in the accessible AWSC-36
+    // files or timeline entries"; eighteen entries were newer than it.
+    const older = timeline.length - recent.length;
+    if (older > 0) {
+      lines.push(
+        `${older} older ${older === 1 ? "entry is" : "entries are"} not shown.` +
+          (input.boardReader
+            ? " `read_board` on this task lists every entry by its stamp, and `read_timeline_entry` opens one whole."
+            : ""),
       );
     }
   }
