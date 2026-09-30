@@ -3277,6 +3277,14 @@ function filesSavedByOtherAgents(
  * the Estimate Judge failed the run for an interim link "delivered" before the
  * headline ask.
  *
+ * Ruling 609: and only a run that ended with a report, not a question. A
+ * deliverer that stops to ask a person (the Calculator Builder's headline ask,
+ * which rulings §4 C3 puts before the delivered link) has saved drafts, and the
+ * completion write posts them under its name without calling here. Live on
+ * AWSC-52 the ask stamped `deliveredAt` on an `estimate-link.md` that said the
+ * delivered link was pending; on a first delivery that draft is the score of
+ * record (J1). The delivery is the deliverer's next report once it is answered.
+ *
  * Ruling 570: and never the browser's working files alone. The `page-….yml`
  * snapshots and `console-….log` dumps are tool transport (ruling 105), pruned
  * from a finished run and kept on an interrupted one as its diagnostics, so a
@@ -4898,14 +4906,17 @@ export async function recordAgentCompletion(
          */
         if (verdict) replyEvent = { ...replyEvent, title: VERDICT_REPORT_TITLE };
         parsed.timeline.unshift(replyEvent);
-        stampNonCommitDelivery(
-          parsed.frontmatter,
-          actorRef,
-          replyEvent.attachments ?? null,
-          replyEvent.occurredAt,
-          input.delivers,
-          delivered,
-        );
+        // Ruling 609: a run that ends by asking a person has not delivered.
+        if (!question) {
+          stampNonCommitDelivery(
+            parsed.frontmatter,
+            actorRef,
+            replyEvent.attachments ?? null,
+            replyEvent.occurredAt,
+            input.delivers,
+            delivered,
+          );
+        }
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
         // this run's own mid-run comment), but the run still produced evidence
@@ -4926,14 +4937,17 @@ export async function recordAgentCompletion(
         };
         if (attachments) producing.attachments = attachments;
         parsed.timeline.unshift(producing);
-        stampNonCommitDelivery(
-          parsed.frontmatter,
-          actorRef,
-          attachments,
-          producing.occurredAt,
-          input.delivers,
-          delivered,
-        );
+        // Ruling 609: a run that ends by asking a person has not delivered.
+        if (!question) {
+          stampNonCommitDelivery(
+            parsed.frontmatter,
+            actorRef,
+            attachments,
+            producing.occurredAt,
+            input.delivers,
+            delivered,
+          );
+        }
       }
       if (verdict) {
         const verdictEvent: TaskFileEvent = {
