@@ -32,8 +32,9 @@ import {
  *
  * ## D5 (pass 31): the exhaustion the card could not see
  *
- * The live `rate_limit_event` channel is CLAUDE-only. A Codex subscription that
- * is already spent never emits one — it fails the run with a sentence naming
+ * The live `rate_limit_event` channel is CLAUDE-only. (Since ruling 604 a
+ * Codex run's rollout supplies live readings too, but only once it makes a
+ * model call.) A Codex subscription that is already spent never emits one — it fails the run with a sentence naming
  * the limit and the date it reopens ("You've hit your usage limit … try again
  * at Sep 18th, 2026 5:20 PM"). So the panel read "no reading yet" for codex on
  * an instance where every codex run had been refused for days, with the reset

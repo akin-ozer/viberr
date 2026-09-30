@@ -276,7 +276,10 @@ real success. Never a synthetic probe (ruling 19 generalised). A mark is instanc
 per person.
 
 **Quota and rate limits** (`instance_settings`): the run sink folds Claude
-`rate_limit_event` envelopes into `backendRateLimit.<backend>`; a quota-refused failure
+`rate_limit_event` envelopes, and the Codex rate-limit snapshot the adapter reads from each
+rollout `token_count` event (ruling 604: the window closest to its limit, as
+`five_hour`/`seven_day`, `rejected` at 100%, sent again only when it changes), into
+`backendRateLimit.<backend>`; a quota-refused failure
 (terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` when the terminal
 line's `failure.windowRejected` says the provider rejected the window OR the provider's
 own sentence names a spent limit (`session | weekly | monthly | usage limit`, never
@@ -314,8 +317,8 @@ provider's sentence, or a neutral "usage window spent · reopens <when>" pill, e
 as the last refusal Viberr observed, retired by any completed run or by connecting a
 different account there (ruling 165); and the utilization reading (ruling 294), shown only
 when it names the viewer and was observed after the current connection, with its age, "not
-reported" for a missing figure (never 0%), a clamped percentage, and no row at all on
-Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion hides the
+reported" for a missing figure (never 0%), a clamped percentage, and no row on a Codex
+card until one of the person's runs has made a model call (ruling 604). A reading observed after an exhaustion hides the
 "usage window spent" pill.
 
 ### 2.4 Claude adapter

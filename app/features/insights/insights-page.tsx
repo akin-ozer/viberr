@@ -378,9 +378,10 @@ function tokenSilence(c: OversightSummary["coordination"]): string {
  * exhaustion is visible here BEFORE a run fails on it. A backend with no
  * reading renders neutral — this is an observation log, never a probe.
  *
- * D5 (pass 31): the live reading channel is Claude-only, so a Codex account
+ * D5 (pass 31): the live reading channel was Claude-only, so a Codex account
  * that was ALREADY spent showed "no reading yet" while every run on it was
- * being refused. A refused run is now its own row state, rendered as what it is
+ * being refused. (Ruling 604 reads Codex's from its rollout, once a run makes a
+ * model call.) A refused run is now its own row state, rendered as what it is
  * ("from a refused run"), never merged into the utilization number.
  */
 function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }) {

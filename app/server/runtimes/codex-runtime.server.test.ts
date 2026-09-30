@@ -1793,6 +1793,84 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
     // The raw line is what the CLI said.
     expect(z.object({ usage: z.object({ input_tokens: z.number() }) }).parse(JSON.parse(done.raw)).usage.input_tokens).toBe(36_000);
   });
+
+  /**
+   * Ruling 604: each `token_count` event in the same rollout carries the
+   * account's rate-limit snapshot, which Viberr never read, so Profile and
+   * Insights showed no Codex usage until a run was refused. Shapes and figures
+   * from AWSC-52's rollout on 2026-09-30 (the five-hour window spent, resetting
+   * 15:32:58Z; the weekly one at 37%).
+   */
+  describe("ruling 604: the account's usage window rides the lines", () => {
+    type RateWindow = { used_percent: number; window_minutes: number; resets_at: number };
+    type RateLimits = {
+      limit_id: string;
+      primary: RateWindow | null;
+      secondary: RateWindow | null;
+      rate_limit_reached_type: string | null;
+    };
+    const tokenCount = (rateLimits: RateLimits) =>
+      `${JSON.stringify({
+        timestamp: "2026-09-30T13:20:32.219Z",
+        type: "event_msg",
+        payload: { type: "token_count", info: null, rate_limits: rateLimits },
+      })}\n`;
+    const codex = (primary: number | null, secondary: number | null) => ({
+      limit_id: "codex",
+      limit_name: null,
+      primary: primary === null ? null : { used_percent: primary, window_minutes: 300, resets_at: 1_790_782_378 },
+      secondary:
+        secondary === null ? null : { used_percent: secondary, window_minutes: 10_080, resets_at: 1_791_333_093 },
+      credits: { has_credits: false, unlimited: false, balance: "0" },
+      plan_type: "plus",
+      rate_limit_reached_type: null,
+    });
+    const readings = (lines: EmittedLine[]) =>
+      lines.flatMap((l) => (l.facts.rateLimit ? [[z.object({ type: z.string() }).parse(JSON.parse(l.raw)).type, l.facts.rateLimit]] : []));
+
+    it("records the window closest to its limit when it changes, through sparse updates, until it is spent", async () => {
+      const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+      const lines = await linesOf(shared, [
+        { event: { type: "thread.started", thread_id: THREAD } },
+        {
+          write: `${JSON.stringify({ type: "session_meta", payload: { id: THREAD } })}\n${record([11_000, 0, 100])}${tokenCount(codex(64, 37))}`,
+        },
+        { event: TOOL },
+        // The same reading again, a sparse update that leaves the five-hour
+        // window out, and a limit with no windows at all: nothing new.
+        { write: tokenCount(codex(64, 37)) + tokenCount(codex(null, 38)) },
+        { event: TOOL_DONE },
+        { write: tokenCount({ limit_id: "premium", primary: null, secondary: null, rate_limit_reached_type: null }) },
+        { event: TOOL },
+        { write: tokenCount(codex(100, 38)) },
+        { event: TOOL_DONE },
+        { event: { type: "turn.completed", usage: { input_tokens: 11_000, cached_input_tokens: 0, output_tokens: 100 } } },
+      ]);
+
+      // CANARY: never read the rate limits and no Codex line carries one.
+      // CANARY: let a null window clear the last one and the sparse update
+      // records the weekly 38% as the account's usage.
+      expect(readings(lines)).toEqual([
+        ["item.started", { status: "allowed", rateLimitType: "five_hour", utilization: 0.64, resetsAt: 1_790_782_378, isUsingOverage: false }],
+        ["item.completed", { status: "rejected", rateLimitType: "five_hour", utilization: 1, resetsAt: 1_790_782_378, isUsingOverage: false }],
+      ]);
+    });
+
+    it("names the weekly window when it is the one closer to its limit", async () => {
+      const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+      const lines = await linesOf(shared, [
+        { event: { type: "thread.started", thread_id: THREAD } },
+        {
+          write: `${JSON.stringify({ type: "session_meta", payload: { id: THREAD } })}\n${record([11_000, 0, 100])}${tokenCount(codex(20, 37))}`,
+        },
+        { event: { type: "item.completed", item: { type: "agent_message", text: "done" } } },
+        { event: { type: "turn.completed", usage: { input_tokens: 11_000, cached_input_tokens: 0, output_tokens: 100 } } },
+      ]);
+      expect(readings(lines)).toEqual([
+        ["item.completed", { status: "allowed", rateLimitType: "seven_day", utilization: 0.37, resetsAt: 1_791_333_093, isUsingOverage: false }],
+      ]);
+    });
+  });
 });
 
 /**
