@@ -3,6 +3,7 @@
  *
  *   npm run deploy            — stamp from git, build, up, verify
  *   npm run deploy -- --no-up — stamp and build only
+ *   --skip-disk-check         — build without measuring the host first (ruling 603)
  *
  * `build-info.server.ts` has resolved build identity from env since gap 18, and
  * says plainly that env "is the only source a container can have" —
@@ -31,9 +32,12 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { composePort } from "../app/server/ops/compose-port.server";
+import { formatBytes } from "../app/server/ops/disk-space.server";
+import { buildRoomRefusal, tightestHostDisk } from "../app/server/ops/host-disk.server";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -113,6 +117,44 @@ function compose(...args: string[]): void {
     env: buildEnv,
     stdio: "inherit",
   });
+}
+
+/** Docker's own storage when it lives on this host's filesystem (a Linux
+ *  engine); on Docker Desktop it names a path inside the VM, which is skipped. */
+function dockerRootDir(): string | null {
+  try {
+    return (
+      execFileSync("docker", ["info", "--format", "{{.DockerRootDir}}"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+// Ruling 603: the build writes into Docker's disk, which on Docker Desktop is a
+// sparse image file on this host. Measure the host before building.
+if (!process.argv.includes("--skip-disk-check")) {
+  const disk = tightestHostDisk(
+    [
+      ROOT,
+      path.join(os.homedir(), "Library/Containers/com.docker.docker/Data"),
+      path.join(os.homedir(), ".docker/desktop"),
+      dockerRootDir(),
+    ].filter((p): p is string => p !== null),
+  );
+  if (!disk) {
+    console.warn("! could not measure the host disk; building without the free-space check.");
+  } else {
+    const refusal = buildRoomRefusal(disk);
+    if (refusal) {
+      console.error(refusal);
+      process.exit(1);
+    }
+    console.log(`host disk: ${formatBytes(disk.freeBytes)} free under ${disk.path}`);
+  }
 }
 
 compose("build");

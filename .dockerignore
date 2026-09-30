@@ -3,6 +3,7 @@ build
 .react-router
 data
 docker-data
+.host-disk
 .env
 .env.*
 !.env.example

@@ -52,7 +52,7 @@ The route spreads `healthSnapshot()` after `ok`, and key order is part of the co
 | `lock` | `{ pid, hostname, startedAt }` of the single-writer holder, `null` if none |
 | `backends` | `{ claude: { connectedUsers }, codex: { connectedUsers } }` → how many PEOPLE have connected each backend (ruling 127), recounted on every call. `0` is a normal reading, not a fault, and never degrades health; it is not a validity check, and it does not answer "can this task run", which is a fact about the task owner |
 | `browser` | `{ status: "ready" }` or `{ status: "unavailable", reason }` for the governed browser (the `@playwright/mcp` CLI missing, or a pinned `VIBERR_BROWSER_EXECUTABLE` not on disk) |
-| `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1) |
+| `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, source: data-root\|host, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1). `source: host` means the host disk under the data root (`VIBERR_HOST_DISK_PATH`, Compose's `/host-disk` mount) had less room than the data root's own filesystem and is the reading (ruling 603): on Docker Desktop the named volume reports its disk image's virtual size, 940.8 GB free while the Mac had 19.9 GB |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in an image built without `npm run deploy` or the build args |
 | `quota` | one row per backend, `{ backend, reading, credentialRefused, exhausted }`: the latest rate-limit reading, the latest credential refusal and the latest quota exhaustion the run sink recorded (F32-9). On this unauthenticated route `credentialUserId` and `credentialLabel` are stripped from each record (ruling 130(d)); never `degraded` (ruling 146) |
@@ -699,7 +699,9 @@ page, `deployment.md` and `scripts.md` to:
   tables are rebuilt by the boot rescan. Delete the `.corrupt-*` files once you have a
   backup.
 - Low disk never refuses boot; it is logged, reported on health as `disk.status`, and
-  triggers an extra maintenance pass. `ENOSPC` on a canonical write becomes a named "No
+  triggers an extra maintenance pass. The status is the tighter of the data root and the
+  host disk under it (`disk.source`, ruling 603), and each transition's log line names
+  which one; the first check after a boot only records its reading. `ENOSPC` on a canonical write becomes a named "No
   space left on the data root" error; `ESTALE`/`EIO` (a data-root mount gone stale under a
   running container) become a 503 naming the data root as unreachable.
 

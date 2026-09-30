@@ -9,6 +9,7 @@ import {
 import {
   formatBytes,
   measureDataRootSpace,
+  type DiskSource,
   type DiskSpace,
   type DiskStatus,
 } from "./disk-space.server";
@@ -101,6 +102,7 @@ type MaintenancePassLog = {
   workspacesSkipped?: MaintenancePassResult["workspacesSkipped"];
   diskFree?: string;
   diskStatus?: DiskStatus;
+  diskSource?: DiskSource;
 };
 
 const EMPTY_RETENTION: RetentionResult = {
@@ -211,6 +213,7 @@ export function runMaintenancePass(
   if (disk) {
     summary.diskFree = formatBytes(disk.freeBytes);
     summary.diskStatus = disk.status;
+    summary.diskSource = disk.source;
   }
   // Every pass logs what it removed — including a pass that removed nothing,
   // which is how an operator confirms the scheduler is alive at all.
@@ -326,10 +329,13 @@ export function checkDiskPressure(
   const previous = lastDiskStatus();
   setLastDiskStatus(disk.status);
 
-  if (disk.status !== previous) {
+  // The first sample after boot is a baseline, not a transition: "recovered"
+  // there named a recovery from nothing (boot logs its own reading).
+  if (disk.status !== previous && !(previous === null && disk.status === "ok")) {
     const detail = {
       free: formatBytes(disk.freeBytes),
       total: formatBytes(disk.totalBytes),
+      source: disk.source,
       usedPercent: disk.usedPercent,
       lowThreshold: formatBytes(disk.lowThresholdBytes),
       criticalThreshold: formatBytes(disk.criticalThresholdBytes),

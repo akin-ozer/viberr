@@ -41,6 +41,7 @@ import { cachedToolchain, type Toolchain } from "./ops/toolchain.server";
 import {
   formatBytes,
   measureDataRootSpace,
+  type DiskSource,
   type DiskStatus,
 } from "./ops/disk-space.server";
 import {
@@ -140,7 +141,7 @@ type BootIntegrityFields = {
   projections: { projects: number; tasks: number };
   users: number;
   build: BuildInfo;
-  disk: { free: string; total: string; status: DiskStatus } | null;
+  disk: { free: string; total: string; status: DiskStatus; source: DiskSource } | null;
   /** Ruling 182: what this host can run, probed once here so the first health
    *  request does not pay for it. */
   toolchain: Toolchain;
@@ -420,6 +421,7 @@ export function logBootIntegrity(db: DatabaseSync): void {
           free: formatBytes(disk.freeBytes),
           total: formatBytes(disk.totalBytes),
           status: disk.status,
+          source: disk.source,
         }
       : null,
     // Ruling 182: resolved here, once, so the probe's cost lands in boot and

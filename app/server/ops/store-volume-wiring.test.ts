@@ -24,6 +24,7 @@ const composeSchema = z.object({
     app: z.object({
       volumes: z.array(z.string()),
       env_file: z.array(z.object({ path: z.string(), required: z.boolean() })),
+      environment: z.record(z.string(), z.string()),
       cpus: z.string(),
     }),
   }),
@@ -60,5 +61,20 @@ describe("ruling 504: a starter's `docker compose up` is the whole install", () 
       expect(steps, doc).toMatch(/^docker compose up\b/m);
       expect(steps, doc).not.toMatch(/cp \.env\.example|docker volume create/);
     }
+  });
+});
+
+describe("ruling 603: the free-space check sees the host disk", () => {
+  const app = composeSchema.parse(parse(read("compose.yml")));
+
+  // Ruling 460 moved the store onto a named volume, and on Docker Desktop that
+  // volume reports the VM disk image's virtual size: the check read 940.8 GB
+  // free while the Mac had 19.9 GB. The host disk reaches the app only through
+  // this mount and the env that names it.
+  it("mounts a host directory read-only and names it to the app", () => {
+    expect(app.services.app.volumes).toContain("./.host-disk:/host-disk:ro");
+    expect(app.services.app.environment.VIBERR_HOST_DISK_PATH).toBe(
+      "${VIBERR_HOST_DISK_PATH-/host-disk}",
+    );
   });
 });
