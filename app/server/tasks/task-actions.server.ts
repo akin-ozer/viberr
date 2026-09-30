@@ -3269,6 +3269,14 @@ function filesSavedByOtherAgents(
  * was handed delivery while it worked still saved evidence for a review, and
  * the roster at completion does not turn that into the delivery.
  *
+ * Ruling 601: and only a run that FINISHED. A run that stopped (an error, a
+ * Stop, a restart) posts its saved files under its name through
+ * `postAgentReplyComment`, which never reaches here: they are its work in
+ * progress. Live on AWSC-54 a restart cut the Calculator Builder mid-estimate,
+ * ruling 567 recorded its interim exports as the task's first delivery, and
+ * the Estimate Judge failed the run for an interim link "delivered" before the
+ * headline ask.
+ *
  * Ruling 570: and never the browser's working files alone. The `page-….yml`
  * snapshots and `console-….log` dumps are tool transport (ruling 105), pruned
  * from a finished run and kept on an interrupted one as its diagnostics, so a
@@ -3483,11 +3491,10 @@ export async function postAgentReplyComment(
     replyText: string | null;
     /** Files this run saved into the task's attachments/ dir — stamped onto
      *  the reply so the producing message names its own files (an interrupted
-     *  run may still have captured screenshots). */
+     *  run may still have captured screenshots). Ruling 601: they are the
+     *  run's work in progress, posted under its name, and never the delivery:
+     *  only a run that finished reports one. */
     attachments?: string[] | null;
-    /** Ruling 555: the run was dispatched to deliver, so its files can be the
-     *  delivery. */
-    delivers: boolean;
   },
 ): Promise<void> {
   const attachments = sanitizeEventAttachmentNames(input.attachments);
@@ -3558,20 +3565,9 @@ export async function postAgentReplyComment(
   const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
   const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
   // The reply write, on its own so it can be RETRIED (C3).
-  let replyStampBefore: string | null = null;
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      replyStampBefore = parsed.frontmatter.deliveredAt ?? null;
-      const delivered = deliveredFileNames(parsed.frontmatter, parsed.timeline);
       parsed.timeline.unshift(event);
-      stampNonCommitDelivery(
-        parsed.frontmatter,
-        input.actorRef,
-        attachments,
-        event.occurredAt,
-        input.delivers,
-        delivered,
-      );
       if (compactOn) {
         parsed.timeline = compactTimelineEvents(
           parsed.timeline,
@@ -3685,7 +3681,6 @@ export async function postAgentReplyComment(
     }
     return;
   }
-  keepStampedDelivery(ctx, input.projectSlug, input.taskKey, replyStampBefore, wrote);
   // The reply IS posted. Finalize (reproject + audit + @mention fan-out) is
   // best-effort and must NEVER re-run `writeReply` — a finalize failure loses the
   // audit row and the human notifications, not the reply, and re-posting the
@@ -6071,7 +6066,6 @@ export async function applyAgentCompletionEffects(
       actorRef,
       replyText,
       attachments: runAttachments,
-      delivers: input.delivers,
     });
   }
   // 1b. A run that ENDED IN ERROR (backend quota/auth/crash) previously left NO

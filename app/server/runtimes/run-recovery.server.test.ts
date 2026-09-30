@@ -210,7 +210,8 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
    * a deploy cut the Calculator Builder after it had saved every result file:
    * the files belonged to nobody, `deliveredAt` stayed null, the move to Review
    * offered acceptance before the Judge had started, and the Judge's verdict
-   * could bind to nothing.
+   * could bind to nothing. Ruling 601 keeps the posting and drops the
+   * delivery: only a run that finished reports one.
    */
   function cutRunWithFiles(kind: "primary" | "reviewer", profileId: string, files: string[]) {
     writeTask(store.dataRoot, store.slug, {
@@ -235,19 +236,29 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     for (const f of files) writeFileSync(path.join(dir, f), f);
   }
 
-  it("ruling 567: a deliverer the restart cut off keeps its saved files as the delivery, recorded before the operator runs again", async () => {
-    // CANARIES: drop the replay from the notes loop and the files belong to
-    // nobody with `deliveredAt` null; drop `await notes` from the re-invokes and
-    // the operator is called while `deliveredAt` is still null.
+  it("ruling 601: a deliverer the restart cut off has its saved files posted under its name before the operator runs again, and they are not the delivery", async () => {
+    // Ruling 567 recorded them as the delivery. Live on AWSC-54 a restart cut
+    // the Calculator Builder mid-estimate, its interim exports became the
+    // task's first delivery, and the Estimate Judge failed the run for an
+    // interim link "delivered" before the headline ask. A delivery is what a
+    // finished run reports. CANARIES: stamp the stopped run's files again and
+    // `deliveredAt` moves with a kept copy; drop the replay from the notes loop
+    // and the files belong to nobody; drop `await notes` from the re-invokes
+    // and the operator is called before the files are posted.
     cutRunWithFiles("primary", "developer", ["estimate-link.md", "summary.md"]);
-    /** What the re-invoked operator would read, at the moment it is called. */
-    const deliveredAtWhenCalled: (string | null)[] = [];
+    const producingOf = (
+      timeline: { actor: { kind: string }; attachments?: string[] | null; occurredAt: string }[],
+    ) =>
+      timeline.find((e) => e.actor.kind === "agent" && (e.attachments ?? []).includes("estimate-link.md"));
+    /** Whether the operator, at the moment it is called, can read the files. */
+    const postedWhenCalled: boolean[] = [];
     const res = finalizeOrphanedRuns(store.db, {
       dataRoot: store.dataRoot,
       runOperator: async () => {
-        deliveredAtWhenCalled.push(
-          readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
-            .parsed.frontmatter.deliveredAt,
+        postedWhenCalled.push(
+          !!producingOf(
+            readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline,
+          ),
         );
         return { runId: null, queued: true, backend: "claude", autonomy: "supervised" };
       },
@@ -255,28 +266,14 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     await res.notes;
     await res.reinvokes;
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
-    const producing = parsed.timeline.find(
-      (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes("estimate-link.md"),
-    );
+    const producing = producingOf(parsed.timeline);
     expect(producing?.actor).toMatchObject({ kind: "agent", profileId: "developer" });
     expect(producing!.attachments).toEqual(expect.arrayContaining(["estimate-link.md", "summary.md"]));
-    expect(parsed.frontmatter.deliveredAt).toBe(producing!.occurredAt);
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([]);
     const note = parsed.timeline.find((e) => e.title === "Interrupted by a restart")!;
     expect(note.occurredAt >= producing!.occurredAt).toBe(true);
-    expect(deliveredAtWhenCalled).toEqual([producing!.occurredAt]);
-  });
-
-  it("ruling 597: the delivery a restart records for a deliverer it cut off is kept as saved", async () => {
-    // The files reach the timeline through the reply path (ruling 567), which
-    // stamps the delivery apart from a finished run's completion. CANARY: drop
-    // the keep after the reply's write and nothing is kept.
-    cutRunWithFiles("primary", "developer", ["estimate-link.md", "summary.md"]);
-    await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).notes;
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    expect(fm.deliveredAt).not.toBeNull();
-    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
-      { deliveredAt: fm.deliveredAt, files: ["estimate-link.md", "summary.md"] },
-    ]);
+    expect(postedWhenCalled).toEqual([true]);
   });
 
   it("ruling 570: a deliverer cut off mid-browse has its working files posted under its name, and they are not the delivery", async () => {

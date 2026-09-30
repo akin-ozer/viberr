@@ -739,7 +739,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_test",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: `@${store.users.arda.name.split(" ")[0]} the review is clean — over to you for acceptance.`,
     });
@@ -794,7 +793,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_flood",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: "Implementation reviewed end to end; the flow is correct and the tests pass.",
     });
@@ -930,7 +928,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_test_ambiguous",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: `@${firstName} the review is clean — over to you for acceptance.`,
     });
@@ -969,7 +966,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_chatter",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: "ok",
     });
@@ -1045,7 +1041,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_dup",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: finding,
     });
@@ -1212,7 +1207,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_att",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: finding,
       attachments: ["fail.png"],
@@ -1246,7 +1240,6 @@ describe("appendComment", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_more",
-      delivers: false,
       actorRef: REVIEWER_REF,
       replyText: "Investigating the flaky test. Fixed: it raced the catalog fetch.",
     });
@@ -1798,7 +1791,6 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
       projectSlug: store.slug,
       taskKey: "VIB-1",
       runId: "run_rework",
-      delivers: true,
       actorRef: {
         kind: "agent",
         backend: "claude",
