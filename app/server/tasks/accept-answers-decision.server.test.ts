@@ -236,7 +236,7 @@ describe("ruling 471: a plain acceptance answers a decision that offers accept_c
     );
 
     // The decision's notification is settled, as the packet door settles it.
-    // CANARY: drop `markTaskPacketApprovalRead` from the answered branch.
+    // CANARY: drop `markTaskPacketApprovalRead` from the acceptance.
     expect(
       listNotifications(store.db, store.users.arda.id).filter((n) => n.unread && n.kind === "packet"),
     ).toHaveLength(0);
@@ -300,6 +300,82 @@ describe("ruling 471: a plain acceptance answers a decision that offers accept_c
     expect(file().frontmatter.stage).toBe("done");
     expect(listAuditEvents(store.db, { action: "task.packet.resolved" })).toHaveLength(0);
     expect(listAuditEvents(store.db, { action: "task.packet.withdrawn" })).toHaveLength(1);
+  });
+});
+
+/**
+ * Ruling 600: an acceptance leaves no decision on the task, so it leaves no
+ * decision row unread. Live on AWSC-12 (2026-09-29) the operator's "Accept
+ * completion" card was consumed by a direct Accept, and its `approval` row
+ * stayed unread: every tab's title counted it for a day and a half. Only an
+ * acceptance that answered a packet read the rows. CANARY: put
+ * `markTaskPacketApprovalRead` back under `answered.current && input.answerer`
+ * and all three cases go red.
+ */
+describe("ruling 600: an acceptance reads every decision row on the task", () => {
+  function unreadDecisions(): string[] {
+    return listNotifications(store.db, store.users.arda.id)
+      .filter((n) => n.unread && ["packet", "question", "approval"].includes(n.kind))
+      .map((n) => n.kind);
+  }
+
+  function notify(kind: "packet" | "approval", text: string): void {
+    createNotification(store.db, {
+      id: `n-${kind}`,
+      userId: store.users.arda.id,
+      kind,
+      ptype: kind === "packet" ? "input" : null,
+      text,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+    });
+  }
+
+  it("a recommendation card the acceptance consumed", async () => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        recommendations: [
+          { id: "r1", kind: "accept_completion", label: "Accept completion", detail: "" },
+        ],
+      }),
+      packet: null,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    notify("approval", "Operator recommends: Accept completion and move VIB-1 to Done");
+    await pressAccept();
+    expect(file().frontmatter.recommendations).toEqual([]);
+    expect(unreadDecisions()).toEqual([]);
+  });
+
+  it("a packet the acceptance withdrew", async () => {
+    atReview(OTHER_PACKET);
+    notify("packet", OTHER_PACKET.title);
+    await pressAccept();
+    expect(listAuditEvents(store.db, { action: "task.packet.withdrawn" })).toHaveLength(1);
+    expect(unreadDecisions()).toEqual([]);
+  });
+
+  it("the operator's own acceptance, which answers no person", async () => {
+    atReview(READY_PACKET);
+    notify("packet", READY_PACKET.title);
+    await applyAcceptanceWrite(store.db, { dataRoot: store.dataRoot }, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      doneStageId: "done",
+      prState: "accepted",
+      event: {
+        occurredAt: new Date().toISOString(),
+        type: "completion",
+        actor: { kind: "operator" },
+        title: "Completion accepted",
+        text: "Operator acceptance recorded.",
+        toAgent: false,
+        evidence: null,
+      },
+    });
+    expect(unreadDecisions()).toEqual([]);
   });
 });
 

@@ -15139,10 +15139,15 @@ export async function applyAcceptanceWrite(
         via: input.forced ? "force-accept" : "accept",
       },
     });
-    // And the notifications the packet door marks read for a settled decision.
-    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   }
   if (accepted) {
+    // Ruling 600: an acceptance closes the packet (answered or withdrawn) and
+    // consumes every recommendation card, so no decision is left on the task,
+    // and its decision rows are read for everyone, as the packet door and
+    // archiving read theirs. Live on AWSC-12 a direct Accept consumed the
+    // operator's "Accept completion" card; its row stayed unread, and every
+    // tab's title counted that decision for a day and a half.
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
     // Ruling 503: an acceptance is the usual way an epic's last task is done.
     maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
     // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
