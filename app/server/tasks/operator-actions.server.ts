@@ -75,6 +75,7 @@ import {
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { escapeRegExp } from "~/shared/text/regexp";
+import { indefiniteArticle } from "~/shared/text/sentence";
 import { isEpicOpen, type EpicStatus } from "~/schemas/epic-file.schema";
 import { epicTaskRows, listEpics } from "~/server/projections/epic-query.server";
 import { setTasksEpic } from "./epic-actions.server";
@@ -4797,7 +4798,7 @@ export async function operatorScheduleRun(
     }
     schedInput.action = "run-agent";
     schedInput.profileId = agent.id;
-    what = `a ${agent.name} run`;
+    what = `${indefiniteArticle(agent.name)} ${agent.name} run`;
   }
   let scheduled: Awaited<ReturnType<typeof scheduleTaskAction>>;
   try {

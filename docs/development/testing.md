@@ -363,7 +363,8 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
 - `app/server/runtimes/codex-app-server.server.test.ts` (ruling 376) scripts the Codex
   app-server over pipes and pins the JSON-RPC exchange a completion compaction makes, the
   notification that settles it, and the ways it ends without one (a refusal on any step,
-  a dead server, the timeout, a spawn that throws).
+  a dead server, the timeout, a spawn that throws, and, ruling 599, a compaction turn the
+  CLI reports failed).
 - `app/routes/project.task.run-agent.server.test.ts` (ruling 375) POSTs the Run-an-agent
   intent with a prompt through the real route and pins the order that keeps a prompted
   dispatch to ONE run: the person's `@<agent>` comment predates the run, so ruling 203's

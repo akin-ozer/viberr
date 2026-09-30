@@ -738,6 +738,11 @@ export function runFailureReason(
   const lines = listRunLines(db, runId).map((l) => l.display);
   let last: LogLine | null = null;
   for (const l of lines) {
+    // Ruling 599: the completion compaction runs after the run has ended and
+    // is never its failure (ruling 376). Live on AWSC-60 its "did not happen"
+    // line, tagged `run·compaction·failed`, displaced the usage-limit refusal
+    // before it: the packet lost the reset instant and its wait option.
+    if ((l.tag ?? "").startsWith("run·compact")) continue;
     if (l.ev === "err" || /fail|error/i.test(l.tag ?? "")) last = l;
   }
   if (!last?.text) return null;

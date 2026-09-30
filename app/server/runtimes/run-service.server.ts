@@ -59,6 +59,7 @@ import {
   type ProjectedRunView,
 } from "./run-projection.server";
 import { createRunSink, runPersistDrained } from "./run-sink.server";
+import { classifyRunEndOf } from "./provider-refusal.server";
 import {
   appendRawLine,
   getRun,
@@ -2436,10 +2437,20 @@ function launch(
           : exit.effectiveBackend === "codex"
             ? (stats?.lastPromptTokens ?? 0)
             : (getRun(db, spec.runId)?.last_prompt_tokens ?? 0);
+        // Ruling 599: nor after a run its provider refused (the usage limit,
+        // the account, no credential, its own overload). The compaction is one
+        // more request to that provider on that account and cannot be served
+        // either. Live, eight Codex runs the usage limit refused each stayed
+        // `running` five more minutes while their compaction went unanswered.
+        const refused =
+          !drained &&
+          exit.outcome === "error" &&
+          classifyRunEndOf(db, { id: spec.runId, state: "error" }).failedBackendUnavailable;
         if (
           adapter.compact &&
           exit.sessionId &&
           exit.outcome !== "interrupted" &&
+          !refused &&
           replaySize > COMPACT_AT_COMPLETION_TOKENS
         ) {
           // U39-30: the answer is written; only the housekeeping is left.

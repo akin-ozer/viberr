@@ -150,6 +150,19 @@ const compactedItemSchema = z.object({
   threadId: z.string().nullish(),
 });
 
+/** A turn's error as the app-server reports it (`TurnError`). */
+const turnErrorSchema = z.object({ message: z.string().catch("") }).nullish();
+
+/** Ruling 599: the two notifications that end a compaction turn that failed:
+ *  `error` (with whether the CLI retries it itself) and `turn/completed`
+ *  (whose turn carries its status and, when it failed, its error). */
+const turnFailureSchema = z.object({
+  threadId: z.string().nullish(),
+  error: turnErrorSchema,
+  willRetry: z.boolean().nullish(),
+  turn: z.object({ status: z.string().catch(""), error: turnErrorSchema }).nullish(),
+});
+
 const realSpawn: SpawnAppServer = (binary, args, env) =>
   spawnProcess(binary, args, { env, stdio: ["pipe", "pipe", "pipe"] });
 
@@ -248,6 +261,26 @@ export function compactCodexThread(input: CompactThreadInput): Promise<CompactOu
           const params = compactedItemSchema.safeParse(parsed.params ?? {});
           if (params.success && COMPACTION_ITEM_TYPES.has(params.data.item?.type ?? "")) {
             finish({ compacted: true, preTokens: null, postTokens: null });
+          }
+          continue;
+        }
+        // Ruling 599: a compaction turn that failed ends the exchange with the
+        // CLI's reason. Live, eight compactions the Codex usage limit refused
+        // each waited out the whole deadline: the CLI said so, and nothing
+        // here listened for anything but success.
+        if (parsed.method === "error" || parsed.method === "turn/completed") {
+          const params = turnFailureSchema.safeParse(parsed.params ?? {});
+          if (!params.success) continue;
+          const { threadId, error, willRetry, turn } = params.data;
+          if (threadId && threadId !== input.threadId) continue;
+          if (parsed.method === "error" && !willRetry) {
+            finish({ compacted: false, reason: `the app-server reported an error: ${error?.message || "no message"}` });
+          } else if (turn?.status === "failed" || turn?.status === "interrupted") {
+            const ended = turn.status === "failed" ? "failed" : "was interrupted";
+            finish({
+              compacted: false,
+              reason: `the compaction turn ${ended}${turn.error?.message ? `: ${turn.error.message}` : ""}`,
+            });
           }
         }
       }
