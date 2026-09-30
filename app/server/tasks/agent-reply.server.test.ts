@@ -58,6 +58,7 @@ import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server
 import { commentToAgent, deliverDeferredMention } from "./task-actions.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -970,6 +971,23 @@ describe("runFailureReason (F7-RUN1)", () => {
         }),
       ]),
     ).toMatchObject({ kind: "max_budget" });
+  });
+
+  it("ruling 599: the completion compaction's lines are never the run's failure", () => {
+    // Live on AWSC-60 a usage-limit refusal was followed by the compaction's
+    // "did not happen" line, and the stall packet named that line as the
+    // failure: kind unknown, no reset instant, no option to wait for it.
+    // CANARY: drop the `run·compact` skip and this reads unknown.
+    const facts = emptyRunFailureFacts("quota");
+    expect(
+      classify([
+        errLine({ tag: "error·quota", text: "Codex usage limit was reached.", failure: facts }),
+        {
+          t: "", ev: "meta", tag: "run·compaction·failed",
+          text: "compaction at the end of the run did not happen: the app-server did not report a compaction within 300s",
+        },
+      ]),
+    ).toMatchObject({ kind: "quota", text: "Codex usage limit was reached.", facts });
   });
 
   it("returns the last err line and null when no failure line exists", () => {

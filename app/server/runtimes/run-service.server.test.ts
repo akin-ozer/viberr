@@ -38,6 +38,7 @@ import { defaultModelFor } from "./model-catalog.server";
 import { claudeReportedTotals } from "./wire-format.server";
 import { RUN_PHASE } from "./adapter.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
+import { emptyRunFailureFacts } from "~/shared/run-failure";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { RunCallbacks, RunSpec, RuntimeAdapter } from "./adapter.server";
 import type { AdapterSet } from "./runtime-registry.server";
@@ -2682,6 +2683,54 @@ describe("compaction at completion (ruling 376)", () => {
     expect(compactedRunSpecs().length).toBe(before);
     expect(getRun(store.db, runId)!.state).toBe("interrupted");
     expect(getRun(store.db, runId)!.compactions).toBe(0);
+  });
+
+  /**
+   * Ruling 599. Live, eight Codex runs the usage limit refused were compacted
+   * on the same account: each stayed `running` five more minutes while its
+   * compaction went unanswered, and the stall packets came late. A run that
+   * failed on its own work is still compacted (ruling 376): its next run
+   * resumes the session. CANARY: drop `!refused` and the first case asks for
+   * a compaction; skip every errored run and the second one does not.
+   */
+  const failedWith = (sessionId: string, kind: "quota" | "idle_timeout"): FakeRun => ({
+    ...finished(sessionId, 150_000),
+    outcome: "error",
+    lines: [
+      { t: "1", ev: "init", tag: "system·init", text: "session" },
+      { t: "2", ev: "text", tag: "assistant", text: "read a lot" },
+      { t: "3", ev: "err", tag: `error·${kind}`, text: "the run failed", failure: emptyRunFailureFacts(kind) },
+    ],
+    extraFacts: [undefined, { cache: { ...bigCall.cache, promptTokens: 150_000 } }, undefined],
+  });
+
+  it("ruling 599: never compacts a run its provider refused, whatever its size", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(failedWith("sess-refused", "quota"));
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs().length).toBe(before);
+    expect(getRun(store.db, runId)!.state).toBe("error");
+    expect(getRun(store.db, runId)!.compactions).toBe(0);
+  });
+
+  it("ruling 599: still compacts a large run that failed on its own work", async () => {
+    const before = compactedRunSpecs().length;
+    queueFakeRun(failedWith("sess-hung", "idle_timeout"));
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 20_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs().slice(before)).toHaveLength(1);
+    expect(getRun(store.db, runId)!.state).toBe("error");
+    expect(getRun(store.db, runId)!.compactions).toBe(1);
   });
 
   it("on Codex the rollout is the truth: a compaction the app-server did not announce still counts", async () => {

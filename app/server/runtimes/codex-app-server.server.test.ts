@@ -26,7 +26,15 @@ type Request = z.infer<typeof requestSchema>;
 interface ServerLine {
   id?: number | undefined;
   method?: string;
-  params?: { threadId?: string; turnId?: string; item?: { type: string; id: string } };
+  params?: {
+    threadId?: string;
+    turnId?: string;
+    item?: { type: string; id: string };
+    // Ruling 599: `error` and `turn/completed` carry the turn's failure.
+    willRetry?: boolean;
+    error?: { message: string };
+    turn?: { id: string; status: string; error: { message: string } | null };
+  };
   result?: ServerResult;
   error?: { code: number; message: string };
 }
@@ -201,6 +209,41 @@ describe("compactCodexThread (ruling 376)", () => {
     expect(outcome).toMatchObject({ compacted: false });
     expect(z.object({ reason: z.string() }).parse(outcome).reason).toContain("did not report a compaction");
     expect(server.killed).toEqual(["SIGTERM"]);
+  });
+
+  // Ruling 599: live, eight compactions the Codex usage limit refused each
+  // waited out the whole deadline, holding their failed runs `running`.
+  // CANARY: drop the `error` / `turn/completed` arm and both cases end on the
+  // two-second deadline's reason instead.
+  const refusal = "You've hit your usage limit. Try again at 10:31 AM.";
+
+  it("ruling 599: an error the CLI will not retry ends the compaction with its reason; a retried one or another thread's does not", async () => {
+    const server = scriptedServer((request, write) => {
+      if (request.method === "initialize") write(ok(request));
+      if (request.method === "thread/resume") write(ok(request));
+      if (request.method === "thread/compact/start") {
+        write(ok(request));
+        write({ method: "error", params: { threadId: "t-6", turnId: "u", willRetry: true, error: { message: "stream disconnected" } } });
+        write({ method: "error", params: { threadId: "someone-else", turnId: "x", willRetry: false, error: { message: "not this one" } } });
+        write({ method: "error", params: { threadId: "t-6", turnId: "u", willRetry: false, error: { message: refusal } } });
+      }
+    });
+    const outcome = await compactCodexThread({ threadId: "t-6", cwd: "/w", spawn: server.spawn, binary: "codex", timeoutMs: 2_000 });
+    expect(outcome).toEqual({ compacted: false, reason: `the app-server reported an error: ${refusal}` });
+    expect(server.killed).toEqual(["SIGTERM"]);
+  });
+
+  it("ruling 599: a compaction turn that completes failed ends it with the turn's error", async () => {
+    const server = scriptedServer((request, write) => {
+      if (request.method === "initialize") write(ok(request));
+      if (request.method === "thread/resume") write(ok(request));
+      if (request.method === "thread/compact/start") {
+        write(ok(request));
+        write({ method: "turn/completed", params: { threadId: "t-7", turn: { id: "u", status: "failed", error: { message: refusal } } } });
+      }
+    });
+    const outcome = await compactCodexThread({ threadId: "t-7", cwd: "/w", spawn: server.spawn, binary: "codex", timeoutMs: 2_000 });
+    expect(outcome).toEqual({ compacted: false, reason: `the compaction turn failed: ${refusal}` });
   });
 
   it("a spawn that throws is a reason", async () => {

@@ -276,7 +276,8 @@ pins the set by name:
 No context window rides a run's child env (ruling 376): every `AUTO_COMPACT_WINDOW` entry
 in `app/server/runtimes/context-policy.server.ts` is null and `CONTEXT_ENV_KEYS` is empty,
 so the CLI compacts at its model's own limit, and a session above
-`COMPACT_AT_COMPLETION_TOKENS` (100k) is compacted at the end of its run instead. The key
+`COMPACT_AT_COMPLETION_TOKENS` (100k) is compacted at the end of its run instead (not
+after an interrupt, and not after a run its provider refused, ruling 599). The key
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` would be set by the run service from that table if an
 entry were ever non-null again, and Codex would take its window through `config.toml`
 (§2.5 of `agents-and-runtime.md`). It is not a deployment knob, and one in the server's own

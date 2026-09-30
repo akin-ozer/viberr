@@ -816,7 +816,7 @@ function AgentRunControl({
               ? "This agent already has a run in progress on this task"
               : delay === "now"
                 ? runRefusal ?? `Run ${selected.name} on this task`
-                : `Schedule a ${selected.name} run`
+                : `Schedule ${selected.name} on this task`
         }
       >
         {/* Ruling 459 over ruling 368: the resting mark trades for the clock

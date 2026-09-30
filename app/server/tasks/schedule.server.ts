@@ -26,6 +26,7 @@ import {
   type TaskSchedule,
 } from "~/schemas/task-file.schema";
 import { toError } from "~/shared/errors";
+import { indefiniteArticle } from "~/shared/text/sentence";
 
 /**
  * Governed SCHEDULED task actions (O-3). A maintainer schedules a future
@@ -175,7 +176,7 @@ export async function scheduleTaskAction(
   if (!Number.isFinite(dueMs)) throw AppError.validation("Invalid schedule time.");
   if (dueMs <= Date.now()) throw AppError.validation("Schedule a time in the future.");
   const action: ScheduleAction = input.action ?? "run-operator";
-  let agentName: string | null = null;
+  let what = "an operator re-run";
   if (action === "run-agent") {
     if (!input.profileId) {
       throw AppError.validation("Pick which agent the scheduled run should start.");
@@ -192,7 +193,7 @@ export async function scheduleTaskAction(
         `"${input.profileId}" is not deployed on this project.`,
       );
     }
-    agentName = view.name;
+    what = `${indefiniteArticle(view.name)} **${view.name}** run`;
   }
 
   const ref = taskRef(ctx, input.projectSlug, input.taskKey);
@@ -231,10 +232,6 @@ export async function scheduleTaskAction(
     retries: 0,
   };
 
-  const what =
-    action === "run-agent"
-      ? `a **${agentName}** run`
-      : "an operator re-run";
   await updateTaskFile(ref, (parsed) => {
     parsed.frontmatter.schedules.push(schedule);
     parsed.timeline.unshift(

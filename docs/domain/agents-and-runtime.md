@@ -357,7 +357,11 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   own limit (`startRun` would set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` from
   `context-policy.server.ts` if an entry were non-null). Instead, a run that finishes or
   errors with a session whose last prompt is above `COMPACT_AT_COMPLETION_TOKENS` (100k)
-  is compacted at the END of the run, while its cache is warm: the adapter's `compact()`
+  is compacted at the END of the run, while its cache is warm. Not an interrupted run,
+  and not one its provider refused (ruling 599: `classifyRunEndOf` reads it as
+  `failedBackendUnavailable`, and the compaction would be one more request to that
+  provider on that account). The compaction's lines are never the run's failure
+  (`runFailureReason` skips `run·compaction…` and `run·compacted…`): the adapter's `compact()`
   sends `/compact <COMPLETION_COMPACT_INSTRUCTIONS>` as a one-turn query that resumes the
   session, built by the same options builder as the run so it reads the run's cached
   prefix; the exit is asynchronous (`settleRun`) so the finalize and the completion contract
@@ -550,7 +554,9 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   `initialize`, `initialized`, `thread/resume` with the run's cwd, model and
   `compact_prompt`, `thread/compact/start`, then the `thread/compacted` notification or an
   `item/completed` compaction item; 5 min timeout), in the principal's shared home where
-  the rollout lives. The adapter writes only a `run·compaction·failed` line; the run
+  the rollout lives. An `error` notification the CLI will not retry, or a `turn/completed`
+  whose turn failed or was interrupted, ends the exchange at once with its message as the
+  reason (ruling 599). The adapter writes only a `run·compaction·failed` line; the run
   service reads the result off the rollout and writes `run·compacted·completion` when a
   new compaction appears there. Codex keeps `developer_instructions` and recent user
   messages within a 20k budget plus the summary across a compaction and drops earlier
@@ -957,7 +963,8 @@ classification, `classifyRunEnd` (`provider-refusal.server.ts`), read by the run
 by the review-round count, where a deliverer run the provider refused (quota, auth, no
 credential, overload) fights no round (ruling 416). A drop after a completed turn is not a
 failure at all: the run settles `finished` with a `run·transport·after-turn` meta line
-(ruling 394, §2.4, §2.5). `runFailureReason` returns the record as `facts`;
+(ruling 394, §2.4, §2.5). `runFailureReason` returns the record as `facts`, and never
+reads the completion compaction's lines as the failure (ruling 599);
 `projectRunsForTask` sets `failureKind` on every errored run's view (operator runs
 included) and flags `failedBackendUnavailable` from the class before the raw scan; the
 controller's turn note (ruling 130(b)) names a quota window's reset and the account

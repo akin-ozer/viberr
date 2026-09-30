@@ -12,3 +12,14 @@
 export function endSentence(text: string): string {
   return /[.!?…]$/.test(text) ? text : `${text}.`;
 }
+
+/**
+ * The indefinite article before `word`, by its first letter: "an Estimate
+ * Judge run", never "a Estimate Judge run" (AWSC-66's schedule note, ruling
+ * 599). Agent and profile names are what it is for.
+ *
+ * Pure, client-safe, no imports.
+ */
+export function indefiniteArticle(word: string): "a" | "an" {
+  return /^[aeiou]/i.test(word) ? "an" : "a";
+}
