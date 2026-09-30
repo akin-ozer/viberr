@@ -294,7 +294,8 @@ run does not (ruling 216).
   reviewer; otherwise `changed`. The review subject is `reviewSubjectId` (ruling 388):
   the active work revision, or, for a task whose deliverable is not a commit, the moment
   a delivering run that finished last saved files (`files:<deliveredAt>`; a stopped
-  run's files are its work in progress, ruling 601), so a report or attachment
+  run's files are its work in progress, ruling 601, and so are the drafts of a run
+  that ended by asking a person, ruling 609), so a report or attachment
   deliverable is reviewable like a commit and a later save stales older verdicts. The
   browser's working files alone (`page-….yml`, `console-….log`, `isBrowserWorkingArtifact`)
   never move it: they are tool transport, not a delivery (ruling 570). A run not
@@ -611,7 +612,10 @@ a re-created head mints a fresh id. A task whose deliverable is not a commit sta
 `deliveredAt` when its delivering run saves files (ruling 388), and when any other
 agent's run rewrites one of the delivered files (ruling 587), in both cases only for a
 run that finished: a run that stopped (an error, a Stop, a restart) posts its files
-under its name and moves nothing (ruling 601).
+under its name and moves nothing (ruling 601). Nor does a run that ended with a question
+for a person (ruling 609): the Calculator Builder's headline ask comes before the
+delivered link, so what it saved is drafts, posted under its name, and its next report
+once the question is answered is the delivery.
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned

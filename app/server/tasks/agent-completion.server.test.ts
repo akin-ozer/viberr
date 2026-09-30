@@ -1047,6 +1047,48 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.frontmatter.verdicts).toEqual([]);
   });
 
+  it("ruling 609: a deliverer that ends by asking a person has not delivered", async () => {
+    // Live on AWSC-52 the Calculator Builder stopped at its headline ask
+    // (rulings §4 C3) with drafts saved, and the ask stamped `deliveredAt` on an
+    // estimate-link.md that said the delivered link was still pending.
+    // CANARY: stamp the delivery whatever the run ends with, and the drafts
+    // become the delivery.
+    writeReviewTask({
+      stage: "impl",
+      workRevision: null,
+      validation: "none",
+      engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+    });
+    const runId = await finishedRunWith(
+      JSON.stringify({
+        summary: "Rebuilt the estimate. The delivered link and the final exports wait on the headline ask.",
+        question: { title: "Headline calculator total or Price List total? (C3)", body: "Calculator $2,092.70, Price List $2,094.55." },
+      }),
+    );
+    saveInRunWindow(runId, ["estimate-link.md", "assumptions.md"]);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        profileId: "reviewer",
+        role: "Calculator Builder",
+        delivers: true,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const parsed = taskFile().parsed;
+    expect(parsed.packet?.title).toBe("Headline calculator total or Price List total? (C3)");
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+    // The drafts are still posted under its name, where its next run reads them.
+    const reply = parsed.timeline.find((e) => e.type === "comment" && e.actor.kind === "agent");
+    expect(reply?.attachments).toEqual(expect.arrayContaining(["estimate-link.md", "assumptions.md"]));
+  });
+
   /** Ruling 555's hand-off: the `reviewer` profile was handed delivery while
    *  its review run worked, over files `dev` delivered at `savedAt`. */
   function writeHandedOffReviewTask(savedAt: string): void {
