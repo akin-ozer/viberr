@@ -183,6 +183,11 @@ interface RunGrant {
    *  still opens `initialize` and the listings for its completion compaction,
    *  and refuses every call. */
   callsClosed: boolean;
+  /** Ruling 598: when each call came back with each answer, by a hash of
+   *  both, inside the last window. */
+  repeats: Map<string, number[]>;
+  /** Ruling 598: the run was asked to stop for repeating one call. */
+  loopStopped: boolean;
 }
 
 interface Upstream {
@@ -451,6 +456,8 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     taskKey: input.taskKey,
     isLive: input.isLive,
     callsClosed: false,
+    repeats: new Map(),
+    loopStopped: false,
   });
   state.byRun.set(input.runId, hash);
   logger.info("mcp gateway token minted", {
@@ -1139,11 +1146,26 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         const result = await forward(grant, upstream, (client) =>
           client.request({ method: "tools/call", params }, CallToolResultSchema, options),
         );
+        const stop = repeatedCallStop(grant, server, tool, request.params.arguments, result);
+        if (stop) {
+          outcome = "tool_error";
+          return stop;
+        }
         outcome = result.isError ? "tool_error" : "ok";
         // Ruling 486(d): the upstream's words stay as they are; the note
         // follows them as one more text block.
         const note = toolRefusedAuthority(result) ? readOnlyGrantNote(grant, server) : null;
         return note ? { ...result, content: [...result.content, { type: "text", text: note }] } : result;
+      } catch (error) {
+        // Ruling 598: an upstream that answers with an error answers too; a
+        // script that catches it and sends the call again is the same loop.
+        const failed: CallToolResult = { content: [{ type: "text", text: errorMessage(error) }], isError: true };
+        const stop = repeatedCallStop(grant, server, tool, request.params.arguments, failed);
+        if (stop) {
+          outcome = "tool_error";
+          return stop;
+        }
+        throw error;
       } finally {
         const durationMs = Date.now() - started;
         // Ruling 461(5): every forwarded call, never its arguments or result.
@@ -1252,6 +1274,69 @@ async function connectSession(
   return session;
 }
 
+/**
+ * Ruling 598: how often one call may come back with one answer inside
+ * `LOOP_WINDOW_MS` before the run is stopped. A poll once a second never
+ * reaches it; a script that retries without reading the answer reaches it in
+ * about two seconds.
+ */
+export const LOOP_REPEATS = 100;
+export const LOOP_WINDOW_MS = 60_000;
+/** Past this many remembered calls, the ones outside the window are dropped. */
+const LOOP_KEYS_PRUNE_AT = 2_000;
+
+/**
+ * Ruling 598: a run that keeps sending one call and getting one answer is
+ * stopped. Live on AWSC-49 (2026-09-30) the Estimate Judge ran a script in
+ * Codex's code mode that corrected a golden entry in an unbounded loop, and
+ * the correction was refused every time ("The passage you sent as `replaces`
+ * stands 3 times … Nothing was written."). The script never read the answer:
+ * 44,725 corrections and as many reads in twenty minutes, until a person
+ * stopped the run. Nothing else bounds a script, which calls at machine speed
+ * between two model turns. Returns the answer to send instead once the run
+ * repeats past the bound; the run service ends it failed, with the call and
+ * the answer as its cause.
+ */
+function repeatedCallStop(
+  grant: RunGrant,
+  server: string,
+  tool: string,
+  args: ToolCallArguments | undefined,
+  result: CallToolResult,
+): CallToolResult | null {
+  const now = Date.now();
+  const key = createHash("sha256")
+    .update(JSON.stringify([server, tool, args ?? null, result.content, result.isError === true]))
+    .digest("hex");
+  const recent = (grant.repeats.get(key) ?? []).filter((at) => now - at < LOOP_WINDOW_MS);
+  recent.push(now);
+  grant.repeats.set(key, recent);
+  if (grant.repeats.size > LOOP_KEYS_PRUNE_AT) {
+    for (const [k, times] of grant.repeats) {
+      if (now - times[times.length - 1]! >= LOOP_WINDOW_MS) grant.repeats.delete(k);
+    }
+  }
+  if (recent.length < LOOP_REPEATS) return null;
+  const answer = result.content
+    .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const seconds = Math.max(1, Math.round((now - recent[0]!) / 1000));
+  const sentence =
+    `Viberr stopped the run: it sent \`${tool}\` (${server}) with the same arguments ${recent.length} times in ` +
+    `${seconds} s and got the same answer each time: "${answer.length > 400 ? `${answer.slice(0, 399)}…` : answer}". ` +
+    "Sending it again cannot change the answer; the call has to change.";
+  if (!grant.loopStopped) {
+    grant.loopStopped = true;
+    logger.warn("mcp gateway stopped a run repeating one call", { runId: grant.runId, mcp: server, tool, repeats: recent.length });
+    void import("~/server/runtimes/run-service.server")
+      .then(({ stopRunForToolLoop }) => stopRunForToolLoop(grant.runId, sentence))
+      .catch((error) => logger.error("mcp gateway could not stop a looping run", { runId: grant.runId, err: toError(error) }));
+  }
+  return { content: [{ type: "text", text: `[stopped] ${sentence}` }], isError: true };
+}
+
 /** A tool call's arguments as the MCP request carries them. */
 type ToolCallArguments = NonNullable<CallToolRequest["params"]["arguments"]>;
 
@@ -1273,10 +1358,11 @@ async function openOwnSession(
     assertCallsOpen(grant, server, "tools/call");
     const tool = request.params.name;
     const started = Date.now();
-    const result = (await call(tool, request.params.arguments ?? {})) ?? {
+    const answered = (await call(tool, request.params.arguments ?? {})) ?? {
       content: [{ type: "text", text: `"${server}" has no tool "${tool}"; it offers ${tools.map((t) => t.name).join(" and ")}.` }],
       isError: true,
     };
+    const result = repeatedCallStop(grant, server, tool, request.params.arguments, answered) ?? answered;
     logger.info("mcp gateway call", {
       runId: grant.runId,
       mcp: server,

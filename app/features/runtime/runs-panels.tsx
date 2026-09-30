@@ -1889,6 +1889,9 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
                       ? "cut off at the run's turn cap: not a task failure; continue the run"
                       : cur.failureKind === "idle_timeout"
                         ? "stopped after producing nothing for the whole idle window: the run hung, it did not fail; re-run it"
+                        : cur.failureKind === "tool_loop"
+                        ? // Ruling 598: the error line names the call and its answer.
+                          "stopped for sending one tool call and getting the same answer again and again (the error line names both): redirect it with what the tool said"
                         : cur.failureKind === "session_missing"
                           ? "the provider session this run tried to resume no longer exists; a fresh run re-anchored on the task record is the recovery"
                           : backendUnavailable

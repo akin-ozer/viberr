@@ -62,6 +62,10 @@ export function runStatePill(run: RunView): RunStateBadge {
     // Ruling 175: the instance's spending cap stopped it, not the task.
     return { kind: "blocked", label: "cut off · spending cap" };
   }
+  if (run.state === "error" && run.failureKind === "tool_loop") {
+    // Ruling 598: the gateway stopped it for repeating one call.
+    return { kind: "blocked", label: "stopped · repeated call" };
+  }
   if (run.state === "error" && run.failureKind === "overloaded") {
     // U35-11: a connection that failed in this deployment's own environment
     // is named as such; the provider is blamed only when it answered.

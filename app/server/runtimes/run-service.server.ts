@@ -36,6 +36,7 @@ import {
 import {
   RUN_PHASE,
   type CompactOutcome,
+  type EmittedLine,
   type RunCallbacks,
   type RunHandle,
   type RunMcpServers,
@@ -126,6 +127,7 @@ import { countLabel } from "~/shared/text/plural";
 
 import { newId } from "~/shared/ids/new-id.server";
 import { errorMessage, toError } from "~/shared/errors";
+import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { agentLaunchFor } from "./agent-isolation.server";
 import { claudeReportedTotals } from "./wire-format.server";
 
@@ -203,6 +205,8 @@ interface ServiceState {
 interface LiveSlot {
   handle: RunHandle;
   lane: RunLane;
+  /** Ruling 598: stop the run as failed, with this sentence as its cause. */
+  fail: (sentence: string) => void;
 }
 
 /** A run waiting for a concurrency slot: launch it by calling `launch`. */
@@ -2234,6 +2238,8 @@ function launch(
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.
   let exited = false;
+  // Ruling 598: why the gateway stopped this run, once it has.
+  let stoppedFor: string | null = null;
 
   // Mark running immediately (queued → running). A run that was RESERVED before
   // its workspace was prepared (R21-4) keeps the instant it was reserved, so the
@@ -2329,7 +2335,15 @@ function launch(
         });
       }
     },
-    onExit: (exit) => {
+    onExit: (adapterExit) => {
+      // Ruling 598: a run the gateway stopped ends failed, and its cause is
+      // the last error line, written after anything the abort emitted. A run
+      // that finished before the stop landed keeps its outcome.
+      let exit = adapterExit;
+      if (stoppedFor !== null && exit.outcome !== "finished") {
+        sink.line(toolLoopLine(stoppedFor));
+        exit = { ...exit, outcome: "error" };
+      }
       // A step deferred by the throttle never lands on a settled row.
       settled = true;
       if (deferredTimer) clearTimeout(deferredTimer);
@@ -2373,7 +2387,17 @@ function launch(
   // deletes the not-yet-set handle; setting it here afterward would leave a
   // stale handle for an already-finished run — making `fireIfAlreadyTerminal`
   // (and interrupt) think a dead run is live. Guard on the exit flag.
-  if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
+  if (!exited) {
+    state.handles.set(spec.runId, {
+      handle,
+      lane: laneOf(spec.kind),
+      fail: (sentence) => {
+        if (exited || stoppedFor !== null) return;
+        stoppedFor = sentence;
+        handle.interrupt();
+      },
+    });
+  }
 
   async function settleRun(exit: RunExit): Promise<void> {
       // Ruling 461: the process that held the run's gateway token has exited,
@@ -2701,6 +2725,37 @@ export async function interruptRun(
   };
   await noteInterrupt(db, run, actor, input.dataRoot);
   return result;
+}
+
+/**
+ * Ruling 598: the gateway stops a run that keeps sending one call and getting
+ * one answer. The run ends failed with `sentence` as its cause, so its stall
+ * packet says which call and what it answered. False when no process of that
+ * run is live.
+ */
+export function stopRunForToolLoop(runId: string, sentence: string): boolean {
+  const slot = getState().handles.get(runId);
+  if (!slot) return false;
+  logger.warn("run stopped: it repeated one tool call", { runId });
+  slot.fail(sentence);
+  return true;
+}
+
+/** Ruling 598: the error line a stopped run ends on, tagged as its cause. */
+function toolLoopLine(sentence: string): EmittedLine {
+  const occurredAt = new Date().toISOString();
+  return {
+    raw: JSON.stringify({ type: "error", source: "viberr", reason: "tool_loop", message: sentence }),
+    display: {
+      t: occurredAt.slice(11, 19),
+      ev: "err",
+      tag: "run·error·tool_loop",
+      text: sentence,
+      failure: emptyRunFailureFacts("tool_loop"),
+    },
+    facts: {},
+    occurredAt,
+  };
 }
 
 /**
