@@ -682,7 +682,8 @@ Packet notes:
 - Packet-level fields beside the sample's: `cause` (ruling 315: the shared cause string,
   `backend:<backend>:<kind>:<credentialUserId>`, stamped on a quota, auth or unavailable
   failure; answering one such packet applies the same option to every sibling still carrying
-  it, ruling 319), `stalled: true` (ruling 432: a stall escalation, the only kind a later
+  it, ruling 319, and a quota answer stands for the rest of its window, ruling 602, kept
+  in `instance_settings` under `packetCauseDecision:<cause>`), `stalled: true` (ruling 432: a stall escalation, the only kind a later
   successful run may withdraw), and `askedBy` (R15-14: the profile of the agent that raised
   the question; resolving it resumes that agent's session).
 - `options` and `observations` parse per row: a malformed row drops only itself

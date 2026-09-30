@@ -6319,6 +6319,13 @@ export async function applyAgentCompletionEffects(
       { ...ctx, operatorAuthorized: true },
       stuck,
     );
+    // Ruling 602: a refusal in a window someone already decided.
+    if (accountCause && escalation.status === "opened") {
+      await answerFromStandingDecision(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+      });
+    }
     // T13 (pass 31): ONE notification per failure PER RECIPIENT, not two.
     //
     // `openStuckLoopPacket` → `operatorOpenPacket` already notifies the same
@@ -13319,6 +13326,18 @@ export async function resolvePacket(
     await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
   }
 
+  // Ruling 602: a person's own answer to a quota packet stands for the rest of
+  // its window, for the packets later refusals open. A fanned-out or standing
+  // answer records nothing: the decision it came from already stands.
+  if (input.fanOutOrigin === undefined && packet.cause) {
+    try {
+      const { recordStandingDecision } = await import("./packet-fanout.server");
+      recordStandingDecision(db, { packet, option, actor, fromTaskKey: input.taskKey, nowMs: Date.now() });
+    } catch (error) {
+      logger.warn("standing decision not recorded", { taskKey: input.taskKey, err: toError(error) });
+    }
+  }
+
   await fanOutByCause(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -13332,6 +13351,57 @@ export async function resolvePacket(
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
     option,
   };
+}
+
+/**
+ * Ruling 602: a packet raised after a person already decided this account's
+ * window is answered by that decision, through the real `resolvePacket`
+ * (authority, events, the schedule a wait writes, notifications), exactly as a
+ * ruling 319 sibling is. Best-effort: a miss leaves the packet open, as before.
+ */
+async function answerFromStandingDecision(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  input: { projectSlug: string; taskKey: string },
+): Promise<void> {
+  try {
+    const { siblingOptionIndex, standingArrivalText, standingDecisionFor, standingOption } =
+      await import("./packet-fanout.server");
+    const packet = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet;
+    if (!packet || packet.awaiting || packet.decided) return;
+    const decision = standingDecisionFor(db, packet, Date.now());
+    if (!decision) return;
+    const at = siblingOptionIndex(packet, standingOption(decision));
+    if (at === null) return;
+    await resolvePacket(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        optionIndex: at,
+        fanOutOrigin: decision.fromTaskKey,
+      },
+      { userId: decision.byUserId, label: decision.byLabel },
+      ctx,
+    );
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "system", systemId: "policy-engine" },
+        title: null,
+        text: standingArrivalText(decision),
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.warn("standing decision could not answer the packet", {
+      taskKey: input.taskKey,
+      err: toError(error),
+    });
+  }
 }
 
 /**

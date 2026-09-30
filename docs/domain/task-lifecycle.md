@@ -429,7 +429,12 @@ order of an epic's work is each task's own list.
     credential updated" nobody performed (ruling 130(c)). Packets that share one account
     failure (`packet.cause` `backend:<backend>:<kind>:<credentialUserId>`) resolve
     together: answering one answers its siblings with the same option kind
-    (`packet-fanout.server.ts`, ruling 319).
+    (`packet-fanout.server.ts`, ruling 319). A person's answer to a quota packet whose
+    window is known stands until that window reopens (ruling 602): a later refusal of
+    the same account in the same window opens its packet and is answered from that
+    decision at once, with a note naming where it came from. Only waiting, retrying on
+    the other backend and holding may stand; an answer that re-runs the agent on the
+    refused account would answer its own next refusal, in a loop.
   - a run the instance's **spending cap** cut off (ruling 175, Claude only) is a cut-off,
     not a failure, like the turn cap: the `blocked` event reads "the Claude run reached the
     instance's spending cap of $X after spending $Y and was CUT OFF mid-work, which is not a

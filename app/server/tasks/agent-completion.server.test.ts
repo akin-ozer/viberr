@@ -5222,3 +5222,96 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     ).toBe(false);
   });
 });
+
+/**
+ * Ruling 602: a refusal in a window the owner already decided. Live on AWSC-52
+ * at 13:20 a Judge run in flight when the Codex window closed was refused two
+ * minutes after Arda had chosen to wait on AWSC-51, and its packet asked the
+ * same question again: ruling 319 answers only the siblings open at the time.
+ */
+describe("a refusal in a window the owner already decided (ruling 602)", () => {
+  const resetsAt = new Date(Date.now() + 2 * 3_600_000).toISOString();
+  let seq = 0;
+  /** A Codex run billed to Arda, refused for her usage window. */
+  function refusedRun(taskKey: string): string {
+    seq += 1;
+    const id = `run_refused_${seq}`;
+    upsertRun(store.db, {
+      id,
+      projectSlug: store.slug,
+      taskKey,
+      threadId: `refused-${seq}`,
+      role: "Developer",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-5.6-luna",
+      sdk: "codex",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "error",
+      credentialUserId: store.users.arda.id,
+    });
+    insertRunLine(store.db, {
+      runId: id,
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "",
+      display: {
+        t: "00:00:01",
+        ev: "err",
+        tag: "run·error·quota",
+        text: "Codex refused the agent run: the account is over its usage limit.",
+        failure: { ...emptyRunFailureFacts("quota"), resetsAt },
+      },
+    });
+    return id;
+  }
+  async function complete(taskKey: string, runId: string): Promise<void> {
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey,
+        backend: "codex",
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        workdir: null,
+        agentHandle: "dev",
+      },
+      { id: runId, state: "error" },
+    );
+  }
+  function parsedOf(taskKey: string) {
+    return readTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot })!.parsed;
+  }
+
+  it("answers the later packet with the wait the owner chose on another task", async () => {
+    // CANARY: drop the `answerFromStandingDecision` call and VIB-2's packet
+    // stays open, asking again.
+    deployOperator();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
+      goal: "A second task on the same account.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await complete("VIB-1", refusedRun("VIB-1"));
+    const first = parsedOf("VIB-1").packet!;
+    const wait = first.options.findIndex((o) => o.kind === "wait_for_window");
+    expect(wait, "the first refusal offers the wait").toBeGreaterThanOrEqual(0);
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: wait },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    await complete("VIB-2", refusedRun("VIB-2"));
+    const second = parsedOf("VIB-2");
+    expect(second.packet, "the later packet was answered from the standing decision").toBeNull();
+    expect(second.frontmatter.schedules.map((s) => s.action)).toEqual(["run-operator"]);
+    expect(second.timeline.some((e) => e.text.startsWith("Answered from VIB-1: "))).toBe(true);
+  });
+});
