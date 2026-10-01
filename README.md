@@ -139,11 +139,12 @@ Each backend card offers a hosted sign-in and a pasted credential:
 A person can keep several accounts on each backend, up to ten (ruling 507): a Claude Max
 subscription next to a Console key, say, or a personal and a work ChatGPT sign-in. Adding
 one signs nothing else out. One account per backend is **in use**, and every run on that
-backend bills it. The card lists the others with **Use this account**, which switches
-without a sign-in and without running the vendor's binary: the next run uses it, and a run
-already going finishes on the account it started with. Each account can be renamed and
-disconnected on its own. Viberr never moves a run to another account by itself; when the
-account in use can't run and another of yours can, the refusal says so.
+backend bills it. The card's **Runs use** picker opens a list of every account you keep
+there, and choosing one switches without a sign-in and without running the vendor's
+binary: the next run uses it, and a run already going finishes on the account it started
+with. Each account can be renamed and disconnected on its own. Viberr never moves a run to
+another account by itself; when the account in use can't run and another of yours can, the
+refusal says so.
 
 **Viberr never stores your sign-in tokens.** It does not implement the vendors' OAuth,
 never reads or copies a Claude.ai or ChatGPT session token, and offers no "paste your
