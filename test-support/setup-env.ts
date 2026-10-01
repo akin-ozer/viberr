@@ -1,6 +1,7 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterAll } from "vitest";
 import { primeHermeticToolchain } from "./toolchain";
 
 /**
@@ -97,12 +98,23 @@ process.env.GIT_ALLOW_PROTOCOL = "file";
  * already cost PATs and run logs once). A temp root makes that mistake land
  * somewhere harmless instead of somewhere expensive.
  *
- * `??=`, matching the secrets above: an explicit export still wins, but the
- * ambient `.env` never does.
+ * An explicit export still wins, matching the secrets above, but the ambient
+ * `.env` never does.
+ *
+ * The root is this test file's own, and it goes when the file's tests finish
+ * (a setup file's `afterAll` runs after the file's own hooks). It used to
+ * stay: one per test file per run, 185,225 of them in the temp folder by
+ * 2026-10-01.
  */
-process.env.VIBERR_DATA_ROOT ??= mkdtempSync(
-  path.join(tmpdir(), "viberr-suite-root-"),
-);
+const suiteRoot = process.env.VIBERR_DATA_ROOT
+  ? null
+  : mkdtempSync(path.join(tmpdir(), "viberr-suite-root-"));
+if (suiteRoot) {
+  process.env.VIBERR_DATA_ROOT = suiteRoot;
+  afterAll(() => {
+    rmSync(suiteRoot, { recursive: true, force: true });
+  });
+}
 
 /**
  * Fail closed against PROBING THE HOST (ruling 182).
