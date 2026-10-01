@@ -1,3 +1,4 @@
+import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { withProviderText } from "~/shared/provider-marker";
 import {
@@ -278,6 +279,12 @@ const filePathSchema = z.object({ file_path: z.string() });
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
   interrupt(): Promise<void>;
+  /** Ruling 611: the structured data behind the CLI's `/usage`, the account's
+   *  plan windows among it. The SDK marks it experimental and says its name
+   *  will change, so it is optional here and a run without it reads none. */
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?(opts?: {
+    skipBehaviors?: boolean;
+  }): Promise<SDKControlGetUsageResponse>;
 }
 
 export type ClaudeQueryFn = (params: {
@@ -649,6 +656,176 @@ async function realQuery(): Promise<ClaudeQueryFn> {
   // passes is `singlePrompt`, which yields that exact SDKUserMessage shape.
   cachedQuery = query as ClaudeQueryFn;
   return cachedQuery;
+}
+
+/**
+ * Ruling 611: a Claude run reads its account's plan windows.
+ *
+ * A `rate_limit_event` names one window, and gives its percentage only once
+ * the provider warns (`allowed_warning`). On 2026-10-01 every run on the
+ * owner's new account reported "five_hour · allowed · utilization not
+ * reported" while that account's weekly window stood at 71%, so neither
+ * Profile nor the controller's `instance_health` could say how much of the
+ * week was left. The CLI's `/usage` reads the account's windows from the
+ * claude.ai usage endpoint; the SDK exposes it as a control request, so the
+ * run asks its own CLI once, at `system/init`. No model call is made, and
+ * nothing beyond the run's own credential is used.
+ */
+type RateLimitFact = NonNullable<EnvelopeFacts["rateLimit"]>;
+type PlanWindow = NonNullable<RateLimitFact["windows"]>[number];
+
+/** How long a run waits for its CLI's usage answer before going without. */
+const PLAN_USAGE_TIMEOUT_MS = 20_000;
+
+const planWindowSchema = z
+  .object({
+    /** Percent of the window used, 0 to 100 (not a fraction). */
+    utilization: z.number().nullable().catch(null),
+    /** ISO instant the window resets. */
+    resets_at: z.string().nullable().catch(null),
+  })
+  .nullable()
+  .catch(null);
+
+/** The windows the SDK documents, shortest first. */
+const PLAN_WINDOW_KEYS = [
+  "five_hour",
+  "seven_day",
+  "seven_day_opus",
+  "seven_day_sonnet",
+  "seven_day_oauth_apps",
+] as const;
+
+const planUsageSchema = z.object({
+  /** False for an API key, Bedrock or Vertex, or a sign-in without the profile scope. */
+  rate_limits_available: z.boolean().catch(false),
+  rate_limits: z
+    .object({
+      five_hour: planWindowSchema.optional(),
+      seven_day: planWindowSchema.optional(),
+      seven_day_opus: planWindowSchema.optional(),
+      seven_day_sonnet: planWindowSchema.optional(),
+      seven_day_oauth_apps: planWindowSchema.optional(),
+      /** Per-model weekly windows, named by the server. */
+      model_scoped: z
+        .array(
+          z.object({
+            display_name: z.string(),
+            utilization: z.number().nullable().catch(null),
+            resets_at: z.string().nullable().catch(null),
+          }),
+        )
+        .optional()
+        .catch(undefined),
+    })
+    .nullable()
+    .catch(null),
+});
+
+function planWindow(
+  rateLimitType: string,
+  utilization: number | null,
+  resetsAt: string | null,
+): PlanWindow | null {
+  if (utilization === null) return null;
+  const resetsMs = resetsAt === null ? Number.NaN : Date.parse(resetsAt);
+  return {
+    rateLimitType,
+    utilization: Math.max(0, Math.min(1, utilization / 100)),
+    resetsAt: Number.isFinite(resetsMs) ? Math.floor(resetsMs / 1000) : null,
+  };
+}
+
+/** The usage answer's windows that carry a percentage, or null when it has none. */
+function planWindowsOf(usage: z.infer<typeof planUsageSchema>): PlanWindow[] | null {
+  const limits = usage.rate_limits_available ? usage.rate_limits : null;
+  if (!limits) return null;
+  const windows: PlanWindow[] = [];
+  for (const key of PLAN_WINDOW_KEYS) {
+    const reported = limits[key];
+    const window = reported && planWindow(key, reported.utilization, reported.resets_at);
+    if (window) windows.push(window);
+  }
+  for (const scoped of limits.model_scoped ?? []) {
+    const slug = scoped.display_name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    const name = `seven_day_${slug}`;
+    if (!slug || windows.some((w) => w.rateLimitType === name)) continue;
+    const window = planWindow(name, scoped.utilization, scoped.resets_at);
+    if (window) windows.push(window);
+  }
+  return windows.length ? windows : null;
+}
+
+/** Ask the run's CLI for its plan windows; null when it cannot say. Never throws. */
+async function readPlanWindows(q: ClaudeQuery): Promise<PlanWindow[] | null> {
+  if (!q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const answer = await Promise.race([
+      // Skip the scan of local transcripts: only the windows are wanted.
+      q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), PLAN_USAGE_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]);
+    // Parsed again although typed: the request is experimental upstream, and
+    // a shape it changes to reads as no windows rather than as a wrong figure.
+    const parsed = planUsageSchema.safeParse(answer);
+    return parsed.success ? planWindowsOf(parsed.data) : null;
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * The reading a line records once the run knows its plan windows. The
+ * provider's event stays the live word: its window's percentage and reset
+ * replace the plan's, and a warning or a rejection keeps that window as the
+ * binding one with the provider's status. Otherwise the binding window is the
+ * one closest to its limit, as ruling 608 reads Codex's. Without plan windows
+ * the event is recorded as it came.
+ */
+function withPlanWindows(event: RateLimitFact | null, plan: PlanWindow[] | null): RateLimitFact | null {
+  if (!plan) return event;
+  const windows = plan.map((w) => ({ ...w }));
+  if (event?.rateLimitType) {
+    const at = windows.findIndex((w) => w.rateLimitType === event.rateLimitType);
+    const known = at === -1 ? null : windows[at]!;
+    const live: PlanWindow = {
+      rateLimitType: event.rateLimitType,
+      utilization: event.utilization ?? known?.utilization ?? null,
+      resetsAt: event.resetsAt ?? known?.resetsAt ?? null,
+    };
+    if (at === -1) windows.push(live);
+    else windows[at] = live;
+  }
+  const alarm =
+    event && event.status && event.status !== "allowed"
+      ? windows.find((w) => w.rateLimitType === event.rateLimitType)
+      : undefined;
+  let binding = alarm;
+  if (!binding) {
+    for (const window of windows) {
+      if (!binding || (window.utilization ?? -1) > (binding.utilization ?? -1)) binding = window;
+    }
+  }
+  if (!binding) return event;
+  const status = alarm
+    ? event!.status
+    : binding.utilization !== null && binding.utilization >= 1
+      ? "rejected"
+      : "allowed";
+  return {
+    status,
+    rateLimitType: binding.rateLimitType,
+    utilization: binding.utilization,
+    resetsAt: binding.resetsAt,
+    isUsingOverage: event?.isUsingOverage ?? false,
+    windows,
+  };
 }
 
 /** The three block shapes that carry OUTPUT the model wrote: prose, its
@@ -1577,6 +1754,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       /** Ruling 130(a): the structured evidence the stream produced, kept for
        *  the classifier. */
       const evidence: FailureEvidence = { ...NO_EVIDENCE };
+      /** Ruling 611: the account's plan windows as this run's CLI reported
+       *  them, whether they still wait for a line to ride, and the last
+       *  `rate_limit_event` reading they are recorded beside. */
+      let plan: PlanWindow[] | null = null;
+      let planPending = false;
+      let planAsked = false;
+      let lastLimit: RateLimitFact | null = null;
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
@@ -1999,6 +2183,25 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             // error code and the result's status/terminal reason for the classifier.
             if (envelope.type === "rate_limit_event" && envelope.rate_limit_info) {
               evidence.rateLimit = envelope.rate_limit_info;
+            }
+            // Ruling 611: once the CLI is up, ask it for the account's plan
+            // windows. They ride the next line, and every rate_limit_event
+            // after them is recorded beside them.
+            if (!planAsked && envelope.type === "system" && envelope.subtype === "init") {
+              planAsked = true;
+              void readPlanWindows(q).then((windows) => {
+                if (!windows) return;
+                plan = windows;
+                planPending = true;
+              });
+            }
+            if (facts.rateLimit) {
+              lastLimit = facts.rateLimit;
+              facts.rateLimit = withPlanWindows(facts.rateLimit, plan);
+              planPending = false;
+            } else if (planPending) {
+              facts.rateLimit = withPlanWindows(lastLimit, plan);
+              planPending = false;
             }
             if (envelope.type === "assistant" && envelope.error) {
               evidence.apiError = envelope.error;

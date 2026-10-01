@@ -27,6 +27,7 @@ import {
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
 import { claudeReportedTotals } from "./wire-format.server";
+import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import type { JsonValue } from "~/features/runtime/runtime-types";
@@ -62,7 +63,12 @@ describe("resolveClaudeModel", () => {
  *  the SDK does when the request itself never gets off the ground. */
 function fakeQuery(
   messages: unknown[],
-  opts: { throwAfter?: number; rejectWith?: Error } = {},
+  opts: {
+    throwAfter?: number;
+    rejectWith?: Error;
+    /** Ruling 611: the SDK's experimental `/usage` control request. */
+    usage?: (opts?: { skipBehaviors?: boolean }) => Promise<SDKControlGetUsageResponse>;
+  } = {},
 ) {
   let interrupted = false;
   const gen = (async function* () {
@@ -82,6 +88,7 @@ function fakeQuery(
       interrupted = true;
     },
   });
+  if (opts.usage) q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = opts.usage;
   return { q, wasInterrupted: () => interrupted };
 }
 
@@ -1321,6 +1328,114 @@ describe("ruling 130(a): structured classification", () => {
     expect(terminal?.display?.text).toContain("(403 account_on_hold): the account itself is on hold");
     expect(terminal?.display?.text).toContain("Profile → Agent accounts");
     expect(terminal?.display?.failure).toMatchObject({ kind: "auth", apiError: "account_on_hold", apiErrorStatus: 403 });
+  });
+});
+
+/**
+ * Ruling 611: a run asks its own CLI for the account's plan windows (the data
+ * behind `/usage`), because a `rate_limit_event` gives a percentage only once
+ * the provider warns. Live on 2026-10-01 the events read "five_hour · allowed ·
+ * utilization not reported" while the account's week stood at 71%.
+ */
+describe("ruling 611: a Claude run reads its account's plan windows", () => {
+  // The live answer's resets, floored to the second.
+  const FIVE_HOUR_RESET = 1_790_833_199; // 2026-10-01T05:39:59Z
+  const WEEK_RESET = 1_790_855_999; // 2026-10-01T11:59:59Z
+  const iso = (epoch: number) => new Date(epoch * 1000).toISOString();
+  const init = { type: "system", subtype: "init", session_id: "s", model: "claude-opus-5-5", tools: [], mcp_servers: [] };
+  const text = (t: string) => ({ type: "assistant", message: { content: [{ type: "text", text: t }] } });
+  const event = (status: string, rateLimitType: string, utilization: number | null, resetsAt: number) => ({
+    type: "rate_limit_event",
+    rate_limit_info: { status, rateLimitType, utilization, resetsAt, isUsingOverage: false },
+  });
+  const result = { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {}, total_cost_usd: 0.01 };
+  const answer = (rateLimits: SDKControlGetUsageResponse["rate_limits"]): SDKControlGetUsageResponse => ({
+    session: { total_cost_usd: 0, total_api_duration_ms: 0, total_duration_ms: 0, total_lines_added: 0, total_lines_removed: 0, model_usage: {} },
+    subscription_type: rateLimits ? "max" : null,
+    rate_limits_available: rateLimits !== null,
+    rate_limits: rateLimits,
+    behaviors: null,
+  });
+  // The windows as the bundled CLI gave them live: percentages 0 to 100,
+  // ISO resets with microseconds, a window that does not apply as null.
+  const usageAnswer = answer({
+    five_hour: { utilization: 1, resets_at: "2026-10-01T05:39:59.634177+00:00" },
+    seven_day: { utilization: 71, resets_at: "2026-10-01T11:59:59.634218+00:00" },
+    seven_day_opus: null,
+    model_scoped: [{ display_name: "Fable", utilization: 12.5, resets_at: iso(WEEK_RESET) }],
+  });
+
+  const run = async (messages: unknown[], usage?: (opts?: { skipBehaviors?: boolean }) => Promise<SDKControlGetUsageResponse>) => {
+    const { q } = fakeQuery(messages, usage ? { usage } : {});
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createClaudeAdapter({ queryFn: () => q }).start(SPEC, { onLine: (l) => lines.push(l), onExit: (e) => (exit = e) });
+    await drain();
+    return { lines, exit, readings: lines.flatMap((l) => (l.facts.rateLimit ? [l.facts.rateLimit] : [])) };
+  };
+
+  it("records every plan window, and a later event beside them with the provider's warning kept", async () => {
+    const asked: unknown[] = [];
+    const { lines, exit, readings } = await run(
+      [
+        init,
+        text("reading the board"),
+        text("still reading"),
+        event("allowed", "five_hour", null, FIVE_HOUR_RESET),
+        text("working"),
+        event("allowed_warning", "seven_day", 0.94, WEEK_RESET),
+        result,
+      ],
+      async (opts) => {
+        asked.push(opts);
+        return usageAnswer;
+      },
+    );
+    expect(exit).toMatchObject({ outcome: "finished" });
+    // CANARY: drop the ask at `system/init` and no line carries the windows.
+    // One ask per run, without the scan of local transcripts.
+    expect(asked).toEqual([{ skipBehaviors: true }]);
+    const windows = [
+      { rateLimitType: "five_hour", utilization: 0.01, resetsAt: FIVE_HOUR_RESET },
+      // CANARY: read the percentage as a fraction and this reads 1 (clamped).
+      { rateLimitType: "seven_day", utilization: 0.71, resetsAt: WEEK_RESET },
+      { rateLimitType: "seven_day_fable", utilization: 0.125, resetsAt: WEEK_RESET },
+    ];
+    // The windows ride a line before the first event: the week, closest to
+    // its limit, is the binding window.
+    expect(readings[0]).toEqual({
+      status: "allowed", rateLimitType: "seven_day", utilization: 0.71, resetsAt: WEEK_RESET, isUsingOverage: false, windows,
+    });
+    // CANARY: record the event as it came once the windows are known, and this
+    // reading falls back to "five_hour, utilization null" with no week in it.
+    expect(readings[1]).toEqual(readings[0]);
+    expect(lines.find((l) => l.facts.rateLimit === readings[1])?.display?.tag).toBe("rate_limit_event");
+    // A warning is the provider's live word: its window binds with its
+    // status and its newer percentage, the other windows kept.
+    expect(readings[2]).toEqual({
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      utilization: 0.94,
+      resetsAt: WEEK_RESET,
+      isUsingOverage: false,
+      windows: [windows[0], { ...windows[1], utilization: 0.94 }, windows[2]],
+    });
+    expect(readings).toHaveLength(3);
+  });
+
+  it.each([
+    ["an SDK without the request", undefined],
+    ["an API-key session", async () => answer(null)],
+    ["a request that fails", async () => Promise.reject(new Error("control request failed"))],
+  ])("%s records the event as it came and finishes the run", async (_name, usage) => {
+    const { exit, readings } = await run(
+      [init, text("one"), text("two"), event("allowed", "five_hour", null, FIVE_HOUR_RESET), result],
+      usage,
+    );
+    expect(exit).toMatchObject({ outcome: "finished" });
+    expect(readings).toEqual([
+      { status: "allowed", rateLimitType: "five_hour", utilization: null, resetsAt: FIVE_HOUR_RESET, isUsingOverage: false },
+    ]);
   });
 });
 
