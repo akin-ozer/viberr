@@ -211,9 +211,9 @@ then reports the vendor's own refusal and points at the workspace admin, or at a
 key. Treat a pasted token as a secret, prefer a finite expiration, and rotate it.
 
 A person may keep several accounts per backend (ruling 507), up to ten: each sign-in or
-pasted key adds one and makes it the one their runs bill, and **Use this account** on
-Profile → Agent accounts switches to another without a sign-in, because each keeps its
-sign-in in its own home. A run already going keeps the account it started on.
+pasted key adds one and makes it the one their runs bill, and the **Runs use** picker on
+Profile → Agent accounts switches to another without a sign-in (ruling 616), because each
+keeps its sign-in in its own home. A run already going keeps the account it started on.
 
 Each Codex run works in a private copy of its principal's home,
 `runtimes/users/<userId>/codex-home/runs/<runId>/` (ruling 181): the billed account's

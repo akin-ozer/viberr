@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, type RenderResult } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
@@ -990,6 +990,78 @@ describe("ruling 294: copy the sign-in link", () => {
 });
 
 /**
+ * Ruling 507: one account of several on a backend, as the loader lists it:
+ * a Claude sign-in by default, connected and verified on 2026-09-01.
+ */
+type Account = NonNullable<ProfileBackend["accounts"]>[number];
+
+function account(
+  id: string,
+  name: string,
+  overrides: Partial<Account["health"]> & { active?: boolean; label?: string | null } = {},
+): Account {
+  const { active = false, label = null, ...health } = overrides;
+  return {
+    id,
+    name,
+    label,
+    active,
+    health: {
+      ...HEALTH_NONE,
+      backend: "claude",
+      userId: "u_arda",
+      available: true,
+      kind: "login",
+      method: "claudeai",
+      verification: "file",
+      verifiedAt: "2026-09-01T10:00:00.000Z",
+      connectedAt: "2026-09-01T10:00:00.000Z",
+      detail: null,
+      accountId: id,
+      accountName: name,
+      ...health,
+    },
+  };
+}
+
+const WORK = account("ubc_work", "Work", { active: true, label: "Work" });
+const PERSONAL = account("ubc_personal", "personal@example.com", {
+  connectedAt: "2026-08-20T10:00:00.000Z",
+});
+const KEY = account("ubc_key", "API key ending in abcd", {
+  kind: "api_key",
+  method: null,
+  verification: "credential",
+  secretSuffix: "abcd",
+});
+
+/** A backend card holding `accounts`, the active one's health leading it. */
+function withAccounts(
+  name: "claude" | "codex",
+  accounts: Account[],
+  overrides: Partial<ProfileBackend> = {},
+): ProfileBackend {
+  const active = accounts.find((a) => a.active)!;
+  return backend(name, {
+    health: active.health,
+    accounts,
+    limits: { maxAccounts: 10, maxLabelLength: 60 },
+    ...overrides,
+  });
+}
+
+/** Ruling 616: a card's account picker, named by its label and the account
+ *  in use ("Runs use Work Claude sign-in (claude.ai)"). */
+function pickerFor(view: RenderResult, accountName: string): HTMLElement {
+  return view.getByRole("button", { name: (name) => name.startsWith(`Runs use ${accountName} `) });
+}
+
+/** One account in the open picker's menu, named by the account and its line. */
+function accountRow(view: RenderResult, accountName: string): HTMLElement {
+  return view.getByRole("menuitemradio", { name: (name) => name.startsWith(`${accountName} `) });
+}
+
+/**
  * Ruling 368: both cards share one fetcher, so every control went `disabled`
  * for the whole wait with its resting label, the one that was pressed
  * included: it painted the .45 refused step and said nothing while the server
@@ -1054,65 +1126,47 @@ describe("ruling 368: the account request in flight", () => {
     expect(submitCode.disabled).toBe(true);
     expect(submitCode.hasAttribute("aria-busy")).toBe(false);
   });
+
+  // Ruling 616: the switch is sent from the picker's menu, so the picker is
+  // the control that shows it, and it names the account in use until the
+  // loader says otherwise (no optimistic switch).
+  // CANARY: stop handing the picker the account its switch names
+  // (`switchingTo`) and it sits still through the switch, the press lost.
+  it("a switch reads Switching to… on its own picker, and the other card's picker only waits", async () => {
+    const codexAccount = account("ubc_cx", "cx@example.com", {
+      active: true,
+      backend: "codex",
+      method: "device",
+    });
+    const view = renderHeld([withAccounts("claude", [WORK, PERSONAL]), withAccounts("codex", [codexAccount])]);
+    const claude = pickerFor(view, "Work");
+    fireEvent.click(claude);
+    fireEvent.click(accountRow(view, "personal@example.com"));
+    await waitFor(() => expect(claude.getAttribute("aria-busy")).toBe("true"));
+    expect(claude.querySelector(".acct-nm")!.textContent).toBe("Work");
+    expect(claude.textContent).toContain("Switching to personal@example.com…");
+    expect(claude.querySelector("svg.ico.spin")).not.toBeNull();
+    // A second press opens nothing while the first is in flight.
+    fireEvent.click(claude);
+    expect(view.queryByRole("menu")).toBeNull();
+    const codex = pickerFor(view, "cx@example.com");
+    expect(codex.getAttribute("aria-disabled")).toBe("true");
+    expect(codex.hasAttribute("aria-busy")).toBe(false);
+  });
 });
 
+
 /**
- * Ruling 507: a person may keep several accounts per backend. The card leads
- * with the one runs use, lists the others with a one-click switch (no
- * sign-in), and adds, renames and disconnects per account.
+ * Rulings 507 and 616: a person may keep several accounts per backend. The
+ * card leads with the one runs use, as a picker whose menu lists every
+ * account, the one in use checked, and switches to the one chosen (no
+ * sign-in). The same menu adds another account and opens the others'
+ * management, where each is renamed, signed in again or disconnected without
+ * first becoming the one in use.
  */
-describe("ruling 507: several accounts on one backend", () => {
-  type Account = NonNullable<ProfileBackend["accounts"]>[number];
-
-  function account(
-    id: string,
-    name: string,
-    overrides: Partial<Account["health"]> & { active?: boolean; label?: string | null } = {},
-  ): Account {
-    const { active = false, label = null, ...health } = overrides;
-    return {
-      id,
-      name,
-      label,
-      active,
-      health: {
-        ...HEALTH_NONE,
-        backend: "claude",
-        userId: "u_arda",
-        available: true,
-        kind: "login",
-        method: "claudeai",
-        verification: "file",
-        verifiedAt: "2026-09-01T10:00:00.000Z",
-        connectedAt: "2026-09-01T10:00:00.000Z",
-        detail: null,
-        accountId: id,
-        accountName: name,
-        ...health,
-      },
-    };
-  }
-
-  const WORK = account("ubc_work", "Work", { active: true, label: "Work" });
-  const PERSONAL = account("ubc_personal", "personal@example.com", {
-    connectedAt: "2026-08-20T10:00:00.000Z",
-  });
-  const KEY = account("ubc_key", "API key ending in abcd", {
-    kind: "api_key",
-    method: null,
-    verification: "credential",
-    secretSuffix: "abcd",
-  });
-
-  function claudeWith(accounts: Account[], overrides: Partial<ProfileBackend> = {}): ProfileBackend {
-    const active = accounts.find((a) => a.active)!;
-    return backend("claude", {
-      health: active.health,
-      accounts,
-      limits: { maxAccounts: 10, maxLabelLength: 60 },
-      ...overrides,
-    });
-  }
+describe("rulings 507 and 616: several accounts on one backend", () => {
+  const claudeWith = (accounts: Account[], overrides: Partial<ProfileBackend> = {}) =>
+    withAccounts("claude", accounts, overrides);
 
   function rowOf(container: HTMLElement, id: string): HTMLElement {
     return container.querySelector<HTMLElement>(`[data-account="${id}"]`)!;
@@ -1126,41 +1180,94 @@ describe("ruling 507: several accounts on one backend", () => {
     return found;
   }
 
-  it("leads with the account runs use and lists the others, each one switch away", () => {
-    const { container, getByText } = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
-    // Which account bills, said in the green line once there is a choice.
-    expect(container.querySelector(".cred-ok")!.textContent).toContain("Runs use Work");
-    expect(getByText("Other Claude accounts")).toBeTruthy();
-    const personal = rowOf(container, "ubc_personal");
-    expect(personal.textContent).toContain("personal@example.com");
-    expect(personal.textContent).toContain("Claude sign-in (claude.ai)");
-    const key = rowOf(container, "ubc_key");
-    expect(key.textContent).toContain("API key ending in abcd");
-    // The active account is not in the list of others.
-    expect(container.querySelector('[data-account="ubc_work"]')).toBeNull();
+  /** Open the picker over `accountName` and choose a menu action. */
+  function chooseAction(view: RenderResult, accountName: string, action: string | RegExp): void {
+    fireEvent.click(pickerFor(view, accountName));
+    fireEvent.click(view.getByRole("menuitem", { name: action }));
+  }
 
-    // A switch is one click and no sign-in: it names the account and nothing else.
-    fireEvent.click(buttonIn(personal, "Use this account"));
+  // The switch is the picker's whole job: the row chosen is the account the
+  // next run bills, and the store refuses nothing a person can choose here.
+  // CANARY: submit the active account's id instead of the chosen row's and
+  // runs keep billing the account the person just left.
+  it("the picker names the account runs use and lists every account, the one in use checked; a choice is one switch", () => {
+    const view = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
+    const trigger = pickerFor(view, "Work");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    fireEvent.click(trigger);
+    expect(view.getByRole("menu", { name: "Claude accounts 3 of 10" })).toBeTruthy();
+    expect(view.getAllByRole("menuitemradio")).toHaveLength(3);
+    expect(accountRow(view, "Work").getAttribute("aria-checked")).toBe("true");
+    expect(accountRow(view, "Work").textContent).toContain("in use");
+    expect(accountRow(view, "personal@example.com").getAttribute("aria-checked")).toBe("false");
+    expect(accountRow(view, "personal@example.com").textContent).toContain("Claude sign-in (claude.ai)");
+    expect(accountRow(view, "API key ending in abcd").getAttribute("aria-checked")).toBe("false");
+
+    // Choosing the account in use closes the menu and asks the server nothing.
+    fireEvent.click(accountRow(view, "Work"));
+    expect(view.queryByRole("menu")).toBeNull();
+    expect(lastSubmit).toBeNull();
+
+    fireEvent.click(trigger);
+    fireEvent.click(accountRow(view, "personal@example.com"));
     expect(lastSubmit).toEqual({
       intent: "backend-account-switch",
       backend: "claude",
       account: "ubc_personal",
     });
+    expect(view.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
-  it("offers a sign-in, not a switch, for another account whose sign-in file is gone", () => {
+  // The menu keeps the contract of the repo's other menus (StageMenu, the run
+  // picker): it opens on the checked row, the arrows wrap, Home and End jump,
+  // and Escape hands the focus back to the trigger.
+  // CANARY: drop the focus-on-open effect and the arrows have no row to walk
+  // from; drop `close(true)`'s refocus and Escape leaves the focus on <body>.
+  it("the keyboard opens the menu on the account in use, walks its rows, and Escape hands the focus back", () => {
+    const view = renderPanel([claudeWith([WORK, PERSONAL]), backend("codex")]);
+    const trigger = pickerFor(view, "Work");
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(accountRow(view, "Work"));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(accountRow(view, "personal@example.com"));
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    expect(document.activeElement).toBe(view.getByRole("menuitem", { name: "Manage other accounts" }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(accountRow(view, "Work"));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(view.getByRole("menuitem", { name: "Manage other accounts" }));
+    fireEvent.keyDown(document.activeElement!, { key: "Home" });
+    expect(document.activeElement).toBe(accountRow(view, "Work"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(view.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  // The store refuses a switch to an account whose sign-in file is gone, so
+  // the row must not send one; the account's way back is its own sign-in.
+  // CANARY: let the dimmed row's press reach `onSwitch` and the person is
+  // sent the refusal the store has already decided.
+  it("lists an account whose sign-in file is gone without letting it be chosen, and its management offers the sign-in", () => {
     const wiped = account("ubc_wiped", "wiped@example.com", {
       available: false,
       verification: "none",
       detail: "Your Claude sign-in file is missing from this server (the runtime volume was wiped).",
     });
-    const { container } = renderPanel([claudeWith([WORK, wiped]), backend("codex")]);
-    const row = rowOf(container, "ubc_wiped");
+    const view = renderPanel([claudeWith([WORK, wiped]), backend("codex")]);
+    fireEvent.click(pickerFor(view, "Work"));
+    const row = accountRow(view, "wiped@example.com");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
     expect(row.textContent).toContain("sign-in file missing");
-    expect(Array.from(row.querySelectorAll("button")).map((b) => b.textContent)).not.toContain(
-      "Use this account",
-    );
-    fireEvent.click(buttonIn(row, "Sign in with Claude"));
+    fireEvent.click(row);
+    expect(lastSubmit).toBeNull();
+    expect(view.getByRole("menu")).toBeTruthy();
+
+    fireEvent.click(view.getByRole("menuitem", { name: "Manage other accounts" }));
+    const managed = rowOf(view.container, "ubc_wiped");
+    expect(managed.textContent).toContain("sign-in file missing");
+    fireEvent.click(buttonIn(managed, "Sign in with Claude"));
     expect(lastSubmit).toEqual({
       intent: "backend-login-start",
       backend: "claude",
@@ -1169,10 +1276,34 @@ describe("ruling 507: several accounts on one backend", () => {
     });
   });
 
+  // What the menu opens replaces the row that opened it, so the focus has to
+  // be put somewhere: into the section, and back on the picker when it closes.
+  // CANARY: drop the `focusAsked` effect and a keyboard user is left on
+  // <body> once the menu row they chose has gone.
+  it("what the menu opens takes the focus, and closing it hands the focus back to the picker", () => {
+    const view = renderPanel([claudeWith([WORK, PERSONAL]), backend("codex")]);
+    const trigger = pickerFor(view, "Work");
+    chooseAction(view, "Work", "Manage other accounts");
+    expect(document.activeElement).toBe(view.getByRole("group", { name: "Other Claude accounts" }));
+    fireEvent.click(view.getByRole("button", { name: "Done" }));
+    expect(view.queryByRole("group", { name: "Other Claude accounts" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    chooseAction(view, "Work", "Add another Claude account");
+    const adding = view.getByRole("group", { name: "Add another Claude account" });
+    expect(document.activeElement).toBe(adding);
+    fireEvent.click(buttonIn(adding, "Cancel"));
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("disconnecting another account says runs keep the one in use; the one in use says who takes over", () => {
-    const { container, getByRole } = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
-    fireEvent.click(buttonIn(rowOf(container, "ubc_key"), "Disconnect"));
-    const other = getByRole("alertdialog", { name: "Disconnect API key ending in abcd?" });
+    const view = renderPanel([claudeWith([WORK, PERSONAL, KEY]), backend("codex")]);
+    chooseAction(view, "Work", "Manage other accounts");
+    // The management lists only the others; the account in use is managed
+    // under its own health line.
+    expect(view.container.querySelector('[data-account="ubc_work"]')).toBeNull();
+    fireEvent.click(buttonIn(rowOf(view.container, "ubc_key"), "Disconnect"));
+    const other = view.getByRole("alertdialog", { name: "Disconnect API key ending in abcd?" });
     expect(other.textContent).toContain("Your runs keep using Work.");
     fireEvent.click(buttonIn(other, "Disconnect API key ending in abcd"));
     expect(lastSubmit).toEqual({ intent: "backend-disconnect", backend: "claude", account: "ubc_key" });
@@ -1190,10 +1321,9 @@ describe("ruling 507: several accounts on one backend", () => {
   });
 
   it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {
-    const { container, getByLabelText, getByRole, queryByRole } = renderPanel([
-      claudeWith([WORK, PERSONAL]),
-      backend("codex"),
-    ]);
+    const view = renderPanel([claudeWith([WORK, PERSONAL]), backend("codex")]);
+    const { container, getByLabelText, getByRole, queryByRole } = view;
+    chooseAction(view, "Work", "Manage other accounts");
     fireEvent.click(buttonIn(rowOf(container, "ubc_personal"), "Rename"));
     const field = container.querySelector<HTMLInputElement>("#agentacc-ubc_personal-name")!;
     // The label is the field's real label, not an aria-label.
@@ -1222,26 +1352,29 @@ describe("ruling 507: several accounts on one backend", () => {
   });
 
   it("adds another account through the same sign-in and paste methods, never into an existing one", () => {
-    const { container, getByText, queryByText } = renderPanel([claudeWith([WORK]), backend("codex")]);
-    // One account: no list of others, and no "Runs use" lead — there is no choice yet.
-    expect(queryByText("Other Claude accounts")).toBeNull();
-    expect(container.querySelector(".cred-ok")!.textContent).not.toContain("Runs use");
-
-    fireEvent.click(getByText("Add another Claude account"));
-    expect(getByText(/switching back needs no sign-in/)).toBeTruthy();
-    fireEvent.click(getByText("Sign in with Claude"));
+    const view = renderPanel([claudeWith([WORK]), backend("codex")]);
+    fireEvent.click(pickerFor(view, "Work"));
+    // One account: nothing else to manage yet.
+    expect(view.queryByRole("menuitem", { name: "Manage other accounts" })).toBeNull();
+    fireEvent.click(view.getByRole("menuitem", { name: "Add another Claude account" }));
+    expect(view.getByText(/switching back needs no sign-in/)).toBeTruthy();
+    fireEvent.click(view.getByText("Sign in with Claude"));
     expect(lastSubmit).toEqual({ intent: "backend-login-start", backend: "claude", method: "claudeai" });
-    fireEvent.click(buttonIn(container.querySelector<HTMLElement>(".cred-card")!, "Use an API key"));
-    expect(container.querySelector("#agentacc-claude-api_key")).toBeTruthy();
+    fireEvent.click(buttonIn(view.container.querySelector<HTMLElement>(".cred-card")!, "Use an API key"));
+    expect(view.container.querySelector("#agentacc-claude-api_key")).toBeTruthy();
   });
 
   it("stops offering another account at the ceiling, and says why", () => {
-    const { getByText } = renderPanel([
+    const view = renderPanel([
       claudeWith([WORK, PERSONAL], { limits: { maxAccounts: 2, maxLabelLength: 60 } }),
       backend("codex"),
     ]);
-    expect(getByText("Add another Claude account").closest("button")!.disabled).toBe(true);
-    expect(getByText(/2 is the most one person can keep/)).toBeTruthy();
+    fireEvent.click(pickerFor(view, "Work"));
+    const add = view.getByRole("menuitem", { name: /^Add another Claude account/ });
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(add.textContent).toContain("2 is the most one person can keep; disconnect one to add another.");
+    fireEvent.click(add);
+    expect(view.queryByText(/switching back needs no sign-in/)).toBeNull();
   });
 
   it("says which account a running sign-in is for", () => {
