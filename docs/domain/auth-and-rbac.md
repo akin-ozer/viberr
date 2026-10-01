@@ -539,25 +539,32 @@ setup checklist carries a **Claude or Codex** step for them, whatever their role
 532), whose link, `/profile#agent-accounts`, brings this panel to rest below the
 overlay's pinned head, ringed and focused.
 
-**Several accounts per backend (ruling 507).** A person may keep up to ten accounts per
-backend; one is **in use**, the one their runs bill. A connected card leads with it
-(its health, usage and refusals are about that account; once there is a choice the
-green line opens "Runs use <name>"), then lists **Other Claude accounts**, a row each:
-the name (one line, cut with an ellipsis only where the row is narrower than it) and its
-facts over the row's buttons, the order the account in use has (ruling 515). Each has
-**Use this account** (`backend-account-switch` {account}):
-a switch, not a sign-in, because every account keeps its vendor sign-in in a home of its
-own on this server; it takes effect for the next run, a run already going keeps its
-account, and the toast says "Claude runs now use <name>". An account whose sign-in file
-is gone offers its sign-in instead of the switch, into that same account
-(`backend-login-start` with its `account`). **Add another Claude account** opens the same
-sign-in and paste methods a fresh card has, says the new account becomes the one in use
-and the others stay connected, and is disabled with a sentence at the ceiling. Every
-account, the one in use included, has **Rename** (`backend-account-rename` {account,
-name}: the same field idiom as the key form, at most 60 characters refused in the store's
-own words per ruling 147, an empty name going back to the vendor's facts) and
-**Disconnect**. An account is named by the person's label, else the email Claude's
-`auth status` reported, else its kind ("ChatGPT sign-in", "API key ending in abcd").
+**Several accounts per backend (rulings 507, 616).** A person may keep up to ten accounts
+per backend; one is **in use**, the one their runs bill, and Claude's and Codex's are
+chosen apart. A connected card leads with it as a picker labelled **Runs use** (ruling
+616): the trigger names the account in use over its kind, and the card under it carries
+that account's health, usage and refusals. The trigger opens a menu, "Claude accounts · n
+of 10", that lists every account the person keeps there with the one in use checked.
+Choosing another is `backend-account-switch` {account}: a switch, not a sign-in, because
+every account keeps its vendor sign-in in a home of its own on this server; it takes
+effect for the next run, a run already going keeps its account, and the toast says "Claude
+runs now use <name>". While it is in flight the trigger reads "Switching to <name>…" under
+the account still in use. An account whose sign-in file is gone is listed dimmed and
+cannot be chosen. The menu keeps the repo's menu keyboard (the arrows, Home/End, Escape
+and Tab back to the trigger) and opens upward where the overlay has no room below. Under a
+rule it offers **Add another Claude account**, which opens the same sign-in and paste
+methods a fresh card has, says the new account becomes the one in use and the others stay
+connected, and is disabled with a sentence at the ceiling; and **Manage other accounts**,
+which opens **Other Claude accounts**, a row each: the name (one line, cut with an
+ellipsis only where the row is narrower than it) and its facts over the row's buttons
+(ruling 515). An account whose sign-in file is gone offers its sign-in there, into that
+same account (`backend-login-start` with its `account`); the others are renamed and
+disconnected there without first becoming the one in use. Every account, the one in use
+included, has **Rename** (`backend-account-rename` {account, name}: the same field idiom
+as the key form, at most 60 characters refused in the store's own words per ruling 147, an
+empty name going back to the vendor's facts) and **Disconnect**. An account is named by
+the person's label, else the email Claude's `auth status` reported, else its kind
+("ChatGPT sign-in", "API key ending in abcd").
 
 Two routes in, both the vendor's own:
 

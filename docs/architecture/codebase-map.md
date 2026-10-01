@@ -131,7 +131,7 @@ the route table is `app/routes.ts`.
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
 | `controller/` | The conversation surface; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); where a transcript puts its reader and the jump back to its newest message, shared by the page and the dock (`transcript-follow.ts`, `transcript-jump.tsx`, rulings 476(c) and 572); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`; the files sent with a message, `message-files.tsx`, served by `routes/resources.controller-file.ts`, ruling 573), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
 | `notifications/` | The inbox page and the shared notification row. |
-| `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 127): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live; ruling 507: the account in use first, the person's other accounts with Use this account (no sign-in), Rename and Disconnect each, and Add another account. |
+| `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 127): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live; ruling 507: several accounts per backend, Rename and Disconnect each; ruling 616: the account in use as a picker (`AccountPicker`) whose menu switches to another (no sign-in), adds another account and opens the others' management. |
 | `insights/` | Read-only run analytics dashboard (oversight cards, backend quota, prompt cache, breakdowns, daily chart). |
 | `live-updates/` | `useLiveUpdates`: SSE subscription → debounced loader revalidation, replaying what a reconnect missed; `revalidation-policy.ts`: which loader re-runs on which trigger (every route's `shouldRevalidate`, and the tab's ledger of what its loaders owe, ruling 457); `event-types.ts` mirrors the wire contract. |
 
@@ -146,7 +146,8 @@ failure toast never renders the success tick).
 `avatar` + `initials`, `identity` (agent glyph: sparkle for Claude, cpu for Codex, shield
 for the operator), `icon` (one stroke icon set), `pill` (the one
 readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` ``,
-`@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `collapsible`
+`@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `markdown-doc`
+(a markdown file read as a document, and its Preview / Raw switch, ruling 614), `collapsible`
 (a box taller than 340px clamps behind Show more: a long comment, a task's long attachment
 list, ruling 510; its `FoldToggle` counts what it hides beyond the box and keeps its place
 on Show less, and `useFirstRow` counts the tiles on a wrapping strip's first line, so a

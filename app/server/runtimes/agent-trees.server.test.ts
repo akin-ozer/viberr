@@ -204,6 +204,9 @@ describe("rm's refusal, read (ruling 485)", () => {
     );
     expect(removalFailure("rm: cannot remove '/x': Some new error\n")).toBe("Some new error on /x");
     expect(removalFailure("chmod: nothing\n")).toBeNull();
+    // GNU names itself by its argv[0], which is the resolved binary.
+    // CANARY: match only a bare `rm:` and this reads the raw rm line.
+    expect(removalFailure("/usr/bin/rm: cannot remove '/x/f': Permission denied\n")).toBe("EACCES on /x/f");
   });
 
   it("ruling 495: reads the server's rmdir of an emptied root the same way, GNU and BSD", () => {
@@ -211,6 +214,7 @@ describe("rm's refusal, read (ruling 485)", () => {
       "ENOTEMPTY on /data/t/WEB-1/workspace",
     );
     expect(removalFailure("rmdir: /tmp/t/workspace: Permission denied\n")).toBe("EACCES on /tmp/t/workspace");
+    expect(removalFailure("/usr/bin/rmdir: failed to remove '/t/w': Directory not empty\n")).toBe("ENOTEMPTY on /t/w");
   });
 });
 
@@ -237,6 +241,8 @@ describe("the server opens its own residue and removes an emptied root it owns (
     left: ReturnType<TreeView["left"]>;
     owners: number[];
     linkAbove: string | null;
+    /** The target's folder is one an agent writes. */
+    replaceable: boolean;
     /** The server's chmod has run. */
     opened: boolean;
   }
@@ -246,6 +252,7 @@ describe("the server opens its own residue and removes an emptied root it owns (
     left: "entries",
     owners: [],
     linkAbove: null,
+    replaceable: false,
     opened: false,
     ...over,
   });
@@ -270,6 +277,7 @@ describe("the server opens its own residue and removes an emptied root it owns (
       agentOwners: () => (state.present ? state.owners : []),
       left: () => (state.present ? state.left : "other"),
       agentLinkAbove: () => state.linkAbove,
+      agentMayReplace: () => state.replaceable,
     };
     const plan = removalPlan(target, person, view);
     const steps: string[] = [];
@@ -277,8 +285,9 @@ describe("the server opens its own residue and removes an emptied root it owns (
     while (!next.done) {
       const step = next.value;
       steps.push(`${step.launch ? step.launch.uid : "server"} ${step.command} ${step.args.join(" ")}`);
-      if (!step.launch && step.command === "chmod" && step.args.includes("-P")) state.opened = true;
-      next = plan.next(act(step, state));
+      const outcome = act(step, state);
+      if (!step.launch && step.command === "chmod" && outcome.ok) state.opened = true;
+      next = plan.next(outcome);
     }
     return { steps, left: next.value };
   }
@@ -310,6 +319,42 @@ describe("the server opens its own residue and removes an emptied root it owns (
     });
     expect(steps).toEqual([...pass(AGENT_UID_FLOOR), SERVER_CHMOD, ...pass(AGENT_UID_FLOOR)]);
     expect(left).toBeNull();
+  });
+
+  /** A GNU chmod before coreutils 9.5 (CI's Ubuntu 24.04), which has no `-P`. */
+  const noDashP = (step: RemovalStep): StepOutcome | null =>
+    !step.launch && step.command === "chmod" && step.args.includes("-P")
+      ? { ok: false, stderr: "chmod: invalid option -- 'P'\nTry 'chmod --help' for more information.\n" }
+      : null;
+
+  it("a chmod with no -P opens the residue without it, where no agent may replace the target", () => {
+    // CANARY: drop the fallback and the residue stays, a fault naming the
+    // skill file, on every host whose coreutils predates 9.5.
+    const { steps, left } = drive(tree(), PERSON, (step, state) => {
+      const refused = noDashP(step);
+      if (refused) return refused;
+      if (step.command !== "rm") return ok;
+      if (!state.opened) return refusedOn(RESIDUE);
+      state.present = false;
+      return ok;
+    });
+    expect(steps).toEqual([
+      ...pass(AGENT_UID_FLOOR),
+      SERVER_CHMOD,
+      `server chmod -R g+rwX -- ${WORKSPACE}`,
+      ...pass(AGENT_UID_FLOOR),
+    ]);
+    expect(left).toBeNull();
+  });
+
+  it("a chmod with no -P never runs without it where an agent could swap the target for a link", () => {
+    // CANARY: drop the agentMayReplace check and the server's chmod follows
+    // whatever link an agent put at the target's path.
+    const { steps, left } = drive(tree({ replaceable: true }), PERSON, (step) => {
+      return noDashP(step) ?? (step.command === "rm" ? refusedOn(RESIDUE) : ok);
+    });
+    expect(steps.filter((step) => step.startsWith("server"))).toEqual([SERVER_CHMOD]);
+    expect(left).toBe(refusedOn(RESIDUE).stderr);
   });
 
   it("an emptied root the server owns goes with the server's rmdir, and nothing is opened first", () => {
