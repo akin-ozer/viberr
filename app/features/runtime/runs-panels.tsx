@@ -1559,6 +1559,10 @@ const ConsoleView = memo(function ConsoleView({
         role="log"
         aria-live="off"
         aria-label={label}
+        // Ruling 626: a scroller the keyboard reaches. Its lines hold nothing
+        // focusable, so without a tab stop of its own the log scrolled for a
+        // mouse only (WCAG 2.1.1, axe scrollable-region-focusable).
+        tabIndex={0}
         onScroll={(e) => {
           const el = e.currentTarget;
           const top = el.scrollTop;
