@@ -64,6 +64,29 @@ export function headMovedSince(
   return null;
 }
 
+/**
+ * Ruling 613: did this hop deliver the task's files?
+ *
+ * A task whose deliverable is files is delivered by moving `deliveredAt`
+ * (rulings 388 and 587), never by a work revision, so `headMovedSince` saw no
+ * hop of it make progress. Live on AWSC-71 (2026-10-01) the Estimate Judge
+ * asked for two small fixes, the Architect saved them and the Calculator
+ * Builder delivered the files again, and the fourth hop opened "Work stalled:
+ * pick a recovery path" over a rework that had just finished; round 5's
+ * AWSC-65 stalled the same way. A delivery stamped during the hop is that
+ * board's head moving: the stamp, or null.
+ */
+export function filesDeliveredSince(
+  deliveredAt: string | null | undefined,
+  since: string | null | undefined,
+): string | null {
+  if (!deliveredAt || !since) return null;
+  const at = Date.parse(deliveredAt);
+  const from = Date.parse(since);
+  if (Number.isNaN(at) || Number.isNaN(from)) return null;
+  return at >= from ? deliveredAt : null;
+}
+
 /** The task's committed head and whether it has been delivered. */
 export type TaskHeadState =
   /** No committed head on record (no revision, or only a verification of the
@@ -166,7 +189,12 @@ export interface StuckLoopStandings {
  * `agentHandle` names who wrote it.
  */
 export function stuckLoopStandings(input: {
-  fm: { workRevision: WorkRevision | null; pr: PrRef | null; gateRun?: GateRun | undefined };
+  fm: {
+    workRevision: WorkRevision | null;
+    pr: PrRef | null;
+    gateRun?: GateRun | undefined;
+    deliveredAt?: string | null;
+  };
   gates: readonly ProjectGate[];
   replyText: string | null;
   agentHandle: string;
@@ -175,7 +203,13 @@ export function stuckLoopStandings(input: {
   const excerpt = reportExcerpt(input.replyText);
   if (excerpt) parts.push(`The last report, from @${input.agentHandle}: “${excerpt}”`);
   const head = taskHeadState(input.fm);
-  parts.push(headStateSentence(head));
+  // Ruling 613: a task delivered as files has no head to name; its delivery
+  // is the stamp a review binds to (`files:<deliveredAt>`, ruling 388).
+  parts.push(
+    head.kind === "none" && input.fm.deliveredAt
+      ? `The task's files were last delivered at ${input.fm.deliveredAt}.`
+      : headStateSentence(head),
+  );
   // Ruling 482: the last gate result on record. The view binds it to the head
   // under review, so a run on an older revision reads as "not run yet" here.
   const gates = input.fm.gateRun ? projectGatesView(input.gates, input.fm) : null;

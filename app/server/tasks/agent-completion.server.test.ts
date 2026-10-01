@@ -2345,6 +2345,82 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ]);
     });
 
+    /**
+     * Ruling 613: a task whose deliverable is files is delivered by moving
+     * `deliveredAt`, never by a work revision. Live on AWSC-71 the Calculator
+     * Builder delivered the Judge's two fixes and the fourth hop opened "Work
+     * stalled" over the rework it had just delivered.
+     */
+    async function completeFilesDelivererAtCap(runId: string): Promise<void> {
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "codex",
+          profileId: "reviewer",
+          role: "Calculator Builder",
+          delivers: true,
+          workdir: null,
+          agentHandle: "reviewer",
+          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 4 },
+        },
+        { id: runId, state: "finished" },
+      );
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    const FILES_TASK: Parameters<typeof baseTaskFrontmatter>[1] = {
+      stage: "impl",
+      workRevision: null,
+      validation: "none",
+      engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+    };
+
+    it("ruling 613: a reply at the cap that delivered the task's files opens no stuck packet; the operator reacts from a fresh depth", async () => {
+      approveReviewEntry(store);
+      deployOperator();
+      writeReviewTask({ ...FILES_TASK, deliveredAt: "2026-09-30T12:00:00.000Z" });
+      const runId = await finishedRunWith("Added the requested comparison to assumptions.md.");
+      saveInRunWindow(runId, ["assumptions.md"]);
+      const before = operatorRuns();
+      const log = vi.spyOn(logger, "info");
+      log.mockClear();
+
+      await completeFilesDelivererAtCap(runId);
+
+      // The delivery the run made is this hop's: the stamp moved past the run's start.
+      expect(taskFile().parsed.frontmatter.deliveredAt).not.toBe("2026-09-30T12:00:00.000Z");
+      // CANARY: read only the work revision for progress and "Work stalled:
+      // pick a recovery path" opens over the files just delivered.
+      expect(taskFile().parsed.packet).toBeNull();
+      expect(
+        log.mock.calls.some(([msg]) => String(msg).includes("delivered the task's files")),
+      ).toBe(true);
+      await pollUntil(() => operatorRuns() > before);
+      expect(operatorRuns()).toBe(before + 1);
+    });
+
+    it("ruling 613: a delivery from before the hop is not its progress, and the capped packet names it", async () => {
+      deployOperator();
+      writeReviewTask({ ...FILES_TASK, deliveredAt: "2026-09-30T12:00:00.000Z" });
+      // The reply saves nothing, so the delivery stays where an earlier hop put it.
+      const runId = await finishedRunWith("Still checking the FSx rates; nothing saved yet.");
+      const before = operatorRuns();
+
+      await completeFilesDelivererAtCap(runId);
+
+      // CANARY: drop the `since` comparison in `filesDeliveredSince` and any
+      // delivery on record resets the depth, so a loop that gets nowhere on a
+      // files task is no longer capped.
+      const packet = taskFile().parsed.packet;
+      expect(packet?.title).toBe("Work stalled: pick a recovery path");
+      expect(operatorRuns()).toBe(before);
+      // CANARY: keep "No committed head is on record" for a files delivery.
+      expect(packet!.body).toContain("The task's files were last delivered at 2026-09-30T12:00:00.000Z.");
+      expect(packet!.body).not.toContain("No committed head");
+    });
+
     it("the capped packet quotes the report, names the head and the gates, recommends delivering an undelivered head, and confirming it delivers", async () => {
       deployOperator();
       const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;

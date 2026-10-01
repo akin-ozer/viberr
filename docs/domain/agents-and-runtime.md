@@ -1518,7 +1518,8 @@ write grant.
    depth is still under 4. A reply whose recorded verdict is `approve` resets the depth
    (ruling 362), and so does a reply that moved the task's head during its hop: a work
    revision minted, or a revision's `pushedAt` stamped, after the run's row was created
-   (ruling 489). A moved head does not restart the ceiling of 12 react hops since a person
+   (ruling 489), or, on a task delivered as files, its `deliveredAt` stamped then (ruling
+   613). A moved head does not restart the ceiling of 12 react hops since a person
    last acted (`OPERATOR_REACT_HOP_CEILING`, 489(d)); an approve does. At the ceiling no
    react follows and the stuck-loop packet opens. A completion that raised the review-deadlock packet does not react
    (ruling 237). With no react, a repeated reply (no progress) or the depth cap opens the
