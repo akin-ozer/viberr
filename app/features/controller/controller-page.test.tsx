@@ -798,6 +798,26 @@ describe("ruling 419(a): the page's navigation is at its top", () => {
 });
 
 describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
+  /** A thread of one message, the viewer's own. */
+  const thread = () =>
+    view({
+      conversation: {
+        id: "cnv_b",
+        userId: "u1",
+        userLabel: "arda@viberr.dev",
+        projectSlug: "viberr-core",
+        taskKey: null,
+        title: "Board thread",
+        createdAt: "2026-09-01T10:00:00.000Z",
+        updatedAt: "2026-09-01T10:00:00.000Z",
+        lastMessageAt: "2026-09-01T10:00:00.000Z",
+      },
+      messages: [
+        { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:00.000Z" },
+      ],
+      viewerOwnsActive: true,
+    });
+
   it("moves only the transcript's own box to the newest message", async () => {
     // CANARY: restore `endRef.current?.scrollIntoView?.({ block: "end" })`.
     const intoView = vi.spyOn(Element.prototype, "scrollIntoView");
@@ -807,26 +827,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
         return this.classList.contains("ctl-transcript") ? 4321 : 0;
       });
     try {
-      const { container } = renderPage(
-        view({
-          conversation: {
-            id: "cnv_b",
-            userId: "u1",
-            userLabel: "arda@viberr.dev",
-            projectSlug: "viberr-core",
-            taskKey: null,
-            title: "Board thread",
-            createdAt: "2026-09-01T10:00:00.000Z",
-            updatedAt: "2026-09-01T10:00:00.000Z",
-            lastMessageAt: "2026-09-01T10:00:00.000Z",
-          },
-          messages: [
-            { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:00.000Z" },
-          ],
-          viewerOwnsActive: true,
-        }),
-        "?c=cnv_b",
-      );
+      const { container } = renderPage(thread(), "?c=cnv_b");
       await screen.findByText("Status?");
       const box = container.querySelector<HTMLElement>("section.ctl-transcript")!;
       await waitFor(() => expect(box.scrollTop).toBe(4321));
@@ -835,6 +836,24 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
       intoView.mockRestore();
       height.mockRestore();
     }
+  });
+
+  it("ruling 626: the keyboard reaches the box, on a thread and on the blank composer", async () => {
+    // axe's scrollable-region-focusable (WCAG 2.1.1): the box scrolls, and a
+    // reply with no link in it, or a phone's blank page whose examples are
+    // held while Claude is not connected, left nothing inside it to focus.
+    // CANARY: drop either section's `tabIndex`.
+    const page = renderPage(thread(), "?c=cnv_b");
+    await screen.findByText("Status?");
+    expect(screen.getByRole("region", { name: "Conversation transcript" }).getAttribute("tabindex")).toBe("0");
+    page.unmount();
+
+    renderPage(view({ conversation: null, available: false }), "?c=new");
+    // Ruling 625: while Claude is not connected the blank transcript offers no
+    // examples, so the box holds nothing else the keyboard could reach.
+    await screen.findByRole("heading", { name: "Nothing asked yet" });
+    expect(screen.queryByRole("button", { name: "Which tasks have been open longest, and why?" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Conversation transcript" }).getAttribute("tabindex")).toBe("0");
   });
 });
 

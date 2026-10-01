@@ -129,7 +129,8 @@ and the rail end at its foot (ruling 524(a)). Where the three do not fit (a proj
 on a laptop) the conversation and the run split the band and the rail goes under it. Below
 the breakpoint, and wherever the rail's list is out of view, the head carries a native
 thread picker (`ConversationPicker`); the transcript is a scroller that never moves the
-page, capped in the one-column layout (ruling 419). A blank transcript offers three example asks per scope that send on click
+page, capped in the one-column layout (ruling 419), and a tab stop of its own, blank or on
+a thread, so the keyboard scrolls it (ruling 626). A blank transcript offers three example asks per scope that send on click
 (`controller-examples.tsx`, shared with the dock; ruling 314), drawn as one framed list of
 rows: the glyph of what each is about, the sentence, and an arrow (ruling 516). A working
 turn shows the run's `phase` and last tool `step` on the row that says it is working

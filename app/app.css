@@ -9678,7 +9678,9 @@ a.pr-branch:hover { background: var(--tint-hover); }
    names it, and, like them, a region focused by script that paints no ring
    once the person's next press ends the mark (ruling 523). */
 .panel[data-targeted] { outline: 2px solid var(--blue); outline-offset: 2px; }
-.panel:focus-visible:not([data-targeted]) { outline: none; }
+/* Only a panel a script focuses: one that is a tab stop (the controller page's
+   transcript, ruling 626) keeps the app's ring. */
+.panel[tabindex="-1"]:focus-visible:not([data-targeted]) { outline: none; }
 
 /* ---------- appended: ruling 548, the Blocked by picker ---------- */
 /* The wait's editor gives each entry the Owner row's release cross (`.own-x`),
@@ -10041,3 +10043,11 @@ a.pr-branch:hover { background: var(--tint-hover); }
   .gh-prs .rq-main { flex: 1; }
   .gh-prs .rq-meta { flex: 0 1 auto; max-width: 52%; justify-content: flex-end; }
 }
+
+/* ---------- appended: ruling 626, scrollers the keyboard reaches ---------- */
+/* The run console and both conversation transcripts are tab stops now, so the
+   keyboard scrolls them. Each draws the app's ring inside its edge, as the
+   other scrollers do: the dock's transcript is flush with a panel that clips
+   what is painted outside it, and the console and the page's transcript
+   panel take the ring over their own border. */
+.console:focus-visible, .ctl-transcript:focus-visible, .dock-transcript:focus-visible { outline-offset: -2px; }

@@ -962,6 +962,9 @@ describe("the controller dock (ruling 121)", () => {
     ).toContain("Controller is working");
     // History never wears the entry animation marker.
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
+    // Ruling 626: the transcript is a tab stop, so the keyboard scrolls it
+    // (axe's scrollable-region-focusable). CANARY: drop its `tabIndex`.
+    expect(screen.getByRole("region", { name: "Conversation transcript" }).getAttribute("tabindex")).toBe("0");
   });
 
   /**

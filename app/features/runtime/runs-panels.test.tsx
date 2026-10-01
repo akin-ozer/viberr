@@ -278,6 +278,16 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".logs-bar .pill.agent")).not.toBeNull();
   });
 
+  it("ruling 626: the console is a tab stop, so the keyboard scrolls it", () => {
+    // axe's scrollable-region-focusable (WCAG 2.1.1) on the task page and the
+    // controller page: the log scrolls, and its lines hold nothing that takes
+    // focus. CANARY: drop the console's `tabIndex`.
+    const { getByRole } = render(
+      <Logs runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "x" }, raw: "{}" }] }} />,
+    );
+    expect(getByRole("log", { name: "Log stream for Claude Code · Developer" }).getAttribute("tabindex")).toBe("0");
+  });
+
   it("a controller turn's streaming footer names the transcript, not a task record", () => {
     // Ruling 99: the console now renders on the controller page too, where
     // "the task record" names a thing the run does not have.
