@@ -847,10 +847,12 @@ describe("ruling 293: the coordinators can read the evidence", () => {
       seen.push({ offset: read.offset, truncated: read.truncated, nextOffset: read.nextOffset });
       offset = read.nextOffset;
     }
+    // Ruling 624: a page is 32,000 bytes, which this ASCII file is in characters.
     expect(seen).toEqual([
-      { offset: undefined, truncated: true, nextOffset: 40_000 },
-      { offset: 40_000, truncated: true, nextOffset: 80_000 },
-      { offset: 80_000, truncated: false, nextOffset: undefined },
+      { offset: undefined, truncated: true, nextOffset: 32_000 },
+      { offset: 32_000, truncated: true, nextOffset: 64_000 },
+      { offset: 64_000, truncated: true, nextOffset: 96_000 },
+      { offset: 96_000, truncated: false, nextOffset: undefined },
     ]);
     expect(pages.join("")).toBe(whole);
 
