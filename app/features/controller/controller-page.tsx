@@ -170,7 +170,7 @@ export function ControllerPage({
 
   return (
     // The instance controller (/controller) sits under the standalone-page
-    // header with no rail beside it (ruling 615), so it keeps a frame of its
+    // header with no rail beside it (ruling 623), so it keeps a frame of its
     // own; inside a project it takes the workspace shell's.
     <main
       className={"ctl-wrap" + (projectSlug ? "" : " standalone")}
@@ -211,7 +211,7 @@ export function ControllerPage({
             <Icon name="plus" />
             New conversation
           </Link>
-          {/* No Home button (ruling 615): the app header's brand and its
+          {/* No Home button (ruling 623): the app header's brand and its
               `Home ›` crumb are that way back, as on every standalone page
               (ruling 145(b)). */}
         </div>

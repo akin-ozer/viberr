@@ -9,7 +9,7 @@ import {
  * Ruling 145 — the standalone-page layout's loader.
  *
  * It answers one question: does THIS route take the app header, and with what.
- * The scoping is the point. `/org/settings`, `/controller` (ruling 615) and
+ * The scoping is the point. `/org/settings`, `/controller` (ruling 623) and
  * `/insights` get the viewer and the bell's counts the header renders;
  * `/profile` and `/notifications` get nothing at all — not even an auth call —
  * so the routes that render no header cost exactly what they cost before the
@@ -53,7 +53,7 @@ describe("palette-shell loader (ruling 145)", () => {
   });
 
   it("answers the same on the other page routes", async () => {
-    // Ruling 615: the controller page carries the header too; it was the one
+    // Ruling 623: the controller page carries the header too; it was the one
     // instance page with no search, bell or account menu. CANARY: take
     // `/controller` off `STANDALONE_PAGES` and its header is null again.
     for (const path of ["/insights", "/controller"]) {

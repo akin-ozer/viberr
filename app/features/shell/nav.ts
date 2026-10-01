@@ -86,7 +86,7 @@ export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
  * be a dimmed sliver, not a header. `/controller` was absent too, for its own
  * identity header and full-height layout, and that left the one instance page
  * people work in all day with no search, no bell and no account menu (ruling
- * 615). Its identity header stays under this one, and its band fills the
+ * 623). Its identity header stays under this one, and its band fills the
  * height this one leaves (app.css).
  */
 export const STANDALONE_PAGES: readonly { path: string; label: string }[] = [

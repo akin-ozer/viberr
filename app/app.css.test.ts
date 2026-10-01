@@ -3303,7 +3303,7 @@ describe("app.css controller band (ruling 524)", () => {
     expect(requiredDecls(plain, ".ctl-wrap.standalone").get("max-width")).toBe("1920px");
   });
 
-  it("ruling 615: the standalone page fills what the app header leaves", () => {
+  it("ruling 623: the standalone page fills what the app header leaves", () => {
     // /controller sits in Home's page shell (`.home`, a flex column) under the
     // app header. The shell is the screen's height and the page flexes into
     // the rest, which is the band's height to fill.
@@ -3931,7 +3931,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     expect(collapse.some((r) => selectorParts(r).includes(".gh-table .live-row") && r.decls.has("min-width"))).toBe(false);
     const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
     expect(block).toMatch(/\.board-wrap:has\(> \.agents-layout, > \.live-wrap\)\s*\{\s*overflow-y:\s*auto/);
-    // The standalone controller is in Home's page shell (ruling 615), which is
+    // The standalone controller is in Home's page shell (ruling 623), which is
     // opted out of the clipped body. CANARY: drop `body:has(.home)` and at
     // 320px the controller's composer and rail cannot be scrolled to.
     expect(requiredDecls(plain, "body:has(.home)").get("overflow")).toBe("auto");
@@ -5271,6 +5271,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".pill.quiet .ico": ".pill.quiet",
       ".sched-when .ico": ".sched-when",
       ".stage-menu-btn .sm-caret": ".stage-menu-btn",
+      ".epic-status-select .epic-status-chev": ".epic-status-select select",
       ".rq-row .wait-tag.human .ico": ".rq-row .wait-tag.human",
       ".gh-freshness .ico": ".gh-freshness",
       ".ctl-msg-who .ico": ".ctl-msg-who",
