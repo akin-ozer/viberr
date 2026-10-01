@@ -9567,3 +9567,12 @@ a.pr-branch:hover { background: var(--tint-hover); }
 @media (forced-colors: active) {
   .pager-btn[aria-current="page"] { background: SelectedItem; color: SelectedItemText; }
 }
+
+/* ---------- appended: ruling 621, closing the setup checklist ---------- */
+/* The cross that hides the checklist for the session is the one close design
+   (`.icon-btn.modal-close`) at the notice's 28px circle and 14px glyph (ruling
+   148), after the meter. The count keeps the head's one auto margin, and the
+   negative margins give back what the circle adds: the head keeps its height
+   and the glyph lines up with the rows' actions. */
+.setup-head > .modal-close { width: 28px; height: 28px; flex: none; margin: -.375rem -.375rem -.375rem 0; }
+.setup-head > .modal-close .ico { width: 14px; height: 14px; }
