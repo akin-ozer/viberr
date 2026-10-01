@@ -5039,10 +5039,12 @@ a.task-ref, a.kp-ref { white-space: nowrap; }
 
 /* Login surface. */
 
-/* Interface review 2026-09-24 (acce-12): the standalone controller (/controller)
-   mounts with no shell, and its frame is only a min-height, so nothing in it
-   scrolled; the document does, as it does for the other shell-less pages. */
-body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wrap.standalone) { overflow: auto; height: auto; min-height: 100vh; }
+/* The pages outside the workspace shell are scrolled by the document, not
+   clipped. Interface review 2026-09-24 (acce-12) added the standalone
+   controller (/controller), which then mounted with no shell at all; since
+   ruling 623 it sits in Home's page shell under the app header, so `.home`
+   answers for it as for the other standalone pages. */
+body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; height: auto; min-height: 100vh; }
 
 /* The row gap spaces the stacked aside from the card, and `align-content`
    packs the two rows in the middle rather than centring each in half of a
@@ -6515,9 +6517,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   .ctl-wrap .ctl-side { position: static; max-height: none; overflow-y: visible; }
   /* The phone's thread switcher takes the head's second row. Two classes, for
      the reason given above: the base rules come later in the sheet. */
-  /* Ruling 476(e): the switcher takes a row of its own, New and Home the row
-     under it. Beside them it was 97px at 375px and named no thread ("Hi. I'm
-     s"), which is the one thing ruling 419(a) put it there to do. */
+  /* Ruling 476(e): the switcher takes a row of its own, New conversation the
+     row under it. Beside it the switcher was 97px at 375px and named no thread
+     ("Hi. I'm s"), which is the one thing ruling 419(a) put it there to do. */
   .ctl-wrap .ctl-head-acts { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
   .ctl-wrap .ctl-picker { display: block; flex: 1 1 100%; min-width: 0; width: 100%; max-width: none; }
 }
@@ -7268,11 +7270,16 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
      shell's rail or not (the `ctl` queries below). */
   container: ctl / inline-size;
 }
-/* The instance controller (/controller) mounts with no shell around it, so
-   it keeps a frame of its own. Ruling 524(a): centred up to 1920px, where it
-   stopped at 1200px: at 1440 and 1920 the capped page left 120px and 360px of
-   empty margin on each side of a console squeezed under the conversation. */
-.ctl-wrap.standalone { max-width: 1920px; margin: 0 auto; padding-top: 1.5rem; min-height: 100dvh; }
+/* The instance controller (/controller) has no rail beside it, so it keeps a
+   frame of its own. Ruling 524(a): centred up to 1920px, where it stopped at
+   1200px: at 1440 and 1920 the capped page left 120px and 360px of empty
+   margin on each side of a console squeezed under the conversation. Ruling
+   623: it sits in Home's page shell under the app header. That shell is a
+   flex column, whose auto margins shrink a child to its content (a new
+   conversation would narrow to its examples), so the page takes the row's
+   width as `.insights` does, and its height is what the header leaves
+   (`flex: 1` above) rather than a screen of its own. */
+.ctl-wrap.standalone { width: 100%; max-width: 1920px; margin: 0 auto; padding-top: 1.5rem; }
 .ctl-head {
   display: flex;
   align-items: center;
@@ -7377,9 +7384,10 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
    complement (the 1100px block stacks the page), so no zoomed width falls
    between the two with the run pane in the rail's column. */
 @media (width > 1100px) {
-  /* No shell sizes the standalone page, so it is the screen's height, which
-     gives its band a height to fill. */
-  .ctl-wrap.standalone { height: 100dvh; }
+  /* Ruling 623: the standalone page's shell is the screen's height and the
+     page fills what the app header leaves, which gives its band a height to
+     fill. With no header above it, the page itself was 100dvh. */
+  .home:has(> .ctl-wrap.standalone) { height: 100dvh; }
   /* A run takes a column between the conversation and the rail: the
      conversation first, as the DOM reads, and the agent's console beside
      it the way Codex and Devin set theirs. */

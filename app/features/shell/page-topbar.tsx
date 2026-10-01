@@ -7,7 +7,8 @@ import { UserMenu, type MenuUser } from "./user-menu";
 
 /**
  * The app header for the standalone pages — the instance-level surfaces that
- * render OUTSIDE the workspace layout (`/org/settings`, `/insights`).
+ * render OUTSIDE the workspace layout (`/org/settings`, `/controller`,
+ * `/insights`).
  *
  * Ruling 145 (owner, 2026-09-05). Every project surface, the board's own
  * Settings included, sits under a header carrying the brand, the ⌘K search, the
@@ -32,7 +33,8 @@ export function PageTopbar({
   orphanUnread,
   onOpenPalette,
 }: {
-  /** The page's name, as the current crumb (`Instance settings`, `Insights`). */
+  /** The page's name, as the current crumb (`Instance settings`, `Controller`,
+   *  `Insights`). */
   title: string;
   user: MenuUser;
   theme: ThemePreference;

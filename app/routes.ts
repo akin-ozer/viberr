@@ -22,7 +22,7 @@ export default [
   //
   // Ruling 145 gave it a second job: the app header the standalone PAGES were
   // missing (`palette-shell.tsx` renders it for the routes `standalonePageLabel`
-  // names — today /org/settings and /insights).
+  // names — today /org/settings, /controller (ruling 623) and /insights).
   layout("routes/palette-shell.tsx", [
     // The real tabbed org-settings surface (org profile, members, resources).
     route("org/settings", "routes/org.settings.tsx"),

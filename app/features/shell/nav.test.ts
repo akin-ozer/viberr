@@ -45,14 +45,14 @@ describe("standalone pages carry the app header (ruling 145)", () => {
     expect(standalonePageLabel("/insights")).toBe("Insights");
   });
 
-  it("leaves the overlay routes, the controller and the workspace alone", () => {
+  it("leaves the overlay routes and the workspace alone", () => {
     // /profile and /notifications render their whole surface inside a
-    // showModal() dialog that covers the viewport; /controller carries its own
-    // identity header; the workspace has the topbar.
+    // showModal() dialog that covers the viewport; the workspace, the board's
+    // own controller page included, has the topbar.
     for (const path of [
       "/profile",
       "/notifications",
-      "/controller",
+      "/projects/viberr-core/controller",
       "/",
       "/projects/viberr-core/settings",
       "/org/settings/audit-export",

@@ -106,7 +106,7 @@ results board nothing the person asked for is committed to it.
 
 | Surface | Who | Notes |
 |---|---|---|
-| `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 525). |
+| `/controller` | any signed-in user | Instance scope, under the app header every standalone page carries (brand, `Home › Controller`, search, bell, account menu; ruling 623). `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 525). |
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). `?all=1` lists everyone's threads about the project for an org admin, and, sealed, for a holder of `delete-controller-conversations` (§2.3, ruling 525). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
@@ -121,8 +121,9 @@ and, while a turn is working, reads the turn's console tail every 5 seconds: the
 for a settle the stream missed, which revalidates the page once the tail says the run
 ended (ruling 457, CTL-2; it used to revalidate root, the workspace layout and the page
 every 5 s to move one step line). New conversation sits in the page head.
-Above the two-column breakpoint the page is one band as tall as the screen (the standalone
-page up to 1920px wide): the conversation's column, the thread's run pane (§2.2) and the
+Above the two-column breakpoint the page is one band as tall as the screen leaves it (under
+the app header on `/controller`, ruling 623, up to 1920px wide; under the workspace topbar on
+a project): the conversation's column, the thread's run pane (§2.2) and the
 rail, which lists the conversations, each fill it and scroll themselves, so the composer
 and the rail end at its foot (ruling 524(a)). Where the three do not fit (a project's page
 on a laptop) the conversation and the run split the band and the rail goes under it. Below
@@ -133,8 +134,9 @@ page, capped in the one-column layout (ruling 419). A blank transcript offers th
 rows: the glyph of what each is about, the sentence, and an arrow (ruling 516). A working
 turn shows the run's `phase` and last tool `step` on the row that says it is working
 (ruling 250). Below the
-two-column breakpoint the thread picker takes a row of its own in the head, with New and
-Home on the row under it (ruling 476(e)). A link in a message, and any other long token in
+two-column breakpoint the thread picker takes a row of its own in the head, with New
+conversation on the row under it (ruling 476(e)). The page has no Home button: the app
+header's brand and crumb are the way back (ruling 623). A link in a message, and any other long token in
 its prose (a word joined by slashes), wraps inside the transcript rather than scrolling it
 sideways (`.md-body a`, and `.md-body` paragraphs, list items, blockquotes and headings;
 a code block and a table keep their own scrollers; ruling 476(a), (i)). Where the transcript puts
