@@ -260,6 +260,8 @@ export function DockPanelBody({
           className="dock-body dock-transcript"
           ref={scrollRef}
           aria-label="Conversation transcript"
+          // Ruling 626: as the page's transcript, a scroller the keyboard reaches.
+          tabIndex={0}
         >
           {!current ? (
             <p className="empty sm">Loading…</p>

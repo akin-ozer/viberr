@@ -208,7 +208,8 @@ Intents behind `project.task.tsx` are explained in
   sent; "… is working" sits under the answered message (ruling 465). Both transcripts show
   a reply that lands from its first line, never pulling a reader who scrolled up to
   history, and a link's URL or any other long token in prose wraps inside them (ruling
-  476(a), (c), (i)). A reader scrolled away from the newest message gets a jump back at the
+  476(a), (c), (i)). Both are tab stops that draw the focus ring inside their edge, so the
+  keyboard scrolls them (ruling 626). A reader scrolled away from the newest message gets a jump back at the
   foot of the box, "New reply" when one landed meanwhile and "Latest" otherwise, and both
   set the thread as one centred column with the person's messages as bubbles and each reply
   as unframed text (ruling 572); the open panel has its
@@ -542,7 +543,8 @@ base`, `Edit MCP server`, `GitHub sign-in`).
 - **A live run's console is disclosed on its own card** (ruling 380): while a run streams,
   the Agent-logs console renders INSIDE the Live-run strip, open by default, and the strip's
   trigger reads "Hide console"/"Show console" with `aria-expanded`; the panel below is the
-  settled-runs archive, so exactly one console exists either way. On the task page the
+  settled-runs archive, so exactly one console exists either way. The console is a tab
+  stop (`role="log"`, "Log stream for <run>"), so the keyboard scrolls it (ruling 626). On the task page the
   timeline's own "open console" still travels to the anchor, because from there the
   console really is elsewhere, and opens the disclosure first so there is something to
   travel to. On the Controller page the card, or the archive after it, is a pane of its own

@@ -737,8 +737,11 @@ function Transcript({
       // sentence pinned to its top edge in --placeholder. It is the app's
       // composed empty state now (the hero Home and Insights use), centred in
       // the column the transcript will fill; the composer under it is the
-      // page's single object until something is said.
-      <section className="ctl-transcript">
+      // page's single object until something is said. Ruling 626: named and
+      // focusable like the transcript it stands in for; on a phone it scrolls,
+      // and with Claude not connected its examples are disabled, so nothing in
+      // it took the keyboard.
+      <section className="ctl-transcript" aria-label="Conversation transcript" tabIndex={0}>
         <div className="empty-hero" data-screen-label="Empty state">
           <span className="glyph">
             <Icon name="cpu" />
@@ -787,6 +790,9 @@ function Transcript({
       ref={scrollRef}
       className="panel ctl-transcript"
       aria-label="Conversation transcript"
+      // Ruling 626: the keyboard scrolls it too. A reply with no link in it
+      // left nothing inside that took focus.
+      tabIndex={0}
     >
       <div className="ctl-msgs">
         {ordered.map((m) => (

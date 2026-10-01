@@ -6316,3 +6316,109 @@ describe("app.css ruling 572: the controller transcript reads as one column", ()
     expect(requiredDecls(reduced, ".ctl-jump > .btn").get("animation")).toBe("fade-in .12s ease");
   });
 });
+
+/**
+ * Ruling 626: the run console and the conversation transcripts are tab stops,
+ * so the keyboard scrolls them (axe's scrollable-region-focusable, WCAG 2.1.1).
+ * A tab stop is no use unseen: each keeps the app's ring, drawn inside its edge
+ * as the other scrollers draw theirs.
+ */
+describe("app.css ruling 626: scrollers the keyboard reaches", () => {
+  type Scroller = { name: string; tag: string; classes: string[]; attrs: Record<string, string> };
+  /** The scrollers as they render. */
+  const SCROLLERS: Scroller[] = [
+    { name: "the run console", tag: "div", classes: ["console"], attrs: { role: "log", tabindex: "0" } },
+    { name: "the page's blank transcript", tag: "section", classes: ["ctl-transcript"], attrs: { tabindex: "0" } },
+    { name: "the page's transcript", tag: "section", classes: ["panel", "ctl-transcript"], attrs: { tabindex: "0" } },
+    { name: "the dock's transcript", tag: "section", classes: ["dock-body", "dock-transcript"], attrs: { tabindex: "0" } },
+  ];
+  /** Where the bracket or parenthesis opened at `open` closes. */
+  const closing = (text: string, open: number) => {
+    let depth = 0;
+    for (let i = open; i < text.length; i++) {
+      if (text[i] === "(" || text[i] === "[") depth++;
+      else if ((text[i] === ")" || text[i] === "]") && --depth === 0) return i;
+    }
+    return text.length;
+  };
+  /** The compound a complex selector's subject must carry (after its last combinator). */
+  const subject = (selector: string) => {
+    const text = selector.trim();
+    let from = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === "(" || text[i] === "[") i = closing(text, i);
+      else if (/[\s>+~]/.test(text[i]!)) from = i + 1;
+    }
+    return text.slice(from);
+  };
+  /** Whether a compound selector can match the scroller while it has keyboard
+   *  focus. A pseudo-class this cannot decide (`:hover`) counts as a match, so
+   *  a rule is never cleared by being hard to read. */
+  const matches = (compound: string, el: Scroller): boolean => {
+    let rest = compound.trim();
+    const tag = /^[a-z][\w-]*/i.exec(rest);
+    if (tag && tag[0].toLowerCase() !== el.tag) return false;
+    if (tag) rest = rest.slice(tag[0].length);
+    while (rest) {
+      const cls = /^\.([-\w]+)/.exec(rest);
+      const attr = /^\[([-\w]+)(?:="([^"]*)")?\]/.exec(rest);
+      const pseudo = /^(::?)([-\w]+)/.exec(rest);
+      if (cls) {
+        if (!el.classes.includes(cls[1]!)) return false;
+        rest = rest.slice(cls[0].length);
+      } else if (attr) {
+        const value = el.attrs[attr[1]!];
+        if (value === undefined || (attr[2] !== undefined && value !== attr[2])) return false;
+        rest = rest.slice(attr[0].length);
+      } else if (pseudo) {
+        // A pseudo-element's rule styles the ::before or ::after, not the box.
+        if (pseudo[1] === "::") return false;
+        let end = pseudo[0].length;
+        const args: string[] = [];
+        if (rest[end] === "(") {
+          const close = closing(rest, end);
+          args.push(...splitArgs(rest.slice(end + 1, close)));
+          end = close + 1;
+        }
+        const name = pseudo[2]!;
+        // `:is()` and `:where()` match when one argument's subject can.
+        if ((name === "is" || name === "where") && !args.some((a) => matches(subject(a), el))) return false;
+        // `:not()` rules the box out only when an argument surely matches it:
+        // a plain compound whose pseudo-classes are all the focus it has.
+        const sure = (a: string) => subject(a) === a.trim() && !/:(?!focus)/.test(a);
+        if (name === "not" && args.some((a) => sure(a) && matches(a, el))) return false;
+        rest = rest.slice(end);
+      } else {
+        return true;
+      }
+    }
+    return true;
+  };
+  /** A declaration that leaves a focused box no ring, `!important` or not. */
+  const erases = (decls: Map<string, string>) =>
+    /^(none|0(px)?)(\s|$)/.test(decls.get("outline") ?? "") ||
+    /^none(\s|$)/.test(decls.get("outline-style") ?? "") ||
+    /^0(px)?(\s|$)/.test(decls.get("outline-width") ?? "") ||
+    /^transparent(\s|$)/.test(decls.get("outline-color") ?? "");
+
+  it("no rule at any width takes the ring off a focused scroller", () => {
+    // CANARY: widen ruling 532's rule back to `.panel:focus-visible:not([data-targeted])`,
+    // which took the ring off the page's transcript, a .panel, once it became a tab stop.
+    const found = SCROLLERS.flatMap((el) =>
+      RULES.filter((r) => erases(r.decls)).flatMap((r) =>
+        selectorParts(r)
+          .filter((s) => matches(subject(s), el))
+          .map((s) => `${el.name}: ${s}`),
+      ),
+    );
+    expect(found).toEqual([]);
+  });
+
+  it("draws the ring inside each scroller's edge", () => {
+    // CANARY: drop the ruling 626 offset, and the dock's panel cuts the ring
+    // its transcript paints outside itself.
+    for (const selector of [".console:focus-visible", ".ctl-transcript:focus-visible", ".dock-transcript:focus-visible"]) {
+      expect(requiredDecls(plain, selector).get("outline-offset"), selector).toBe("-2px");
+    }
+  });
+});
