@@ -4,7 +4,6 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -3070,25 +3069,23 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   });
 
   it("ruling 422: knowledgeBaseReadDirs keeps real folders only, once each, in order", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "kb-read-"));
+    const root = ctx.makeTempDir("kb-read-");
     mkdirSync(path.join(root, "kb", "rulings"), { recursive: true });
     mkdirSync(path.join(root, "kb", "house"), { recursive: true });
     expect(knowledgeBaseReadDirs(["rulings", "missing", "house", "rulings", null, "../etc"], root)).toEqual([
       path.join(root, "kb", "house"),
       path.join(root, "kb", "rulings"),
     ]);
-    rmSync(root, { recursive: true, force: true });
   });
 
   it("ruling 578: knowledgeBaseReadDirs never names a private folder, which no shell on the run can open", () => {
     // CANARY: drop the `isPrivateKbFolder` term and the workspace contract
     // tells the run to read a folder its shell is refused.
-    const root = mkdtempSync(path.join(tmpdir(), "kb-read-"));
+    const root = ctx.makeTempDir("kb-read-");
     mkdirSync(path.join(root, "kb", "rulings"), { recursive: true });
     mkdirSync(path.join(root, "kb", "keys"), { recursive: true });
     chmodSync(path.join(root, "kb", "keys"), 0o700);
     expect(knowledgeBaseReadDirs(["keys", "rulings"], root)).toEqual([path.join(root, "kb", "rulings")]);
-    rmSync(root, { recursive: true, force: true });
   });
 
   it("the task-files section rides the evidence grant (owner ask 2026-08-20)", () => {

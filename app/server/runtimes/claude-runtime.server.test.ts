@@ -1,10 +1,11 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { createTempDirs } from "../../../test-support/temp-dirs";
 import { resetEnvCacheForTests } from "../config/env.server";
 import {
   RUN_PHASE,
@@ -31,6 +32,9 @@ import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk"
 import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import type { JsonValue } from "~/features/runtime/runtime-types";
+
+const temp = createTempDirs();
+afterEach(temp.cleanup);
 
 describe("resolveClaudeModel", () => {
   it("maps friendly family labels to CLI aliases", () => {
@@ -113,7 +117,7 @@ interface CapturedOptions {
  * (ruling 180): the manifest the CLI reads plus one folder per granted skill.
  */
 function pluginDir(skills: string[]): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "viberr-claude-plugin-"));
+  const dir = temp.make("viberr-claude-plugin-");
   mkdirSync(path.join(dir, ".claude-plugin"), { recursive: true });
   writeFileSync(
     path.join(dir, ".claude-plugin", "plugin.json"),
@@ -514,7 +518,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     //
     // Canary: drop the `skillPluginInPlace` gate from `nativeSkillsOutcome`
     // and `plugins` names the dead directory with its skills listed.
-    const gone = path.join(mkdtempSync(path.join(tmpdir(), "viberr-claude-gone-")), "run_x");
+    const gone = path.join(temp.make("viberr-claude-gone-"), "run_x");
 
     const captured = await optionsFor({
       ...SPEC,
@@ -2287,7 +2291,7 @@ describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)"
   });
 
   it("skills, servers, the approval list and the denylist reach the SDK in name order, deduplicated", async () => {
-    const plugin = mkdtempSync(path.join(tmpdir(), "viberr-sorted-"));
+    const plugin = temp.make("viberr-sorted-");
     for (const name of ["zeta", "alpha"]) {
       mkdirSync(path.join(plugin, "skills", name), { recursive: true });
       writeFileSync(path.join(plugin, "skills", name, "SKILL.md"), `---\nname: ${name}\n---\nbody\n`);

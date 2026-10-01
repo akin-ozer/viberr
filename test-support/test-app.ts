@@ -1,8 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { createTempDirs } from "./temp-dirs";
 
 /**
  * Route-level test harness (phase 4): points the PROCESS env at a temp data
@@ -46,7 +44,10 @@ export const APP_TEST_PASSWORD = "test-harness-password-000";
 let appTestPasswordHash: Promise<string> | undefined;
 
 export async function setupAppTest(): Promise<AppTestContext> {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-app-test-"));
+  // A `createTempDirs` root, so one whose `cleanup` never ran (a second
+  // `setupAppTest` in the same test) still goes when the file finishes.
+  const temp = createTempDirs();
+  const dataRoot = temp.make("viberr-app-test-");
   const sessionSecret = "test-session-secret-test-session-secret";
   process.env.NODE_ENV = "test";
   process.env.VIBERR_SESSION_SECRET = sessionSecret;
@@ -164,7 +165,7 @@ export async function setupAppTest(): Promise<AppTestContext> {
     cleanup() {
       closeDb();
       resetEnvCacheForTests();
-      rmSync(dataRoot, { recursive: true, force: true });
+      temp.cleanup();
     },
   };
   return context;

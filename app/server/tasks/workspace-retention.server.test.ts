@@ -25,6 +25,7 @@ import { reclaimTerminalTaskWorkspaces } from "./workspace-retention.server";
  */
 describe("reclaimTerminalTaskWorkspaces", () => {
   const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
 
   /** Create a workspace clone with real bytes in it, return its root. */
   function seedWorkspace(store: TestStore, key: string): string {

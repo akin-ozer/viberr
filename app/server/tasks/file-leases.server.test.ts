@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -44,6 +44,7 @@ beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
 });
+afterEach(() => ctx.cleanup());
 
 describe("activeFileLeases", () => {
   it("binds while the holder is still working", () => {

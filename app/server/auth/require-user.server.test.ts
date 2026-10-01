@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { UserRole } from "~/shared/mapping/user.server";
 import {
   statementsMatching,
@@ -200,10 +200,12 @@ describe("one session resolution per Request (ruling 457)", () => {
  */
 describe("requireAuth login redirect (returnTo normalization)", () => {
   let app: Awaited<ReturnType<typeof setupAppTest>>;
+  beforeEach(async () => {
+    app = await setupAppTest();
+  });
   afterEach(() => app?.cleanup());
 
   async function redirectLocationFor(path: string): Promise<string> {
-    app = await setupAppTest();
     try {
       await requireAuth(app.request(path));
     } catch (thrown) {

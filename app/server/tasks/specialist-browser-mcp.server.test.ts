@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
 import { BROWSER_CALL_DEADLINE_MS } from "./browser-deadline.server";
 import {
   BROWSER_MCP_NAME,
@@ -20,8 +20,11 @@ const g = (
   mode: "direct" | "recommend" | "human" | "off",
 ) => ({ capabilityId, mode });
 
+const temp = createTempDirs();
+afterEach(temp.cleanup);
+
 function tmpAttachments(): string {
-  return path.join(mkdtempSync(path.join(tmpdir(), "viberr-battach-")), "attachments");
+  return path.join(temp.make("viberr-battach-"), "attachments");
 }
 
 afterEach(() => {
@@ -46,7 +49,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     }
     // An ungranted browser creates no attachments dir either.
     expect(existsSync(dir)).toBe(false);
-    rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 
   it("mounts the Playwright MCP CLI for a granted profile, writing into the task's attachments dir", () => {
@@ -82,7 +84,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     // Host default: no executable override, no sandbox opt-out.
     expect(server.args).not.toContain("--executable-path");
     expect(server.args).not.toContain("--no-sandbox");
-    rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 
   it("REFUSES the mount when web egress is withheld — the browser cannot re-acquire revoked egress", () => {
@@ -98,7 +99,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(r.refused!.reason).toContain("use-web-search-fetch");
     // A refused mount creates nothing.
     expect(existsSync(dir)).toBe(false);
-    rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 
   it("omits image responses on codex, keeps them on claude", () => {
@@ -115,7 +115,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     }).server!;
     expect(claude.args).not.toContain("--image-responses");
     expect(codex.args[codex.args.indexOf("--image-responses") + 1]).toBe("omit");
-    rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 
   it("drives the deployment's chromium when VIBERR_BROWSER_EXECUTABLE is set — and only then drops the sandbox", () => {
@@ -136,7 +135,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     // docker's default seccomp blocks the user-namespace sandbox for the
     // non-root node user; the flag rides ONLY with the container executable.
     expect(server.args).toContain("--no-sandbox");
-    rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 
   it("REFUSES the mount when the pinned browser executable is not on disk — a clean refusal, not a deep runtime failure", () => {
@@ -156,7 +154,6 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(r.refused!.reason).toContain("chromium is not installed");
     // A refused mount creates nothing — no empty attachments dir left behind.
     expect(existsSync(dir)).toBe(false);
-    rmSync(path.dirname(dir), { recursive: true, force: true });
   });
 });
 

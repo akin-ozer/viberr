@@ -37,6 +37,17 @@ import {
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
+/**
+ * A data root one level down in a temp dir, so the copy a forced restore moves
+ * aside (`<root>.replaced-<time>`, beside the root) is inside the dir
+ * `ctx.cleanup` removes.
+ */
+function dataRootDir(): string {
+  const root = path.join(ctx.makeTempDir(), "root");
+  mkdirSync(root);
+  return root;
+}
+
 interface Fixture {
   dataRoot: string;
   db: DatabaseSync;
@@ -45,7 +56,7 @@ interface Fixture {
 
 /** A data root shaped like the real one: state/projection.sqlite + markdown. */
 function fixture(): Fixture {
-  const dataRoot = ctx.makeTempDir();
+  const dataRoot = dataRootDir();
   const db = openDatabase(projectionPathIn(dataRoot));
   runMigrations(db);
   db.prepare(
@@ -527,7 +538,7 @@ describe("restore and the per-person agent logins under runtimes/", () => {
     const { backup } = withRuntimes();
 
     // A DIFFERENT live root, already holding somebody's current session.
-    const live = ctx.makeTempDir();
+    const live = dataRootDir();
     const liveHome = path.join(live, "runtimes", "users", "u_arda", "codex-home");
     mkdirSync(liveHome, { recursive: true });
     writeFileSync(path.join(liveHome, "auth.json"), '{"token":"LIVE-RIGHT-NOW"}');
@@ -564,7 +575,7 @@ describe("restore and the per-person agent logins under runtimes/", () => {
     const f = fixture();
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
 
-    const live = ctx.makeTempDir();
+    const live = dataRootDir();
     const liveHome = path.join(live, "runtimes", "users", "u_arda", "codex-home");
     mkdirSync(liveHome, { recursive: true });
     writeFileSync(path.join(liveHome, "auth.json"), '{"token":"UNTOUCHED"}');
