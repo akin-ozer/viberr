@@ -1,7 +1,7 @@
 import { cookieValues } from "~/server/http/cookies.server";
 
 /**
- * Ruling 614: the setup checklist's close hides it for the session that
+ * Ruling 618: the setup checklist's close hides it for the session that
  * pressed it, and the card is back once that session ends. The cookie carries
  * the sign-in's session id and no expiry, so the browser drops it when its own
  * session ends, and the next sign-in (the same person again, or the account

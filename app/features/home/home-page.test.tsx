@@ -904,11 +904,11 @@ describe("ruling 532: the setup checklist", () => {
 });
 
 /**
- * Ruling 614: the checklist's close. It comes with the first project (before
+ * Ruling 618: the checklist's close. It comes with the first project (before
  * that the card is the empty Home's way to start one), the card goes while
  * the close is posted, and a refused close brings it back with the reason.
  */
-describe("ruling 614: closing the setup checklist", () => {
+describe("ruling 618: closing the setup checklist", () => {
   const close = { name: "Hide for this session" };
   const region = { name: "Finish setting up" };
 

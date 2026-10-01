@@ -346,7 +346,6 @@ export function AgentModal({
         </label>
         <textarea
           id="ga-persona"
-          className="ta"
           rows={6}
           value={persona}
           placeholder="How this agent works: its responsibilities, standards, reporting format…"

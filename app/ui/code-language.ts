@@ -136,6 +136,16 @@ export function languageForName(name: string): string {
   return BY_EXTENSION.get(extensionOf(lower)) ?? PLAIN_LANGUAGE;
 }
 
+/**
+ * Ruling 614: whether a file opens rendered as markdown (`.md`, `.markdown`),
+ * read off the same table, so a name it learns needs no second list. `.mdx`
+ * stays source: its JSX and imports are not markdown, and rendered they would
+ * print as stray text.
+ */
+export function isMarkdownName(name: string): boolean {
+  return languageForName(name) === "markdown";
+}
+
 /** The part after the last dot, or "" without one. A dot-leading name
  *  (`.bashrc`) has no extension in this sense: `.env` is handled above. */
 function extensionOf(lower: string): string {

@@ -59,7 +59,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     greet,
     projects,
     // Ruling 532: the setup checklist's steps, null once all are done. Ruling
-    // 614: null too while this session has closed it, which counts once the
+    // 618: null too while this session has closed it, which counts once the
     // viewer has a project; before that the card is Home's way to start one.
     setup:
       projects.length > 0 && isSetupHidden(request, sessionId)
@@ -120,7 +120,7 @@ export async function action({ request }: Route.ActionArgs) {
       });
       return { ok: true as const, intent: "view" as const };
     }
-    // Ruling 614: the setup checklist's close, personal UI state like a pin.
+    // Ruling 618: the setup checklist's close, personal UI state like a pin.
     // The cookie names this sign-in, so the card is back for the next one.
     if (intent === "hide-setup") {
       return data(
