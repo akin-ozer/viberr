@@ -204,6 +204,14 @@ describe("rm's refusal, read (ruling 485)", () => {
     );
     expect(removalFailure("rm: cannot remove '/x': Some new error\n")).toBe("Some new error on /x");
     expect(removalFailure("chmod: nothing\n")).toBeNull();
+    // GNU names itself by the path it was run as, and the server runs the
+    // resolved binary, so a Linux refusal opens `/usr/bin/rm:`. The removal
+    // suites above see that form only on Linux; this row holds it on a Mac
+    // too. CANARY: anchor the patterns at a bare `rm:` again and the fault
+    // carries rm's raw line instead of the errno.
+    expect(removalFailure("/usr/bin/rm: cannot remove '/data/w/website': Permission denied\n")).toBe(
+      "EACCES on /data/w/website",
+    );
   });
 
   it("ruling 495: reads the server's rmdir of an emptied root the same way, GNU and BSD", () => {
@@ -211,6 +219,9 @@ describe("rm's refusal, read (ruling 485)", () => {
       "ENOTEMPTY on /data/t/WEB-1/workspace",
     );
     expect(removalFailure("rmdir: /tmp/t/workspace: Permission denied\n")).toBe("EACCES on /tmp/t/workspace");
+    expect(removalFailure("/usr/bin/rmdir: failed to remove '/data/t/WEB-2/workspace': Directory not empty\n")).toBe(
+      "ENOTEMPTY on /data/t/WEB-2/workspace",
+    );
   });
 });
 

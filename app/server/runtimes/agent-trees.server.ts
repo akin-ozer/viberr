@@ -384,15 +384,17 @@ const ERRNO_BY_MESSAGE = new Map([
 /** "<errno> on <path>" from the first refusal of rm (GNU: `rm: cannot remove
  *  '<path>': <text>`; BSD: `rm: <path>: <text>`) or of the server's rmdir of
  *  an emptied root (GNU: `rmdir: failed to remove '<path>': <text>`; BSD:
- *  `rmdir: <path>: <text>`). */
+ *  `rmdir: <path>: <text>`). GNU names itself by the path it was run as, and
+ *  `spawnOf` runs the resolved binary, so on Linux the line opens
+ *  `/usr/bin/rm:`: the program's directory is optional. */
 export function removalFailure(stderr: string): string | null {
   for (const line of stderr.split("\n")) {
     const trimmed = line.trim();
     const match =
-      /^rm: cannot remove '(.+)': (.+)$/.exec(trimmed) ??
-      /^rmdir: failed to remove '(.+)': (.+)$/.exec(trimmed) ??
-      /^rmdir: (\/.+): ([^:]+)$/.exec(trimmed) ??
-      /^rm: (\/.+): ([^:]+)$/.exec(trimmed);
+      /^(?:\S*\/)?rm: cannot remove '(.+)': (.+)$/.exec(trimmed) ??
+      /^(?:\S*\/)?rmdir: failed to remove '(.+)': (.+)$/.exec(trimmed) ??
+      /^(?:\S*\/)?rmdir: (\/.+): ([^:]+)$/.exec(trimmed) ??
+      /^(?:\S*\/)?rm: (\/.+): ([^:]+)$/.exec(trimmed);
     if (!match) continue;
     const [, where, text] = match;
     return `${ERRNO_BY_MESSAGE.get(text ?? "") ?? text} on ${where}`;
