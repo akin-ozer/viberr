@@ -15,6 +15,7 @@ import {
 } from "~/server/secrets/git-output-redact.server";
 import { getPatToken, getProjectCredential } from "~/server/secrets/pat-store.server";
 import { countLabel } from "~/shared/text/plural";
+import { pageEnd, READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 
 /**
  * F21-21 — the operator's ANCHORED read of the project's default branch.
@@ -78,10 +79,12 @@ const GIT_CONFIG_TIMEOUT_MS = 10_000;
  * it, and the controller has no `Read` tool. So on ax-clone the controller
  * could not read `internal/runtime/executor.go` (57,835 characters) at all,
  * and a file over the cap was no better off: its first 60,000 characters were
- * refused whole, so the clip note never arrived. 40,000 leaves room for the
- * header and for code that tokenizes densely.
+ * refused whole, so the clip note never arrived. 40,000 left room for the
+ * header and for code that tokenizes densely. Ruling 624: a page is counted in
+ * UTF-8 bytes, at `READ_PAGE_BYTES`, the most a Codex run's code-mode tool
+ * output carries whole, since an operator may run on Codex.
  */
-export const DEFAULT_BRANCH_READ_PAGE_CHARS = 40_000;
+export const DEFAULT_BRANCH_READ_PAGE_BYTES = READ_PAGE_BYTES;
 /**
  * The largest file a read will load to page through. The mirror is local, so
  * this bounds memory, not the network. It was the page cap times four
@@ -136,13 +139,13 @@ export type TextPage =
 
 /**
  * Ruling 436: the whole lines from `fromLine` (1-based) that fit in
- * `pageChars`, so any file can be read to its end in pieces. At least one line
+ * `pageBytes` of UTF-8 (ruling 624), so any file can be read to its end in pieces. At least one line
  * is always taken; a single line longer than a page is cut and says so.
  */
 export function pageOfText(
   text: string,
   fromLine = 1,
-  pageChars = DEFAULT_BRANCH_READ_PAGE_CHARS,
+  pageBytes = DEFAULT_BRANCH_READ_PAGE_BYTES,
 ): TextPage {
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   const lines = body === "" ? [] : body.split("\n");
@@ -155,10 +158,10 @@ export function pageOfText(
   }
   if (start > totalLines) return { ok: false, totalLines };
   const first = lines[start - 1]!;
-  if (first.length > pageChars) {
+  if (Buffer.byteLength(first) > pageBytes) {
     return {
       ok: true,
-      text: first.slice(0, pageChars),
+      text: first.slice(0, pageEnd(first, 0, pageBytes)),
       fromLine: start,
       toLine: start,
       totalLines,
@@ -166,10 +169,10 @@ export function pageOfText(
       lineCut: true,
     };
   }
-  let used = first.length;
+  let used = Buffer.byteLength(first);
   let end = start;
-  while (end < totalLines && used + 1 + lines[end]!.length <= pageChars) {
-    used += 1 + lines[end]!.length;
+  while (end < totalLines && used + 1 + Buffer.byteLength(lines[end]!) <= pageBytes) {
+    used += 1 + Buffer.byteLength(lines[end]!);
     end += 1;
   }
   return {
@@ -204,7 +207,7 @@ export function defaultBranchPageNote(
   const notes: string[] = [];
   if (read.lineCut) {
     notes.push(
-      `Line ${read.fromLine} is longer than one page, so it was cut at ${DEFAULT_BRANCH_READ_PAGE_CHARS} characters.`,
+      `Line ${read.fromLine} is longer than one page, so it was cut at ${DEFAULT_BRANCH_READ_PAGE_BYTES} bytes.`,
     );
   }
   if (read.more) {

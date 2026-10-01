@@ -4,7 +4,8 @@ import {
   type StageColor,
 } from "~/shared/workflow/stage-colors";
 import type { DatabaseSync } from "node:sqlite";
-import { KB_DOC_OFFSET_DESCRIPTION, KB_DOC_READ_CHARS, readKbDocForRun } from "~/server/files/kb-injection.server";
+import { KB_DOC_OFFSET_DESCRIPTION, readKbDocForRun } from "~/server/files/kb-injection.server";
+import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
@@ -841,7 +842,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // document was more than the controller could take in, and it could
         // not safely change what it could not read.
         const start = Math.min(Math.max(0, args.offset ?? 0), doc.text.length);
-        const end = Math.min(doc.text.length, start + KB_DOC_READ_CHARS);
+        // Ruling 624: a page is bounded in UTF-8 bytes, as every agent read is.
+        const end = pageEnd(doc.text, start);
         return json({
           path: args.path,
           // Ruling 466: UTF-8 bytes, the unit the write replies use.
