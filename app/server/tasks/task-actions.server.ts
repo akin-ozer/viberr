@@ -5708,8 +5708,9 @@ export async function applyAgentCompletionEffects(
   // run as its author and, for a deliverer, move `deliveredAt` onto the
   // person's input. Their note claims the name; the run does not. Ruling 538:
   // the same for a file a relay carried here from another task. A claim by
-  // another RUN is not excluded: a supporting run that finished first claims
-  // what fell in its own window, the deliverer's files among them.
+  // another RUN is not excluded: the deliverer claims its whole window even
+  // when a run beside it named one of its files (ruling 627 narrows what a run
+  // that does not deliver claims, below).
   const carriedHere = new Set(
     thisRunStartedAt && completionFile
       ? completionFile.timeline
@@ -5809,18 +5810,39 @@ export async function applyAgentCompletionEffects(
       )
       .get(input.projectSlug, input.taskKey, finished.id) as { n: number }
   ).n;
-  // The corpus covers every place an agent can cite: the final reply (for a
-  // Codex envelope, ALSO the raw envelope text — replyText is narrowed to its
-  // summary), the evidence rows, the ask-human question, every timeline text
-  // since the run started (mid-run comments, human directives), and — ruling
-  // 549 — the text of the files this run saved, where a deliverer of files
-  // cites its evidence.
-  const citationCorpus = [
+  // Ruling 627: another specialist run worked on this task while this one did,
+  // still live or finished since this run started. The operator saves no file
+  // into the attachments store itself (a relay's files are claimed by the
+  // relay), so its runs are not counted.
+  // SAFETY: the SELECT list is the single aliased aggregate `n`; COUNT(*)
+  // over `agent_runs` (0001_baseline) is always a number row.
+  const overlappingSpecialists = thisRunStartedAt
+    ? (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM agent_runs
+              WHERE project_slug = ? AND task_key = ? AND id != ? AND kind != 'operator'
+                AND (state IN ('queued', 'running') OR finished_at >= ?)`,
+          )
+          .get(input.projectSlug, input.taskKey, finished.id, thisRunStartedAt) as { n: number }
+      ).n
+    : 0;
+  // What the run said itself: the final reply (for a Codex envelope, ALSO the
+  // raw envelope text — replyText is narrowed to its summary), the evidence
+  // rows and the ask-human question.
+  const ownWords = [
     replyText ?? "",
     fullText ?? "",
     JSON.stringify(outcome?.evidence ?? []),
     outcome?.question?.title ?? "",
     outcome?.question?.body ?? "",
+  ].join("\n");
+  // The corpus covers every place an agent can cite: its own words, every
+  // timeline text since the run started (mid-run comments, human directives),
+  // and — ruling 549 — the text of the files this run saved, where a deliverer
+  // of files cites its evidence.
+  const citationCorpus = [
+    ownWords,
     savedFilesText(input.projectSlug, input.taskKey, runSaved, ctx.dataRoot),
     // Ruling 593: an entry cites a file in its evidence rows as well as its
     // text, and an entry that claims a file keeps it. Live on AWSC-32 a
@@ -5862,7 +5884,23 @@ export async function applyAgentCompletionEffects(
       pruned: attachmentsPrune.pruned,
     });
   }
-  const runAttachments = attachmentsPrune.kept;
+  // Ruling 627: a run's files are found by mtime in a store every run on the
+  // task writes to, so beside another specialist run the window holds that
+  // run's files too. A run that does not deliver then claims only the files
+  // its own words name, and never one the delivery already holds: under
+  // ruling 587 that claim would move the delivery onto this run's entry, and
+  // under ruling 556 make the subject this run's own work. Live on AWSC-80 the
+  // Estimate Judge, told to save no file, finished nine seconds after the
+  // Workflow Researcher saved the task's deliverable, and its comment claimed
+  // that file. The deliverer claims its whole window as before: its claim is
+  // the delivery.
+  const deliveredNow = completionFile
+    ? deliveredFileNames(completionFile.frontmatter, completionFile.timeline)
+    : new Set<string>();
+  const runAttachments =
+    finished.state === "finished" && !input.delivers && overlappingSpecialists > 0
+      ? attachmentsPrune.kept.filter((name) => ownWords.includes(name) && !deliveredNow.has(name))
+      : attachmentsPrune.kept;
   /** Ruling 362: this completion's RECORDED verdict was `approve` — a boundary
    *  for the react chain's depth count (the arm before the react decision). */
   let approvedThisReply = false;

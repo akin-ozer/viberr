@@ -1382,6 +1382,23 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(currentVerdicts(fm).map((v) => v.result)).toEqual(["request_changes"]);
   });
 
+  it("ruling 627: beside another specialist run, a delivered file it names is not its, and the delivery stays", async () => {
+    // A reviewer names the file it reviewed; the deliverer, live beside it,
+    // is the one that saved it again. Claiming it would move the delivery
+    // onto the reviewer's entry (ruling 587) and make the subject its own
+    // work (ruling 556). CANARY: drop the delivered-file check and
+    // `deliveredAt` moves.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeDeliveredAndObjectedTask(savedAt);
+    const runId = await finishedRunWith("Re-read assumptions.md: the 20%-free line is still missing.");
+    insertSiblingRun("primary", null);
+    saveInRunWindow(runId, ["assumptions.md"]);
+    await completeSupportingRun(runId);
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).toBe(savedAt);
+    expect(parsed.timeline.filter((e) => e.actor.kind === "agent" && e.actor.profileId === "reviewer").flatMap((e) => e.attachments ?? [])).toEqual([]);
+  });
+
   it("ruling 538: a file a relay carries here while a deliverer runs is the relay's, and delivers nothing", async () => {
     // CANARY: leave relay comments out of the completion's `carriedHere` and
     // the run claims `sample-01-input.csv` and stamps `deliveredAt`.
@@ -1655,9 +1672,61 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     for (const name of [cited, uncited, screenshot]) expect(existsSync(path.join(dir, name))).toBe(true);
     const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
     expect(claimed).toContain(cited);
-    expect(claimed).toContain(screenshot);
     expect(claimed).not.toContain(uncited);
+    // Ruling 627: nor a file of any kind it does not name.
+    expect(claimed).not.toContain(screenshot);
   });
+
+  /** A sibling run row on VIB-1, of `kind`, live or finished at `finishedAt`. */
+  function insertSiblingRun(kind: "primary" | "operator", finishedAt: string | null): void {
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
+           backend, model, state, started_at, created_at, updated_at, agent_profile_id, finished_at)
+         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Workflow Researcher', ?,
+           'codex', 'gpt-6-luna', ?, ?, ?, ?, 'developer', ?)`,
+      )
+      .run(store.slug, kind, finishedAt ? "finished" : "running", now, now, now, finishedAt);
+  }
+
+  it.each([
+    { sibling: "a live specialist run", kind: "primary", live: true, claims: "only the files it names" },
+    { sibling: "a specialist run that finished inside its window", kind: "primary", live: false, claims: "only the files it names" },
+    { sibling: "a live operator run", kind: "operator", live: true, claims: "its whole window" },
+  ] as const)(
+    "ruling 627: beside $sibling, a run that does not deliver claims $claims",
+    async ({ kind, live, claims }) => {
+      // Live on AWSC-80 the Estimate Judge, told to save no file, finished nine
+      // seconds after the Workflow Researcher saved round-6-comparison.md, and
+      // its comment claimed the deliverable. A sibling that finished first
+      // leaves the same file in the window. The operator saves no file of its
+      // own. CANARY: claim every kept file of the window again.
+      writeReviewTask();
+      const runId = await finishedRunWith("Redid the R6-10 score; my working is in `rescore-note.md`.");
+      insertSiblingRun(kind, live ? null : getRun(store.db, runId)!.finished_at!);
+      const names = ["round-6-comparison.md", "rescore-note.md", "page-2026-10-01T22-01-20-000Z.png"];
+      const dir = saveInRunWindow(runId, names);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "codex",
+          profileId: "reviewer",
+          role: "Estimate Judge",
+          delivers: false,
+          workdir: null,
+          agentHandle: "reviewer",
+        },
+        { id: runId, state: "finished" },
+      );
+      for (const name of names) expect(existsSync(path.join(dir, name))).toBe(true);
+      const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
+      expect(claimed.sort()).toEqual(claims === "its whole window" ? [...names].sort() : ["rescore-note.md"]);
+    },
+  );
 
   it("ruling 593: the prune keeps a working file another entry of its window cites in evidence or claims", async () => {
     // The Judge's verdict cited its snapshots in evidence rows, not in its
