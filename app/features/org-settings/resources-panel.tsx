@@ -308,7 +308,9 @@ export function ResourcesPanel({
       {browsingKb && (
         <StoreBrowser
           title={browsingKb.name}
-          subMono={browsingKb.uri + "/ · read live"}
+          // The folder path alone (owner request 2026-10-01): the browser's own
+          // note already says this is the real folder on disk.
+          subMono={browsingKb.uri + "/"}
           metaTail={
             <>
               re-scanned <RelativeStamp iso={browsingKb.lastIndexedAt} />

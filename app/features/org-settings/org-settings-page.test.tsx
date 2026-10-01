@@ -948,6 +948,9 @@ describe("ResourcesPanel", () => {
     expect(
       document.querySelector('[aria-label="Files · Architecture notes"]'),
     ).toBeTruthy();
+    // Its subtitle is the folder path alone (owner request 2026-10-01).
+    // CANARY: put " · read live" back after the path and this exact match fails.
+    expect(getByText("store://kb/architecture-notes/")).toBeTruthy();
     expect(getByText("overview.md")).toBeTruthy();
     expect(
       getByText(/This is the real folder on disk\. Files added outside Viberr/),
