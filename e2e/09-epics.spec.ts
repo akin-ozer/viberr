@@ -112,7 +112,7 @@ test("a task joins the epic from its own page", async ({ page }) => {
   await expect(taskRow(page, "VIB-166")).toBeVisible();
 });
 
-test("at 375px the epic page reads in one column", async ({ page }) => {
+test("at 375px the epic page reads in one column, and each task's title keeps a line", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto(EPIC);
   await expect(page.locator(".epic-history")).toContainText("Created by");
@@ -123,6 +123,15 @@ test("at 375px the epic page reads in one column", async ({ page }) => {
   // 0px beside a 340px Details column (ruling 560).
   expect(main!.width).toBeGreaterThan(300);
   expect(side!.y).toBeGreaterThanOrEqual(main!.y + main!.height);
+  // Ruling 615. CANARY: drop the task list's 36rem container query and the
+  // row stays one line: the stage, the status chip, the owner and Remove take
+  // it all, the title is 0px wide and the stage runs over the key.
+  const row = taskRow(page, "VIB-166");
+  const key = await row.locator(".epic-task-key").boundingBox();
+  const title = await row.locator(".epic-task-title").boundingBox();
+  const stage = await row.locator(".epic-task-stage").boundingBox();
+  expect(title!.width).toBeGreaterThan(120);
+  expect(stage!.y).toBeGreaterThanOrEqual(key!.y + key!.height);
 });
 
 test("the epic page and its dialogs have no WCAG 2.2 AA violations", async ({ page }) => {
