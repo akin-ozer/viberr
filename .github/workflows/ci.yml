@@ -26,7 +26,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Ruling 618: the suite runs on the userland the app ships on, as an
+      # Ruling 621: the suite runs on the userland the app ships on, as an
       # unprivileged user. The image's base is node:26-slim (Debian), and its
       # runtime stage adds git and ca-certificates; the server shells out to
       # rm, chmod and git, and this runner's Ubuntu has other versions of them

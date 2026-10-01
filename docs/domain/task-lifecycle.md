@@ -375,8 +375,14 @@ released" note naming who cleared it, a stored `blocked` lifted to `ready`, the 
 `dependency` notification to the owner and supervisors, and the operator re-invoked with
 `dependencies-released`). The `human` is where `clearWaitingToHuman` settles any task
 nothing holds, so a released task shows as someone's to move even in a project with no
-operator; an operator's drive marks it `agent` when it starts. A wait that can
-NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
+operator; an operator's drive marks it `agent` when it starts. A person's edit that
+leaves only done entries on the list releases it too, in the same write and through the
+engine's own `releaseTask` (ruling 620): such a list can only come from taking entries
+off, since an added done entry is refused. Its "Dependencies updated" note says every
+entry is done, the controller's `update_task` reply says the task is released, and the
+task page toasts "Released: … is done". The operator's own edit leaves that release to
+the minute sweep, because the release re-invokes the operator, and its reply says so.
+A wait that can NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
 reference to nothing): ONE "Waiting on work that cannot complete" note, one
 notification, `waiting: human`, and the list left for a person to edit. A task that
 already reached the terminal stage has its list cleared quietly — no note, no operator

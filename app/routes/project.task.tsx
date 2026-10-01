@@ -857,9 +857,11 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: !result.changed
             ? "Dependencies unchanged"
-            : result.blockedBy.length > 0
-              ? `Waits on ${result.blockedBy.join(", ")}`
-              : "No longer waits on other work",
+            : result.released && result.blockedBy.length > 0
+              ? `Released: ${result.blockedBy.join(", ")} ${result.blockedBy.length === 1 ? "is" : "are"} done`
+              : result.blockedBy.length > 0
+                ? `Waits on ${result.blockedBy.join(", ")}`
+                : "No longer waits on other work",
         };
       }
       case "resolve-packet": {

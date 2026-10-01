@@ -169,7 +169,8 @@ ticking reader, ruling 457), `use-stable-rows` (structural sharing of loader row
 values across revalidations, ruling 457), `number-ticker` (counts up to a figure,
 ruling 366(f); it commits only when the drawn digits change),
 `attach-files` (a composer's tray of picked, dropped or pasted files, its paperclip and its drop target, ruling 573) + `picked-files` (the rules a composer keeps files by, which the New task dialog shares), `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
-ruling 166), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-hint`.
+ruling 166), `pagination` (Previous, the page numbers with a gap for each skipped run, Next:
+shadcn's Pagination drawn with the sheet's classes, ruling 618), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-hint`.
 
 ## 6. `app/shared/`
 
