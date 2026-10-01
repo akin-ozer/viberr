@@ -4,13 +4,15 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { languageForName } from "~/ui/code-language";
+import { isMarkdownName, languageForName } from "~/ui/code-language";
 import { CodeView } from "~/ui/code-view";
 import { Icon } from "~/ui/icon";
+import { DocViewToggle, MarkdownDoc, type DocView } from "~/ui/markdown-doc";
 import { useDialog } from "~/ui/use-dialog";
 import { useRemoveFromRecord } from "./remove-from-record";
 import { attachmentKind, IMAGE_RE, looksBinary } from "./attachment-kind";
@@ -43,7 +45,17 @@ import { attachmentKind, IMAGE_RE, looksBinary } from "./attachment-kind";
  * out images and the known binary kinds by name and the bytes' NUL test rules
  * out the rest — and what it shows is `CodeView`: Shiki tokens by the name's
  * grammar, numbered lines, plain when no grammar is mapped.
+ *
+ * Ruling 614: except a markdown file, which opens rendered, with Preview / Raw
+ * at the top of the card; Raw is that same code reader.
  */
+
+/** Ruling 614: what a markdown attachment's rendered links resolve against —
+ *  the task's own files, through their serving route. */
+export interface AttachmentDocLinks {
+  names: ReadonlySet<string>;
+  base: string;
+}
 
 /** Re-exported for the panel and the timeline, which split images from files. */
 export { IMAGE_RE };
@@ -146,12 +158,18 @@ function LightboxTextBody({
   url,
   name,
   onUnservable,
+  links,
 }: {
   url: string;
-  /** The filename — it picks the grammar (ruling 363). */
+  /** The filename — it picks the grammar (ruling 363), and whether the file
+   *  renders as markdown (ruling 614). */
   name: string;
   onUnservable: () => void;
+  links: AttachmentDocLinks | null;
 }) {
+  /** Ruling 614: a markdown file opens rendered; Raw is the code reader. */
+  const markdown = isMarkdownName(name);
+  const [view, setView] = useState<DocView>("preview");
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "failed" }
@@ -216,11 +234,33 @@ function LightboxTextBody({
   }
   return (
     <>
-      <CodeView
-        className="lightbox-text"
-        text={state.text}
-        language={languageForName(name)}
-      />
+      {markdown && (
+        <div className="lightbox-head">
+          <DocViewToggle view={view} onChange={setView} />
+        </div>
+      )}
+      {markdown && view === "preview" ? (
+        // Scrolls on its own, so it takes focus and a name, as the code
+        // reader's <pre> does: a keyboard reaches all of a long document.
+        <div
+          className="lightbox-doc"
+          tabIndex={0}
+          role="region"
+          aria-label={"Preview of " + name}
+        >
+          <MarkdownDoc
+            text={state.text}
+            attachmentNames={links?.names}
+            attachmentsBase={links?.base}
+          />
+        </div>
+      ) : (
+        <CodeView
+          className="lightbox-text"
+          text={state.text}
+          language={languageForName(name)}
+        />
+      )}
       {state.truncated && (
         <p className="lightbox-text-status">
           Showing the first part of a large file. Download it for the rest.
@@ -232,10 +272,12 @@ function LightboxTextBody({
 
 function Lightbox({
   img,
+  links,
   onClose,
   onRemove,
 }: {
   img: LightboxImage;
+  links: AttachmentDocLinks | null;
   onClose: () => void;
   /** Ruling 582: the viewer may take this file off its task's record. */
   onRemove?: () => void;
@@ -288,9 +330,13 @@ function Lightbox({
     >
       {isText ? (
         <LightboxTextBody
+          // Each file opens on its own view (ruling 614): a markdown file
+          // opens rendered whatever the last one was switched to.
+          key={img.url}
           url={img.url}
           name={img.name}
           onUnservable={markUnservable}
+          links={links}
         />
       ) : isOther ? (
         <div className="lightbox-broken">
@@ -381,20 +427,37 @@ function Lightbox({
 export function AttachmentLightboxProvider({
   children,
   removable = false,
+  attachmentNames,
+  attachmentsBase,
 }: {
   children: ReactNode;
   /** Ruling 582: the viewer holds `remove-from-record`, so the card offers
    *  Remove on a task attachment. */
   removable?: boolean;
+  /** Ruling 614: the task's files and their serving route, which a rendered
+   *  markdown attachment's links and pictures resolve against. */
+  attachmentNames?: readonly string[];
+  attachmentsBase?: string | null;
 }) {
   const [img, setImg] = useState<LightboxImage | null>(null);
+  // Keyed on the names' content: the page hands over a new list on every
+  // render, and the removable card is memoised (ruling 457). The names are
+  // directory entries, which cannot contain "/", so the join is exact.
+  const nameKey = attachmentNames?.join("/") ?? "";
+  const links = useMemo(
+    () =>
+      attachmentsBase && nameKey
+        ? { names: new Set(nameKey.split("/")), base: attachmentsBase }
+        : null,
+    [nameKey, attachmentsBase],
+  );
   return (
     <LightboxContext.Provider value={setImg}>
       {children}
       {removable ? (
-        <RemovableLightbox img={img} setImg={setImg} />
+        <RemovableLightbox img={img} setImg={setImg} links={links} />
       ) : (
-        img && <Lightbox img={img} onClose={() => setImg(null)} />
+        img && <Lightbox img={img} links={links} onClose={() => setImg(null)} />
       )}
     </LightboxContext.Provider>
   );
@@ -407,9 +470,11 @@ export function AttachmentLightboxProvider({
 const RemovableLightbox = memo(function RemovableLightbox({
   img,
   setImg,
+  links,
 }: {
   img: LightboxImage | null;
   setImg: (img: LightboxImage | null) => void;
+  links: AttachmentDocLinks | null;
 }) {
   const [askRemove, removeDialog] = useRemoveFromRecord();
   // The task that serves the file takes its removal: its URL ends in
@@ -425,7 +490,14 @@ const RemovableLightbox = memo(function RemovableLightbox({
       : null;
   return (
     <>
-      {img && <Lightbox img={img} onClose={() => setImg(null)} {...(remove ? { onRemove: remove } : {})} />}
+      {img && (
+        <Lightbox
+          img={img}
+          links={links}
+          onClose={() => setImg(null)}
+          {...(remove ? { onRemove: remove } : {})}
+        />
+      )}
       {removeDialog}
     </>
   );

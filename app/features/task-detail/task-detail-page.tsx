@@ -872,8 +872,13 @@ export function TaskDetailPage({
     // Image evidence anywhere on this page — timeline thumbnails, inline
     // markdown embeds, the Attachments panel, cited evidence filenames —
     // opens in the in-app lightbox this provider renders (owner request
-    // 2026-08-21) instead of a raw-file tab.
-    <AttachmentLightboxProvider removable={roleCan(role, "remove-from-record")}>
+    // 2026-08-21) instead of a raw-file tab. A markdown attachment renders
+    // there, its pictures resolved against the task's files (ruling 614).
+    <AttachmentLightboxProvider
+      removable={roleCan(role, "remove-from-record")}
+      attachmentNames={attachments.map((a) => a.name)}
+      attachmentsBase={attachmentsBase}
+    >
     <div
       className="detail"
       ref={detailRef}

@@ -4665,6 +4665,11 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   .fm-toolbar select[aria-label],
   .ctl-composer textarea[rows], .dock-composer .ctl-composer textarea[rows],
   .field textarea[rows].mono { font-size: 1rem; }
+  /* Ruling 614: a document's raw text is a field too, and the rendered page
+     and the reader give up their wide gutters. One selector more than the
+     base rules, which the appended section declares later. */
+  .fm-doc .doc-src { font-size: 1rem; padding: .75rem 1rem; }
+  .fm-doc .doc-preview, .modal-card.lightbox-card .lightbox-doc { padding: 1rem; }
   /* Ruling 121: the controller dock becomes a bottom sheet — full width,
      entering and leaving along the bottom edge. The trigger stays on screen
      (R19-12: no control disappears under a width query); it rides just above
@@ -4935,8 +4940,10 @@ a.task-ref, a.kp-ref { white-space: nowrap; }
 /* A picture in a comment, a goal or a controller message takes the image edge
    (ruling 459): an agent's screenshot of a white page sat on the white card
    with no boundary. An outline, inset a pixel, so it costs no layout and
-   stays inside the .md-img-btn focus ring. */
-.md-body img { outline: 1px solid var(--image-outline); outline-offset: -1px; }
+   stays inside the .md-img-btn focus ring. A picture wider than its column
+   scales down to it (ruling 614): a document's screenshot ran past the
+   rendered page and scrolled it sideways. */
+.md-body img { outline: 1px solid var(--image-outline); outline-offset: -1px; max-width: 100%; }
 /* Wide tables scroll inside their own container — the page body never scrolls. */
 .md-table-wrap { overflow-x: auto; margin: .5rem 0; }
 /* Interface review 2026-09-24 (layo-5): the horizontal scrollers mark their
@@ -5902,24 +5909,8 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 }
 
 /* In-app store document editor (P13-LV-06) — knowledge bases are authorable
-   in the product, not only fillable by upload/import. */
-.fm-doc {
-  display: flex; flex-direction: column; gap: .5rem;
-  margin: .5rem 0 .25rem;
-  padding: .75rem;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-box);
-  /* P13-D-18: was var(--surface-2, …); --surface-2 does not exist, so only the
-     fallback ever applied. Resolved to that token. */
-  background: var(--surface);
-}
-.fm-doc .ta { min-height: 8rem; resize: vertical; }
-.fm-doc-acts { display: flex; justify-content: flex-end; gap: .5rem; }
-/* P14-UI-61: an OPENED document shows its real path — the name is the file's own
-   and is not retyped, so this arm carries no name input. The new-document arm
-   does, and it rides the shared `.field` chrome (ruling 149). */
-.fm-doc-path { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); }
-.fm-doc-acts .fm-hint { margin-left: 0; margin-right: auto; }
+   in the product, not only fillable by upload/import. Its card is declared in
+   the appended ruling 614 section. */
 
 /* Capability-matrix runtime-difference notes (P13-RT-14). */
 .mx-notes { padding: 1rem .25rem .25rem; }
@@ -9312,6 +9303,136 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .dep-opt-hint { flex: none; font-size: .69rem; color: var(--faint); white-space: nowrap; }
 .dep-opt[aria-disabled="true"] { cursor: default; }
 .dep-opt[aria-disabled="true"] > * { color: var(--placeholder); }
+
+/* ---------- appended: ruling 614, a markdown file opens rendered ---------- */
+/* The store browser's open document is one card. It was a path line over a
+   "Document contents" label, a bare textarea with a resize grip and a hint
+   that printed "/". Now a head carries the file and the Preview / Raw switch,
+   the body is the document, and a foot holds its state and actions. Head and
+   foot are quiet bands in the well tint, so the document between them is the
+   one bright surface. The card clips to its own corner, so every full-width
+   part inside it draws its focus ring inside; `flex: none` for the reason the
+   tree has it (layo-23): clipped, a flex item of the column `.modal-body` has
+   no automatic minimum and shrank to a strip, where now the body scrolls. */
+.fm-doc {
+  display: flex; flex-direction: column; flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-box);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+/* In Raw the card is the field, as the controller composer is (owner,
+   2026-09-25: a square ring inside a rounded frame, and a resize grip, read
+   as unfinished). The textarea draws no frame or ring of its own; the card
+   takes the field's blue edge and wash, and the ring on its own edge. */
+.fm-doc:has(.doc-src:focus) { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
+.fm-doc:has(.doc-src:focus-visible) { outline: 2px solid var(--blue); outline-offset: -1px; }
+.doc-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem;
+  padding: .375rem .375rem .375rem .75rem;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--tint-well);
+}
+.doc-glyph {
+  display: grid; place-items: center; flex: none;
+  width: 28px; height: 28px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--muted);
+}
+/* The file's path as a trail: the folders in the muted ink, the name in the
+   row's own, each a piece the line may wrap between. */
+.doc-path {
+  flex: 1 1 12rem; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 .375rem;
+  font-family: var(--font-mono); font-size: .75rem; color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.doc-path .dp-sep { color: var(--placeholder); }
+.doc-path .dp-name { color: var(--fg); font-weight: 600; }
+.doc-path .doc-title { font-family: var(--font-body); font-size: .88rem; font-weight: 600; color: var(--fg); }
+.doc-head .doc-view { margin-left: auto; }
+/* A new document's name is the card's first row: the field's own chrome and
+   visible label, side by side. */
+.field.doc-name {
+  flex-direction: row; align-items: center; gap: .75rem;
+  padding: .5rem .75rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.field.doc-name .flabel { flex: none; }
+.field.doc-name input[type="text"] { flex: 1 1 12rem; width: auto; min-width: 0; }
+.doc-notes { display: flex; flex-direction: column; gap: .5rem; padding: .75rem .75rem 0; }
+/* The two bodies share a height range, so switching between them moves the
+   foot as little as the text allows: each grows with its text from 12rem to
+   the cap, then scrolls. */
+.doc-preview {
+  min-height: 12rem; max-height: min(56vh, 34rem);
+  overflow: auto; overscroll-behavior: contain;
+  padding: 1.5rem 2rem;
+}
+.doc-preview:focus-visible { outline-offset: -2px; }
+.doc-src {
+  display: block; width: 100%;
+  min-height: 12rem; max-height: min(56vh, 34rem);
+  field-sizing: content;
+  margin: 0; padding: 1rem 1.5rem;
+  border: 0; outline: none; resize: none;
+  background: transparent; color: var(--fg);
+  font-family: var(--font-mono); font-size: .75rem; line-height: 1.7;
+  tab-size: 4;
+}
+.doc-blank {
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+  min-height: 12rem; margin: 0; padding: 1.5rem;
+  font-size: .88rem; color: var(--muted); text-align: center;
+}
+.doc-blank[role="alert"] .ico { color: var(--coral-dark); }
+.doc-foot {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .5rem;
+  padding: .5rem .5rem .5rem .75rem;
+  border-top: 1px solid var(--hairline);
+  background: var(--tint-well);
+}
+.doc-state {
+  display: inline-flex; align-items: center; gap: .375rem;
+  margin-right: auto; min-width: 0;
+  font-size: .75rem; color: var(--muted);
+}
+.doc-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--amber-dark); }
+
+/* The document type, for a file read rather than a comment: one centred 48rem
+   column, as the controller transcript reads (ruling 572), at the body step
+   with a reading leading, paragraphs running the column. The top heading
+   renders at h3 under the surface's own h2 (`MarkdownDoc`), so the levels are
+   set by rendered tag: the title, sections over a hairline, subsections, and
+   the quiet rest. Weights stay under the app's 800 headings: a document is
+   read, not scanned. */
+.md-doc { max-width: 48rem; margin-inline: auto; font-size: .88rem; line-height: 1.65; color: var(--fg); }
+.md-doc p, .md-doc li { max-width: none; }
+.md-doc h3, .md-doc h4, .md-doc h5, .md-doc h6 { margin: 1.5rem 0 .5rem; line-height: 1.3; }
+.md-doc h3 { font-size: 1.25rem; font-weight: 700; letter-spacing: var(--track-section); }
+.md-doc h4 { font-size: 1rem; font-weight: 700; padding-bottom: .375rem; border-bottom: 1px solid var(--hairline); }
+.md-doc h5 { font-size: .88rem; font-weight: 700; }
+.md-doc h6 { font-size: .88rem; font-weight: 600; color: var(--muted); }
+.md-doc blockquote { border-left-color: var(--border); color: var(--muted); }
+.md-doc hr { margin: 1.5rem 0; }
+/* A document's tables carry its sentences, so they take the body step and
+   let a header wrap, top-aligned rows reading across. */
+.md-doc table { font-size: .88rem; }
+.md-doc th, .md-doc td { padding: .5rem .75rem; vertical-align: top; }
+.md-doc th { white-space: normal; }
+
+/* The attachment reader: a markdown file's switch heads the card, over the
+   rendered document in the code reader's frame. */
+.lightbox-card .lightbox-head { display: flex; align-items: center; gap: .5rem; padding: .125rem .125rem .5rem; }
+.lightbox-card .lightbox-doc {
+  max-height: 68vh; overflow: auto; overscroll-behavior: contain;
+  padding: 1.5rem 2rem;
+  background: var(--surface);
+  border: 1px solid var(--hairline); border-radius: var(--radius-box);
+}
 
 /* ---------- appended: ruling 616, the account picker ---------- */
 /* Profile → Agent accounts: the account a backend's runs use is a select
