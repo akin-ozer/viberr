@@ -81,7 +81,7 @@ export interface OrgSettingsView {
   };
   stages: StageDef[];
   /**
-   * Ruling 614: each live project whose board has stages the default workflow
+   * Ruling 618: each live project whose board has stages the default workflow
    * lacks, so the AgentModal can offer them grouped by project (its Custom
    * stages section) instead of only echoing an id a profile already stores.
    */
@@ -132,7 +132,7 @@ export interface AuthProviderView {
 }
 
 /**
- * Ruling 614: one live project's board stages outside the default workflow.
+ * Ruling 618: one live project's board stages outside the default workflow.
  * A global profile names its eligible stages by id, and a project's own board
  * can add ids the default workflow has never had (akinozer.com's `build`, or
  * `intake`, `mapping` and `estimate`).

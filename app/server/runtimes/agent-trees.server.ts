@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, type Stats } from "node:fs";
+import { lstatSync, readdirSync, statSync, type Stats } from "node:fs";
 import path from "node:path";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -153,6 +153,9 @@ export interface TreeView {
    *  there (one an agent uid owns, or any link in a folder an agent can
    *  write), or null. */
   agentLinkAbove(target: string): string | null;
+  /** An agent could put something else at the target's path: the folder
+   *  holding it is one an agent writes (or one the server cannot look at). */
+  agentMayReplace(target: string): boolean;
 }
 
 function present(target: string): boolean {
@@ -256,11 +259,23 @@ function agentLinkAboveOf(target: string): string | null {
   }
 }
 
+/** The target's folder, followed: a link above it is either one no agent
+ *  could have put there or one `agentLinkAbove` already refused. */
+function agentMayReplaceOf(target: string): boolean {
+  try {
+    const st = statSync(path.dirname(target));
+    return isAgentUid(st.uid) || (st.mode & 0o022) !== 0;
+  } catch {
+    return true;
+  }
+}
+
 const FS_VIEW: TreeView = {
   present,
   agentOwners: agentOwnersIn,
   left: leftOf,
   agentLinkAbove: agentLinkAboveOf,
+  agentMayReplace: agentMayReplaceOf,
 };
 
 /**
@@ -271,8 +286,9 @@ const FS_VIEW: TreeView = {
  *
  * The order: the person's pass, then each agent uid found in what is left
  * (at most {@link OWNER_ROUNDS} rounds). With isolation on, when that leaves
- * entries, the server opens its own to the group (`chmod -R -P g+rwX`) and
- * the person's pass and the rounds run again; when it leaves an empty
+ * entries, the server opens its own to the group (`chmod -R -P g+rwX`, or
+ * without `-P` on a chmod that lacks it, where no agent may replace the
+ * target) and the person's pass and the rounds run again; when it leaves an empty
  * directory the server owns, the server's `rmdir` removes it (ruling 495).
  * Exported for the plan's own tests, which pass a {@link TreeView}.
  */
@@ -324,7 +340,14 @@ export function* removalPlan(
   // Ruling 495(b): what is left is the server's own; opened to the group,
   // never removed, by the server.
   if (view.left(target) === "entries" && serverMayAct()) {
-    yield { launch: null, command: "chmod", args: ["-R", "-P", "g+rwX", "--", target] };
+    const opened: StepOutcome = yield { launch: null, command: "chmod", args: ["-R", "-P", "g+rwX", "--", target] };
+    // GNU chmod before coreutils 9.5 has no `-P` and follows a link named on
+    // the command line (an Ubuntu 24.04 host). Without it the step runs only
+    // where no agent can put a link at the target's path; links met while
+    // recursing are ignored by every GNU chmod.
+    if (!opened.ok && /invalid option -- '?P'?/.test(opened.stderr) && !view.agentMayReplace(target)) {
+      yield { launch: null, command: "chmod", args: ["-R", "g+rwX", "--", target] };
+    }
     if (yield* agentPasses(person)) return null;
   }
   // Ruling 495(c): the emptied root the server owns goes with its rmdir.
@@ -384,10 +407,12 @@ const ERRNO_BY_MESSAGE = new Map([
 /** "<errno> on <path>" from the first refusal of rm (GNU: `rm: cannot remove
  *  '<path>': <text>`; BSD: `rm: <path>: <text>`) or of the server's rmdir of
  *  an emptied root (GNU: `rmdir: failed to remove '<path>': <text>`; BSD:
- *  `rmdir: <path>: <text>`). */
+ *  `rmdir: <path>: <text>`). GNU names itself by its argv[0], and `spawnOf`
+ *  runs the resolved binary, so the name may carry its directory
+ *  (`/usr/bin/rm: cannot remove …`). */
 export function removalFailure(stderr: string): string | null {
   for (const line of stderr.split("\n")) {
-    const trimmed = line.trim();
+    const trimmed = line.trim().replace(/^\/\S*\/(rm|rmdir):/, "$1:");
     const match =
       /^rm: cannot remove '(.+)': (.+)$/.exec(trimmed) ??
       /^rmdir: failed to remove '(.+)': (.+)$/.exec(trimmed) ??

@@ -587,7 +587,7 @@ const STAGES: StageDef[] = [
   { id: "done", name: "Done", color: "green" },
 ];
 
-/** Ruling 614: live projects' own stages, as the loader serves them. */
+/** Ruling 618: live projects' own stages, as the loader serves them. */
 const BILLING_STAGES: ProjectCustomStages = {
   slug: "billing-service",
   name: "Billing Service",
@@ -876,7 +876,7 @@ describe("ResourcesPanel", () => {
    * akinozer.com's own `build` stage. The row printed the bare id, and the
    * editor offered only the default workflow's chips, so Content Writer opened
    * with nothing pressed and `build` could be neither seen nor removed while
-   * every save kept it. Ruling 614: a stage a live board has is offered in that
+   * every save kept it. Ruling 618: a stage a live board has is offered in that
    * project's row, so the stored-ids row holds only what no board has. Canary:
    * drop the `storedOnlyStages` chips.
    */
@@ -919,14 +919,14 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 614 (2026-10-01): a project's own stages were offered only
+   * Ruling 618 (2026-10-01): a project's own stages were offered only
    * once a profile already stored one, as a pressed chip after the defaults.
    * Each live project's stages are offered under its name now, and the
    * projects the profile already names lead. Canary: render the Custom stages
    * rows from `projectStages` in the loader's order, or drop `stageChip` from
    * a row.
    */
-  it("ruling 614: a project's own stages are offered in its row, and a press posts the stage id", async () => {
+  it("ruling 618: a project's own stages are offered in its row, and a press posts the stage id", async () => {
     const outside: GagentView[] = [
       { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
     ];
@@ -967,11 +967,11 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 614: the rows page three projects at a time behind the pager, and
+   * Ruling 618: the rows page three projects at a time behind the pager, and
    * the order is taken once, at the open, so a press never moves a row to
    * another page. Canary: page by 4, or reorder `projects` on every render.
    */
-  it("ruling 614: Custom stages page three projects at a time, and a press on one page keeps the others'", async () => {
+  it("ruling 618: Custom stages page three projects at a time, and a press on one page keeps the others'", async () => {
     const seven = Array.from({ length: 7 }, (_, i) => projectRow(i + 1));
     const sixth: GagentView[] = [{ ...GAGENTS[1]!, id: "sixth", name: "Sixth", stages: ["s6"] }];
     const { getByText, getByLabelText, getByRole } = renderPanel(
@@ -1081,6 +1081,9 @@ describe("ResourcesPanel", () => {
     expect(
       document.querySelector('[aria-label="Files · Architecture notes"]'),
     ).toBeTruthy();
+    // Its subtitle is the folder path alone (owner request 2026-10-01).
+    // CANARY: put " · read live" back after the path and this exact match fails.
+    expect(getByText("store://kb/architecture-notes/")).toBeTruthy();
     expect(getByText("overview.md")).toBeTruthy();
     expect(
       getByText(/This is the real folder on disk\. Files added outside Viberr/),

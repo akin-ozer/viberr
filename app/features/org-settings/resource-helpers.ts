@@ -35,7 +35,7 @@ export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void
  * default workflow's stages. A template deployed onto a project with its own
  * stages keeps that project's ids (`build` on akinozer.com): the row printed
  * the raw id and the editor offered no chip for it at all, so Content Writer
- * looked eligible nowhere while it worked at `build`. Since ruling 614 the
+ * looked eligible nowhere while it worked at `build`. Since ruling 618 the
  * editor offers such a stage in its project's row of Custom stages, and only
  * the row still says this.
  */

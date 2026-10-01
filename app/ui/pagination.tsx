@@ -2,7 +2,7 @@ import { Icon } from "./icon";
 
 /**
  * Page controls laid out the way shadcn/ui's Pagination draws them (ruling
- * 614): Previous, the page numbers with a gap where a run is skipped, Next.
+ * 618): Previous, the page numbers with a gap where a run is skipped, Next.
  * The registry component is a design reference, read the way
  * `design/html-app` is, never an install (ruling 166): this renders with the
  * sheet's own `.pager*` classes.

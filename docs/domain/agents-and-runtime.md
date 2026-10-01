@@ -52,7 +52,7 @@ recently selected (`selected_at`; `ACTIVE_FIRST`). Every selection is stamped pa
 person's latest one on that backend (`selectionStamp`), so two selections in one millisecond
 still rank in the order they happened. Connecting, by a
 hosted sign-in or a pasted key, adds an account and makes it active; switching
-(`switchBackendAccount`, Profile → Agent accounts' **Use this account**) stamps
+(`switchBackendAccount`, Profile → Agent accounts' **Runs use** picker, ruling 616) stamps
 `selected_at` and nothing else, so no vendor process runs and no file moves, and a run
 already going keeps the account it started on. Disconnecting is per account
 (`disconnectBackendAccount`): removing the active one hands runs to the account used
@@ -1978,13 +1978,16 @@ runtime's answer for a missing grant.
   server itself wrote there no agent pass can remove (ruling 495, F40-71: a skill plugin
   copied at the store's 0755, the `workspace/` root in a task directory only the server
   writes), so when the passes leave entries the server opens its own to their group
-  (`chmod -R -P g+rwX`, `-P` so it follows no link, not even the tree's own) and the
+  (`chmod -R -P g+rwX`, `-P` so it follows no link, not even the tree's own; a GNU chmod
+  older than coreutils 9.5 has no `-P`, and there the step runs without it only when no
+  agent can write the folder holding the tree, ruling 617) and the
   person's pass and the rounds run again; when they leave an empty directory the server
   owns, the server removes it with `rmdir`. The server never runs `rm` there, and neither
   step runs while a directory above the tree is a link an agent could have put there (one
   an agent uid owns, or any link in a folder an agent can write, a link the server's own
   clone checked out included). A tree still
-  there is a fault naming the path and the errno ("EACCES on …/dev-1wnDsF"). With no
+  there is a fault naming the path and the errno ("EACCES on …/dev-1wnDsF"; GNU rm names
+  itself by the absolute path it was run by, which the reading drops). With no
   launcher the same two commands run as the server and nothing else; with isolation on
   and no owner to name the removal refuses and nothing is removed. A checkout with no `.git/HEAD` found when a
   run (or the operator) prepares its checkout is removed as its person and cloned again,

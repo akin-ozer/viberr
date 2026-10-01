@@ -97,7 +97,7 @@ export function ResourcesPanel({
     skills: Record<string, number>;
   };
   stages: StageDef[];
-  /** Ruling 614: the agent editor's Custom stages, by project. */
+  /** Ruling 618: the agent editor's Custom stages, by project. */
   projectStages: ProjectCustomStages[];
 }) {
   const [modal, setModal] = useState<ResourceModal | null>(null);
@@ -313,7 +313,9 @@ export function ResourcesPanel({
       {browsingKb && (
         <StoreBrowser
           title={browsingKb.name}
-          subMono={browsingKb.uri + "/ · read live"}
+          // The folder path alone (owner request 2026-10-01): the browser's own
+          // note already says this is the real folder on disk.
+          subMono={browsingKb.uri + "/"}
           metaTail={
             <>
               re-scanned <RelativeStamp iso={browsingKb.lastIndexedAt} />

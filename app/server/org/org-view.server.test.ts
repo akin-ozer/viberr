@@ -24,13 +24,13 @@ function boardOf(stages: StageDef[]): Pick<ProjectFrontmatter, "stages" | "workf
 }
 
 /**
- * Ruling 614: the global profile editor offers each live project's own
+ * Ruling 618: the global profile editor offers each live project's own
  * stages under the project's name, from this slice of the loader. A stage the
  * default workflow has is already a Default workflow chip; a board's last
  * stage is closed by a human whatever the board calls it; an archived
  * project's board is one nobody edits any more.
  */
-describe("getOrgSettingsView: projectStages (ruling 614)", () => {
+describe("getOrgSettingsView: projectStages (ruling 618)", () => {
   it("serves each live project's stages outside the default workflow, never its last, by name", () => {
     // CANARY: drop the terminal filter and `shipped` joins Estimates' row;
     // drop the archived filter and Old Board's row comes back; drop the

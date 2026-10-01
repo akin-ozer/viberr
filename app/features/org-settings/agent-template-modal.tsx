@@ -59,11 +59,11 @@ export const kbLegacyOf = (
 const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
-/** Ruling 614: the Custom stages list pages through projects this many at a
+/** Ruling 618: the Custom stages list pages through projects this many at a
  *  time. */
 const PROJECTS_PER_PAGE = 3;
 
-/** Ruling 614: one row of the Custom stages list, a project's own stages under
+/** Ruling 618: one row of the Custom stages list, a project's own stages under
  *  its name and task key, or the stored ids no board has. The row is a named
  *  group, so a chip that reads "To do" is heard with the project it is on. */
 function StageRow({
@@ -146,7 +146,7 @@ export function AgentModal({
 }: {
   initial: GagentView | null;
   stages: StageDef[];
-  /** Ruling 614: each live project's stages outside the default workflow. */
+  /** Ruling 618: each live project's stages outside the default workflow. */
   projectStages: ProjectCustomStages[];
   kbs: KbView[];
   mcps: McpView[];
@@ -195,7 +195,7 @@ export function AgentModal({
   // Ruling 479(h): a stored stage the chips below do not offer (a project's own
   // `build`, carried into the template) had no chip, so it could be neither
   // seen nor removed and every save kept it. Held from the open, so a chip
-  // pressed off stays on screen to be pressed back on. Ruling 614: a stage a
+  // pressed off stays on screen to be pressed back on. Ruling 618: a stage a
   // live project's board has is offered in that project's row, so this is
   // only what no board has any more (a project archived, a stage renamed).
   const [storedOnlyStages] = useState<string[]>(() =>
@@ -207,7 +207,7 @@ export function AgentModal({
         )
       : [],
   );
-  // Ruling 614: the projects whose stages the profile already names lead, so
+  // Ruling 618: the projects whose stages the profile already names lead, so
   // what it stores is on the first page. Ordered once, at the open, so a press
   // never moves a row to another page.
   const [projects] = useState<ProjectCustomStages[]>(() => {
@@ -424,7 +424,6 @@ export function AgentModal({
         </label>
         <textarea
           id="ga-persona"
-          className="ta"
           rows={6}
           value={persona}
           placeholder="How this agent works: its responsibilities, standards, reporting format…"
@@ -442,7 +441,7 @@ export function AgentModal({
               actually makes rather than one it cannot. */}
           <span className="fhint">Done is closed by a human, never by an agent</span>
         </span>
-        {/* Ruling 614 (2026-10-01): the stages a project's own board
+        {/* Ruling 618 (2026-10-01): the stages a project's own board
             adds were echoed only once a profile already stored one, as a
             pressed chip after the defaults that repeated "not in the default
             workflow". They are offered now, grouped by the project whose board
