@@ -13,7 +13,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
  * - Home `rebuild-projections` intent: admin-only full drop + rebuild with
  *   identical counts and an audit row.
  * - /resources/health: `{ ok, projections: { projects, tasks }, watcher }`.
- * - Home `hide-setup` intent (ruling 618): the setup checklist closed for the
+ * - Home `hide-setup` intent (ruling 621): the setup checklist closed for the
  *   sign-in that closed it.
  */
 
@@ -97,7 +97,7 @@ function refusal(result: HomeActionResult) {
 }
 
 /** The setup checklist's close answers `ok` in the wrapper that sets its
- *  cookie (ruling 618); this is that cookie's Set-Cookie value. */
+ *  cookie (ruling 621); this is that cookie's Set-Cookie value. */
 function closeCookie(result: HomeActionResult): string {
   const cookie =
     "init" in result && result.data.ok
@@ -210,12 +210,12 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
 });
 
 /**
- * Ruling 618: the setup checklist's close hides it for the sign-in that
+ * Ruling 621: the setup checklist's close hides it for the sign-in that
  * pressed it, through a cookie that names that sign-in and has no expiry (the
  * browser drops it with its own session). The demo seed leaves Arda's
  * checklist open: he holds no Claude or Codex account of his own.
  */
-describe("hide-setup intent (ruling 618)", () => {
+describe("hide-setup intent (ruling 621)", () => {
   it("closes the checklist for this sign-in, and the next sign-in has it back", async () => {
     const session = await app.cookieFor(ardaId);
     expect((await runHomeLoader(session.cookie)).setup).not.toBeNull();

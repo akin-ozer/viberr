@@ -18,7 +18,7 @@ import type { HomeSetupStep } from "./home-query.server";
  * person's own Agent accounts (ruling 127: the only place either is connected),
  * and the first project in Home's own dialog.
  *
- * Ruling 618: the close in the head hides the card for the rest of the
+ * Ruling 621: the close in the head hides the card for the rest of the
  * session, and it is back with the next one while a step is still open. It
  * comes with the first project: on a Home with no project the card is the
  * page's only way to start one, and the loader keeps it there.

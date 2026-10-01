@@ -152,7 +152,7 @@ export function HomePage({
     }
   });
 
-  // Ruling 618: the setup checklist's close. The card goes at once (personal
+  // Ruling 621: the setup checklist's close. The card goes at once (personal
   // UI state, like a pin), and the answer's cookie keeps it gone for the rest
   // of this session; a refused close brings it back and says why.
   const setupFetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -296,7 +296,7 @@ export function HomePage({
         {/* Ruling 532: an empty Home is never without the checklist, whose
             last step is the first project, so it stands where the empty
             state's dashed box did. Once there is a project, the person may
-            close it for the session (ruling 618). */}
+            close it for the session (ruling 621). */}
         {data.setup && !setupClosed && (
           <SetupChecklist
             steps={data.setup}

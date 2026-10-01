@@ -2762,6 +2762,29 @@ describe("task anchoring (ruling 121)", () => {
     const listedAgain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
     expect(listedAgain.find((t) => t.key === key)!.waitsOn).toEqual(["VIB-142 (open)"]);
   });
+
+  it("ruling 620: taking the last open entry off a wait releases the task, and the reply says so", async () => {
+    // Live on aws-cost-calculator the reply read "blocked by (AWSC-73,
+    // AWSC-74)" for two done tasks, the board still read blocked, and the
+    // controller asked a person to clear both lists. CANARY: report the
+    // satisfied list as a bare "blocked by (…)".
+    const { getTaskSummary } = await import("~/server/projections/task-query.server");
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const created = await call(ids.contributor, "create_task", { title: "Waits on two", blockedBy: ["VIB-142"] });
+    const key = /VIB-\d+/.exec(created)![0];
+    // VIB-139 is done in the demo seed: it reached the list before it finished.
+    await updateTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot }, (p) => {
+      p.frontmatter.blockedBy = ["VIB-139", "VIB-142"];
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    expect(await callAnchored(ids.contributor, "update_task", { blockedBy: ["VIB-139"] }, key)).toBe(
+      `[done] ${key} updated: blocked by (VIB-139: every entry is done, so the task is released).`,
+    );
+    const summary = getTaskSummary(app.db, SLUG, key)!;
+    expect(summary.blockedBy).toEqual([]);
+    expect(summary.readiness).not.toBe("blocked");
+  });
 });
 
 // ------------------------------------------ global agent template grants

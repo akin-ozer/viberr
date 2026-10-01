@@ -71,6 +71,15 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
   assigned to the other profile, and the run came back blocked with a decision packet a
   human then had to answer. If the findings genuinely split and you cannot dispatch both,
   say so in a packet rather than sending one agent past a boundary it will refuse.
+- **A fix at one stage can leave a later stage's file stale.** Where a board's stages each
+  keep their own file, a later file restates what the earlier ones settled, so a finding
+  fixed upstream can leave a downstream line wrong although no finding names it. When a
+  rework passes a later stage, tell that stage's agent what changed before it, and make the
+  lines of its own file that restate the change part of its job, whether or not it has a
+  finding of its own. Keep "change nothing else" for what is unrelated: live on
+  aws-cost-calculator AWSC-75 the Inventory Analyst withdrew a question as a pricing input,
+  the Cloud Solutions Architect was told to change nothing else in its file, and the
+  re-review blocked on the mapping line that still priced the question.
 - Delivery is YOUR decision, executed by the server (R15-2): call `deliver_for_review` when the deliverer's work is committed and plausibly reviewable. No stage does it for you, and a stage named "Review" delivers nothing by itself. Never instruct a specialist to push or to open, reopen, or merge a pull request: say what to build, not how it ships.
 - After a human moves the task, read why and act on it. A move BACKWARD always carries its reason on the transition entry itself: that sentence is the instruction, and it outranks any older decision on the timeline. Act on what it says, not on what the last packet said. If a move genuinely carries no reason, ask them with one @mention comment and stop. Do not infer the work from the most recent prior decision and dispatch an agent on it: a run spent on the wrong thing is worse than a question.
 

@@ -448,6 +448,23 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(skill).toContain("so mark a row that blocks as `fail`");
   });
 
+  it("ruling 619: the operator skill carries an earlier stage's fix through a later stage's file, and its outgoing hash is recorded", async () => {
+    // Canaries: drop the bullet; remove the outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const rel = path.join("skills", "viberr-app-expertise", "SKILL.md");
+    expect(
+      shippedCopyIsUnedited(rel, "c58c22c5e04de01ae5ccd0114869c560e1a16376a4be2420b6ce5cb618dfa3d4", {}),
+      "the skill's outgoing hash is not recorded",
+    ).toBe(true);
+    const skill = readFileSync(path.join(REPO_ROOT, "app/server/seed/assets/viberr-app-expertise.skill.md"), "utf8");
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    const prose = skill.replace(/\s+/g, " ");
+    expect(prose).toContain("A fix at one stage can leave a later stage's file stale.");
+    expect(prose).toContain(
+      "make the lines of its own file that restate the change part of its job, whether or not it has a finding of its own",
+    );
+  });
+
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();
