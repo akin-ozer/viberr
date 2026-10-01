@@ -2815,7 +2815,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               );
               if (!wait.changed) unchanged.push("blocked by");
               else if (wait.blockedBy.length === 0) applied.push("blocked by (cleared: the task is released)");
-              else applied.push(`blocked by (${wait.blockedBy.join(", ")})`);
+              else if (wait.released) {
+                applied.push(`blocked by (${wait.blockedBy.join(", ")}: every entry is done, so the task is released)`);
+              } else applied.push(`blocked by (${wait.blockedBy.join(", ")})`);
             } catch (error) {
               if (!(error instanceof AppError)) throw error;
               firstError ??= error;

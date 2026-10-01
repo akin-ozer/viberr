@@ -326,6 +326,14 @@ locked write, offering `question_reviewer` among its options (ruling 237); when 
 packet is open at that instant the escalation is skipped and raised again when that one is
 answered (ruling 328).
 
+**Rework through stages** (ruling 619). A verdict's findings go to the agents that own
+them, each told which findings it is not getting and who has them. On a board whose stages
+each keep their own file, a later file restates what the earlier ones settled, so a fix
+upstream can leave a downstream line wrong although no finding names it. When a rework
+passes a later stage, the operator tells that stage's agent what changed before it. The
+lines of the agent's own file that restate the change are part of its job, whether or not
+it has a finding of its own.
+
 **Text for another task** (ruling 488). The non-negotiable rules carry it whatever the
 persona says: text meant for ANOTHER task of the project is posted there with
 `relay_to_task`, an agent's `relay` entries are posted for it, and nobody is handed text

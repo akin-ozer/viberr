@@ -69,6 +69,7 @@ function renderPanel(mcp: McpView, server: StubServer = {}) {
           gagents={[]}
           templateGrants={{ kbs: {}, mcps: {}, skills: {} }}
           stages={[]}
+          projectStages={[]}
         />
       </ToastProvider>
     );
