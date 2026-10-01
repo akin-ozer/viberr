@@ -146,7 +146,8 @@ failure toast never renders the success tick).
 `avatar` + `initials`, `identity` (agent glyph: sparkle for Claude, cpu for Codex, shield
 for the operator), `icon` (one stroke icon set), `pill` (the one
 readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` ``,
-`@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `collapsible`
+`@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `markdown-doc`
+(a markdown file read as a document, and its Preview / Raw switch, ruling 614), `collapsible`
 (a box taller than 340px clamps behind Show more: a long comment, a task's long attachment
 list, ruling 510; its `FoldToggle` counts what it hides beyond the box and keeps its place
 on Show less, and `useFirstRow` counts the tiles on a wrapping strip's first line, so a
