@@ -55,8 +55,9 @@ export interface EnvelopeFacts {
   apiErrorStatus?: number | null;
   /** Ruling 130(a): the result envelope's `terminal_reason` (`api_error`, …). */
   terminalReason?: string | null;
-  /** A live quota reading — Claude's `rate_limit_event`, or the Codex
-   *  rollout's rate-limit snapshot the adapter reads (ruling 604) — folded
+  /** A live quota reading — Claude's `rate_limit_event` (beside the plan
+   *  windows the run's CLI reported, ruling 611), or the Codex rollout's
+   *  rate-limit snapshot the adapter reads (ruling 604) — folded
    *  into the instance-wide backend-quota store by the sink, so approaching
    *  exhaustion is visible BEFORE a run fails on it (pass-29 gap 3.2). */
   rateLimit?: {
@@ -66,8 +67,9 @@ export interface EnvelopeFacts {
     resetsAt: number | null;
     isUsingOverage: boolean;
     /** Ruling 608: every window the provider reported, shortest first (Codex
-     *  names its five-hour and weekly windows at once); the fields above are
-     *  the one closest to its limit. Absent when only that one is known. */
+     *  names its five-hour and weekly windows at once, and a Claude run's CLI
+     *  its plan windows, ruling 611); the fields above are the binding one.
+     *  Absent when only that one is known. */
     windows?: { rateLimitType: string; utilization: number | null; resetsAt: number | null }[];
   } | null;
   /** Ruling 369: what the prompt cache did for ONE model call (a Claude

@@ -279,7 +279,8 @@ per person.
 `rate_limit_event` envelopes, and the Codex rate-limit snapshot the adapter reads from each
 rollout `token_count` event (ruling 604: the window closest to its limit, as
 `five_hour`/`seven_day`, `rejected` at 100%, sent again only when it changes; ruling 608:
-with every window it reported in `windows`, shortest first), into
+with every window it reported in `windows`, shortest first), and the plan windows a Claude
+run's own CLI reports at `system/init` (ruling 611: §2.4), into
 `backendRateLimit.<backend>`; a quota-refused failure
 (terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` when the terminal
 line's `failure.windowRejected` says the provider rejected the window OR the provider's
@@ -356,6 +357,19 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   never in its recorded system prompt (ruling 444). Every list the adapter sends is in
   name order (`skills`, the `mcpServers` map, `allowedTools`, `disallowedTools`), so two
   runs of one profile hand the CLI the same bytes.
+- Plan windows (ruling 611). When `system/init` arrives the adapter asks its own CLI, once,
+  for the data behind `/usage`: the SDK's experimental
+  `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })`
+  (no model call; the scan of local transcripts skipped), with a 20 s limit. The answer's
+  windows that carry a percentage (`five_hour`, `seven_day`, `seven_day_opus`,
+  `seven_day_sonnet`, `seven_day_oauth_apps`, and each per-model weekly window as
+  `seven_day_<name>`) become `windows`, the percentage read as a fraction and clamped, the
+  binding fields the window closest to its limit. They ride the next line's
+  `facts.rateLimit`, and every later `rate_limit_event` is recorded beside them: its window
+  takes the event's percentage and reset when the event has them, and a warning or a
+  rejection keeps that window as the binding one with the provider's status. An SDK without
+  the request, an API-key or third-party session (`rate_limits_available: false`), a failed
+  request or one past the limit leaves the event readings as they came, and the run goes on.
 - Context window and compaction (rulings 371, 373, 376). No mid-run window: every
   `AUTO_COMPACT_WINDOW` entry is null (ruling 376) and the CLI compacts at its model's
   own limit (`startRun` would set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` from

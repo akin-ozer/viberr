@@ -100,9 +100,10 @@ export interface ProfileBackendRefusal {
 /**
  * Ruling 294: what this backend last told Viberr about THIS person's window.
  *
- * An observation, never a probe — Viberr has no way to ask a provider how much
- * of a window is left, so this is whatever the last run billed to this person
- * happened to report. That is why it carries `observedAt` and why the card
+ * An observation, never a probe: this is whatever the last run billed to this
+ * person reported. A Claude run asks its own CLI for the account's plan windows
+ * when it starts (ruling 611), and a Codex run reads its rollout (ruling 604);
+ * nothing asks between runs. That is why it carries `observedAt` and why the card
  * renders the age beside the number: a percentage with no age reads as current
  * when it may be hours old, and the honest failure here is a person deciding
  * they have room to run on a figure from this morning.
