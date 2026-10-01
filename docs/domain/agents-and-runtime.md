@@ -281,7 +281,8 @@ rollout `token_count` event (ruling 604: the window closest to its limit, as
 `five_hour`/`seven_day`, `rejected` at 100%, sent again only when it changes; ruling 608:
 with every window it reported in `windows`, shortest first), and the plan windows a Claude
 run's own CLI reports at `system/init` (ruling 611: §2.4), into
-`backendRateLimit.<backend>`; a quota-refused failure
+`backendRateLimit.<backend>` (read back with each listed window aged on its own reset,
+ruling 612); a quota-refused failure
 (terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` when the terminal
 line's `failure.windowRejected` says the provider rejected the window OR the provider's
 own sentence names a spent limit (`session | weekly | monthly | usage limit`, never

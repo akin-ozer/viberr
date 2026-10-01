@@ -199,6 +199,42 @@ export function readingWindowReset(
 }
 
 /**
+ * Ruling 612: a reading ages window by window.
+ *
+ * Since rulings 608 and 611 a reading lists every window it knows, and ruling
+ * 481(d) aged it as one piece by its binding window's reset. So once the
+ * binding five-hour window reset, Profile and Insights read "five hour window
+ * reset" and dropped the weekly figure beside it, which was still current; and
+ * a lapsed window kept the figure of a window that is over. Each window now
+ * ages on its own reset: a lapsed one keeps its name and reset but loses its
+ * figure (no run has reported on the new window), and when the binding window
+ * is the one that lapsed, the current window closest to its limit binds in its
+ * place. A reading with no current figure left is aged whole, as before.
+ */
+function agedReading(reading: BackendRateLimitReading | null, nowMs: number): BackendRateLimitReading | null {
+  if (!reading?.windows?.length || !Number.isFinite(nowMs)) return reading;
+  const lapsed = (resetsAt: number | null) => resetsAt != null && resetsAt * 1000 <= nowMs;
+  if (!reading.windows.some((w) => lapsed(w.resetsAt))) return reading;
+  const windows = reading.windows.map((w) => (lapsed(w.resetsAt) ? { ...w, utilization: null } : w));
+  if (!lapsed(reading.resetsAt)) return { ...reading, windows };
+  let binding: (typeof windows)[number] | null = null;
+  // A lapsed window has no figure by now, so only a current one can bind.
+  for (const window of windows) {
+    if (window.utilization === null) continue;
+    if (!binding || window.utilization > (binding.utilization ?? -1)) binding = window;
+  }
+  if (!binding || binding.utilization === null) return { ...reading, windows };
+  return {
+    ...reading,
+    status: binding.utilization >= 1 ? "rejected" : "allowed",
+    rateLimitType: binding.rateLimitType,
+    utilization: binding.utilization,
+    resetsAt: binding.resetsAt,
+    windows,
+  };
+}
+
+/**
  * V4 (pass 31): the sentence a `·quota` failure line carries is only sometimes
  * evidence of an EXHAUSTED subscription window.
  *
@@ -633,7 +669,9 @@ function exhaustionExpired(
  * (`UNDATED_EXHAUSTION_TTL_MS`) rather than waiting for a completed run. The
  * same instant marks a reading whose own window has reset
  * (`readingWindowReset`, ruling 481(d)): the one home Profile and Insights
- * both read, so neither presents a closed window as current.
+ * both read, so neither presents a closed window as current. A reading that
+ * lists its windows ages each one on its own reset first (`agedReading`,
+ * ruling 612).
  */
 export function latestBackendRateLimits(
   db: DatabaseSync,
@@ -641,7 +679,7 @@ export function latestBackendRateLimits(
 ): BackendQuotaRow[] {
   const nowMs = nowIso ? Date.parse(nowIso) : Date.now();
   return BACKENDS.map((backend) => {
-    const reading = getSetting(db, `${KEY_PREFIX}${backend}`, readingSchema);
+    const reading = agedReading(getSetting(db, `${KEY_PREFIX}${backend}`, readingSchema), nowMs);
     const stored = getSetting(
       db,
       `${EXHAUSTED_KEY_PREFIX}${backend}`,
