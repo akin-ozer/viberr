@@ -302,7 +302,9 @@ run does not (ruling 216).
   dispatched to deliver moves it when it saves again a file the delivery already holds
   (`deliveredFileNames`: the names the delivering engagement's entries claim), because the
   delivered content changed under the verdicts bound to it; a file of its own moves
-  nothing (ruling 587). A
+  nothing (ruling 587). Beside another specialist run, live or finished inside its window,
+  such a run claims only the files its own words name and never one the delivery holds, since
+  the window also holds the other run's files (ruling 627). A
   verdict binds only to the subject its run was dispatched on (`agent_runs.review_subject`,
   ruling 544): one returned after a newer delivery binds to nothing, and its note says what
   moved and to run the review again. Never
