@@ -81,6 +81,7 @@ import {
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
 import { toError } from "~/shared/errors";
+import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 
 /**
  * The generic agent's in-process collaboration TOOLS (generic-agents G3) — a
@@ -151,9 +152,11 @@ interface ReportedOutcome {
   relay?: RelayEntry[];
 }
 
-/** F4: cap the JSON a single `github_read` hands back, so a large tree/blob or a
- *  1000-item list cannot flood the run transcript. The agent narrows or paginates. */
-const MAX_GITHUB_READ_CHARS = 48_000;
+/** F4: the JSON a single `github_read` hands back is capped, so a large
+ *  tree/blob or a 1000-item list cannot flood the run transcript; the agent
+ *  narrows or paginates. Ruling 624: the cap is `READ_PAGE_BYTES` of UTF-8,
+ *  the most a Codex run's code-mode tool output carries whole (it was 48,000
+ *  characters). */
 
 /** Post an agent-authored timeline comment NOW (mid-run progress/finding).
  * Scoped write: guardrail-light (the anti-noise guardrails govern the final
@@ -683,9 +686,10 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             return textResult(`[unavailable] ${result.reason}`);
           }
           const json = JSON.stringify(result.data, null, 2);
+          const cut = pageEnd(json, 0);
           const body =
-            json.length > MAX_GITHUB_READ_CHARS
-              ? `${json.slice(0, MAX_GITHUB_READ_CHARS)}\n… [truncated ${json.length - MAX_GITHUB_READ_CHARS} more chars; narrow the path or paginate]`
+            cut < json.length
+              ? `${json.slice(0, cut)}\n… [truncated ${json.length - cut} more chars; narrow the path or paginate]`
               : json;
           const remaining = result.rateLimit.remaining;
           const rl =

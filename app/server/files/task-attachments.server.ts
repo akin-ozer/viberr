@@ -32,6 +32,7 @@ import {
 } from "./file-store-root.server";
 import { resolveKeptDeliveryFile } from "./kept-deliveries.server";
 import { xlsxToText } from "./xlsx-text.server";
+import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 
 /**
  * R19-19 — the task attachments store (read side).
@@ -687,8 +688,6 @@ function quietly(step: () => void): void {
  * this channel, and saying so is better than handing back bytes it will
  * describe as if it had looked.
  */
-const ATTACHMENT_READ_CHARS = 40_000;
-
 export interface TaskAttachmentRead {
   name: string;
   bytes: number;
@@ -713,7 +712,9 @@ function textPage(
   cutShort: boolean,
   offset: number,
 ): Pick<TaskAttachmentRead, "text" | "truncated" | "offset" | "nextOffset"> {
-  const end = offset + ATTACHMENT_READ_CHARS;
+  // Ruling 624: a page is at most `READ_PAGE_BYTES` of UTF-8, the most a Codex
+  // run's code-mode tool output carries whole (it was 40,000 characters).
+  const end = pageEnd(whole, offset);
   const page: Pick<TaskAttachmentRead, "text" | "truncated" | "offset" | "nextOffset"> = {
     text: whole.slice(offset, end),
     // A whole that was itself cut short says so on its last page, with no

@@ -10,7 +10,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  KB_DOC_READ_CHARS,
   isInjectableKbDoc,
   isPrivateKbFolder,
   kbSizeClass,
@@ -19,6 +18,7 @@ import {
   readKbIndexes,
 } from "./kb-injection.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
+import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 
 const temp = createTempDirs();
 afterAll(temp.cleanup);
@@ -392,7 +392,7 @@ describe("readKbDocForRun — the pull half of ruling 283", () => {
 
   it("says plainly when a document was cut, rather than reading as complete", () => {
     const { dataRoot, kbDir } = freshKb();
-    writeFileSync(path.join(kbDir, "big.md"), "z".repeat(KB_DOC_READ_CHARS + 500), "utf8");
+    writeFileSync(path.join(kbDir, "big.md"), "z".repeat(READ_PAGE_BYTES + 500), "utf8");
     const out = readKbDocForRun(["notes"], "notes", "big.md", dataRoot);
     expect(out).toContain("not the whole document");
   });
@@ -403,16 +403,16 @@ describe("readKbDocForRun — the pull half of ruling 283", () => {
     // which a private knowledge base (ruling 578) closes. CANARY: ignore
     // `offset` and every page is the opening again.
     const { dataRoot, kbDir } = freshKb();
-    const size = KB_DOC_READ_CHARS * 2 + 1_000;
-    writeFileSync(path.join(kbDir, "big.md"), "a".repeat(KB_DOC_READ_CHARS) + "b".repeat(KB_DOC_READ_CHARS) + "c".repeat(1_000), "utf8");
+    const size = READ_PAGE_BYTES * 2 + 1_000;
+    writeFileSync(path.join(kbDir, "big.md"), "a".repeat(READ_PAGE_BYTES) + "b".repeat(READ_PAGE_BYTES) + "c".repeat(1_000), "utf8");
     const first = readKbDocForRun(["notes"], "notes", "big.md", dataRoot);
     expect(first.startsWith("a")).toBe(true);
-    expect(first).toContain(`characters 0 to 48,000 of ${size.toLocaleString("en-US")} in \`big.md\``);
-    expect(first).toContain(`read on with offset ${KB_DOC_READ_CHARS}`);
-    const second = readKbDocForRun(["notes"], "notes", "big.md", dataRoot, KB_DOC_READ_CHARS);
+    expect(first).toContain(`characters 0 to 32,000 of ${size.toLocaleString("en-US")} in \`big.md\``);
+    expect(first).toContain(`read on with offset ${READ_PAGE_BYTES}`);
+    const second = readKbDocForRun(["notes"], "notes", "big.md", dataRoot, READ_PAGE_BYTES);
     expect(second.startsWith("b")).toBe(true);
-    expect(second).toContain(`read on with offset ${KB_DOC_READ_CHARS * 2}`);
-    const last = readKbDocForRun(["notes"], "notes", "big.md", dataRoot, KB_DOC_READ_CHARS * 2);
+    expect(second).toContain(`read on with offset ${READ_PAGE_BYTES * 2}`);
+    const last = readKbDocForRun(["notes"], "notes", "big.md", dataRoot, READ_PAGE_BYTES * 2);
     expect(last.startsWith("c")).toBe(true);
     expect(last).toContain("the end of the document");
     expect(readKbDocForRun(["notes"], "notes", "big.md", dataRoot, size + 5)).toContain("is past its end");

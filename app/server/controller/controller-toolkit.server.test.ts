@@ -731,8 +731,8 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     // Live on the AWS calculator board the controller could not take in a
     // 94 KB document whole, and so could not safely change it. CANARY: return
     // the whole text again and the first page carries all of it.
-    const { KB_DOC_READ_CHARS } = await import("~/server/files/kb-injection.server");
-    const body = "a".repeat(KB_DOC_READ_CHARS) + "b".repeat(500);
+    const { READ_PAGE_BYTES } = await import("~/server/runtimes/read-page-budget.server");
+    const body = "a".repeat(READ_PAGE_BYTES) + "b".repeat(500);
     const created = await call(ids.orgAdmin, "save_knowledge_base", {
       name: "paged-read",
       doc: { path: "long.md", content: body },
@@ -745,13 +745,13 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "long.md" }),
     ) as Page;
     expect(first.characters).toBe(body.length);
-    expect(first.text).toBe("a".repeat(KB_DOC_READ_CHARS));
-    expect(first.nextOffset).toBe(KB_DOC_READ_CHARS);
+    expect(first.text).toBe("a".repeat(READ_PAGE_BYTES));
+    expect(first.nextOffset).toBe(READ_PAGE_BYTES);
     // SAFETY: as above.
     const second = JSON.parse(
       await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "long.md", offset: first.nextOffset }),
     ) as Page;
-    expect(second.offset).toBe(KB_DOC_READ_CHARS);
+    expect(second.offset).toBe(READ_PAGE_BYTES);
     expect(second.text).toBe("b".repeat(500));
     expect(second.nextOffset).toBeNull();
   });
