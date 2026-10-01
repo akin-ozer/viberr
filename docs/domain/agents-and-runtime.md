@@ -52,7 +52,7 @@ recently selected (`selected_at`; `ACTIVE_FIRST`). Every selection is stamped pa
 person's latest one on that backend (`selectionStamp`), so two selections in one millisecond
 still rank in the order they happened. Connecting, by a
 hosted sign-in or a pasted key, adds an account and makes it active; switching
-(`switchBackendAccount`, Profile → Agent accounts' **Use this account**) stamps
+(`switchBackendAccount`, Profile → Agent accounts' **Runs use** picker, ruling 616) stamps
 `selected_at` and nothing else, so no vendor process runs and no file moves, and a run
 already going keeps the account it started on. Disconnecting is per account
 (`disconnectBackendAccount`): removing the active one hands runs to the account used
@@ -1980,7 +1980,7 @@ runtime's answer for a missing grant.
   writes), so when the passes leave entries the server opens its own to their group
   (`chmod -R -P g+rwX`, `-P` so it follows no link, not even the tree's own; a GNU chmod
   older than coreutils 9.5 has no `-P`, and there the step runs without it only when no
-  agent can write the folder holding the tree, ruling 615) and the
+  agent can write the folder holding the tree, ruling 617) and the
   person's pass and the rounds run again; when they leave an empty directory the server
   owns, the server removes it with `rmdir`. The server never runs `rm` there, and neither
   step runs while a directory above the tree is a link an agent could have put there (one

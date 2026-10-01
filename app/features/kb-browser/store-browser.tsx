@@ -6,6 +6,7 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useFetcher } from "react-router";
 import { countLabel } from "~/shared/text/plural";
@@ -14,6 +15,8 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
+import { isMarkdownName } from "~/ui/code-language";
+import { DocViewToggle, MarkdownDoc, type DocView } from "~/ui/markdown-doc";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -30,7 +33,7 @@ import {
   type StoreNode,
 } from "./tree";
 import { prettySize } from "~/shared/text/byte-size";
-import { useRefusalShake } from "~/ui/use-refusal-shake";
+import { useRefusalShake, type RefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Store-folder file manager popup.
@@ -733,9 +736,23 @@ interface DocDraft {
   name: string;
   body: string;
   existing: boolean;
+  /** Ruling 614: the body as the read returned it, so the card knows whether
+   *  anything changed. Null until the read answers (and after a read that
+   *  failed); always null for a new document. */
+  saved: string | null;
   /** The on-disk file exceeded the read cap, so this body is a partial copy. */
   truncated: boolean;
+  /** Ruling 614: rendered or raw. An existing markdown file opens rendered; a
+   *  new document opens raw, since there is nothing to render yet. */
+  view: DocView;
   err: string | null;
+}
+
+/** The name a new document is saved under: `writeStoreDoc` gives a name with
+ *  no extension `.md`. */
+function draftFileName(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.includes(".") ? trimmed : `${trimmed}.md`;
 }
 
 /**
@@ -770,7 +787,13 @@ function useDocEditor(
     setDoc((prev) =>
       prev
         ? d.ok
-          ? { ...prev, body: d.text ?? "", truncated: Boolean(d.truncated), err: null }
+          ? {
+              ...prev,
+              body: d.text ?? "",
+              saved: d.text ?? "",
+              truncated: Boolean(d.truncated),
+              err: null,
+            }
           : { ...prev, err: d.error ?? "That document could not be read." }
         : prev,
     );
@@ -791,10 +814,28 @@ function useDocEditor(
   });
 
   const openNew = (dir: string[]) =>
-    setDoc({ dir, name: "", body: "", existing: false, truncated: false, err: null });
+    setDoc({
+      dir,
+      name: "",
+      body: "",
+      existing: false,
+      saved: null,
+      truncated: false,
+      view: "raw",
+      err: null,
+    });
 
   const openExisting = (dir: string[], name: string) => {
-    setDoc({ dir, name, body: "", existing: true, truncated: false, err: null });
+    setDoc({
+      dir,
+      name,
+      body: "",
+      existing: true,
+      saved: null,
+      truncated: false,
+      view: isMarkdownName(name) ? "preview" : "raw",
+      err: null,
+    });
     readFetcher.submit(
       {
         _csrf: csrf,
@@ -867,6 +908,230 @@ function ReplaceConfirm({
       onCancel={onCancel}
       onConfirm={onConfirm}
     />
+  );
+}
+
+/** Lines as the attachment reader's gutter counts them (ruling 363): a
+ *  trailing newline ends the last line rather than opening an empty one. */
+function lineCount(text: string): number {
+  if (text === "") return 0;
+  const lines = text.split(/\r\n|\r|\n/);
+  return lines.length > 1 && lines.at(-1) === "" ? lines.length - 1 : lines.length;
+}
+
+/**
+ * Ruling 614: the open document is one card. The head names the file and, for
+ * markdown, carries the Preview / Raw switch; the body is the rendered document
+ * or its raw text; the foot says what state the text is in, beside Close (or
+ * Cancel) and Save. It replaces a path line over a "Document contents" label, a
+ * bare textarea with a resize grip, and a hint that printed "/".
+ *
+ * In Raw the card is the field, as the controller composer is (owner,
+ * 2026-09-25: a square ring inside a rounded frame, and a resize grip, read as
+ * unfinished): the textarea draws no frame of its own and the card takes the
+ * focus ring.
+ */
+function DocumentCard({
+  doc,
+  sizeBytes,
+  saving,
+  nameRef,
+  nameInvalid,
+  refusal,
+  onEdit,
+  onCancel,
+  onSave,
+}: {
+  doc: DocDraft;
+  /** The file's size as the tree lists it; null for a new document. */
+  sizeBytes: number | null;
+  saving: boolean;
+  nameRef: RefObject<HTMLInputElement | null>;
+  /** Ruling 147: a refused save of a nameless draft marks the name field. */
+  nameInvalid: boolean;
+  /** The refusal counter the alert is keyed on, and its one shake (451(g)). */
+  refusal: { count: number; shake: RefusalShake };
+  onEdit: (next: DocDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  /** An existing document whose read has not answered, or failed. */
+  const unread = doc.existing && doc.saved === null;
+  /** Ruling 147(d): an opened document saves only once its text changed. */
+  const changed = doc.existing && doc.saved !== null && doc.body !== doc.saved;
+  const fileName = doc.existing ? doc.name : draftFileName(doc.name);
+  // A nameless draft is markdown until it is named otherwise: the server
+  // saves a bare name as `.md`.
+  const markdown = doc.existing || doc.name.trim() ? isMarkdownName(fileName) : true;
+  const view: DocView = markdown ? doc.view : "raw";
+  const meta =
+    doc.saved === null
+      ? ""
+      : [
+          doc.truncated ? null : countLabel(lineCount(doc.saved), "line"),
+          sizeBytes === null ? null : prettySize(sizeBytes),
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+  return (
+    <section className="fm-doc" aria-label={doc.existing ? doc.name : "New document"}>
+      <div className="doc-head">
+        <span className="doc-glyph">
+          <Icon name="file" />
+        </span>
+        <span
+          className="doc-path"
+          title={doc.existing ? [...doc.dir, doc.name].join("/") : undefined}
+        >
+          {doc.dir.map((segment, i) => (
+            <Fragment key={i}>
+              <span>{segment}</span>
+              <span className="dp-sep">/</span>
+            </Fragment>
+          ))}
+          {doc.existing ? (
+            <span className="dp-name">{doc.name}</span>
+          ) : (
+            <span className="doc-title">New document</span>
+          )}
+        </span>
+        {markdown && !(unread && doc.err) && (
+          <DocViewToggle view={view} onChange={(next) => onEdit({ ...doc, view: next })} />
+        )}
+      </div>
+      {!doc.existing && (
+        /* Ruling 149: the name is a typing control in the sheet's own field
+           chrome, with its visible label, laid out as the card's first row. */
+        <div className="field doc-name">
+          <label className="flabel" htmlFor="fm-doc-name">
+            File name
+          </label>
+          <input
+            ref={nameRef}
+            id="fm-doc-name"
+            type="text"
+            className="mono"
+            value={doc.name}
+            placeholder="file-name.md"
+            aria-invalid={nameInvalid || undefined}
+            aria-describedby={nameInvalid ? "fm-doc-err" : undefined}
+            onChange={(e) => onEdit({ ...doc, name: e.target.value, err: null })}
+          />
+        </div>
+      )}
+      {doc.truncated && (
+        <div className="doc-notes">
+          <div className="cred-warn">
+            <Icon name="alert" />
+            This document is larger than the editor can load, so only the
+            first part is shown. Saving would destroy the rest. Edit it on
+            disk instead.
+          </div>
+        </div>
+      )}
+      {unread ? (
+        doc.err ? (
+          <div className="doc-blank" role="alert">
+            <Icon name="alert" />
+            {doc.err}
+          </div>
+        ) : (
+          <div className="doc-blank">
+            <Icon name="loader" className="spin" />
+            Loading document…
+          </div>
+        )
+      ) : view === "preview" ? (
+        doc.body.trim() ? (
+          /* Scrolls on its own, so it takes focus and a name: a keyboard
+             reaches all of a long document (WCAG 2.1.1). */
+          <div
+            className="doc-preview"
+            tabIndex={0}
+            role="region"
+            aria-label={
+              "Preview of " +
+              (doc.existing || doc.name.trim() ? fileName : "the new document")
+            }
+          >
+            <MarkdownDoc text={doc.body} />
+          </div>
+        ) : (
+          <p className="doc-blank">
+            {doc.existing ? "This document is empty." : "Nothing to preview yet."}
+          </p>
+        )
+      ) : (
+        <>
+          <label className="vh" htmlFor="fm-doc-body">
+            Document contents
+          </label>
+          <textarea
+            id="fm-doc-body"
+            className="doc-src"
+            // Where `field-sizing` is unsupported the rows size it; the sheet
+            // caps both at the preview's height.
+            rows={Math.min(24, Math.max(8, lineCount(doc.body) + 1))}
+            value={doc.body}
+            placeholder={"# Title\n\nWhat your agents must know."}
+            onChange={(e) => onEdit({ ...doc, body: e.target.value, err: null })}
+          />
+        </>
+      )}
+      {/* One box, never two: a refused save speaks in the same slot the
+          server's own sentence uses (ruling 147). A read that failed says so
+          in the body instead. */}
+      {(nameInvalid || (doc.err && !unread)) && (
+        <div className="doc-notes">
+          {nameInvalid ? (
+            <div
+              key={`refused-${refusal.count}`}
+              id="fm-doc-err"
+              className={"form-err" + (refusal.shake.shake ? " refused" : "")}
+              onAnimationEnd={refusal.shake.onAnimationEnd}
+              role="alert"
+            >
+              <Icon name="alert" />
+              Give the document a file name.
+            </div>
+          ) : (
+            <div className="form-err">
+              <Icon name="alert" />
+              {doc.err}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="doc-foot">
+        <span className="doc-state">
+          {changed ? (
+            <>
+              <span className="doc-dot" />
+              Unsaved changes
+            </>
+          ) : (
+            meta
+          )}
+        </span>
+        <button type="button" className="btn ghost sm" onClick={onCancel}>
+          {doc.existing && !changed ? "Close" : "Cancel"}
+        </button>
+        <button
+          type="button"
+          className="btn sm primary"
+          // Ruling 147: the in-flight states, the truncated hard block (a
+          // data-safety refusal whose reason is rendered above) and, for an
+          // opened document, nothing changed (147(d)) disable this; a
+          // nameless draft is refused instead.
+          disabled={doc.truncated || saving || unread || (doc.existing && !changed)}
+          aria-busy={saving}
+          onClick={onSave}
+        >
+          {saving ? "Saving…" : "Save document"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1033,10 +1298,10 @@ export function StoreBrowser({
     refusedDoc > 0 && doc !== null && !doc.existing && !doc.name.trim();
   /** Does a file with the draft's name already sit in the destination folder? */
   const draftCollides = (draft: DocDraft): boolean => {
-    const wanted = draft.name.trim().includes(".")
-      ? draft.name.trim()
-      : `${draft.name.trim()}.md`;
-    return childNames(nodes, draft.dir).includes(wanted);
+    const wanted = draftFileName(draft.name);
+    return childrenAt(nodes, draft.dir).some(
+      (n) => n.type === "file" && n.name === wanted,
+    );
   };
 
   return (
@@ -1080,125 +1345,35 @@ export function StoreBrowser({
           />
 
           {doc && (
-            <div className="fm-doc">
-              {doc.existing ? (
-                <div className="fm-doc-path mono">
-                  {[...doc.dir, doc.name].join("/")}
-                  {editor.loading ? " · loading…" : ""}
-                </div>
-              ) : (
-                /* Ruling 149: both typing controls used to sit bare inside
-                   `.fm-doc`, so they painted in UA chrome inside a card whose
-                   every other control wears the sheet's. `.field` is the one
-                   place that chrome is declared, and it brings a visible label
-                   with it. */
-                <div className="field">
-                  <label className="flabel" htmlFor="fm-doc-name">
-                    File name
-                  </label>
-                  <input
-                    ref={docNameRef}
-                    id="fm-doc-name"
-                    type="text"
-                    className="mono"
-                    value={doc.name}
-                    placeholder="file-name.md"
-                    aria-invalid={docNameInvalid || undefined}
-                    aria-describedby={docNameInvalid ? "fm-doc-err" : undefined}
-                    onChange={(e) =>
-                      editor.setDoc({ ...doc, name: e.target.value, err: null })
-                    }
-                  />
-                </div>
-              )}
-              <div className="field">
-                <label className="flabel" htmlFor="fm-doc-body">
-                  Document contents
-                </label>
-                <textarea
-                  id="fm-doc-body"
-                  className="ta mono"
-                  rows={10}
-                  value={doc.body}
-                  placeholder={"# Title\n\nWhat your agents must know."}
-                  onChange={(e) =>
-                    editor.setDoc({ ...doc, body: e.target.value, err: null })
-                  }
-                />
-              </div>
-              {doc.truncated && (
-                <div className="cred-warn">
-                  <Icon name="alert" />
-                  This document is larger than the editor can load, so only the
-                  first part is shown. Saving would destroy the rest. Edit it on
-                  disk instead.
-                </div>
-              )}
-              {/* One box, never two: a refused save speaks in the same slot the
-                  server's own sentence uses (ruling 147). */}
-              {docNameInvalid ? (
-                <div
-                  key={`refused-${refusedDoc}`}
-                  id="fm-doc-err"
-                  className={"form-err" + (docShake.shake ? " refused" : "")}
-                  onAnimationEnd={docShake.onAnimationEnd}
-                  role="alert"
-                >
-                  <Icon name="alert" />
-                  Give the document a file name.
-                </div>
-              ) : (
-                doc.err && (
-                  <div className="form-err">
-                    <Icon name="alert" />
-                    {doc.err}
-                  </div>
-                )
-              )}
-              {/* Ruling 614: no folder hint beside the actions. An opened
-                  document's path already heads the editor, the save toast
-                  names a new one's, and the hint's lone "/" for the root read
-                  as a stray mark. */}
-              <div className="fm-doc-acts">
-                <button
-                  type="button"
-                  className="btn ghost sm"
-                  onClick={() => {
-                    setRefusedDoc(0);
-                    editor.setDoc(null);
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn sm primary"
-                  // Ruling 147: only the in-flight states and the truncated
-                  // hard block (a data-safety refusal whose reason is rendered
-                  // above) disable this; a nameless draft is refused below.
-                  disabled={doc.truncated || editor.saving || editor.loading}
-                  aria-busy={editor.saving}
-                  onClick={() => {
-                    if (editor.saving || editor.loading) return;
-                    if (!doc.existing && !doc.name.trim()) {
-                      setRefusedDoc((n) => n + 1);
-                      docNameRef.current?.focus();
-                      return;
-                    }
-                    // UI-59: a new document that would land on an existing file
-                    // asks first. Saving an OPENED document is already an
-                    // explicit edit of that file, so it replaces directly.
-                    if (!doc.existing && draftCollides(doc)) {
-                      editor.setConfirmReplace(true);
-                      return;
-                    }
-                    editor.save(doc.existing);
-                  }}
-                >
-                  {editor.saving ? "Saving…" : "Save document"}
-                </button>
-              </div>
-            </div>
+            <DocumentCard
+              doc={doc}
+              sizeBytes={doc.existing ? fileSize(nodes, doc.dir, doc.name) : null}
+              saving={editor.saving}
+              nameRef={docNameRef}
+              nameInvalid={docNameInvalid}
+              refusal={{ count: refusedDoc, shake: docShake }}
+              onEdit={editor.setDoc}
+              onCancel={() => {
+                setRefusedDoc(0);
+                editor.setDoc(null);
+              }}
+              onSave={() => {
+                if (editor.saving || editor.loading) return;
+                if (!doc.existing && !doc.name.trim()) {
+                  setRefusedDoc((n) => n + 1);
+                  docNameRef.current?.focus();
+                  return;
+                }
+                // UI-59: a new document that would land on an existing file
+                // asks first. Saving an OPENED document is already an
+                // explicit edit of that file, so it replaces directly.
+                if (!doc.existing && draftCollides(doc)) {
+                  editor.setConfirmReplace(true);
+                  return;
+                }
+                editor.save(doc.existing);
+              }}
+            />
           )}
 
           <StoreTree
@@ -1303,13 +1478,19 @@ function folderPaths(nodes: StoreNode[], base: string[] = []): string[][] {
   return out;
 }
 
-/** File names directly inside `dir` ([] = the store root). */
-function childNames(nodes: StoreNode[], dir: string[]): string[] {
+/** The entries directly inside `dir` ([] = the store root). */
+function childrenAt(nodes: StoreNode[], dir: string[]): StoreNode[] {
   let level = nodes;
   for (const segment of dir) {
     const next = level.find((n) => n.type === "dir" && n.name === segment);
     if (!next || next.type !== "dir") return [];
     level = next.children;
   }
-  return level.flatMap((n) => (n.type === "file" ? [n.name] : []));
+  return level;
+}
+
+/** A file's size as the scanned tree lists it; null when the tree does not. */
+function fileSize(nodes: StoreNode[], dir: string[], name: string): number | null {
+  const file = childrenAt(nodes, dir).find((n) => n.type === "file" && n.name === name);
+  return file?.type === "file" ? file.sizeBytes : null;
 }

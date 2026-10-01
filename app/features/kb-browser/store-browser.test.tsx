@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { StoreBrowser } from "./store-browser";
@@ -344,17 +344,19 @@ describe("StoreBrowser document editor", () => {
     expect(lastForm?.overwrite).toBeUndefined();
   });
 
-  it("ruling 149: both typing controls ride the shared .field chrome", () => {
-    // Canary: unwrap either control and it paints in UA chrome inside a card
-    // whose every other control wears the sheet's — the class this closes.
+  it("ruling 149: the file name rides the shared .field chrome, and the raw text the card's (ruling 614)", () => {
+    // Canary: unwrap the name and it paints in UA chrome inside a card whose
+    // every other control wears the sheet's — the class this closes. Drop
+    // `.doc-src` and the raw text does too, with no ring on the card around it.
     const { getByText, getByLabelText, getByPlaceholderText } = renderBrowser();
     fireEvent.click(getByText("New document"));
     const name = getByPlaceholderText("file-name.md");
     expect(name.closest(".field")).not.toBeNull();
     expect(getByText("File name").tagName).toBe("LABEL");
     const body = getByLabelText("Document contents");
-    expect(body.closest(".field")).not.toBeNull();
-    // The visible label IS the accessible name: no aria-label overriding it.
+    expect(body.classList.contains("doc-src")).toBe(true);
+    expect(body.closest(".fm-doc")).not.toBeNull();
+    // A label names each control: no aria-label overriding it.
     expect(name.getAttribute("aria-label")).toBeNull();
     expect(body.getAttribute("aria-label")).toBeNull();
   });
@@ -377,13 +379,14 @@ describe("StoreBrowser document editor", () => {
     );
   });
 
-  it("clicking a text doc opens it in place with its real contents", async () => {
-    const { getByLabelText, getByText } = renderBrowser({
-      respond: (intent) =>
-        intent === "store-read-doc"
-          ? { ok: true, text: "# Overview\nLOADED", truncated: false }
-          : undefined,
-    });
+  it("ruling 614: a markdown doc opens rendered, and Raw is its real text to edit", async () => {
+    const { getByLabelText, getByRole, getByText, queryByLabelText, findByRole } =
+      renderBrowser({
+        respond: (intent) =>
+          intent === "store-read-doc"
+            ? { ok: true, text: "# Overview\n\nLOADED **text**", truncated: false }
+            : undefined,
+      });
     fireEvent.click(getByLabelText("Open overview.md"));
     await waitFor(() =>
       expect(lastForm).toMatchObject({
@@ -391,19 +394,32 @@ describe("StoreBrowser document editor", () => {
         path: JSON.stringify(["overview.md"]),
       }),
     );
-    const body = control(getByLabelText("Document contents"), HTMLTextAreaElement);
-    await waitFor(() => expect(body.value).toContain("LOADED"));
+    // Rendered on arrival: the heading is a heading (level 3, under the
+    // dialog's own h2), the bold is bold, and no textarea shows the markup.
+    // CANARY: open an existing doc on `raw` and none of this renders.
+    const preview = await findByRole("region", { name: "Preview of overview.md" });
+    expect(within(preview).getByRole("heading", { level: 3, name: "Overview" })).toBeTruthy();
+    expect(within(preview).getByText("text").tagName).toBe("STRONG");
+    expect(queryByLabelText("Document contents")).toBeNull();
+    expect(getByRole("button", { name: "Preview" }).getAttribute("aria-pressed")).toBe("true");
     // The name is the file's own — the editor edits it, it does not re-create it.
-    expect(getByText("overview.md", { selector: ".fm-doc-path" })).toBeTruthy();
-    // Ruling 614: that path is the editor's one word on where the document
-    // lives. CANARY: restore the folder hint beside the buttons and this row
-    // reads "/CancelSave document".
-    expect(getByText("Save document").parentElement?.textContent).toBe(
-      "CancelSave document",
-    );
+    expect(getByText("overview.md", { selector: ".doc-path .dp-name" })).toBeTruthy();
+    // Ruling 147(d): nothing has changed, so there is nothing to save yet.
+    const save = getByText("Save document").closest("button")!;
+    expect(save.disabled).toBe(true);
+    expect(getByText("Close")).toBeTruthy();
 
+    fireEvent.click(getByRole("button", { name: "Raw" }));
+    const body = control(getByLabelText("Document contents"), HTMLTextAreaElement);
+    expect(body.value).toBe("# Overview\n\nLOADED **text**");
     fireEvent.change(body, { target: { value: "# Overview\nEDITED" } });
-    fireEvent.click(getByText("Save document"));
+    expect(getByText("Unsaved changes")).toBeTruthy();
+    expect(save.disabled).toBe(false);
+    // The draft, not the file, is what Preview renders.
+    fireEvent.click(getByRole("button", { name: "Preview" }));
+    expect(getByText("EDITED")).toBeTruthy();
+
+    fireEvent.click(save);
     await waitFor(() =>
       expect(lastForm).toMatchObject({
         intent: "store-write-doc",
@@ -412,6 +428,35 @@ describe("StoreBrowser document editor", () => {
         overwrite: "1",
       }),
     );
+  });
+
+  it("ruling 614: a doc that is not markdown opens on its raw text, with no Preview", async () => {
+    const { getByLabelText, queryByRole } = renderBrowser({
+      tree: [{ type: "file", name: "limits.yaml", sizeBytes: 9, mtime: new Date().toISOString() }],
+      respond: (intent) =>
+        intent === "store-read-doc" ? { ok: true, text: "max: 3\n", truncated: false } : undefined,
+    });
+    fireEvent.click(getByLabelText("Open limits.yaml"));
+    const body = await waitFor(() =>
+      control(getByLabelText("Document contents"), HTMLTextAreaElement),
+    );
+    expect(body.value).toBe("max: 3\n");
+    expect(queryByRole("group", { name: "Document view" })).toBeNull();
+  });
+
+  it("ruling 614: a new document opens on its text, and Preview renders the draft", () => {
+    // Nothing exists to render yet, so it opens raw. CANARY: open it on
+    // `preview` and the text box this types into is not there.
+    const { getByText, getByLabelText, getByRole } = renderBrowser();
+    fireEvent.click(getByText("New document"));
+    expect(getByRole("button", { name: "Raw" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.change(getByLabelText("Document contents"), {
+      target: { value: "# Draft\n\n- one" },
+    });
+    fireEvent.click(getByRole("button", { name: "Preview" }));
+    const preview = getByRole("region", { name: "Preview of the new document" });
+    expect(within(preview).getByRole("heading", { level: 3, name: "Draft" })).toBeTruthy();
+    expect(within(preview).getByRole("listitem").textContent).toBe("one");
   });
 
   it("a new document colliding with an existing file confirms before replacing", async () => {

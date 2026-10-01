@@ -53,7 +53,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user), same page layout as the project controller (ruling 419; a reply shown from its first line and announced by one always-mounted status region, ruling 476(c), (d); steering, the queue, Send now and Retract, ruling 527); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin); the rail's Delete on the viewer's own threads, and on everyone's for an org admin (ruling 525) | `send` (`text`, `conversationId`, `surface`, `timeZone`, `mode`, ruling 527), `send-now` and `retract` (`conversationId`, `messageId`, ruling 527), `interrupt` (`conversationId`, `runId`), `delete-conversation` (`conversationId`, `open`, `all`; ruling 525) |
 | `/insights` | `insights.tsx` | org admin | run analytics under the standalone-page header (ruling 145): totals, coordination share, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate, ruling 158), breakdowns naming what their top 8 left out, the **Prompt cache** table (ruling 369: by run kind, by backend and run kind and by credential kind, with the planning baseline's columns and, under it, resumes by idle time and operator bursts, ruling 505; every figure on a `data-` attribute, rows keyed `data-cache-row="by run kind:primary"`, resume rows `data-resume-row="codex · login"` with each bucket's `data-past-ttl`, the burst note `data-operator-bursts`), oversight cards naming their exceptions (ruling 290), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)). Details in [../domain/auth-and-rbac.md §6](../domain/auth-and-rbac.md#6-insights-insights-org-admin-only) | |
-| `/profile` | `profile.tsx` | user | identity, password, notification routing (nine in-app toggles, agent questions on their own; and the per-browser Desktop notifications switch, the one place the browser permission is asked for; ruling 481), appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it, in the past tense once its window has reset, ruling 481(d); Disconnect asks first, ruling 481(b); ruling 507: several accounts per backend, the one in use first, the others one "Use this account" away with no sign-in, each renamable and disconnected on its own, and "Add another account"; `#agent-accounts`, the setup checklist's link, brings the panel to rest below the overlay's pinned head, ringed and focused, ruling 532), GitHub identity (its Disconnect asks first too). The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-account-switch`, `backend-account-rename`, `backend-disconnect` |
+| `/profile` | `profile.tsx` | user | identity, password, notification routing (nine in-app toggles, agent questions on their own; and the per-browser Desktop notifications switch, the one place the browser permission is asked for; ruling 481), appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it, in the past tense once its window has reset, ruling 481(d); Disconnect asks first, ruling 481(b); ruling 507: several accounts per backend, each renamable and disconnected on its own; ruling 616: the one in use is a "Runs use" picker whose menu lists every account and switches to the one chosen with no sign-in, and offers "Add another account" and "Manage other accounts"; `#agent-accounts`, the setup checklist's link, brings the panel to rest below the overlay's pinned head, ringed and focused, ruling 532), GitHub identity (its Disconnect asks first too). The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-account-switch`, `backend-account-rename`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user (CSRF as a result) | fetcher target; GET redirects to `/notifications` | `read` (the default; repeatable `id`), `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user (CSRF as a result) | writes `theme` to the user row and the `viberr_theme` cookie; GET redirects to `/` | |
@@ -273,8 +273,8 @@ Intents behind `project.task.tsx` are explained in
   iOS Safari does not zoom on focus: every `.field` input and textarea,
   `select`, the search, board-filter and palette inputs, the comment and
   controller composers, the goal editor, the label, stage and steer
-  inputs, the store browser's inputs and the concurrency field (the 720px block
-  in `app.css` is the list). Under the 1100px collapse the task page stacks
+  inputs, the store browser's inputs and its document's raw text, and the
+  concurrency field (the 720px block in `app.css` is the list). Under the 1100px collapse the task page stacks
   title and goal, the open decision, then the side column (GitHub, current
   state and next action, Details), then the rest (runs, the timeline): the
   page is four regions in source order (`.detail-head`, `.detail-packet`,
@@ -354,6 +354,14 @@ connections (`connection-add`, `connection-replace`, `connection-recheck`,
 templates (`agent-save`, `agent-delete`), controller (`controller-save`, `controller-request-decline`), runtime
 (`set-concurrency`, `set-run-spend-cap`, ruling 175), audit (`audit-export-s3`,
 `s3-config-save`, `s3-config-clear`). That is 45 intents.
+The store browser shows a document it opens (`store-read-doc`) as one card (ruling
+614): a head with the file's path and, for a markdown file (`.md`, `.markdown`), a
+Preview / Raw switch; the document, rendered on arrival when it is markdown and its raw
+text otherwise; and a foot with its state and Close (Cancel once it changed) beside Save
+document. Raw is where a document is edited; Save (`store-write-doc`) stays disabled on
+an opened document until its text changes, and the foot reads "Unsaved changes" while it
+differs (its line count and size otherwise). A new document opens on Raw under its
+file-name row, and Preview renders the draft.
 A GitHub connection row (ruling 463) says what its token reaches: a `<details>`
 (`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"
 when the read stopped at its cap) and whose body lists each repository with a quiet
@@ -510,7 +518,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   is mapped; ruling 508: every scope family the theme emits has a colour, so a diff's
   lines are green and red, and a log colours a number whole and a level by severity),
   unless a NUL byte in its first 8,000 characters sends it to the no-preview
-  card ("This file is not text"). A body whose fetch proved the file unservable (404
+  card ("This file is not text"). A markdown file opens rendered instead, under a
+  Preview / Raw switch at the top of the card whose Raw is that code reader; its pictures
+  and links to the task's own files resolve to their serving route (ruling 614). A body whose fetch proved the file unservable (404
   after the completion-time prune, 413 over the 50 MB cap, an auth redirect) reports the
   failure and drops Download rather than saving an error body under the real filename.
   The `Attachment lightbox` screen label covers all three.
