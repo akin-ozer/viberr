@@ -638,7 +638,9 @@ The same principal check applies, and the reading retires with the account like 
 refusal does. A Codex card shows the reading its runs' rollouts report (ruling 604),
 once one of them has made a model call. A Claude card's reading names the account's
 plan window closest to its limit, which each run reads from its own CLI when it starts
-(ruling 611), so the weekly window shows before the provider warns. Once the reading's
+(ruling 611), so the weekly window shows before the provider warns. A reading that
+lists its windows ages each one on its own reset (ruling 612): when the binding one has
+reset, the card shows the current window closest to its limit instead. Once the reading's
 own `resetsAt` has passed (`readingWindowReset`, computed in `latestBackendRateLimits`,
 the one home Insights reads too; ruling 481(d)) the pill drops the percentage and reads
 "<window> window reset", and the note says "That window reset <time>, and no Claude run

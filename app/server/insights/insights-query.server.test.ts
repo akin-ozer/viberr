@@ -1099,6 +1099,84 @@ describe("backend quota readings (pass 29)", () => {
     const earlier = getInsightsSummary(db, "2026-08-23T03:29:59.000Z").backendQuota;
     expect(earlier.find((q) => q.backend === "claude")!.readingWindowReset).toBe(false);
   });
+
+  /**
+   * Ruling 612: a reading that lists its windows (rulings 608, 611) ages each
+   * one on its own reset. A lapsed window keeps its name and reset but loses
+   * its figure, and when it was the binding window, the current window closest
+   * to its limit binds in its place, so the week stays on the card after the
+   * five-hour window resets.
+   *
+   * Canary: age only the binding window (return the stored reading), and the
+   * week is hidden behind "five hour window reset".
+   */
+  it("ages a listed reading window by window (ruling 612)", async () => {
+    const db = ctx.makeDb();
+    const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
+    const fiveHourReset = Date.parse("2026-08-23T03:30:00.000Z") / 1000; // before NOW
+    const weekReset = Date.parse("2026-08-27T12:00:00.000Z") / 1000; // after NOW
+    const read = (at: string, backend: "claude" | "codex") =>
+      getInsightsSummary(db, at).backendQuota.find((q) => q.backend === backend)!;
+    // The five-hour window binds, then resets: the week binds in its place.
+    recordBackendRateLimit(db, "codex", {
+      credentialUserId: null,
+      credentialLabel: null,
+      status: "allowed",
+      rateLimitType: "five_hour",
+      utilization: 0.8,
+      resetsAt: fiveHourReset,
+      isUsingOverage: false,
+      windows: [
+        { rateLimitType: "five_hour", utilization: 0.8, resetsAt: fiveHourReset },
+        { rateLimitType: "seven_day", utilization: 0.47, resetsAt: weekReset },
+      ],
+      observedAt: "2026-08-23T03:01:00.000Z",
+    });
+    const before = read("2026-08-23T03:29:59.000Z", "codex");
+    expect(before.reading).toMatchObject({ rateLimitType: "five_hour", utilization: 0.8 });
+    const codex = read(NOW, "codex");
+    expect(codex.readingWindowReset).toBe(false);
+    expect(codex.reading).toMatchObject({
+      status: "allowed",
+      rateLimitType: "seven_day",
+      utilization: 0.47,
+      resetsAt: weekReset,
+      observedAt: "2026-08-23T03:01:00.000Z",
+      windows: [
+        { rateLimitType: "five_hour", utilization: null, resetsAt: fiveHourReset },
+        { rateLimitType: "seven_day", utilization: 0.47, resetsAt: weekReset },
+      ],
+    });
+    // The week binds and the five-hour window resets: the binding stands, and
+    // the lapsed window's figure is gone.
+    recordBackendRateLimit(db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
+      status: "allowed",
+      rateLimitType: "seven_day",
+      utilization: 0.71,
+      resetsAt: weekReset,
+      isUsingOverage: false,
+      windows: [
+        { rateLimitType: "five_hour", utilization: 0.02, resetsAt: fiveHourReset },
+        { rateLimitType: "seven_day", utilization: 0.71, resetsAt: weekReset },
+      ],
+      observedAt: "2026-08-23T03:01:00.000Z",
+    });
+    expect(read(NOW, "claude").reading).toMatchObject({
+      rateLimitType: "seven_day",
+      utilization: 0.71,
+      windows: [
+        { rateLimitType: "five_hour", utilization: null, resetsAt: fiveHourReset },
+        { rateLimitType: "seven_day", utilization: 0.71, resetsAt: weekReset },
+      ],
+    });
+    // Once the week has reset too, nothing current is left: the reading is
+    // aged whole (ruling 481(d)) and kept as history.
+    const later = read("2026-08-28T00:00:00.000Z", "claude");
+    expect(later.readingWindowReset).toBe(true);
+    expect(later.reading).toMatchObject({ rateLimitType: "seven_day", utilization: 0.71 });
+  });
 });
 
 /**
