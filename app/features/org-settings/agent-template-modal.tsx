@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import type { GagentView } from "~/server/org/gagents.server";
+import type { ProjectCustomStages } from "~/server/org/org-view.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
+import { Pagination } from "~/ui/pagination";
 import { countLabel } from "~/shared/text/plural";
 import { MiniModal } from "./mini-modal";
-import { STAGE_OUTSIDE_DEFAULT, useModalAction } from "./resource-helpers";
+import { useModalAction } from "./resource-helpers";
 
 /**
  * The global agent-TEMPLATE editor for the Agent-resources tab, with its
@@ -57,6 +59,41 @@ export const kbLegacyOf = (
 const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
+/** Ruling 618: the Custom stages list pages through projects this many at a
+ *  time. */
+const PROJECTS_PER_PAGE = 3;
+
+/** Ruling 618: one row of the Custom stages list, a project's own stages under
+ *  its name and task key, or the stored ids no board has. The row is a named
+ *  group, so a chip that reads "To do" is heard with the project it is on. */
+function StageRow({
+  label,
+  tag,
+  on,
+  children,
+}: {
+  label: string;
+  /** The project's task key; absent on the stored-ids row. */
+  tag?: string;
+  /** How many of the row's stages the profile names. */
+  on: number;
+  children: ReactNode;
+}) {
+  const labelId = useId();
+  return (
+    <div className="elig-proj" role="group" aria-labelledby={labelId}>
+      <div className="elig-proj-head">
+        <span className="elig-proj-name" id={labelId}>
+          {label}
+        </span>
+        {tag && <span className="elig-proj-key">{tag}</span>}
+        {on > 0 && <span className="elig-count">{on} selected</span>}
+      </div>
+      <div className="pick-chips">{children}</div>
+    </div>
+  );
+}
+
 /** Grants pointing at a resource this org no longer has, rendered removable —
  *  the same red `missing` chip the project profile modal uses (P14-KM-10).
  *  Exported for the controller settings panel (ruling 106), so the missing
@@ -101,6 +138,7 @@ export function MissingChips({
 export function AgentModal({
   initial,
   stages,
+  projectStages,
   kbs,
   mcps,
   skills,
@@ -108,6 +146,8 @@ export function AgentModal({
 }: {
   initial: GagentView | null;
   stages: StageDef[];
+  /** Ruling 618: each live project's stages outside the default workflow. */
+  projectStages: ProjectCustomStages[];
   kbs: KbView[];
   mcps: McpView[];
   skills: SkillView[];
@@ -155,10 +195,29 @@ export function AgentModal({
   // Ruling 479(h): a stored stage the chips below do not offer (a project's own
   // `build`, carried into the template) had no chip, so it could be neither
   // seen nor removed and every save kept it. Held from the open, so a chip
-  // pressed off stays on screen to be pressed back on.
+  // pressed off stays on screen to be pressed back on. Ruling 618: a stage a
+  // live project's board has is offered in that project's row, so this is
+  // only what no board has any more (a project archived, a stage renamed).
   const [storedOnlyStages] = useState<string[]>(() =>
-    initial ? initial.stages.filter((id) => !workStages.some((s) => s.id === id)) : [],
+    initial
+      ? initial.stages.filter(
+          (id) =>
+            !workStages.some((s) => s.id === id) &&
+            !projectStages.some((p) => p.stages.some((s) => s.id === id)),
+        )
+      : [],
   );
+  // Ruling 618: the projects whose stages the profile already names lead, so
+  // what it stores is on the first page. Ordered once, at the open, so a press
+  // never moves a row to another page.
+  const [projects] = useState<ProjectCustomStages[]>(() => {
+    const named = new Set(initial ? initial.stages : []);
+    const namesOne = (p: ProjectCustomStages) => p.stages.some((s) => named.has(s.id));
+    return [...projectStages.filter(namesOne), ...projectStages.filter((p) => !namesOne(p))];
+  });
+  const [page, setPage] = useState(1);
+  const defaultLabelId = useId();
+  const customLabelId = useId();
   const [selSkills, setSelSkills] = useState<string[]>(
     initial ? match(initial.skills, skillNames) : [],
   );
@@ -198,6 +257,25 @@ export function AgentModal({
   const canSave =
     name.trim().length > 1 && role.trim().length > 0 && selStages.length > 0;
   const selStageSet = new Set(selStages);
+  const offeredByDefault = new Set(stageOpts.map((s) => s.id));
+  const customOn = selStages.filter((id) => !offeredByDefault.has(id)).length;
+  const pages = Math.max(1, Math.ceil(projects.length / PROJECTS_PER_PAGE));
+  const pageStart = (page - 1) * PROJECTS_PER_PAGE;
+  const pageProjects = projects.slice(pageStart, pageStart + PROJECTS_PER_PAGE);
+  const pageEnd = pageStart + pageProjects.length;
+  const stageChip = (s: StageDef, title?: string) => (
+    <button
+      type="button"
+      key={s.id}
+      className={"pick-chip" + (selStageSet.has(s.id) ? " on" : "")}
+      aria-pressed={selStageSet.has(s.id)}
+      title={title}
+      onClick={() => toggle(selStages, setSelStages, s.id)}
+    >
+      <span className="sdot" data-stage-color={s.color}></span>
+      {s.name}
+    </button>
+  );
   const selSkillSet = new Set(selSkills);
   const selMcpSet = new Set(selMcps);
   const selKbSet = new Set(selKbs);
@@ -363,42 +441,84 @@ export function AgentModal({
               actually makes rather than one it cannot. */}
           <span className="fhint">Done is closed by a human, never by an agent</span>
         </span>
-        <div className="pick-chips">
-          {stageOpts.map((s) => (
-            <button
-              type="button"
-              key={s.id}
-              className={"pick-chip" + (selStageSet.has(s.id) ? " on" : "")}
-              aria-pressed={selStageSet.has(s.id)}
-              onClick={() => toggle(selStages, setSelStages, s.id)}
-            >
-              <span className="sdot" data-stage-color={s.color}></span>
-              {s.name}
-            </button>
-          ))}
-          {storedOnlyStages.map((id) => {
-            const known = stages.find((s) => s.id === id);
-            const on = selStageSet.has(id);
-            return (
-              <button
-                type="button"
-                key={id}
-                className={"pick-chip" + (known ? "" : " mono") + (on ? " on" : "")}
-                aria-pressed={on}
-                title={`This profile names the stage “${id}”, which the default workflow does not offer. A project whose board has a stage with this id, or one in the same role, reads it. Press to ${on ? "remove" : "keep"} it.`}
-                onClick={() => toggle(selStages, setSelStages, id)}
-              >
-                <span className="sdot" data-stage-color={known?.color}></span>
-                {known ? known.name : id}
-                {!known && (
-                  <>
-                    {" "}
-                    <span className="res-chip-note">{STAGE_OUTSIDE_DEFAULT}</span>
-                  </>
-                )}
-              </button>
-            );
-          })}
+        {/* Ruling 618 (2026-10-01): the stages a project's own board
+            adds were echoed only once a profile already stored one, as a
+            pressed chip after the defaults that repeated "not in the default
+            workflow". They are offered now, grouped by the project whose board
+            has them and paged three projects at a time. */}
+        <div className="elig-groups">
+          <div className="elig-group" role="group" aria-labelledby={defaultLabelId}>
+            <span className="ctx-lbl" id={defaultLabelId}>
+              Default workflow
+            </span>
+            <div className="pick-chips">{stageOpts.map((s) => stageChip(s))}</div>
+          </div>
+          <div className="elig-group" role="group" aria-labelledby={customLabelId}>
+            <div className="elig-head">
+              <span className="ctx-lbl" id={customLabelId}>
+                Custom stages
+              </span>
+              {customOn > 0 && <span className="elig-count">{customOn} selected</span>}
+            </div>
+            {projects.length === 0 && storedOnlyStages.length === 0 ? (
+              <span className="ctx-none">No project&apos;s board adds a stage of its own.</span>
+            ) : (
+              <p className="elig-note">
+                From each project&apos;s own board. A profile names stages by id, so a
+                stage counts on every board that has it.
+              </p>
+            )}
+            {storedOnlyStages.length > 0 && (
+              <div className="elig-stray">
+                <StageRow
+                  label="On no project's board"
+                  on={storedOnlyStages.filter((id) => selStageSet.has(id)).length}
+                >
+                  {storedOnlyStages.map((id) => {
+                    const known = stages.find((s) => s.id === id);
+                    const on = selStageSet.has(id);
+                    return (
+                      <button
+                        type="button"
+                        key={id}
+                        className={"pick-chip" + (known ? "" : " mono") + (on ? " on" : "")}
+                        aria-pressed={on}
+                        title={`This profile names the stage “${id}”, which neither the default workflow nor any project's own stages offer. A board with a stage of this id, or one in the same role, reads it. Press to ${on ? "remove" : "keep"} it.`}
+                        onClick={() => toggle(selStages, setSelStages, id)}
+                      >
+                        <span className="sdot" data-stage-color={known?.color}></span>
+                        {known ? known.name : id}
+                      </button>
+                    );
+                  })}
+                </StageRow>
+              </div>
+            )}
+            {pageProjects.length > 0 && (
+              <div className="elig-projs">
+                {pageProjects.map((p) => (
+                  <StageRow
+                    key={p.slug}
+                    label={p.name}
+                    tag={p.prefix}
+                    on={p.stages.filter((s) => selStageSet.has(s.id)).length}
+                  >
+                    {p.stages.map((s) => stageChip(s, `“${s.id}” on ${p.name}'s board`))}
+                  </StageRow>
+                ))}
+              </div>
+            )}
+            {pages > 1 && (
+              <div className="elig-foot">
+                <span className="elig-range" aria-live="polite">
+                  {pageEnd - pageStart === 1
+                    ? `Project ${pageEnd} of ${projects.length}`
+                    : `Projects ${pageStart + 1} to ${pageEnd} of ${projects.length}`}
+                </span>
+                <Pagination page={page} pages={pages} label="Custom stage pages" onPage={setPage} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <div className="field">
