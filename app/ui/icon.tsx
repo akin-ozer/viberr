@@ -76,6 +76,9 @@ const ICON_PATHS = {
   term: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9.5l3 3-3 3M13 15.5h4"/>',
   // Ruling 500: a code block's head in a comment (the angle brackets).
   code: '<path d="M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5"/>',
+  // Ruling 614: a document's Preview, beside `code` for its Raw text. The
+  // almond and the pupil share the box's centre.
+  eye: '<path d="M2.5 12C4.5 8 8 5.5 12 5.5S19.5 8 21.5 12C19.5 16 16 18.5 12 18.5S4.5 16 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
   // Ruling 365: the board card's status and problem marks — a circle family
   // (failed, done, held, resting) so the chips read as one set at 13px.
   xcircle: '<circle cx="12" cy="12" r="8.5"/><path d="M9 9l6 6M15 9l-6 6"/>',
