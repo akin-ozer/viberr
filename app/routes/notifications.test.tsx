@@ -196,10 +196,10 @@ describe("notifications overlay: row destinations come from href", () => {
         unread: false,
       }),
     ]);
-    // The row body marks read; the "key" button is the navigable control.
-    const keybtn = container.querySelector(".ntf-ev .keybtn")!;
-    expect(keybtn.textContent).toBe("Viberr Core"); // no trailing separator
-    fireEvent.click(keybtn);
+    // The row body marks read; the where link is the navigable control.
+    const link = container.querySelector(".ntf-ev .ntf-where button")!;
+    expect(link.textContent).toBe("Viberr Core"); // no trailing separator
+    fireEvent.click(link);
     await waitFor(() => expect(wentTo()).toBe("/projects/board"));
   });
 
@@ -216,8 +216,8 @@ describe("notifications overlay: row destinations come from href", () => {
       }),
     ]);
     const row = container.querySelector(".ntf-ev")!;
-    // The key button is the navigable control; with no destination the row
+    // The where link is the navigable control; with no destination the row
     // must not present one at all.
-    expect(row.querySelector(".keybtn")).toBeNull();
+    expect(row.querySelector(".ntf-where")).toBeNull();
   });
 });

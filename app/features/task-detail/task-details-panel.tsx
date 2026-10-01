@@ -605,7 +605,7 @@ function EpicMenu({
           <span className="epic-dot" data-stage-color={epic.color} aria-hidden="true" />
           <span className="epic-menu-title">{epic.title}</span>
           {!isEpicOpen(epic.status) && (
-            <span className="fine xs dim"> · {EPIC_STATUS_LABEL[epic.status]}</span>
+            <span className="fine dim"> · {EPIC_STATUS_LABEL[epic.status]}</span>
           )}
           {epic.id === current && <Icon name="check" className="prop-check" />}
         </button>

@@ -314,7 +314,6 @@ export function HomePage({
             rest={rest}
             archivedList={archivedList}
             query={query}
-            onNew={() => setModal(true)}
           />
         )}
 

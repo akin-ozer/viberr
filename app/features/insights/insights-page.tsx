@@ -60,10 +60,12 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
   // (docs/ui/surfaces.md §4).
   return (
     <main className="insights" data-screen-label="Insights">
-      <div className="insights-head">
+      {/* Ruling 625: Instance settings' header, its sibling standalone page
+          (ruling 145) — one title step, one lede. */}
+      <div className="set-head">
         <div>
           <h1>Insights</h1>
-          <p className="fine">
+          <p className="sub">
             Analytics across every agent run on this instance. Generated{" "}
             <LocalDayDotTime iso={summary.generatedAt} />.
           </p>
@@ -206,7 +208,7 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         <Icon name="check" />
         <h2>Delivery oversight</h2>
       </div>
-      <div className="stat-grid">
+      <div className="stat-grid four">
       <StatCard
         label="Owner & state clarity"
         value={fmtPercent(g.clarity.pct)}
@@ -1017,7 +1019,7 @@ function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
 function DailyChart({ summary }: { summary: InsightsSummary }) {
   const max = summary.daily.reduce((m, d) => Math.max(m, d.runs), 0) || 1;
   return (
-    <section className="panel daily">
+    <section className="panel">
       <div className="panel-head">
         <h2>Runs · last {summary.windowDays} days</h2>
       </div>
@@ -1029,7 +1031,13 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
         {summary.daily.map((d) => {
           const day = `${d.date}: ${countLabel(d.runs, "run")}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`;
           return (
-            <span key={d.date} className="daily-col" role="listitem" title={day}>
+            <span
+              key={d.date}
+              className="daily-col"
+              role="listitem"
+              title={day}
+              data-empty={d.runs === 0 || undefined}
+            >
               <span
                 className="daily-bar"
                 style={{ height: `${Math.max(3, Math.round((d.runs / max) * 100))}%` }}

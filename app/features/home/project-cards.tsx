@@ -118,14 +118,18 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           </span>
         </>
       )}
+      {/* Ruling 625: "quiet" is the stat a narrow row drops (app.css, 1100px
+          tier), so the decision count beside it, the row's one demand, stays. */}
       {p.running === 0 && total > 0 && (
         <>
-          <span>·</span>
-          <span>quiet</span>
+          <span className="pj-quiet">·</span>
+          <span className="pj-quiet">quiet</span>
         </>
       )}
+      {/* Ruling 625: a decision that waits on you is blue everywhere (amber is
+          an agent's question), in the outline tier the board's chip wears. */}
       {p.waiting > 0 && (
-        <Pill kind="input" sm>
+        <Pill kind="info" sm quiet dot>
           {p.waiting} waiting on you
         </Pill>
       )}

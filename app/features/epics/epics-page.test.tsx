@@ -296,7 +296,11 @@ describe("ruling 503(e): the empty Epics page", () => {
     expect(hero?.getAttribute("data-screen-label")).toBe("Empty state");
     expect(hero?.textContent).toContain("Create one here, or ask the controller to plan one.");
     expect(hero && within(hero).getByRole("button", { name: "New epic" })).toBeTruthy();
-    expect(headCount()).toBe("No epics yet");
+    // Ruling 625: said once and offered once. CANARY: put the head's "No epics
+    // yet" back, or drop `epics.length > 0` from the head's New epic button,
+    // and the page says it twice and offers two primary buttons.
+    expect(headCount()).toBe("");
+    expect(screen.getAllByRole("button", { name: "New epic" })).toHaveLength(1);
     // No views to pick between when there is nothing to show.
     expect(screen.queryByRole("group", { name: "Which epics" })).toBeNull();
   });

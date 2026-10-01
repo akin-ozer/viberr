@@ -110,8 +110,10 @@ export function KbPanel({
               {/* The two lines read as one sentence split across them —
                   "…docs agents read" / "read live" — which said "read" twice
                   and left the live-folder promise dangling. One clause each. */}
-              <span className="sub mono">
-                store://kb/{kb.dir}/ ·{" "}
+              {/* Ruling 625: the store path is code, the rest of the line is
+                  prose in the body face. */}
+              <span className="sub">
+                <code className="mono">store://kb/{kb.dir}/</code> ·{" "}
                 {kb.folderExists ? (
                   <>
                     {kb.injectableCount} doc
@@ -495,8 +497,8 @@ export function SkillPanel({
               <span className="sub clamp" title={s.summary}>
                 {s.summary}
               </span>
-              <span className="sub mono">
-                store://skills/{s.name}/ · {countLabel(s.fileCount, "file")} ·{" "}
+              <span className="sub">
+                <code className="mono">store://skills/{s.name}/</code> · {countLabel(s.fileCount, "file")} ·{" "}
                 <UpdatedStamp iso={s.updatedAt} />
                 {usedBy(s.name) > 0
                   ? " · " + countLabel(usedBy(s.name), "template")
@@ -593,7 +595,7 @@ export function AgentPanel({
                 <span className="sub clamp" title={a.summary}>
                   {a.summary}
                 </span>
-                <span className="sub mono">
+                <span className="sub">
                   {BACKEND_LABEL[a.backend]} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes
                       ("project"/"projects"); this one always said "resources". */}

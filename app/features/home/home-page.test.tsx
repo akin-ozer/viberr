@@ -295,9 +295,11 @@ describe("UI-21: the search empty state accounts for pinned matches", () => {
 
 describe("UI-24: the org tile counts the population the panel shows", () => {
   it("discloses disabled accounts inside the total", () => {
-    const { getByText } = renderHome(baseData([card()]));
+    const { getByText, container } = renderHome(baseData([card()]));
     expect(getByText("5 users")).toBeTruthy();
-    expect(getByText(/1 admin · 4 members · 2 disabled/)).toBeTruthy();
+    // Each count is its own unbreakable span (ruling 625), so read the line.
+    const lines = [...container.querySelectorAll(".org-tile .sub")].map((s) => s.textContent);
+    expect(lines).toContain("1 admin · 4 members · 2 disabled");
   });
 });
 

@@ -178,8 +178,9 @@ function CallbackUrl({ url }: { url: string }) {
     }
   };
   return (
-    <span className="sub mono">
-      Callback URL: {url}{" "}
+    // Ruling 625: the label is prose; only the URL is code.
+    <span className="sub">
+      Callback URL: <code className="mono">{url}</code>{" "}
       <button
         type="button"
         className="btn ghost sm"

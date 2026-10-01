@@ -58,9 +58,13 @@ export function Rail({
               (membersCount === 1 ? " member" : " members")
             }
           >
-            {(projectRepo ? projectRepo + " · " : "") +
-              membersCount +
-              (membersCount === 1 ? " member" : " members")}
+            {/* Ruling 625: the repo clips; the count beside it never does. */}
+            {projectRepo && <span className="pj-repo">{projectRepo}</span>}
+            <span>
+              {(projectRepo ? "· " : "") +
+                membersCount +
+                (membersCount === 1 ? " member" : " members")}
+            </span>
           </div>
         </span>
         <Icon name="chevron" />

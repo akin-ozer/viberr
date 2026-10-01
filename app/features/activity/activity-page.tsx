@@ -30,7 +30,9 @@ import {
  * per-row task-key deep link (kept by the callers) is the stable pointer to the
  * run/task itself.
  */
-const ACTIVITY_TEXT_PREVIEW_LIMIT = 240;
+// Ruling 625 (h-mobile #13): 160, not 240. The "one-line" preview set three
+// lines at 1440 and eight on a phone; 160 is two at 1440.
+const ACTIVITY_TEXT_PREVIEW_LIMIT = 160;
 function ActivityText({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   if (text.length <= ACTIVITY_TEXT_PREVIEW_LIMIT) {
@@ -600,7 +602,7 @@ function FeedFilters({
         ))}
       </select>
       <input
-        className="ff-task mono"
+        className="ff-task"
         type="search"
         value={get(params.task)}
         placeholder="Task id"
@@ -609,25 +611,29 @@ function FeedFilters({
       />
       {/* Pass 30: the app's ONE date-entry control (the task pages' custom
           DatePicker) — the feeds were the only surface still shipping native
-          date inputs, a second visual idiom for the same act. */}
-      <span className="ff-datepick">
-        <DatePicker
-          value={get(params.from) || null}
-          placeholder="From"
-          label={`From date for the ${legend}`}
-          onChange={(iso) => setParam(params.from, iso ?? "")}
-        />
-      </span>
-      <span className="ff-dash" aria-hidden="true">
-        to
-      </span>
-      <span className="ff-datepick">
-        <DatePicker
-          value={get(params.to) || null}
-          placeholder="To"
-          label={`To date for the ${legend}`}
-          onChange={(iso) => setParam(params.to, iso ?? "")}
-        />
+          date inputs, a second visual idiom for the same act.
+          Ruling 625: the range wraps as one piece; on a phone "To" went to a
+          line of its own and left "to" dangling after From. */}
+      <span className="ff-range">
+        <span className="ff-datepick">
+          <DatePicker
+            value={get(params.from) || null}
+            placeholder="From"
+            label={`From date for the ${legend}`}
+            onChange={(iso) => setParam(params.from, iso ?? "")}
+          />
+        </span>
+        <span className="ff-dash" aria-hidden="true">
+          to
+        </span>
+        <span className="ff-datepick">
+          <DatePicker
+            value={get(params.to) || null}
+            placeholder="To"
+            label={`To date for the ${legend}`}
+            onChange={(iso) => setParam(params.to, iso ?? "")}
+          />
+        </span>
       </span>
       {active && (
         <button

@@ -21,20 +21,25 @@ import {
  * mutations go through the ONE existing /notifications/read action.
  *
  * Deviation from the mock (spec §8 open question C, resolved): this is a
- * GLOBAL cross-project page, so the project pill / keybtn project prefix
- * render for every row with a known project — the mock hid them for its
+ * GLOBAL cross-project page, so every row with a known project names it
+ * ("Project · KEY", `whereLabel`) — the mock hid it for its
  * hard-coded "Viberr Core" workspace, a literal the porting notes say must
  * not survive.
  */
 
-function keybtnLabel(n: NotificationPageItem): string {
+/**
+ * Where a notification points, in the ONE idiom all three of its drawings use
+ * (ruling 625): "Project · KEY" in the meta voice, as the bell's meta line
+ * reads. The page drew the project as a grey pill in one list and a mono
+ * keycap in the other.
+ */
+function whereLabel(n: NotificationPageItem): string {
   // F18-1: an orphan has nowhere to open — say so instead of a live-looking link.
   if (n.targetMissing) return "project no longer exists";
   // Named after where it GOES. Concatenating an absent task key produced
   // "Viberr Core · " — a trailing separator on a control whose destination is
   // the project board, not a task.
-  if (!n.taskKey) return n.projectName ?? "";
-  return (n.projectName ? n.projectName + " · " : "") + n.taskKey;
+  return [n.projectName, n.taskKey].filter(Boolean).join(" · ");
 }
 
 function NtfNeedsYou({
@@ -79,10 +84,11 @@ function NtfNeedsYou({
           {subParts.length > 0 ? ` · ${subParts.join(" · ")}` : ""}
         </span>
       </div>
-      <div className="rq-list">
+      <div className="rq-list ntf-wait">
         {items.map((n) => {
           const m = ntfMeta(n);
           const p = ntfPill(n);
+          const where = whereLabel(n);
           return (
             <button
               type="button"
@@ -98,23 +104,28 @@ function NtfNeedsYou({
               </span>
               <span className="rq-main">
                 <div className="ttl">
+                  {/* The dot is colour alone (WCAG 1.4.1); the bell's row
+                      leads its name the same way. */}
+                  {n.unread && <span className="vh">Unread: </span>}
                   {n.title}
-                  {n.unread && <span className="unread-dot in" />}
                 </div>
                 <div className="sub">
-                  <span className="mono">{n.taskKey}</span> ·{" "}
+                  {where && (
+                    <>
+                      <span className="ntf-where">{where}</span> ·{" "}
+                    </>
+                  )}
                   <RichText text={n.text} mentions={false} />
                 </div>
               </span>
+              {/* Ruling 625: the unread dot sits in the trailing cluster beside
+                  the time, as in the stream below and at the bell row's end;
+                  it hung off the title's last word here. */}
               <span className="rq-meta">
-                {n.projectName && (
-                  <Pill kind="neutral" sm>
-                    {n.projectName}
-                  </Pill>
-                )}
                 <Pill kind={p.kind} sm>
                   {p.label}
                 </Pill>
+                {n.unread && <span className="unread-dot" />}
                 <span className="pev-t">
                   {local ? needsYouTime(n.occurredAt) : needsYouTimeUTC(n.occurredAt)}
                 </span>
@@ -201,43 +212,50 @@ function NtfStream({
                     <strong className="ntf-ev-title">{n.title}</strong>
                   ) : (
                     <RichText text={n.text} mentions={false} />
-                  )}{" "}
-                  {/* B-FD6: the keybtn NAVIGATES, so it renders only when the row
-                      has a destination. An org-wide row has none (nothing shown).
-                      F18-1: an ORPHAN (its project was deleted) also has no
-                      destination but MUST still say so — otherwise the row is
-                      indistinguishable from a live one and the bell popover, which
-                      still shows "project no longer exists", disagrees with it. */}
-                  {n.href !== null ? (
-                    <button
-                      type="button"
-                      className="keybtn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRead(n.id);
-                        onOpen(n);
-                      }}
-                    >
-                      {keybtnLabel(n)}
-                    </button>
-                  ) : n.targetMissing ? (
-                    <span
-                      className="keybtn dead"
-                      title="The project this refers to no longer exists"
-                    >
-                      {keybtnLabel(n)}
-                    </span>
-                  ) : null}
+                  )}
                   {n.title && (
                     <span className="ntf-ev-text" data-clamped>
                       <RichText text={n.text} mentions={false} />
                     </span>
                   )}
+                  {/* B-FD6: the link NAVIGATES, so it renders only when the row
+                      has a destination. An org-wide row has none (nothing shown).
+                      F18-1: an ORPHAN (its project was deleted) also has no
+                      destination but MUST still say so — otherwise the row is
+                      indistinguishable from a live one and the bell popover, which
+                      still shows "project no longer exists", disagrees with it.
+                      Ruling 625: it is the row's meta line, the bell row's
+                      anatomy (title, body, where), not a mono keycap mid-
+                      sentence. */}
+                  {n.href !== null ? (
+                    <span className="ntf-where">
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRead(n.id);
+                          onOpen(n);
+                        }}
+                      >
+                        {whereLabel(n)}
+                      </button>
+                    </span>
+                  ) : n.targetMissing ? (
+                    <span
+                      className="ntf-where"
+                      title="The project this refers to no longer exists"
+                    >
+                      {whereLabel(n)}
+                    </span>
+                  ) : null}
                 </span>
+                {/* Ruling 625: a button in the header's "Mark all read" idiom;
+                    it was a mono keycap, the look of a task key. */}
                 {n.unread && (
                   <button
                     type="button"
-                    className="keybtn"
+                    className="btn ghost sm"
                     // `title` is NULL for every kind but the decision kinds, so
                     // concatenating it announced `Mark “null” read` — the row
                     // body's own fallback is the notification's identity.

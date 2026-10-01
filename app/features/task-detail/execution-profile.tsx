@@ -420,7 +420,8 @@ function OperatorRunControl({
 }: {
   /** The operator-run fetcher's request, if one is in flight. */
   inFlight: RunInFlight;
-  /** Task is closed (terminal stage) — controls render disabled (G9). */
+  /** Task is closed (terminal stage) — the control withdraws to its reason
+   *  (G9, ruling 625). */
   disabled?: boolean;
   /** F20-5 (R20-1): a non-structural reason the manual run is refused — an open
    *  decision packet pauses coordination. Rendered copy (a `title` never opens
@@ -456,14 +457,39 @@ function OperatorRunControl({
   const [delay, setDelay] = useState<RunDelay>("now");
   const busy = inFlight !== null;
   const backendLabel = backendLabelOf(defaultBackend);
-  // Hunt 2026-08-29: two different kinds of "off". `busy`/`disabled` (closed
-  // task) kill the whole control; the open-packet refusal (F20-5) and a backend
-  // the owner cannot run (P11-41, ruling 127) refuse a run NOW — but
-  // scheduleTaskAction refuses neither (the packet resolves, the owner connects
-  // the backend or the seat changes hands, and the fired run resolves the live
-  // profile and the live owner anyway), so a picked delay keeps the button
-  // alive as "Schedule" instead of blocking the one action that still works.
-  const hardOff = busy || !!disabled;
+  if (disabled) {
+    // Ruling 625 on ruling 37: a closed task WITHDRAWS the operator's run
+    // control, as the run-an-agent cell beside it does, rather than drawing a
+    // dead steer field, a dead when-picker and a dead button (under a backend
+    // warning that cannot matter any more). Ruling 177 (pass 36): every door
+    // refuses a closed task — the button, an @operator comment, a schedule, an
+    // agent's completion — and the sentence says so; N20-17's "mentioning
+    // @operator still runs it" disclosure described the F36-4 hole and is gone
+    // with it. The pending entries stay, cancellable and marked as never
+    // running.
+    return (
+      <span className="op-run">
+        <span className="sub">Task closed. Reopen it to run the operator.</span>
+        <PendingSchedules
+          schedules={schedules}
+          agentNameOf={() => undefined}
+          canCancel
+          busy={scheduleBusy}
+          moot
+          onCancel={onCancelSchedule}
+        />
+      </span>
+    );
+  }
+  // Hunt 2026-08-29: two different kinds of "off". `busy` kills the whole
+  // control (a closed task withdrew it above); the open-packet refusal (F20-5)
+  // and a backend the owner cannot run (P11-41, ruling 127) refuse a run NOW —
+  // but scheduleTaskAction refuses neither (the packet resolves, the owner
+  // connects the backend or the seat changes hands, and the fired run resolves
+  // the live profile and the live owner anyway), so a picked delay keeps the
+  // button alive as "Schedule" instead of blocking the one action that still
+  // works.
+  const hardOff = busy;
   const runNowBlocked = !!blockedReason || !!runRefusal;
   const off = hardOff || (delay === "now" && runNowBlocked);
   const run = () => {
@@ -504,11 +530,9 @@ function OperatorRunControl({
         onClick={run}
         title={
           blockedReason ??
-          (disabled
-            ? "Task is closed (terminal stage). Reopen it to run the operator"
-            : delay === "now"
-              ? "Run the operator to coordinate this task"
-              : "Schedule this operator run")
+          (delay === "now"
+            ? "Run the operator to coordinate this task"
+            : "Schedule this operator run")
         }
       >
         {/* Ruling 459 over ruling 368: the resting mark trades for the clock
@@ -533,7 +557,7 @@ function OperatorRunControl({
         // `principalRefusalMessage`).
         <span className="sub">{runRefusal}</span>
       )}
-      {configuredAutonomy === "full" && !disabled && (
+      {configuredAutonomy === "full" && (
         // F20-9's mirror, kept: full autonomy is the state that lets this run
         // transition stages — it must be visible on the surface that launches
         // it. Supervised needs no caption.
@@ -551,16 +575,9 @@ function OperatorRunControl({
         </span>
       )}
       {/* P14 ruling: a `title` is unreachable on a DISABLED control, so the
-          reason a control is dead has to be rendered copy. F20-5's open-packet
-          reason wins over the closed copy. */}
+          reason a control is dead has to be rendered copy. */}
       {blockedReason ? (
         <span className="sub">{blockedReason}</span>
-      ) : disabled ? (
-        // Ruling 177 (pass 36): every door refuses a closed task — the button,
-        // an @operator comment, a schedule, an agent's completion. N20-17's
-        // "mentioning @operator still runs it" disclosure described the F36-4
-        // hole and is gone with it.
-        <span className="sub">Task closed. Reopen it to run the operator.</span>
       ) : holdNote ? (
         <span className="sub" data-hold-note>{holdNote}</span>
       ) : null}
@@ -569,7 +586,6 @@ function OperatorRunControl({
         agentNameOf={() => undefined}
         canCancel
         busy={scheduleBusy}
-        moot={disabled}
         onCancel={onCancelSchedule}
       />
     </span>
@@ -1123,7 +1139,9 @@ export function ExecutionProfile({
           <div className="lbl">Operator</div>
           <div className="val op-val">
             <div className="op-id">
-              <span className="agent-glyph">
+              {/* i-dark #13 (ruling 625): the Operator's one tile, as the
+                  agent-log picker draws it, not a violet specialist's. */}
+              <span className="agent-glyph op">
                 <Icon name="shield" />
               </span>
               <span>

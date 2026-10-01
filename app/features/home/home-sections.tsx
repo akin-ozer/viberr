@@ -269,7 +269,6 @@ export function ProjectSections({
   rest,
   archivedList,
   query,
-  onNew,
 }: {
   view: "grid" | "list";
   stars: Record<string, boolean>;
@@ -278,7 +277,6 @@ export function ProjectSections({
   rest: HomeProjectCard[];
   archivedList: HomeProjectCard[];
   query: string;
-  onNew: () => void;
 }) {
   const renderGroup = (list: HomeProjectCard[]) =>
     view === "grid" ? (
@@ -335,53 +333,13 @@ export function ProjectSections({
           <div className="empty">
             Every match for “{query}” is pinned above.
           </div>
-        ) : view === "grid" ? (
-          <div className="pj-grid">
-            {rest.map((p) => (
-              <ProjectCard
-                key={p.slug}
-                p={p}
-                starred={!!stars[p.slug]}
-                onStar={onStar}
-                repoAccess={p.repoAccess ?? undefined}
-                showDesc
-              />
-            ))}
-            {!query && (
-              <button type="button" className="pj-new" onClick={onNew}>
-                <span className="plus">
-                  <Icon name="plus" />
-                </span>
-                New project
-              </button>
-            )}
-          </div>
         ) : (
-          <>
-            <div className="pj-list">
-              {rest.map((p) => (
-                <ProjectRow
-                  key={p.slug}
-                  p={p}
-                  repoAccess={p.repoAccess ?? undefined}
-                  starred={!!stars[p.slug]}
-                  onStar={onStar}
-                />
-              ))}
-            </div>
-            {!query && (
-              <button
-                type="button"
-                className="pj-new inline"
-                onClick={onNew}
-              >
-                <span className="inline-row">
-                  <Icon name="plus" />
-                  New project
-                </span>
-              </button>
-            )}
-          </>
+          // Ruling 625: no third "New project" here. The grid ended in a
+          // 341×221 dashed tile and the list in a dashed button, beside the
+          // hero's primary button (and the checklist's step while it is
+          // open), so the page drew one action three ways. The hero's button
+          // is the path in both views; the checklist carries it at zero.
+          renderGroup(rest)
         )}
       </section>
       {archivedList.length > 0 && (
@@ -423,6 +381,7 @@ function OrgTile({
   isAdmin,
   to,
   verb = "Manage",
+  aside,
   children,
 }: {
   isAdmin: boolean;
@@ -430,22 +389,32 @@ function OrgTile({
   /** The action word in the tile foot (default "Manage"; a read-only tile like
    *  Insights passes "View"). */
   verb?: string;
+  /** Ruling 625: the tile's picture (the member faces, the two backends) sits
+   *  at the foot's far end. Beside the numbers it squeezed the text column, so
+   *  the four headlines started at four different x and wrapped unevenly. */
+  aside?: ReactNode;
   children: ReactNode;
 }) {
   if (!isAdmin) {
     return (
       <div className="org-tile" aria-disabled="true">
         {children}
-        <span className="foot go-hint muted">Org admins manage this</span>
+        <span className="foot">
+          <span className="go-hint muted">Org admins manage this</span>
+          {aside}
+        </span>
       </div>
     );
   }
   return (
     <Link className="org-tile go" to={to}>
       {children}
-      <span className="foot go-hint">
-        {verb}
-        <Icon name="arrow" />
+      <span className="foot">
+        <span className="go-hint">
+          {verb}
+          <Icon name="arrow" />
+        </span>
+        {aside}
       </span>
     </Link>
   );
@@ -479,60 +448,66 @@ export function SettingsPanel({
             GitHub connections
           </span>
           <span className="val">
-            <span>
-              <span className="nm">
-                {countLabel(org.connectionOwners.length, "connection")}
-              </span>
-              <div className="sub">
-                {org.connectionOwners.join(" · ") || "none connected"}
-              </div>
+            <span className="nm">
+              {countLabel(org.connectionOwners.length, "connection")}
+            </span>
+            <span className="sub">
+              {org.connectionOwners.join(" · ") || "none connected"}
             </span>
           </span>
         </OrgTile>
-        <OrgTile isAdmin={isAdmin} to="/org/settings?tab=users">
+        <OrgTile
+          isAdmin={isAdmin}
+          to="/org/settings?tab=users"
+          aside={<MemberStack members={org.users.first} />}
+        >
           <span className="lbl">
             <Icon name="user" />
             Users &amp; access
           </span>
           <span className="val">
-            <MemberStack members={org.users.first} />
-            <span>
-              <span className="nm">{countLabel(org.users.total, "user")}</span>
-              <div className="sub">
-                {countLabel(org.users.admins, "admin")} ·{" "}
-                {countLabel(org.users.members, "member")}
-                {org.users.disabled > 0
-                  ? ` · ${org.users.disabled} disabled`
-                  : ""}
-              </div>
+            <span className="nm">{countLabel(org.users.total, "user")}</span>
+            {/* Each count keeps its noun on its line (ruling 625). */}
+            <span className="sub">
+              <span>{countLabel(org.users.admins, "admin")}</span> ·{" "}
+              <span>{countLabel(org.users.members, "member")}</span>
+              {org.users.disabled > 0 && (
+                <>
+                  {" "}
+                  · <span>{org.users.disabled} disabled</span>
+                </>
+              )}
             </span>
           </span>
         </OrgTile>
-        <OrgTile isAdmin={isAdmin} to="/org/settings?tab=resources">
+        <OrgTile
+          isAdmin={isAdmin}
+          to="/org/settings?tab=resources"
+          aside={
+            // A pictogram of the two backends, not data: the tile's own text
+            // names what it counts.
+            <span className="glyphs">
+              <AgentGlyph backend="codex" decorative />
+              <AgentGlyph backend="claude" decorative />
+            </span>
+          }
+        >
           <span className="lbl">
             <Icon name="memory" />
             Agent resources
           </span>
           <span className="val">
-            {/* A pictogram of the two backends, not data: the tile's own text
-                names what it counts. */}
-            <span className="glyphs">
-              <AgentGlyph backend="codex" decorative />
-              <AgentGlyph backend="claude" decorative />
+            <span className="nm">
+              {countLabel(org.globalAgents, "agent profile")}
+              <span className="muted"> + operator</span>
             </span>
-            <span>
-              <span className="nm">
-                {countLabel(org.globalAgents, "agent profile")}
-                <span className="muted"> · + operator</span>
-              </span>
-              {/* Hardcoded plurals here read "1 knowledge bases · 1 MCP ·
-                  1 skills" on a one-of-each instance — the Users-tab
-                  disagreement, three nouns at a time. */}
-              <div className="sub">
-                {countLabel(org.knowledgeBases, "knowledge base")} ·{" "}
-                {countLabel(org.mcpServers, "MCP server")} ·{" "}
-                {countLabel(org.skills, "skill")}
-              </div>
+            {/* Hardcoded plurals here read "1 knowledge bases · 1 MCP ·
+                1 skills" on a one-of-each instance — the Users-tab
+                disagreement, three nouns at a time. */}
+            <span className="sub">
+              <span>{countLabel(org.knowledgeBases, "knowledge base")}</span> ·{" "}
+              <span>{countLabel(org.mcpServers, "MCP server")}</span> ·{" "}
+              <span>{countLabel(org.skills, "skill")}</span>
             </span>
           </span>
         </OrgTile>
@@ -542,10 +517,8 @@ export function SettingsPanel({
             Insights
           </span>
           <span className="val">
-            <span>
-              <span className="nm">Agent-run analytics</span>
-              <div className="sub">cost, tokens, timing &amp; outcomes</div>
-            </span>
+            <span className="nm">Agent-run analytics</span>
+            <span className="sub">cost, tokens, timing &amp; outcomes</span>
           </span>
         </OrgTile>
       </div>
@@ -592,8 +565,11 @@ export function StoreStrip({
           // WAL loss (the incident this guard exists to stop).
           <>
             {" "}
+            {/* Ruling 625: the code face for the two values only; the label
+                and the sentence are prose. */}
             <span className="sub">
-              Writer: pid {lockHolder.pid} on {lockHolder.hostname}.
+              Writer: pid <span className="mono">{lockHolder.pid}</span> on{" "}
+              <span className="mono">{lockHolder.hostname}</span>.
             </span>
           </>
         )}

@@ -63,7 +63,7 @@ function renderReview(waitingOnMe: string[]) {
 const tagOf = (container: HTMLElement, key: string) =>
   [...container.querySelectorAll(".rq-row")]
     .find((r) => r.querySelector(".rq-key")!.textContent === key)!
-    .querySelector(".wait-tag")!.textContent;
+    .querySelector(".chip.st")!.textContent;
 
 describe("ReviewView: the row tag reads the board's waitingOnMe", () => {
   it("tags exactly the keys the loader says wait on this viewer", async () => {

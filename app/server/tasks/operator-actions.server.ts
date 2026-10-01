@@ -1934,7 +1934,8 @@ export async function operatorOpenPacket(
       // Ruling 586: the entry carries the card, which leaves when answered.
       text: askedEntryText(
         input.packetType === "blocked"
-          ? `**Blocked:** ${sentence(title)} Opened a decision packet for the owner to resolve.`
+          ? // Ruling 625: the entry's title already says what blocked it.
+            "**Blocked.** Opened a decision packet for the owner to resolve."
           : `**Decision packet:** ${sentence(title)} Awaiting a human decision.`,
         packet,
       ),

@@ -330,7 +330,7 @@ function useRovingStageMenu(active: boolean) {
 function TraceMark({ task }: { task: BoardTask }) {
   if (task.pr) {
     return (
-      <span className="trace pr" title={"Pull request #" + task.pr.number}>
+      <span className="trace" title={"Pull request #" + task.pr.number}>
         {/* Interface review 2026-09-24 (acce-5): the title is the pointer's
             extra; the words reach the accessibility tree through `.vh`. */}
         <Icon name="pr" />
@@ -444,10 +444,12 @@ function CardChips({ task }: { task: BoardTask }) {
 }
 
 /** The list row's agent: the badge and the name — the row has the room the
- *  card does not, and ruling 168(c)'s name stays printed here. */
+ *  card does not, and ruling 168(c)'s name stays printed here. Ruling 625: a
+ *  row with no agent keeps the empty seat, so the chips before it hold one
+ *  column instead of sliding 7rem right. */
 function ListAgent({ task }: { task: BoardTask }) {
   const sp = task.specialist;
-  if (!sp) return null;
+  if (!sp) return <span className="list-agent" aria-hidden="true" />;
   return (
     <span className="list-agent">
       <AgentGlyph backend={sp.backend} decorative />
@@ -465,7 +467,7 @@ function ListAgent({ task }: { task: BoardTask }) {
  * only beside an engaged agent, which is what left a human-owned card without
  * one with a bare right end.
  */
-function OwnerSeat({ task, label }: { task: BoardTask; label?: boolean }) {
+function OwnerSeat({ task }: { task: BoardTask }) {
   const o = task.owner;
   const human = o && o.kind === "human" ? o : null;
   const name = human ? human.name : task.operator ? "awaiting owner" : "unassigned";
@@ -481,8 +483,7 @@ function OwnerSeat({ task, label }: { task: BoardTask; label?: boolean }) {
       role="img"
       aria-label={"Owner: " + name}
     >
-      {label && <span className="rs-lbl">owner</span>}
-      {human ? <Avatar person={human} size="xs" /> : <span className="avatar xs ghost">?</span>}
+      {human ?<Avatar person={human} size="xs" /> : <span className="avatar xs ghost">?</span>}
     </span>
   );
 }
@@ -927,6 +928,14 @@ const ListRow = memo(function ListRow({
           {task.title}
         </Link>
       </h3>
+      {/* F19-13: the card's state block verbatim — the row used to draw
+          validation and the wait tag alone, so the PR-state, checks and
+          review pills existed on one board layout and not the other. Ruling
+          365: the same status chip and problem chips the card draws. Ruling
+          625: before the seats, so the stage and the owner — fixed widths at
+          the row's end — start on one x on every row whatever the chips say. */}
+      <CardChips task={task} />
+      <ListAgent task={task} />
       {/* UI-58: the same StageMenu the cards use — the list view's
           keyboard equivalent for drag-and-drop. F19-8: and off for the
           same reason on an archived row, which falls back to the same
@@ -948,13 +957,9 @@ const ListRow = memo(function ListRow({
           {stageLabel(stage)}
         </span>
       )}
-      <ListAgent task={task} />
-      <OwnerSeat task={task} label />
-      {/* F19-13: the card's state block verbatim — the row used to draw
-          validation and the wait tag alone, so the PR-state, checks and
-          review pills existed on one board layout and not the other. Ruling
-          365: the same status chip and problem chips the card draws. */}
-      <CardChips task={task} />
+      {/* Ruling 625: no per-row "OWNER" eyebrow — the seat's place in the
+          row and its accessible name say what it is. */}
+      <OwnerSeat task={task} />
     </div>
   );
 });
@@ -1682,84 +1687,101 @@ function FilterBar({
     : projectLabels;
   return (
     <div className="filter-bar">
-      {FILTERS.filter(
-        (f) =>
-          (f.id !== "archived" || archived > 0 || filter === "archived") &&
-          // D4: same rarity gate as Archived — surface the continuity chip only
-          // when there is a degraded task to find (or the filter is already on).
-          (f.id !== "continuity" || continuity > 0 || filter === "continuity"),
-      ).map((f) => (
-        <button
-          type="button"
-          key={f.id}
-          className={"fchip" + (filter === f.id ? " on" : "")}
-          aria-pressed={filter === f.id}
-          onClick={() => setParam("filter", f.id === "all" ? null : f.id)}
-        >
-          <Icon name={f.icon} />
-          {f.label}
-          {f.id === "human" && waitingOnMe > 0 && (
-            <span className="tally">· {waitingOnMe}</span>
-          )}
-          {f.id === "quiet" && quiet > 0 && (
-            <span className="tally">· {quiet}</span>
-          )}
-          {f.id === "continuity" && continuity > 0 && (
-            <span className="tally">· {continuity}</span>
-          )}
-          {f.id === "archived" && archived > 0 && (
-            <span className="tally">· {archived}</span>
-          )}
-        </button>
-      ))}
       {/* R15-5: the term input lives on the BOARD now. The topbar's box read
           "Search tasks, branches, agents…" while only ever filtering the open
           board; the global question moved to the ⌘K palette and this one says
-          exactly what it does. */}
-      {/* F26-12 / R26-2: one chip per label the project actually uses (the same
-          vocabulary the New-task modal offers). Single-select: clicking a label
-          narrows the board to its tasks; clicking the active one clears it. They
-          AND with the readiness chips and the term, and only render when the
-          project has labels — a board that never tagged anything stays clean. */}
-      {/* Cap the visible label chips (active-first) — a many-label project
-          pushed the search input down several wrapped rows. The overflow
-          stays reachable: expand in place, and the search box already
-          matches labels. Mirrors the card's own LabelChips "+N" rule. */}
-      {(labelsExpanded
-        ? orderedLabels
-        : orderedLabels.slice(0, LABEL_CHIP_CAP)
-      ).map((l) => {
-        const active = labelFilter?.toLowerCase() === l.toLowerCase();
-        return (
+          exactly what it does. Ruling 625: it leads the row, the left end that
+          the open controller dock (anchored bottom right) never covers; at the
+          row's right end it sat under the dock's panel at 1280×720. */}
+      <label className="board-filter-input">
+        <Icon name="filter" />
+        <input
+          type="search"
+          value={query}
+          placeholder="Filter this board…"
+          aria-label="Filter this board"
+          onChange={(e) => setParam("q", e.target.value || null)}
+        />
+      </label>
+      {/* Ruling 625: the chips as one row — no box on a wide screen (the row
+          is `display: contents` there), one line that scrolls sideways on a
+          phone, where seven wrapped chips took three rows above the lanes. */}
+      <div className="fchip-row">
+        {FILTERS.filter(
+          (f) =>
+            (f.id !== "archived" || archived > 0 || filter === "archived") &&
+            // D4: same rarity gate as Archived — surface the continuity chip only
+            // when there is a degraded task to find (or the filter is already on).
+            (f.id !== "continuity" || continuity > 0 || filter === "continuity"),
+        ).map((f) => (
           <button
             type="button"
-            key={l}
-            className={"fchip lbl" + (active ? " on" : "")}
-            aria-pressed={active}
-            onClick={() => setParam("label", active ? null : l)}
-            title={active ? `Showing only “${l}”. Click to clear.` : `Show only tasks labelled “${l}”`}
+            key={f.id}
+            className={"fchip" + (filter === f.id ? " on" : "")}
+            aria-pressed={filter === f.id}
+            onClick={() => setParam("filter", f.id === "all" ? null : f.id)}
           >
-            {l}
+            <Icon name={f.icon} />
+            {f.label}
+            {f.id === "human" && waitingOnMe > 0 && (
+              <span className="tally">· {waitingOnMe}</span>
+            )}
+            {f.id === "quiet" && quiet > 0 && (
+              <span className="tally">· {quiet}</span>
+            )}
+            {f.id === "continuity" && continuity > 0 && (
+              <span className="tally">· {continuity}</span>
+            )}
+            {f.id === "archived" && archived > 0 && (
+              <span className="tally">· {archived}</span>
+            )}
           </button>
-        );
-      })}
-      {orderedLabels.length > LABEL_CHIP_CAP && (
-        <button
-          type="button"
-          className="fchip lbl"
-          aria-expanded={labelsExpanded}
-          onClick={() => setLabelsExpanded((v) => !v)}
-          title={
-            labelsExpanded
-              ? "Collapse the label list"
-              : `Show all ${orderedLabels.length} labels`
-          }
-        >
-          {labelsExpanded
-            ? "fewer labels"
-            : `+${orderedLabels.length - LABEL_CHIP_CAP} more`}
-        </button>
-      )}
+        ))}
+        {/* F26-12 / R26-2: one chip per label the project actually uses (the same
+            vocabulary the New-task modal offers). Single-select: clicking a label
+            narrows the board to its tasks; clicking the active one clears it. They
+            AND with the readiness chips and the term, and only render when the
+            project has labels — a board that never tagged anything stays clean. */}
+        {/* Cap the visible label chips (active-first) — a many-label project
+            pushed the search input down several wrapped rows. The overflow
+            stays reachable: expand in place, and the search box already
+            matches labels. Mirrors the card's own LabelChips "+N" rule. */}
+        {(labelsExpanded
+          ? orderedLabels
+          : orderedLabels.slice(0, LABEL_CHIP_CAP)
+        ).map((l) => {
+          const active = labelFilter?.toLowerCase() === l.toLowerCase();
+          return (
+            <button
+              type="button"
+              key={l}
+              className={"fchip lbl" + (active ? " on" : "")}
+              aria-pressed={active}
+              onClick={() => setParam("label", active ? null : l)}
+              title={active ? `Showing only “${l}”. Click to clear.` : `Show only tasks labelled “${l}”`}
+            >
+              {l}
+            </button>
+          );
+        })}
+        {orderedLabels.length > LABEL_CHIP_CAP && (
+          <button
+            type="button"
+            className="fchip lbl"
+            aria-expanded={labelsExpanded}
+            onClick={() => setLabelsExpanded((v) => !v)}
+            title={
+              labelsExpanded
+                ? "Collapse the label list"
+                : `Show all ${orderedLabels.length} labels`
+            }
+          >
+            {labelsExpanded
+              ? "fewer labels"
+              : `+${orderedLabels.length - LABEL_CHIP_CAP} more`}
+          </button>
+        )}
+      </div>
       {/* Ruling 503: one epic's tasks, or those in none. A select rather than
           chips: a project can hold many epics, and their names are long. Only
           when the project has epics, or the filter is already on. */}
@@ -1787,16 +1809,6 @@ function FilterBar({
           </select>
         </label>
       )}
-      <label className="board-filter-input">
-        <Icon name="filter" />
-        <input
-          type="search"
-          value={query}
-          placeholder="Filter this board…"
-          aria-label="Filter this board"
-          onChange={(e) => setParam("q", e.target.value || null)}
-        />
-      </label>
       {/* P13-D-34: the board's clear-filter affordance. "All tasks" resets the
           filter but NOT `?q=`, so a board hidden by a stale term needs one
           control that resets both (and the label filter — F26-12). One chip per
@@ -2024,7 +2036,10 @@ export function StageBoard({
     );
   }
   return (
-    <div className="board" onKeyDown={onCardKeyDown}>
+    // Ruling 625: lanes are content-sized at rest; `dragging` stretches every
+    // lane to the board's full height for the drag, so the empty space under a
+    // short lane is still that lane's drop target (`laneAt` reads live rects).
+    <div className={drag ? "board dragging" : "board"} onKeyDown={onCardKeyDown}>
       {columns.map((c, columnIndex) => {
         const base = visible(c.tasks);
         // The hovered column is the drop target (same OR different stage).

@@ -1100,7 +1100,7 @@ describe("P13-D-11: the console pages backwards", () => {
       />,
     );
     expect(footerCount(container)).toBe("6");
-    expect(container.querySelector(".logs-foot .mono")?.textContent).toMatch(/ events$/);
+    expect(container.querySelector(".logs-foot .logs-count")?.textContent).toMatch(/ events$/);
 
     // A live tail can run ahead of the loader's snapshot — the count follows
     // the lines that exist, so it never goes backwards.

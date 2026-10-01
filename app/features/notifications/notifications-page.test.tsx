@@ -271,34 +271,41 @@ describe("NotificationsPage", () => {
     expect(rows[0]!.querySelector(".pill.blocked")!.textContent).toBe(
       "blocked decision",
     );
-    expect(rows[1]!.querySelector(".pill.input")!.textContent).toBe(
+    // Ruling 625: a decision that waits on you is blue (info), as on the
+    // board; amber (input) is kept for an agent's question.
+    // CANARY: put the packet pill back on `input`.
+    expect(rows[1]!.querySelector(".pill.info")!.textContent).toBe(
       "decision required",
     );
     expect(rows[2]!.querySelector(".pill.info")!.textContent).toBe("approval");
 
     // …and the icon tone agrees with the word: a question does not get the
-    // completion checkmark. (The sibling fall-through in `ntfMeta`.)
+    // completion checkmark (the sibling fall-through in `ntfMeta`), and the
+    // decision wears the same blue as its pill.
     expect(
       rows[1]!.querySelector(".pev-ico")!.classList.contains("act-completion"),
     ).toBe(false);
     expect(
-      rows[1]!.querySelector(".pev-ico")!.classList.contains("act-policy"),
+      rows[1]!.querySelector(".pev-ico")!.classList.contains("act-transition"),
     ).toBe(true);
 
-    // Global page: the project pill renders for every row (open Q C).
-    expect(rows[0]!.querySelector(".pill.neutral")!.textContent).toBe(
-      "Viberr Core",
+    // Global page: every row names where it points (open Q C), in the one
+    // "Project · KEY" idiom the bell's meta line and the stream use (ruling
+    // 625) — no project pill beside the type pill.
+    expect(rows[0]!.querySelector(".sub .ntf-where")!.textContent).toBe(
+      "Viberr Core · VIB-160",
     );
-    expect(rows[1]!.querySelector(".pill.neutral")!.textContent).toBe(
-      "Deploy Pipeline",
+    expect(rows[1]!.querySelector(".sub .ntf-where")!.textContent).toBe(
+      "Deploy Pipeline · DEP-31",
     );
+    expect(rows[0]!.querySelector(".pill.neutral")).toBeNull();
 
-    // Unread dot on the title (inline variant), none on the read approval.
-    expect(rows[0]!.querySelector(".unread-dot.in")).toBeTruthy();
-    expect(rows[2]!.querySelector(".unread-dot.in")).toBeNull();
+    // Unread dot in the trailing cluster beside the time, as the stream's;
+    // none on the read approval.
+    expect(rows[0]!.querySelector(".rq-meta .unread-dot")).toBeTruthy();
+    expect(rows[2]!.querySelector(".unread-dot")).toBeNull();
 
-    // Mono task key in the subline; rich text rendered (backticks → code).
-    expect(rows[0]!.querySelector(".sub .mono")!.textContent).toBe("VIB-160");
+    // Rich text rendered (backticks → code).
     expect(rows[0]!.querySelector(".sub code.mono")!.textContent).toBe(
       "task.md",
     );
@@ -327,12 +334,12 @@ describe("NotificationsPage", () => {
     expect(row.querySelector(".act-sep")).toBeNull();
     expect(row.textContent).not.toContain("−");
     // The row still carries its message and its destination.
-    expect(row.querySelector(".keybtn")!.textContent).toBe(
+    expect(row.querySelector(".ntf-where button")!.textContent).toBe(
       "Viberr Core · VIB-148",
     );
   });
 
-  it("stream rows: day groups, actor line, keybtn navigation, unread treatment", () => {
+  it("stream rows: day groups, actor line, link navigation, unread treatment", () => {
     const { container, onRead, onOpen } = renderPage();
     const days = [...container.querySelectorAll(".act-day")].map(
       (d) => d.textContent,
@@ -346,15 +353,15 @@ describe("NotificationsPage", () => {
     expect(mention.getAttribute("title")).toBe("Click to mark read");
     expect(mention.querySelector(".act-actor")!.textContent).toBe("Elif Demir");
     expect(mention.querySelector(".mention")).toBeNull(); // RichA mode: no mention spans
-    expect(mention.querySelector(".keybtn")!.textContent).toBe(
+    expect(mention.querySelector(".ntf-where button")!.textContent).toBe(
       "Viberr Core · VIB-148",
     );
 
-    // Row click only marks read; keybtn marks read AND navigates.
+    // Row click only marks read; the where link marks read AND navigates.
     fireEvent.click(mention);
     expect(onRead).toHaveBeenCalledWith("n-148-mention");
     expect(onOpen).not.toHaveBeenCalled();
-    fireEvent.click(mention.querySelector(".keybtn")!);
+    fireEvent.click(mention.querySelector(".ntf-where button")!);
     expect(onOpen).toHaveBeenCalledWith(
       expect.objectContaining({ id: "n-148-mention" }),
     );
@@ -482,14 +489,11 @@ describe("NotificationsPage", () => {
     const { container, getByText } = renderPage([orphan], 0, 0);
     // Present on the page, matching the bell popover's disclosure.
     expect(getByText("project no longer exists")).toBeTruthy();
-    // Rendered as a non-navigating label, not a live-looking keybtn button.
-    const dead = container.querySelector(".keybtn.dead")!;
-    expect(dead).toBeTruthy();
-    expect(dead.tagName).toBe("SPAN");
-    // A read orphan row carries NO navigating keybtn button.
-    expect(
-      container.querySelector(".ntf-ev")!.querySelector("button.keybtn"),
-    ).toBeNull();
+    // Rendered as a non-navigating label, not a live-looking link.
+    const dead = container.querySelector(".ntf-ev .ntf-where")!;
+    expect(dead.textContent).toBe("project no longer exists");
+    // A read orphan row carries NO navigating button at all.
+    expect(container.querySelector(".ntf-ev")!.querySelector("button")).toBeNull();
   });
 
   it("Mark all read invokes the shared read-all handler", () => {

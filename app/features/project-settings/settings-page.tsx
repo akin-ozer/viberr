@@ -191,7 +191,6 @@ export function ProjectPanel({
             <input
               id="set-project-prefix"
               type="text"
-              className="mono"
               value={prefix}
               disabled={!canManage}
               onChange={(e) => setPrefix(e.target.value.toUpperCase().slice(0, 4))}
@@ -260,7 +259,9 @@ export function ProjectPanel({
                 and a "Task keys" row is a statement about the project, not a
                 preview of an uncommitted edit. Same rule as everywhere else on
                 this page: no optimistic UI for governed state. */}
-            <span className="mono">{project.prefix}-###</span>
+            {/* Ruling 625: a task key is a name, not code, so its pattern is
+                set in the body face like every key (the prefix field too). */}
+            {project.prefix}-###
           </span>
         </div>
         <div className="kv-row">
@@ -1207,15 +1208,9 @@ export function RequiredReviewersPanel({
               </button>
             </div>
           ))}
-          {draft.length === 0 && (
-            <p className="empty sm">
-              No required reviewers. Only the reviewers an operator engages on a
-              task are required.
-            </p>
-          )}
         </div>
       ) : rules.length === 0 ? (
-        <p className="empty sm">No required reviewers declared.</p>
+        <p className="empty rr-empty">No required reviewers declared.</p>
       ) : (
         <div className="guard-list">
           {rules.map((r) => (
@@ -1228,23 +1223,31 @@ export function RequiredReviewersPanel({
           ))}
         </div>
       )}
+      {/* Ruling 625 (e-settings #4): an empty list is ONE left-aligned row, the
+          sentence with Add beside it, and Save arrives with something to save
+          (a row, or the clear that removed the last one). The sentence used to
+          repeat the note below word for word, centred over right-aligned
+          buttons, beside a disabled primary with nothing behind it. */}
       {canManage && (
         <div className="rr-actions">
+          {draft.length === 0 && <p className="empty rr-empty">No required reviewers.</p>}
           {canAdd && (
             <button type="button" className="btn ghost sm" disabled={busy} onClick={add}>
               <Icon name="plus" />
               Add rule
             </button>
           )}
-          <button
-            type="button"
-            className="btn primary sm"
-            disabled={!changed || busy}
-            aria-busy={busy || undefined}
-            onClick={() => onSave(draft)}
-          >
-            Save
-          </button>
+          {(draft.length > 0 || changed) && (
+            <button
+              type="button"
+              className="btn primary sm"
+              disabled={!changed || busy}
+              aria-busy={busy || undefined}
+              onClick={() => onSave(draft)}
+            >
+              Save
+            </button>
+          )}
         </div>
       )}
       <div className="pol-note after last">
@@ -1417,14 +1420,9 @@ export function FileLeasesPanel({
               </button>
             </div>
           ))}
-          {draft.length === 0 && (
-            <p className="empty sm">
-              No file leases. Every task may change any file its work needs.
-            </p>
-          )}
         </div>
       ) : leases.length === 0 ? (
-        <p className="empty sm">No file leases declared.</p>
+        <p className="empty rr-empty">No file leases declared.</p>
       ) : (
         <div className="guard-list">
           {leases.map((l) => (
@@ -1444,8 +1442,14 @@ export function FileLeasesPanel({
           ))}
         </div>
       )}
+      {/* Ruling 625: the empty list is one row, as the reviewers' above. */}
       {canManage && (
         <div className="rr-actions">
+          {draft.length === 0 && (
+            <p className="empty rr-empty">
+              No file leases. Every task may change any file its work needs.
+            </p>
+          )}
           <button type="button" className="btn ghost sm" disabled={busy} onClick={add}>
             <Icon name="plus" />
             Add lease
@@ -1455,23 +1459,25 @@ export function FileLeasesPanel({
               Clear finished
             </button>
           )}
-          <button
-            type="button"
-            className="btn primary sm"
-            disabled={!changed || busy}
-            aria-busy={busy || undefined}
-            onClick={() =>
-              onSave(
-                draft.map((r) => ({
-                  paths: splitPaths(r.paths),
-                  taskKey: r.taskKey,
-                  reason: r.reason.trim(),
-                })),
-              )
-            }
-          >
-            Save
-          </button>
+          {(draft.length > 0 || changed) && (
+            <button
+              type="button"
+              className="btn primary sm"
+              disabled={!changed || busy}
+              aria-busy={busy || undefined}
+              onClick={() =>
+                onSave(
+                  draft.map((r) => ({
+                    paths: splitPaths(r.paths),
+                    taskKey: r.taskKey,
+                    reason: r.reason.trim(),
+                  })),
+                )
+              }
+            >
+              Save
+            </button>
+          )}
         </div>
       )}
       <div className="pol-note after last">
@@ -1619,14 +1625,9 @@ export function ProjectGatesPanel({
               </button>
             </div>
           ))}
-          {draft.length === 0 && (
-            <p className="empty sm">
-              No gates. Acceptance waits only on the reviewers&rsquo; verdicts.
-            </p>
-          )}
         </div>
       ) : gates.length === 0 ? (
-        <p className="empty sm">No gates declared.</p>
+        <p className="empty rr-empty">No gates declared.</p>
       ) : (
         <div className="guard-list">
           {gates.map((g) => (
@@ -1642,8 +1643,14 @@ export function ProjectGatesPanel({
           ))}
         </div>
       )}
+      {/* Ruling 625: the empty list is one row, as the reviewers' above. */}
       {canManage && (
         <div className="rr-actions">
+          {draft.length === 0 && (
+            <p className="empty rr-empty">
+              No gates. Acceptance waits only on the reviewers&rsquo; verdicts.
+            </p>
+          )}
           <button
             type="button"
             className="btn ghost sm"
@@ -1653,15 +1660,17 @@ export function ProjectGatesPanel({
             <Icon name="plus" />
             Add gate
           </button>
-          <button
-            type="button"
-            className="btn primary sm"
-            disabled={!changed || busy}
-            aria-busy={busy || undefined}
-            onClick={() => onSave(gatesOfDraft(draft))}
-          >
-            Save
-          </button>
+          {(draft.length > 0 || changed) && (
+            <button
+              type="button"
+              className="btn primary sm"
+              disabled={!changed || busy}
+              aria-busy={busy || undefined}
+              onClick={() => onSave(gatesOfDraft(draft))}
+            >
+              Save
+            </button>
+          )}
         </div>
       )}
       <div className="pol-note after last">
@@ -2612,67 +2621,156 @@ export function SettingsPage({
         </div>
       </div>
       <div className="policy-wrap">
+        {/* Ruling 178 put the required reviewers "under the stage editor in the
+            same grid cell", and rulings 396 and 482 stacked leases and gates under
+            them — but the cell was a third grid item, so it wrapped to row 2 under
+            Project and left a 786px hole beside it (ruling 625, e-settings #1).
+            Two stacks now, one theme each: the project, its people and its
+            repository on the left; the workflow and the policy that names its
+            stages on the right. `.profile-col` is the sheet's
+            stack-of-panels-in-a-cell (Policy stacks Guardrails the same way),
+            and ruling 148(a) ends the two columns on one line. */}
         <div className="policy-cols">
-          <ProjectPanel
-            // Remount (resetting the edit fields) whenever the loader's
-            // identity fields change — replaces the old resync effect.
-            key={`${data.project.name}\u0000${data.project.prefix}\u0000${data.project.description}`}
-            project={data.project}
-            canManage={canEditPolicy}
-            busy={identityFetcher.state !== "idle"}
-            onSave={(fields) =>
-              identityFetcher.submit(
-                { intent: "save-project", _csrf: csrf, ...fields },
-                { method: "post" },
-              )
-            }
-          />
-          <StagesPanel
-            stages={data.stages}
-            counts={data.stageCounts}
-            canManage={canEditPolicy}
-            editingId={editingStageId}
-            setEditingId={setEditingStageId}
-            onRename={(stageId, name) =>
-              stageFetcher.submit(
-                { intent: "rename-stage", _csrf: csrf, stageId, name },
-                { method: "post" },
-              )
-            }
-            onReorder={(orderedIds) =>
-              stageFetcher.submit(
-                {
-                  intent: "reorder-stages",
-                  _csrf: csrf,
-                  orderedIds: orderedIds.join(","),
-                },
-                { method: "post" },
-              )
-            }
-            onAdd={(name) =>
-              stageFetcher.submit(
-                { intent: "add-stage", _csrf: csrf, name },
-                { method: "post" },
-              )
-            }
-            onRemove={(stageId) =>
-              stageFetcher.submit(
-                { intent: "remove-stage", _csrf: csrf, stageId },
-                { method: "post" },
-              )
-            }
-            onRecolor={(stageId, color) =>
-              stageFetcher.submit(
-                { intent: "recolor-stage", _csrf: csrf, stageId, color },
-                { method: "post" },
-              )
-            }
-            onNavPolicy={onNavPolicy}
-          />
-          {/* Ruling 178: the rule names a stage, so it sits under the stage
-              editor in the same grid cell (`.profile-col`, the sheet's
-              stack-of-panels-in-a-cell, as Policy stacks Guardrails). */}
           <div className="profile-col">
+            <ProjectPanel
+              // Remount (resetting the edit fields) whenever the loader's
+              // identity fields change — replaces the old resync effect.
+              key={`${data.project.name}\u0000${data.project.prefix}\u0000${data.project.description}`}
+              project={data.project}
+              canManage={canEditPolicy}
+              busy={identityFetcher.state !== "idle"}
+              onSave={(fields) =>
+                identityFetcher.submit(
+                  { intent: "save-project", _csrf: csrf, ...fields },
+                  { method: "post" },
+                )
+              }
+            />
+            <MembersPanel
+              members={data.members}
+              meId={meId}
+              projectName={data.project.name}
+              canManage={canManageMembers}
+              busy={memberFetcher.state !== "idle"}
+              removing={
+                inFlightIntent(memberFetcher) === "remove-member"
+                  ? String(memberFetcher.formData?.get("userId") ?? "")
+                  : null
+              }
+              onInvite={(name, email) =>
+                memberFetcher.submit(
+                  { intent: "invite", _csrf: csrf, name, email },
+                  { method: "post" },
+                )
+              }
+              onRemove={(member) =>
+                memberFetcher.submit(
+                  { intent: "remove-member", _csrf: csrf, userId: member.userId },
+                  { method: "post" },
+                )
+              }
+              onNavPolicy={onNavPolicy}
+            />
+            <RepoPanel
+              repo={data.project.repo}
+              credential={data.credential}
+              canGrant={canGrant}
+              inFlight={inFlightIntent(repoFetcher)}
+              credInFlight={inFlightIntent(credFetcher)}
+              canEditPolicy={canEditPolicy}
+              footprintTasks={data.repoFootprintTasks}
+              branchCleanup={data.branchCleanupOnMerge}
+              repoBusy={repoFetcher.state !== "idle"}
+              changeResult={repoFetcher.data}
+              onChangeRepo={(repoInput, confirmFootprint) => {
+                const fields = {
+                  intent: "change-repo",
+                  _csrf: csrf,
+                  repo: repoInput,
+                };
+                // Only a confirmed change carries the field: the route reads it
+                // as `confirmFootprint === "1"`, so it is sent or absent, never
+                // blank.
+                repoFetcher.submit(
+                  confirmFootprint ? { ...fields, confirmFootprint: "1" } : fields,
+                  { method: "post" },
+                );
+              }}
+              onSetBranchCleanup={(enabled) =>
+                repoFetcher.submit(
+                  {
+                    intent: "set-branch-cleanup",
+                    _csrf: csrf,
+                    enabled: enabled ? "1" : "0",
+                  },
+                  { method: "post" },
+                )
+              }
+              onGrantScope={() =>
+                repoFetcher.submit(
+                  { intent: "grant-scope", _csrf: csrf },
+                  { method: "post" },
+                )
+              }
+              onSetCredential={() =>
+                credFetcher.submit(
+                  { intent: "set-credential", _csrf: csrf },
+                  { method: "post" },
+                )
+              }
+              onClearCredential={() =>
+                credFetcher.submit(
+                  { intent: "clear-credential", _csrf: csrf },
+                  { method: "post" },
+                )
+              }
+              onOpenTask={onOpenTask}
+              instanceAdmin={instanceAdmin}
+            />
+          </div>
+          <div className="profile-col">
+            <StagesPanel
+              stages={data.stages}
+              counts={data.stageCounts}
+              canManage={canEditPolicy}
+              editingId={editingStageId}
+              setEditingId={setEditingStageId}
+              onRename={(stageId, name) =>
+                stageFetcher.submit(
+                  { intent: "rename-stage", _csrf: csrf, stageId, name },
+                  { method: "post" },
+                )
+              }
+              onReorder={(orderedIds) =>
+                stageFetcher.submit(
+                  {
+                    intent: "reorder-stages",
+                    _csrf: csrf,
+                    orderedIds: orderedIds.join(","),
+                  },
+                  { method: "post" },
+                )
+              }
+              onAdd={(name) =>
+                stageFetcher.submit(
+                  { intent: "add-stage", _csrf: csrf, name },
+                  { method: "post" },
+                )
+              }
+              onRemove={(stageId) =>
+                stageFetcher.submit(
+                  { intent: "remove-stage", _csrf: csrf, stageId },
+                  { method: "post" },
+                )
+              }
+              onRecolor={(stageId, color) =>
+                stageFetcher.submit(
+                  { intent: "recolor-stage", _csrf: csrf, stageId, color },
+                  { method: "post" },
+                )
+              }
+              onNavPolicy={onNavPolicy}
+            />
             <RequiredReviewersPanel
               key={`reviewers:${JSON.stringify(data.requiredReviewers)}`}
               rules={data.requiredReviewers}
@@ -2730,89 +2828,6 @@ export function SettingsPage({
               }
             />
           </div>
-        </div>
-        <div className="policy-cols">
-          <MembersPanel
-            members={data.members}
-            meId={meId}
-            projectName={data.project.name}
-            canManage={canManageMembers}
-            busy={memberFetcher.state !== "idle"}
-            removing={
-              inFlightIntent(memberFetcher) === "remove-member"
-                ? String(memberFetcher.formData?.get("userId") ?? "")
-                : null
-            }
-            onInvite={(name, email) =>
-              memberFetcher.submit(
-                { intent: "invite", _csrf: csrf, name, email },
-                { method: "post" },
-              )
-            }
-            onRemove={(member) =>
-              memberFetcher.submit(
-                { intent: "remove-member", _csrf: csrf, userId: member.userId },
-                { method: "post" },
-              )
-            }
-            onNavPolicy={onNavPolicy}
-          />
-          <RepoPanel
-            repo={data.project.repo}
-            credential={data.credential}
-            canGrant={canGrant}
-            inFlight={inFlightIntent(repoFetcher)}
-            credInFlight={inFlightIntent(credFetcher)}
-            canEditPolicy={canEditPolicy}
-            footprintTasks={data.repoFootprintTasks}
-            branchCleanup={data.branchCleanupOnMerge}
-            repoBusy={repoFetcher.state !== "idle"}
-            changeResult={repoFetcher.data}
-            onChangeRepo={(repoInput, confirmFootprint) => {
-              const fields = {
-                intent: "change-repo",
-                _csrf: csrf,
-                repo: repoInput,
-              };
-              // Only a confirmed change carries the field: the route reads it
-              // as `confirmFootprint === "1"`, so it is sent or absent, never
-              // blank.
-              repoFetcher.submit(
-                confirmFootprint ? { ...fields, confirmFootprint: "1" } : fields,
-                { method: "post" },
-              );
-            }}
-            onSetBranchCleanup={(enabled) =>
-              repoFetcher.submit(
-                {
-                  intent: "set-branch-cleanup",
-                  _csrf: csrf,
-                  enabled: enabled ? "1" : "0",
-                },
-                { method: "post" },
-              )
-            }
-            onGrantScope={() =>
-              repoFetcher.submit(
-                { intent: "grant-scope", _csrf: csrf },
-                { method: "post" },
-              )
-            }
-            onSetCredential={() =>
-              credFetcher.submit(
-                { intent: "set-credential", _csrf: csrf },
-                { method: "post" },
-              )
-            }
-            onClearCredential={() =>
-              credFetcher.submit(
-                { intent: "clear-credential", _csrf: csrf },
-                { method: "post" },
-              )
-            }
-            onOpenTask={onOpenTask}
-            instanceAdmin={instanceAdmin}
-          />
         </div>
         {/* Owner ruling (pass 18, Q-V1): a READ-ONLY viewer must not see the
             Danger zone at all. It used to render for every member with the

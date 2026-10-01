@@ -350,7 +350,11 @@ describe("the controller dock (ruling 121)", () => {
     );
     const note = panel.querySelector(".ctl-composer [data-not-connected]");
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
-    expect(composer.getAttribute("placeholder")).toBe("Connect Claude to send a message.");
+    // Ruling 625: the note is the one statement; the box and the empty state
+    // do not add a placeholder or examples nobody here could send.
+    // CANARY: restore the not-connected placeholder, or the examples.
+    expect(composer.hasAttribute("placeholder")).toBe(false);
+    expect(panel.querySelector(".ctl-examples")).toBeNull();
   });
 
   it("Escape inside the panel closes instantly and hands focus back to the trigger", async () => {

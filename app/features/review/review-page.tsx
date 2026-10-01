@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
-import { Pill, ValidationPill } from "~/ui/pill";
+import { Pill, ValidationPill, validationLabel, validationQuiet } from "~/ui/pill";
 import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
@@ -136,7 +136,10 @@ function RQRow({
           neither. */}
       <div className="rq-main">
         <div className="ttl">{t.title}</div>
-        <div className="sub">{sub}</div>
+        {/* Ruling 625: two lines, clamped; the whole sentence on hover. */}
+        <div className="sub" title={sub}>
+          {sub}
+        </div>
       </div>
       <span className="rq-meta">
         {/* UXA-2: this queue carried its OWN pr-state colour map, so a
@@ -176,7 +179,17 @@ function RQRow({
             PRs into CONFLICTING inside a minute, all on the same two shared
             files, and a person discovered each one by pressing Accept. */}
         <OverlapChip overlaps={t.pr?.overlaps ?? []} />
-        <ValidationPill value={t.validation} sm />
+        {/* Ruling 625: a failing (or bypassed) validation is the board card's
+            problem chip, outlined in red ink; the quiet values stay the quiet
+            pill, the acceptance boundary's "awaiting verdict" among them. */}
+        {validationQuiet(t.validation) ? (
+          <ValidationPill value={t.validation} sm />
+        ) : (
+          <span className="chip pb">
+            <Icon name={t.validation === "failing" ? "xcircle" : "alert"} />
+            {validationLabel(t.validation)}
+          </span>
+        )}
         {/* F26-14: the same triage metadata the board card shows — priority,
             labels and due date — so the acceptance boundary is not blind to an
             urgent or overdue task. Shared `task-meta.tsx` pills (one vocabulary);
@@ -206,30 +219,33 @@ function RQRow({
             too, not only on the task page's Continuity Recovery panel. The row
             has room for the tooltip the dense card cannot carry. */}
         {t.continuity === "degraded" && (
-          <span title="A resumed agent session lost its provider transcript; the agent re-anchored on the task record and continued fresh. See the Continuity recovery panel on the task.">
-            <Pill kind="risk" sm>
-              <Icon name="refresh" />
-              degraded continuity
-            </Pill>
+          <span
+            className="chip pb"
+            title="A resumed agent session lost its provider transcript; the agent re-anchored on the task record and continued fresh. See the Continuity recovery panel on the task."
+          >
+            <Icon name="refresh" />
+            degraded continuity
           </span>
         )}
         {/* writ-3: the board's test (card-status.ts): human-waiting AND
             `waitingOnMe`. `ready` already implies both. */}
+        {/* Ruling 625: the board card's status chip (`.chip.st`), so a task
+            reads the same in the queue as on the board one click away. */}
         {ready || (t.waiting === "human" && waitingOnMe) ? (
-          <span className="wait-tag you">
+          <span className="chip st you">
             <Icon name="hand" />
             waiting on you
           </span>
         ) : t.waiting === "human" ? (
           // Human-waiting, but nothing here is THIS viewer's move (R8-3) — a
           // human still needs to act, so never the false "agent working".
-          <span className="wait-tag human">
+          <span className="chip st human">
             <Icon name="hand" />
             waiting on a human
           </span>
         ) : t.waiting === "schedule" ? (
           // Ruling 225: resting on a clock. Not a person, and not a run.
-          <span className="wait-tag scheduled">
+          <span className="chip st scheduled">
             <Icon name="clock" />
             {t.resumesAt ? (
               <>
@@ -240,7 +256,7 @@ function RQRow({
             )}
           </span>
         ) : t.waiting === "agent" ? (
-          <span className="wait-tag agent">
+          <span className="chip st agent">
             <span className="working" />
             agent working
           </span>

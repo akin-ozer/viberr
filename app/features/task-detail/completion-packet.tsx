@@ -214,8 +214,8 @@ export function CompletionPacket({
           {change ? (
             <p className="cmp-stat">
               {plural(change.files, "file", "files")} changed
-              <span className="cmp-add mono">+{change.add}</span>
-              <span className="cmp-del mono">−{change.del}</span>
+              <span className="cmp-add">+{change.add}</span>
+              <span className="cmp-del">−{change.del}</span>
               {!small ? (
                 <>
                   <span className="cmp-sep" aria-hidden="true">

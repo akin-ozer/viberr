@@ -113,7 +113,9 @@ export function CapabilityMatrixModal({
 
   return (
     <dialog
-      className="modal-card modal-wide"
+      // Ruling 625: as wide as its grid (`.mx-modal`), so each row's label
+      // sits beside its dots instead of 450-680px from them.
+      className="modal-card mx-modal"
       aria-label="Capability matrix"
       // D33-2: `docs/ui/surfaces.md` §4 states the screen-label contract as
       // universal ("every top-level surface and dialog"), and this dialog was
@@ -162,9 +164,13 @@ export function CapabilityMatrixModal({
           <span className="d off" />
           {MODE_LABEL.off}
         </span>
+        {/* Ruling 625: the legend names the row mark once; the rows carry the
+            mark, not the word repeated on every one. */}
         <span className="lg mx-scope-legend">
-          <span className="mx-scope">Claude-enforced</span>
-          binds tools on Claude runs · advisory on Codex
+          <span className="mx-scope" aria-hidden="true">
+            <Icon name="sparkle" />
+          </span>
+          Claude-enforced: binds tools on Claude runs · advisory on Codex
         </span>
       </div>
       <div className="modal-body">
@@ -227,7 +233,8 @@ export function CapabilityMatrixModal({
                             className="mx-scope"
                             title="Enforced on Claude runs (tool denylist). On Codex it is advisory only: the Codex SDK ignores tool allow/deny lists (S3)."
                           >
-                            Claude-enforced
+                            <Icon name="sparkle" />
+                            <span className="vh">Claude-enforced</span>
                           </span>
                         )}
                         {carveOut.length > 0 && (

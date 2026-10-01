@@ -741,7 +741,7 @@ export function Timeline({
       <div className="composer">
         {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
         {taskClosed && (
-          <div className="fine xs">
+          <div className="fine">
             This task is closed. Comments are still recorded.
           </div>
         )}
@@ -794,7 +794,7 @@ export function Timeline({
                 the server actually enforces, in the panel's own words. */}
             <span className="att-lead">
               {canAttach && <AttachButton onFiles={addFiles} disabled={busy} />}
-              <span className="fine xs dim">
+              <span className="fine dim">
                 Every project member can comment · @mentions route to agents
               </span>
             </span>
@@ -803,11 +803,11 @@ export function Timeline({
                 {commentError}
               </span>
             )}
-            <span
-              className="mono fine xs dim push"
-              suppressHydrationWarning
-            >
-              {sendHint} to send
+            {/* Ruling 625: the controller composer's hint, in its words and
+                its class: the body face (a key hint is not code), and gone
+                on a touch screen (ruling 419(d)). */}
+            <span className="fine dim push kbd-hint" suppressHydrationWarning>
+              {sendHint} sends
             </span>
             {/* Ruling 500: the frame's one action, primary as the
                 controller composer's Send is. */}

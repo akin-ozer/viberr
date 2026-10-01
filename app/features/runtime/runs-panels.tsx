@@ -546,7 +546,7 @@ const RunStripFacts = memo(function RunStripFacts({
           {f.step ? (
             <div
               key={"step:" + f.step}
-              className="step mono"
+              className="step"
               title={f.step}
               data-fresh={stepFresh ? "true" : undefined}
             >
@@ -558,13 +558,13 @@ const RunStripFacts = memo(function RunStripFacts({
       <div className="run-stats">
         <div className="run-cell">
           <div className="lbl">Elapsed</div>
-          <div className="val mono">
+          <div className="val">
             <LiveElapsed startedAt={run.startedAt} />
           </div>
         </div>
         <div className="run-cell">
           <div className="lbl">Turns</div>
-          <div className="val mono">
+          <div className="val">
             <TurnCount n={f.turns} />
           </div>
         </div>
@@ -577,10 +577,10 @@ const RunStripFacts = memo(function RunStripFacts({
               replaces at the result. A stopped run has no result, so its
               estimate keeps the tilde after it ends. */}
           {f.tokens === null ? (
-            <div className="val mono">pending</div>
+            <div className="val">pending</div>
           ) : f.tokensEstimated ? (
             <div
-              className="val mono"
+              className="val"
               title={withCacheTitle(
                 "Estimated from the streamed text. The provider's own total replaces it when one lands; a run that was stopped never gets one",
                 f.cache,
@@ -589,7 +589,7 @@ const RunStripFacts = memo(function RunStripFacts({
               <TokenCount n={f.tokens} estimated />
             </div>
           ) : (
-            <div className="val mono" title={withCacheTitle(null, f.cache)}>
+            <div className="val" title={withCacheTitle(null, f.cache)}>
               <TokenCount n={f.tokens} estimated={false} />
             </div>
           )}
@@ -744,7 +744,7 @@ function SessionIdChip({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  if (!sid) return <span className="mono faint">none</span>;
+  if (!sid) return <span className="faint">none</span>;
   const short = sid.length > 10 ? sid.slice(0, 8) + "…" : sid;
   const copy = async () => {
     try {
@@ -1664,7 +1664,7 @@ const ConsoleView = memo(function ConsoleView({
         {/* Ruling 366(f): the total counts up to its figure; the figure itself
             is on `data-count` for anyone reading the DOM, and the noun follows
             the figure drawn, so the count never passes through "1 events". */}
-        <span className="mono">
+        <span className="logs-count">
           <NumberTicker end={eventCount}>
             {(n, text) => `${text} event${n === 1 ? "" : "s"}`}
           </NumberTicker>

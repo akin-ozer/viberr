@@ -58,7 +58,8 @@ export function MiniModal({
    *  plays, then `onClose` unmounts it. A caller that unmounted it on success
    *  took it away in one frame, with no exit. */
   done?: boolean;
-  footHint?: string;
+  /** Prose in the body face; a caller wraps a path or id in `<code className="mono">`. */
+  footHint?: ReactNode;
   /** UXA-9: what is still missing while `canSave` is false. */
   unmetHint?: string;
   /** Where a refused save puts focus; defaults to the first empty control. */
@@ -108,7 +109,10 @@ export function MiniModal({
       </div>
       <div className="modal-body">{children}</div>
       <div className="modal-foot">
-        {footHint && <span className="foot-hint mono">{footHint}</span>}
+        {/* Ruling 625: one footnote at a time. While the form is incomplete
+            the unmet line is the one to read; two side by side each wrapped
+            to two lines. */}
+        {footHint && canSave && <span className="foot-hint">{footHint}</span>}
         {/* UXA-9: the disabled Save dimmed to .55 and said nothing — and a
             disabled control cannot explain itself through `title`, so the
             reader was left hunting for the unmet requirement. Every caller

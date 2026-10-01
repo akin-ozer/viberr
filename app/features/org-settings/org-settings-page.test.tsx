@@ -624,6 +624,13 @@ const TEMPLATE_GRANTS = {
   skills: { "terraform-review": 1 },
 };
 
+/** Ruling 625: a resource row's meta line sets its store path in `<code>` and
+ *  the rest in the body face, so the line is matched whole, by text content. */
+const metaLine =
+  (text: string) =>
+  (_: string, el: Element | null): boolean =>
+    el?.matches(".rsrc-main .sub") === true && el.textContent === text;
+
 function renderResources() {
   return renderPanel(
     <ResourcesPanel
@@ -643,14 +650,14 @@ describe("ResourcesPanel", () => {
     const { getByText } = renderResources();
     expect(
       getByText(
-        "store://kb/architecture-notes/ · 2 docs · agents read the live folder",
+        metaLine("store://kb/architecture-notes/ · 2 docs · agents read the live folder"),
       ),
     ).toBeTruthy();
     expect(getByText(/re-scanned just now/)).toBeTruthy();
     expect(getByText(/14 tools · checked just now · auth: configured/)).toBeTruthy();
     expect(getByText(/unreachable · checked just now/)).toBeTruthy();
     expect(
-      getByText(/store:\/\/skills\/terraform-review\/ · 1 file · updated just now · 1 template/),
+      getByText(metaLine("store://skills/terraform-review/ · 1 file · updated just now · 1 template")),
     ).toBeTruthy();
     expect(getByText(/Codex · Ready · In Progress · 2 context resources · used in 4 projects/)).toBeTruthy();
     expect(getByText(/These are the shared base definitions/)).toBeTruthy();
@@ -1083,7 +1090,11 @@ describe("ResourcesPanel", () => {
     ).toBeTruthy();
     // Its subtitle is the folder path alone (owner request 2026-10-01).
     // CANARY: put " · read live" back after the path and this exact match fails.
-    expect(getByText("store://kb/architecture-notes/")).toBeTruthy();
+    // (Scoped to the browser: the row's own `<code>` path matches too, ruling 625.)
+    const browser = document.querySelector<HTMLElement>('[aria-label="Files · Architecture notes"]')!;
+    expect(
+      [...browser.querySelectorAll<HTMLElement>("*")].some((el) => getNodeText(el) === "store://kb/architecture-notes/"),
+    ).toBe(true);
     expect(getByText("overview.md")).toBeTruthy();
     expect(
       getByText(/This is the real folder on disk\. Files added outside Viberr/),
@@ -1118,7 +1129,7 @@ describe("ResourcesPanel", () => {
     // nothing, because only six text extensions ever reach a run.
     expect(
       getByText(
-        "store://kb/architecture-notes/ · 2 docs · agents read the live folder · 1 non-text file skipped",
+        metaLine("store://kb/architecture-notes/ · 2 docs · agents read the live folder · 1 non-text file skipped"),
       ),
     ).toBeTruthy();
   });

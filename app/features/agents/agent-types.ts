@@ -242,8 +242,9 @@ export function deploymentStatusKind(
   status: string,
 ): "agent" | "input" | "info" | "neutral" {
   if (status === "working" || status === "coordinating") return "agent";
-  if (status === "packet open") return "input";
-  if (status === "waiting on human") return "info";
+  // Ruling 625: an open packet is a decision waiting on a person, which is
+  // blue everywhere; amber is an agent's question.
+  if (status === "packet open" || status === "waiting on human") return "info";
   return "neutral";
 }
 

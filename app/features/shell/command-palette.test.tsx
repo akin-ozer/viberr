@@ -25,7 +25,8 @@ const HITS: CommandHit[] = [
   {
     kind: "task",
     id: "task:viberr-core/VIB-142",
-    label: "VIB-142 · Attach a project credential",
+    label: "Attach a project credential",
+    key: "VIB-142",
     sub: "Viberr Core",
     href: "/projects/viberr-core/tasks/VIB-142",
   },
