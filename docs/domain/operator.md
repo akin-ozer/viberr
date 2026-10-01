@@ -189,13 +189,17 @@ reads the active work revision after the completion's workspace reconcile, and t
 moved it when a `delivered` revision was minted, or a revision's `pushedAt` was stamped by
 a delivery push, at or after the finished run's row was created. A head reached only
 through Viberr's own base refreshes mints nothing (ruling 439), and an `external` or
-`verified` revision is not the chain's progress. A reply that leaves the head where it was
-counts every hop, so a loop that gets nowhere is still capped. A task already acceptable
+`verified` revision is not the chain's progress. A task whose deliverable is files has no
+head to move: a reply whose hop stamped its `deliveredAt` (`filesDeliveredSince`, the stamp at
+or after the finished run's row was created: the deliverer's files delivery, or a re-save of a
+delivered file, ruling 587) is that task's progress (ruling 613). A reply that leaves the head
+and the delivery where they were counts every hop, so a loop that gets nowhere is still capped. A task already acceptable
 when the cap is reached gets no packet (ruling 258). Otherwise the depth-capped "Work
 stalled: pick a recovery path" packet says where the work stands (`stuckLoopStandings`):
 the first paragraph of the report that hit the cap (heading marks and the `cc` line
 dropped, capped at 280 characters), the task's head and whether it is delivered (pushed by
-a delivery, or carried by the live PR), and the last gate result on record (ruling 482).
+a delivery, or carried by the live PR; on a task with no head, the stamp its files were last
+delivered at, ruling 613), and the last gate result on record (ruling 482).
 When the head is committed and not delivered, its recommended option is `deliver_for_review`
 ("Deliver <sha7> for review"), with the stock redirect and send-back options beside it,
 unrecommended, and the hold after them.

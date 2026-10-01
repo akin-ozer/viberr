@@ -35,6 +35,7 @@ import { isRelayComment, type RelayPayload } from "./task-relay.server";
 // Ruling 489: where a react chain's work stands, read from the server's record.
 import {
   deliverHeadOption,
+  filesDeliveredSince,
   headMovedSince,
   stuckLoopStandings,
 } from "./react-progress.server";
@@ -6625,6 +6626,12 @@ export async function applyAgentCompletionEffects(
     const moved = afterReply
       ? headMovedSince(afterReply.parsed.frontmatter.workRevision, hopStartedAt)
       : null;
+    // Ruling 613: on a task whose deliverable is files, the delivery stamp is
+    // the head, and a stamp this hop wrote is its progress.
+    const filesDelivered =
+      afterReply && !moved
+        ? filesDeliveredSince(afterReply.parsed.frontmatter.deliveredAt, hopStartedAt)
+        : null;
     if (moved) {
       logger.info("react depth reset: this reply moved the task's head, a boundary; the chain continues", {
         taskKey: input.taskKey,
@@ -6632,6 +6639,14 @@ export async function applyAgentCompletionEffects(
         depthBefore: currentDepth,
         headSha: moved.sha,
         how: moved.how,
+      });
+      currentDepth = 0;
+    } else if (filesDelivered) {
+      logger.info("react depth reset: this reply delivered the task's files, a boundary; the chain continues", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        depthBefore: currentDepth,
+        deliveredAt: filesDelivered,
       });
       currentDepth = 0;
     }
