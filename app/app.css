@@ -353,13 +353,14 @@ svg.ico { width: 16px; height: 16px; flex: none; }
    equal-specificity tie goes to the bold label's weight (ruling 625: a .btn
    is 500 now, and a quiet pill takes .pill's 700 and its glyph). The
    board card's icon-only stage trigger takes the .sm-caret weight too, so
-   every stage trigger draws one caret. The pick-chip glyphs are scoped to the
+   every stage trigger draws one caret, and so does the epic page's status
+   chip (ruling 615), drawn the same way. The pick-chip glyphs are scoped to the
    chip's own child, so the agent tile a backend chip leads with keeps its 1.7
    like every other tile; the run selector's caret (not its agent tile) and
    the lock beside a 700 field label take the heavier stroke. */
 .nav-item .ico, .seg .ico, .fchip .ico, .chip .ico, .card-head .trace .ico, .pick-chip.mono > .ico,
 .menu-item .ico, .toast .ico, .deny-note .ico, .btn .ico, .sched-when .ico,
-.stage-menu-btn .sm-caret, .gh-freshness .ico, .ctl-msg-who .ico,
+.stage-menu-btn .sm-caret, .epic-status-select .epic-status-chev, .gh-freshness .ico, .ctl-msg-who .ico,
 .prop-empty .ico, .wait-chip .ico, .cred-top > .ico, .trans-path .ico, .guard-name .ico, .cmdk-row .ico, .rq-go .ico { stroke-width: 2; }
 .pill .ico, .op-rec-kind .ico, .model-sub .ico,
 .rev-add .ico, .own-btn .ico, .rsel-btn .caret, .pick-chip:not(.mono) > .ico, .go-hint .ico, .ag-newbtn .ico,
@@ -380,7 +381,9 @@ svg.ico { width: 16px; height: 16px; flex: none; }
    `appearance` is left NATIVE on purpose: the drop-down arrow and the popup
    list then follow `color-scheme` (declared light/dark on :root), which is the
    only way the popup itself themes correctly. Overriding it would mean shipping
-   a hard-coded arrow colour, which the porting rules forbid. */
+   a hard-coded arrow colour, which the porting rules forbid. The one select
+   that drops the arrow, the epic page's status chip (ruling 615), draws the
+   `Icon` chevron in its own ink instead, and its popup still themes. */
 select {
   border: 1px solid var(--border-control);
   border-radius: var(--radius-button);
@@ -5240,10 +5243,12 @@ a.task-ref, a.kp-ref { white-space: nowrap; }
 
 /* Login surface. */
 
-/* Interface review 2026-09-24 (acce-12): the standalone controller (/controller)
-   mounts with no shell, and its frame is only a min-height, so nothing in it
-   scrolled; the document does, as it does for the other shell-less pages. */
-body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wrap.standalone) { overflow: auto; height: auto; min-height: 100vh; }
+/* The pages outside the workspace shell are scrolled by the document, not
+   clipped. Interface review 2026-09-24 (acce-12) added the standalone
+   controller (/controller), which then mounted with no shell at all; since
+   ruling 623 it sits in Home's page shell under the app header, so `.home`
+   answers for it as for the other standalone pages. */
+body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; height: auto; min-height: 100vh; }
 
 /* The row gap spaces the stacked aside from the card, and `align-content`
    packs the two rows in the middle rather than centring each in half of a
@@ -6008,6 +6013,13 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   .gate-table .gate-mark svg.ico { width: 16px; height: 16px; }
   a.gate-log { min-width: 24px; justify-content: center; padding: .25rem; }
   .gate-log-word { display: none; }
+  /* Ruling 618: the pager's ends keep their chevrons alone (their names stay
+     "Previous page" and "Next page") and its squares narrow to 28px, so both
+     ends and seven page slots fit a phone's 295px modal column. One class more
+     than the base rules, which the sheet declares later. */
+  .pager-word { display: none; }
+  .pager .pager-list { gap: .125rem; }
+  .pager .pager-btn, .pager .pager-gap { min-width: 1.75rem; }
 }
 
 /* Neutralize anchor defaults on link-shaped controls. */
@@ -6771,9 +6783,9 @@ a.card:active { transform: scale(.99); }
   .ctl-wrap .ctl-side { position: static; max-height: none; overflow-y: visible; }
   /* The phone's thread switcher takes the head's second row. Two classes, for
      the reason given above: the base rules come later in the sheet. */
-  /* Ruling 476(e): the switcher takes a row of its own, New and Home the row
-     under it. Beside them it was 97px at 375px and named no thread ("Hi. I'm
-     s"), which is the one thing ruling 419(a) put it there to do. */
+  /* Ruling 476(e): the switcher takes a row of its own, New conversation the
+     row under it. Beside it the switcher was 97px at 375px and named no thread
+     ("Hi. I'm s"), which is the one thing ruling 419(a) put it there to do. */
   .ctl-wrap .ctl-head-acts { flex: 1 1 100%; margin-left: 0; flex-wrap: wrap; }
   .ctl-wrap .ctl-picker { display: block; flex: 1 1 100%; min-width: 0; width: 100%; max-width: none; }
 }
@@ -7522,11 +7534,16 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
      shell's rail or not (the `ctl` queries below). */
   container: ctl / inline-size;
 }
-/* The instance controller (/controller) mounts with no shell around it, so
-   it keeps a frame of its own. Ruling 524(a): centred up to 1920px, where it
-   stopped at 1200px: at 1440 and 1920 the capped page left 120px and 360px of
-   empty margin on each side of a console squeezed under the conversation. */
-.ctl-wrap.standalone { max-width: 1920px; margin: 0 auto; padding-top: 1.5rem; min-height: 100dvh; }
+/* The instance controller (/controller) has no rail beside it, so it keeps a
+   frame of its own. Ruling 524(a): centred up to 1920px, where it stopped at
+   1200px: at 1440 and 1920 the capped page left 120px and 360px of empty
+   margin on each side of a console squeezed under the conversation. Ruling
+   623: it sits in Home's page shell under the app header. That shell is a
+   flex column, whose auto margins shrink a child to its content (a new
+   conversation would narrow to its examples), so the page takes the row's
+   width as `.insights` does, and its height is what the header leaves
+   (`flex: 1` above) rather than a screen of its own. */
+.ctl-wrap.standalone { width: 100%; max-width: 1920px; margin: 0 auto; padding-top: 1.5rem; }
 .ctl-head {
   display: flex;
   align-items: center;
@@ -7633,9 +7650,10 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
    complement (the 1100px block stacks the page), so no zoomed width falls
    between the two with the run pane in the rail's column. */
 @media (width > 1100px) {
-  /* No shell sizes the standalone page, so it is the screen's height, which
-     gives its band a height to fill. */
-  .ctl-wrap.standalone { height: 100dvh; }
+  /* Ruling 623: the standalone page's shell is the screen's height and the
+     page fills what the app header leaves, which gives its band a height to
+     fill. With no header above it, the page itself was 100dvh. */
+  .home:has(> .ctl-wrap.standalone) { height: 100dvh; }
   /* A run takes a column between the conversation and the rail: the
      conversation first, as the DOM reads, and the agent's console beside
      it the way Codex and Devin set theirs. */
@@ -9076,15 +9094,58 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .epic-tasks > .epic-progress { margin-bottom: .75rem; }
 
 /* One epic's page: the head, then a main column and a Details column, the
-   task page's proportions (ruling 170's 340px side). */
-.epic-crumb { margin: 0 0 .25rem; }
-/* A three-line head (crumb, title, status line): its tools sit level with the
-   crumb, not centred against the block. */
-.epic-head { align-items: flex-start; }
+   task page's proportions (ruling 170's 340px side). Ruling 615: the head is
+   the scroller's first child, so `.policy-wrap`'s gutters are its gutters and
+   Edit ends on the panels' right edge; outside it, the scroller's 10px
+   scrollbar pulled the panels in under a head that kept its width. Three
+   lines with room between them (crumb, a page title at the task hero's step,
+   the status line), and 1.5rem down to the panels with the scroller's gap. */
+.epic-head { display: flex; flex-direction: column; gap: .5rem; padding: 1rem 0 .5rem; }
+.epic-crumb { margin: 0; }
+.epic-head-row { display: flex; align-items: flex-start; gap: 1rem; }
 .epic-status { display: inline-flex; }
-.epic-title { display: flex; align-items: center; gap: .5rem; min-width: 0; overflow-wrap: anywhere; }
-.epic-sub { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.epic-status-select select { font-weight: 600; }
+.epic-title {
+  flex: 1; min-width: 0;
+  display: flex; align-items: flex-start; gap: .75rem;
+  font-size: 1.75rem; line-height: 1.15; letter-spacing: var(--track-page);
+  overflow-wrap: anywhere;
+}
+/* The colour dot centres on the title's first line, however many it takes. */
+.epic-title > .epic-dot { margin-top: calc((1lh - .75rem) / 2); }
+.epic-sub { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .88rem; color: var(--faint); }
+/* Ruling 615: the status select is a chip at the head of the status line,
+   where a viewer reads the pill, so the status is said once there. It is the
+   task page's stage trigger (`.stage-menu-btn`: the dot, the name, a chevron)
+   drawn around a native select, whose menu stays the platform's and themes
+   with `color-scheme`. Only the closed control drops the UA arrow, which
+   Chromium paints 4px inside the border whatever the padding: the chevron is
+   the app's own glyph, set in .5rem and drawn in the label's ink, so no arrow
+   colour is shipped. The dot takes the status's pill tone
+   (`EPIC_STATUS_PILL`, `data-tone`), in the quiet pill's dot inks. The chip
+   grows past 26px with the 16px select text of a phone. */
+.epic-status-select { position: relative; display: inline-flex; }
+.epic-status-select select {
+  appearance: none;
+  min-height: 26px;
+  padding: .125rem 1.75rem .125rem 1.375rem;
+  font-weight: 600; line-height: 1.5;
+}
+.epic-status-select select:hover:not(:disabled, :focus) { border-color: var(--fg); }
+.epic-status-dot, .epic-status-chev { position: absolute; top: 50%; pointer-events: none; }
+.epic-status-dot {
+  left: .5rem; width: .5rem; height: .5rem; transform: translateY(-50%);
+  border-radius: 50%; background: var(--faint);
+}
+.epic-status-select[data-tone="info"] .epic-status-dot { background: var(--blue-pressed); }
+.epic-status-select[data-tone="input"] .epic-status-dot { background: var(--amber-dark); }
+.epic-status-select[data-tone="done"] .epic-status-dot { background: var(--success-dark); }
+.ico.epic-status-chev {
+  right: .5rem; width: 13px; height: 13px;
+  color: var(--muted); transform: translateY(-50%) rotate(90deg);
+}
+/* A status on its way to the server: the select takes the sheet's disabled
+   step, and the dot and the chevron drawn over it go with it. */
+.epic-status-select:has(> select:disabled) > :is(.epic-status-dot, .epic-status-chev) { opacity: .45; }
 .epic-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -9123,6 +9184,30 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .epic-task-props { display: flex; align-items: center; gap: .375rem; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; }
 .epic-task-stage { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; color: var(--muted); white-space: nowrap; }
 .epic-task-remove { display: inline-flex; flex: none; }
+/* Ruling 615: a narrow list gives the title its own line. One line left the
+   title what the stage, the status chip, the owner and Remove did not take:
+   as few as six characters on a 768px screen, none on a 375px phone, where the
+   stage then ran over the key. Under 36rem the facts go to a second line,
+   under the title, and Remove is the row's trailing action, centred on both
+   lines; under 24rem (a phone) the facts take the whole second line, from the
+   key, and Remove stays on the title's. A container query, because the list
+   is narrow in the two-column layout too, not only on a narrow screen
+   (U39-11's console lines). */
+.epic-task-list { container-type: inline-size; }
+@container (max-width: 36rem) {
+  .epic-task {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "link remove" "props remove";
+    column-gap: .75rem; row-gap: .125rem;
+  }
+  .epic-task-link { grid-area: link; }
+  .epic-task-props { grid-area: props; justify-content: flex-start; padding: 0 0 .25rem calc(62px + .75rem); }
+  .epic-task-remove { grid-area: remove; align-self: center; }
+}
+@container (max-width: 24rem) {
+  .epic-task { grid-template-areas: "link remove" "props props"; }
+  .epic-task-props { padding-left: 0; }
+}
 .epic-archived { margin-top: .75rem; padding-top: .5rem; border-top: 1px solid var(--hairline); }
 .epic-archived > summary {
   display: inline-flex; align-items: center; gap: .375rem;
@@ -9801,6 +9886,73 @@ a.pr-branch:hover { background: var(--tint-hover); }
 @media (prefers-reduced-motion: reduce) {
   .rsel-menu.acct-menu, .rsel-menu.acct-menu[data-side="top"] { animation: fade-in .12s ease; }
 }
+
+/* ---------- appended: ruling 618, a profile's custom stages by project ---------- */
+/* The global profile editor's eligible stages read as two groups: the default
+   workflow's chips, then each live project's own stages under its name, three
+   projects to a page. A project is a row of a divided list in a box (the setup
+   checklist's rows, at the radius a nested box takes): its name, its key
+   (a name too, ruling 625) and, once the profile names any of its stages, how many, over its
+   chips. Stored ids no board has sit in a dashed box of their own above them,
+   on every page, because no project owns them. */
+.elig-groups { display: flex; flex-direction: column; gap: 1rem; }
+.elig-group { display: flex; flex-direction: column; gap: .5rem; }
+.elig-head { display: flex; align-items: baseline; gap: .5rem; }
+.elig-count { margin-left: auto; font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.elig-note { margin: -.25rem 0 0; font-size: .75rem; line-height: 1.5; color: var(--faint); }
+.elig-projs { border: 1px solid var(--hairline); border-radius: var(--radius-box); }
+.elig-stray { border: 1px dashed var(--border); border-radius: var(--radius-box); }
+.elig-proj { display: flex; flex-direction: column; gap: .5rem; padding: .75rem; }
+.elig-proj + .elig-proj { border-top: 1px solid var(--hairline); }
+.elig-proj-head { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+.elig-proj-name { min-width: 0; overflow-wrap: anywhere; font-size: .88rem; font-weight: 600; color: var(--fg); }
+/* Ruling 625: a project key is a name, drawn as Home draws it beside a
+   project's name — the body face, quiet, no chip. */
+.elig-proj-key { flex: none; font-size: .75rem; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
+.elig-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.elig-range { font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* The pager: shadcn's Pagination in the sheet's terms. Ghost squares take the
+   hover fill; the current page is outlined in the control edge, so it reads
+   without its fill (colo-1); the ends carry the set's chevron, the glyph side
+   the text side less 2px (ruling 459), and dim at the house step when no page
+   lies past them. */
+.pager { display: flex; margin-left: auto; }
+.pager-list { display: flex; align-items: center; gap: .25rem; margin: 0; padding: 0; list-style: none; }
+.pager-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .25rem;
+  min-width: 2rem; height: 2rem; padding: 0 .5rem;
+  border: 1px solid transparent; border-radius: var(--radius-button); color: var(--muted);
+  font-family: var(--font-display); font-size: .75rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: background-color .14s ease, color .14s ease, transform .15s var(--ease-out);
+}
+.pager-btn:hover:not([aria-disabled="true"]) { background: var(--tint-hover); color: var(--fg); }
+.pager-btn:active:not([aria-disabled="true"]) { transform: scale(.96); }
+.pager-btn[aria-current="page"] { border-color: var(--border-control); background: var(--surface); color: var(--fg); }
+.pager-btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.pager-btn .ico { width: 14px; height: 14px; }
+.pager-step .ico { stroke-width: 2; }
+.pager-step:has(> .ico:first-child) { padding-left: .375rem; }
+.pager-step:has(> .ico:last-child) { padding-right: .375rem; }
+.pager-back { transform: rotate(180deg); }
+/* The gap is a typed ellipsis, which sits on the baseline: lifted to the
+   middle of the numbers beside it, as shadcn's centred dots are. */
+.pager-gap {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2rem; height: 2rem; padding-bottom: .375rem;
+  font-size: .75rem; color: var(--placeholder);
+}
+@media (forced-colors: active) {
+  .pager-btn[aria-current="page"] { background: SelectedItem; color: SelectedItemText; }
+}
+
+/* ---------- appended: ruling 621, closing the setup checklist ---------- */
+/* The cross that hides the checklist for the session is the one close design
+   (`.icon-btn.modal-close`) at the notice's 28px circle and 14px glyph (ruling
+   148), after the meter. The count keeps the head's one auto margin, and the
+   negative margins give back what the circle adds: the head keeps its height
+   and the glyph lines up with the rows' actions. */
+.setup-head > .modal-close { width: 28px; height: 28px; flex: none; margin: -.375rem -.375rem -.375rem 0; }
+.setup-head > .modal-close .ico { width: 14px; height: 14px; }
 
 /* ---------- appended: ruling 625, the design pass — foundations ---------- */
 /* GitHub's chrome on dark is near-black (--chrome), so its tiles take the

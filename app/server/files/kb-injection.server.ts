@@ -13,6 +13,7 @@ import { countLabel } from "~/shared/text/plural";
 import { kbDirPath } from "./file-store-root.server";
 import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
 import { toError } from "~/shared/errors";
+import { pageEnd, READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 
 /**
  * Shared knowledge-base → agent-context reader (F6).
@@ -121,9 +122,10 @@ export function kbSizeClass(size: number): string {
   return KB_SIZE_CLASSES.find((c) => size < c.below)?.label ?? "1M chars or more";
 }
 
-/** Cap on ONE `read_knowledge_doc` call. Generous — the point of the pull is
- *  that a document arrives whole — but not unbounded. */
-export const KB_DOC_READ_CHARS = 48_000;
+/** Ruling 624: ONE `read_knowledge_doc` call returns a page of at most
+ *  `READ_PAGE_BYTES` of UTF-8, the most a Codex run's code-mode tool output
+ *  carries whole. It was 48,000 characters, and a Codex model saw each page
+ *  with its middle cut out. */
 
 /** Heading lines are cheap to extract and are what makes an index worth
  *  reading; a doc far larger than any real KB doc is listed without them. */
@@ -488,7 +490,7 @@ export function readKbDoc(
   if (!doc) return null;
   const raw = readFileSync(doc.abs, "utf8");
   const start = Math.min(Math.max(0, Math.floor(offset)), raw.length);
-  const end = Math.min(raw.length, start + KB_DOC_READ_CHARS);
+  const end = pageEnd(raw, start);
   // Reported, never hidden: a clipped document that reads as complete is how
   // a model states a half-read file as fact.
   return { rel: doc.rel, text: raw.slice(start, end), start, end, length: raw.length };
@@ -496,13 +498,13 @@ export function readKbDoc(
 
 /** What a run's `read_knowledge_doc` says it does, on either backend (ruling 585). */
 export const KB_DOC_TOOL_DESCRIPTION =
-  "Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name.";
+  `Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name. A long document comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, each sized to reach you whole (ruling 624): read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes.`;
 export const KB_DOC_KB_DESCRIPTION = "The knowledge base's name, as its index heading gives it.";
 export const KB_DOC_PATH_DESCRIPTION = "The document's path inside that knowledge base, e.g. 'conventions.md'.";
 
 /** Ruling 580: what a knowledge-base reader's `offset` does, one sentence for every tool that takes it. */
 export const KB_DOC_OFFSET_DESCRIPTION =
-  `Ruling 580: the character to start at. A read returns ${KB_DOC_READ_CHARS.toLocaleString("en-US")} characters; ` +
+  `Ruling 580: the character to start at. A read returns one page of at most ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes; ` +
   "when a document is longer, the read says which characters it returned and the offset to pass to read on.";
 
 /**

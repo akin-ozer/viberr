@@ -106,7 +106,7 @@ results board nothing the person asked for is committed to it.
 
 | Surface | Who | Notes |
 |---|---|---|
-| `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 525). |
+| `/controller` | any signed-in user | Instance scope, under the app header every standalone page carries (brand, `Home › Controller`, search, bell, account menu; ruling 623). `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 525). |
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). `?all=1` lists everyone's threads about the project for an org admin, and, sealed, for a holder of `delete-controller-conversations` (§2.3, ruling 525). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
@@ -121,8 +121,9 @@ and, while a turn is working, reads the turn's console tail every 5 seconds: the
 for a settle the stream missed, which revalidates the page once the tail says the run
 ended (ruling 457, CTL-2; it used to revalidate root, the workspace layout and the page
 every 5 s to move one step line). New conversation sits in the page head.
-Above the two-column breakpoint the page is one band as tall as the screen (the standalone
-page up to 1920px wide): the conversation's column, the thread's run pane (§2.2) and the
+Above the two-column breakpoint the page is one band as tall as the screen leaves it (under
+the app header on `/controller`, ruling 623, up to 1920px wide; under the workspace topbar on
+a project): the conversation's column, the thread's run pane (§2.2) and the
 rail, which lists the conversations, each fill it and scroll themselves, so the composer
 and the rail end at its foot (ruling 524(a)). Where the three do not fit (a project's page
 on a laptop) the conversation and the run split the band and the rail goes under it. Below
@@ -133,8 +134,9 @@ page, capped in the one-column layout (ruling 419). A blank transcript offers th
 rows: the glyph of what each is about, the sentence, and an arrow (ruling 516). A working
 turn shows the run's `phase` and last tool `step` on the row that says it is working
 (ruling 250). Below the
-two-column breakpoint the thread picker takes a row of its own in the head, with New and
-Home on the row under it (ruling 476(e)). A link in a message, and any other long token in
+two-column breakpoint the thread picker takes a row of its own in the head, with New
+conversation on the row under it (ruling 476(e)). The page has no Home button: the app
+header's brand and crumb are the way back (ruling 623). A link in a message, and any other long token in
 its prose (a word joined by slashes), wraps inside the transcript rather than scrolling it
 sideways (`.md-body a`, and `.md-body` paragraphs, list items, blockquotes and headings;
 a code block and a table keep their own scrollers; ruling 476(a), (i)). Where the transcript puts
@@ -727,8 +729,8 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 503); Done included, archived only with `includeArchived` |
 | `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), kept `deliveries` (ruling 597: each files delivery as it was delivered, newest first), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
-| `read_task_attachment` | One attachment of a task: an `.xlsx` as its sheets in CSV, an image as the picture, and any other file whose bytes are text as text, whatever its name; a known binary kind or bytes with a NUL in their head are named and refused (rulings 293, 533, 574). A read returns up to 40,000 characters; a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551); with `delivery`, a stamp from `get_task`'s `deliveries`, the file as that delivery held it (ruling 597) |
-| `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, 40,000 characters at a time with `offset`; rulings 573 and 574); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
+| `read_task_attachment` | One attachment of a task: an `.xlsx` as its sheets in CSV, an image as the picture, and any other file whose bytes are text as text, whatever its name; a known binary kind or bytes with a NUL in their head are named and refused (rulings 293, 533, 574). A read returns one page of up to 32,000 bytes (ruling 624); a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551); with `delivery`, a stamp from `get_task`'s `deliveries`, the file as that delivery held it (ruling 597) |
+| `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, a page of up to 32,000 bytes at a time with `offset`; rulings 573 and 574); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
 | `read_pull_request` | A task's review PR: every changed file with status, counts and unified-diff hunks; `patches: false` for the file list, `path` for one file, a byte budget with `patchOmitted` flags (ruling 266); audited `controller.github.read` |
@@ -1183,10 +1185,16 @@ minute.
   its target date. New epic (for `manage-epics`) opens the epic dialog: name, description,
   status, lead, start and target dates, colour; `intent=create-epic`.
 - **`/projects/:slug/epics/:epicId`** (`project.epic.tsx`, `EpicPage`): the head carries
-  the status select and Edit (the same dialog). About renders the description; Tasks
-  has the bar and one row per task with its stage, the board card's status word (the
-  same `cardStatus` the board computes, fed the review queue and live-run state, ruling
-  476(g)), "waits on N" when it waits, its owner, and Remove; Add tasks offers every live
+  the status select and Edit (the same dialog). It scrolls with the panels, in the page's
+  one scroller, so Edit ends on their right edge (ruling 615): the crumb, the title with
+  Edit at the end of its row, and the status line, which opens on the status select (a
+  chip: the status's dot in its pill tone, its name, the app's chevron) where a viewer
+  without `manage-epics` reads the status pill, so the head says the status once. About
+  renders the description; Tasks has the bar and one row per task with its stage, the
+  board card's status word (the same `cardStatus` the board computes, fed the review
+  queue and live-run state, ruling 476(g)), "waits on N" when it waits, its owner, and
+  Remove (under 36rem of list, the title takes the row's first line and the rest go under
+  it); Add tasks offers every live
   task not in it and says which will move from another epic; New task makes one in it;
   archived tasks fold under the list. History is the file's timeline as a feed (ruling
   560): the newest eight under their days ("Today", "Yesterday", "Sep 25"), each entry a

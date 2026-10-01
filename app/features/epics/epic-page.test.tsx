@@ -199,6 +199,36 @@ describe("ruling 503(e): the epic page's head", () => {
   });
 });
 
+describe("ruling 615: the head says the status once and scrolls with the panels", () => {
+  /** The head's status line: the one that says how far along the epic is. */
+  const statusLine = () => screen.getByText("50% done · 2 tasks").parentElement!;
+
+  it("the status line carries the select for someone who may change the status, and the pill for anyone else", async () => {
+    renderEpic(pageView(), { canManage: true });
+    await screen.findByRole("combobox", { name: "Status" });
+    // CANARY: render the pill beside the select again and the head says
+    // "In progress" twice, three times with the Details row.
+    expect(within(statusLine()).getByRole("combobox", { name: "Status" })).toBeTruthy();
+    expect(statusLine().querySelector("[data-epic-status]")).toBeNull();
+    cleanup();
+    renderEpic(pageView(), { canManage: false });
+    await screen.findByRole("heading", { name: "Checkout revamp", level: 1 });
+    expect(within(statusLine()).getByText("In progress").closest("[data-epic-status]")).not.toBeNull();
+  });
+
+  it("the head is in the page's one scroller with the panels", async () => {
+    renderEpic(pageView());
+    const title = await screen.findByRole("heading", { name: "Checkout revamp", level: 1 });
+    const scroller = title.closest(".policy-wrap");
+    // CANARY: lift the head out of `.policy-wrap` again and wherever the page
+    // scrolls, the scroller's 10px scrollbar pulls the panels in under an Edit
+    // that keeps its place. Only this suite sees it: headless Chromium hides
+    // scrollbars, so the e2e layout checks measure no gutter.
+    expect(scroller).not.toBeNull();
+    expect((await section("Details")).closest(".policy-wrap")).toBe(scroller);
+  });
+});
+
 describe("ruling 503(e): About, History and Details", () => {
   it("About renders the description as markdown", async () => {
     renderEpic(pageView());

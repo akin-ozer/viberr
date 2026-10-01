@@ -9,8 +9,8 @@ import {
  * Ruling 145 — the standalone-page layout's loader.
  *
  * It answers one question: does THIS route take the app header, and with what.
- * The scoping is the point. `/org/settings` and `/insights` get the viewer, the
- * notification slice and the unread count the header renders; `/controller`,
+ * The scoping is the point. `/org/settings`, `/controller` (ruling 623) and
+ * `/insights` get the viewer and the bell's counts the header renders;
  * `/profile` and `/notifications` get nothing at all — not even an auth call —
  * so the routes that render no header cost exactly what they cost before the
  * header existed, and their own guards stay the only ones that speak.
@@ -52,9 +52,13 @@ describe("palette-shell loader (ruling 145)", () => {
     expect(result.header).not.toHaveProperty("notifications");
   });
 
-  it("answers the same on the other page route", async () => {
-    const result = await loadShell("/insights", ardaId);
-    expect(result.header?.user.id).toBe(ardaId);
+  it("answers the same on the other page routes", async () => {
+    // Ruling 623: the controller page carries the header too; it was the one
+    // instance page with no search, bell or account menu. CANARY: take
+    // `/controller` off `STANDALONE_PAGES` and its header is null again.
+    for (const path of ["/insights", "/controller"]) {
+      expect((await loadShell(path, ardaId)).header?.user.id, path).toBe(ardaId);
+    }
   });
 
   it("reads the tab and the query string as the same page", async () => {
@@ -79,7 +83,7 @@ describe("palette-shell loader (ruling 145)", () => {
   });
 
   it("carries no header — and reads nothing — on the routes that render none", async () => {
-    for (const path of ["/controller", "/profile", "/notifications"]) {
+    for (const path of ["/profile", "/notifications"]) {
       expect((await loadShell(path, ardaId)).header, path).toBeNull();
     }
   });

@@ -47,9 +47,10 @@ export function useEpicActionToast(fetcher: ReturnType<typeof useFetcher<EpicAct
  * The status as a pill. `in_progress` takes the board's "waiting on you" blue
  * rather than the agents' purple: an epic in progress is a plan being worked,
  * not a run. Paused is amber like everything parked on purpose; done is the
- * accepted green; planned and cancelled are quiet.
+ * accepted green; planned and cancelled are quiet. The epic page's status
+ * select draws its dot in the same tone (ruling 615).
  */
-const EPIC_STATUS_PILL = {
+export const EPIC_STATUS_PILL = {
   planned: "neutral",
   in_progress: "info",
   paused: "input",

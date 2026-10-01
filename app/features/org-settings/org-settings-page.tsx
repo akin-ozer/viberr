@@ -219,6 +219,7 @@ export function OrgSettingsPage({
               projectGrants={view.projectGrants}
               templateGrants={view.templateGrants}
               stages={view.stages}
+              projectStages={view.projectStages}
             />
           )}
           {tab === "controller" && (

@@ -1340,9 +1340,10 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       }
       expect(text).toContain("[truncated");
       expect(text).toContain("narrow the path or paginate");
-      // The cap holds: the whole message stays near MAX_GITHUB_READ_CHARS
-      // (48_000) plus the short prefix/marker, not the ~220 KB raw body.
-      expect(text.length).toBeLessThan(49_000);
+      // The cap holds (ruling 624): printed as the tool result it is, the
+      // message fits a Codex code-mode tool output, 10,000 tokens counted as
+      // UTF-8 bytes / 4, not the ~220 KB raw body. CANARY: cap at 48,000.
+      expect(Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text }] })) / 4).toBeLessThanOrEqual(10_000);
     });
   });
 });

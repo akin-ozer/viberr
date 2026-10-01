@@ -22,6 +22,7 @@ import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
+  EPIC_STATUS_PILL,
   EpicDialog,
   EpicProgressBar,
   EpicStatusPill,
@@ -90,8 +91,13 @@ export function EpicPage({
 
   return (
     <div className="board-wrap" data-screen-label="Epic">
-      <div className="board-head epic-head">
-        <div>
+      {/* Ruling 615: the head scrolls with the page, inside the one scroller,
+          so it ends where the panels end whether or not a scrollbar takes
+          room beside them. The status is said once in it: the select, for
+          someone who may change it, stands where everyone else reads the
+          pill. */}
+      <div className="policy-wrap">
+        <div className="epic-head">
           <p className="epic-crumb fine">
             <Link className="linkish" to={epicsHref(projectSlug)}>
               Epics
@@ -99,25 +105,23 @@ export function EpicPage({
             <span aria-hidden="true"> / </span>
             {epic.id}
           </p>
-          <h1 className="epic-title">
-            <span className="epic-dot lg" data-stage-color={epic.color} aria-hidden="true" />
-            {epic.title}
-          </h1>
-          <div className="sub epic-sub">
-            <EpicStatusPill status={shownStatus} sm />
-            <span>
-              {epic.progress.total > 0
-                ? `${epicDonePercent(epic.progress)}% done · ${countLabel(epic.progress.total, "task")}`
-                : "No tasks yet"}
-            </span>
-            {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} sm />}
+          <div className="epic-head-row">
+            <h1 className="epic-title">
+              <span className="epic-dot lg" data-stage-color={epic.color} aria-hidden="true" />
+              {epic.title}
+            </h1>
+            {canManage && (
+              <button type="button" className="btn ghost sm" onClick={() => setEditing(true)}>
+                <Icon name="edit" />
+                Edit
+              </button>
+            )}
           </div>
-        </div>
-        <div className="board-tools">
-          {canManage && (
-            <>
-              <label className="epic-status-select">
+          <div className="epic-sub">
+            {canManage ? (
+              <label className="epic-status-select" data-tone={EPIC_STATUS_PILL[shownStatus]}>
                 <span className="vh">Status</span>
+                <span className="epic-status-dot" aria-hidden="true" />
                 <select
                   value={shownStatus}
                   disabled={statusBusy}
@@ -133,17 +137,20 @@ export function EpicPage({
                     </option>
                   ))}
                 </select>
+                <Icon name="chevron" className="epic-status-chev" />
               </label>
-              <button type="button" className="btn ghost sm" onClick={() => setEditing(true)}>
-                <Icon name="edit" />
-                Edit
-              </button>
-            </>
-          )}
+            ) : (
+              <EpicStatusPill status={shownStatus} sm />
+            )}
+            <span>
+              {epic.progress.total > 0
+                ? `${epicDonePercent(epic.progress)}% done · ${countLabel(epic.progress.total, "task")}`
+                : "No tasks yet"}
+            </span>
+            {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} sm />}
+          </div>
         </div>
-      </div>
 
-      <div className="policy-wrap">
         <div className="epic-layout">
           <div className="epic-main">
             <section className="panel" aria-labelledby="epic-about">
