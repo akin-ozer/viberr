@@ -5251,6 +5251,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".pill.quiet .ico": ".pill.quiet",
       ".sched-when .ico": ".sched-when",
       ".stage-menu-btn .sm-caret": ".stage-menu-btn",
+      ".epic-status-select .epic-status-chev": ".epic-status-select select",
       ".rq-row .wait-tag.human .ico": ".rq-row .wait-tag.human",
       ".gh-freshness .ico": ".gh-freshness",
       ".ctl-msg-who .ico": ".ctl-msg-who",

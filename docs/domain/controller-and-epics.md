@@ -1183,10 +1183,16 @@ minute.
   its target date. New epic (for `manage-epics`) opens the epic dialog: name, description,
   status, lead, start and target dates, colour; `intent=create-epic`.
 - **`/projects/:slug/epics/:epicId`** (`project.epic.tsx`, `EpicPage`): the head carries
-  the status select and Edit (the same dialog). About renders the description; Tasks
-  has the bar and one row per task with its stage, the board card's status word (the
-  same `cardStatus` the board computes, fed the review queue and live-run state, ruling
-  476(g)), "waits on N" when it waits, its owner, and Remove; Add tasks offers every live
+  the status select and Edit (the same dialog). It scrolls with the panels, in the page's
+  one scroller, so Edit ends on their right edge (ruling 615): the crumb, the title with
+  Edit at the end of its row, and the status line, which opens on the status select (a
+  chip: the status's dot in its pill tone, its name, the app's chevron) where a viewer
+  without `manage-epics` reads the status pill, so the head says the status once. About
+  renders the description; Tasks has the bar and one row per task with its stage, the
+  board card's status word (the same `cardStatus` the board computes, fed the review
+  queue and live-run state, ruling 476(g)), "waits on N" when it waits, its owner, and
+  Remove (under 36rem of list, the title takes the row's first line and the rest go under
+  it); Add tasks offers every live
   task not in it and says which will move from another epic; New task makes one in it;
   archived tasks fold under the list. History is the file's timeline as a feed (ruling
   560): the newest eight under their days ("Today", "Yesterday", "Sep 25"), each entry a
