@@ -1155,11 +1155,11 @@ export function StoreBrowser({
                   </div>
                 )
               )}
+              {/* Ruling 614: no folder hint beside the actions. An opened
+                  document's path already heads the editor, the save toast
+                  names a new one's, and the hint's lone "/" for the root read
+                  as a stray mark. */}
               <div className="fm-doc-acts">
-                <span className="fm-hint mono">
-                  {(doc.dir.length > 0 ? doc.dir.join("/") + "/" : "/") +
-                    (doc.existing ? "" : " · new document")}
-                </span>
                 <button
                   type="button"
                   className="btn ghost sm"

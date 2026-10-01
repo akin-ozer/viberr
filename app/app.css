@@ -5919,7 +5919,6 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    and is not retyped, so this arm carries no name input. The new-document arm
    does, and it rides the shared `.field` chrome (ruling 149). */
 .fm-doc-path { font-family: var(--font-mono); font-size: .75rem; color: var(--muted); }
-.fm-doc-acts .fm-hint { margin-left: 0; margin-right: auto; }
 
 /* Capability-matrix runtime-difference notes (P13-RT-14). */
 .mx-notes { padding: 1rem .25rem .25rem; }

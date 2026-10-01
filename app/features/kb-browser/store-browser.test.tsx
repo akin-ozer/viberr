@@ -395,6 +395,12 @@ describe("StoreBrowser document editor", () => {
     await waitFor(() => expect(body.value).toContain("LOADED"));
     // The name is the file's own — the editor edits it, it does not re-create it.
     expect(getByText("overview.md", { selector: ".fm-doc-path" })).toBeTruthy();
+    // Ruling 614: that path is the editor's one word on where the document
+    // lives. CANARY: restore the folder hint beside the buttons and this row
+    // reads "/CancelSave document".
+    expect(getByText("Save document").parentElement?.textContent).toBe(
+      "CancelSave document",
+    );
 
     fireEvent.change(body, { target: { value: "# Overview\nEDITED" } });
     fireEvent.click(getByText("Save document"));
