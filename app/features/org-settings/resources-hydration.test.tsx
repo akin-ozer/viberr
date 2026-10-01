@@ -102,7 +102,7 @@ async function tabIn(zone: string): Promise<() => ReactElement> {
         path: "/org/settings",
         Component: () => (
           <toast.ToastProvider>
-            <panel.ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />
+            <panel.ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} projectStages={[]} />
           </toast.ToastProvider>
         ),
       },

@@ -700,6 +700,26 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(released.task.timeline.some((e) => e.type === "note" && /Dependencies released/.test(e.title ?? ""))).toBe(true);
   });
 
+  it("ruling 620 set-task-dependencies: an edit that leaves only done entries releases the task and toasts it", async () => {
+    // CANARY: toast "Waits on VIB-139" for the released list.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    // VIB-139 is done in the seed: it reached the list before it finished.
+    await updateTaskFile({ projectSlug: "viberr-core", taskKey: "VIB-153", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.blockedBy = ["VIB-139", "VIB-142"];
+    });
+    rebuildProject(app.db, "viberr-core", { dataRoot: app.dataRoot });
+    // SAFETY: arda holds `edit-task-meta`, so a valid list returns the intent's
+    // ok arm with its toast.
+    const set = (await postIntent("VIB-153", ids.arda, {
+      intent: "set-task-dependencies", blockedBy: "VIB-139",
+    })) as { ok: true; toast: string };
+    expect(set.toast).toBe("Released: VIB-139 is done");
+    const after = await runLoader("VIB-153", ids.arda);
+    expect(after.task.blockedBy).toEqual([]);
+    expect(after.task.timeline.some((e) => e.type === "note" && e.title === "Dependencies released")).toBe(true);
+  });
+
   it("ruling 501 set-task-metadata: an edit writes only the axis its form carries", async () => {
     // Canary: read an absent field as empty again (the old full replace), and
     // the priority edit below clears VIB-142's labels and due date.

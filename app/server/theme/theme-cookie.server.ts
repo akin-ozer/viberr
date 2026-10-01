@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod";
+import { cookieValues } from "../http/cookies.server";
 
 const THEME_COOKIE_NAME = "viberr_theme";
 
@@ -22,23 +23,7 @@ export function isThemePreference(value: string): value is ThemePreference {
 
 /** Reads the theme preference from the request's Cookie header. Default: system. */
 export function getThemePreference(request: Request): ThemePreference {
-  const header = request.headers.get("Cookie");
-  if (!header) return "system";
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    const name = part.slice(0, eq).trim();
-    if (name !== THEME_COOKIE_NAME) continue;
-    let value = part.slice(eq + 1).trim();
-    try {
-      value = decodeURIComponent(value);
-    } catch {
-      // keep raw value; validated below anyway
-    }
-    const parsed = themePreferenceSchema.safeParse(value);
-    if (parsed.success) return parsed.data;
-  }
-  return "system";
+  return cookieValues(request, THEME_COOKIE_NAME).find(isThemePreference) ?? "system";
 }
 
 /** Set-Cookie value persisting the preference (~400 days, browser max). */

@@ -32,7 +32,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/login` | `login.tsx` | public; `login` runs the origin check, `set-password` full CSRF | local sign-in, forced-reset mode; with at least one OAuth provider configured the card leads with both provider buttons (an unconfigured one disabled and labelled), with none the local form leads | `login`, `set-password` |
 | `/logout` | `logout.tsx` | CSRF | better-auth sign-out | |
 | `/api/auth/*` | `api.auth.$.ts` | better-auth | six allow-listed paths incl. OAuth callbacks | |
-| `/` | `_index.tsx` | user, form | Home: the setup checklist while any of the viewer's steps is open (ruling 532: "Finish setting up", GitHub, Your own account, Claude or Codex and First project for an org admin, the last two for a member; the first step the viewer can take leads with its sentence and the primary action, each action opens its place, and the card leaves once every step is done), pinned, all and archived projects, waiting counts, the Settings tiles (connections, users, resources, insights), store strip (org admin), new-project modal | `create-project`, `pin`, `view`, `rescan` (org admin), `rebuild-projections` (org admin) |
+| `/` | `_index.tsx` | user, form | Home: the setup checklist while any of the viewer's steps is open (ruling 532: "Finish setting up", GitHub, Your own account, Claude or Codex and First project for an org admin, the last two for a member; the first step the viewer can take leads with its sentence and the primary action, each action opens its place, and the card leaves once every step is done; once the viewer has a project, the cross in its head, "Hide for this session", closes it until the sign-in or the browser's session ends, ruling 621), pinned, all and archived projects, waiting counts, the Settings tiles (connections, users, resources, insights), store strip (org admin), new-project modal | `create-project`, `pin`, `view`, `hide-setup` (ruling 621), `rescan` (org admin), `rebuild-projections` (org admin) |
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
 | `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365; a decision the viewer owes beside an agent's wait leads the chips as "waiting on you", ruling 529), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm (the shared accept dialog, whose "Collides" row the board computes from its own cards' `pr.paths`, ruling 475), the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first), the epic filter (ruling 503: `?epic=<epic id>` or `none`, a select shown once the project has an epic; Clear resets it and the empty copy names it; cards and list rows draw no epic, ruling 172) and the New task dialog's Epic select (it starts on the filtered epic) | `create-task` (with `epic`, ruling 503), `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
@@ -802,5 +802,22 @@ base`, `Edit MCP server`, `GitHub sign-in`).
     this project's copy. Changes apply from the next run."
   - (h) In Instance settings → Agent resources, a global profile's stored stage the
     default workflow lacks reads "build (not in the default workflow)" on the row, and the
-    editor shows it as a pressed chip "build" with the note "not in the default workflow"
-    that can be pressed off (and back on) before the save.
+    editor shows it as a pressed chip that can be pressed off (and back on) before the
+    save: under its project's name in Custom stages, or, when no live board has it, as
+    "build" in the "On no project's board" row (ruling 618).
+- **The global profile editor offers each project's own stages** (ruling 618, pinned by
+  `org-settings-page.test.tsx` "ruling 618", `pagination.test.tsx` and
+  `org-view.server.test.ts`): Default eligible stages reads in two groups, "Default
+  workflow" and "Custom stages" ("N selected" once the profile names any; "From each
+  project's own board. A profile names stages by id, so a stage counts on every board
+  that has it."; "No project's board adds a stage of its own." when none does). Each live
+  project whose board has stages outside the default workflow is a row named for the
+  project, with its task key, "N selected" once the profile names any of its stages, and
+  that board's own stage chips in its names and colours, never its last stage. An id two
+  boards share is pressed on both. The rows the profile names come first, then the rest
+  by name, ordered at the open. Past three projects the rows page behind the "Custom stage
+  pages" control, in shadcn's Pagination shape: "Previous", the page numbers with "…" for
+  a skipped run (at most seven slots), "Next", the current page outlined, an end with no
+  page past it aria-disabled, and "Projects 4 to 6 of 7" beside it. Below 560px the ends show
+  their chevrons alone. A stored stage no live board has sits above the rows in the dashed
+  "On no project's board" row, on every page.

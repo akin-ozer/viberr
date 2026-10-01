@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { getEnv } from "~/server/config/env.server";
+import { listProjects } from "~/server/projections/board-query.server";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import type { OAuthProvider } from "~/server/auth/oauth-credential-test.server";
 import {
@@ -79,6 +81,12 @@ export interface OrgSettingsView {
   };
   stages: StageDef[];
   /**
+   * Ruling 618: each live project whose board has stages the default workflow
+   * lacks, so the AgentModal can offer them grouped by project (its Custom
+   * stages section) instead of only echoing an id a profile already stores.
+   */
+  projectStages: ProjectCustomStages[];
+  /**
    * F18-3: which OAuth sign-in providers are actually configured on this
    * deployment. The Allow-access modal keys its default method + which OAuth
    * options it offers off this — mirroring R17-4's login-page rule — so it never
@@ -121,6 +129,41 @@ export interface AuthProviderView {
   verifiedDetail: string | null;
   /** True when the deployment env also carries a pair for this provider. */
   envAvailable: boolean;
+}
+
+/**
+ * Ruling 618: one live project's board stages outside the default workflow.
+ * A global profile names its eligible stages by id, and a project's own board
+ * can add ids the default workflow has never had (akinozer.com's `build`, or
+ * `intake`, `mapping` and `estimate`).
+ */
+export interface ProjectCustomStages {
+  slug: string;
+  name: string;
+  /** The project's task-key prefix ("BIL"), shown beside its name. */
+  prefix: string;
+  /** In board order. Never the board's terminal stage: Done is closed by a
+   *  human, never by an agent, whatever the board calls it. */
+  stages: StageDef[];
+}
+
+/** Archived projects are left out, as `usedByProject` leaves them out of a
+ *  profile's adoption count: nobody can edit their boards any more. Ordered by
+ *  name the way a person reads a list: SQLite's `ORDER BY name` is binary, so
+ *  `akinozer.com` would follow every capitalised name. */
+function projectCustomStages(db: DatabaseSync): ProjectCustomStages[] {
+  const defaultIds = new Set(GOVERNED_TEMPLATE.stages.map((s) => s.id));
+  return listProjects(db)
+    .flatMap((project) => {
+      if (project.archived) return [];
+      const stages = project.stages.filter(
+        (s) => !defaultIds.has(s.id) && !isTerminalStage(s.id, project.stages),
+      );
+      return stages.length === 0
+        ? []
+        : [{ slug: project.slug, name: project.name, prefix: project.taskPrefix, stages }];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -198,6 +241,7 @@ export function getOrgSettingsView(
       skills: countGrants(skills.map((s) => s.name), "skills", countTemplateGrants),
     },
     stages: GOVERNED_TEMPLATE.stages,
+    projectStages: projectCustomStages(db),
     // R19-16: what the app can ACTUALLY grant now (app row overriding env),
     // not what the process happened to boot with.
     providers: {

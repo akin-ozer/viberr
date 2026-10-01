@@ -33,8 +33,8 @@ import { SetupChecklist } from "./setup-checklist";
  *
  * Pass 16 split this file (1739 lines) along its own seams — a pure structural
  * refactor, no behaviour or copy change. What stayed here is the page's state
- * and the four fetchers that own it (prefs/pin/view, re-scan, rebuild, and the
- * ⌘K palette), plus the composition below. The pieces live in
+ * and what owns it (the prefs/pin/view, re-scan, rebuild and setup-close
+ * fetchers, and the ⌘K palette), plus the composition below. The pieces live in
  * `project-cards.tsx`, `home-sections.tsx` and `new-project-modal.tsx`.
  */
 
@@ -151,6 +151,24 @@ export function HomePage({
       push(d.pinned ? "Pinned. It will stay at the top" : "Unpinned");
     }
   });
+
+  // Ruling 621: the setup checklist's close. The card goes at once (personal
+  // UI state, like a pin), and the answer's cookie keeps it gone for the rest
+  // of this session; a refused close brings it back and says why.
+  const setupFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const setupClosed =
+    setupFetcher.state !== "idle" || setupFetcher.data?.ok === true;
+  useFetcherResult(setupFetcher, (d) => {
+    if (!d.ok) {
+      push(d.error ?? "Couldn't hide the setup checklist. Please try again", "error");
+    }
+  });
+  const closeSetup = () => {
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "hide-setup");
+    setupFetcher.submit(fd, { method: "post" });
+  };
 
   const scanning = rescanFetcher.state !== "idle";
   // UI-07: a failed re-scan (403 for a non-admin, or an app error) used to
@@ -277,9 +295,14 @@ export function HomePage({
 
         {/* Ruling 532: an empty Home is never without the checklist, whose
             last step is the first project, so it stands where the empty
-            state's dashed box did. */}
-        {data.setup && (
-          <SetupChecklist steps={data.setup} onNewProject={() => setModal(true)} />
+            state's dashed box did. Once there is a project, the person may
+            close it for the session (ruling 621). */}
+        {data.setup && !setupClosed && (
+          <SetupChecklist
+            steps={data.setup}
+            onNewProject={() => setModal(true)}
+            onClose={closeSetup}
+          />
         )}
 
         {projects.length > 0 && (
