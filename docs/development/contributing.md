@@ -40,6 +40,10 @@ node scripts/measure-routes.mjs --check   # the bundle ratchet, after the build 
 npm run e2e     # Docker; the only gate that boots the shipped image
 ```
 
+CI runs `npm test` in the image's Debian base as an unprivileged user (ruling 618); as root,
+or on another coreutils, the agent-tree suites fail for reasons of the host, not the change.
+[testing.md](testing.md) §1 has the command that runs it as CI does.
+
 A change that makes a perf budget move fails `npm test` in either direction: lower the
 ceiling to keep a win, or raise it with the reason beside it
 ([performance.md](performance.md)).

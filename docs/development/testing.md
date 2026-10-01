@@ -111,11 +111,27 @@ with Node 26: `verify` = `npm ci` → lint → typecheck → test → build → 
 chromium` → `npm run e2e`, uploading `playwright-report/` for 7 days on failure. No secrets
 are needed: the unit setup file seeds synthetic ones and `compose.e2e.yml` carries its own.
 
-No CI job has executed since 2026-09-07 (checked 2026-09-27): GitHub refuses to start them
-("recent account payments have failed or your spending limit needs to be increased"), so
-every run reads as a failure a few seconds long, and the bundle ratchet step has never run
-on CI. Until the account is fixed, the gates are the six commands above, run locally
-before a merge.
+The test step runs on the image's userland, not the runner's (ruling 618): `npm test`
+inside `node:26-slim`, the Dockerfile's base, with the git and ca-certificates its
+runtime stage adds, as the runner's own uid. The server shells out to `rm`, `chmod` and
+`git`, and the runner's Ubuntu carries other versions of them (its coreutils 9.4 has no
+`chmod -P`; the image's 9.7 does). The agent-tree suites prove refusals that root never
+meets, so they need an unprivileged user, and `--init` reaps orphans as the app's
+`init: true` does (the process suites wait for a killed group's members to go). Run the
+same step locally as a non-root user
+whose uid is outside the agent range (20001 to 59999), from the checkout:
+
+```sh
+docker run --rm --init -v "$PWD:/w" -w /w -e DEBIAN_FRONTEND=noninteractive \
+  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" node:26-slim sh -euc '
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends git ca-certificates > /dev/null
+    exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups env HOME=/tmp npm test'
+```
+
+From 2026-09-07 GitHub refused to start any job ("recent account payments have failed or
+your spending limit needs to be increased"), and the six commands above, run locally, were
+the only gates. Jobs run again since 2026-10-01.
 
 ## 2. Unit and integration suite (Vitest)
 

@@ -26,8 +26,25 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Unit + integration tests
-        run: npm test
+      # Ruling 618: the suite runs on the userland the app ships on, as an
+      # unprivileged user. The image's base is node:26-slim (Debian), and its
+      # runtime stage adds git and ca-certificates; the server shells out to
+      # rm, chmod and git, and this runner's Ubuntu has other versions of them
+      # (its coreutils 9.4 has no `chmod -P`, the image's 9.7 does). Root
+      # passes the permission checks the agent-tree suites prove, so the tests
+      # run as the runner's own uid, which owns the checkout. `--init` reaps
+      # orphans as compose's `init: true` does for the app; the process suites
+      # kill a group and wait for its members to go.
+      - name: Unit + integration tests (node:26-slim, unprivileged)
+        run: |
+          docker run --rm --init -v "$PWD:/w" -w /w \
+            -e CI -e DEBIAN_FRONTEND=noninteractive \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            node:26-slim sh -euc '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends git ca-certificates > /dev/null
+              exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups env HOME=/tmp npm test
+            '
 
       - name: Build
         run: npm run build
