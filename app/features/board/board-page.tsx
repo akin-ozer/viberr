@@ -1687,6 +1687,22 @@ function FilterBar({
     : projectLabels;
   return (
     <div className="filter-bar">
+      {/* R15-5: the term input lives on the BOARD now. The topbar's box read
+          "Search tasks, branches, agents…" while only ever filtering the open
+          board; the global question moved to the ⌘K palette and this one says
+          exactly what it does. Ruling 625: it leads the row, the left end that
+          the open controller dock (anchored bottom right) never covers; at the
+          row's right end it sat under the dock's panel at 1280×720. */}
+      <label className="board-filter-input">
+        <Icon name="filter" />
+        <input
+          type="search"
+          value={query}
+          placeholder="Filter this board…"
+          aria-label="Filter this board"
+          onChange={(e) => setParam("q", e.target.value || null)}
+        />
+      </label>
       {/* Ruling 625: the chips as one row — no box on a wide screen (the row
           is `display: contents` there), one line that scrolls sideways on a
           phone, where seven wrapped chips took three rows above the lanes. */}
@@ -1721,10 +1737,6 @@ function FilterBar({
             )}
           </button>
         ))}
-        {/* R15-5: the term input lives on the BOARD now. The topbar's box read
-            "Search tasks, branches, agents…" while only ever filtering the open
-            board; the global question moved to the ⌘K palette and this one says
-            exactly what it does. */}
         {/* F26-12 / R26-2: one chip per label the project actually uses (the same
             vocabulary the New-task modal offers). Single-select: clicking a label
             narrows the board to its tasks; clicking the active one clears it. They
@@ -1797,16 +1809,6 @@ function FilterBar({
           </select>
         </label>
       )}
-      <label className="board-filter-input">
-        <Icon name="filter" />
-        <input
-          type="search"
-          value={query}
-          placeholder="Filter this board…"
-          aria-label="Filter this board"
-          onChange={(e) => setParam("q", e.target.value || null)}
-        />
-      </label>
       {/* P13-D-34: the board's clear-filter affordance. "All tasks" resets the
           filter but NOT `?q=`, so a board hidden by a stale term needs one
           control that resets both (and the label filter — F26-12). One chip per

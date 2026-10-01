@@ -1188,8 +1188,8 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    it, and it wraps with the chips at narrow widths. */
 .board-filter-input {
   display: inline-flex; align-items: center; gap: .375rem;
-  /* Ruling 625: grows into the chip row's leftover room (it wrapped alone at
-     1280 with 247px free), on the chips' radius and height. */
+  /* Ruling 625: it leads the row (the open dock covers the row's right end at
+     1280×720), on the chips' radius and height. */
   flex: 1 1 140px; min-width: 140px; max-width: 260px;
   padding: .25rem .5rem;
   border: 1px solid var(--border-control);

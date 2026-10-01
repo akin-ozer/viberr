@@ -756,6 +756,15 @@ describe("R15-5: the board owns its own filter box", () => {
     await waitFor(() => expect(queryByText("Attach a project credential")).toBeNull());
     expect(queryByText("Rotate the PAT")).toBeTruthy();
   });
+
+  it("leads the filter row, the end the open controller dock never covers (ruling 625)", () => {
+    // At the row's right end the field sat under the open dock's panel at
+    // 1280×720, so the page under a non-modal dock could not be filtered
+    // (e2e 08-controller-dock). CANARY: render the field after the chip row.
+    const { container } = renderBoard([task({ key: "VIB-1" })]);
+    const bar = container.querySelector(".filter-bar")!;
+    expect(bar.firstElementChild!.classList.contains("board-filter-input")).toBe(true);
+  });
 });
 
 /**
