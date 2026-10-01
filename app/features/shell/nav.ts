@@ -83,13 +83,15 @@ export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
  * A route is on this list when it is a PAGE. `/profile` and `/notifications`
  * are deliberately absent: both render their whole surface inside a
  * `showModal()` overlay that covers the viewport, so a header behind one would
- * be a dimmed sliver, not a header. `/controller` is absent too — it carries
- * its own identity header (the controller's name, its model and its scope) and
- * a full-height layout of its own, which the document scrolls: app.css opts it
- * out of the shell's clipped body (interface review 2026-09-24, acce-12).
+ * be a dimmed sliver, not a header. `/controller` was absent too, for its own
+ * identity header and full-height layout, and that left the one instance page
+ * people work in all day with no search, no bell and no account menu (ruling
+ * 615). Its identity header stays under this one, and its band fills the
+ * height this one leaves (app.css).
  */
 export const STANDALONE_PAGES: readonly { path: string; label: string }[] = [
   { path: "/org/settings", label: "Instance settings" },
+  { path: "/controller", label: "Controller" },
   { path: "/insights", label: "Insights" },
 ];
 

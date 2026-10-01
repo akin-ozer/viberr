@@ -30,12 +30,12 @@ import { SkipLink } from "~/ui/skip-link";
  * under nothing — no brand, no search, no bell, no account menu, and an in-page
  * back button doing the navigating. `PageTopbar` is that header, rendered here
  * so one mount serves every standalone page, and `standalonePageLabel` decides
- * which routes are pages that take it (the two overlay routes and the
- * controller are not — see `nav.ts`).
+ * which routes are pages that take it (the two overlay routes are not — see
+ * `nav.ts`).
  *
  * The loader is scoped to the same answer: on a route with no header it reads
- * nothing at all, so `/controller`, `/profile` and `/notifications` cost
- * exactly what they cost before — including their own auth guard, unchanged.
+ * nothing at all, so `/profile` and `/notifications` cost exactly what they
+ * cost before — including their own auth guard, unchanged.
  */
 
 /**

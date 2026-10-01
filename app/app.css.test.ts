@@ -3297,10 +3297,28 @@ describe("app.css controller band (ruling 524)", () => {
     // the rail comes back beside the conversation.
     expect(requiredDecls(wide, '.ctl-layout > .ctl-run[data-console="closed"]').get("grid-row")).toBe("2");
     expect(requiredDecls(wide, `${CLOSED} > .ctl-side`).get("grid-row")).toBe("1 / -1");
-    // The standalone page is no longer a 1200px column, and it is the
-    // screen's height so the band has one to fill.
+    // The standalone page is no longer a 1200px column.
     expect(requiredDecls(plain, ".ctl-wrap.standalone").get("max-width")).toBe("1920px");
-    expect(requiredDecls(wide, ".ctl-wrap.standalone").get("height")).toBe("100dvh");
+  });
+
+  it("ruling 615: the standalone page fills what the app header leaves", () => {
+    // /controller sits in Home's page shell (`.home`, a flex column) under the
+    // app header. The shell is the screen's height and the page flexes into
+    // the rest, which is the band's height to fill.
+    expect(requiredDecls(wide, ".home:has(> .ctl-wrap.standalone)").get("height")).toBe("100dvh");
+    expect(requiredDecls(plain, ".ctl-wrap").get("flex")).toBe("1");
+    // CANARY: put the page's own `height: 100dvh` back (or its min-height) and
+    // the page is a screen under a 61px header, so the document scrolls by
+    // the header's height at every desktop size.
+    for (const rule of RULES.filter((r) => selectorParts(r).includes(".ctl-wrap.standalone"))) {
+      for (const prop of ["height", "min-height"]) {
+        expect(rule.decls.get(prop) ?? "", `${rule.at.join(" ")} ${prop}`).not.toMatch(/vh\b/);
+      }
+    }
+    // A flex column's auto margins shrink a child to its content, and the page
+    // is an inline-size container, which has none. CANARY: drop the width and
+    // the page is 48px wide (its padding), measured in Chromium.
+    expect(requiredDecls(plain, ".ctl-wrap.standalone").get("width")).toBe("100%");
   });
 
   it("(a) gives the console the pane's height, where it was a 320px box", () => {
@@ -3911,8 +3929,10 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     expect(collapse.some((r) => selectorParts(r).includes(".gh-table .live-row") && r.decls.has("min-width"))).toBe(false);
     const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
     expect(block).toMatch(/\.board-wrap:has\(> \.agents-layout, > \.live-wrap\)\s*\{\s*overflow-y:\s*auto/);
-    // The shell-less controller is opted out of the clipped body like Home.
-    expect(CODE).toMatch(/body:has\(\.ctl-wrap\.standalone\)\s*\{[^}]*overflow:\s*auto/);
+    // The standalone controller is in Home's page shell (ruling 615), which is
+    // opted out of the clipped body. CANARY: drop `body:has(.home)` and at
+    // 320px the controller's composer and rail cannot be scrolled to.
+    expect(requiredDecls(plain, "body:has(.home)").get("overflow")).toBe("auto");
   });
 
   it("the credential card's green footer wraps like its warn box, so the re-check can take its own line", () => {
