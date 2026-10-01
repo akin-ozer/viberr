@@ -6,7 +6,7 @@ import {
   appErrorResponse,
   requireFormAction,
 } from "~/server/auth/form-action.server";
-import { requireUser } from "~/server/auth/require-user.server";
+import { requireAuth } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { heldDataRootLock } from "~/server/db/data-root-lock.server";
 import { getEnv } from "~/server/config/env.server";
@@ -29,6 +29,10 @@ import {
   createProject,
   type CreateProjectInput,
 } from "~/features/home/project-create.server";
+import {
+  isSetupHidden,
+  serializeSetupHidden,
+} from "~/features/home/setup-hidden.server";
 import { HomePage } from "~/features/home/home-page";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
@@ -43,7 +47,7 @@ export function meta() {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  const { user, sessionId } = await requireAuth(request);
   const db = getDb();
   const hour = new Date().getHours();
   const greet =
@@ -54,8 +58,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     user,
     greet,
     projects,
-    // Ruling 532: the setup checklist's steps, null once all are done.
-    setup: getHomeSetup(db, viewer, projects.length),
+    // Ruling 532: the setup checklist's steps, null once all are done. Ruling
+    // 621: null too while this session has closed it, which counts once the
+    // viewer has a project; before that the card is Home's way to start one.
+    setup:
+      projects.length > 0 && isSetupHidden(request, sessionId)
+        ? null
+        : getHomeSetup(db, viewer, projects.length),
     prefs: getHomePrefs(db, user.id),
     org: getHomeOrgSummary(db),
     // Ruling 457 (FL-4): the bell's counts; the bell loads its own list.
@@ -110,6 +119,14 @@ export async function action({ request }: Route.ActionArgs) {
         view: formData.get("view") === "list" ? "list" : "grid",
       });
       return { ok: true as const, intent: "view" as const };
+    }
+    // Ruling 621: the setup checklist's close, personal UI state like a pin.
+    // The cookie names this sign-in, so the card is back for the next one.
+    if (intent === "hide-setup") {
+      return data(
+        { ok: true as const },
+        { headers: { "Set-Cookie": serializeSetupHidden(ctx.sessionId) } },
+      );
     }
     if (intent === "rescan") {
       // A global re-scan reprojects EVERY project from files — an

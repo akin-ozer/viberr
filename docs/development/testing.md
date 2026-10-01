@@ -111,7 +111,7 @@ with Node 26: `verify` = `npm ci` → lint → typecheck → test → build → 
 chromium` → `npm run e2e`, uploading `playwright-report/` for 7 days on failure. No secrets
 are needed: the unit setup file seeds synthetic ones and `compose.e2e.yml` carries its own.
 
-The test step runs on the image's userland, not the runner's (ruling 621): `npm test`
+The test step runs on the image's userland, not the runner's (ruling 622): `npm test`
 inside `node:26-slim`, the Dockerfile's base, with the git and ca-certificates its
 runtime stage adds, as the runner's own uid. The server shells out to `rm`, `chmod` and
 `git`, and the runner's Ubuntu carries other versions of them (its coreutils 9.4 has no

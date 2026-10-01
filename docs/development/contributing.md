@@ -40,7 +40,7 @@ node scripts/measure-routes.mjs --check   # the bundle ratchet, after the build 
 npm run e2e     # Docker; the only gate that boots the shipped image
 ```
 
-CI runs `npm test` in the image's Debian base as an unprivileged user (ruling 621); as root,
+CI runs `npm test` in the image's Debian base as an unprivileged user (ruling 622); as root,
 or on another coreutils, the agent-tree suites fail for reasons of the host, not the change.
 [testing.md](testing.md) §1 has the command that runs it as CI does.
 
