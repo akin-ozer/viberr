@@ -118,7 +118,7 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           </span>
         </>
       )}
-      {/* Ruling 621: "quiet" is the stat a narrow row drops (app.css, 1100px
+      {/* Ruling 625: "quiet" is the stat a narrow row drops (app.css, 1100px
           tier), so the decision count beside it, the row's one demand, stays. */}
       {p.running === 0 && total > 0 && (
         <>
@@ -126,7 +126,7 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           <span className="pj-quiet">quiet</span>
         </>
       )}
-      {/* Ruling 621: a decision that waits on you is blue everywhere (amber is
+      {/* Ruling 625: a decision that waits on you is blue everywhere (amber is
           an agent's question), in the outline tier the board's chip wears. */}
       {p.waiting > 0 && (
         <Pill kind="info" sm quiet dot>

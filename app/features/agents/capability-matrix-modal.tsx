@@ -113,7 +113,7 @@ export function CapabilityMatrixModal({
 
   return (
     <dialog
-      // Ruling 621: as wide as its grid (`.mx-modal`), so each row's label
+      // Ruling 625: as wide as its grid (`.mx-modal`), so each row's label
       // sits beside its dots instead of 450-680px from them.
       className="modal-card mx-modal"
       aria-label="Capability matrix"
@@ -164,7 +164,7 @@ export function CapabilityMatrixModal({
           <span className="d off" />
           {MODE_LABEL.off}
         </span>
-        {/* Ruling 621: the legend names the row mark once; the rows carry the
+        {/* Ruling 625: the legend names the row mark once; the rows carry the
             mark, not the word repeated on every one. */}
         <span className="lg mx-scope-legend">
           <span className="mx-scope" aria-hidden="true">

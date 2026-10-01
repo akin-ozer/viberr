@@ -250,7 +250,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     const note = container.querySelector(".ctl-composer [data-not-connected]");
     expect(note?.textContent).toContain("your own Claude account");
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
-    // Ruling 621: said once beside the box, not again inside it.
+    // Ruling 625: said once beside the box, not again inside it.
     // CANARY: put a not-connected placeholder back on the disabled box.
     expect(box.placeholder).toBe("");
     // The pill states the state in the header's title row, and neither of them
@@ -880,7 +880,7 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
   });
 
   it("offers no examples while the viewer's Claude is not connected", async () => {
-    // Ruling 621: three disabled suggestions were a fourth way of saying "not
+    // Ruling 625: three disabled suggestions were a fourth way of saying "not
     // connected"; the composer's note says what to do instead.
     // CANARY: render the example list whatever `view.available` says.
     const { container } = renderPage(view({ conversation: null, available: false }), "?c=new");

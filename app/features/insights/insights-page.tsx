@@ -60,7 +60,7 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
   // (docs/ui/surfaces.md §4).
   return (
     <main className="insights" data-screen-label="Insights">
-      {/* Ruling 621: Instance settings' header, its sibling standalone page
+      {/* Ruling 625: Instance settings' header, its sibling standalone page
           (ruling 145) — one title step, one lede. */}
       <div className="set-head">
         <div>

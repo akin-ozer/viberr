@@ -803,7 +803,7 @@ export function Timeline({
                 {commentError}
               </span>
             )}
-            {/* Ruling 621: the controller composer's hint, in its words and
+            {/* Ruling 625: the controller composer's hint, in its words and
                 its class: the body face (a key hint is not code), and gone
                 on a touch screen (ruling 419(d)). */}
             <span className="fine dim push kbd-hint" suppressHydrationWarning>

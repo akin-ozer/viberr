@@ -109,7 +109,7 @@ export function MiniModal({
       </div>
       <div className="modal-body">{children}</div>
       <div className="modal-foot">
-        {/* Ruling 621: one footnote at a time. While the form is incomplete
+        {/* Ruling 625: one footnote at a time. While the form is incomplete
             the unmet line is the one to read; two side by side each wrapped
             to two lines. */}
         {footHint && canSave && <span className="foot-hint">{footHint}</span>}

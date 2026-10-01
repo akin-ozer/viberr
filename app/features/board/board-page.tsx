@@ -444,7 +444,7 @@ function CardChips({ task }: { task: BoardTask }) {
 }
 
 /** The list row's agent: the badge and the name — the row has the room the
- *  card does not, and ruling 168(c)'s name stays printed here. Ruling 621: a
+ *  card does not, and ruling 168(c)'s name stays printed here. Ruling 625: a
  *  row with no agent keeps the empty seat, so the chips before it hold one
  *  column instead of sliding 7rem right. */
 function ListAgent({ task }: { task: BoardTask }) {
@@ -932,7 +932,7 @@ const ListRow = memo(function ListRow({
           validation and the wait tag alone, so the PR-state, checks and
           review pills existed on one board layout and not the other. Ruling
           365: the same status chip and problem chips the card draws. Ruling
-          621: before the seats, so the stage and the owner — fixed widths at
+          625: before the seats, so the stage and the owner — fixed widths at
           the row's end — start on one x on every row whatever the chips say. */}
       <CardChips task={task} />
       <ListAgent task={task} />
@@ -957,7 +957,7 @@ const ListRow = memo(function ListRow({
           {stageLabel(stage)}
         </span>
       )}
-      {/* Ruling 621: no per-row "OWNER" eyebrow — the seat's place in the
+      {/* Ruling 625: no per-row "OWNER" eyebrow — the seat's place in the
           row and its accessible name say what it is. */}
       <OwnerSeat task={task} />
     </div>
@@ -1687,7 +1687,7 @@ function FilterBar({
     : projectLabels;
   return (
     <div className="filter-bar">
-      {/* Ruling 621: the chips as one row — no box on a wide screen (the row
+      {/* Ruling 625: the chips as one row — no box on a wide screen (the row
           is `display: contents` there), one line that scrolls sideways on a
           phone, where seven wrapped chips took three rows above the lanes. */}
       <div className="fchip-row">
@@ -2034,7 +2034,7 @@ export function StageBoard({
     );
   }
   return (
-    // Ruling 621: lanes are content-sized at rest; `dragging` stretches every
+    // Ruling 625: lanes are content-sized at rest; `dragging` stretches every
     // lane to the board's full height for the drag, so the empty space under a
     // short lane is still that lane's drop target (`laneAt` reads live rects).
     <div className={drag ? "board dragging" : "board"} onKeyDown={onCardKeyDown}>

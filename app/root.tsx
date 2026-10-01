@@ -1,7 +1,7 @@
 // Ruling 365: one UI typeface. Inter carries both the body and the display
 // token (Manrope and Noto Sans are gone); JetBrains Mono stays for code and
 // identifiers that are code. 400–700 so every weight the sheet declares is a
-// real face and nothing is synthesised; ruling 621 retired 800 (headings are
+// real face and nothing is synthesised; ruling 625 retired 800 (headings are
 // 700, names 600), so its face is no longer shipped.
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";

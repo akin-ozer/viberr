@@ -236,7 +236,7 @@ export function HumanAccess({
               <th>Action</th>
               {PROJECT_ROLES.map((r) => (
                 <th key={r}>
-                  {/* Ruling 621: the count under the role, so the header can
+                  {/* Ruling 625: the count under the role, so the header can
                       wrap at its cap instead of taking the action column's
                       width. The space keeps the two words apart for AT. */}
                   {ROLE_LABEL[r]} <span className="rbac-n">{counts[r]}</span>
@@ -997,7 +997,7 @@ export function RequiredReviewers({
           {canManage ? (
             <>
               Add or remove a rule in{" "}
-              {/* Ruling 621: a place named in a sentence, linked the way the
+              {/* Ruling 625: a place named in a sentence, linked the way the
                   controller's "Profile → Agent accounts" is, not a key chip. */}
               <button type="button" className="linkish" onClick={onOpenSettings}>
                 Settings → Required reviewers

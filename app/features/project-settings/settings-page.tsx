@@ -259,7 +259,7 @@ export function ProjectPanel({
                 and a "Task keys" row is a statement about the project, not a
                 preview of an uncommitted edit. Same rule as everywhere else on
                 this page: no optimistic UI for governed state. */}
-            {/* Ruling 621: a task key is a name, not code, so its pattern is
+            {/* Ruling 625: a task key is a name, not code, so its pattern is
                 set in the body face like every key (the prefix field too). */}
             {project.prefix}-###
           </span>
@@ -1223,7 +1223,7 @@ export function RequiredReviewersPanel({
           ))}
         </div>
       )}
-      {/* Ruling 621 (e-settings #4): an empty list is ONE left-aligned row, the
+      {/* Ruling 625 (e-settings #4): an empty list is ONE left-aligned row, the
           sentence with Add beside it, and Save arrives with something to save
           (a row, or the clear that removed the last one). The sentence used to
           repeat the note below word for word, centred over right-aligned
@@ -1442,7 +1442,7 @@ export function FileLeasesPanel({
           ))}
         </div>
       )}
-      {/* Ruling 621: the empty list is one row, as the reviewers' above. */}
+      {/* Ruling 625: the empty list is one row, as the reviewers' above. */}
       {canManage && (
         <div className="rr-actions">
           {draft.length === 0 && (
@@ -1643,7 +1643,7 @@ export function ProjectGatesPanel({
           ))}
         </div>
       )}
-      {/* Ruling 621: the empty list is one row, as the reviewers' above. */}
+      {/* Ruling 625: the empty list is one row, as the reviewers' above. */}
       {canManage && (
         <div className="rr-actions">
           {draft.length === 0 && (
@@ -2624,7 +2624,7 @@ export function SettingsPage({
         {/* Ruling 178 put the required reviewers "under the stage editor in the
             same grid cell", and rulings 396 and 482 stacked leases and gates under
             them — but the cell was a third grid item, so it wrapped to row 2 under
-            Project and left a 786px hole beside it (ruling 621, e-settings #1).
+            Project and left a 786px hole beside it (ruling 625, e-settings #1).
             Two stacks now, one theme each: the project, its people and its
             repository on the left; the workflow and the policy that names its
             stages on the right. `.profile-col` is the sheet's

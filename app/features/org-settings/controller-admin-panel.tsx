@@ -380,7 +380,7 @@ export function ControllerAdminPanel({
             </strong>
             . Model and effort stay editable. To unlock a section, set its
             variable in the app environment and restart:{" "}
-            {/* Ruling 621: an env var is code — set in mono, one token each,
+            {/* Ruling 625: an env var is code — set in mono, one token each,
                 as the grant-request rows print theirs. */}
             {lockedSections.map(([section], i) => (
               <Fragment key={section}>

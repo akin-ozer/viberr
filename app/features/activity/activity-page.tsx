@@ -30,7 +30,7 @@ import {
  * per-row task-key deep link (kept by the callers) is the stable pointer to the
  * run/task itself.
  */
-// Ruling 621 (h-mobile #13): 160, not 240. The "one-line" preview set three
+// Ruling 625 (h-mobile #13): 160, not 240. The "one-line" preview set three
 // lines at 1440 and eight on a phone; 160 is two at 1440.
 const ACTIVITY_TEXT_PREVIEW_LIMIT = 160;
 function ActivityText({ text }: { text: string }) {
@@ -612,7 +612,7 @@ function FeedFilters({
       {/* Pass 30: the app's ONE date-entry control (the task pages' custom
           DatePicker) — the feeds were the only surface still shipping native
           date inputs, a second visual idiom for the same act.
-          Ruling 621: the range wraps as one piece; on a phone "To" went to a
+          Ruling 625: the range wraps as one piece; on a phone "To" went to a
           line of its own and left "to" dangling after From. */}
       <span className="ff-range">
         <span className="ff-datepick">

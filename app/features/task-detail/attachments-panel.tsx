@@ -73,7 +73,7 @@ export function AttachmentsPanel({
           <Icon name="file" />
           <h2>Attachments</h2>
         </div>
-        {/* Ruling 621: left-aligned with the panel's title and as tall as its
+        {/* Ruling 625: left-aligned with the panel's title and as tall as its
             sentence, not a centred empty box over a left-aligned button. */}
         <p className="attach-empty">
           {browserExpected

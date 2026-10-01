@@ -334,7 +334,7 @@ export function ProjectSections({
             Every match for “{query}” is pinned above.
           </div>
         ) : (
-          // Ruling 621: no third "New project" here. The grid ended in a
+          // Ruling 625: no third "New project" here. The grid ended in a
           // 341×221 dashed tile and the list in a dashed button, beside the
           // hero's primary button (and the checklist's step while it is
           // open), so the page drew one action three ways. The hero's button
@@ -389,7 +389,7 @@ function OrgTile({
   /** The action word in the tile foot (default "Manage"; a read-only tile like
    *  Insights passes "View"). */
   verb?: string;
-  /** Ruling 621: the tile's picture (the member faces, the two backends) sits
+  /** Ruling 625: the tile's picture (the member faces, the two backends) sits
    *  at the foot's far end. Beside the numbers it squeezed the text column, so
    *  the four headlines started at four different x and wrapped unevenly. */
   aside?: ReactNode;
@@ -467,7 +467,7 @@ export function SettingsPanel({
           </span>
           <span className="val">
             <span className="nm">{countLabel(org.users.total, "user")}</span>
-            {/* Each count keeps its noun on its line (ruling 621). */}
+            {/* Each count keeps its noun on its line (ruling 625). */}
             <span className="sub">
               <span>{countLabel(org.users.admins, "admin")}</span> ·{" "}
               <span>{countLabel(org.users.members, "member")}</span>
@@ -565,7 +565,7 @@ export function StoreStrip({
           // WAL loss (the incident this guard exists to stop).
           <>
             {" "}
-            {/* Ruling 621: the code face for the two values only; the label
+            {/* Ruling 625: the code face for the two values only; the label
                 and the sentence are prose. */}
             <span className="sub">
               Writer: pid <span className="mono">{lockHolder.pid}</span> on{" "}

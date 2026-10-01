@@ -98,7 +98,7 @@ describe("HumanAccess", () => {
     expect(getByText("Human access · RBAC")).toBeTruthy();
     expect(getByText("4 members")).toBeTruthy();
     expect(container.querySelectorAll(".member-row")).toHaveLength(4);
-    // Header counts derive live from the same member array. Ruling 621: the
+    // Header counts derive live from the same member array. Ruling 625: the
     // count sits under the role (`.rbac-n`), so the header can wrap.
     const heads = [...container.querySelectorAll(".rbac-table thead th")].map((th) => th.textContent);
     expect(heads.slice(0, 3)).toEqual(["Action", "Admin 2", "Maintainer 1"]);
@@ -214,7 +214,7 @@ describe("HumanAccess", () => {
       (v) => v.textContent,
     );
     expect(values).toEqual(["Admin", "Admin", "Maintainer", "Contributor"]);
-    // The role words are the VALUES; the table headers (ruling 621: the role
+    // The role words are the VALUES; the table headers (ruling 625: the role
     // over its count) are not what this counts.
     expect(getAllByText("Admin", { ignore: "th" })).toHaveLength(2);
     expect(queryByText("Viewer", { ignore: "th" })).toBeNull(); // no member holds it → no dead chip

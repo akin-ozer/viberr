@@ -61,7 +61,7 @@ export function EpicsPage({
       <div className="board-head">
         <div>
           <h1>Epics</h1>
-          {/* Ruling 621: an empty project's count is the hero's heading below
+          {/* Ruling 625: an empty project's count is the hero's heading below
               ("No epics yet"), so the head says nothing rather than say it
               twice. The status region stays, so a count that arrives is read. */}
           <div className="sub">
@@ -86,7 +86,7 @@ export function EpicsPage({
               ))}
             </div>
           )}
-          {/* Ruling 621: one primary New epic — the empty state's own button
+          {/* Ruling 625: one primary New epic — the empty state's own button
               while there are none (as the board keeps one create on a
               virgin board), this one once there is a list. */}
           {canManage && epics.length > 0 && (

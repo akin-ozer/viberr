@@ -114,7 +114,7 @@ export function ReleaseConfirm({
               {packet ? (
                 <span className="rel-open">
                   <Pill
-                    // Ruling 621 (B11): a decision waiting on a person is
+                    // Ruling 625 (B11): a decision waiting on a person is
                     // info blue; amber is an agent's question.
                     kind={packet.type === "blocked" ? "blocked" : packet.answerTo ? "input" : "info"}
                     sm

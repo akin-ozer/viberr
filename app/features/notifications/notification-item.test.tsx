@@ -46,7 +46,7 @@ describe("NotificationItem (shared bell/page row)", () => {
     // F19-24: packet/input → not the completion palette. This branch used to
     // draw `act-completion` (a completion checkmark) on every non-blocked
     // packet, so an operator's scoping question wore the visual vocabulary of
-    // something to accept. Ruling 621: the blue a waiting decision wears
+    // something to accept. Ruling 625: the blue a waiting decision wears
     // everywhere, not the amber of an agent's question.
     const ico = container.querySelector(".pev-ico")!;
     expect(ico.classList.contains("act-completion")).toBe(false);

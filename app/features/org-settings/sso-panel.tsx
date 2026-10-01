@@ -178,7 +178,7 @@ function CallbackUrl({ url }: { url: string }) {
     }
   };
   return (
-    // Ruling 621: the label is prose; only the URL is code.
+    // Ruling 625: the label is prose; only the URL is code.
     <span className="sub">
       Callback URL: <code className="mono">{url}</code>{" "}
       <button

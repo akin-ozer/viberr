@@ -596,7 +596,7 @@ const TEMPLATE_GRANTS = {
   skills: { "terraform-review": 1 },
 };
 
-/** Ruling 621: a resource row's meta line sets its store path in `<code>` and
+/** Ruling 625: a resource row's meta line sets its store path in `<code>` and
  *  the rest in the body face, so the line is matched whole, by text content. */
 const metaLine =
   (text: string) =>
@@ -957,7 +957,7 @@ describe("ResourcesPanel", () => {
     ).toBeTruthy();
     // Its subtitle is the folder path alone (owner request 2026-10-01).
     // CANARY: put " · read live" back after the path and this exact match fails.
-    // (Scoped to the browser: the row's own `<code>` path matches too, ruling 621.)
+    // (Scoped to the browser: the row's own `<code>` path matches too, ruling 625.)
     const browser = document.querySelector<HTMLElement>('[aria-label="Files · Architecture notes"]')!;
     expect(
       [...browser.querySelectorAll<HTMLElement>("*")].some((el) => getNodeText(el) === "store://kb/architecture-notes/"),

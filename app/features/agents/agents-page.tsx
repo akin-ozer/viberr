@@ -138,7 +138,7 @@ function BackendChip({
   // configured"), which was already telling this truth while this page said
   // "available" about the same profile.
   // Ruling 127: "not connected" is about the VIEWER's own account, not the
-  // deployment's — the badge says what THEY have to do about it. Ruling 621:
+  // deployment's — the badge says what THEY have to do about it. Ruling 625:
   // one phrase and one hue for it on the page (the hero's and the roster's
   // rose pill), and only where nothing nearer says it already.
   const missing = health ? !health.viewerConnected && !noted : false;
@@ -212,7 +212,7 @@ function ActiveBadge({
         {count} running
       </span>
     );
-  // Ruling 621: the page's one phrase and hue for this fact ("no runtime" was
+  // Ruling 625: the page's one phrase and hue for this fact ("no runtime" was
   // a second, vaguer claim, in amber beside the hero's rose pill). The words
   // the backend chips use: in a 312px roster card the backend's name wrapped
   // the role under the name, so it rides the hover sentence and the hero.
@@ -1290,7 +1290,7 @@ export function ProfileDetail({
         {/* Ruling 127: the actionable half, addressed to the person reading
             it. There is no instance credential to name any more — a run bills
             the task owner, and this viewer's own account is what decides
-            whether the profile runs on the tasks THEY own. Ruling 621: the
+            whether the profile runs on the tasks THEY own. Ruling 625: the
             members' count is the runtime line's, just above; it is not said
             twice. */}
         {backendMissing && (
@@ -1316,7 +1316,7 @@ export function ProfileDetail({
         </div>
         {insts.length === 0 ? (
           <div className="empty sm">
-            {/* Ruling 621: with the backend not connected, the note above
+            {/* Ruling 625: with the backend not connected, the note above
                 already says why a run would be refused; this stops at the
                 fact, and no longer calls the profile available. */}
             {backendMissing
@@ -1332,7 +1332,7 @@ export function ProfileDetail({
                 key={`${d.taskKey}:${d.engagement}`}
                 onClick={() => onOpen(d.taskKey)}
               >
-                {/* Ruling 621: on the operator's own page every row is an
+                {/* Ruling 625: on the operator's own page every row is an
                     operator engagement, so the label went on all of them. */}
                 {(a.kind !== "operator" || d.engagement !== "operator") && (
                   <span className="deploy-eng">{engagementLabel(d.engagement)}</span>
@@ -1432,7 +1432,7 @@ export function LiveRoster({
    *  raw profileId (P11-42). The row falls back to the profileId when a name
    *  can't be resolved. */
   nameById?: Record<string, string>;
-  /** profileId → the profile's own icon (ruling 621), so a row wears the mark
+  /** profileId → the profile's own icon (ruling 625), so a row wears the mark
    *  the Profiles tab gives it; the Backend column names the backend. */
   iconById?: Record<string, string>;
   /** Ruling 479(e): the backend an operator run starts on. The Backend column
@@ -1487,7 +1487,7 @@ export function LiveRoster({
               onClick={() => onOpen(d.taskKey)}
             >
               <span className="live-agent">
-                {/* Ruling 621: the profile's own glyph, as on the Profiles tab
+                {/* Ruling 625: the profile's own glyph, as on the Profiles tab
                     (Developer drew Codex's cpu here and its branch there). A
                     row whose profile is gone keeps the backend's tile. */}
                 <span

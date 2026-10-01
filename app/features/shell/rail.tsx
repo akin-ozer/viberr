@@ -58,7 +58,7 @@ export function Rail({
               (membersCount === 1 ? " member" : " members")
             }
           >
-            {/* Ruling 621: the repo clips; the count beside it never does. */}
+            {/* Ruling 625: the repo clips; the count beside it never does. */}
             {projectRepo && <span className="pj-repo">{projectRepo}</span>}
             <span>
               {(projectRepo ? "· " : "") +

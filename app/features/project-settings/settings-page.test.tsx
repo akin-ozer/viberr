@@ -1268,7 +1268,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(container.textContent).not.toContain("Archive Viberr Core");
     // …and the rest of the page really did render, so the absence above is the
     // gate doing its job rather than a blank component tree.
-    // Ruling 621: in reading order, the left stack (project, people,
+    // Ruling 625: in reading order, the left stack (project, people,
     // repository) then the right one (the workflow and its rules).
     expect(pageRendered(container)).toEqual([
       "Project",
@@ -1337,13 +1337,13 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
 });
 
 /**
- * Ruling 621 (e-settings #1 and #4). The page said the reviewer rules sit
+ * Ruling 625 (e-settings #1 and #4). The page said the reviewer rules sit
  * "under the stage editor in the same grid cell" (ruling 178), with leases and
  * gates under them (rulings 396, 482), but the cell was a third grid item and
  * wrapped under Project, leaving a 786px hole beside it. And each empty list
  * was a 240px card holding a centred sentence and a disabled primary.
  */
-describe("ruling 621: Settings' layout and its empty rule lists", () => {
+describe("ruling 625: Settings' layout and its empty rule lists", () => {
   const headingsIn = (col: Element) =>
     Array.from(col.querySelectorAll("h2")).map((h) => h.textContent?.trim());
 

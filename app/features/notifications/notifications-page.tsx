@@ -29,7 +29,7 @@ import {
 
 /**
  * Where a notification points, in the ONE idiom all three of its drawings use
- * (ruling 621): "Project · KEY" in the meta voice, as the bell's meta line
+ * (ruling 625): "Project · KEY" in the meta voice, as the bell's meta line
  * reads. The page drew the project as a grey pill in one list and a mono
  * keycap in the other.
  */
@@ -118,7 +118,7 @@ function NtfNeedsYou({
                   <RichText text={n.text} mentions={false} />
                 </div>
               </span>
-              {/* Ruling 621: the unread dot sits in the trailing cluster beside
+              {/* Ruling 625: the unread dot sits in the trailing cluster beside
                   the time, as in the stream below and at the bell row's end;
                   it hung off the title's last word here. */}
               <span className="rq-meta">
@@ -224,7 +224,7 @@ function NtfStream({
                       destination but MUST still say so — otherwise the row is
                       indistinguishable from a live one and the bell popover, which
                       still shows "project no longer exists", disagrees with it.
-                      Ruling 621: it is the row's meta line, the bell row's
+                      Ruling 625: it is the row's meta line, the bell row's
                       anatomy (title, body, where), not a mono keycap mid-
                       sentence. */}
                   {n.href !== null ? (
@@ -250,7 +250,7 @@ function NtfStream({
                     </span>
                   ) : null}
                 </span>
-                {/* Ruling 621: a button in the header's "Mark all read" idiom;
+                {/* Ruling 625: a button in the header's "Mark all read" idiom;
                     it was a mono keycap, the look of a task key. */}
                 {n.unread && (
                   <button

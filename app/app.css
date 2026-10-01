@@ -47,7 +47,7 @@
   /* THE focus/selection wash — the one blue tint text never sits on. Used by
      every focus ring and the selected-control washes. */
   --focus-wash: color-mix(in srgb, var(--blue), transparent 86%);
-  /* Ruling 621: dark elevation. Light paints these three roles with tokens it
+  /* Ruling 625: dark elevation. Light paints these three roles with tokens it
      already has; dark lifts or sinks each a step, because a black drop shadow
      cannot darken a canvas that is already near-black (a menu over a card
      measured 1.00:1). --surface-float is every floating layer (menus,
@@ -155,7 +155,7 @@
   --stage-pink: #db2777;
   --stage-rose: #e11d48;
 
-  /* agent identity tint — violet, distinct from human blue. Ruling 621: the
+  /* agent identity tint — violet, distinct from human blue. Ruling 625: the
      wash moved to purple (h ≈ 305) with a touch more chroma; at #efeaff it was
      ΔE .011 from --blue-soft, one lavender at chip size. */
   --agent: #7b61ff;
@@ -350,7 +350,7 @@ svg.ico { width: 16px; height: 16px; flex: none; }
    it, so no markup changes. `.kv-row .v .ico` is left out on purpose: every
    glyph there sits beside `.kv-row .v .mono`, which is 400. The heavier group
    comes second, so where a bold label sits inside a medium one the
-   equal-specificity tie goes to the bold label's weight (ruling 621: a .btn
+   equal-specificity tie goes to the bold label's weight (ruling 625: a .btn
    is 500 now, and a quiet pill takes .pill's 700 and its glyph). The
    board card's icon-only stage trigger takes the .sm-caret weight too, so
    every stage trigger draws one caret. The pick-chip glyphs are scoped to the
@@ -513,7 +513,7 @@ div.top-search:has(input:focus-visible),
    Named `.fine` (fine print), not `.note`: `.tl-node.note` already occupies
    that word for the timeline's node kinds. */
 .fine { font-size: .75rem; color: var(--faint); }
-/* Vestiges of the 13-step scale: all three are .fine's own size (ruling 621
+/* Vestiges of the 13-step scale: all three are .fine's own size (ruling 625
    folds them; the markup's modifiers can go, then this rule). */
 .fine:is(.xs, .sm, .md) { font-size: .75rem; }
 .fine.dim { color: var(--placeholder); }
@@ -548,7 +548,7 @@ div.top-search:has(input:focus-visible),
 /* A file picker driven by a button elsewhere; never rendered itself. */
 .file-input { display: none; }
 
-/* Ruling 621: one weight per role, and a heading's is 700 (800 drew every h2
+/* Ruling 625: one weight per role, and a heading's is 700 (800 drew every h2
    louder than its own page title, and is not preloaded). */
 h1, h2, h3, h4 {
   font-family: var(--font-display);
@@ -558,9 +558,9 @@ h1, h2, h3, h4 {
   text-wrap: balance;
 }
 /* A bold run inside a 600+ label resolved `bolder` to 900, a face that is not
-   loaded; emphasis is one weight, 600 (ruling 621). A class still wins. */
+   loaded; emphasis is one weight, 600 (ruling 625). A class still wins. */
 :where(strong, b) { font-weight: 600; }
-/* Ruling 621: multi-line text never sits at `normal` (Inter's 1.21). Zero
+/* Ruling 625: multi-line text never sits at `normal` (Inter's 1.21). Zero
    specificity, so every rule that states a leading still wins, and the second
    rule hands a container's own leading and wrap on to the prose inside it
    (markdown, the composer, a rules list), which this default would otherwise
@@ -617,7 +617,7 @@ h1, h2, h3, h4 {
   margin-bottom: 1.5rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-button);
-  /* The rail's own ground, the phone drawer's lifted one too (ruling 621). */
+  /* The rail's own ground, the phone drawer's lifted one too (ruling 625). */
   background: transparent;
   text-align: left;
   /* The transform leg carries the .99 press (ruling 459): the switcher sat
@@ -631,7 +631,7 @@ h1, h2, h3, h4 {
 .project-switch .ico { width: 16px; height: 16px; color: var(--placeholder); flex: none; }
 /* The rail's title, at the title step, one line each: the rail is a fixed
    column, so a long project name or repo path clips instead of breaking
-   "4 / members" onto a widow. Ruling 621: the repo clips, never the member
+   "4 / members" onto a widow. Ruling 625: the repo clips, never the member
    count, which is the fact the line is there to give ("4 memb…"). */
 .project-switch .pj-name { font-weight: 600; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-switch .pj-meta { display: flex; gap: .25rem; font-size: .75rem; color: var(--faint); margin-top: .125rem; white-space: nowrap; }
@@ -674,7 +674,7 @@ h1, h2, h3, h4 {
   font-weight: 600;
 }
 .nav-item .ico { width: 17px; height: 17px; flex: none; color: currentColor; }
-/* A count, not code (ruling 621): the body face with tabular figures, as the
+/* A count, not code (ruling 625): the body face with tabular figures, as the
    board's column counts. Mono's dotted zero read "10" as a literal. */
 .nav-item .count {
   margin-left: auto;
@@ -767,7 +767,7 @@ h1, h2, h3, h4 {
 .crumbs .sep { color: var(--placeholder); display: inline-flex; flex: none; }
 .crumbs .sep .ico { width: 14px; height: 14px; }
 .crumbs a, .crumbs button { color: var(--muted); background: none; border: 0; padding: 0; font-weight: 500; flex: none; white-space: nowrap; text-decoration: none; }
-/* The UA underline was the shell's only one (ruling 621); it returns under the
+/* The UA underline was the shell's only one (ruling 625); it returns under the
    pointer, beside the ink change. */
 .crumbs a:hover, .crumbs button:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
 .crumbs .cur { color: var(--fg); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
@@ -796,7 +796,7 @@ h1, h2, h3, h4 {
    dialog. The trigger takes the app's control treatment (a filled face, and a
    LABEL in `--muted` rather than placeholder-grey); Home's finder stays a white
    well with placeholder text and a caret. Same shape, two readable states. */
-/* Ruling 621: the trigger's edge is the bell's hairline. --border-control is
+/* Ruling 625: the trigger's edge is the bell's hairline. --border-control is
    for a boundary that alone identifies a control (Home's finder keeps it);
    this one is a labelled button with a filled face, and its 3:1 rim was the
    heaviest line in the header. */
@@ -810,7 +810,7 @@ button.top-search {
 }
 button.top-search:hover { background: var(--tint-press); }
 .top-search-label { flex: 1; font-size: .88rem; color: var(--muted); }
-/* Ruling 621: the input takes the row's free space, not 100% of it; a full-
+/* Ruling 625: the input takes the row's free space, not 100% of it; a full-
    width flex item squeezed the ⌘K button beside it to "Ctrl" over "K" and
    grew the box to 48px in a 60px bar. */
 .top-search input { border: 0; outline: 0; background: transparent; flex: 1; min-width: 0; color: var(--fg); font-size: .88rem; }
@@ -835,7 +835,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      chip sits on the palette trigger's own surface — `--faint` there misses the
      4.5:1 AA threshold (axe flagged it on the dark home). */
   color: var(--muted);
-  /* A keycap is one token (ruling 621): "Ctrl K" broke onto two lines. */
+  /* A keycap is one token (ruling 625): "Ctrl K" broke onto two lines. */
   white-space: nowrap;
   flex: none;
 }
@@ -853,7 +853,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--fg);
-  /* Ruling 621: a control's label is 500, one weight with the segments; the
+  /* Ruling 625: a control's label is 500, one weight with the segments; the
      bold was louder than the options a packet's CTA confirms. */
   font-family: var(--font-body);
   font-weight: 500;
@@ -935,7 +935,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    without the flex row. */
 .hint:has(> .ico:first-child), .fhint:has(> .ico:first-child) { display: flex; align-items: flex-start; gap: .375rem; line-height: 1.45; }
 .hint > .ico:first-child, .fhint > .ico:first-child { width: 13px; height: 13px; flex: none; margin-top: .125rem; }
-/* Ruling 621: the lead states its weight; `bolder` over the note resolved to
+/* Ruling 625: the lead states its weight; `bolder` over the note resolved to
    an unloaded 900. */
 .deny-note strong { color: var(--muted); font-weight: 600; }
 .icon-btn {
@@ -973,7 +973,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    so every icon pill stood 24px next to a 19px text pill and read as a badge.
    The glyph is text-sized now: 12px in a pill, 11px in a small one. */
 .pill .ico { width: 12px; height: 12px; }
-/* Ruling 621: "ready" is the baseline, so it is the outline tier everywhere,
+/* Ruling 625: "ready" is the baseline, so it is the outline tier everywhere,
    as on the board card (.chip.st.ready): a teal fill beside "done"'s green
    one told them apart by the word alone. The mark keeps the teal. */
 .pill.ready   { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--hairline); }
@@ -1017,7 +1017,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .pill.quiet.done .pdot { background: var(--success-dark); }
 .pill.quiet.info .pdot { background: var(--blue-pressed); }
 .pill.quiet.input .pdot { background: var(--amber-dark); }
-/* Dots and outline ink take the control red (ruling 621): --coral-dark is the
+/* Dots and outline ink take the control red (ruling 625): --coral-dark is the
    error box's TEXT, #600000, and read as the darkest dot, not the alarm. */
 .pill.quiet.risk .pdot, .pill.quiet.blocked .pdot { background: var(--danger); }
 .pill.quiet.agent .pdot { background: var(--agent-dark); }
@@ -1054,7 +1054,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-radius: 50%;
   background: var(--blue-soft);
   color: var(--blue-pressed);
-  /* Initials are 600 (ruling 621): at 800 "MY" ran into the ring. */
+  /* Initials are 600 (ruling 625): at 800 "MY" ran into the ring. */
   font-family: var(--font-body);
   font-weight: 600;
   font-size: .75rem;
@@ -1068,7 +1068,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .avatar.xs { width: 22px; height: 22px; font-size: .69rem; letter-spacing: -.02em; }
 .avatar.sm { width: 24px; height: 24px; font-size: .69rem; }
 .avatar.lg { width: 34px; height: 34px; font-size: .88rem; }
-/* Identity tints only (ruling 621): a person's tone is a wash of a stage
+/* Identity tints only (ruling 625): a person's tone is a wash of a stage
    preset under --fg initials (8.8:1 and up), off the status hues and off the
    agent violet. The stored tone names stay; "rose" read as a risk pill and
    "violet" as an agent beside the agent's own badge. */
@@ -1099,7 +1099,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   max-width: 70ch;
 }
 .board-tools { display: flex; align-items: center; gap: .5rem; margin-left: auto; flex-wrap: wrap; }
-/* Ruling 621: one control height per toolbar — the segment beside `.btn.sm`
+/* Ruling 625: one control height per toolbar — the segment beside `.btn.sm`
    is 24px inside its 2px well and 1px edge, 30px like the buttons (was 37). */
 .board-tools .seg button { padding-block: .25rem; min-height: 24px; }
 
@@ -1152,7 +1152,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; align-items: center; gap: .5rem;
   padding: 0 1.5rem .75rem; flex-wrap: wrap;
 }
-/* Ruling 621: the chip group is no box here; on a phone it is one scrolling row. */
+/* Ruling 625: the chip group is no box here; on a phone it is one scrolling row. */
 .fchip-row { display: contents; }
 .fchip {
   display: inline-flex; align-items: center; gap: .375rem;
@@ -1177,7 +1177,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    filters. They wear the row's face and weight (ruling 365: the mono face
    marked them as code, and a label is a word); the missing icon is what tells
    them from the readiness chips, and the shared .fchip.on state paints the
-   active one. (Ruling 621: `.fchip` already sets that face and weight.) */
+   active one. (Ruling 625: `.fchip` already sets that face and weight.) */
 .fchip.lbl:not(.on) { color: var(--muted); }
 
 /* R15-5: the board's own term filter, moved off the topbar (whose box now
@@ -1185,7 +1185,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    it, and it wraps with the chips at narrow widths. */
 .board-filter-input {
   display: inline-flex; align-items: center; gap: .375rem;
-  /* Ruling 621: grows into the chip row's leftover room (it wrapped alone at
+  /* Ruling 625: grows into the chip row's leftover room (it wrapped alone at
      1280 with 247px free), on the chips' radius and height. */
   flex: 1 1 140px; min-width: 140px; max-width: 260px;
   padding: .25rem .5rem;
@@ -1212,7 +1212,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   grid-auto-columns: minmax(218px, 21rem);
   gap: 1rem;
   padding: .25rem 1.5rem 1.5rem;
-  /* Ruling 621: the snap port starts where lane 1 does, so a board that
+  /* Ruling 625: the snap port starts where lane 1 does, so a board that
      overflows no longer loads 16px scrolled with lane 1 flush on the rail. */
   scroll-padding-inline: 1.5rem;
   /* Lanes take their content's height at rest (no 700px empty slabs); a drag
@@ -1270,7 +1270,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .board-orphans-label { font-size: .88rem; color: var(--fg); flex: 1; min-width: 12rem; }
 .board-orphans-keys { display: flex; gap: .375rem; flex-wrap: wrap; }
 .board-orphan-key {
-  /* Ruling 621: a task key is a name, in the body face as on the card. */
+  /* Ruling 625: a task key is a name, in the body face as on the card. */
   font-size: .75rem; font-weight: 500; font-variant-numeric: tabular-nums;
   padding: .125rem .5rem; border-radius: var(--radius-chip);
   border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 55%);
@@ -1285,7 +1285,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    underway, and an empty stage was a gap rather than a place to put something.
    A 3% ink wash is enough: the cards are `--surface`, so they lift off it
    without needing more contrast, and the blue drag wash still reads over it.
-   Ruling 621: --sunken, not the 3% wash itself — on dark an ink wash rises
+   Ruling 625: --sunken, not the 3% wash itself — on dark an ink wash rises
    toward the card (1.02:1); --sunken sinks below the canvas instead. */
 .column {
   display: flex; flex-direction: column; min-height: 0;
@@ -1300,12 +1300,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      of every lane a drag crossed and left the sticky head's 22px corners
      standing inside a smaller lane. */
   border-radius: var(--radius-panel);
-  /* Ruling 621: content-sized at rest (`.board { align-items: start }`), and
+  /* Ruling 625: content-sized at rest (`.board { align-items: start }`), and
      a full lane scrolls inside the board instead of running past it. */
   max-height: 100%;
 }
 .board.dragging > .column { height: 100%; }
-/* Ruling 621: one head height. The entry lane's 24px "+" made its head 40px
+/* Ruling 625: one head height. The entry lane's 24px "+" made its head 40px
    against 33px, so Triage and its first card sat 7px below every other lane. */
 .col-head {
   display: flex; align-items: center; gap: .5rem;
@@ -1329,7 +1329,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .col-body {
   display: flex; flex-direction: column; gap: .375rem;
   overflow-y: auto;
-  /* Ruling 621: the .125rem top keeps the first card's outset 1px ring inside
+  /* Ruling 625: the .125rem top keeps the first card's outset 1px ring inside
      the scrollport (it was clipped), and the gutter is reserved on both edges
      (ruling 457's live-scroller gutter) so a card sits centred, not 8 | 17. */
   padding: .125rem .5rem var(--dock-clear);
@@ -1425,7 +1425,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* The column under the cursor lifts and outlines to invite the drop. */
 .column { transition: background .15s ease, box-shadow .15s ease; }
 .column.drop-over {
-  /* Opaque, as --sunken: the sticky head inherits it (ruling 621). */
+  /* Opaque, as --sunken: the sticky head inherits it (ruling 625). */
   background: color-mix(in srgb, var(--blue) 8%, var(--bg));
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--blue), transparent 55%);
 }
@@ -1543,7 +1543,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .card-head { display: flex; align-items: center; gap: .375rem; min-height: 22px; min-width: 0; }
 .card-head .key { font-size: .75rem; font-weight: 500; line-height: 18px; letter-spacing: .01em; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
 .card-sp { flex: 1; }
-/* Ruling 621: the PR number in this ink too — a `.trace.pr` link blue (same
+/* Ruling 625: the PR number in this ink too — a `.trace.pr` link blue (same
    specificity, later; deleted) made a number that is not a link read as one. */
 .card-head .trace { font-family: inherit; font-size: .75rem; font-weight: 500; color: var(--faint); gap: .25rem; font-variant-numeric: tabular-nums; }
 /* The mark in the quieter AA ink, not --faint at .55 (2.3:1). */
@@ -1582,7 +1582,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .chip .working { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--agent); margin: 0 .125rem; }
 .chip.st { box-shadow: none; }
 .chip.st.agent, .chip.st.queued { background: var(--agent-soft); color: var(--agent-dark); }
-/* Ruling 621: "waiting on you" repeats down a viewer's board (8 of 10 cards
+/* Ruling 625: "waiting on you" repeats down a viewer's board (8 of 10 cards
    for an admin), so it wears the outline tier, ink and mark only — the
    .keybtn precedent: a fill on every row differentiates nothing. */
 .chip.st.you { color: var(--blue-pressed); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue), transparent 55%); }
@@ -1617,7 +1617,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Freeform labels are descriptive by definition, so they wear the quiet tier's
    treatment rather than a private grey fill of their own. They keep the
    softer radius — a label is a token the person typed, not a state the system
-   computed. Ruling 621: in the row's face, as the board's label chips (a
+   computed. Ruling 625: in the row's face, as the board's label chips (a
    label is a word, not code). */
 .label-chip {
   display: inline-flex; align-items: center;
@@ -1630,7 +1630,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* The "+N" overflow chip earns its distinction through color. */
 .label-chip.more { color: var(--fg); font-variant-numeric: tabular-nums; }
 
-/* Ruling 621: the review queue's `.wait-tag` family is gone; its rows draw the
+/* Ruling 625: the review queue's `.wait-tag` family is gone; its rows draw the
    board card's own status and problem chips. */
 .by-schedule { color: var(--muted); }
 /* The "agent working" pulse (R21-8, ruling 365(b)): a ring that swells about
@@ -1778,7 +1778,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 /* task hero */
 .task-hero { display: flex; flex-direction: column; gap: .75rem; }
-/* Ruling 621: a task key is a name, not code (365(e), app-wide). */
+/* Ruling 625: a task key is a name, not code (365(e), app-wide). */
 .task-hero .key { font-size: .75rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--faint); }
 .task-hero h1 { font-size: 1.75rem; line-height: 1.1; letter-spacing: var(--track-page); }
 .task-hero .goal { color: var(--muted); font-size: 1rem; line-height: 1.5; max-width: 70ch; }
@@ -1884,7 +1884,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: var(--tint-press); color: var(--fg);
 }
 .label-input-field { flex: 1; min-width: 6rem; outline: 0; color: var(--fg); font: inherit; font-size: .88rem; }
-/* Ruling 621: the wrapper is the field. In a `.field` (the New task modal) the
+/* Ruling 625: the wrapper is the field. In a `.field` (the New task modal) the
    field chrome (0,2,1) out-ranked the bare class and drew a box in the box
    with a third focus ring; this outranks it and its :focus. The insets put
    the text on a `.field` input's x and the wrapper at its 35px. No font-size
@@ -1927,7 +1927,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Ruling 169: the hero's stage and status are labelled fields (the Current
    state panel's own row keys), so a stage NAMED Ready can no longer be read as
    a status word beside "blocked". The label is the house field label
-   (.rs-lbl / .res-group .lbl): .69rem caps on --faint (ruling 621). */
+   (.rs-lbl / .res-group .lbl): .69rem caps on --faint (ruling 625). */
 .hero-field { display: inline-flex; align-items: center; gap: .375rem; }
 .hero-field-lbl { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 .hero-file {
@@ -1935,7 +1935,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font-family: var(--font-mono); font-size: .75rem; color: var(--faint);
   /* Interface review 2026-09-24 (acce-10): a task file path is one token; it
      breaks where it must rather than pushing a phone's page sideways (it was
-     `white-space: nowrap` on the chip and every child). Ruling 621: plain
+     `white-space: nowrap` on the chip and every child). Ruling 625: plain
      meta, no chip (it outweighed the status pills), and each segment is one
      box, so a line breaks after a slash, never inside a key. */
   overflow-wrap: anywhere;
@@ -1946,14 +1946,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Decision packet — the questionnaire card (shadcn base/questionnaire shape,
    owner rulings 2026-08-20 + 2026-08-21: minimalist, coherent, never a full
    screen). The card is a QUIET surface built on ONE system: a single type ramp
-   (ruling 621, by role: title 1rem as a panel's → lede and options .88 →
+   (ruling 625, by role: title 1rem as a panel's → lede and options .88 →
    evidence .75 → micro labels), a single chrome rule (the only boxed sub-surfaces are the SELECTABLE
    option rows — evidence is flat text behind a thin rule, never a stack of
    boxes), and a single tone carrier (no full-card wash). Right edge carries
    only attribution (top) and the rec tags (options); everything else is one
    left-aligned column.
    Ruling 500 (AICSS's Approval Card): the card sits on a hairline and a soft
-   shadow at the panel radius and inset (ruling 621), the tone carrier is the head's tile (amber for a
+   shadow at the panel radius and inset (ruling 625), the tone carrier is the head's tile (amber for a
    question, coral for a block) with the kind beside it as the card's title,
    and each option leads with its key, the digit that selects it, where the
    radio stood; the chosen option's key fills. */
@@ -1978,7 +1978,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: color-mix(in srgb, var(--coral-dark), var(--surface) 88%);
   color: var(--coral-dark);
 }
-/* Ruling 621: a decision that waits on a person is the info blue everywhere;
+/* Ruling 625: a decision that waits on a person is the info blue everywhere;
    the amber above is an agent's question. */
 .packet.decision .packet-tile { background: var(--blue-soft); color: var(--blue-pressed); }
 /* Ruling 529: a question asked while an agent keeps working is not what the
@@ -2151,7 +2151,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    a narrow viewport the DELIVERING/HUMAN-OWNER column (with its Run / Manage /
    Assign controls) rendered off the right edge with no scroll — a governance
    action unreachable at that width (violates the responsive ruling). `minmax(0,
-   1fr)` lets the tracks shrink. Ruling 621: the panel's own width picks one
+   1fr)` lets the tracks shrink. Ruling 625: the panel's own width picks one
    or two columns (a bare `1fr` on a phone floored at the run row's
    min-content and ran the cells 33px past the panel), and a short cell keeps
    its own height. The cells are wells, not a third frame (their fill painted
@@ -2245,7 +2245,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font: inherit; font-size: .75rem; color: var(--fg);
   background: var(--surface); border: 1px solid var(--border-control);
   border-radius: var(--radius-button); padding: .25rem .5rem;
-  /* Ruling 621: one control height per row, `.btn.sm`'s. */
+  /* Ruling 625: one control height per row, `.btn.sm`'s. */
   min-height: 30px;
 }
 .op-steer::placeholder { color: var(--placeholder); }
@@ -2260,7 +2260,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border: 1px solid var(--hairline); background: var(--surface); color: var(--muted);
   transition: background .14s ease, color .14s ease, border-color .14s ease, transform .1s var(--ease-out);
 }
-/* Ruling 621: a selected filter is the sheet's selected pair (.mini-seg .on),
+/* Ruling 625: a selected filter is the sheet's selected pair (.mini-seg .on),
    never an inverted ink slab, which dark turned into a white pill. */
 .tl-filter button.on { background: var(--blue-soft); color: var(--blue-pressed); border-color: var(--blue); }
 
@@ -2513,7 +2513,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   flex-wrap: nowrap;
   gap: .5rem;
 }
-/* Ruling 621: the DOM reads label → marker, so `order` puts the marker first,
+/* Ruling 625: the DOM reads label → marker, so `order` puts the marker first,
    on one 1rem column level with the label's first line. */
 .kv.grants :is(.rbac-yes, .rbac-no) { order: -1; flex: none; width: 1rem; height: auto; background: none; margin-top: .125rem; font-size: .75rem; }
 .kv-row:last-child { border-bottom: 0; }
@@ -2684,7 +2684,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .ag-hero { display: flex; align-items: flex-start; gap: 1rem; }
 .ag-hero-main { flex: 1; min-width: 0; }
 .ag-hero-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-/* Ruling 621 (B3): the selected profile is a section of the page, so its name
+/* Ruling 625 (B3): the selected profile is a section of the page, so its name
    takes the section step under the 20px "Agents" h1 (it was 20/800, louder
    than the page title), and the lede under it reads at body size. */
 .ag-hero-top .ag-hero-name { font-size: 1rem; margin: 0; }
@@ -2720,12 +2720,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .stage-chip.off { color: var(--placeholder); text-decoration: line-through; text-decoration-color: var(--placeholder); }
 
 /* capability matrix */
-/* Ruling 621 (B9): borderless tinted wells inside the panel, each as tall as
+/* Ruling 625 (B9): borderless tinted wells inside the panel, each as tall as
    its own list. They were bordered AND filled, and the grid stretched two
    short columns into 150-200px of empty tint beside the long one. */
 .cap-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; align-items: start; }
 .cap-col { border-radius: var(--radius-box); padding: .75rem 1rem; }
-/* One strength for the three tints (ruling 621): they were mixed at 28%, 60%
+/* One strength for the three tints (ruling 625): they were mixed at 28%, 60%
    and 45%, so the blue column was a navy block beside its neighbours. */
 .cap-col.direct { background: color-mix(in srgb, var(--teal-light), var(--surface) 60%); }
 .cap-col.recommend { background: color-mix(in srgb, var(--blue-soft), var(--surface) 60%); }
@@ -2769,7 +2769,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .res-chip-note { font-size: .69rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
 
 /* Ruling 479(e): the operator carries a fourth cell (Autonomy beside Model ·
-   effort), so the row fits its cells instead of a fixed three. Ruling 621:
+   effort), so the row fits its cells instead of a fixed three. Ruling 625:
    at 13rem the cells land on the resources grid's three tracks above them
    (9rem gave four 186px cells offset from them), and a fourth wraps. */
 .runtime-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
@@ -2781,7 +2781,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    plus a substitution flag when the saved profile model isn't a recognized
    id (runs fall back to the default). */
 .model-val { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .75rem; }
-/* A status, so sentence case on one line (ruling 621, F13): uppercase
+/* A status, so sentence case on one line (ruling 625, F13): uppercase
    "NOT / CONNECTED" broke into a two-line pill inside its chip. */
 .model-sub {
   display: inline-flex; align-items: center; gap: .25rem;
@@ -3001,7 +3001,7 @@ dialog[data-closing]::backdrop {
   border-color: color-mix(in srgb, var(--blue), transparent 78%);
 }
 .cmdk-main { min-width: 0; display: flex; flex-direction: column; }
-/* Ruling 621: options at the control weight, so seven rows are not seven
+/* Ruling 625: options at the control weight, so seven rows are not seven
    headings, and a task's key ahead of its title in the board's key voice. */
 .cmdk-label {
   font-size: .88rem; font-weight: 500;
@@ -3026,7 +3026,7 @@ dialog[data-closing]::backdrop {
 .modal-foot .foot-actions { margin-left: auto; display: flex; gap: .5rem; }
 
 .field { display: flex; flex-direction: column; gap: .5rem; }
-/* The eyebrow's one colour is --faint (ruling 621); --placeholder names text a
+/* The eyebrow's one colour is --faint (ruling 625); --placeholder names text a
    person is invited to overwrite. */
 .flabel { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 .flabel .req { color: var(--coral-dark); margin-left: .125rem; }
@@ -3045,7 +3045,7 @@ dialog[data-closing]::backdrop {
   width: 100%; border: 1px solid var(--border-control); border-radius: var(--radius-button);
   padding: .5rem .75rem; background: var(--surface); color: var(--fg);
   font-family: var(--font-body); font-size: .88rem;
-  /* Ruling 621: one control height per form row, the 38px of the select, the
+  /* Ruling 625: one control height per form row, the 38px of the select, the
      date trigger and the buttons beside it (an input was 35px). A line box,
      not a min-height, so a field nested in a wrapper (the label input) grows
      its wrapper to the same 38px. The textarea restates its own below. */
@@ -3053,7 +3053,7 @@ dialog[data-closing]::backdrop {
   transition: border-color .14s ease, box-shadow .14s ease;
 }
 /* A select in a form is the field's sibling, not the 12px toolbar select
-   (ruling 621). */
+   (ruling 625). */
 .field select { width: 100%; min-height: 38px; padding: .5rem .75rem; font-size: .88rem; }
 .field textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
 .field input:focus, .field textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
@@ -3235,7 +3235,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .mx-legend .d.recommend { background: none; border: 2px solid var(--blue); box-sizing: border-box; }
 .mx-legend .d.human { border-radius: 2px; }
 .mx-scroll { overflow: auto; max-height: 100%; border: 1px solid var(--hairline); border-radius: var(--radius-button); }
-/* Ruling 621: the modal is as wide as its grid, between the house modal's
+/* Ruling 625: the modal is as wide as its grid, between the house modal's
    660px and the 1060px a long roster needs, so a row's label sits near its
    dots. At a fixed 1060px the label column took every spare pixel (622px) and
    the dots bunched at the far edge, 450-680px from the words they answer. The
@@ -3249,7 +3249,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .cap-matrix-table thead th:not(.corner) { min-width: 6rem; }
 .cap-matrix-table th, .cap-matrix-table td { padding: .5rem .5rem; text-align: center; border-bottom: 1px solid var(--hairline); }
 /* The sticky head and label cells are opaque in the modal's own paint (ruling
-   621: --surface drew a darker band down the label column in dark). */
+   625: --surface drew a darker band down the label column in dark). */
 .cap-matrix-table thead th { position: sticky; top: 0; background: var(--surface-float); z-index: 2; border-bottom: 1px solid var(--border); }
 /* The corner header takes the same kicker voice as the group rows beneath it
    (it inherited UA th-bold at data size and out-shouted the cells). */
@@ -3257,7 +3257,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* Interface review 2026-09-24 (layo-17): the label's floor yields to the
    viewport, so at 320px the profile columns keep a window to scroll through. */
 .cap-matrix-table td.rowlabel { position: sticky; left: 0; background: var(--surface-float); text-align: left; z-index: 1; min-width: min(230px, 40vw); font-size: .75rem; color: var(--fg); }
-/* Ruling 621: a footnote tag, the quiet tier (it was the policy roster's
+/* Ruling 625: a footnote tag, the quiet tier (it was the policy roster's
    override): sentence case, no fill, a hairline edge. In the matrix the
    Claude-enforced tag is a mark the legend names once, not the uppercase blue
    word repeated on six rows. */
@@ -3322,7 +3322,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* D32-10: the Policy page's cross-role rules as a short list, not a nine-line
    paragraph. Lives under .pol-note so it inherits its size and colour. */
 .pol-note .pol-rules { margin: .375rem 0 0; padding-left: 1.1rem; display: grid; gap: .3rem; }
-/* Ruling 621 (F6): Policy's two rule blocks are what a reader decides from,
+/* Ruling 625 (F6): Policy's two rule blocks are what a reader decides from,
    so they are body copy (14px), not 12px --faint fine print. */
 .pol-note.rules { font-size: .88rem; color: var(--muted); text-wrap: pretty; }
 .pol-note.rules .ico { margin-top: .25rem; }
@@ -3404,7 +3404,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .mini-seg button.on:hover:not(:disabled) { background: var(--blue-soft); color: var(--blue-pressed); }
 
 /* rbac matrix */
-/* Ruling 621 (h-mobile #1): positioned, so the cells' `.vh` "yes" spans are
+/* Ruling 625 (h-mobile #1): positioned, so the cells' `.vh` "yes" spans are
    laid out inside the scroller. Unpositioned, they escaped to `.board-wrap`
    and made the phone shell 89px wider than the screen. */
 .rbac-scroll { overflow-x: auto; position: relative; }
@@ -3417,7 +3417,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 }
 .rbac-table th, .rbac-table td { padding: .5rem .5rem; border-bottom: 1px solid var(--hairline); text-align: center; }
 /* The role columns hold a 16px check each; without a cap they steal width and
-   wrap every action label 3-4 lines while they idle. Ruling 621: the member
+   wrap every action label 3-4 lines while they idle. Ruling 625: the member
    count sits under the role (`.rbac-n`), so no nowrap "CONTRIBUTOR · 1" floors
    a column past its cap; the action column takes the width (128 → ~200px at
    1440) and keeps a floor of its own on a phone. */
@@ -3505,7 +3505,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* P16-UI-02: the "· except <case>" clause on an always-reserved-for-humans row.
    It had no rule, so it rendered as a UA-italic <em> at full --fg weight and
    competed with the rule it qualifies. It is a footnote: same size, secondary
-   colour. Ruling 621: upright, in a <span>; no italic face is loaded, so the
+   colour. Ruling 625: upright, in a <span>; no italic face is loaded, so the
    slant was synthesised. */
 .ho-exc { color: var(--muted); }
 
@@ -3557,7 +3557,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .cred-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .cred-top > .ico { width: 15px; height: 15px; color: var(--muted); }
 .cred-name { font-weight: 600; font-size: .88rem; }
-/* Ruling 621: a field hint a sentence long takes its own line under the label
+/* Ruling 625: a field hint a sentence long takes its own line under the label
    rather than widowing a word beside it. */
 .cred-card .flabel > .fhint { display: block; margin: .25rem 0 0; }
 .scope-chips { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .75rem; }
@@ -3646,7 +3646,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    (a border that identifies a control needs 3:1, not the hairline a
    descriptive pill gets); the blue comes back on hover, where it means "this
    one". */
-/* Ruling 621: a task key is a name, not code — the body face at 500 with
+/* Ruling 625: a task key is a name, not code — the body face at 500 with
    tabular figures, as on the board card; so are "Show more" and the nav
    paths this control also carries. */
 .keybtn {
@@ -3701,7 +3701,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    plus the `.pol-ev` gap (.75rem) — so the run reads as belonging to the line
    that folded it rather than as N new top-level entries. */
 .pol-ev.pev-sub { padding-left: calc(26px + .75rem); }
-/* Ruling 621: a time is a numeral, not code (the org audit list's
+/* Ruling 625: a time is a numeral, not code (the org audit list's
    `.audit-when` was already Inter with tabular figures), and meta is .75rem. */
 .pev-t { font-size: .75rem; font-variant-numeric: tabular-nums; color: var(--placeholder); flex: none; padding-top: .375rem; white-space: nowrap; }
 
@@ -3869,7 +3869,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    REVIEW QUEUE + GITHUB + polish
    ============================================================ */
 @media (max-width: 1400px) {
-  /* Ruling 621: the board keeps the head's 1.5rem gutter (a 1rem one put
+  /* Ruling 625: the board keeps the head's 1.5rem gutter (a 1rem one put
      lane 1 8px left of the title), and five 190px lanes fit at 1280. */
   .board { grid-auto-columns: minmax(190px, 21rem); gap: .75rem; }
 }
@@ -3888,7 +3888,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    someone watches keep the scrollbar's gutter, so a lane, the task page, the
    run console or a transcript does not narrow and rewrap its content the
    moment a live update makes it overflow (or stop overflowing). A lane
-   reserves both edges in its own rule (ruling 621). */
+   reserves both edges in its own rule (ruling 625). */
 .board.list, .detail, .console, .ctl-transcript, .dock-body { scrollbar-gutter: stable; }
 
 /* Design pass 2026-09-08: a queue row is a ROW, not a card. It was a bordered
@@ -3899,7 +3899,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    and a fill on hover. No lift: a row inside a card should not rise off it —
    the press scale (`.rq-row:active`) and the "Review ›" shift are its feedback.
    Same rule on GitHub's pull-request list and the review queue.
-   Ruling 621: the queue draws a task as the board card does — the key in the
+   Ruling 625: the queue draws a task as the board card does — the key in the
    card head's face, a row title one step under the 16px section head, the
    subline clamped at two lines (one line cut the instruction mid-sentence),
    and every column on the title's first baseline, not centred on the block. */
@@ -3951,7 +3951,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    top-level object and keeps its frame. */
 .gh-table .live-table { border: 0; box-shadow: none; border-radius: 0; background: transparent; }
 .gh-table .live-head { background: transparent; border-bottom-color: var(--border); }
-/* Ruling 621 (h-mobile #11): zero floors, so every row is on the same tracks.
+/* Ruling 625 (h-mobile #11): zero floors, so every row is on the same tracks.
    Each row is its own grid, and a bare `fr` floored at THAT row's min-content
    ("3 commits" widened one row's branch cell, and the columns drifted 18px).
    The Sync track keeps a floor: its pill, not the track, decides its width. */
@@ -3974,7 +3974,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .dz-row:last-child { border-bottom: 0; padding-bottom: .125rem; }
 .dz-main { flex: 1; min-width: 0; }
 .dz-main .dn { font-weight: 600; font-size: .88rem; }
-/* Ruling 621: the consequence is what the reader decides on, so it is set at
+/* Ruling 625: the consequence is what the reader decides on, so it is set at
    the reading size, not the meta one. */
 .dz-main .dd { font-size: .88rem; color: var(--faint); margin-top: .25rem; line-height: 1.5; text-wrap: pretty; }
 .dz-row .btn { flex: none; }
@@ -3989,7 +3989,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    end on one line instead of wherever each stack happened to stop. */
 .profile-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .profile-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-/* Ruling 621: the overlay is the raised layer; a panel inside it is flat, and
+/* Ruling 625: the overlay is the raised layer; a panel inside it is flat, and
    its corner steps down a radius (concentric with the 22px dialog). Every
    overlay, not Profile's alone: Notifications' panels wore a card shadow
    inside the popover's. */
@@ -3999,7 +3999,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .profile-id .profile-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1rem; }
 .field input[disabled] { color: var(--faint); background: var(--tint-well); cursor: not-allowed; }
 
-/* Ruling 621: the text keeps a 10rem floor and the control wraps under it (a
+/* Ruling 625: the text keeps a 10rem floor and the control wraps under it (a
    zero basis squeezed the sentence to 55px beside a segment on a phone). */
 .pref-row {
   display: flex; align-items: center; gap: .5rem 1rem; flex-wrap: wrap;
@@ -4047,7 +4047,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .ntf-ev { cursor: pointer; border-radius: var(--radius-button); margin-inline: -.45rem; padding-inline: .5rem; transition: background .12s ease; }
 .ntf-ev:hover { background: var(--tint-well); }
 .ntf-ev.unread .pev-main { color: var(--fg); }
-/* "Mark read" (a `.btn.sm`, ruling 621) centres on the row's first line, as
+/* "Mark read" (a `.btn.sm`, ruling 625) centres on the row's first line, as
    the dot and the time beside it do. */
 .ntf-ev > .btn { margin-top: -.25rem; }
 /* U39-14: a titled notice reads as its title, then its body clamped as the
@@ -4083,7 +4083,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
      (`.rq-row`, `.ntf-item`, `.ctl-conv`), where #868d9f was 4.46:1. Same
      hue, one step lighter: --placeholder #8a91a3 = 5.33:1 on --surface, 5.83:1
      on --bg, 4.72:1 on the 5% tint (--faint 5.38:1 there); still under --faint.
-     Ruling 621: and on the 5% tint over --surface-float, the floating layers'
+     Ruling 625: and on the 5% tint over --surface-float, the floating layers'
      lighter ground, where #8a91a3 fell to 4.41:1: #8e95a7 = 4.64:1 there,
      5.61:1 on --surface, still under --faint. */
   --faint: #969bac;
@@ -4091,7 +4091,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   --border: #3d4152;
   --border-control: #6a708a;
   --ring: #2b2e3a;
-  /* Ruling 621 (see :root): a float 1.06:1 over a card and 1.16:1 over --bg;
+  /* Ruling 625 (see :root): a float 1.06:1 over a card and 1.16:1 over --bg;
      a lane 1.03:1 under --bg, so its card lifts 1.13:1; GitHub's own dark
      header black (the console's fill). */
   --surface-float: #20222b;
@@ -4103,7 +4103,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 
   --blue: #6f87ff;
   --blue-pressed: #b3c0ff;
-  /* Ruling 621: at the other dark washes' chroma (C .055, was .082, a navy
+  /* Ruling 625: at the other dark washes' chroma (C .055, was .082, a navy
      slab twice as saturated as its siblings); --faint on it is 4.79:1. */
   --blue-soft: #272e4c;
   /* Dark inverts the CTA rather than darkening it (see the light --cta-bg
@@ -4111,7 +4111,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   --cta-bg: #6f87ff;
   --cta-fg: #131419;
   --success: #2fd394;
-  /* Ruling 621: the three status inks sit at or under --muted (L .76), not
+  /* Ruling 625: the three status inks sit at or under --muted (L .76), not
      at 11:1 where a "merged" chip outshone the text around it. Each still
      clears 5:1 on its own soft fill. */
   --success-dark: #73c59e;
@@ -4192,7 +4192,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .home-user-wrap { position: relative; }
 .home-user {
   display: inline-flex; align-items: center; gap: .5rem;
-  /* 34px avatar + 2px: the bell's 38px square beside it (ruling 621). */
+  /* 34px avatar + 2px: the bell's 38px square beside it (ruling 625). */
   background: none; border: 0; padding: .125rem;
   border-radius: var(--radius-chip);
   transition: transform .15s var(--ease-out);
@@ -4202,7 +4202,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* notifications popover (global bell, shared by Home + workspace) */
 .ntf-pop {
   position: absolute;
-  /* Clears the 60px bar under the 38px bell (ruling 621): .55rem left the
+  /* Clears the 60px bar under the 38px bell (ruling 625): .55rem left the
      popover 2px over the bar's own edge. */
   top: calc(100% + .75rem);
   right: 0;
@@ -4231,7 +4231,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .ntf-item-main .tt { display: block; font-size: .88rem; font-weight: 700; color: var(--fg); line-height: 1.35; text-wrap: balance; }
 .ntf-item.read .tt { font-weight: 600; color: var(--muted); }
 .ntf-item-main .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .75rem; color: var(--faint); line-height: 1.45; margin-top: .125rem; }
-/* "Project · KEY · time" in the meta voice (ruling 621), the idiom the page's
+/* "Project · KEY · time" in the meta voice (ruling 625), the idiom the page's
    `.ntf-where` repeats; it was 11px mono, as if it were code. */
 .ntf-item-main .mt { display: block; font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; margin-top: .25rem; }
 .ntf-item .unread-dot { margin-top: .5rem; flex: none; }
@@ -4508,7 +4508,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .log-line .lx { color: #c9d1e3; word-break: break-word; white-space: pre-wrap; }
 .log-line .ln { color: #e6dcff; font-weight: 600; }
 .log-line.init .ltag, .log-line.init .lx { color: #8fb2ff; }
-/* The model's voice is the dimmer ink alone (ruling 621): no italic face ships,
+/* The model's voice is the dimmer ink alone (ruling 625): no italic face ships,
    so the slant was a synthesised oblique. */
 .log-line.think .lx { color: #8f9ab3; }
 .log-line.tool .ltag { color: #b79dff; }
@@ -4550,7 +4550,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    HUMAN REVIEWERS — task-scoped review assignment
    ============================================================ */
 .rev-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-/* Ruling 621: the owner in the Execution profile's well is an avatar and a
+/* Ruling 625: the owner in the Execution profile's well is an avatar and a
    name, not a framed pill inside the well inside the panel. */
 .rev-chip { display: inline-flex; align-items: center; gap: .5rem; }
 .rev-chip .nm { white-space: nowrap; }
@@ -4628,7 +4628,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* release-ownership dialog */
 .agent-glyph.warn { background: var(--rose-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .release-card { width: min(560px, calc(100vw - 2rem)); }
-/* Ruling 621: a dialog names its task by key, a name in the body face. */
+/* Ruling 625: a dialog names its task by key, a name in the body face. */
 .mh-sub .key { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rel-owner { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-family: var(--font-display); }
 .rel-open { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
@@ -4648,7 +4648,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* topbar responsiveness — crumbs truncate before touching search */
 @media (max-width: 1080px) {
   .topbar { gap: .75rem; padding: 0 1rem; }
-  /* The workspace bar's wordmark only (ruling 621): the crumbs need its room.
+  /* The workspace bar's wordmark only (ruling 625): the crumbs need its room.
      Home's and the standalone header's bars keep it; they have ~500px free. */
   .topbar .home-brand b { display: none; }
   /* P16-G3: this was an unscoped `.kbd`, so it also hid Home's palette BUTTON
@@ -4694,7 +4694,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 }
 @media (max-width: 720px) {
   .app { grid-template-columns: minmax(0, 1fr); }
-  /* Ruling 621: a page overlay on a phone is the page: full screen, no frame
+  /* Ruling 625: a page overlay on a phone is the page: full screen, no frame
      (the max-* lift the UA's dialog:modal cap); and Home takes the workspace
      pages' 24px gutter (it was 32px; `main` outranks the later base rule). */
   .page-overlay { width: 100vw; height: 100dvh; max-width: none; max-height: none; border-radius: 0; }
@@ -4760,7 +4760,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   .topbar { gap: .5rem; padding: 0 .75rem; transition: z-index 0s linear .15s; }
   .app[data-rail-open="true"] .topbar { transition: none; }
   /* P16-G3: icon-only from here down, so it needs a target a finger can hit
-     (WCAG 2.5.8). Ruling 621: one square for the bar's controls, the bell's
+     (WCAG 2.5.8). Ruling 625: one square for the bar's controls, the bell's
      38px (they were 34, 34, 38 and 42 side by side). */
   .top-search { flex: 0 0 auto; min-width: 0; padding: .375rem .5rem; min-height: 38px; }
   .top-search-label { display: none; }
@@ -4771,7 +4771,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   .filter-bar, .board { padding-left: .75rem; padding-right: .75rem; }
   .board { scroll-padding-inline: .75rem; }
   .board-filter-input { flex-basis: 100%; max-width: none; }
-  /* Ruling 621 (h-mobile #7): seven wrapped chips were three rows (91px) above
+  /* Ruling 625 (h-mobile #7): seven wrapped chips were three rows (91px) above
      the lanes. One row that scrolls sideways with the cut-edge cue; the .25rem
      inset, cancelled by the margin, keeps a focused chip's ring unclipped. */
   .fchip-row {
@@ -4783,13 +4783,13 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   .fchip-row > .fchip { flex: none; }
   /* A wrapped tool row starts on the title's edge, not flush right. */
   .board-tools { margin-left: 0; }
-  /* Ruling 621: a queue row's key becomes its eyebrow, as on the board card,
+  /* Ruling 625: a queue row's key becomes its eyebrow, as on the board card,
      so the title gets the row's full width (the 62px key column left it 214px
      and floated the key 21px below the title's first line). */
   .rq-row:has(> .rq-key) { row-gap: .375rem; }
   .rq-row .rq-key { flex-basis: 100%; width: auto; }
   .rq-key + .rq-main { flex-basis: 100%; }
-  /* Ruling 621: a phone sets the task's title at the page-title step and its
+  /* Ruling 625: a phone sets the task's title at the page-title step and its
      goal at body size (a 28px title ran to three lines and the 16px goal
      outranked the decision under it); the composer's foot gives its hint a
      line of its own instead of a word per line. (The Execution profile's
@@ -5272,7 +5272,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .login-aside-points li { display: flex; align-items: flex-start; gap: .5rem; font-size: .88rem; color: var(--muted); line-height: 1.5; }
 .login-aside-points .ico { margin-top: .125rem; color: var(--teal-dark); }
 @media (min-width: 900px) {
-  /* Ruling 621: the card's track is its own width. An `auto` track sized to
+  /* Ruling 625: the card's track is its own width. An `auto` track sized to
      the card's max-content (a 956px SSO line, its `min(430px, 100%)` cyclic
      in it), which ate the free space `justify-content` centres with: the
      pitch hugged the left edge and the card floated mid-right. */
@@ -5297,7 +5297,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
     display: inline-grid; place-items: center;
     width: 46px; height: 46px; border-radius: var(--radius-box);
     /* Pass 30: the SAME product mark as the sign-in card's — the aside used a
-       teal one-off (P13-D-18's --accent fallback). Ruling 621: the same glyph
+       teal one-off (P13-D-18's --accent fallback). Ruling 625: the same glyph
        too (it was a slab mono V beside the card's Inter one), and ONE of them
        on screen: beside the card the pitch carries the mark, so the card's
        own goes. Stacked under the card, the card's is the one. */
@@ -5406,7 +5406,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   padding-top: .375rem;
 }
 .home-hero h1 { font-size: 1.75rem; letter-spacing: var(--track-page); }
-/* Ruling 621: the sentence yields before the actions do. Its block could not
+/* Ruling 625: the sentence yields before the actions do. Its block could not
    shrink, so at 1024 the 973px it needed against a 960px shell pushed the
    whole action row onto a line of its own. */
 .home-hero > :first-child { flex: 1 1 20rem; min-width: 0; }
@@ -5414,7 +5414,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .home-hero .sub .working { position: relative; display: inline-block; width: .46rem; height: .46rem; border-radius: 50%; background: var(--agent); margin: 0 .125rem 1px 0; }
 .home-hero .sub b { color: var(--fg); font-weight: 600; }
 .hero-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; flex-wrap: wrap; }
-/* One control height on the row (ruling 621): the toggle stood 37px beside
+/* One control height on the row (ruling 625): the toggle stood 37px beside
    38px buttons, a 1px step at their tops. */
 .hero-actions .seg { min-height: 38px; }
 
@@ -5426,7 +5426,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .sec-h h2 { font-size: 1rem; }
 .sec-h .ico { width: 15px; height: 15px; color: var(--placeholder); }
 /* A plain count at the heading's size, as the board's column head counts
-   (ruling 621): the mono capsule read as a code chip. */
+   (ruling 625): the mono capsule read as a code chip. */
 .sec-h .ct { font-size: 1rem; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
 
 /* ---------- Project grid ---------- */
@@ -5471,7 +5471,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   font-size: 1rem;
 }
 .pj-name { min-width: 0; }
-/* Ruling 621: a name (600), and the key a name too, in the body face with no
+/* Ruling 625: a name (600), and the key a name too, in the body face with no
    box: the board card's key since 365(e). */
 .pj-name .nm { display: flex; align-items: center; gap: .5rem; font-weight: 600; font-size: 1rem; line-height: 1.35; }
 .pj-name .key { font-weight: 500; font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -5528,7 +5528,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
    no longer reaches inside to resize its children. */
 .avatar-group { display: flex; }
 .avatar-group .avatar { border: 2px solid var(--surface); }
-/* -2px (ruling 621): at -7px, and still at -4px, the next disc's ring covered
+/* -2px (ruling 625): at -7px, and still at -4px, the next disc's ring covered
    the second initial ("MY" lost 1px); the rings still overlap into a stack. */
 .avatar-group .avatar + .avatar { margin-left: -.125rem; }
 /* The `+N` chip closing a folded group: an avatar-shaped disc in the neutral
@@ -5588,7 +5588,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .pj-row .pj-name .repo { margin-top: .125rem; }
 .pj-row .pj-meter { flex: none; width: 110px; }
 .pj-row .pj-stats { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; }
-/* Ruling 621: one width for every row's faces (five discs at the group's
+/* Ruling 625: one width for every row's faces (five discs at the group's
    overlap), so the meter and stats columns land at one x down the list.
    `.stack` named the hand-rolled stack AvatarGroup replaced, and sized
    nothing. */
@@ -5616,7 +5616,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .org-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .75rem; }
 .org-tile {
   border: 1px solid var(--hairline);
-  /* Ruling 621: a top-level card on the canvas, like the setup checklist and
+  /* Ruling 625: a top-level card on the canvas, like the setup checklist and
      the project rows beside it — card radius and card elevation. */
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -5634,7 +5634,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   color: var(--faint);
 }
 .org-tile .lbl .ico { width: 14px; height: 14px; }
-/* Ruling 621: the numbers own the tile's text column and start at its edge in
+/* Ruling 625: the numbers own the tile's text column and start at its edge in
    every tile; the picture moved to the foot's far end (`aside`), and the foot
    is as tall as that picture in every tile, so the four "Manage"s share a
    line. A count never breaks from its noun. */
@@ -5648,7 +5648,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 
 /* ---------- Store strip ---------- */
 /* Body face for the explanatory sentence — mono prose reads as debug output;
-   only the writer's pid and host keep the code face (`.mono`, ruling 621).
+   only the writer's pid and host keep the code face (`.mono`, ruling 625).
    The icon heads the sentence's first line rather than centring between its
    two, and the actions centre on the block. */
 .store-strip {
@@ -5681,7 +5681,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .empty-hero {
   border: 1.5px dashed var(--border);
   border-radius: var(--radius-panel);
-  /* Compact (ruling 621): an empty state is a sentence and a next step, not
+  /* Compact (ruling 625): an empty state is a sentence and a next step, not
      a 48px-padded stage. */
   padding: 2rem 1.5rem;
   display: flex; flex-direction: column; align-items: center; text-align: center; gap: .5rem;
@@ -5697,7 +5697,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   color: var(--blue-pressed);
   margin-bottom: .25rem;
 }
-/* An empty state's heading never outweighs its page's title (ruling 621). */
+/* An empty state's heading never outweighs its page's title (ruling 625). */
 .empty-hero h2 { font-size: 1rem; font-weight: 600; }
 .empty-hero p { margin: 0; color: var(--muted); font-size: .88rem; max-width: 46ch; line-height: 1.5; text-wrap: balance; }
 .empty-hero .btn { margin-top: 1rem; }
@@ -5716,7 +5716,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 
 /* ---------- Viberr settings (instance level) ---------- */
 .set-head { display: flex; align-items: flex-start; gap: 1rem; padding-top: .375rem; flex-wrap: wrap; }
-/* Ruling 621: one standalone-page header (Instance settings, Insights), the
+/* Ruling 625: one standalone-page header (Instance settings, Insights), the
    workspace page title's step and lede (`.board-head`), not the hero's 28px. */
 .set-head h1 { font-size: 1.25rem; letter-spacing: var(--track-section); }
 .set-head .sub { color: var(--faint); font-size: .88rem; margin: .25rem 0 0; max-width: 66ch; line-height: 1.5; }
@@ -5725,7 +5725,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .set-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 1rem; align-items: start; }
 .set-nav { display: flex; flex-direction: column; gap: .25rem; position: sticky; top: calc(var(--topbar-h) + 1rem); }
 .set-content { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-/* Ruling 621: a tab's title sits on one line whether or not its head holds a
+/* Ruling 625: a tab's title sits on one line whether or not its head holds a
    .btn.sm, so the heading does not hop 5px between tabs. */
 .set-content .panel-head { min-height: 1.875rem; }
 /* The whole right-hand column of Instance settings: the tab card plus the three
@@ -5759,7 +5759,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .conn-main .scope-chip { padding: .25rem .5rem; font-size: .69rem; }
 .conn-main .scope-chip .ico { width: 11px; height: 11px; }
 
-/* Ruling 621 (re-rules 148(a)'s pairing here): one column. The four panels
+/* Ruling 625 (re-rules 148(a)'s pairing here): one column. The four panels
    are not peers in length (Skills grows with the store, Agent profiles does
    not), so two to a row stretched a 2-row card into a 600px-empty box. A row
    whose text would drop under 14rem puts its actions on a line of their own. */
@@ -5982,7 +5982,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   .ntf-ev .pev-main { flex: 1 1 calc(100% - 26px - .75rem); }
   .ntf-ev .pev-main + * { margin-left: calc(26px + .75rem); }
   .ntf-ev > .btn { margin-top: 0; }
-  /* Ruling 621 (h-mobile #13): an activity row's time does the same. Beside
+  /* Ruling 625 (h-mobile #13): an activity row's time does the same. Beside
      the text it cost the column 52px (225 of a 390px screen). */
   .activity-cols .pol-ev { flex-wrap: wrap; row-gap: .125rem; }
   .activity-cols .pev-main { flex: 1 1 calc(100% - 26px - .75rem); }
@@ -6133,7 +6133,7 @@ a.card:active { transform: scale(.99); }
 
 /* Capability-matrix runtime-difference notes (P13-RT-14). */
 .mx-notes { padding: 1rem .25rem .25rem; }
-/* Ruling 621 (B4): explanations a reader decides from, at the reading size;
+/* Ruling 625 (B4): explanations a reader decides from, at the reading size;
    the head one step above them in weight, never below them in size. */
 .mx-notes h3 {
   font-size: .88rem; font-weight: 700;
@@ -6270,7 +6270,7 @@ a.card:active { transform: scale(.99); }
   border: 1px solid var(--border-control); border-radius: var(--radius-button);
   background: var(--surface); padding: 0 .5rem;
 }
-/* Ruling 621: one control height for the bar (it held 31, 27, 26 and 25px),
+/* Ruling 625: one control height for the bar (it held 31, 27, 26 and 25px),
    the 30px of the `.btn.sm` Clear beside them. */
 .feed-filters :is(.ff-search, .ff-sel, .ff-task, .datepick-trigger) { height: 1.875rem; }
 .feed-filters .ff-search:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); outline: 2px solid var(--blue); outline-offset: 2px; }
@@ -6330,13 +6330,13 @@ a.card:active { transform: scale(.99); }
 /* Block axis only: the inline padding comes from `.board` and its 720px
    override, so the list rows line up with the filter bar at every width. */
 .board.list { display: block; padding-block: 0 var(--dock-clear); overflow-y: auto; }
-/* Ruling 621: the .125rem top keeps the first row's outset ring unclipped. */
+/* Ruling 625: the .125rem top keeps the first row's outset ring unclipped. */
 .board-list { display: flex; flex-direction: column; gap: .5rem; max-width: 920px; padding-top: .125rem; }
 /* One non-wrapping line gave the title whatever the chips left over (h3 at
    79px, five lines deep, at 1280px) while the stage trigger broke its own name.
    The trailing chips drop to a second line before the title shrinks below a
    readable measure; the row-gap is the tighter step so a wrapped row still
-   reads as one row. Ruling 621: every column sits on the title's first
+   reads as one row. Ruling 625: every column sits on the title's first
    baseline (centred, the key sat 5px above a one-line title and mid-block
    beside a wrapped one). */
 .card.list-row { flex-direction: row; align-items: baseline; gap: .5rem 1rem; flex-wrap: wrap; }
@@ -6365,12 +6365,12 @@ a.card:active { transform: scale(.99); }
 .card.list-row :is(.stage-menu-btn, .stage-static) { width: 8rem; }
 .card.list-row .stage-menu-btn { justify-content: space-between; }
 .card.list-row .list-agent { width: 7rem; }
-/* The empty owner seat (ruling 621): an unfilled dashed seat, the agent seat's
+/* The empty owner seat (ruling 625): an unfilled dashed seat, the agent seat's
    own idiom, not a half-transparent person called "?" (2.38:1). */
 .avatar.ghost { background: transparent; color: var(--faint); border: 1px dashed var(--border-control); }
 /* The board filter chips' counts: `.tally`'s --faint (5.79:1, the AA ladder,
    not alpha — an opacity composite is invisible to the contrast gate); the .on
-   chip's count takes its ink with the selected segment's (ruling 621: one rule). */
+   chip's count takes its ink with the selected segment's (ruling 625: one rule). */
 .modal-card.modal-narrow { width: min(560px, calc(100vw - 2rem)); }
 
 /* --- policy / GitHub view / project settings --- */
@@ -6445,7 +6445,7 @@ a.card:active { transform: scale(.99); }
 .audit-browse-foot { margin-top: .5rem; }
 .audit-dl { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
 .audit-dl .btn { text-decoration: none; }
-/* Ruling 621: one fact row, no eyebrow over it; the value follows its label
+/* Ruling 625: one fact row, no eyebrow over it; the value follows its label
    (in a three-child row `space-between` floated it mid-card). */
 .audit-s3 { margin-top: 1rem; }
 .audit-s3 .kv-row .v { margin-right: auto; }
@@ -6461,7 +6461,7 @@ a.card:active { transform: scale(.99); }
    stretch — so without a declared width the whole surface shrinks to its
    content and the three-up stat grid collapses with it. `.home-shell` carries
    the same pair for the same reason. */
-/* Ruling 621: Instance settings' header (`.set-head`) at `.home-shell`'s top
+/* Ruling 625: Instance settings' header (`.set-head`) at `.home-shell`'s top
    inset, and one 1rem gap between bands in place of per-band margins. */
 .insights { width: 100%; max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem var(--dock-clear); display: flex; flex-direction: column; gap: 1rem; }
 .insights > .set-head { margin-bottom: .5rem; }
@@ -6469,7 +6469,7 @@ a.card:active { transform: scale(.99); }
 .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
 /* Seven oversight tiles: 4 + 3 rather than 3 + 3 + an orphan. */
 .stat-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-/* Ruling 621: the stat tile is `.ag-stat`'s well (the 2026-09-08 pass), not a
+/* Ruling 625: the stat tile is `.ag-stat`'s well (the 2026-09-08 pass), not a
    raised card at another radius beside the page's panels. */
 .stat-card { display: flex; flex-direction: column; gap: .125rem; padding: 1rem; background: var(--sunken); border-radius: var(--radius-card); }
 .stat-ico { color: var(--blue-pressed); }
@@ -6486,7 +6486,7 @@ a.card:active { transform: scale(.99); }
    rule exists to end. */
 .stat-names { display: flex; flex-wrap: wrap; gap: .25rem .5rem; margin-top: .25rem; }
 .stat-names .linkish { font-size: .75rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* Ruling 621: a one-row breakdown keeps its own height beside a six-row one. */
+/* Ruling 625: a one-row breakdown keeps its own height beside a six-row one. */
 .insights-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 .bar-list { display: flex; flex-direction: column; gap: .5rem; margin: .5rem 0 0; padding: 0; list-style: none; }
 /* Interface review 2026-09-24 (layo-26, layo-4): the label column flexes
@@ -6510,7 +6510,7 @@ a.card:active { transform: scale(.99); }
 .daily-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
 .daily-bar { display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
 .daily-col:hover .daily-bar { background: var(--blue-pressed); }
-/* Ruling 621: an empty day is a neutral floor tick, not a brand-blue mark. */
+/* Ruling 625: an empty day is a neutral floor tick, not a brand-blue mark. */
 .daily-col[data-empty] .daily-bar { background: var(--border); }
 
 .deny-note.before { margin-bottom: .5rem; }
@@ -6527,7 +6527,7 @@ a.card:active { transform: scale(.99); }
 }
 .kv-row .v.light { font-weight: 400; }
 .kv-row .k.strong { color: var(--fg); }
-/* Ruling 621: the commit count sits under its branch rather than beside it,
+/* Ruling 625: the commit count sits under its branch rather than beside it,
    where it took the branch's width ("vib-142- / attach- / workspace" beside
    "3 / commits"), and the name holds one line, ellipsised, its `title` whole. */
 .live-branch { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
@@ -6638,7 +6638,7 @@ a.card:active { transform: scale(.99); }
   .detail-packet,
   .detail-main,
   .detail-side { grid-column: 1; grid-row: auto; min-width: 0; }
-  /* Ruling 621: each card its own height; stretched to Current state's, the
+  /* Ruling 625: each card its own height; stretched to Current state's, the
      GitHub card held a 184px void. */
   .detail-side { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
   /* Pass 30 (390px audit): min-width alone let a panel's min-content —
@@ -6654,7 +6654,7 @@ a.card:active { transform: scale(.99); }
      R19-12's contract is that no control is hidden at any width. The gate in
      `app.css.test.ts` fails if a width query ever hides it again. */
   .agents-layout { grid-template-columns: 1fr; }
-  /* Ruling 621 (d-controller #15): the strip wraps instead of scrolling, so
+  /* Ruling 625 (d-controller #15): the strip wraps instead of scrolling, so
      no card and neither button sits off-screen (1032px of strip in a 744px
      box at 1024), and a group label heads its own row instead of floating
      between two cards as if it were one. */
@@ -6699,10 +6699,10 @@ a.card:active { transform: scale(.99); }
      auto` is for the one-line row). */
   .rq-meta { flex: 1 1 auto; max-width: none; justify-content: flex-start; }
   /* home project rows drop the least-load-bearing stat: "· quiet", never the
-     decisions waiting on you (ruling 621; it used to drop that pill) */
+     decisions waiting on you (ruling 625; it used to drop that pill) */
   .pj-row .pj-stats .pj-quiet { display: none; }
   /* A notification row leads with its 26px icon, not the queue's 62px key, so
-     its wrapped meta indents under the title, not under the icon (ruling 621;
+     its wrapped meta indents under the title, not under the icon (ruling 625;
      it hung 42px left of the title). */
   .ntf-wait .rq-row { row-gap: .375rem; }
   .ntf-wait .rq-row .rq-main { flex-basis: calc(100% - 26px - 1rem); }
@@ -6720,8 +6720,8 @@ a.card:active { transform: scale(.99); }
      not its rows. On the rows it never scrolled anything: `.live-table`'s
      `overflow: hidden` (it rounds the head band) clipped the Pull request and
      Sync columns inside the frame. The frame now grows with its rows. */
-  .gh-table .live-table { min-width: 30rem; } /* ruling 621: the three-track rows need ~29rem */
-  /* Ruling 621 (h-mobile #11): three tracks, each branch on a line under its
+  .gh-table .live-table { min-width: 30rem; } /* ruling 625: the three-track rows need ~29rem */
+  /* Ruling 625 (h-mobile #11): three tracks, each branch on a line under its
      task. Four tracks shared 464px of the 34rem table, so branches broke at
      every hyphen and the Sync pill ran past an 820px box's edge. The rows keep
      one set of tracks, so the columns still line up. */
@@ -6762,7 +6762,7 @@ a.card:active { transform: scale(.99); }
      left a 234px text column on a 375px phone. Ruling 572(b) took the reply's
      frame away at every width, so the panel keeps a reading gutter. */
   .ctl-wrap .ctl-transcript { padding: .75rem; }
-  /* Ruling 621: the gutter is for messages; the empty state keeps the
+  /* Ruling 625: the gutter is for messages; the empty state keeps the
      composer's edges, and its padding fits the capped box (48px/32px made it
      541px tall in a 484px transcript on a phone, an inner scroll). */
   .ctl-wrap .ctl-transcript:has(> .empty-hero) { padding: 0; }
@@ -7512,7 +7512,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
   /* Ruling 524(a): no room at the foot for the dock's button. The controller
      routes do not render the dock (`controller-dock-context.ts`), and the
      80px kept for it were a strip of empty page under every column. Ruling
-     621: the 1rem top is `.board-head`'s, so the title sits where Board's,
+     625: the 1rem top is `.board-head`'s, so the title sits where Board's,
      Agents' and Policy's do (it was 2px under the topbar, 14px higher). */
   padding: 1rem 1.5rem 1.5rem;
   display: flex;
@@ -7547,7 +7547,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
 }
 /* The switcher is the phone's list; the wide layout has the rail's. */
 .ctl-picker { display: none; max-width: 16rem; min-width: 0; }
-/* Ruling 621: the workspace page title (1.25rem / 700) and `.board-head .sub`'s
+/* Ruling 625: the workspace page title (1.25rem / 700) and `.board-head .sub`'s
    lede; the subtitle `<p>` kept the UA's 12px margins. The "not connected"
    pill sits in the title row, beside the noun it describes. */
 .ctl-head h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: var(--track-section); }
@@ -7622,7 +7622,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
 /* The empty state fills the column the conversation will, centred. Nothing
    in it scrolls, so it keeps no scrollbar gutter (ruling 457's rule for the
    transcript): the gutter held its dashed frame 15px short of the composer's
-   edge under it. Ruling 621: frameless (the composer is the page's one
+   edge under it. Ruling 625: frameless (the composer is the page's one
    object; a dashed frame is this sheet's drop-target signal), and the mark
    wears the controller's violet, as its rail glyph and the dock do. The border
    stays, transparent, so nothing moves and forced colours keep an edge. */
@@ -7873,7 +7873,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
   .ctl-all-toggle .linkish { padding-block: .3rem; }
   /* Ruling 527: so do a waiting message's Send now and Retract. */
   .ctl-msg-acts .linkish { padding-block: .3rem; }
-  /* Ruling 621: and the shared small controls (23px segments, 22px keys, the
+  /* Ruling 625: and the shared small controls (23px segments, 22px keys, the
      21px switch, whose hit area grows past its unchanged track). */
   .mini-seg button { padding-block: .375rem; }
   .keybtn { padding-block: .25rem; }
@@ -7893,7 +7893,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
    ModelEffortFields, .ctx-groups pick-chips), so only the panel frame and its
    footer keep local rules. */
 .ctladm { display: flex; flex-direction: column; gap: 1rem; }
-/* Ruling 621: flex margins do not collapse, so the gap is the only rhythm. */
+/* Ruling 625: flex margins do not collapse, so the gap is the only rhythm. */
 .ctladm > * { margin: 0; }
 .ctladm-foot { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 
@@ -8033,7 +8033,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .dock-head-acts .icon-btn { width: 30px; height: 30px; text-decoration: none; }
 .dock-head-acts .icon-btn .ico { width: 15px; height: 15px; }
 .dock-head-acts .icon-btn[aria-pressed="true"] { background: var(--tint-well); color: var(--fg); border-color: var(--border); }
-/* Ruling 621: the head and its scope line are one header with one rule under
+/* Ruling 625: the head and its scope line are one header with one rule under
    it (the head's own rule split them). */
 .dock-context { margin: 0; padding: 0 .75rem .5rem; border-bottom: 1px solid var(--hairline); }
 /* Scrolling a dock body never chains into the page underneath: the panel is
@@ -8067,7 +8067,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    + 6 + the panel's 1px border = 23, a pixel off --radius-panel (22), the
    nearest step (the board lane rounds 20 to 22 the same way). The old .75rem
    made it 29 and the gap swelled at both corners. The composer keeps its own
-   inner step: the 8px Send button sits 8px from its bottom edge. Ruling 621:
+   inner step: the 8px Send button sits 8px from its bottom edge. Ruling 625:
    the composer's own frame is the panel's foot; the strip's full-width
    hairline drew a second rule 9px above it. The phone sheet has square
    bottom corners and keeps the 12px gutter (the 720px block).
@@ -8376,7 +8376,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    line under the row — the slot `.guard-ctl.err` takes in Policy's rows. */
 .conc-lane { flex-basis: 100%; font-size: .75rem; line-height: 1.5; color: var(--muted); }
 .conc-well .form-err { flex-basis: 100%; }
-/* Ruling 621: the control speaks the settings-form idiom (the .flabel eyebrow
+/* Ruling 625: the control speaks the settings-form idiom (the .flabel eyebrow
    over the field, the .fhint under it) in one fixed column, so both rows'
    fields and Saves line up whatever their labels and hints say. */
 .conc-well .guard-ctl { display: grid; grid-template-columns: 5.5rem auto; justify-content: start; justify-items: start; gap: .375rem .5rem; width: 15rem; }
@@ -8390,7 +8390,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .rr-row > .btn { margin-left: auto; }
 .rr-row .guard-ctl select { min-width: 9rem; }
 .rr-actions { display: flex; justify-content: flex-end; align-items: center; gap: .5rem; padding-top: .75rem; }
-/* Ruling 621 (e-settings #4): an empty list is one row: its sentence at the
+/* Ruling 625 (e-settings #4): an empty list is one row: its sentence at the
    content's left edge, the Add beside it at the panel foot's right. It was a
    centred `.empty.sm` over the right-aligned buttons over a left-aligned
    note: three alignments and a 240px card for zero rows. */
@@ -8917,7 +8917,7 @@ button.chg-num:hover { color: var(--blue-pressed); background: var(--focus-wash)
 .kv.props .kv-row .v { min-height: 2rem; padding-block: .375rem; flex-wrap: wrap; justify-content: flex-start; font-family: var(--font-body); font-weight: 400; line-height: 1.25rem; }
 .prop-val { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .25rem; min-width: 0; }
 /* The invitation takes the placeholder rung, a step under the row's own
-   label, and comes up to --muted under the pointer. Ruling 621: at the
+   label, and comes up to --muted under the pointer. Ruling 625: at the
    values' size, its glyph centred in the facts' 16px mark column, so its
    words start where theirs do. */
 .prop-empty { display: inline-flex; align-items: center; gap: .5rem; font-size: .88rem; font-weight: 500; color: var(--placeholder); white-space: nowrap; }
@@ -9047,7 +9047,7 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .epic-list > li + li .epic-row { box-shadow: 0 -1px 0 var(--hairline); }
 .epic-list > li + li .epic-row:hover { box-shadow: none; }
 .epic-row-name { display: flex; align-items: center; gap: .5rem; min-width: 0; }
-/* Ruling 621: an epic's id is a key (Inter 500, tabular), and its name a row
+/* Ruling 625: an epic's id is a key (Inter 500, tabular), and its name a row
    title — one step under the page title, as the queue's and the board's. */
 .epic-row-id { font-size: .75rem; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 .epic-row-title {
@@ -9281,7 +9281,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .commit .msg { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .commit .sha { flex: none; font-family: var(--font-mono); font-size: .75rem; }
 .pr-acts { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem; }
-/* Ruling 621: the override's whole-truth label (R19-5) wraps as a sentence
+/* Ruling 625: the override's whole-truth label (R19-5) wraps as a sentence
    from its glyph, not a centred two-line block. */
 .pr-acts .btn.full.danger { justify-content: flex-start; text-align: left; }
 .pr-card > .pr-acts { margin-top: 0; }
@@ -9417,7 +9417,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 /* What Operator hands over at the acceptance boundary: its summary, each
    reviewer's verdict on the work under review, the screenshots it picked and
    the change. Inside the decision that offers acceptance it sits between the
-   evidence and the options behind the evidence's thin rule (ruling 621: it
+   evidence and the options behind the evidence's thin rule (ruling 625: it
    was an inset box, read as a fourth option); while the offer is a recommendation
    it is its own card in the decision region, which stacks the two when both
    show. Section labels are the observation rows' kicker (`.obs .k`); a
@@ -9540,7 +9540,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .setup-meter > .on { background: var(--success); }
 .setup-steps { list-style: none; margin: 0; padding: 0; }
 /* An open row is as tall as one with a small button (30px) in its padding, so
-   rows with and without an action match. A done row is compact (ruling 621):
+   rows with and without an action match. A done row is compact (ruling 625):
    it has nothing left to press, and at full height two checked rows put the
    projects 28px further down. */
 .setup-step {
@@ -9707,7 +9707,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
    with a reading leading, paragraphs running the column. The top heading
    renders at h3 under the surface's own h2 (`MarkdownDoc`), so the levels are
    set by rendered tag: the title, sections over a hairline, subsections, and
-   the quiet rest. Weights stop at the app's 700 heading weight (ruling 621):
+   the quiet rest. Weights stop at the app's 700 heading weight (ruling 625):
    a document is read, not scanned. */
 .md-doc { max-width: 48rem; margin-inline: auto; font-size: .88rem; line-height: 1.65; color: var(--fg); }
 .md-doc p, .md-doc li { max-width: none; }
@@ -9802,7 +9802,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
   .rsel-menu.acct-menu, .rsel-menu.acct-menu[data-side="top"] { animation: fade-in .12s ease; }
 }
 
-/* ---------- appended: ruling 621, the design pass — foundations ---------- */
+/* ---------- appended: ruling 625, the design pass — foundations ---------- */
 /* GitHub's chrome on dark is near-black (--chrome), so its tiles take the
    floating surfaces' white ring for an edge. The operator glyph is clipped to
    its cut corner, which clips a shadow too, so it takes the border instead. */
@@ -9825,7 +9825,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
    its shadow (or a gutter buys it back with a ragged edge). Border only. */
 :is(.ag-detail, .ctl-side) > .panel { box-shadow: none; }
 
-/* ---------- appended: ruling 621, the design pass — Home, login and notifications ---------- */
+/* ---------- appended: ruling 625, the design pass — Home, login and notifications ---------- */
 /* Notifications draw one object one way. Where a row points is "Project ·
    KEY" in the meta voice, the bell row's `.mt` idiom: the prefix of a waiting
    row's line, and a stream row's last line, a quiet link while it can open
@@ -9842,7 +9842,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .ntf-wait .rq-main, .ntf-wait .rq-meta { padding-top: .25rem; }
 .ntf-wait .unread-dot { margin-top: 0; }
 
-/* ---------- appended: ruling 621, the design pass — the task page ---------- */
+/* ---------- appended: ruling 625, the design pass — the task page ---------- */
 /* The task file path breaks between segments, never inside a key. */
 .hero-file-seg { display: inline-block; }
 /* Ruling 520 on the side column: an empty value with no glyph still starts
@@ -9855,13 +9855,13 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .attach-empty { margin: 0 0 .75rem; max-width: 70ch; font-size: .88rem; line-height: 1.5; color: var(--faint); text-wrap: pretty; }
 .attach-empty:last-child { margin-bottom: 0; }
 
-/* ---------- appended: ruling 621, the design pass — the controller ---------- */
+/* ---------- appended: ruling 625, the design pass — the controller ---------- */
 /* h-mobile #19: four tiles in a row, or two by two, never three and a
    full-width orphan (540px under three 172px tiles at 820). 42.25rem is four
    160px floors and their three gaps. */
 @container (width < 42.25rem) { .ag-stat { flex-basis: calc(50% - .375rem); } }
 
-/* ---------- appended: ruling 621, the design pass — project settings, GitHub and Activity ---------- */
+/* ---------- appended: ruling 625, the design pass — project settings, GitHub and Activity ---------- */
 /* e-settings #13: a GitHub pull-request row keeps the one-line row wherever its
    list has the room (a tablet's full-width panel). The collapse's queue-row
    wrap is for the review queue's chips; here it dropped a lone "in review"

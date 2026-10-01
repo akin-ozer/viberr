@@ -631,7 +631,7 @@ function AuditExportCard({
         </a>
       </div>
       <div className="audit-s3">
-        {/* Ruling 621: one fact row needs no eyebrow over it; the label
+        {/* Ruling 625: one fact row needs no eyebrow over it; the label
             names the whole fact. */}
         <div className="kv-row">
           <span className="k">S3 export</span>

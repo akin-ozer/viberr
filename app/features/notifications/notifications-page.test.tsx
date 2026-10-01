@@ -271,7 +271,7 @@ describe("NotificationsPage", () => {
     expect(rows[0]!.querySelector(".pill.blocked")!.textContent).toBe(
       "blocked decision",
     );
-    // Ruling 621: a decision that waits on you is blue (info), as on the
+    // Ruling 625: a decision that waits on you is blue (info), as on the
     // board; amber (input) is kept for an agent's question.
     // CANARY: put the packet pill back on `input`.
     expect(rows[1]!.querySelector(".pill.info")!.textContent).toBe(
@@ -291,7 +291,7 @@ describe("NotificationsPage", () => {
 
     // Global page: every row names where it points (open Q C), in the one
     // "Project · KEY" idiom the bell's meta line and the stream use (ruling
-    // 621) — no project pill beside the type pill.
+    // 625) — no project pill beside the type pill.
     expect(rows[0]!.querySelector(".sub .ntf-where")!.textContent).toBe(
       "Viberr Core · VIB-160",
     );

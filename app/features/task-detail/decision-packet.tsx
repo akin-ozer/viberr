@@ -1005,7 +1005,7 @@ export function DecisionPacket({
   // the pending option's own `kind`, so two can never stand at once.
   const [pendingConfirm, setPendingConfirm] = useState<number | null>(null);
   const isBlocked = p.type === "blocked";
-  // Ruling 621 (B11): a decision that waits on a person is ONE colour, the
+  // Ruling 625 (B11): a decision that waits on a person is ONE colour, the
   // info blue it wears on Home, Notifications, the board and the queue; the
   // amber stays an agent's question (`answerTo`, ruling 478(e)'s predicate),
   // the coral a block.

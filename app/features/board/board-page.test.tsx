@@ -2433,13 +2433,13 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
   it("the list row seats the same two identities", () => {
     const { container } = renderBoard([task({ key: "VIB-2", owner: arda })], { view: "list" });
     const row = container.querySelector(".list-row")!;
-    // Ruling 621: the agent seat stays as an empty, hidden column so the chips
+    // Ruling 625: the agent seat stays as an empty, hidden column so the chips
     // before it line up. CANARY: return null for a row with no agent.
     expect(row.querySelector(".list-agent")!.getAttribute("aria-hidden")).toBe("true");
     expect(row.querySelector(".list-agent")!.childElementCount).toBe(0);
     expect(row.textContent).not.toContain("no agent");
     expect(row.querySelector(".rev-stack")!.getAttribute("aria-label")).toBe("Owner: Arda Kaya");
-    // Ruling 621: no "OWNER" eyebrow repeated on every row; the seat's name is
+    // Ruling 625: no "OWNER" eyebrow repeated on every row; the seat's name is
     // its label. CANARY: print an "owner" label beside the list row's seat.
     expect(row.textContent).not.toMatch(/owner/i);
   });

@@ -27,7 +27,7 @@ export interface CommandHit {
   id: string;
   /** Primary line. */
   label: string;
-  /** A task hit's key, drawn quietly ahead of its title (ruling 621): baked
+  /** A task hit's key, drawn quietly ahead of its title (ruling 625): baked
    *  into the label it was as loud as the title. */
   key?: string;
   /** Secondary line (project name, stage, role…). */

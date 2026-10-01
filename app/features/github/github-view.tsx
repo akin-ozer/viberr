@@ -219,7 +219,7 @@ function PullRequestsPanel({
           {prs.length} linked to tasks
         </span>
       </div>
-      {/* Ruling 621: `gh-prs` scopes this page's own row rules (the one-line
+      {/* Ruling 625: `gh-prs` scopes this page's own row rules (the one-line
           row on a tablet) without touching the review queue's. */}
       <div className="rq-list gh-prs">
         {prs.length === 0 && (
@@ -348,7 +348,7 @@ function BranchesPanel({
                 onClick={() => onOpenTask(row.taskKey)}
               >
                 <span className="live-task">
-                  {/* Ruling 621: a task key is a name, not code. */}
+                  {/* Ruling 625: a task key is a name, not code. */}
                   <span className="key">{row.taskKey}</span>{" "}
                   <span className="ttl">{row.title}</span>
                 </span>
@@ -356,7 +356,7 @@ function BranchesPanel({
                   {/* Interface review 2026-09-24 (colo-12): secondary ink, not
                       the teal OK ink — the Sync pill carries the state, and a
                       branch never compared or not pushed is not "ok". */}
-                  {/* Ruling 621: one line, never broken at every hyphen; a
+                  {/* Ruling 625: one line, never broken at every hyphen; a
                       name longer than its column ends in an ellipsis and the
                       title carries it whole. */}
                   <span className="trace" title={row.branch}>

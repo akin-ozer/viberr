@@ -110,7 +110,7 @@ export function KbPanel({
               {/* The two lines read as one sentence split across them —
                   "…docs agents read" / "read live" — which said "read" twice
                   and left the live-folder promise dangling. One clause each. */}
-              {/* Ruling 621: the store path is code, the rest of the line is
+              {/* Ruling 625: the store path is code, the rest of the line is
                   prose in the body face. */}
               <span className="sub">
                 <code className="mono">store://kb/{kb.dir}/</code> ·{" "}

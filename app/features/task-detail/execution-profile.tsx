@@ -421,7 +421,7 @@ function OperatorRunControl({
   /** The operator-run fetcher's request, if one is in flight. */
   inFlight: RunInFlight;
   /** Task is closed (terminal stage) — the control withdraws to its reason
-   *  (G9, ruling 621). */
+   *  (G9, ruling 625). */
   disabled?: boolean;
   /** F20-5 (R20-1): a non-structural reason the manual run is refused — an open
    *  decision packet pauses coordination. Rendered copy (a `title` never opens
@@ -458,7 +458,7 @@ function OperatorRunControl({
   const busy = inFlight !== null;
   const backendLabel = backendLabelOf(defaultBackend);
   if (disabled) {
-    // Ruling 621 on ruling 37: a closed task WITHDRAWS the operator's run
+    // Ruling 625 on ruling 37: a closed task WITHDRAWS the operator's run
     // control, as the run-an-agent cell beside it does, rather than drawing a
     // dead steer field, a dead when-picker and a dead button (under a backend
     // warning that cannot matter any more). Ruling 177 (pass 36): every door
@@ -1139,7 +1139,7 @@ export function ExecutionProfile({
           <div className="lbl">Operator</div>
           <div className="val op-val">
             <div className="op-id">
-              {/* i-dark #13 (ruling 621): the Operator's one tile, as the
+              {/* i-dark #13 (ruling 625): the Operator's one tile, as the
                   agent-log picker draws it, not a violet specialist's. */}
               <span className="agent-glyph op">
                 <Icon name="shield" />

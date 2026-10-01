@@ -2219,7 +2219,7 @@ describe("F16: the roster tells the truth about backend connections", () => {
     // none to set.
     expect(container.textContent).toContain("Profile → Agent accounts");
     expect(container.textContent).not.toContain("VIBERR_CODEX_USE_CLI_AUTH");
-    // Ruling 621: said once per place. The chip the note names carries no
+    // Ruling 625: said once per place. The chip the note names carries no
     // second badge, the members' count is the runtime line's alone, and the
     // empty-deployments copy neither repeats the refusal nor calls the
     // profile assignable. CANARY: badge the noted chip again.
@@ -2263,13 +2263,13 @@ describe("F16: the roster tells the truth about backend connections", () => {
     // Ruling 127: the hover sentence names the person's own remedy, not a
     // deployment file path — there is no instance credential to point at.
     expect(badge.getAttribute("title")).toContain("Profile → Agent accounts");
-    // Ruling 621: the chips' phrase and the hero's hue, not a vaguer amber
+    // Ruling 625: the chips' phrase and the hero's hue, not a vaguer amber
     // "no runtime"; the hover sentence names the backend.
     expect(badge.textContent).toBe("not connected");
     expect(badge.getAttribute("title")).toContain("You haven't connected Codex");
   });
 
-  it("still badges a second backend the note does not name (ruling 621)", () => {
+  it("still badges a second backend the note does not name (ruling 625)", () => {
     // The note under the runtime row names the FIRST backend only; a profile
     // that also lists Claude, unconnected, keeps that chip's own badge.
     const { container } = render(

@@ -1296,7 +1296,7 @@ function AgentAccountCard({
   return (
     <div className="cred-card">
       <div className="cred-top">
-        {/* Ruling 621: the backend's own mark (Claude's sparkle, Codex's
+        {/* Ruling 625: the backend's own mark (Claude's sparkle, Codex's
             chip), as every other surface draws it; the name beside it is the
             text, so the tile is decorative. */}
         <AgentGlyph backend={backend} decorative />

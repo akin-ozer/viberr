@@ -211,7 +211,7 @@ function ProfileIdentity({
             fact, beside the sign-in fact it belongs with. */}
         <div className="kv-row">
           <span className="k">Email</span>
-          {/* Ruling 621: an address and a sign-in method are not code: the
+          {/* Ruling 625: an address and a sign-in method are not code: the
               body face, at the value's regular weight. */}
           <span className="v light">{user.email}</span>
         </div>

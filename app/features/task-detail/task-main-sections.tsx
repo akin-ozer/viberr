@@ -303,7 +303,7 @@ export function TaskHero({
         )}
         <span className="hero-file">
           <Icon name="file" />
-          {/* Ruling 621: one box per segment, its slash included, so a
+          {/* Ruling 625: one box per segment, its slash included, so a
               narrow line breaks after a slash and never inside the key
               ("tasks/VIB-" | "151/task.md"). */}
           <span>

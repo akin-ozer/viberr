@@ -350,7 +350,7 @@ describe("the controller dock (ruling 121)", () => {
     );
     const note = panel.querySelector(".ctl-composer [data-not-connected]");
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
-    // Ruling 621: the note is the one statement; the box and the empty state
+    // Ruling 625: the note is the one statement; the box and the empty state
     // do not add a placeholder or examples nobody here could send.
     // CANARY: restore the not-connected placeholder, or the examples.
     expect(composer.hasAttribute("placeholder")).toBe(false);

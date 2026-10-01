@@ -689,7 +689,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
     });
     // Fails on main: the Accept button and the run controls stayed live.
     expect(findButton(container, "Accept completion")).toBeUndefined();
-    // Ruling 621: the operator's run control is withdrawn, not disabled.
+    // Ruling 625: the operator's run control is withdrawn, not disabled.
     expect(findButton(container, "Run operator")).toBeUndefined();
     expect(queryByText("Task closed. Reopen it to run the operator.")).toBeTruthy();
     // The run-agent control withdraws itself with the closed copy rather than

@@ -156,7 +156,7 @@ describe("ReviewQueuePage", () => {
     const { container } = renderQueue([degraded], []);
     const row = container.querySelector(".rq-row")!;
     expect(row.textContent).toContain("degraded continuity");
-    // Ruling 621: the chip, not a risk pill. CANARY: render the Pill again.
+    // Ruling 625: the chip, not a risk pill. CANARY: render the Pill again.
     expect(row.querySelector(".rq-meta .chip.pb")!.textContent).toContain("degraded continuity");
   });
 

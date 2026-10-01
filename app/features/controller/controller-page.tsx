@@ -176,7 +176,7 @@ export function ControllerPage({
       data-screen-label="Controller"
     >
       <header className="ctl-head">
-        {/* Ruling 621: inside a project the head is its rail siblings' head
+        {/* Ruling 625: inside a project the head is its rail siblings' head
             (Board, Agents, Policy: the title at the page's left edge, the
             rail's own glyph names the page). The standalone page has no rail,
             so it keeps its mark. */}
@@ -192,7 +192,7 @@ export function ControllerPage({
                 account, so this pill is about the person reading it. Another
                 member with Claude connected converses normally while this one
                 cannot, which the old instance-wide wording could not express.
-                Ruling 621: beside the noun it describes, as on Agents. */}
+                Ruling 625: beside the noun it describes, as on Agents. */}
             {!view.available && (
               <Pill kind="risk" sm>
                 Claude not connected
@@ -578,7 +578,7 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
         </p>
       )}
       {view.conversations.length === 0 ? (
-        // Ruling 621: no direction; the composer is beside the rail on a wide
+        // Ruling 625: no direction; the composer is beside the rail on a wide
         // page and above it on a narrow one.
         <p className="empty sm">No conversations yet. Your first message starts one.</p>
       ) : (
@@ -766,7 +766,7 @@ function Transcript({
             resources, agents. Everything runs with your own permissions, and
             refusals say why.
           </p>
-          {/* Ruling 314 as the dock has it: clicking one SENDS it. Ruling 621:
+          {/* Ruling 314 as the dock has it: clicking one SENDS it. Ruling 625:
               not while the viewer cannot send at all; three suggestions at
               half opacity were a fourth way of saying "not connected". */}
           {examples.length > 0 && onExample && view.available && (
@@ -988,7 +988,7 @@ function Composer({
             ? view.available
               ? "Read-only: only the conversation's owner can talk in it."
               : // Ruling 127's sentence is the note above the box (U39-10);
-                // ruling 621: the box does not say it a third time.
+                // ruling 625: the box does not say it a third time.
                 undefined
             : "Ask the controller, or tell it what to do…"
         }

@@ -136,7 +136,7 @@ function RQRow({
           neither. */}
       <div className="rq-main">
         <div className="ttl">{t.title}</div>
-        {/* Ruling 621: two lines, clamped; the whole sentence on hover. */}
+        {/* Ruling 625: two lines, clamped; the whole sentence on hover. */}
         <div className="sub" title={sub}>
           {sub}
         </div>
@@ -179,7 +179,7 @@ function RQRow({
             PRs into CONFLICTING inside a minute, all on the same two shared
             files, and a person discovered each one by pressing Accept. */}
         <OverlapChip overlaps={t.pr?.overlaps ?? []} />
-        {/* Ruling 621: a failing (or bypassed) validation is the board card's
+        {/* Ruling 625: a failing (or bypassed) validation is the board card's
             problem chip, outlined in red ink; the quiet values stay the quiet
             pill, the acceptance boundary's "awaiting verdict" among them. */}
         {validationQuiet(t.validation) ? (
@@ -229,7 +229,7 @@ function RQRow({
         )}
         {/* writ-3: the board's test (card-status.ts): human-waiting AND
             `waitingOnMe`. `ready` already implies both. */}
-        {/* Ruling 621: the board card's status chip (`.chip.st`), so a task
+        {/* Ruling 625: the board card's status chip (`.chip.st`), so a task
             reads the same in the queue as on the board one click away. */}
         {ready || (t.waiting === "human" && waitingOnMe) ? (
           <span className="chip st you">
