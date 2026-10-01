@@ -5782,6 +5782,13 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   .gate-table .gate-mark svg.ico { width: 16px; height: 16px; }
   a.gate-log { min-width: 24px; justify-content: center; padding: .25rem; }
   .gate-log-word { display: none; }
+  /* Ruling 614: the pager's ends keep their chevrons alone (their names stay
+     "Previous page" and "Next page") and its squares narrow to 28px, so both
+     ends and seven page slots fit a phone's 295px modal column. One class more
+     than the base rules, which the sheet declares later. */
+  .pager-word { display: none; }
+  .pager .pager-list { gap: .125rem; }
+  .pager .pager-btn, .pager .pager-gap { min-width: 1.75rem; }
 }
 
 /* Neutralize anchor defaults on link-shaped controls. */
@@ -9312,3 +9319,62 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .dep-opt-hint { flex: none; font-size: .69rem; color: var(--faint); white-space: nowrap; }
 .dep-opt[aria-disabled="true"] { cursor: default; }
 .dep-opt[aria-disabled="true"] > * { color: var(--placeholder); }
+
+/* ---------- appended: ruling 614, a profile's custom stages by project ---------- */
+/* The global profile editor's eligible stages read as two groups: the default
+   workflow's chips, then each live project's own stages under its name, three
+   projects to a page. A project is a row of a divided list in a box (the setup
+   checklist's rows, at the radius a nested box takes): its name, its key in the
+   code face and, once the profile names any of its stages, how many, over its
+   chips. Stored ids no board has sit in a dashed box of their own above them,
+   on every page, because no project owns them. */
+.elig-groups { display: flex; flex-direction: column; gap: 1rem; }
+.elig-group { display: flex; flex-direction: column; gap: .5rem; }
+.elig-head { display: flex; align-items: baseline; gap: .5rem; }
+.elig-count { margin-left: auto; font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.elig-note { margin: -.25rem 0 0; font-size: .75rem; line-height: 1.5; color: var(--faint); }
+.elig-projs { border: 1px solid var(--hairline); border-radius: var(--radius-box); }
+.elig-stray { border: 1px dashed var(--border); border-radius: var(--radius-box); }
+.elig-proj { display: flex; flex-direction: column; gap: .5rem; padding: .75rem; }
+.elig-proj + .elig-proj { border-top: 1px solid var(--hairline); }
+.elig-proj-head { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+.elig-proj-name { min-width: 0; overflow-wrap: anywhere; font-size: .88rem; font-weight: 600; color: var(--fg); }
+.elig-proj-key {
+  flex: none; padding: 0 .375rem; border-radius: var(--radius-small);
+  background: var(--tint-well); font-family: var(--font-mono); font-size: .69rem; color: var(--muted);
+}
+.elig-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.elig-range { font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* The pager: shadcn's Pagination in the sheet's terms. Ghost squares take the
+   hover fill; the current page is outlined in the control edge, so it reads
+   without its fill (colo-1); the ends carry the set's chevron, the glyph side
+   the text side less 2px (ruling 459), and dim at the house step when no page
+   lies past them. */
+.pager { display: flex; margin-left: auto; }
+.pager-list { display: flex; align-items: center; gap: .25rem; margin: 0; padding: 0; list-style: none; }
+.pager-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .25rem;
+  min-width: 2rem; height: 2rem; padding: 0 .5rem;
+  border: 1px solid transparent; border-radius: var(--radius-button); color: var(--muted);
+  font-family: var(--font-display); font-size: .75rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: background-color .14s ease, color .14s ease, transform .15s var(--ease-out);
+}
+.pager-btn:hover:not([aria-disabled="true"]) { background: var(--tint-hover); color: var(--fg); }
+.pager-btn:active:not([aria-disabled="true"]) { transform: scale(.96); }
+.pager-btn[aria-current="page"] { border-color: var(--border-control); background: var(--surface); color: var(--fg); }
+.pager-btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.pager-btn .ico { width: 14px; height: 14px; }
+.pager-step .ico { stroke-width: 2; }
+.pager-step:has(> .ico:first-child) { padding-left: .375rem; }
+.pager-step:has(> .ico:last-child) { padding-right: .375rem; }
+.pager-back { transform: rotate(180deg); }
+/* The gap is a typed ellipsis, which sits on the baseline: lifted to the
+   middle of the numbers beside it, as shadcn's centred dots are. */
+.pager-gap {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2rem; height: 2rem; padding-bottom: .375rem;
+  font-size: .75rem; color: var(--placeholder);
+}
+@media (forced-colors: active) {
+  .pager-btn[aria-current="page"] { background: SelectedItem; color: SelectedItemText; }
+}

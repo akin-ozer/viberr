@@ -792,5 +792,22 @@ base`, `Edit MCP server`, `GitHub sign-in`).
     this project's copy. Changes apply from the next run."
   - (h) In Instance settings → Agent resources, a global profile's stored stage the
     default workflow lacks reads "build (not in the default workflow)" on the row, and the
-    editor shows it as a pressed chip "build" with the note "not in the default workflow"
-    that can be pressed off (and back on) before the save.
+    editor shows it as a pressed chip that can be pressed off (and back on) before the
+    save: under its project's name in Custom stages, or, when no live board has it, as
+    "build" in the "On no project's board" row (ruling 614).
+- **The global profile editor offers each project's own stages** (ruling 614, pinned by
+  `org-settings-page.test.tsx` "ruling 614", `pagination.test.tsx` and
+  `org-view.server.test.ts`): Default eligible stages reads in two groups, "Default
+  workflow" and "Custom stages" ("N selected" once the profile names any; "From each
+  project's own board. A profile names stages by id, so a stage counts on every board
+  that has it."; "No project's board adds a stage of its own." when none does). Each live
+  project whose board has stages outside the default workflow is a row named for the
+  project, with its task key, "N selected" once the profile names any of its stages, and
+  that board's own stage chips in its names and colours, never its last stage. An id two
+  boards share is pressed on both. The rows the profile names come first, then the rest
+  by name, ordered at the open. Past three projects the rows page behind the "Custom stage
+  pages" control, in shadcn's Pagination shape: "Previous", the page numbers with "…" for
+  a skipped run (at most seven slots), "Next", the current page outlined, an end with no
+  page past it aria-disabled, and "Projects 4 to 6 of 7" beside it. Below 560px the ends show
+  their chevrons alone. A stored stage no live board has sits above the rows in the dashed
+  "On no project's board" row, on every page.

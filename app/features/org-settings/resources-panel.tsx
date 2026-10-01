@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRevalidator, useSearchParams } from "react-router";
 import { StoreBrowser } from "~/features/kb-browser/store-browser";
 import type { GagentView } from "~/server/org/gagents.server";
+import type { ProjectCustomStages } from "~/server/org/org-view.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { countLabel } from "~/shared/text/plural";
@@ -77,6 +78,7 @@ export function ResourcesPanel({
   projectGrants = { kbs: {}, mcps: {}, skills: {} },
   templateGrants = { kbs: {}, mcps: {}, skills: {} },
   stages,
+  projectStages,
 }: {
   kbs: KbView[];
   mcps: McpView[];
@@ -95,6 +97,8 @@ export function ResourcesPanel({
     skills: Record<string, number>;
   };
   stages: StageDef[];
+  /** Ruling 614: the agent editor's Custom stages, by project. */
+  projectStages: ProjectCustomStages[];
 }) {
   const [modal, setModal] = useState<ResourceModal | null>(null);
   // Ruling 483: `?kb=<dir>&doc=<path>` arrives from a knowledge-base proposal's
@@ -298,6 +302,7 @@ export function ResourcesPanel({
           key={modal.item?.id ?? "new"}
           initial={modal.item}
           stages={stages}
+          projectStages={projectStages}
           kbs={kbs}
           mcps={mcps}
           skills={skills}

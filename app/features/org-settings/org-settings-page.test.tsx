@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, getNodeText, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, getNodeText, render, waitFor, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
@@ -18,6 +18,7 @@ import { OrgSettingsPage } from "./org-settings-page";
 import type {
   AuthProviderView,
   OrgSettingsView,
+  ProjectCustomStages,
 } from "~/server/org/org-view.server";
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
@@ -586,6 +587,33 @@ const STAGES: StageDef[] = [
   { id: "done", name: "Done", color: "green" },
 ];
 
+/** Ruling 614: live projects' own stages, as the loader serves them. */
+const BILLING_STAGES: ProjectCustomStages = {
+  slug: "billing-service",
+  name: "Billing Service",
+  prefix: "BIL",
+  stages: [
+    { id: "todo", name: "To do", color: "slate" },
+    { id: "doing", name: "In progress", color: "violet" },
+  ],
+};
+const AKINOZER_STAGES: ProjectCustomStages = {
+  slug: "akinozer-com",
+  name: "akinozer.com",
+  prefix: "AKN",
+  stages: [{ id: "build", name: "Build", color: "amber" }],
+};
+/** Project `n` with the one stage `s<n>`, "Stage <n>". */
+const projectRow = (n: number): ProjectCustomStages => ({
+  slug: `project-${n}`,
+  name: `Project ${n}`,
+  prefix: `P${n}`,
+  stages: [{ id: `s${n}`, name: `Stage ${n}`, color: "teal" }],
+});
+/** The project names of the Custom stages rows on screen, top to bottom. */
+const rowNames = () =>
+  [...document.querySelectorAll(".elig-projs .elig-proj-name")].map((n) => n.textContent);
+
 /** The template-grant counts the LOADER supplies, matching what GAGENTS
  *  declares. They are counted server-side over the profile files now, because
  *  `gagents` is the specialist CRUD list and hides the controller and operator
@@ -605,6 +633,7 @@ function renderResources() {
       gagents={GAGENTS}
       templateGrants={TEMPLATE_GRANTS}
       stages={STAGES}
+      projectStages={[]}
     />,
   );
 }
@@ -648,7 +677,7 @@ describe("ResourcesPanel", () => {
       },
     ];
     const { container } = renderPanel(
-      <ResourcesPanel kbs={[]} mcps={failed} skills={[]} gagents={[]} stages={STAGES} />,
+      <ResourcesPanel kbs={[]} mcps={failed} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
     );
     const err = container.querySelector(".rsrc-err")!;
     expect(err).toBeTruthy();
@@ -674,7 +703,7 @@ describe("ResourcesPanel", () => {
       },
     ];
     const { container } = renderPanel(
-      <ResourcesPanel kbs={[]} mcps={warming} skills={[]} gagents={[]} stages={STAGES} />,
+      <ResourcesPanel kbs={[]} mcps={warming} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
     );
     // R20-4 (N20-2): softened to one copy for both the evidence and heuristic
     // warm-up bases — the reader can act on neither distinction.
@@ -689,7 +718,7 @@ describe("ResourcesPanel", () => {
   it("R19-17: a HEALTHY server shows no error line", () => {
     // A stale reason under a green dot would be worse than none.
     const { container } = renderPanel(
-      <ResourcesPanel kbs={[]} mcps={MCPS.filter((m) => m.up === true)} skills={[]} gagents={[]} stages={STAGES} />,
+      <ResourcesPanel kbs={[]} mcps={MCPS.filter((m) => m.up === true)} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
     );
     expect(container.querySelector(".rsrc-err")).toBeNull();
   });
@@ -711,7 +740,7 @@ describe("ResourcesPanel", () => {
       },
     ];
     const { getByText, queryByText } = renderPanel(
-      <ResourcesPanel kbs={[]} mcps={brokenMcps} skills={[]} gagents={[]} stages={STAGES} />,
+      <ResourcesPanel kbs={[]} mcps={brokenMcps} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
     );
     expect(getByText(/auth: unreadable/)).toBeTruthy();
     expect(queryByText(/auth: configured/)).toBeNull();
@@ -731,6 +760,7 @@ describe("ResourcesPanel", () => {
           { ...GAGENTS[0]!, id: "many", name: "Many", skills: ["terraform-review"], mcps: ["github-mcp"], kbs: [], used: 3 },
         ]}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     expect(getByText(/1 context resource · used in 1 project$/)).toBeTruthy();
@@ -761,6 +791,7 @@ describe("ResourcesPanel", () => {
           },
         ]}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     expect(getByText(/0 context resources · not deployed$/)).toBeTruthy();
@@ -773,7 +804,7 @@ describe("ResourcesPanel", () => {
         hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
     ];
     const { container } = renderPanel(
-      <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} />,
+      <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
     );
     // The dot is amber (stale), NOT the fresh-green `up`.
     const dot = container.querySelector(".stat-dot")!;
@@ -845,7 +876,9 @@ describe("ResourcesPanel", () => {
    * akinozer.com's own `build` stage. The row printed the bare id, and the
    * editor offered only the default workflow's chips, so Content Writer opened
    * with nothing pressed and `build` could be neither seen nor removed while
-   * every save kept it. Canary: drop the `storedOnlyStages` chips.
+   * every save kept it. Ruling 614: a stage a live board has is offered in that
+   * project's row, so the stored-ids row holds only what no board has. Canary:
+   * drop the `storedOnlyStages` chips.
    */
   it("ruling 479(h): a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
     const outside: GagentView[] = [
@@ -859,13 +892,19 @@ describe("ResourcesPanel", () => {
         gagents={outside}
         templateGrants={TEMPLATE_GRANTS}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     expect(getByText(/Claude · Ready · build \(not in the default workflow\) · /)).toBeTruthy();
     fireEvent.click(getByLabelText("Edit Design Engineer"));
-    const chip = getByRole("button", { name: "build not in the default workflow" });
+    const chip = within(getByRole("group", { name: "On no project's board" })).getByRole(
+      "button",
+      { name: "build" },
+    );
     expect(chip.getAttribute("aria-pressed")).toBe("true");
-    expect(chip.getAttribute("title")).toContain("the default workflow does not offer");
+    expect(chip.getAttribute("title")).toContain(
+      "neither the default workflow nor any project's own stages offer",
+    );
     // Removable, and still on screen to be pressed back on before the save.
     fireEvent.click(chip);
     expect(chip.getAttribute("aria-pressed")).toBe("false");
@@ -875,6 +914,99 @@ describe("ResourcesPanel", () => {
         intent: "agent-save",
         profileId: "design-engineer",
         stages: JSON.stringify(["ready"]),
+      }),
+    );
+  });
+
+  /**
+   * Ruling 614 (2026-10-01): a project's own stages were offered only
+   * once a profile already stored one, as a pressed chip after the defaults.
+   * Each live project's stages are offered under its name now, and the
+   * projects the profile already names lead. Canary: render the Custom stages
+   * rows from `projectStages` in the loader's order, or drop `stageChip` from
+   * a row.
+   */
+  it("ruling 614: a project's own stages are offered in its row, and a press posts the stage id", async () => {
+    const outside: GagentView[] = [
+      { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
+    ];
+    const { getByText, getByLabelText, getByRole, queryByRole } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={outside}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+        projectStages={[BILLING_STAGES, AKINOZER_STAGES]}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Design Engineer"));
+    // `build` is akinozer.com's: pressed in that project's row, which leads,
+    // and not in a stored-ids row.
+    expect(rowNames()).toEqual(["akinozer.com", "Billing Service"]);
+    const build = within(getByRole("group", { name: "akinozer.com" })).getByRole("button", {
+      name: "Build",
+    });
+    expect(build.getAttribute("aria-pressed")).toBe("true");
+    expect(queryByRole("group", { name: "On no project's board" })).toBeNull();
+    const toDo = within(getByRole("group", { name: "Billing Service" })).getByRole("button", {
+      name: "To do",
+    });
+    expect(toDo.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toDo);
+    expect(getByText("2 selected")).toBeTruthy();
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "agent-save",
+        profileId: "design-engineer",
+        stages: JSON.stringify(["ready", "build", "todo"]),
+      }),
+    );
+  });
+
+  /**
+   * Ruling 614: the rows page three projects at a time behind the pager, and
+   * the order is taken once, at the open, so a press never moves a row to
+   * another page. Canary: page by 4, or reorder `projects` on every render.
+   */
+  it("ruling 614: Custom stages page three projects at a time, and a press on one page keeps the others'", async () => {
+    const seven = Array.from({ length: 7 }, (_, i) => projectRow(i + 1));
+    const sixth: GagentView[] = [{ ...GAGENTS[1]!, id: "sixth", name: "Sixth", stages: ["s6"] }];
+    const { getByText, getByLabelText, getByRole } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={sixth}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+        projectStages={seven}
+      />,
+    );
+    fireEvent.click(getByLabelText("Edit Sixth"));
+    expect(rowNames()).toEqual(["Project 6", "Project 1", "Project 2"]);
+    expect(getByText("Projects 1 to 3 of 7")).toBeTruthy();
+    const pager = getByRole("navigation", { name: "Custom stage pages" });
+    // Pressed off and on again, the row stays where it opened.
+    const s6 = getByRole("button", { name: "Stage 6" });
+    fireEvent.click(s6);
+    fireEvent.click(s6);
+    expect(rowNames()).toEqual(["Project 6", "Project 1", "Project 2"]);
+    fireEvent.click(within(pager).getByRole("button", { name: "Next page" }));
+    expect(rowNames()).toEqual(["Project 3", "Project 4", "Project 5"]);
+    expect(getByText("Projects 4 to 6 of 7")).toBeTruthy();
+    fireEvent.click(within(pager).getByRole("button", { name: "Page 3" }));
+    expect(rowNames()).toEqual(["Project 7"]);
+    expect(getByText("Project 7 of 7")).toBeTruthy();
+    fireEvent.click(getByRole("button", { name: "Stage 7" }));
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "agent-save",
+        profileId: "sixth",
+        stages: JSON.stringify(["s6", "s7"]),
       }),
     );
   });
@@ -924,6 +1056,7 @@ describe("ResourcesPanel", () => {
         gagents={legacy}
         templateGrants={TEMPLATE_GRANTS}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Edit Spare"));
@@ -975,6 +1108,7 @@ describe("ResourcesPanel", () => {
         skills={[]}
         gagents={[]}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     // The old row said "3 docs" — a KB of PDFs read as healthy and injected
@@ -991,7 +1125,7 @@ describe("ResourcesPanel", () => {
       { ...KBS[0]!, tree: [], fileCount: 0, injectableCount: 0, folderExists: false },
     ];
     const { getByText, queryByText } = renderPanel(
-      <ResourcesPanel kbs={missing} mcps={[]} skills={[]} gagents={[]} stages={STAGES} />,
+      <ResourcesPanel kbs={missing} mcps={[]} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
     );
     expect(getByText(/folder missing: no docs reach a granted agent/)).toBeTruthy();
     // It must NOT read like a normal empty KB.
@@ -1031,6 +1165,7 @@ describe("ResourcesPanel", () => {
         gagents={GAGENTS}
         projectGrants={{ kbs: { "architecture-notes": 2 }, mcps: {}, skills: {} }}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Delete Architecture notes"));
@@ -1058,6 +1193,7 @@ describe("ResourcesPanel", () => {
           skills: {},
         }}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Delete Architecture notes"));
@@ -1078,6 +1214,7 @@ describe("ResourcesPanel", () => {
         projectGrants={{ kbs: {}, mcps: { "github-mcp": 3 }, skills: {} }}
         templateGrants={TEMPLATE_GRANTS}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Remove github-mcp"));
@@ -1131,6 +1268,7 @@ describe("ResourcesPanel", () => {
         skills={SKILLS}
         gagents={orphaned}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Edit Developer"));
@@ -1166,6 +1304,7 @@ describe("ResourcesPanel", () => {
         skills={SKILLS}
         gagents={orphaned}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Edit Developer"));
@@ -1203,6 +1342,7 @@ describe("ResourcesPanel", () => {
         skills={SKILLS}
         gagents={orphaned}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     fireEvent.click(getByLabelText("Edit Spare"));
@@ -1302,7 +1442,7 @@ describe("ConnectionsPanel — scope evidence", () => {
 describe("SkillModal — one entry point, two content modes", () => {
   function openNewSkill() {
     const utils = renderPanel(
-      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} projectStages={[]} />,
     );
     const skillsPanel = [...document.querySelectorAll(".panel")].find(
       (p) => p.querySelector("h2")?.textContent === "Skills",
@@ -1413,6 +1553,7 @@ const BASE_VIEW: OrgSettingsView = {
   projectGrants: { kbs: {}, mcps: {}, skills: {} },
   templateGrants: { kbs: {}, mcps: {}, skills: {} },
   stages: STAGES,
+  projectStages: [],
   providers: { github: false, google: false },
   authProviders: AUTH_PROVIDERS,
   storage: STORAGE,
@@ -2009,7 +2150,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
 describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
   function openNewKb() {
     const utils = renderPanel(
-      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} projectStages={[]} />,
     );
     const kbPanel = [...document.querySelectorAll(".panel")].find(
       (p) => p.querySelector("h2")?.textContent === "Knowledge bases",
@@ -2079,7 +2220,7 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
 
   it("edit mode never offers the mode radios (content already exists)", () => {
     const utils = renderPanel(
-      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
+      <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} projectStages={[]} />,
     );
     const kbPanel = [...document.querySelectorAll(".panel")].find(
       (p) => p.querySelector("h2")?.textContent === "Knowledge bases",
@@ -2118,6 +2259,7 @@ describe("MCP rows state where a server stands on write tools (ruling 220)", () 
         gagents={GAGENTS}
         templateGrants={TEMPLATE_GRANTS}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
     // The posture rides the row's meta line, beside the transport and target —
@@ -2178,6 +2320,7 @@ describe("McpModal — write tools (ruling 176)", () => {
         gagents={GAGENTS}
         templateGrants={TEMPLATE_GRANTS}
         stages={STAGES}
+        projectStages={[]}
       />,
     );
   }
@@ -2263,7 +2406,7 @@ describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483
         path: "/org/settings",
         Component: () => (
           <ToastProvider>
-            <ResourcesPanel kbs={KBS} mcps={[]} skills={[]} gagents={[]} stages={STAGES} />
+            <ResourcesPanel kbs={KBS} mcps={[]} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />
           </ToastProvider>
         ),
         action: async ({ request }) => {

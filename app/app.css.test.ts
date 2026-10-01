@@ -5279,6 +5279,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".sec-h > .ico": "h2",
       ".flabel .lbl-lock": ".flabel",
       ".ctx-lbl .lbl-lock": ".ctx-lbl",
+      ".pager-step .ico": ".pager-btn",
     } satisfies Record<string, string>;
     const weight = (label: string) => {
       const w = declsFor(plain, label).get("font-weight");
