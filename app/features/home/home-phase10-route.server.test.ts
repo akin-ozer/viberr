@@ -13,6 +13,8 @@ import { listAuditEvents } from "../../../test-support/audit-log";
  * - Home `rebuild-projections` intent: admin-only full drop + rebuild with
  *   identical counts and an audit row.
  * - /resources/health: `{ ok, projections: { projects, tasks }, watcher }`.
+ * - Home `hide-setup` intent (ruling 614): the setup checklist closed for the
+ *   sign-in that closed it.
  */
 
 let app: AppTestContext;
@@ -49,16 +51,26 @@ async function runHomeLoader(cookie: string) {
 }
 
 /** Every branch of the home action: a bare payload on success, a react-router
- *  `data(body, init)` wrapper on every refusal. */
+ *  `data(body, init)` wrapper on every refusal and on the setup checklist's
+ *  close, whose answer carries a cookie. */
 type HomeActionResult = Awaited<
   ReturnType<typeof import("~/routes/_index").action>
 >;
+
+/** A signed-in session, as `app.cookieFor` makes it. */
+type Session = Awaited<ReturnType<AppTestContext["cookieFor"]>>;
 
 async function postHome(
   userId: string,
   fields: Record<string, string>,
 ): Promise<HomeActionResult> {
-  const { cookie, sessionId } = await app.cookieFor(userId);
+  return postHomeAs(await app.cookieFor(userId), fields);
+}
+
+async function postHomeAs(
+  { cookie, sessionId }: Session,
+  fields: Record<string, string>,
+): Promise<HomeActionResult> {
   const csrf = await app.csrfFor(sessionId);
   const body = new URLSearchParams({ _csrf: csrf, ...fields });
   const { action } = await import("~/routes/_index");
@@ -74,14 +86,27 @@ async function postHome(
   );
 }
 
-/** A refusal carries the status in the `data(body, init)` wrapper; a success
- *  never has one, so anything unwrapped here took a branch the caller did not
- *  expect and should say so rather than read `undefined` off the wrong shape. */
+/** A refusal carries the status in the `data(body, init)` wrapper and says
+ *  `ok: false`; anything else took a branch the caller did not expect and
+ *  should say so rather than read `undefined` off the wrong shape. */
 function refusal(result: HomeActionResult) {
-  if (!("init" in result)) {
+  if (!("init" in result) || result.data.ok) {
     throw new Error(`expected a refusal, got ${JSON.stringify(result)}`);
   }
-  return result;
+  return { init: result.init, data: result.data };
+}
+
+/** The setup checklist's close answers `ok` in the wrapper that sets its
+ *  cookie (ruling 614); this is that cookie's Set-Cookie value. */
+function closeCookie(result: HomeActionResult): string {
+  const cookie =
+    "init" in result && result.data.ok
+      ? new Headers(result.init?.headers).get("Set-Cookie")
+      : null;
+  if (!cookie) {
+    throw new Error(`expected the close's cookie, got ${JSON.stringify(result)}`);
+  }
+  return cookie;
 }
 
 /** The rescan/rebuild intents are the only branches answering a projection
@@ -181,6 +206,51 @@ describe("rebuild-projections intent (Phase 10 recovery)", () => {
     expect(projectionRun(await postHome(ardaId, { intent: "rescan" })).ok).toBe(true);
     const rescanAgain = refusal(await postHome(ardaId, { intent: "rescan" }));
     expect(rescanAgain.init?.status).toBe(429);
+  });
+});
+
+/**
+ * Ruling 614: the setup checklist's close hides it for the sign-in that
+ * pressed it, through a cookie that names that sign-in and has no expiry (the
+ * browser drops it with its own session). The demo seed leaves Arda's
+ * checklist open: he holds no Claude or Codex account of his own.
+ */
+describe("hide-setup intent (ruling 614)", () => {
+  it("closes the checklist for this sign-in, and the next sign-in has it back", async () => {
+    const session = await app.cookieFor(ardaId);
+    expect((await runHomeLoader(session.cookie)).setup).not.toBeNull();
+
+    const setCookie = closeCookie(await postHomeAs(session, { intent: "hide-setup" }));
+    // CANARY: give the cookie a Max-Age and the card stays closed after the
+    // browser's session ends.
+    expect(setCookie).not.toMatch(/max-age|expires/i);
+    expect(setCookie).toMatch(/; HttpOnly(;|$)/);
+    const closed = setCookie.split(";")[0]!;
+    expect((await runHomeLoader(`${session.cookie}; ${closed}`)).setup).toBeNull();
+
+    // The same browser, signed in again: the cookie names the old sign-in.
+    // CANARY: read the cookie as a flag, whoever's session it names, and the
+    // next sign-in (the account the checklist asked for, say) finds it closed.
+    const next = await app.cookieFor(ardaId);
+    expect((await runHomeLoader(`${next.cookie}; ${closed}`)).setup).not.toBeNull();
+  });
+
+  it("leaves the checklist on a Home with no project", async () => {
+    const { createUser } = await import("~/server/auth/user-admin.server");
+    const newcomer = await createUser(
+      app.db,
+      { email: "newcomer@viberr.test", name: "Newcomer", role: "member", tempPassword: null },
+      { userId: ardaId, label: "arda" },
+    );
+    const session = await app.cookieFor(newcomer.id);
+    const closed = closeCookie(
+      await postHomeAs(session, { intent: "hide-setup" }),
+    ).split(";")[0]!;
+    // CANARY: drop the project guard from the loader and the card leaves a
+    // Home that has no other way to start a project.
+    const home = await runHomeLoader(`${session.cookie}; ${closed}`);
+    expect(home.projects).toEqual([]);
+    expect(home.setup).not.toBeNull();
   });
 });
 

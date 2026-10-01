@@ -17,6 +17,11 @@ import type { HomeSetupStep } from "./home-query.server";
  * Instance settings with their dialog already open, Claude or Codex on the
  * person's own Agent accounts (ruling 127: the only place either is connected),
  * and the first project in Home's own dialog.
+ *
+ * Ruling 614: the close in the head hides the card for the rest of the
+ * session, and it is back with the next one while a step is still open. It
+ * comes with the first project: on a Home with no project the card is the
+ * page's only way to start one, and the loader keeps it there.
  */
 
 interface StepView {
@@ -31,15 +36,20 @@ interface StepView {
 export function SetupChecklist({
   steps,
   onNewProject,
+  onClose,
 }: {
   steps: HomeSetupStep[];
   onNewProject: () => void;
+  onClose: () => void;
 }) {
   const done = steps.filter((step) => step.state === "done").length;
   const lead = steps.findIndex(
     (step) => step.state !== "done" && step.state !== "blocked",
   );
   const withGithub = steps.some((step) => step.id === "github");
+  const closable = steps.some(
+    (step) => step.id === "project" && step.state === "done",
+  );
   return (
     <section
       className="setup"
@@ -57,6 +67,17 @@ export function SetupChecklist({
             <span key={step.id} className={index < done ? "on" : undefined} />
           ))}
         </span>
+        {closable && (
+          <button
+            type="button"
+            className="icon-btn modal-close"
+            aria-label="Hide for this session"
+            title="Hide for this session"
+            onClick={onClose}
+          >
+            <Icon name="x" />
+          </button>
+        )}
       </div>
       <ol className="setup-steps">
         {steps.map((step, index) => {

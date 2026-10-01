@@ -401,7 +401,9 @@ is the two-second check, and the same URL over `http://` shows the throttle.
   skill, the base profile templates) into a store that lacks them.
 - Home's setup checklist lists what is still missing, until nothing is (ruling 532): for
   an org admin a GitHub connection, an account other than the bootstrap admin, their own
-  Claude or Codex account and the first project; for everyone else the last two.
+  Claude or Codex account and the first project; for everyone else the last two. Once
+  there is a project, its cross hides it until the sign-in or the browser's session ends
+  (ruling 614).
 - Connect an agent backend for yourself on **Profile → Agent accounts** before expecting
   any agent to run (ruling 127). Nothing in `.env` does it, and an instance with nobody
   connected refuses every agent run honestly rather than starting one. See

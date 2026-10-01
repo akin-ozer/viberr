@@ -902,3 +902,72 @@ describe("ruling 532: the setup checklist", () => {
     expect(await findByRole("dialog", { name: /New project/ })).toBeTruthy();
   });
 });
+
+/**
+ * Ruling 614: the checklist's close. It comes with the first project (before
+ * that the card is the empty Home's way to start one), the card goes while
+ * the close is posted, and a refused close brings it back with the reason.
+ */
+describe("ruling 614: closing the setup checklist", () => {
+  const close = { name: "Hide for this session" };
+  const region = { name: "Finish setting up" };
+
+  it("has no close on a Home without a project", () => {
+    const { getByRole } = renderHome({
+      ...baseData([]),
+      setup: [
+        { id: "agents", state: "todo" },
+        { id: "project", state: "todo" },
+      ],
+    });
+    // CANARY: offer the close whatever the project step says, and an empty
+    // Home loses its only New project with the card.
+    expect(within(getByRole("region", region)).queryByRole("button", close)).toBeNull();
+  });
+
+  it("takes the card away while the close is posted, and a refused close brings it back", async () => {
+    const posted: FormData[] = [];
+    let answer: (result: { ok: false; error: string }) => void = () => {};
+    const data: HomePageData = {
+      ...baseData([card()]),
+      setup: [
+        { id: "agents", state: "todo" },
+        { id: "project", state: "done" },
+      ],
+    };
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <HomePage data={data} theme="system" />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          posted.push(await request.formData());
+          return new Promise((resolve) => {
+            answer = resolve;
+          });
+        },
+      },
+    ]);
+    const { container, getByRole, queryByRole, findByRole } = render(
+      <Stub initialEntries={["/"]} />,
+    );
+    fireEvent.click(getByRole("button", close));
+    // CANARY: hide the card only once the answer is in and it stays up while
+    // the close is on its way.
+    await waitFor(() => expect(queryByRole("region", region)).toBeNull());
+    expect(posted[0]?.get("intent")).toBe("hide-setup");
+
+    answer({ ok: false, error: "Your session ended. Sign in again." });
+    // CANARY: keep the card hidden whatever the answer says and a refused
+    // close leaves it gone with nothing said.
+    expect(await findByRole("region", region)).toBeTruthy();
+    await waitFor(() =>
+      expect(container.querySelector('.toast[data-kind="error"]')?.textContent).toBe(
+        "Your session ended. Sign in again.",
+      ),
+    );
+  });
+});
