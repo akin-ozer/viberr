@@ -52,7 +52,7 @@ recently selected (`selected_at`; `ACTIVE_FIRST`). Every selection is stamped pa
 person's latest one on that backend (`selectionStamp`), so two selections in one millisecond
 still rank in the order they happened. Connecting, by a
 hosted sign-in or a pasted key, adds an account and makes it active; switching
-(`switchBackendAccount`, Profile → Agent accounts' **Use this account**) stamps
+(`switchBackendAccount`, Profile → Agent accounts' **Runs use** picker, ruling 616) stamps
 `selected_at` and nothing else, so no vendor process runs and no file moves, and a run
 already going keeps the account it started on. Disconnecting is per account
 (`disconnectBackendAccount`): removing the active one hands runs to the account used

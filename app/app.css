@@ -9320,3 +9320,71 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .dep-opt-hint { flex: none; font-size: .69rem; color: var(--faint); white-space: nowrap; }
 .dep-opt[aria-disabled="true"] { cursor: default; }
 .dep-opt[aria-disabled="true"] > * { color: var(--placeholder); }
+
+/* ---------- appended: ruling 616, the account picker ---------- */
+/* Profile → Agent accounts: the account a backend's runs use is a select
+   (`AccountPicker`), drawn after shadcn's account switcher. The trigger is a
+   field, the date picker's box (the control edge and button radius, blue on
+   hover, focus and while open, the focus wash around it), holding the
+   account's name over its kind, with the run picker's turning caret. The menu
+   wears the run picker's chrome and rows (`.rsel-menu`, `.rsel-item`: the
+   ring, the menu shadow, `menu-in`), hangs from the trigger at its width, and
+   opens upward (`data-side`) where the overlay's scrolling body has no room
+   under it; the script caps its height when neither side has the room, and
+   the sheet caps it at about six accounts. Only the accounts scroll
+   (`.acct-menu-list`): the head and the actions under the rule stay in sight. */
+.acct-pick { position: relative; margin-top: .75rem; }
+.acct-pick > .flabel { display: block; margin-bottom: .375rem; }
+.acct-trigger {
+  display: flex; align-items: center; gap: .5rem; width: 100%;
+  padding: .5rem .5rem .5rem .75rem; text-align: left;
+  border: 1px solid var(--border-control); border-radius: var(--radius-button);
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+.acct-trigger:hover, .acct-trigger[aria-expanded="true"] { border-color: var(--blue); }
+.acct-trigger:focus-visible, .acct-trigger[aria-expanded="true"] { box-shadow: 0 0 0 3px var(--focus-wash); }
+/* An unavailable control's two steps (`.btn`): .7 while its own switch is in
+   flight, .45 while another request of the panel's is. Neither turns blue. */
+.acct-trigger[aria-busy="true"] { opacity: .7; cursor: default; }
+.acct-trigger[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.acct-trigger[aria-busy="true"]:hover, .acct-trigger[aria-disabled="true"]:hover { border-color: var(--border-control); }
+.acct-trigger > .ico { width: 15px; height: 15px; color: var(--placeholder); }
+.acct-trigger > .caret { transform: rotate(90deg); transition: transform .15s var(--ease-out); }
+.acct-trigger[aria-expanded="true"] > .caret { transform: rotate(-90deg); }
+/* An account's name over its line, in the trigger and in each row. A name
+   keeps one line and ends in an ellipsis where the box is narrower than it
+   (ruling 515); its `title` holds the whole of it. */
+.acct-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .125rem; }
+.acct-nm { font-size: .88rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-sub { font-size: .75rem; font-weight: 400; color: var(--faint); }
+.acct-trigger .acct-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsel-menu.acct-menu {
+  left: 0; right: 0; top: calc(100% + 4px); min-width: 0;
+  display: flex; flex-direction: column; max-height: 26rem;
+  transform-origin: top center;
+}
+.rsel-menu.acct-menu[data-side="top"] { top: auto; bottom: calc(100% + 4px); transform-origin: bottom center; animation-name: menu-in-up; }
+.acct-menu > :not(.acct-menu-list) { flex: none; }
+.acct-menu-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; padding: .375rem .5rem .25rem; }
+.acct-menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.acct-menu [aria-checked="true"] .acct-nm { font-weight: 700; }
+/* The stage menu's check (`.sm-check`), for the same reason: it marks the
+   checked row, which `aria-checked` and the row's "in use" also say. */
+.acct-menu .acct-check { width: 14px; height: 14px; color: var(--blue); }
+/* An account the store will not switch to (its sign-in file is gone) reads
+   dimmed and takes no press, as the Blocked by picker's refused rows do, and
+   so does Add another at the ceiling; the line under each says why. */
+.acct-menu [aria-disabled="true"] { cursor: default; }
+.acct-menu [aria-disabled="true"]:hover { background: none; }
+.acct-menu [aria-disabled="true"] .acct-nm, .acct-menu .menu-item[aria-disabled="true"] { color: var(--placeholder); }
+/* The ring sits inside the row: the menu scrolls, and a ring outside the row
+   would be cut at the menu's edges. */
+.acct-menu [role^="menuitem"]:focus-visible { outline-offset: -2px; }
+/* The other accounts' management, opened from the menu, heads its list with
+   its Done. Both groups the menu opens take the focus by script, and a region
+   focused by script paints no ring around itself (P16-UI-01). */
+.acct-list-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.acct-list:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rsel-menu.acct-menu, .rsel-menu.acct-menu[data-side="top"] { animation: fade-in .12s ease; }
+}
