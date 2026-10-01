@@ -161,6 +161,68 @@ describe("setTaskDependencies", () => {
     expect(kept.blockedBy).toEqual(["VIB-5", "VIB-1"]);
   });
 
+  it("ruling 620: a person's edit that leaves only done entries releases the task in the same write; the operator's waits for the sweep", async () => {
+    // Live on aws-cost-calculator the controller took AWSC-75 off two hold-outs
+    // that also waited on the done AWSC-73 and AWSC-74; they read blocked
+    // until the minute sweep. CANARY: drop the `satisfied` release arm (the
+    // list stays and no release note lands); release for the operator too.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    for (const key of ["VIB-8", "VIB-9"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, {
+          stage: "impl",
+          waiting: "none",
+          readiness: "blocked",
+          heldAtStage: "impl",
+          blockedBy: ["VIB-2", "VIB-5"],
+          ownerUserId: store.users.arda.id,
+        }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const runOperator = runOperatorStub();
+    const person = await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: ["VIB-2"] },
+      actorOf(store.users.murat),
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+    );
+    expect(person).toMatchObject({ changed: true, blockedBy: ["VIB-2"], removed: ["VIB-5"], satisfied: true, released: true });
+    const parsed = file(store, "VIB-8");
+    expect(parsed.frontmatter.blockedBy).toEqual([]);
+    expect(parsed.frontmatter.heldAtStage).toBeNull();
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    const [release, edit] = parsed.timeline;
+    expect(release!.title).toBe("Dependencies released");
+    expect(release!.text).toContain("everything this task waited on is done (VIB-2)");
+    expect(edit!.title).toBe("Dependencies updated");
+    expect(edit!.text).toBe("Waits on VIB-2 (removed VIB-5). Every entry is done, so nothing holds it.");
+    await eventually(() =>
+      expect(runOperator.mock.calls.some((c) => c[1].taskKey === "VIB-8" && c[1].trigger === "dependencies-released")).toBe(true),
+    );
+
+    const operator = await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-9", blockedBy: ["VIB-2"] },
+      { userId: "operator", label: "operator" },
+      { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator } },
+    );
+    expect(operator).toMatchObject({ changed: true, satisfied: true, released: false });
+    expect(file(store, "VIB-9").frontmatter.blockedBy).toEqual(["VIB-2"]);
+    expect(await releaseDependents(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug)).toEqual(["VIB-9"]);
+
+    // A list with an unfinished entry still holds, and says so.
+    const held = await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-9", blockedBy: ["VIB-5"] },
+      actorOf(store.users.murat),
+      { dataRoot: store.dataRoot, deps: { runOperator } },
+    );
+    expect(held).toMatchObject({ satisfied: false, released: false });
+    expect(file(store, "VIB-9").timeline[0]!.text).toBe("Waits on VIB-5 (added VIB-5). Held until every entry is done; Viberr releases it then.");
+  });
+
   it("keeps waiting when a packet or a running agent still owes something; refuses an archived task and a viewer", async () => {
     const store = setupTestStore(ctx);
     await seed(store);

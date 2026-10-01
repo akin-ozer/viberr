@@ -515,6 +515,29 @@ describe("operatorSetDependencies (ruling 131(b))", () => {
     expect(denied.outcome).toBe("denied");
     expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
   });
+
+  it("ruling 620: a list left with only done entries says the sweep releases it, not that Viberr holds it", async () => {
+    // CANARY: keep the held sentence for a satisfied list.
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
+    seedTask("impl");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-10", { stage: "done" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const { operatorSetDependencies } = await import("./operator-actions.server");
+    const call = (blockedBy: string[]) =>
+      operatorSetDependencies(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy }, authority("supervised"));
+    expect((await call(["VIB-9"])).message).toBe("Recorded: VIB-1 waits on VIB-9. Viberr holds it and releases it when every entry is done.");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "done" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-11", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    await call(["VIB-9", "VIB-11"]);
+    const satisfied = await call(["VIB-9"]);
+    expect(satisfied).toMatchObject({
+      outcome: "done",
+      message: "Recorded: VIB-1 waits on VIB-9. Every entry is done, so Viberr releases it within a minute and hands the task back to you.",
+    });
+    expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
+  });
 });
 
 describe("operatorDispatchAgent", () => {

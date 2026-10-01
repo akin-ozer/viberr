@@ -4088,9 +4088,11 @@ export async function operatorSetDependencies(
     const why = input.reason?.trim() ? ` Reason: ${input.reason.trim()}` : "";
     return {
       outcome: "done",
-      message: list
-        ? `Recorded: ${input.taskKey} waits on ${list}. Viberr holds it and releases it when every entry is done.${why}`
-        : `Recorded: ${input.taskKey} no longer waits on other work.${why}`,
+      message: !list
+        ? `Recorded: ${input.taskKey} no longer waits on other work.${why}`
+        : result.satisfied
+          ? `Recorded: ${input.taskKey} waits on ${list}. Every entry is done, so Viberr releases it within a minute and hands the task back to you.${why}`
+          : `Recorded: ${input.taskKey} waits on ${list}. Viberr holds it and releases it when every entry is done.${why}`,
     };
   } catch (error) {
     // The validator's refusal names the reference and the reason: a fact about

@@ -192,6 +192,12 @@ export interface SetTaskDependenciesResult {
   blockedBy: string[];
   added: string[];
   removed: string[];
+  /** Ruling 620: every entry on the written list is done, so it holds nothing. */
+  satisfied: boolean;
+  /** The write released the task: a person emptied the list, or left only
+   *  done entries on it (ruling 620). An operator's satisfied list is the
+   *  sweep's to release, within a minute. */
+  released: boolean;
 }
 
 /**
@@ -202,7 +208,9 @@ export interface SetTaskDependenciesResult {
  * anything while it waits, ruling 131(a)); an emptied list clears a recorded
  * `heldAtStage`. When a NON-operator write empties a previously non-empty
  * list, that write IS the release (ruling 131(e)): the release note is the
- * one note that lands, through the same two halves the engine uses.
+ * one note that lands, through the same two halves the engine uses. A
+ * non-operator write that leaves only done entries releases the task too
+ * (ruling 620), through the engine's own `releaseTask`.
  */
 export async function setTaskDependencies(
   db: DatabaseSync,
@@ -248,8 +256,25 @@ export async function setTaskDependencies(
   if (alreadyDone.length > 0) {
     throw AppError.validation(doneEntriesRefusal(alreadyDone.map((e) => e.label)));
   }
+  // Ruling 620: a list whose every entry is done holds nothing. It can only be
+  // written by taking entries off (an added done entry is refused above):
+  // live on aws-cost-calculator the controller took AWSC-75 off two hold-outs
+  // that also waited on the done AWSC-73 and AWSC-74. The note said "Held
+  // until every entry is done", the board still read blocked, and the
+  // controller asked a person to clear both lists; the minute sweep released
+  // them 54 seconds later.
+  const satisfied =
+    next.length > 0 && dependenciesSatisfied(resolveDependencies(db, input.projectSlug, next));
   if (JSON.stringify(next) === JSON.stringify(previous)) {
-    return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false, blockedBy: next, added, removed };
+    return {
+      task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+      changed: false,
+      blockedBy: next,
+      added,
+      removed,
+      satisfied,
+      released: false,
+    };
   }
   const releasing = next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized;
   const by = actorRefOf(db, actor, ctx);
@@ -273,9 +298,11 @@ export async function setTaskDependencies(
       actor: by,
       title: "Dependencies updated",
       text:
-        next.length > 0
-          ? `Waits on ${next.join(", ")} (${clauses.join("; ")}). Held until every entry is done; Viberr releases it then.`
-          : `No longer waits on other work (${clauses.join("; ")}).`,
+        next.length === 0
+          ? `No longer waits on other work (${clauses.join("; ")}).`
+          : satisfied
+            ? `Waits on ${next.join(", ")} (${clauses.join("; ")}). Every entry is done, so nothing holds it.`
+            : `Waits on ${next.join(", ")} (${clauses.join("; ")}). Held until every entry is done; Viberr releases it then.`,
       toAgent: false,
       evidence: null,
     };
@@ -291,11 +318,18 @@ export async function setTaskDependencies(
     taskKey: input.taskKey,
     details: { blockedBy: next, added, removed },
   });
+  let released = false;
   if (releasing) {
     await announceRelease(db, ctx, input.projectSlug, input.taskKey, {
       entries: previous,
       clearedBy: actorProseName(db, actor),
     });
+    released = true;
+  } else if (satisfied && !ctx.operatorAuthorized) {
+    // Ruling 620: the release the minute sweep would make, made now. Not for
+    // the operator, for the reason `releasing` excludes it: the release
+    // re-invokes the operator, so its own satisfied list waits for the sweep.
+    released = await releaseTask(db, ctx, input.projectSlug, input.taskKey);
   } else if (previous.length > 0 && next.length === 0) {
     // Ruling 241, corrected by self-review: the drain belongs wherever the HOLD
     // GOES AWAY, not only where a release is ANNOUNCED. `releasing` excludes
@@ -308,7 +342,15 @@ export async function setTaskDependencies(
     // That is F37-68's own shape inside F37-68's own fix.
     await drainQueuedQuestions(db, ctx, input.projectSlug, input.taskKey);
   }
-  return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true, blockedBy: next, added, removed };
+  return {
+    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
+    changed: true,
+    blockedBy: next,
+    added,
+    removed,
+    satisfied,
+    released,
+  };
 }
 
 // --------------------------------------------------------------- release
