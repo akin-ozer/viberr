@@ -341,7 +341,7 @@ export function AgentModal({
         <label className="flabel" htmlFor="ga-persona">
           Persona / instructions{" "}
           <span className="fhint">
-            the agent's working instructions, its system prompt on every run; markdown ok
+            its system prompt on every run · markdown ok
           </span>
         </label>
         <textarea

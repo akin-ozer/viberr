@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import { Link } from "react-router";
 import {
   ModelEffortFields,
@@ -380,14 +380,16 @@ export function ControllerAdminPanel({
             </strong>
             . Model and effort stay editable. To unlock a section, set its
             variable in the app environment and restart:{" "}
-            {lockedSections
-              .map(
-                ([section]) =>
-                  CONTROLLER_UNLOCK_ENV[section] +
-                  "=" +
-                  CONTROLLER_UNLOCK_VALUE,
-              )
-              .join(" · ")}
+            {/* Ruling 621: an env var is code — set in mono, one token each,
+                as the grant-request rows print theirs. */}
+            {lockedSections.map(([section], i) => (
+              <Fragment key={section}>
+                {i > 0 && " · "}
+                <code className="mono">
+                  {CONTROLLER_UNLOCK_ENV[section]}={CONTROLLER_UNLOCK_VALUE}
+                </code>
+              </Fragment>
+            ))}
             . This locks the grant lists and the doctrine file edited on this
             tab; a granted skill or knowledge base can still be edited from
             Agent resources, which changes what the controller loads.

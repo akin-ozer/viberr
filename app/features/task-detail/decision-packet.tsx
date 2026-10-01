@@ -345,7 +345,7 @@ function PacketArchiveConfirm({
         <>
           {disclosure ? (
             <>
-              <span className="mono">{disclosure.taskKey}</span> ·{" "}
+              <span className="key">{disclosure.taskKey}</span> ·{" "}
             </>
           ) : null}
           {option.t}
@@ -1005,6 +1005,11 @@ export function DecisionPacket({
   // the pending option's own `kind`, so two can never stand at once.
   const [pendingConfirm, setPendingConfirm] = useState<number | null>(null);
   const isBlocked = p.type === "blocked";
+  // Ruling 621 (B11): a decision that waits on a person is ONE colour, the
+  // info blue it wears on Home, Notifications, the board and the queue; the
+  // amber stays an agent's question (`answerTo`, ruling 478(e)'s predicate),
+  // the coral a block.
+  const tone = isBlocked ? "blocked" : answerTo ? "input" : "decision";
   // N20-16: a packet raised by the operator recommends its own default; one
   // raised by a delivering/reviewing agent (an ask_human question) carries the
   // AGENT's recommendation. Attributing every rec to "operator pick" was a lie
@@ -1160,7 +1165,7 @@ export function DecisionPacket({
     // editor unchanged so both doors open the same text.
     const draft = p.goalDraft;
     return (
-      <div className={"packet " + (isBlocked ? "blocked" : "input")} data-decided="">
+      <div className={"packet " + tone} data-decided="">
         <PacketHead kind={p.kind} from={p.from} blocked={isBlocked} />
         <div className="packet-body">
           <h2>{p.title}</h2>
@@ -1197,7 +1202,7 @@ export function DecisionPacket({
           </p>
           {draft && (
             <figure className="goal-draft">
-              <figcaption className="fine xs dim">
+              <figcaption className="fine dim">
                 Requested goal (opens in the editor)
               </figcaption>
               <pre className="goal-draft-text">{draft}</pre>
@@ -1229,7 +1234,7 @@ export function DecisionPacket({
     );
   }
   return (
-    <div className={"packet " + (isBlocked ? "blocked" : "input")} data-aside={aside ? "" : undefined}>
+    <div className={"packet " + tone} data-aside={aside ? "" : undefined}>
       <PacketHead kind={p.kind} from={p.from} blocked={isBlocked} />
       <div className="packet-body">
         {aside && (
@@ -1568,7 +1573,7 @@ export function DecisionPacket({
               </p>
             )}
             {note.length > PACKET_NOTE_MAX - 200 && (
-              <p className="fine xs dim">
+              <p className="fine dim">
                 {note.length.toLocaleString("en-US")} of{" "}
                 {PACKET_NOTE_MAX.toLocaleString("en-US")} characters.
               </p>

@@ -122,7 +122,7 @@ describe("ReviewQueuePage", () => {
     // C4: the viewer-scoped canonical phrase — the same "waiting on you" the
     // board card uses. (The panel HEADING still names the acceptance action;
     // this per-row tag is a status, and shares the app's two-phrase vocabulary.)
-    expect(first.querySelector(".wait-tag.you")!.textContent).toContain(
+    expect(first.querySelector(".chip.st.you")!.textContent).toContain(
       "waiting on you",
     );
     expect(first.textContent).toContain("PR #318");
@@ -138,10 +138,10 @@ describe("ReviewQueuePage", () => {
     expect(second.querySelector(".sub")!.textContent).toBe(
       "PR #311 is merged on GitHub. Accept the completion to close the task.",
     );
-    expect(second.querySelector(".wait-tag.agent")!.textContent).toContain(
+    expect(second.querySelector(".chip.st.agent")!.textContent).toContain(
       "agent working",
     );
-    expect(second.querySelector(".wait-tag.agent .working")).toBeTruthy();
+    expect(second.querySelector(".chip.st.agent .working")).toBeTruthy();
     // Merged PR renders the done pill kind.
     expect(second.querySelector(".pill.done")!.textContent).toBe("PR #311");
   });
@@ -149,14 +149,15 @@ describe("ReviewQueuePage", () => {
   it("D4: a row whose task has degraded continuity carries the same cue the board card does", () => {
     // The state used to live only on the task page's Continuity Recovery panel;
     // the review boundary is exactly where a supervisor looks, so it surfaces
-    // here too — warning tone (risk pill), the panel's refresh glyph, one
+    // here too — the board card's problem chip, the panel's refresh glyph, one
     // vocabulary. Canary: drop the `t.continuity === "degraded"` block and this
     // (and the negative case below) go red.
     const degraded: ReviewRowView = { ...rowHuman, continuity: "degraded" };
     const { container } = renderQueue([degraded], []);
     const row = container.querySelector(".rq-row")!;
     expect(row.textContent).toContain("degraded continuity");
-    expect(row.querySelector(".rq-meta .pill.risk")).toBeTruthy();
+    // Ruling 621: the chip, not a risk pill. CANARY: render the Pill again.
+    expect(row.querySelector(".rq-meta .chip.pb")!.textContent).toContain("degraded continuity");
   });
 
   it("D4: a healthy-continuity row shows no continuity cue", () => {
@@ -235,13 +236,13 @@ describe("ReviewQueuePage", () => {
       new Set(["VIB-150", "VIB-152"]),
     );
     const [a, b, c] = [...container.querySelectorAll(".rq-row")];
-    expect(a!.querySelector(".wait-tag.you")!.textContent).toContain("waiting on you");
-    expect(a!.querySelector(".wait-tag.human")).toBeNull();
-    expect(b!.querySelector(".wait-tag.human")!.textContent).toContain(
+    expect(a!.querySelector(".chip.st.you")!.textContent).toContain("waiting on you");
+    expect(a!.querySelector(".chip.st.human")).toBeNull();
+    expect(b!.querySelector(".chip.st.human")!.textContent).toContain(
       "waiting on a human",
     );
-    expect(c!.querySelector(".wait-tag.agent")).toBeTruthy();
-    expect(c!.querySelector(".wait-tag.you")).toBeNull();
+    expect(c!.querySelector(".chip.st.agent")).toBeTruthy();
+    expect(c!.querySelector(".chip.st.you")).toBeNull();
   });
 
   it("F19-31: a `waiting: none` row shows NO wait tag — the board's answer for the same value", () => {
@@ -260,7 +261,7 @@ describe("ReviewQueuePage", () => {
     };
     const { container } = renderQueue([], [noneRow]);
     const row = container.querySelector(".rq-row")!;
-    expect(row.querySelector(".wait-tag")).toBeNull();
+    expect(row.querySelector(".chip.st")).toBeNull();
     expect(row.textContent).not.toContain("agent working");
     // The row is not silent about itself — the subline says what "none" means.
     expect(row.querySelector(".sub")!.textContent).toBe(

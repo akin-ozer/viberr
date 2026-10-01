@@ -73,7 +73,9 @@ export function AttachmentsPanel({
           <Icon name="file" />
           <h2>Attachments</h2>
         </div>
-        <p className="empty">
+        {/* Ruling 621: left-aligned with the panel's title and as tall as its
+            sentence, not a centred empty box over a left-aligned button. */}
+        <p className="attach-empty">
           {browserExpected
             ? "No attachments yet. A browser-capable agent on this task saves the screenshots and files it captures here, and none have landed. They appear the next time such an agent runs and produces evidence."
             : "No attachments yet. Anything you attach here is read by the agents that run on this task: a fixture, a transcript, a spec they would otherwise have to guess at."}
@@ -216,7 +218,7 @@ function AttachFile() {
           }}
         />
       </label>
-      <span className="sub">
+      <span className="fine">
         Agents on this task read what you attach here.
       </span>
       {error && <p className="form-err">{error}</p>}

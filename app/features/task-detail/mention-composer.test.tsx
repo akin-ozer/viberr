@@ -530,19 +530,19 @@ describe("Timeline empty state (UI-40)", () => {
 describe("comment composer send hint (P13-D-39)", () => {
   const hint = () =>
     [...document.querySelectorAll(".composer-foot span")].find((s) =>
-      s.textContent?.includes("to send"),
+      s.textContent?.includes("sends"),
     );
 
   it("shows ⌘↵ on a Mac", async () => {
     vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" });
     await renderComposer();
-    expect(hint()!.textContent).toBe("⌘↵ to send");
+    expect(hint()!.textContent).toBe("⌘↵ sends");
   });
 
   it("shows Ctrl ↵ on a keyboard that has no ⌘ key", async () => {
     vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
     await renderComposer();
-    expect(hint()!.textContent).toBe("Ctrl ↵ to send");
+    expect(hint()!.textContent).toBe("Ctrl ↵ sends");
     // No hardcoded Mac glyph survives anywhere in the composer footer.
     expect(document.querySelector(".composer-foot")!.textContent).not.toContain("⌘");
   });

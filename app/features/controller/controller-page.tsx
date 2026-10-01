@@ -54,7 +54,7 @@ import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 import { MessageFiles } from "./message-files";
 import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
-import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
+import { NotConnectedNote } from "./not-connected";
 import { KnowledgePanel } from "./knowledge-panel";
 import { useOpResultToast, type ActionResult } from "./op-result";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
@@ -176,12 +176,30 @@ export function ControllerPage({
       data-screen-label="Controller"
     >
       <header className="ctl-head">
-        <span className="ctl-head-icon">
-          <Icon name="cpu" />
-        </span>
+        {/* Ruling 621: inside a project the head is its rail siblings' head
+            (Board, Agents, Policy: the title at the page's left edge, the
+            rail's own glyph names the page). The standalone page has no rail,
+            so it keeps its mark. */}
+        {!projectSlug && (
+          <span className="ctl-head-icon">
+            <Icon name="cpu" />
+          </span>
+        )}
         <div className="ctl-head-text">
-          <h1>{view.controllerName}</h1>
-          <p className="fine dim">
+          <div className="ctl-head-title">
+            <h1>{view.controllerName}</h1>
+            {/* Ruling 127: a controller turn runs on the ASKER's own Claude
+                account, so this pill is about the person reading it. Another
+                member with Claude connected converses normally while this one
+                cannot, which the old instance-wide wording could not express.
+                Ruling 621: beside the noun it describes, as on Agents. */}
+            {!view.available && (
+              <Pill kind="risk" sm>
+                Claude not connected
+              </Pill>
+            )}
+          </div>
+          <p>
             {view.conversation?.taskKey
               ? `Anchored to ${view.conversation.taskKey} on the ${view.projectName ?? projectSlug} board, with your own permissions.`
               : projectSlug
@@ -189,11 +207,6 @@ export function ControllerPage({
                 : "Managing this instance with your own permissions."}
           </p>
         </div>
-        {/* Ruling 127: a controller turn runs on the ASKER's own Claude
-            account, so this pill is about the person reading it. Another
-            member with Claude connected converses normally while this one
-            cannot, which the old instance-wide wording could not express. */}
-        {!view.available && <Pill kind="risk">Claude not connected</Pill>}
         {/* Ruling 419(a): the page's two navigation moves live at its top.
             "New" sat in the Conversations panel's head, and on a project the
             rail stacked that panel under every goal chain the page then
@@ -244,7 +257,7 @@ export function ControllerPage({
             <Transcript
               view={view}
               examples={controllerExamples(projectSlug ? { kind: "board" } : { kind: "instance" })}
-              examplesDisabled={!view.available || send.state !== "idle"}
+              examplesDisabled={send.state !== "idle"}
               onExample={(text) =>
                 send.submit(sendForm(csrf, text, `${location.pathname}${location.search}`, null), {
                   method: "post",
@@ -565,7 +578,9 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
         </p>
       )}
       {view.conversations.length === 0 ? (
-        <p className="empty sm">No conversations yet. Say something below.</p>
+        // Ruling 621: no direction; the composer is beside the rail on a wide
+        // page and above it on a narrow one.
+        <p className="empty sm">No conversations yet. Your first message starts one.</p>
       ) : (
         <ul className="ctl-conv-list">
           {view.conversations.map((c) => {
@@ -751,8 +766,10 @@ function Transcript({
             resources, agents. Everything runs with your own permissions, and
             refusals say why.
           </p>
-          {/* Ruling 314 as the dock has it: clicking one SENDS it. */}
-          {examples.length > 0 && onExample && (
+          {/* Ruling 314 as the dock has it: clicking one SENDS it. Ruling 621:
+              not while the viewer cannot send at all; three suggestions at
+              half opacity were a fourth way of saying "not connected". */}
+          {examples.length > 0 && onExample && view.available && (
             <ControllerExampleList examples={examples} disabled={examplesDisabled} onSend={onExample} />
           )}
         </div>
@@ -970,8 +987,9 @@ function Composer({
           disabled
             ? view.available
               ? "Read-only: only the conversation's owner can talk in it."
-              : // Ruling 127's sentence is the note above the box (U39-10).
-                CONNECT_TO_SEND
+              : // Ruling 127's sentence is the note above the box (U39-10);
+                // ruling 621: the box does not say it a third time.
+                undefined
             : "Ask the controller, or tell it what to do…"
         }
         disabled={disabled}

@@ -860,7 +860,8 @@ describe("app.css breakpoints (P16-F8)", () => {
       ".activity-cols",
       ".profile-cols",
       ".rq-row",
-      ".pj-row .pj-stats .pill",
+      // ruling 621: the row drops "· quiet" now, and keeps "N waiting on you".
+      ".pj-row .pj-stats .pj-quiet",
     ]) {
       expect(block![1], `${selector} must still collapse at 1100px`).toContain(selector);
     }
@@ -955,13 +956,15 @@ describe("app.css palette reachability on touch (P16-G3)", () => {
   });
 
   it("gives the collapsed triggers a finger-sized target", () => {
-    // WCAG 2.5.8 (24×24 minimum); both match `.rail-toggle`'s 34px square.
+    // WCAG 2.5.8 (24×24 minimum). ruling 621: both match the bell's 38px
+    // square beside them, as `.rail-toggle` does (they were 36 and 34).
     const narrow = CODE.match(/@media \(max-width: 900px\)\s*\{([\s\S]*?)\n\}/);
     const homeBox = narrow![1].match(/\.home-top \.top-search\s*\{([^}]*)\}/);
-    expect(homeBox![1]).toMatch(/width:\s*36px/);
-    expect(homeBox![1]).toMatch(/height:\s*36px/);
+    expect(homeBox![1]).toMatch(/width:\s*38px/);
+    expect(homeBox![1]).toMatch(/height:\s*38px/);
     const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/);
-    expect(mobile![1]).toMatch(/\.top-search\s*\{[^}]*min-height:\s*34px/);
+    expect(mobile![1]).toMatch(/\.top-search\s*\{[^}]*min-height:\s*38px/);
+    expect(mobile![1]).toMatch(/\.rail-toggle\s*\{[^}]*width:\s*38px; height:\s*38px/);
   });
 });
 
@@ -2098,7 +2101,6 @@ const HIDDEN_BY_DESIGN = {
   ".crumbs .crumb-mid": "topbar tier 2 drops the middle crumb at 760px. Same duplication: the view it links to is a rail item, and at 720px the rail becomes an overlay that still lists all of them.",
   ".home-top .top-search input": "P16-G3. At 900px Home's finder collapses to its `.kbd` BUTTON, which becomes the whole 36×36 box and opens the command palette — the same search over the same projects. The capability moves to a control a phone can actually use; it is not withdrawn. The three tests in `app.css palette reachability on touch` pin the replacement.",
   ".rail": "interface review 2026-09-24 (acce-13). At 720px the project rail is a drawer behind `.rail-toggle` (aria-expanded), and closed it is `visibility: hidden` so its links leave the tab order instead of taking nine invisible Tab stops off-screen. `.app[data-rail-open=\"true\"] .rail` restores visibility, so every link is one toggle press away, not removed.",
-  ".pj-row .pj-stats .pill": "the 1100px tier drops the least load-bearing stat from a Home project ROW. `.pill` is a shared chip class that is a <button> elsewhere (the notification filter, the topbar's live-paused retry), and the ancestors here live in a different component from the pills, so the sweep widens to every `.pill` and picks those buttons up. The pills this rule reaches are project-cards.tsx spans inside `.pj-stats`, and the same numbers stay on the project's own page.",
 } satisfies Record<string, string>;
 
 /** Files allowed to read the viewport, and what they do with it. A read that
@@ -2711,10 +2713,11 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     expect(CODE).toMatch(/\.profile-cols\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(CODE).not.toMatch(/\.profile-cols\s*\{[^}]*align-items:\s*start/);
     expect(CODE).not.toMatch(/\.policy-cols\s*\{[^}]*align-items:\s*start/);
-    // Ruling 149 re-application: Settings > Agent resources pairs four peer
-    // panels two to a row, so its grid stretches for the same reason.
-    expect(CODE).toMatch(/\.rsrc-grid\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
-    expect(CODE).not.toMatch(/\.rsrc-grid\s*\{[^}]*align-items:\s*start/);
+    // ruling 621: Settings > Agent resources is one column now — its four
+    // panels are not peers in length, so pairing them stretched a 2-row card to
+    // an 8-row neighbour (the exemption below, in another shape). The ruling
+    // 621 describe at the foot of this file pins the single column.
+    expect(CODE).not.toMatch(/\.rsrc-grid\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(CODE).toMatch(/\.profile-col > :last-child\s*\{[^}]*flex:\s*1 0 auto/);
     // A feed beside a short panel is the exemption: stretching the panel to the
     // feed's height would only produce a tall empty box.
@@ -3204,7 +3207,6 @@ describe("app.css controller layout (ruling 419)", () => {
     const narrow = collapse();
     expect(ruleBody(narrow, ".rq-meta")).toMatch(/justify-content:\s*flex-start/);
     expect(ruleBody(narrow, ".rq-meta")).toMatch(/max-width:\s*none/);
-    expect(ruleBody(narrow, ".rq-meta .wait-tag")).toMatch(/margin-left:\s*0/);
   });
 
   it("U39-12: the dock's scope pill gives way before the controller's name", () => {
@@ -3581,7 +3583,8 @@ describe("app.css ruling 453: the Apple design pass", () => {
     const NOT_RUNNING_TEXT = {
       ".avatar.xl": "two initials centred in a 56px disc; tracking would push them off centre.",
       ".login-brand .mark": "the one-letter product mark in its tile.",
-      ".login-aside-mark": "the product mark again, in the mono face, whose metrics are its own.",
+      // ruling 621: the same Inter glyph as the card's now, not a mono one.
+      ".login-aside-mark": "the same one-letter product mark, shown beside the card in place of the card's own.",
     } satisfies Record<string, string>;
     const TRACK = new Map([
       ["1.25rem", "var(--track-section)"],
@@ -3677,8 +3680,9 @@ describe("app.css ruling 454: the dock sheet under a finger", () => {
     // rubber-banded pull, lifts the sheet off the bottom edge. Or list it
     // second: the first shadow paints on top, and the pop shadow's blur then
     // draws a dark seam across the extension (seen live).
+    // ruling 621: the extension is the panel's own --surface-float, the floating layers' ground.
     expect(requiredDecls(sheetWidth, ".dock .dock-panel").get("box-shadow")).toBe(
-      "0 calc(min(80dvh, 640px) - var(--radius-panel)) 0 var(--surface), var(--shadow-pop)",
+      "0 calc(min(80dvh, 640px) - var(--radius-panel)) 0 var(--surface-float), var(--shadow-pop)",
     );
   });
 
@@ -3908,7 +3912,9 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
   it("layo-19 / acce-12: the stacked tables and the stacked Agents page can be scrolled to", () => {
     // `.live-table` clips (overflow: hidden rounds its head band), so a row
     // min-width only cut the columns off. CANARY: put it back on the rows.
-    expect(requiredDecls(collapse, ".gh-table .live-table").get("min-width")).toBe("34rem");
+    // Ruling 621: 30rem, not 34rem — the three-track branch rows need ~29rem,
+    // and 34rem left 38px of empty sideways scroll at 820px.
+    expect(requiredDecls(collapse, ".gh-table .live-table").get("min-width")).toBe("30rem");
     expect(requiredDecls(collapse, ".live-wrap .live-table").get("min-width")).toBe("42rem");
     expect(collapse.some((r) => selectorParts(r).includes(".gh-table .live-row") && r.decls.has("min-width"))).toBe(false);
     const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
@@ -4877,8 +4883,6 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
         "the attach button is a <label> wrapping its own hidden file input: pressing the label is pressing that input, one control.",
       '.btn:active:not(:disabled, [aria-disabled="true"]) → <label> app/features/board/filed-files.tsx holds <input>':
         "the New task dialog's Attach files button (ruling 533) is the same <label> around its own hidden file input, one control.",
-      ".keybtn:active → <span> app/features/notifications/notifications-page.tsx is not a control":
-        "`.keybtn.dead`, an orphan row's project note, is an inline <span>; a transform does not apply to a non-replaced inline box, so no press draws on it.",
     } satisfies Record<string, string>;
     // A component that renders exactly one control and passes the class to it
     // is that control (the scan cannot see through a component boundary).
@@ -5015,7 +5019,9 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     ] as const) {
       expect(declsFor(plain, hover).get(prop), hover).toBeTruthy();
     }
-    expect(declsFor(plain, ".btn.provider.github").get("border-color")).toBe(declsFor(plain, ".btn:hover:not(:disabled, [aria-disabled=\"true\"])").get("border-color"));
+    // ruling 621: the face is GitHub's --chrome, which light resolves to the .btn hover border itself.
+    expect(declsFor(plain, ".btn.provider.github").get("border-color")).toBe("var(--chrome)");
+    expect(requiredDecls(plain, ":root").get("--chrome")).toBe(declsFor(plain, ".btn:hover:not(:disabled, [aria-disabled=\"true\"])").get("border-color"));
     // The row's chevron brightens in place, on a colour transition.
     expect(declsFor(plain, ".pj-row .go").get("transition")).toBe("color .14s ease");
     expect(declsFor(plain, ".pj-row:hover .go").get("transform")).toBeUndefined();
@@ -5248,17 +5254,15 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".menu-item .ico": ".menu-item",
       ".toast .ico": ".toast",
       ".deny-note .ico": ".deny-note",
-      ".pill.quiet .ico": ".pill.quiet",
+      // ruling 621: a quiet pill takes .pill's 700, so `.pill .ico` draws its glyph.
       ".sched-when .ico": ".sched-when",
       ".stage-menu-btn .sm-caret": ".stage-menu-btn",
-      ".rq-row .wait-tag.human .ico": ".rq-row .wait-tag.human",
       ".gh-freshness .ico": ".gh-freshness",
       ".ctl-msg-who .ico": ".ctl-msg-who",
       ".prop-empty .ico": ".prop-empty",
       ".wait-chip .ico": ".label-chip",
       ".btn .ico": ".btn",
       ".pill .ico": ".pill",
-      ".wait-tag .ico": ".wait-tag",
       ".op-rec-kind .ico": ".op-rec-kind",
       ".model-sub .ico": ".model-sub",
       ".cmdk-row .ico": ".cmdk-label",
@@ -5271,7 +5275,8 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".trans-lock .ico": ".trans-lock",
       ".trans-path .ico": ".trans-path",
       ".guard-name .ico": ".guard-name",
-      ".cred-top .ico": ".cred-name",
+      // ruling 621: the card head's own glyph only — an agent tile there keeps its 1.7.
+      ".cred-top > .ico": ".cred-name",
       ".org-tile .lbl .ico": ".org-tile .lbl",
       ".cap-col-head .ico": ".cap-col-head",
       ".md-collapse-toggle .ico": ".md-collapse-toggle",
@@ -5304,10 +5309,11 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     // The .kv-row value glyph sits beside 400 mono text and keeps the set's 1.7.
     expect(weight(".kv-row .v .mono")).toBe(400);
     expect(source("./ui/icon.tsx")).toMatch(/strokeWidth="1\.7"/);
-    // A bold control inside a medium one (the .btn in a decision card's
-    // .deny-note) ties at equal specificity, so the heavier group comes later.
+    // A bold label inside a medium one ties at equal specificity, so the
+    // heavier group comes later. ruling 621: a .btn is 500 now (its old tie
+    // inside .deny-note is gone); a 700 pill inside a medium row still ties.
     const at = (selector: string) => RULES.findIndex((r) => r.decls.has("stroke-width") && selectorParts(r).includes(selector));
-    expect(at(".btn .ico")).toBeGreaterThan(at(".deny-note .ico"));
+    expect(at(".pill .ico")).toBeGreaterThan(at(".menu-item .ico"));
   });
 
   it("(F37) every disclosure's caret is the set's chevron: one rule, turned only by its own <details>", () => {
@@ -5434,8 +5440,10 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     // is the house's compositor copy of the dot on ::after (ruling 457), so
     // the dot matches the house's box and its ::after the house's ring; ruling
     // 148(c)'s sweep holds the ring still under reduced motion.
-    const house = declsFor(plain, ".wait-tag .working");
-    const houseRing = declsFor(plain, ".wait-tag .working::after");
+    // Ruling 621: the review queue's `.wait-tag` is gone, so Current state's
+    // working fact is the house dot these copy.
+    const house = declsFor(plain, ".prop-fact .working");
+    const houseRing = declsFor(plain, ".prop-fact .working::after");
     for (const selector of [".ag-active .working", ".ag-running .working"]) {
       const dot = declsFor(plain, selector);
       for (const p of ["position", "width", "height", "border-radius", "background"]) {
@@ -6230,12 +6238,14 @@ describe("app.css ruling 520: Current state on the property grid", () => {
     expect(decl(".prop-fact.by-human > .ico", "color")).toBe("var(--blue-pressed)");
     expect(decl(".prop-fact.by-agent > .ico", "color")).toBe("var(--agent-dark)");
     // The board card's pulse (ruling 365(b)), on its ::after (ruling 457).
-    const house = declsFor(plain, ".wait-tag .working");
+    // Ruling 621: `.wait-tag` is gone; the Agents page's running dot is the
+    // other copy of the house dot.
+    const house = declsFor(plain, ".ag-active .working");
     const dot = declsFor(plain, ".prop-fact .working");
     for (const p of ["position", "width", "height", "border-radius", "background"]) {
       expect(dot.get(p), p).toBe(house.get(p));
     }
-    expect(decl(".prop-fact .working::after", "animation")).toBe(decl(".wait-tag .working::after", "animation"));
+    expect(decl(".prop-fact .working::after", "animation")).toBe(decl(".ag-active .working::after", "animation"));
   });
 });
 
@@ -6292,5 +6302,568 @@ describe("app.css ruling 572: the controller transcript reads as one column", ()
     expect([slot.get("position"), slot.get("height"), slot.get("align-items")]).toEqual(["sticky", "0", "flex-end"]);
     const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
     expect(requiredDecls(reduced, ".ctl-jump > .btn").get("animation")).toBe("fade-in .12s ease");
+  });
+});
+
+describe("app.css ruling 621: foundations — dark elevation, veil, weights, leading", () => {
+  const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+  const paint = (tokens: Map<string, string>, value: string) => resolveColor(value, tokens)!.rgb;
+  const lum = (rgb: [number, number, number]) => luminance(asHex(rgb));
+
+  it("(a) every floating layer paints --surface-float: the card itself in light, a visible step above it on dark", () => {
+    // CANARY: put `.dock-panel` back on `background: var(--surface)` — on dark
+    // the panel is the card it floats over, 1.00:1.
+    // The elevated surfaces are the rules wearing a pop or menu elevation; the
+    // toast is inverted by convention and the dock trigger is a tinted button.
+    const elevated = [...new Set(plain
+      .filter((r) => /var\(--shadow-(?:pop|menu)\)/.test(r.decls.get("box-shadow") ?? ""))
+      .flatMap(selectorParts))].filter((s) => s !== ".toast" && s !== ".dock-fab");
+    expect(elevated.length).toBeGreaterThanOrEqual(13);
+    for (const s of elevated) expect(requiredDecls(plain, s).get("background"), s).toBe("var(--surface-float)");
+    // The phone drawer floats over a veil too, and so does the dock sheet's run-on.
+    expect(requiredDecls(phone, ".rail").get("background")).toBe("var(--surface-float)");
+    expect(requiredDecls(phone, ".dock .dock-panel").get("box-shadow")).toMatch(/ 0 var\(--surface-float\), /);
+    for (const [theme, tokens] of THEMES) {
+      const float = paint(tokens, "var(--surface-float)");
+      const card = paint(tokens, "var(--surface)");
+      if (theme === "light") expect(asHex(float), theme).toBe(asHex(card));
+      else expect(contrastRatio(asHex(float), asHex(card)), theme).toBeGreaterThanOrEqual(1.05);
+      // colo-3 on the float: the secondary rungs clear AA on the hover a menu row takes.
+      const hover = asHex(over(resolveColor("var(--tint-hover)", tokens)!, float));
+      for (const t of ["--faint", "--placeholder"]) {
+        expect(contrastRatio(asHex(paint(tokens, `var(${t})`)), hover), `${theme} ${t} on ${hover}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("(b) a lane and a quiet well sink below the canvas on dark; GitHub's chrome is --chrome; no selected state is an ink slab", () => {
+    // CANARY: put `.column` back on `var(--tint-well)` (1.02:1 under its cards
+    // on dark), or `.tl-filter button.on` back on `background: var(--fg)` (a
+    // white pill on dark).
+    for (const s of [".column", ".panel.quiet"]) expect(requiredDecls(plain, s).get("background"), s).toBe("var(--sunken)");
+    for (const s of [".gh-bar", ".tl-node.github", ".conn-ico", ".btn.provider.github", ".agent-glyph.op"]) {
+      expect(requiredDecls(plain, s).get("background"), s).toBe("var(--chrome)");
+    }
+    for (const [theme, tokens] of THEMES) {
+      const [bg, card, sunken, chrome] = ["--bg", "--surface", "--sunken", "--chrome"].map((t) => paint(tokens, `var(${t})`));
+      if (theme === "light") {
+        // Pixel-identical in light: GitHub's black is the ink.
+        expect(asHex(chrome)).toBe(asHex(paint(tokens, "var(--fg)")));
+        continue;
+      }
+      expect(lum(sunken)).toBeLessThan(lum(bg));
+      expect(contrastRatio(asHex(card), asHex(sunken))).toBeGreaterThanOrEqual(1.1);
+      expect(lum(chrome)).toBeLessThan(lum(bg));
+    }
+    const selected = /\.(?:on|active|sel)\b|\[aria-(?:pressed|selected|checked)="true"\]|\[aria-current/;
+    const slabs = RULES.filter((r) => /^var\(--fg\)$/.test((r.decls.get("background") ?? r.decls.get("background-color") ?? "").trim()))
+      .flatMap(selectorParts).filter((p) => selected.test(p));
+    expect(slabs).toEqual([]);
+  });
+
+  it("(c) the modal backdrop and the phone drawer's scrim are one veil, and it dims in both themes", () => {
+    // CANARY: put the 720px `.rail-scrim` back on `color-mix(in srgb,
+    // var(--fg), transparent 70%)` — 30% of dark's light ink greys the page.
+    expect(requiredDecls(plain, "dialog::backdrop").get("background")).toBe("var(--veil)");
+    expect(requiredDecls(phone, ".rail-scrim").get("background")).toBe("var(--veil)");
+    expect(RULES.filter((r) => selectorParts(r).some((p) => p.endsWith("::backdrop") && p !== "dialog::backdrop" && !/\[data-closing\]/.test(p)) && r.decls.has("background"))).toEqual([]);
+    for (const [theme, tokens] of THEMES) {
+      const bg = paint(tokens, "var(--bg)");
+      expect(lum(over(resolveColor("var(--veil)", tokens)!, bg)), theme).toBeLessThan(lum(bg));
+    }
+  });
+
+  it("(d) one weight per role: headings 700, controls 500, initials and emphasis 600, pills 700 — and no 800", () => {
+    // CANARY: put `h1, h2, h3, h4` back on `font-weight: 800`, or `.btn` on 700.
+    const w = (s: string) => requiredDecls(plain, s).get("font-weight");
+    for (const h of ["h1", "h2", "h3", "h4"]) expect(w(h), h).toBe("700");
+    for (const control of [".btn", ".seg button", ".mini-seg button", ".menu-item", ".keybtn"]) expect(w(control), control).toBe("500");
+    for (const s of [".avatar", ":where(strong, b)"]) expect(w(s), s).toBe("600");
+    expect(w(".pill")).toBe("700");
+    // A quiet pill is the same word at a lower volume: tier, not weight.
+    expect(declsFor(plain, ".pill.quiet").has("font-weight")).toBe(false);
+    // The Inter 800 face is dropped with this ruling, so nothing may ask for it.
+    expect(RULES.filter((r) => /^(?:800|900|bolder)$/.test(r.decls.get("font-weight") ?? "")).map((r) => r.selector)).toEqual([]);
+  });
+
+  it("(e) multi-line text never sits at `normal`: a zero-specificity default, and a container's own leading reaches its prose", () => {
+    // CANARY: drop `.md-body` from the hand-down rule — every timeline and
+    // packet paragraph falls from its container's 1.5 to the default 1.45.
+    const def = plain.find((r) => r.selector.startsWith(":where(p, li, "));
+    expect(def, "the prose default").toBeTruthy();
+    // One :where() around the whole selector: (0,0,0), so any rule wins.
+    expect(splitArgs(def!.selector)).toEqual([def!.selector]);
+    expect(def!.selector.endsWith(")")).toBe(true);
+    expect(def!.decls.get("line-height")).toBe("1.45");
+    expect(def!.decls.get("text-wrap-style")).toBe("pretty");
+    const handDown = plain.find((r) => /^:where\([^)]*\) :where\(p, li/.test(r.selector));
+    expect(handDown, "containers hand their leading down").toBeTruthy();
+    expect(handDown!.decls.get("line-height")).toBe("inherit");
+    for (const host of [".md-body", ".composer-ce"]) expect(handDown!.selector, host).toContain(host);
+  });
+
+  it("(f) a count, a key or a keycap is not code: the body face with tabular figures, and a keycap never wraps", () => {
+    // CANARY: put `font-family: var(--font-mono)` back on `.nav-item .count`
+    // — the active "10" shows Mono's dotted zero.
+    for (const s of [".nav-item .count", ".bell-badge", ".keybtn"]) {
+      const d = requiredDecls(plain, s);
+      expect(d.get("font-family") ?? "", s).not.toMatch(/--font-mono/);
+      expect(d.get("font-variant-numeric"), s).toBe("tabular-nums");
+    }
+    expect(requiredDecls(plain, ".kbd").get("white-space")).toBe("nowrap");
+    // The mono stack names only faces that ship or the platform's own.
+    expect(requiredDecls(plain, ":root").get("--font-mono")).not.toMatch(/Plex/);
+  });
+});
+
+describe("app.css ruling 621: Home, login, notifications and the palette", () => {
+  const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
+
+  it("sizes the login's card track to the card, and shows one brand mark beside it", () => {
+    // An `auto` track sized to the card's max-content (the 956px SSO line), so
+    // `justify-content` had nothing left to centre with: the pitch hugged the
+    // left edge, the card floated mid-right. CANARY: put
+    // `minmax(0, 380px) auto` back, or drop the card mark's hide.
+    const wide = within(/min-width: 900px/);
+    const card = /^min\((\d+px), 100%\)$/.exec(requiredDecls(plain, ".login-card").get("width") ?? "")?.[1];
+    expect(card, "the card caps its own width").toBeTruthy();
+    expect(requiredDecls(wide, ".login-wrap-2col").get("grid-template-columns")).toBe(`minmax(0, 380px) minmax(0, ${card})`);
+    expect(requiredDecls(wide, ".login-wrap-2col .login-brand .mark").get("display")).toBe("none");
+  });
+
+  it("gives every Home list row's fixed columns one width, so the columns between them line up", () => {
+    // The faces took each row's own width (24/41/75px), and the meter and
+    // stats wandered 30px and 51px down the list. CANARY: drop the width
+    // from `.pj-row .avatar-group`.
+    for (const column of [".pj-row .avatar-group", ".pj-row .pj-meter"]) {
+      const decls = requiredDecls(plain, column);
+      expect([decls.get("flex"), /^\d+px$/.test(decls.get("width") ?? "")], column).toEqual(["none", true]);
+    }
+  });
+
+  it("starts every Settings tile's numbers at its edge, with its picture at the foot's far end", () => {
+    // Faces and glyphs beside the numbers put the four headlines 17, 117, 83
+    // and 17px in, and broke "4 / members" off its count. CANARY: put
+    // `.org-tile .val` back on a centred row.
+    expect(requiredDecls(plain, ".org-tile .val").get("flex-direction")).toBe("column");
+    for (const picture of [".org-tile .foot > .avatar-group", ".org-tile .foot > .glyphs"]) {
+      expect(requiredDecls(plain, picture).get("margin-left"), picture).toBe("auto");
+    }
+    expect(requiredDecls(plain, ".org-tile .sub > span").get("white-space")).toBe("nowrap");
+  });
+
+  it("keeps the code face to repository paths and one-time codes on these surfaces (ruling 365)", () => {
+    // A third of Home's text was JetBrains Mono: counts, times, keys, the
+    // bell's meta line, "Mark read". CANARY: put `font-family:
+    // var(--font-mono)` back on `.pj-stats` or `.ntf-item-main .mt`.
+    const OWN = /\.(?:home-|pj-|org-tile|store-strip|setup-|login-|signin-|ntf-|cmdk-)|\.sec-h \.ct/;
+    const CODE_FACE = [".pj-name .repo", ".signin-code"];
+    const mono = RULES.filter((r) => /--font-mono/.test(r.decls.get("font-family") ?? ""))
+      .flatMap(selectorParts)
+      .filter((s) => OWN.test(s) && !CODE_FACE.includes(s));
+    expect(mono).toEqual([]);
+    for (const numeral of [".pj-stats", ".pj-foot .upd", ".sec-h .ct", ".setup-count", ".ntf-item-main .mt", ".cmdk-key"]) {
+      expect(requiredDecls(plain, numeral).get("font-variant-numeric"), numeral).toBe("tabular-nums");
+    }
+  });
+
+  it("indents a wrapped notification row's meta under its title, past the icon it leads with", () => {
+    // The collapse's queue-row basis assumes the review queue's 62px key; a
+    // notification row leads with a 26px icon, so its pills hung 42px left of
+    // the title at 1024. CANARY: drop the `.ntf-wait` margin.
+    const collapse = within(/max-width: 1100px/);
+    const icon = requiredDecls(plain, ".pev-ico").get("width");
+    const gap = requiredDecls(plain, ".rq-row").get("gap");
+    expect(requiredDecls(collapse, ".ntf-wait .rq-row .rq-meta").get("margin-left")).toBe(`calc(${icon} + ${gap})`);
+    expect(requiredDecls(collapse, ".ntf-wait .rq-row .rq-main").get("flex-basis")).toBe(`calc(100% - ${icon} - ${gap})`);
+  });
+
+  it("drops the wordmark at 1080px from the workspace bar only, where the crumbs need it", () => {
+    // Unscoped, it hid "Viberr" from Home's and the standalone header's bars,
+    // which have ~500px free at 1024. CANARY: unscope `.topbar .home-brand b`.
+    const tier = within(/max-width: 1080px/);
+    expect(requiredDecls(tier, ".topbar .home-brand b").get("display")).toBe("none");
+    expect(declsFor(tier, ".home-brand b").get("display")).toBeUndefined();
+  });
+});
+
+
+/**
+ * Ruling 621 (the 2026-10-01 design pass), the board and the review queue:
+ * lane 1 on the page's gutter at every width, lanes one head tall and only as
+ * tall as their cards at rest, the first card's ring inside its scroller, one
+ * field box in the New task modal, and a task drawn in the queue the way the
+ * board card draws it.
+ */
+describe("app.css ruling 621: the board and the review queue", () => {
+  const sides = (value: string) => {
+    const p = value.trim().split(/\s+/);
+    return [p[0], p[1] ?? p[0], p[2] ?? p[0], p[3] ?? p[1] ?? p[0]] as const;
+  };
+  const px = (value: string | undefined) =>
+    [...(value ?? "").matchAll(/(-?[\d.]+)(px|rem)/g)].reduce((n, m) => n + Number(m[1]) * (m[2] === "rem" ? 16 : 1), 0);
+  const inlinePad = (d: Map<string, string>) =>
+    d.get("padding-inline") ?? d.get("padding-left") ?? (d.has("padding") ? sides(d.get("padding")!)[3] : undefined);
+  /** (classes + attributes + pseudo-classes, elements): enough for the plain selectors here. */
+  const specificity = (selector: string) =>
+    (selector.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length * 100 +
+    (selector.match(/(?:^|[\s>+~])[a-z][\w-]*/gi) ?? []).length;
+
+  it("(a) lane 1 starts on the page's gutter: every width that pads the board snaps to that inset", () => {
+    // CANARY: drop `scroll-padding-inline` from `.board`, and a five-lane board
+    // at 1280 loads scrolled 16px with lane 1 flush against the rail; or put
+    // `padding-inline: 1rem` back in the 1400px block alone, and lane 1 sits
+    // 8px left of the title and the chips.
+    const contexts = new Set(RULES.map((r) => r.at.join(" ")));
+    let padded = 0;
+    for (const at of contexts) {
+      const scope = RULES.filter((r) => r.at.join(" ") === at);
+      const board = declsFor(scope, ".board");
+      const pad = inlinePad(board);
+      if (pad === undefined) continue;
+      padded++;
+      expect(board.get("scroll-padding-inline"), at || "unconditional").toBe(pad);
+      expect(inlinePad(declsFor(scope, ".filter-bar")), at || "unconditional").toBe(pad);
+    }
+    expect(padded).toBeGreaterThanOrEqual(2);
+    expect(inlinePad(requiredDecls(plain, ".board-head"))).toBe(inlinePad(requiredDecls(plain, ".board")));
+  });
+
+  it("(b) a lane is one head tall, as tall as its cards at rest, and full height under a drag", () => {
+    // CANARY: drop `min-height` from `.col-head`, and the entry lane's 24px "+"
+    // makes its head 40px against 33px, so Triage and its first card sit 7px
+    // low; or drop `align-items: start` from `.board`, and every empty stage is
+    // a viewport-tall grey slab again (702px at 1440x900, up to 84% empty).
+    const head = requiredDecls(plain, ".col-head");
+    expect(px(head.get("min-height"))).toBe(px(requiredDecls(plain, ".col-head .add").get("height")) + 2 * px(sides(head.get("padding")!)[0]));
+    expect(requiredDecls(plain, ".board").get("align-items")).toBe("start");
+    expect(requiredDecls(plain, ".column").get("max-height")).toBe("100%");
+    // Every lane is a drop target its whole height while a card is lifted.
+    expect(requiredDecls(plain, ".board.dragging > .column").get("height")).toBe("100%");
+  });
+
+  it("(c) a card's ring stays inside its scroller, centred in the lane, its head marks in secondary ink", () => {
+    // CANARY: set `.col-body`'s padding back to `0 .5rem var(--dock-clear)`, and
+    // the first card's outset ring is clipped (in dark its top edge merges into
+    // the lane head); or paint the head's trace `--blue-pressed` again, and a PR
+    // number that is not a link reads as one (365(e)); or put the branch
+    // glyph's `opacity: .55` back (2.3:1).
+    expect(requiredDecls(plain, ".card").get("box-shadow")).toMatch(/^0 0 0 1px /);
+    const body = requiredDecls(plain, ".col-body");
+    expect(px(sides(body.get("padding")!)[0])).toBeGreaterThanOrEqual(1);
+    expect(px(requiredDecls(plain, ".board-list").get("padding-top"))).toBeGreaterThanOrEqual(1);
+    expect(body.get("scrollbar-gutter")).toBe("stable both-edges");
+    expect(requiredDecls(plain, ".card-head .trace").get("color")).toBe(requiredDecls(plain, ".card-head .key").get("color"));
+    expect(requiredDecls(plain, ".card-head .trace .ico").has("opacity")).toBe(false);
+  });
+
+  it("(d) the queue draws a task as the board card does", () => {
+    // CANARY: put `font-family: var(--font-mono)` back on `.rq-key`, or 800 on
+    // `.rq-main .ttl`, or `white-space: nowrap` on `.rq-main .sub`: the key
+    // reads as code, three row titles outshout their section heads, and the
+    // subline is cut mid-instruction.
+    const card = requiredDecls(plain, ".card-head .key");
+    const queue = requiredDecls(plain, ".rq-key");
+    for (const p of ["font-family", "font-size", "font-weight", "letter-spacing", "color", "white-space", "font-variant-numeric"]) {
+      expect(queue.get(p), p).toBe(card.get(p));
+    }
+    const title = requiredDecls(plain, ".rq-main .ttl");
+    expect(title.get("font-size")).toBe(requiredDecls(plain, ".card h3").get("font-size"));
+    expect(Number(title.get("font-weight"))).toBeLessThan(700);
+    const sub = requiredDecls(plain, ".rq-main .sub");
+    expect(sub.get("-webkit-line-clamp")).toBe("2");
+    expect(sub.has("white-space")).toBe(false);
+    // A label is a word in the row's face, as on the board's label chips.
+    expect(requiredDecls(plain, ".label-chip").has("font-family")).toBe(false);
+  });
+
+  it("(e) the New task modal's label field is one box with one focus ring", () => {
+    // CANARY: delete `.label-input .label-input-field[type="text"]`, and in a
+    // `.field` the input takes the field chrome again: a box in the box with a
+    // third focus ring around "Add a label".
+    const field = '.label-input .label-input-field[type="text"]';
+    const reset = requiredDecls(plain, field);
+    expect([reset.get("border"), reset.get("box-shadow")]).toEqual(["0", "none"]);
+    for (const chrome of ['.field input[type="text"]', ".field input:focus"]) {
+      expect(specificity(field), chrome).toBeGreaterThan(specificity(chrome));
+    }
+    // It names no size, so the phone block's 16px anti-zoom size still reaches it.
+    expect(reset.has("font-size")).toBe(false);
+  });
+});
+
+describe("app.css ruling 621: the task page", () => {
+  const decl = (selector: string, prop: string) => requiredDecls(plain, selector).get(prop);
+  const rem = (value: string | undefined) => Number(/^(-?[\d.]+)rem$/.exec(value ?? "")?.[1]);
+  const px = (value: string | undefined) => Number(/^(-?[\d.]+)px$/.exec(value ?? "")?.[1]);
+
+  it("(a) sets the decision packet on the panels' frame, its title a panel's, its lede and options at their timeline record's size", () => {
+    // CANARY: put `.packet-lede` back on `.75rem` — the sentence an owner
+    // decides on, at meta size above a 14px record of itself in the timeline —
+    // or the packet back on `--radius-box` and a .75rem inset beside 22px,
+    // 1rem panels (its words 4px off theirs).
+    expect(decl(".packet", "border-radius")).toBe(decl(".panel", "border-radius"));
+    expect(decl(".packet-body h2", "font-size")).toBe(decl(".panel-head h2", "font-size"));
+    const inline = (padding: string | undefined) => padding?.split(/\s+/)[1];
+    for (const s of [".packet-top", ".packet-body"]) expect(inline(decl(s, "padding")), s).toBe(inline(decl(".panel", "padding")));
+    for (const s of [".packet-lede", ".opt .ot", ".opt .od"]) expect(decl(s, "font-size"), s).toBe(decl(".tl-text", "font-size"));
+    // The only boxes in the card are the options (ruling 500): the completion
+    // report it carries is evidence, behind the evidence's thin rule, not a
+    // fourth box the width of the options (re-rules ruling 521's inset box).
+    expect(decl(".cmp", "border")).toBeUndefined();
+    expect(decl(".cmp", "border-left")).toBe(decl(".packet-body .packet-obs", "border-left"));
+  });
+
+  it("(b) starts every side-column value's words on one edge, at the values' size (ruling 520)", () => {
+    // CANARY: drop `.prop-empty .ico`'s margin-inline ("Normal", "Add labels"
+    // start 4px left of "In Progress"), or the no-glyph padding ("None",
+    // "Nothing", "Unowned" start 24px left of it).
+    const mark = 16 * (rem(decl(".kv.props .col-stage-dot", "width")) + 2 * rem(decl(".kv.props .col-stage-dot", "margin-inline")));
+    expect(px(decl(".prop-empty .ico", "width")) + 2 * px(decl(".prop-empty .ico", "margin-inline"))).toBe(mark);
+    expect(decl(".prop-empty", "gap")).toBe(decl(".prop-fact", "gap"));
+    expect(rem(decl(".detail-side .kv.props .prop-empty:not(:has(> .ico))", "padding-left")) * 16).toBe(mark + 16 * rem(decl(".prop-fact", "gap")));
+    expect(decl(".prop-empty", "font-size")).toBe(decl(".kv-row", "font-size"));
+  });
+
+  it("(c) draws the Execution profile's cells as wells the panel's width lays out, each its own height, one control height per row", () => {
+    // CANARY: put `.profile-grid { grid-template-columns: 1fr }` back in the
+    // 720px block — a bare 1fr floors at the run row's min-content and the
+    // cells ran 33px past the panel at 320px — or a hairline back on the cells
+    // (panel > cell > owner pill > avatar, four boxes deep).
+    expect(decl(".profile-cell", "border")).toBeUndefined();
+    expect(decl(".profile-cell", "background")).toBe("var(--tint-well)");
+    const columns = RULES.filter((r) => selectorParts(r).includes(".profile-grid") && r.decls.has("grid-template-columns"));
+    expect(columns.length).toBeGreaterThan(0);
+    for (const r of columns) {
+      expect(r.decls.get("grid-template-columns"), r.at.join(" ") || "base").toMatch(/^repeat\(auto-fit, minmax\(min\(100%, [\d.]+rem\), 1fr\)\)$/);
+    }
+    expect(decl(".profile-grid", "align-items")).toBe("start");
+    for (const s of [".op-steer", ".run-when"]) expect(decl(s, "min-height"), s).toBe(decl(".btn.sm", "min-height"));
+  });
+
+  it("(d) fits a settled run's console to its lines, up to the live console's fixed box", () => {
+    // CANARY: drop the `.detail-main > .panel > .console` rule and two log
+    // lines sit in a 320px near-black box, 68% of it empty.
+    const settled = requiredDecls(plain, ".detail-main > .panel > .console");
+    expect(settled.get("height")).toBe("auto");
+    expect(settled.get("max-height")).toBe(decl(".console", "height"));
+  });
+
+  it("(e) tints an operator's open decision with the info pair a decision waiting on you wears everywhere (B11)", () => {
+    // CANARY: drop `.packet.decision .packet-tile` and "Decision required" is
+    // amber on the task page while Home and Notifications pill it blue.
+    expect(decl(".packet.decision .packet-tile", "background")).toBe(decl(".pill.info", "background"));
+    expect(decl(".packet.decision .packet-tile", "color")).toBe(decl(".pill.info", "color"));
+  });
+});
+
+
+/**
+ * Ruling 621 (the 2026-10-01 design pass), the controller, the dock, Agents
+ * and Policy: the RBAC grid keeps its words wide and its screen-reader text
+ * inside its scroller, the controller's head is its rail siblings' head, the
+ * dock draws one rule per edge, the matrix's "off" mark reads, and Agents'
+ * badges and wells stop stretching.
+ */
+describe("app.css ruling 621: the controller, the dock, Agents and Policy", () => {
+  const collapse = () => RULES.filter((r) => r.at.some((q) => q.includes("max-width: 1100px")));
+  const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+
+  it("(a) the RBAC grid: its .vh cells lay out inside the scroller, and no header floors a column past its cap", () => {
+    // CANARY: drop `position: relative` from `.rbac-scroll`, and every cell's
+    // absolutely placed "yes" lays out against `.board-wrap`: the phone shell
+    // turns 89px wider than the screen. Or put `white-space: nowrap` back on
+    // `.rbac-table thead th`, and "CONTRIBUTOR · 1" takes the action column's
+    // width again (128px of a 538px table at 1440).
+    expect(requiredDecls(plain, ".rbac-scroll").get("position")).toBe("relative");
+    expect(requiredDecls(plain, ".rbac-table thead th").has("white-space")).toBe(false);
+    expect(requiredDecls(plain, ".rbac-n").get("display")).toBe("block");
+    expect(requiredDecls(plain, ".rbac-table td.act").get("min-width")).toBe("10rem");
+    expect(source("./features/policy/policy-page.tsx")).toMatch(/<span className="rbac-n">\{counts\[r\]\}<\/span>/);
+  });
+
+  it("(b) the project controller's head is its rail siblings' head, and its empty state no frame of its own", () => {
+    // CANARY: set `.ctl-wrap`'s top padding back to .125rem, and the title
+    // sits 2px under the topbar, 14px above Board's, Agents' and Policy's; or
+    // drop `border-color: transparent` from the transcript's empty state, and
+    // the column stacks a dashed frame (the sheet's drop-zone signal) over
+    // the composer's solid one.
+    const wrap = requiredDecls(plain, ".ctl-wrap").get("padding")!.split(/\s+/);
+    expect(wrap[0]).toBe(requiredDecls(plain, ".board-head").get("padding")!.split(/\s+/)[0]);
+    const title = requiredDecls(plain, ".ctl-head h1");
+    const sibling = requiredDecls(plain, ".board-head h1");
+    for (const p of ["font-size", "font-weight", "letter-spacing"]) expect(title.get(p), p).toBe(sibling.get(p));
+    expect(requiredDecls(plain, ".ctl-transcript > .empty-hero").get("border-color")).toBe("transparent");
+    // At 1100px and below the empty state keeps the composer's edges.
+    expect(requiredDecls(collapse(), ".ctl-wrap .ctl-transcript:has(> .empty-hero)").get("padding")).toBe("0");
+  });
+
+  it("(c) the dock draws one rule under its header and none over its composer", () => {
+    // CANARY: put `border-bottom` back on `.dock-head`, and the title row and
+    // its scope line are split by a rule; or `border-top` back on
+    // `.dock-composer`, and two parallel lines sit 9px apart over the box.
+    expect(requiredDecls(plain, ".dock-head").has("border-bottom")).toBe(false);
+    expect(requiredDecls(plain, ".dock-composer").has("border-top")).toBe(false);
+    expect(requiredDecls(plain, ".dock-context").get("border-bottom")).toMatch(/^1px solid /);
+  });
+
+  it("(d) the capability matrix's 'off' mark clears 3:1 on the modal's paint, legend and cell alike", () => {
+    // CANARY: set `.mx-cell.off .d` (or the legend's `.d.off`) back to
+    // var(--ring): 1.30:1 light and 1.24:1 dark, the value `.rbac-no` left
+    // for being invisible, on a mark the legend lists as information.
+    for (const selector of [".mx-cell.off .d", ".d.off"]) {
+      const fill = requiredDecls(plain, selector).get("background")!;
+      for (const [theme, tokens] of THEMES) {
+        const dot = resolveColor(fill, tokens)!;
+        const ground = resolveColor("var(--surface-float)", tokens)!;
+        expect(contrastRatio(asHex(dot.rgb), asHex(ground.rgb)), `${theme} ${selector}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+    // The modal is as wide as its grid, so a row's label sits by its dots.
+    expect(requiredDecls(plain, ".modal-card.mx-modal").get("width")).toBe("max-content");
+  });
+
+  it("(e) Agents: a status badge is one line in sentence case, and capability wells neither frame nor stretch", () => {
+    // CANARY: drop `white-space: nowrap` from `.model-sub` or put its
+    // uppercase back ("NOT / CONNECTED" was a two-line pill in its chip), or
+    // drop `align-items: start` from `.cap-cols` (two short columns stretched
+    // 150-200px of empty tint beside the long one).
+    const badge = requiredDecls(plain, ".model-sub");
+    expect(badge.get("white-space")).toBe("nowrap");
+    expect(badge.has("text-transform")).toBe(false);
+    expect(requiredDecls(plain, ".cap-cols").get("align-items")).toBe("start");
+    for (const col of [".cap-col", ".cap-col.direct", ".cap-col.recommend", ".cap-col.forbidden"]) {
+      const d = requiredDecls(plain, col);
+      expect(d.has("border") || d.has("border-color"), col).toBe(false);
+    }
+    // The runtime row's cells land on the resources grid's tracks above them.
+    expect(requiredDecls(plain, ".runtime-row").get("grid-template-columns")).toBe("repeat(auto-fit, minmax(13rem, 1fr))");
+  });
+});
+
+describe("app.css ruling 621: org settings, Profile and Insights", () => {
+  const rem = (value: string | undefined) => Number.parseFloat(value ?? "NaN");
+
+  it("lays Agent resources out one panel to a row, and a row's actions wrap before its text squeezes", () => {
+    // CANARY: put `.rsrc-grid` back on `1fr 1fr`, and the two-row Agent
+    // profiles card stretches to the eight-row Skills card (609px of nothing).
+    expect(requiredDecls(plain, ".rsrc-grid").get("grid-template-columns")).toBe("minmax(0, 1fr)");
+    expect(requiredDecls(plain, ".rsrc-row").get("flex-wrap")).toBe("wrap");
+    expect(requiredDecls(plain, ".rsrc-main").get("flex")).toBe("1 1 14rem");
+    expect(requiredDecls(plain, ".rsrc-acts").get("margin-left")).toBe("auto");
+  });
+
+  it("gives both standalone pages one header at the page-title step, never quieter than a stat under it", () => {
+    // CANARY: put `.set-head h1` back on 1.75rem (Instance settings 8px over
+    // its sibling Insights), or `.stat-val` back on 1.75rem (KPIs over the h1).
+    const title = requiredDecls(plain, ".set-head h1");
+    expect([title.get("font-size"), title.get("letter-spacing")]).toEqual(["1.25rem", "var(--track-section)"]);
+    const stat = requiredDecls(plain, ".stat-val");
+    expect(rem(stat.get("font-size"))).toBeLessThanOrEqual(rem(title.get("font-size")));
+    expect(stat.get("font-variant-numeric")).toBe("tabular-nums");
+  });
+
+  it("sets Insights breakdowns flush, with no UA list indent, and lets a one-row card keep its own height", () => {
+    // CANARY: drop `padding: 0` from `.bar-list`: every label column loses
+    // 40px and "viberr-core/VIB-145" breaks at the hyphen.
+    const list = requiredDecls(plain, ".bar-list");
+    expect([list.get("padding"), list.get("list-style")]).toEqual(["0", "none"]);
+    expect(requiredDecls(plain, ".insights-cols").get("align-items")).toBe("start");
+  });
+
+  it("leads each Profile grant with its marker on one column, and wraps a preference's control under its text", () => {
+    // CANARY: drop `order: -1` and the checks trail their labels at twenty x
+    // positions; give `.pref-main` back `flex: 1` and its sentence is 55px
+    // wide beside a segment on a phone.
+    const marker = requiredDecls(plain, ".kv.grants :is(.rbac-yes, .rbac-no)");
+    expect([marker.get("order"), marker.get("flex"), marker.get("width")]).toEqual(["-1", "none", "1rem"]);
+    expect(requiredDecls(plain, ".pref-row").get("flex-wrap")).toBe("wrap");
+    expect(requiredDecls(plain, ".pref-main").get("flex")).toBe("1 1 10rem");
+  });
+
+  it("spaces the Controller tab by its gap alone, and stacks each run limit's label, field and hint in one column", () => {
+    // CANARY: drop `.ctladm > * { margin: 0 }` and the head-to-lead step is
+    // 40px against 16px everywhere else; drop the grid's fixed width and the
+    // two fields sit 10px apart again.
+    expect(requiredDecls(plain, ".ctladm > *").get("margin")).toBe("0");
+    const ctl = requiredDecls(plain, ".conc-well .guard-ctl");
+    expect(ctl.get("display")).toBe("grid");
+    expect(ctl.get("width")).toMatch(/^\d+(\.\d+)?rem$/);
+    expect(requiredDecls(plain, ".audit-s3 .kv-row .v").get("margin-right")).toBe("auto");
+  });
+
+  it("keeps the code face off addresses, chips and labels on these surfaces (ruling 365)", () => {
+    // CANARY: put `font-family: var(--font-mono)` back on `.member-main .em`.
+    for (const selector of [".member-main .em", ".idp-chip", ".bar-label", ".stat-names .linkish", ".cache-table td:first-child"]) {
+      expect(requiredDecls(plain, selector).get("font-family"), selector).toBeUndefined();
+    }
+  });
+});
+
+describe("app.css ruling 621: project settings, GitHub and Activity", () => {
+  const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
+  const rem = (value: string | undefined) => parseFloat(value ?? "NaN");
+
+  it("sets counts and times in the body face with tabular figures, and the danger zone's consequences at reading size", () => {
+    // Ruling 365: mono is for code. "11:12" and "2 tasks" were JetBrains Mono,
+    // the org audit list's same times were Inter. CANARY: put
+    // `font-family: var(--font-mono)` back on `.pev-t`.
+    for (const selector of [".pev-t", ".stg-count", ".act-toggle", ".you-tag"]) {
+      expect(requiredDecls(plain, selector).get("font-family") ?? "", selector).not.toMatch(/--font-mono/);
+    }
+    for (const selector of [".pev-t", ".stg-count"]) {
+      expect(requiredDecls(plain, selector).get("font-variant-numeric"), selector).toBe("tabular-nums");
+    }
+    // "Removes tasks and timelines. This cannot be undone." is read to decide.
+    expect(requiredDecls(plain, ".dz-main .dd").get("font-size")).toBe(".88rem");
+  });
+
+  it("gives the activity filter bar one control height, its Clear button's", () => {
+    // Measured 31, 27, 26 and 25px in one toolbar row. CANARY: drop the
+    // shared height rule.
+    const bar = requiredDecls(plain, ".feed-filters :is(.ff-search, .ff-sel, .ff-task, .datepick-trigger)");
+    const clear = requiredDecls(plain, ".btn.sm").get("min-height");
+    expect(`${rem(bar.get("height")) * 16}px`).toBe(clear);
+    expect(requiredDecls(plain, ".feed-filters .ff-search").get("padding")).toMatch(/^0 /);
+  });
+
+  it("puts every Execution branches row on one set of tracks, its branch on one line", () => {
+    // Each row is its own grid, and a bare `fr` track floors at THAT row's
+    // min-content: "3 commits" moved one row's columns 18px off the rest.
+    // CANARY: put `2.4fr 1.5fr .8fr .9fr` back.
+    for (const rules of [plain, within(/max-width: 1100px/)]) {
+      const tracks = requiredDecls(rules, ".gh-table .live-row").get("grid-template-columns")!;
+      expect(tracks.replace(/minmax\([^)]*\)/g, ""), tracks).not.toMatch(/fr\b/);
+    }
+    const name = requiredDecls(plain, ".live-branch .trace > span");
+    expect([name.get("white-space"), name.get("text-overflow")]).toEqual(["nowrap", "ellipsis"]);
+  });
+
+  it("keeps a GitHub PR row on one line wherever its list has the room", () => {
+    // The collapse wraps every queue row for the review queue's chips; at
+    // 1024px it dropped a lone "in review" under "#318" (62 → 93px rows).
+    // CANARY: drop the `.gh-prs` container query.
+    expect(requiredDecls(plain, ".gh-prs").get("container-type")).toBe("inline-size");
+    expect(requiredDecls(within(/@container/), ".gh-prs .rq-row").get("flex-wrap")).toBe("nowrap");
+  });
+
+  it("on a phone, sets an activity row's time on its own line under the text column", () => {
+    // Beside the text it cost the column 52px of 390 (225px wide). The indent
+    // is the text column's, the one the folded `.pev-sub` rows already use.
+    // CANARY: drop `flex-wrap: wrap` from the phone rule.
+    const phone = within(/max-width: 560px/);
+    expect(requiredDecls(phone, ".activity-cols .pol-ev").get("flex-wrap")).toBe("wrap");
+    expect(requiredDecls(phone, ".activity-cols .pev-t").get("margin-left")).toBe(
+      requiredDecls(plain, ".pol-ev.pev-sub").get("padding-left"),
+    );
+  });
+
+  it("sets an empty rule list as one row: its sentence at the left edge, Add at the right", () => {
+    // A centred `.empty.sm` sat over right-aligned buttons over a left-aligned
+    // note, in a 240px card holding nothing. CANARY: drop `.rr-empty`'s
+    // `text-align: left`.
+    const empty = requiredDecls(plain, ".rr-empty");
+    expect([empty.get("text-align"), empty.get("margin")]).toEqual(["left", "0 auto 0 0"]);
+    expect(requiredDecls(plain, ".guard-list:empty + .rr-actions").get("padding-top")).toBe("0");
   });
 });

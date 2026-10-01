@@ -211,15 +211,15 @@ function ProfileIdentity({
             fact, beside the sign-in fact it belongs with. */}
         <div className="kv-row">
           <span className="k">Email</span>
-          <span className="v">
-            <span className="mono">{user.email}</span>
-          </span>
+          {/* Ruling 621: an address and a sign-in method are not code: the
+              body face, at the value's regular weight. */}
+          <span className="v light">{user.email}</span>
         </div>
         <div className="kv-row">
           <span className="k">Signs in via</span>
-          <span className="v">
+          <span className="v light">
             <Icon name={user.idp === "github" ? "github" : "lock"} />
-            <span className="mono">{signsInVia}</span>
+            {signsInVia}
           </span>
         </div>
         <div className="kv-row">
@@ -689,22 +689,18 @@ function ProfileGithub({
       <div className="kv">
         <div className="kv-row">
           <span className="k">Workspace identity</span>
-          <span className="v">
-            <span className="mono">{user.email}</span>
-          </span>
+          <span className="v light">{user.email}</span>
         </div>
         <div className="kv-row">
           <span className="k">GitHub account</span>
-          <span className="v">
-            <span className="mono">
-              {gh
-                ? user.githubHandle
-                  ? `@${user.githubHandle} · GitHub sign-in`
-                  : "linked · GitHub sign-in"
-                : user.githubHandle
-                  ? `@${user.githubHandle} · linked by an org admin`
-                  : "not connected"}
-            </span>
+          <span className="v light">
+            {gh
+              ? user.githubHandle
+                ? `@${user.githubHandle} · GitHub sign-in`
+                : "linked · GitHub sign-in"
+              : user.githubHandle
+                ? `@${user.githubHandle} · linked by an org admin`
+                : "not connected"}
           </span>
         </div>
       </div>
@@ -729,9 +725,7 @@ function ProfileGithub({
           <span className="cred-name">Personal OAuth identity</span>
           {/* "not connected" in words: the "−" this slot used to show read as a
               collapse control that did nothing. */}
-          <span className="mono push faint">
-            {gh ? "oauth" : "not connected"}
-          </span>
+          <span className="fine push">{gh ? "oauth" : "not connected"}</span>
         </div>
         <div className="scope-chips">
           <span className={"scope-chip" + (gh ? "" : " miss")}>

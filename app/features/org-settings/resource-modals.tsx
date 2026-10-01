@@ -64,7 +64,7 @@ export function KBModal({
             ? "Create & add files"
             : "Create & index"
       }
-      footHint={"store://kb/" + (slugify(name) || "name") + "/"}
+      footHint={<code className="mono">{"store://kb/" + (slugify(name) || "name") + "/"}</code>}
       onSave={() => {
         if (!canSave) return;
         setErr(null);
@@ -744,7 +744,7 @@ export function SkillModal({
             ? "Create & add files"
             : "Create skill"
       }
-      footHint={"store://skills/" + (slugify(name) || "name") + "/"}
+      footHint={<code className="mono">{"store://skills/" + (slugify(name) || "name") + "/"}</code>}
       onSave={() => {
         if (!canSave) return;
         setErr(null);

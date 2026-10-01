@@ -303,7 +303,16 @@ export function TaskHero({
         )}
         <span className="hero-file">
           <Icon name="file" />
-          <span>{task.filePath}</span>
+          {/* Ruling 621: one box per segment, its slash included, so a
+              narrow line breaks after a slash and never inside the key
+              ("tasks/VIB-" | "151/task.md"). */}
+          <span>
+            {task.filePath.split("/").map((seg, i, all) => (
+              <span key={i} className="hero-file-seg">
+                {i < all.length - 1 ? `${seg}/` : seg}
+              </span>
+            ))}
+          </span>
         </span>
       </div>
       {editing ? (
@@ -364,7 +373,7 @@ export function TaskHero({
               <span
                 key={refused ? `alert-${refused}` : "hint"}
                 id={goalErrId}
-                className={refused ? "composer-err" + (refusalShake.shake ? " refused" : "") : "fine xs dim"}
+                className={refused ? "composer-err" + (refusalShake.shake ? " refused" : "") : "fine dim"}
                 onAnimationEnd={refused ? refusalShake.onAnimationEnd : undefined}
                 role={refused ? "alert" : undefined}
               >

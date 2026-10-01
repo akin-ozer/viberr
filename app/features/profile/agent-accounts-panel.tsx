@@ -12,6 +12,7 @@ import type { FetcherWithComponents } from "react-router";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
+import { AgentGlyph } from "~/ui/identity";
 import { LocalCalendarDate, LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { inFlightIntent } from "~/ui/in-flight";
@@ -1295,9 +1296,12 @@ function AgentAccountCard({
   return (
     <div className="cred-card">
       <div className="cred-top">
-        <Icon name="cpu" />
+        {/* Ruling 621: the backend's own mark (Claude's sparkle, Codex's
+            chip), as every other surface draws it; the name beside it is the
+            text, so the tile is decorative. */}
+        <AgentGlyph backend={backend} decorative />
         <span className="cred-name">{label}</span>
-        <span className="mono push faint">{badge}</span>
+        <span className="fine push">{badge}</span>
       </div>
 
       {/* A failed sign-in is reported ALONGSIDE whatever is connected, never
@@ -1655,7 +1659,7 @@ function AgentAccountCard({
               inside a card inside a panel; a failed sign-in still reports in
               `.cred-warn` above. */}
           <div className="pol-note after last">
-            <Icon name="cpu" />
+            <Icon name="user" />
             <span>
               Tasks you own and your controller conversations run on your
               own {label} account.

@@ -56,7 +56,7 @@ export function MoveBackConfirm({
         <div className="mh-main">
           <h2>Move back to {toStageName}?</h2>
           <div className="mh-sub">
-            <span className="mono">{taskKey}</span> · {taskTitle}
+            <span className="key">{taskKey}</span> · {taskTitle}
           </div>
         </div>
       </div>

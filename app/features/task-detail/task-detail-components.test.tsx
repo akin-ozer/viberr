@@ -86,7 +86,9 @@ describe("DecisionPacket", () => {
       <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
-    expect(card.classList.contains("input")).toBe(true);
+    // Ruling 621 (B11): the operator's decision wears the info tone a decision
+    // waiting on a person wears everywhere; amber (`input`) is an agent's question.
+    expect(card.classList.contains("decision")).toBe(true);
     // Ruling 500: the kind is the head's title beside its tile.
     expect(container.querySelector(".packet-top .packet-kind")!.textContent).toBe(
       "Completion report",
@@ -1510,14 +1512,15 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(runBtn.disabled).toBe(true);
   });
 
-  it("a closed task disables the operator run and no longer advertises an @operator side door (N20-17 → ruling 177)", () => {
-    const { container, onRunOperator } = renderExec(
+  it("a closed task withdraws the operator run and no longer advertises an @operator side door (N20-17 → ruling 177, 621)", () => {
+    const { container } = renderExec(
       execTask({ operator: attachedOperator, displayReadiness: "accepted" }),
     );
-    const run = operatorRunBtn(container);
-    expect(run.disabled).toBe(true);
-    fireEvent.click(run);
-    expect(onRunOperator).not.toHaveBeenCalled();
+    // Ruling 621 on ruling 37: withdrawn, as the run-an-agent control is, not
+    // a dead steer field, when-picker and button. CANARY: drop the closed
+    // early return in OperatorRunControl and all three draw again, disabled.
+    expect(container.querySelector(".op-run:not(.agent-run) > button.btn")).toBeNull();
+    expect(operatorDelay(container)).toBeNull();
     expect(container.textContent).toContain(
       "Task closed. Reopen it to run the operator.",
     );
@@ -4718,6 +4721,18 @@ describe("ruling 478: the task page's timeline, packet and GitHub panel", () => 
       "H3 (a) Connect Workers Builds",
       "H3 Please reply with",
     ]);
+  });
+
+  it("ruling 621 (B11): an agent's question keeps the amber tone; the operator's decision takes the info blue", () => {
+    // CANARY: tone the card on `p.type` alone again, and every input packet is
+    // `input` (amber) — the operator's "Decision required" too, while Home and
+    // Notifications pill that same packet blue.
+    const question = renderPacket(agentQuestion).container.querySelector(".packet")!;
+    expect([...question.classList]).toEqual(["packet", "input"]);
+    cleanup();
+    const { answerTo: _asker, ...operatorDecision } = agentQuestion;
+    const decision = renderPacket({ ...operatorDecision, kind: "Decision required", from: "Operator" }).container.querySelector(".packet")!;
+    expect([...decision.classList]).toEqual(["packet", "decision"]);
   });
 
   it("(e) F40-31/F40-57: an agent's question preselects nothing, and Confirm refuses until an answer is chosen", () => {

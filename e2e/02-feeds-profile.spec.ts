@@ -17,11 +17,11 @@ test("notifications mark-all-read clears every unread row", async ({
   await page.goto("/notifications");
 
   // Seeded inbox has unread rows for Arda.
-  await expect(page.locator(".unread-dot.in").first()).toBeVisible();
+  await expect(page.locator(".unread-dot").first()).toBeVisible();
 
   await page.locator("button", { hasText: "Mark all read" }).click();
 
-  await expect(page.locator(".unread-dot.in")).toHaveCount(0);
+  await expect(page.locator(".unread-dot")).toHaveCount(0);
 });
 
 test("profile theme switch persists after reload", async ({ page }) => {

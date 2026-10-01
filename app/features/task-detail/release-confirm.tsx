@@ -79,7 +79,7 @@ export function ReleaseConfirm({
         <div className="mh-main">
           <h2>Release ownership?</h2>
           <div className="mh-sub">
-            <span className="mono">{task.key}</span> · {task.title}
+            <span className="key">{task.key}</span> · {task.title}
           </div>
         </div>
         <button
@@ -114,7 +114,9 @@ export function ReleaseConfirm({
               {packet ? (
                 <span className="rel-open">
                   <Pill
-                    kind={packet.type === "blocked" ? "blocked" : "input"}
+                    // Ruling 621 (B11): a decision waiting on a person is
+                    // info blue; amber is an agent's question.
+                    kind={packet.type === "blocked" ? "blocked" : packet.answerTo ? "input" : "info"}
                     sm
                     dot
                   >

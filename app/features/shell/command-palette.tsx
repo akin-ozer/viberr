@@ -24,10 +24,12 @@ const GROUP_LABEL = {
   agent: "Agents",
 } as const satisfies Record<CommandHitKind, string>;
 
+/** Ruling 621: a task is the open circle the board's To do wears, not a check
+ *  mark, which read every open task in the list as done. */
 const GROUP_ICON = {
   project: "board",
   epic: "epic",
-  task: "check",
+  task: "todo",
   branch: "branch",
   agent: "agents",
 } as const satisfies Record<CommandHitKind, IconName>;
@@ -222,7 +224,14 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                   >
                     <Icon name={GROUP_ICON[hit.kind]} />
                     <span className="cmdk-main">
-                      <span className="cmdk-label">{hit.label}</span>
+                      <span className="cmdk-label">
+                        {hit.key && (
+                          <>
+                            <span className="cmdk-key">{hit.key}</span>{" "}
+                          </>
+                        )}
+                        {hit.label}
+                      </span>
                       <span className="cmdk-sub">{hit.sub}</span>
                     </span>
                   </button>

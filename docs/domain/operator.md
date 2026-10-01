@@ -741,7 +741,7 @@ offer still holds.
 
 The same three writers put the card itself on the entry that records it (ruling 586,
 `askedEntryText`): the heading ("**Question for a human:** <title>", "**Decision packet:**
-<title> Awaiting a human decision.", "**Blocked:** <title> Opened a decision packet…"), then
+<title> Awaiting a human decision.", "**Blocked.** Opened a decision packet…", whose entry's title already names what blocked it, ruling 621), then
 the body, the observations and the options, the recommended one marked. A packet leaves the
 task when it is answered, and the decision entry names only the option and the person's
 words, so this entry is where what was asked stays. Viberr's own recovery packets restate

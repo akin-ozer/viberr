@@ -61,11 +61,12 @@ export function EpicsPage({
       <div className="board-head">
         <div>
           <h1>Epics</h1>
+          {/* Ruling 621: an empty project's count is the hero's heading below
+              ("No epics yet"), so the head says nothing rather than say it
+              twice. The status region stays, so a count that arrives is read. */}
           <div className="sub">
             <span role="status">
-              {epics.length === 0
-                ? "No epics yet"
-                : `${countLabel(epics.length, "epic")} · ${open.length} open`}
+              {epics.length > 0 && `${countLabel(epics.length, "epic")} · ${open.length} open`}
             </span>
           </div>
         </div>
@@ -85,7 +86,10 @@ export function EpicsPage({
               ))}
             </div>
           )}
-          {canManage && (
+          {/* Ruling 621: one primary New epic — the empty state's own button
+              while there are none (as the board keeps one create on a
+              virgin board), this one once there is a list. */}
+          {canManage && epics.length > 0 && (
             <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
               <Icon name="plus" />
               New epic
@@ -152,7 +156,7 @@ function EpicRow({ epic, stages, href }: { epic: EpicSummary; stages: EpicStageV
     <Link className="epic-row" to={href} data-epic={epic.id}>
       <span className="epic-row-name">
         <span className="epic-dot" data-stage-color={epic.color} aria-hidden="true" />
-        <span className="epic-row-id mono">{epic.id}</span>
+        <span className="epic-row-id">{epic.id}</span>
         <span className="epic-row-title">{epic.title}</span>
       </span>
       <span className="epic-row-status">

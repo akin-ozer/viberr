@@ -267,7 +267,6 @@ function InviteModal({
           <input
             id="inv-mail"
             type="text"
-            className="mono"
             value={email}
             placeholder="name@company.dev · or · @company.dev"
             onChange={(e) => setEmail(e.target.value)}
@@ -299,7 +298,6 @@ function InviteModal({
             <input
               id="inv-email"
               type="text"
-              className="mono"
               value={email}
               placeholder="name@company.dev"
               onChange={(e) => setEmail(e.target.value)}
@@ -455,7 +453,6 @@ function EditUserModal({
           <input
             id="eu-email"
             type="text"
-            className="mono"
             value={email}
             disabled={!isLocal}
             onChange={(e) => setEmail(e.target.value)}
@@ -681,7 +678,7 @@ export function UsersPanel({
         <div className="cred-ok">
           <Icon name="check" />
           <span>
-            Account created for <span className="mono">{setupNotice.email}</span>. Temp
+            Account created for {setupNotice.email}. Temp
             sign-in password: <code className="mono">{setupNotice.tempPassword}</code>{" "}
             (shown once, hand it over out-of-band).
           </span>

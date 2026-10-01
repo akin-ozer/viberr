@@ -24,7 +24,9 @@ const CLAUDE_NOT_CONNECTED =
 /** Where the sentence above sends a person, linked where it is printed. */
 const AGENT_ACCOUNTS_PLACE = "Profile → Agent accounts";
 
-/** What a composer that cannot send yet says in its own box. */
+/** What a control that cannot send yet says in its title (the knowledge
+ *  panel's actions). Ruling 621: the composers' boxes no longer repeat it;
+ *  the note below is said once, beside them. */
 export const CONNECT_TO_SEND = "Connect Claude to send a message.";
 
 /**

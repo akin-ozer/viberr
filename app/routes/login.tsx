@@ -585,7 +585,6 @@ export default function Login({
               ref={emailRef}
               name="email"
               type="email"
-              className="mono"
               autoComplete="username"
               value={email}
               placeholder="you@company.dev"

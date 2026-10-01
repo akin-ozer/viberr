@@ -97,7 +97,7 @@ export function EpicPage({
               Epics
             </Link>
             <span aria-hidden="true"> / </span>
-            <span className="mono">{epic.id}</span>
+            {epic.id}
           </p>
           <h1 className="epic-title">
             <span className="epic-dot lg" data-stage-color={epic.color} aria-hidden="true" />
@@ -404,7 +404,7 @@ function EpicTaskRow({
   return (
     <li className="epic-task" data-task={task.key} aria-busy={busy || undefined}>
       <Link className="epic-task-link" to={href}>
-        <span className="epic-task-key mono">{task.key}</span>
+        <span className="epic-task-key">{task.key}</span>
         <span className="epic-task-title">{task.title}</span>
       </Link>
       <span className="epic-task-props">
@@ -551,7 +551,7 @@ function AddTasksDialog({
               <li key={c.key}>
                 <label className="epic-add-row">
                   <input type="checkbox" checked={picked.includes(c.key)} onChange={() => toggle(c.key)} />
-                  <span className="mono epic-task-key">{c.key}</span>
+                  <span className="epic-task-key">{c.key}</span>
                   <span className="epic-task-title">{c.title}</span>
                   {c.epicId && (
                     <span className="fine dim epic-add-in">

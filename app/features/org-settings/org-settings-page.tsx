@@ -631,9 +631,10 @@ function AuditExportCard({
         </a>
       </div>
       <div className="audit-s3">
-        <h3>S3 export target</h3>
+        {/* Ruling 621: one fact row needs no eyebrow over it; the label
+            names the whole fact. */}
         <div className="kv-row">
-          <span className="k">Target</span>
+          <span className="k">S3 export</span>
           {configured ? (
             <>
               <span className="v mono">
@@ -779,7 +780,7 @@ function RunConcurrencyControl({
           </span>
         </div>
         <span className="guard-ctl">
-          <label htmlFor="max-concurrent-runs">Max at once</label>
+          <label className="flabel" htmlFor="max-concurrent-runs">Max at once</label>
           <input
             ref={capRef}
             id="max-concurrent-runs"
@@ -801,7 +802,7 @@ function RunConcurrencyControl({
           >
             Save
           </button>
-          <span className="faint">0 = unlimited</span>
+          <span className="fhint flush">0 = unlimited</span>
         </span>
         {runConcurrency.cap > 0 && (
           <span className="conc-lane">
@@ -880,7 +881,7 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
         </span>
       </div>
       <span className="guard-ctl">
-        <label htmlFor="max-run-spend-usd">Max spend per Claude run, USD</label>
+        <label className="flabel" htmlFor="max-run-spend-usd">Max spend per Claude run, USD</label>
         <input
           ref={capRef}
           id="max-run-spend-usd"
@@ -903,7 +904,7 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
         >
           Save
         </button>
-        <span className="faint">blank = no cap</span>
+        <span className="fhint flush">blank = no cap</span>
       </span>
       <span className="conc-lane">
         Claude stops a run once it has spent this much and reports it as cut off by its spending

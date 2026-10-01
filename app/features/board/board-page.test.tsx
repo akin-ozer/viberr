@@ -2399,7 +2399,7 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     ]);
     const card = withPr.container.querySelector(".card")!;
     // One trace: the PR stands in for the branch it implies.
-    const pr = card.querySelector(".card-head .trace.pr")!;
+    const pr = card.querySelector(".card-head .trace:not(.br)")!;
     expect(visibleText(pr)).toBe("#291");
     // Interface review 2026-09-24 (acce-5): "Pull request" was title-only.
     expect(pr.textContent).toBe("Pull request #291");
@@ -2433,10 +2433,15 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
   it("the list row seats the same two identities", () => {
     const { container } = renderBoard([task({ key: "VIB-2", owner: arda })], { view: "list" });
     const row = container.querySelector(".list-row")!;
-    expect(row.querySelector(".list-agent")).toBeNull();
+    // Ruling 621: the agent seat stays as an empty, hidden column so the chips
+    // before it line up. CANARY: return null for a row with no agent.
+    expect(row.querySelector(".list-agent")!.getAttribute("aria-hidden")).toBe("true");
+    expect(row.querySelector(".list-agent")!.childElementCount).toBe(0);
     expect(row.textContent).not.toContain("no agent");
     expect(row.querySelector(".rev-stack")!.getAttribute("aria-label")).toBe("Owner: Arda Kaya");
-    expect(row.querySelector(".rev-stack .rs-lbl")!.textContent).toBe("owner");
+    // Ruling 621: no "OWNER" eyebrow repeated on every row; the seat's name is
+    // its label. CANARY: print an "owner" label beside the list row's seat.
+    expect(row.textContent).not.toMatch(/owner/i);
   });
 });
 

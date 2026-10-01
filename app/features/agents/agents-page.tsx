@@ -125,27 +125,29 @@ function primaryBackendHealth(
 function BackendChip({
   b,
   health,
+  noted = false,
 }: {
   b: "codex" | "claude";
   /** Undefined = not probed on this surface; nothing is claimed. */
   health?: BackendConnectionSummary | undefined;
+  /** The panel's note under the row already says the viewer has not
+   *  connected this backend, so the chip does not say it a second time. */
+  noted?: boolean;
 }) {
-  // Mirrors the task-level Execution profile panel verbatim ("Codex — not
+  // Mirrors the task-level Execution profile panel ("Codex — not
   // configured"), which was already telling this truth while this page said
-  // "available" about the same profile. `.model-sub` is the runtime row's
-  // existing "this value is not what it looks like" badge (the model cell's
-  // DEFAULT flag) — same amber, same alert glyph, same cursor:help, no new
-  // class name with no rule behind it.
+  // "available" about the same profile.
   // Ruling 127: "not connected" is about the VIEWER's own account, not the
-  // deployment's — the badge says what THEY have to do about it.
-  const missing = health ? !health.viewerConnected : false;
+  // deployment's — the badge says what THEY have to do about it. Ruling 621:
+  // one phrase and one hue for it on the page (the hero's and the roster's
+  // rose pill), and only where nothing nearer says it already.
+  const missing = health ? !health.viewerConnected && !noted : false;
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} decorative />
       {BACKEND_LABEL[b]}
       {missing && (
-        <span className="model-sub" title={notConnectedNote(b)}>
-          <Icon name="alert" />
+        <span className="pill risk sm" title={notConnectedNote(b)}>
           not connected
         </span>
       )}
@@ -196,8 +198,9 @@ function ActiveBadge({
   unusable,
 }: {
   count: number;
-  /** F16: the profile's backend holds no credential — every run it is given
-   *  refuses before it starts, so "idle" alone is a half-truth. */
+  /** F16: the viewer has not connected the profile's backend — every run it
+   *  is given on their tasks refuses before it starts, so "idle" alone is a
+   *  half-truth. The sentence its hover carries, naming the backend. */
   unusable?: string | undefined;
 }) {
   // Ruling 455 names the count in words; ruling 459's violet working dot
@@ -209,11 +212,14 @@ function ActiveBadge({
         {count} running
       </span>
     );
+  // Ruling 621: the page's one phrase and hue for this fact ("no runtime" was
+  // a second, vaguer claim, in amber beside the hero's rose pill). The words
+  // the backend chips use: in a 312px roster card the backend's name wrapped
+  // the role under the name, so it rides the hover sentence and the hero.
   if (unusable)
     return (
-      <span className="model-sub" title={unusable}>
-        <Icon name="alert" />
-        no runtime
+      <span className="pill risk sm" title={unusable}>
+        not connected
       </span>
     );
   return <span className="ag-idle">idle</span>;
@@ -777,7 +783,7 @@ export function LibraryPicker({
                     {profileRoleLabel(t.name, t.role, "specialist")}
                   </span>
                   <span className="deploy-task">
-                    <span className="key mono">{t.name}</span> {t.desc}
+                    <span className="key">{t.name}</span> {t.desc}
                   </span>
                   {t.backends.map((b) => (
                     <BackendChip key={b} b={b} />
@@ -1185,7 +1191,7 @@ export function ProfileDetail({
             <div className="lbl">
               Execution backend
               {a.backends.length > 1 && (
-                <span className="fhint"> · a run uses the first</span>
+                <span className="fhint">a run uses the first</span>
               )}
             </div>
             <div className="rt-val">
@@ -1200,6 +1206,7 @@ export function ProfileDetail({
                       key={b}
                       b={b}
                       {...(backendHealth?.[b] ? { health: backendHealth[b] } : {})}
+                      noted={backendMissing && b === runHealth?.backend}
                     />
                   ))
                 ) : (
@@ -1232,7 +1239,7 @@ export function ProfileDetail({
               own default. */}
           <div className="rt-cell">
             <div className="lbl">Model · effort</div>
-            <div className="rt-val mono model-val">
+            <div className="rt-val model-val">
               <span>
                 {a.modelLabel} ·{" "}
                 {a.effort ? effortLabel(a.effort) : "default effort"}
@@ -1283,7 +1290,9 @@ export function ProfileDetail({
         {/* Ruling 127: the actionable half, addressed to the person reading
             it. There is no instance credential to name any more — a run bills
             the task owner, and this viewer's own account is what decides
-            whether the profile runs on the tasks THEY own. */}
+            whether the profile runs on the tasks THEY own. Ruling 621: the
+            members' count is the runtime line's, just above; it is not said
+            twice. */}
         {backendMissing && (
           <div className="def-note">
             <Icon name="alert" />
@@ -1291,10 +1300,7 @@ export function ProfileDetail({
               <b>You haven't connected {backendLabel}</b>. Runs use the task
               owner's account, so a run this profile is given on a task you own
               refuses before it starts. Connect {backendLabel} on your Profile →
-              Agent accounts.{" "}
-              {runHealth
-                ? `${runHealth.membersConnected} of ${runHealth.membersTotal} project members have connected it.`
-                : ""}
+              Agent accounts.
             </span>
           </div>
         )}
@@ -1310,8 +1316,11 @@ export function ProfileDetail({
         </div>
         {insts.length === 0 ? (
           <div className="empty sm">
+            {/* Ruling 621: with the backend not connected, the note above
+                already says why a run would be refused; this stops at the
+                fact, and no longer calls the profile available. */}
             {backendMissing
-              ? `Not currently engaged on any task. This profile is approved, but you have not connected ${backendLabel}, so a run it is given on a task you own would be refused.`
+              ? "Not currently engaged on any task."
               : "Not currently engaged on any task. This profile is approved and available for assignment."}
           </div>
         ) : (
@@ -1323,9 +1332,13 @@ export function ProfileDetail({
                 key={`${d.taskKey}:${d.engagement}`}
                 onClick={() => onOpen(d.taskKey)}
               >
-                <span className="deploy-eng">{engagementLabel(d.engagement)}</span>
+                {/* Ruling 621: on the operator's own page every row is an
+                    operator engagement, so the label went on all of them. */}
+                {(a.kind !== "operator" || d.engagement !== "operator") && (
+                  <span className="deploy-eng">{engagementLabel(d.engagement)}</span>
+                )}
                 <span className="deploy-task">
-                  <span className="key mono">{d.taskKey}</span> {d.taskTitle}
+                  <span className="key">{d.taskKey}</span> {d.taskTitle}
                 </span>
                 {d.backend && a.kind !== "operator" && (
                   <BackendChip b={d.backend} />
@@ -1410,6 +1423,7 @@ export function LiveRoster({
   deployments,
   onOpen,
   nameById,
+  iconById,
   operatorBackend,
 }: {
   deployments: AgentDeploymentView[];
@@ -1418,6 +1432,9 @@ export function LiveRoster({
    *  raw profileId (P11-42). The row falls back to the profileId when a name
    *  can't be resolved. */
   nameById?: Record<string, string>;
+  /** profileId → the profile's own icon (ruling 621), so a row wears the mark
+   *  the Profiles tab gives it; the Backend column names the backend. */
+  iconById?: Record<string, string>;
   /** Ruling 479(e): the backend an operator run starts on. The Backend column
    *  printed "orchestration" for every operator row, a word for no runtime,
    *  while the operator runs on Claude or Codex like any agent. */
@@ -1461,6 +1478,7 @@ export function LiveRoster({
           // project). Name the condition and keep the id in the tooltip, where
           // it is diagnostic rather than decorative.
           const resolved = isOp ? "Operator" : nameById?.[d.profileId];
+          const icon = iconById?.[d.profileId];
           return (
             <button
               type="button"
@@ -1469,14 +1487,29 @@ export function LiveRoster({
               onClick={() => onOpen(d.taskKey)}
             >
               <span className="live-agent">
+                {/* Ruling 621: the profile's own glyph, as on the Profiles tab
+                    (Developer drew Codex's cpu here and its branch there). A
+                    row whose profile is gone keeps the backend's tile. */}
                 <span
                   className={
                     "agent-glyph" +
-                    (isOp ? " op" : " " + (d.backend === "claude" ? "claude" : "codex"))
+                    (isOp
+                      ? " op"
+                      : icon
+                        ? ""
+                        : " " + (d.backend === "claude" ? "claude" : "codex"))
                   }
                 >
                   <Icon
-                    name={isOp ? "shield" : d.backend === "claude" ? "sparkle" : "cpu"}
+                    name={
+                      icon
+                        ? storeIcon(icon)
+                        : isOp
+                          ? "shield"
+                          : d.backend === "claude"
+                            ? "sparkle"
+                            : "cpu"
+                    }
                   />
                 </span>
                 <span className="live-ident">
@@ -1505,7 +1538,7 @@ export function LiveRoster({
                     : "Codex"}
               </span>
               <span className="live-task">
-                <span className="key mono">{d.taskKey}</span>{" "}
+                <span className="key">{d.taskKey}</span>{" "}
                 <span className="ttl">{d.taskTitle}</span>
               </span>
               <span>
@@ -1709,6 +1742,10 @@ export function AgentsPage({
   // falling back to the profileId when unresolved (P11-42).
   const nameById = useMemo(
     () => Object.fromEntries(profiles.map((p) => [p.id, p.name])),
+    [profiles],
+  );
+  const iconById = useMemo(
+    () => Object.fromEntries(profiles.map((p) => [p.id, p.icon])),
     [profiles],
   );
 
@@ -1978,6 +2015,7 @@ export function AgentsPage({
           deployments={deployments}
           onOpen={onOpen}
           nameById={nameById}
+          iconById={iconById}
           operatorBackend={operatorBackend}
         />
       )}

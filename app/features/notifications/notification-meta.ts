@@ -27,12 +27,13 @@ export function ntfMeta(n: {
     // a completion checkmark, exactly the "something to accept" reading a
     // supervisor scanning the inbox must NOT get. A non-blocked packet is an
     // open question: `hand` is the glyph this app already uses for "waiting on
-    // a human" (board WaitTag, "Waiting on me" filter, review queue), and
-    // `act-policy` is the orange/yellow icon palette that matches `.pill.input`
-    // — the very pill the packet wears on the task page (decision-packet.tsx).
+    // a human" (board WaitTag, "Waiting on me" filter, review queue). Ruling
+    // 621: on the blue palette, the one colour "a decision waits on you"
+    // wears everywhere (the board's chip, the review queue); amber stays an
+    // agent's question below.
     return n.ptype === "blocked"
       ? { icon: "alert", cls: "act-blocked" }
-      : { icon: "hand", cls: "act-policy" };
+      : { icon: "hand", cls: "act-transition" };
   }
   // Ruling 481(a) (F40-48): an agent's question waits on a human exactly like
   // an operator's open question, so it wears the same hand on the same
@@ -85,8 +86,8 @@ export function ntfPill(n: {
 }): NtfPill {
   if (n.kind === "approval") return { kind: "info", label: "approval" };
   // Ruling 481(a): the task page names the same packet "Agent question"
-  // (`AGENT_QUESTION_PACKET_KIND`); the pill is its lowercased form, on the input tone
-  // every other decision that waits on a person wears.
+  // (`AGENT_QUESTION_PACKET_KIND`); the pill is its lowercased form, on the
+  // input (amber) tone ruling 621 keeps for an agent's question.
   if (n.kind === "question") return { kind: "input", label: "agent question" };
   // F19-24: this used to end in `return { kind: "input", label: "completion
   // report" }` as the FALL-THROUGH, so every non-blocked packet was pilled a
@@ -100,10 +101,12 @@ export function ntfPill(n: {
   // from the SAME `packetType` that becomes this row's `ptype` further down
   // that function) — see the note on NtfPill about threading the stored string
   // through instead.
+  // Ruling 621: "decision required" is blue (info), as every other decision
+  // that waits on you; amber (input) is an agent's question, above.
   if (n.kind === "packet") {
     return n.ptype === "blocked"
       ? { kind: "blocked", label: "blocked decision" }
-      : { kind: "input", label: "decision required" };
+      : { kind: "info", label: "decision required" };
   }
   // Nothing else reaches this pill — "Waiting on you" holds the decision
   // kinds only (`DECISION_NOTIFICATION_KINDS`). If something ever does, it

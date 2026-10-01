@@ -435,8 +435,11 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     ]) {
       expect(note?.textContent).toContain(label);
     }
+    // Ruling 621: each variable is code, one mono token apiece, so an admin
+    // copies it whole. CANARY: print the four as one joined string again.
+    const tokens = [...note!.querySelectorAll("code.mono")].map((c) => c.textContent);
     for (const envVar of Object.values(CONTROLLER_UNLOCK_ENV)) {
-      expect(note?.textContent).toContain(`${envVar}=enabled`);
+      expect(tokens).toContain(`${envVar}=enabled`);
     }
     // Model stays editable: once the catalog answers, the select is a real
     // control (it is disabled only during the load, lock or no lock).

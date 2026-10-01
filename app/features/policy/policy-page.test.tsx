@@ -98,9 +98,11 @@ describe("HumanAccess", () => {
     expect(getByText("Human access · RBAC")).toBeTruthy();
     expect(getByText("4 members")).toBeTruthy();
     expect(container.querySelectorAll(".member-row")).toHaveLength(4);
-    // Header counts derive live from the same member array.
-    expect(getByText("Admin · 2")).toBeTruthy();
-    expect(getByText("Maintainer · 1")).toBeTruthy();
+    // Header counts derive live from the same member array. Ruling 621: the
+    // count sits under the role (`.rbac-n`), so the header can wrap.
+    const heads = [...container.querySelectorAll(".rbac-table thead th")].map((th) => th.textContent);
+    expect(heads.slice(0, 3)).toEqual(["Action", "Admin 2", "Maintainer 1"]);
+    expect(container.querySelector(".rbac-table thead .rbac-n")!.textContent).toBe("2");
     // Grant rows (one per RBAC_DEFINITIONS entry) — the whole table, every enforced action.
     // Ruling 582 added `remove-from-record`.
     expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(23);
@@ -212,9 +214,10 @@ describe("HumanAccess", () => {
       (v) => v.textContent,
     );
     expect(values).toEqual(["Admin", "Admin", "Maintainer", "Contributor"]);
-    // The role words are the VALUES, not the table headers (those read "Admin · 2").
-    expect(getAllByText("Admin")).toHaveLength(2);
-    expect(queryByText("Viewer")).toBeNull(); // no member holds it → no dead chip
+    // The role words are the VALUES; the table headers (ruling 621: the role
+    // over its count) are not what this counts.
+    expect(getAllByText("Admin", { ignore: "th" })).toHaveLength(2);
+    expect(queryByText("Viewer", { ignore: "th" })).toBeNull(); // no member holds it → no dead chip
     // The note that used to explain a dimmed control now explains its absence,
     // and still names the grant the reader would have to ask for.
     const note = Array.from(container.querySelectorAll(".pol-note")).find((n) =>

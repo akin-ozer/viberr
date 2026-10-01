@@ -250,10 +250,12 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     const note = container.querySelector(".ctl-composer [data-not-connected]");
     expect(note?.textContent).toContain("your own Claude account");
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
-    expect(box.placeholder).toBe("Connect Claude to send a message.");
-    // The pill states the same fact in the header, and neither of them blames
-    // the deployment: since ruling 127 it holds no credential to blame.
-    expect(container.textContent).toContain("Claude not connected");
+    // Ruling 621: said once beside the box, not again inside it.
+    // CANARY: put a not-connected placeholder back on the disabled box.
+    expect(box.placeholder).toBe("");
+    // The pill states the state in the header's title row, and neither of them
+    // blames the deployment: since ruling 127 it holds no credential to blame.
+    expect(container.querySelector(".ctl-head-title .pill")?.textContent).toBe("Claude not connected");
     expect(container.textContent).not.toContain("backend unavailable");
     // The blame, not the words: ruling 419(g) puts ruling 314's instance
     // examples on this page, and one of them asks about the agent profiles
@@ -877,10 +879,14 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
     expect(posted[0]!.conversationId).toBeUndefined();
   });
 
-  it("holds the examples while the viewer's Claude is not connected", async () => {
-    renderPage(view({ conversation: null, available: false }), "?c=new");
-    const example = await screen.findByRole("button", { name: "Which tasks have been open longest, and why?" });
-    expect(example).toHaveProperty("disabled", true);
+  it("offers no examples while the viewer's Claude is not connected", async () => {
+    // Ruling 621: three disabled suggestions were a fourth way of saying "not
+    // connected"; the composer's note says what to do instead.
+    // CANARY: render the example list whatever `view.available` says.
+    const { container } = renderPage(view({ conversation: null, available: false }), "?c=new");
+    await screen.findByText("Nothing asked yet");
+    expect(container.querySelector(".ctl-examples")).toBeNull();
+    expect(container.querySelector(".ctl-composer [data-not-connected]")).not.toBeNull();
   });
 });
 

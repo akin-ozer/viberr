@@ -35,7 +35,7 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   return (
     <span
       key={detail}
-      className="ctl-working-step mono"
+      className="ctl-working-step"
       title={detail}
       data-fresh={fresh ? "true" : undefined}
     >

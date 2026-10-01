@@ -69,7 +69,7 @@ export function ArchiveConfirm({
         <div className="mh-main">
           <h2>Archive this task?</h2>
           <div className="mh-sub">
-            <span className="mono">{task.key}</span> · {task.title}
+            <span className="key">{task.key}</span> · {task.title}
           </div>
         </div>
         <button

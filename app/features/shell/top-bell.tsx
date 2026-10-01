@@ -211,7 +211,7 @@ export function TopBell({
           >
             <div className="ntf-pop-head">
               <h3>Notifications</h3>
-              <span className="ct mono">
+              <span className="ct">
                 {shownUnread > 0 ? shownUnread + " unread" : "caught up"}
               </span>
               {shownUnread > 0 && (

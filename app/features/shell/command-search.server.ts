@@ -27,6 +27,9 @@ export interface CommandHit {
   id: string;
   /** Primary line. */
   label: string;
+  /** A task hit's key, drawn quietly ahead of its title (ruling 621): baked
+   *  into the label it was as loud as the title. */
+  key?: string;
   /** Secondary line (project name, stage, role…). */
   sub: string;
   /** Where Enter goes. */
@@ -222,7 +225,8 @@ export function searchWorkspace(
       taskHits.push({
         kind: "task",
         id: `task:${row.project_slug}/${row.task_key}`,
-        label: `${row.task_key} · ${row.title}`,
+        label: row.title,
+        key: row.task_key,
         sub: archivedSub(project, row),
         href,
       });

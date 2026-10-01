@@ -1268,8 +1268,12 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(container.textContent).not.toContain("Archive Viberr Core");
     // …and the rest of the page really did render, so the absence above is the
     // gate doing its job rather than a blank component tree.
+    // Ruling 621: in reading order, the left stack (project, people,
+    // repository) then the right one (the workflow and its rules).
     expect(pageRendered(container)).toEqual([
       "Project",
+      "Members",
+      "Repository & credentials",
       "Workflow stages",
       // Ruling 178: rendered read-only for a viewer (the rules as text).
       "Required reviewers",
@@ -1278,8 +1282,6 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
       "File leases",
       // Ruling 482: likewise. What acceptance waits on is readable to all.
       "Gates",
-      "Members",
-      "Repository & credentials",
     ]);
     // F21-5: the Repository panel above is present — and this is the assertion
     // that used to stop there, which is exactly how the credential card kept
@@ -1331,6 +1333,71 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
       });
       cleanup();
     }
+  });
+});
+
+/**
+ * Ruling 621 (e-settings #1 and #4). The page said the reviewer rules sit
+ * "under the stage editor in the same grid cell" (ruling 178), with leases and
+ * gates under them (rulings 396, 482), but the cell was a third grid item and
+ * wrapped under Project, leaving a 786px hole beside it. And each empty list
+ * was a 240px card holding a centred sentence and a disabled primary.
+ */
+describe("ruling 621: Settings' layout and its empty rule lists", () => {
+  const headingsIn = (col: Element) =>
+    Array.from(col.querySelectorAll("h2")).map((h) => h.textContent?.trim());
+
+  it("stacks the rule panels under Workflow stages, in its column", () => {
+    // CANARY: render the three rule panels as a third `.policy-cols` cell
+    // again, outside the stages' `.profile-col`.
+    const container = renderPageAs("admin");
+    const cols = Array.from(container.querySelectorAll(".policy-cols > .profile-col"));
+    expect(cols.map(headingsIn)).toEqual([
+      ["Project", "Members", "Repository & credentials"],
+      ["Workflow stages", "Required reviewers", "File leases", "Gates"],
+    ]);
+  });
+
+  it.each([
+    [
+      "Add rule",
+      () => (
+        <RequiredReviewersPanel
+          rules={[]}
+          stages={STAGES}
+          candidates={[{ id: "reviewer", name: "Code Reviewer" }]}
+          canManage
+          busy={false}
+          onSave={() => {}}
+        />
+      ),
+    ],
+    [
+      "Add lease",
+      () => (
+        <FileLeasesPanel
+          leases={[]}
+          candidates={[{ key: "VIB-1", title: "One" }]}
+          canManage
+          busy={false}
+          onSave={() => {}}
+        />
+      ),
+    ],
+    [
+      "Add gate",
+      () => <ProjectGatesPanel gates={[]} canManage busy={false} onSave={() => {}} />,
+    ],
+  ])("an empty list is one row with %s and no Save until there is a row", (add, panel) => {
+    // CANARY: render the panel's Save unconditionally again.
+    const { container, getByText, queryByRole, getByRole } = render(panel());
+    const row = container.querySelector(".rr-actions")!;
+    expect(row.querySelector(".rr-empty")).not.toBeNull();
+    expect(row.textContent).toContain(add);
+    expect(queryByRole("button", { name: "Save" })).toBeNull();
+    fireEvent.click(getByText(add));
+    expect(container.querySelector(".rr-empty")).toBeNull();
+    expect(getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(false);
   });
 });
 

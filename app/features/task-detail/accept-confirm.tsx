@@ -419,7 +419,7 @@ export function AcceptConfirm({
         <div className="mh-main">
           <h2>{headingFor(mode, terminalName)}</h2>
           <div className="mh-sub">
-            <span className="mono">{task.key}</span> · {task.title}
+            <span className="key">{task.key}</span> · {task.title}
           </div>
         </div>
         <button
@@ -624,7 +624,7 @@ export function AcceptConfirm({
                   approved — a gate a human satisfied cannot pass silently
                   (ruling 19). */}
               {verdictSatisfiedBy && (
-                <span className="fine xs"> · {verdictSatisfiedBy}</span>
+                <span className="fine"> · {verdictSatisfiedBy}</span>
               )}
             </span>
           </div>
