@@ -274,8 +274,8 @@ Intents behind `project.task.tsx` are explained in
   iOS Safari does not zoom on focus: every `.field` input and textarea,
   `select`, the search, board-filter and palette inputs, the comment and
   controller composers, the goal editor, the label, stage and steer
-  inputs, the store browser's inputs and the concurrency field (the 720px block
-  in `app.css` is the list). Under the 1100px collapse the task page stacks
+  inputs, the store browser's inputs and its document's raw text, and the
+  concurrency field (the 720px block in `app.css` is the list). Under the 1100px collapse the task page stacks
   title and goal, the open decision, then the side column (GitHub, current
   state and next action, Details), then the rest (runs, the timeline): the
   page is four regions in source order (`.detail-head`, `.detail-packet`,
@@ -355,6 +355,14 @@ connections (`connection-add`, `connection-replace`, `connection-recheck`,
 templates (`agent-save`, `agent-delete`), controller (`controller-save`, `controller-request-decline`), runtime
 (`set-concurrency`, `set-run-spend-cap`, ruling 175), audit (`audit-export-s3`,
 `s3-config-save`, `s3-config-clear`). That is 45 intents.
+The store browser shows a document it opens (`store-read-doc`) as one card (ruling
+614): a head with the file's path and, for a markdown file (`.md`, `.markdown`), a
+Preview / Raw switch; the document, rendered on arrival when it is markdown and its raw
+text otherwise; and a foot with its state and Close (Cancel once it changed) beside Save
+document. Raw is where a document is edited; Save (`store-write-doc`) stays disabled on
+an opened document until its text changes, and the foot reads "Unsaved changes" while it
+differs (its line count and size otherwise). A new document opens on Raw under its
+file-name row, and Preview renders the draft.
 A GitHub connection row (ruling 463) says what its token reaches: a `<details>`
 (`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"
 when the read stopped at its cap) and whose body lists each repository with a quiet
@@ -511,7 +519,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   is mapped; ruling 508: every scope family the theme emits has a colour, so a diff's
   lines are green and red, and a log colours a number whole and a level by severity),
   unless a NUL byte in its first 8,000 characters sends it to the no-preview
-  card ("This file is not text"). A body whose fetch proved the file unservable (404
+  card ("This file is not text"). A markdown file opens rendered instead, under a
+  Preview / Raw switch at the top of the card whose Raw is that code reader; its pictures
+  and links to the task's own files resolve to their serving route (ruling 614). A body whose fetch proved the file unservable (404
   after the completion-time prune, 413 over the 50 MB cap, an auth redirect) reports the
   failure and drops Download rather than saving an error body under the real filename.
   The `Attachment lightbox` screen label covers all three.

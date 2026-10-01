@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub, MemoryRouter } from "react-router";
 import type { ReactNode } from "react";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
@@ -957,6 +957,45 @@ describe("attachment code reader (ruling 363)", () => {
       expect(pre.getAttribute("data-language")).toBe("text");
       expect(pre.querySelectorAll(".line")).toHaveLength(3);
       expect(pre.getAttribute("data-digits")).toBe("1");
+    });
+  });
+
+  it("ruling 614: a .md chip opens rendered, and Raw is the code reader", async () => {
+    await withBody("# Findings\n\nAll **green**.\n", async () => {
+      const { dialog, findByRole, getByRole } = openChip("report.md");
+      // CANARY: send markdown straight to CodeView and nothing here renders.
+      const preview = await findByRole("region", { name: "Preview of report.md" });
+      expect(within(preview).getByRole("heading", { level: 3, name: "Findings" })).toBeTruthy();
+      expect(within(preview).getByText("green").tagName).toBe("STRONG");
+      expect(dialog.querySelector("pre.code-view")).toBeNull();
+
+      fireEvent.click(getByRole("button", { name: "Raw" }));
+      const pre = await readerIn(dialog);
+      expect(pre.getAttribute("data-language")).toBe("markdown");
+      expect([...pre.querySelectorAll(".line")].map((l) => l.textContent)).toEqual([
+        "# Findings",
+        "",
+        "All **green**.",
+      ]);
+      // Either way the card keeps its Download.
+      expect(dialog.querySelector('a[href$="?download=1"]')).toBeTruthy();
+    });
+  });
+
+  it("ruling 614: a rendered picture of the task's own file loads from its serving route", async () => {
+    await withBody("![the page](shot.png)\n", async () => {
+      const { container, findByRole } = render(
+        <AttachmentLightboxProvider attachmentNames={["report.md", "shot.png"]} attachmentsBase={BASE}>
+          <TimelineItem ev={ev(["report.md"])} attachmentsBase={BASE} />
+        </AttachmentLightboxProvider>,
+      );
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
+      // CANARY: drop the provider's names on the way to the reader, and the
+      // picture asks the task page's own URL for `shot.png`.
+      const preview = await findByRole("region", { name: "Preview of report.md" });
+      expect(within(preview).getByRole("img", { name: "the page" }).getAttribute("src")).toBe(
+        `${BASE}/shot.png`,
+      );
     });
   });
 
