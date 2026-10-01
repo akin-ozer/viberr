@@ -568,7 +568,7 @@ h1, h2, h3, h4 {
    rule hands a container's own leading and wrap on to the prose inside it
    (markdown, the composer, a rules list), which this default would otherwise
    override. Paragraphs avoid a one-word last line. */
-:where(p, li, dd, td, blockquote, .sub, .fine, .hint, .fhint, .empty, .act-covers, .stat-sub) { line-height: 1.45; text-wrap-style: pretty; }
+:where(p, li, dd, td, th, blockquote, .sub, .fine, .hint, .fhint, .empty, .act-covers, .stat-sub, .stat-label, .mh-sub, .ho-exc, .ag-stat .l, .member-main .em, .logs-foot > span) { line-height: 1.45; text-wrap-style: pretty; }
 :where(.md-body, .md-doc, .composer-ce, .pol-note, .chg-lines) :where(p, li, dd, td, blockquote) { line-height: inherit; text-wrap-style: inherit; }
 
 /* ---------- App shell ---------- */
@@ -1333,10 +1333,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; flex-direction: column; gap: .375rem;
   overflow-y: auto;
   /* Ruling 625: the .125rem top keeps the first card's outset 1px ring inside
-     the scrollport (it was clipped), and the gutter is reserved on both edges
-     (ruling 457's live-scroller gutter) so a card sits centred, not 8 | 17. */
+     the scrollport (it was clipped), and the gutter is reserved (ruling 457's
+     live-scroller gutter) so a lane's cards do not narrow when it starts to
+     scroll. One edge, not both: both took 18px from every card, which pushed
+     the owner seat 13px past a 156px card's edge at 1280. */
   padding: .125rem .5rem var(--dock-clear);
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
   flex: 1;
   min-height: 0;
 }
@@ -2828,7 +2830,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   flex: none; width: 84px;
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
 }
-.deploy-task { flex: 1 1 14rem; min-width: 0; font-size: .88rem; font-weight: 600; }
+.deploy-task { flex: 1 1 14rem; min-width: 0; font-size: .88rem; font-weight: 600; line-height: 1.35; }
 .deploy-task .key, .live-task .key { color: var(--faint); margin-right: .375rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* live roster */
@@ -2850,7 +2852,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .live-wrap .live-head, .live-wrap .live-row { grid-template-columns: 1.5fr .9fr 2fr .9fr 1.1fr; }
 .live-head {
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
-  border-bottom: 1px solid var(--hairline); background: var(--tint-well);
+  line-height: 1.35; border-bottom: 1px solid var(--hairline); background: var(--tint-well);
 }
 .live-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); font-size: .88rem; transition: transform .15s var(--ease-out); }
 .live-row:last-child { border-bottom: 0; }
@@ -2862,7 +2864,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .live-role-sub { font-size: .75rem; color: var(--muted); }
 .live-be { font-size: .75rem; color: var(--muted); }
 .live-task { min-width: 0; overflow: hidden; }
-.live-task .ttl { color: var(--muted); }
+.live-task .ttl { color: var(--muted); line-height: 1.35; }
 
 /* delete confirmation */
 /* Native <dialog> cards: element-level reset (loses to any card class) so the
@@ -3354,7 +3356,8 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   width: 5.5rem; font: inherit; font-size: .88rem;
   color: var(--fg); background: var(--surface);
   border: 1px solid var(--border-control); border-radius: var(--radius-button);
-  padding: .25rem .5rem;
+  /* Ruling 625: the Save beside it is 30px; one height per control row. */
+  padding: .25rem .5rem; min-height: 30px;
 }
 .guard-toggle { display: inline-flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--muted); }
 .guard-row.inert .guard-name, .guard-row.inert .guard-desc { color: var(--placeholder); }
@@ -3873,8 +3876,9 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    ============================================================ */
 @media (max-width: 1400px) {
   /* Ruling 625: the board keeps the head's 1.5rem gutter (a 1rem one put
-     lane 1 8px left of the title), and five 190px lanes fit at 1280. */
-  .board { grid-auto-columns: minmax(190px, 21rem); gap: .75rem; }
+     lane 1 8px left of the title). Lanes keep their 200px floor: at 190px a
+     card's head (key, PR trace, owner seat) no longer fit it. */
+  .board { grid-auto-columns: minmax(200px, 21rem); gap: .75rem; }
 }
 
 .panel-head .right { white-space: nowrap; }
@@ -4701,6 +4705,12 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
      (the max-* lift the UA's dialog:modal cap); and Home takes the workspace
      pages' 24px gutter (it was 32px; `main` outranks the later base rule). */
   .page-overlay { width: 100vw; height: 100dvh; max-width: none; max-height: none; border-radius: 0; }
+  /* The standalone header's wordmark goes on a phone, where its crumb needs
+     the room ("Instance settings" read "Instanc…"); Home has no crumb. */
+  .home-brand:has(+ .crumbs) b { display: none; }
+  /* A list row's chips take their own line on a phone, so the agent, stage
+     and owner that follow them start one column on every row. */
+  .card.list-row .card-props { flex-basis: 100%; }
   main:is(.home-shell) { padding-inline: 1.5rem; }
   .rail {
     position: fixed;
@@ -5647,7 +5657,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .org-tile .val .nm { font-weight: 600; font-size: .88rem; line-height: 1.35; }
 .org-tile .val .sub { font-size: .75rem; line-height: 1.45; color: var(--faint); }
 .org-tile .sub > span { white-space: nowrap; }
-.org-tile .foot { display: flex; align-items: center; gap: .5rem; margin-top: auto; min-height: 26px; }
+.org-tile .foot { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem .5rem; margin-top: auto; min-height: 26px; }
 .org-tile .foot > .glyphs, .org-tile .foot > .avatar-group { margin-left: auto; }
 .org-tile .glyphs { display: flex; gap: .375rem; }
 
@@ -5743,6 +5753,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .org-tile.go:hover { border-color: var(--border); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .go-hint { display: inline-flex; align-items: center; gap: .375rem; font-family: var(--font-display); font-weight: 700; font-size: .75rem; color: var(--blue-pressed); }
 .go-hint .ico { width: 13px; height: 13px; transition: transform .15s var(--ease-out); }
+/* Ruling 625: a member's "Org admins manage this" is a note, not the link
+   an admin's "Manage →" is, so it keeps `.muted`'s ink and stays one line. */
+.go-hint.muted { color: var(--faint); font-weight: 500; white-space: nowrap; }
 .org-tile.go:hover .go-hint .ico { transform: translateX(2px); }
 
 .conn-list { display: flex; flex-direction: column; }
@@ -5979,6 +5992,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .setup-head > .setup-meter { display: none; }
   .pj-row .pj-name { min-width: 0; }
   .pj-row .pj-link { padding-right: 4.4rem; }
+  /* Ruling 625: the faces' column holds one width on a wide row only; here it
+     took 104px from a 94px name and broke the repo path over three lines. */
+  .pj-row .avatar-group { width: auto; }
   /* U39-16: a notification row's trailing controls (Mark read, the dot, the
      time) took the right half of a 241px row, and the notice itself read a
      word per line ("Policy / engine · GitHub / sync / is"). On a phone they

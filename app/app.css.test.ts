@@ -6564,7 +6564,7 @@ describe("app.css ruling 625: the board and the review queue", () => {
     expect(requiredDecls(plain, ".board.dragging > .column").get("height")).toBe("100%");
   });
 
-  it("(c) a card's ring stays inside its scroller, centred in the lane, its head marks in secondary ink", () => {
+  it("(c) a card's ring stays inside its scroller, its gutter on one edge, its head marks in secondary ink", () => {
     // CANARY: set `.col-body`'s padding back to `0 .5rem var(--dock-clear)`, and
     // the first card's outset ring is clipped (in dark its top edge merges into
     // the lane head); or paint the head's trace `--blue-pressed` again, and a PR
@@ -6574,7 +6574,9 @@ describe("app.css ruling 625: the board and the review queue", () => {
     const body = requiredDecls(plain, ".col-body");
     expect(px(sides(body.get("padding")!)[0])).toBeGreaterThanOrEqual(1);
     expect(px(requiredDecls(plain, ".board-list").get("padding-top"))).toBeGreaterThanOrEqual(1);
-    expect(body.get("scrollbar-gutter")).toBe("stable both-edges");
+    // One reserved edge: `both-edges` took 18px from every card and pushed the
+    // owner seat 13px past a 156px card at 1280 (regression sweep H1).
+    expect(body.get("scrollbar-gutter")).toBe("stable");
     expect(requiredDecls(plain, ".card-head .trace").get("color")).toBe(requiredDecls(plain, ".card-head .key").get("color"));
     expect(requiredDecls(plain, ".card-head .trace .ico").has("opacity")).toBe(false);
   });
