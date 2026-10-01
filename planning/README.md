@@ -59,3 +59,10 @@ rulings 369–376, the measurement the plan asked for before deciding more (its
 baseline table on Insights, resumes by idle time, operator bursts) as ruling 505, and
 the cross-session pass that keeps a knowledge-base edit or the host's environment from
 moving a cached prefix as ruling 506.
+
+The 2026-10-01 Arc UI investigation (what `https://uiarc.dev/r/arc-skill.json` and the
+Arc registry, foundation and MCP server actually contain, where the skill contradicts
+rulings 166, 365 and 451 and the P16-UI-01 focus ring, and the three routes that stay
+open: Arc for the agents Viberr runs, a read-only design-reference sweep, and an adapted
+developer skill) is [`arc-ui-2026-10-01/RESEARCH.md`](arc-ui-2026-10-01/RESEARCH.md). It
+installs nothing and records no ruling.
