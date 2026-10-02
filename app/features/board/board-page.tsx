@@ -2036,10 +2036,7 @@ export function StageBoard({
     );
   }
   return (
-    // Ruling 625: lanes are content-sized at rest; `dragging` stretches every
-    // lane to the board's full height for the drag, so the empty space under a
-    // short lane is still that lane's drop target (`laneAt` reads live rects).
-    <div className={drag ? "board dragging" : "board"} onKeyDown={onCardKeyDown}>
+    <div className="board" onKeyDown={onCardKeyDown}>
       {columns.map((c, columnIndex) => {
         const base = visible(c.tasks);
         // The hovered column is the drop target (same OR different stage).

@@ -1218,9 +1218,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   /* Ruling 625: the snap port starts where lane 1 does, so a board that
      overflows no longer loads 16px scrolled with lane 1 flush on the rail. */
   scroll-padding-inline: 1.5rem;
-  /* Lanes take their content's height at rest (no 700px empty slabs); a drag
-     stretches them back to full height below, so every lane stays a target. */
-  align-items: start;
   overflow-x: auto;
   overflow-y: hidden;
   flex: 1;
@@ -1303,11 +1300,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      of every lane a drag crossed and left the sticky head's 22px corners
      standing inside a smaller lane. */
   border-radius: var(--radius-panel);
-  /* Ruling 625: content-sized at rest (`.board { align-items: start }`), and
-     a full lane scrolls inside the board instead of running past it. */
-  max-height: 100%;
 }
-.board.dragging > .column { height: 100%; }
 /* Ruling 625: one head height. The entry lane's 24px "+" made its head 40px
    against 33px, so Triage and its first card sat 7px below every other lane. */
 .col-head {
@@ -1342,9 +1335,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   flex: 1;
   min-height: 0;
 }
-/* An empty lane holds no card the dock could cover, so at rest it is its
-   sentence and no reserve (a drag stretches every lane anyway). */
-.col-body:not(:has(> .card-wrap)) { padding-bottom: .5rem; }
 .col-body > .empty { padding-block: 1rem; }
 .col-body::-webkit-scrollbar { width: 9px; }
 .col-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--border), transparent 40%); border-radius: var(--radius-chip); border: 2px solid transparent; background-clip: padding-box; }

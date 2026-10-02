@@ -6551,17 +6551,12 @@ describe("app.css ruling 625: the board and the review queue", () => {
     expect(inlinePad(requiredDecls(plain, ".board-head"))).toBe(inlinePad(requiredDecls(plain, ".board")));
   });
 
-  it("(b) a lane is one head tall, as tall as its cards at rest, and full height under a drag", () => {
+  it("(b) a lane is one head tall", () => {
     // CANARY: drop `min-height` from `.col-head`, and the entry lane's 24px "+"
     // makes its head 40px against 33px, so Triage and its first card sit 7px
-    // low; or drop `align-items: start` from `.board`, and every empty stage is
-    // a viewport-tall grey slab again (702px at 1440x900, up to 84% empty).
+    // low.
     const head = requiredDecls(plain, ".col-head");
     expect(px(head.get("min-height"))).toBe(px(requiredDecls(plain, ".col-head .add").get("height")) + 2 * px(sides(head.get("padding")!)[0]));
-    expect(requiredDecls(plain, ".board").get("align-items")).toBe("start");
-    expect(requiredDecls(plain, ".column").get("max-height")).toBe("100%");
-    // Every lane is a drop target its whole height while a card is lifted.
-    expect(requiredDecls(plain, ".board.dragging > .column").get("height")).toBe("100%");
   });
 
   it("(c) a card's ring stays inside its scroller, its gutter on one edge, its head marks in secondary ink", () => {
