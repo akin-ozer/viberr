@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
@@ -30,6 +30,7 @@ beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
 });
+afterEach(() => ctx.cleanup());
 
 describe("projectRulingsKb", () => {
   it("is null when the project names none, and trims what it names", () => {

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { resolveBuildInfo } from "./build-info.server";
 
@@ -12,6 +12,7 @@ import { resolveBuildInfo } from "./build-info.server";
  */
 
 const ctx = createTestDbContext();
+afterEach(ctx.cleanup);
 
 function root(): string {
   return ctx.makeTempDir();
@@ -42,7 +43,6 @@ describe("resolveBuildInfo (gap 18)", () => {
       revisionSource: "env",
       builtAt: "2026-08-08T10:00:00.000Z",
     });
-    ctx.cleanup();
   });
 
   it("falls back to package.json version and the checkout's git sha", () => {
@@ -63,7 +63,6 @@ describe("resolveBuildInfo (gap 18)", () => {
     expect(info.revision).toBe("0123456789ab");
     expect(info.revisionSource).toBe("git");
     expect(info.builtAt).toBeNull();
-    ctx.cleanup();
   });
 
   it("reads a sha that only exists in packed-refs (fresh clone)", () => {
@@ -75,7 +74,6 @@ describe("resolveBuildInfo (gap 18)", () => {
       "# pack-refs with: peeled fully-peeled sorted\nfeedfacefeedfacefeedfacefeedfacefeedface refs/heads/main\n",
     );
     expect(resolveBuildInfo(dir, {}).revision).toBe("feedfacefeed");
-    ctx.cleanup();
   });
 
   it("reports nulls — never a placeholder — when nothing declares an identity", () => {
@@ -94,7 +92,6 @@ describe("resolveBuildInfo (gap 18)", () => {
     // The three hardcoded "1.0.0" literals elsewhere in the codebase are MCP
     // server declarations, not app identity; nothing here may imitate them.
     expect(JSON.stringify(info)).not.toContain("1.0.0");
-    ctx.cleanup();
   });
 
   it("never claims a source it did not read from", () => {
@@ -104,6 +101,5 @@ describe("resolveBuildInfo (gap 18)", () => {
     const info = resolveBuildInfo(dir, {});
     expect(info.revision).toBeNull();
     expect(info.revisionSource).toBeNull();
-    ctx.cleanup();
   });
 });
