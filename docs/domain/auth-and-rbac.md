@@ -431,44 +431,58 @@ label is what `recordAudit` was handed.
 
 ## 6. Insights (`/insights`, org admin only)
 
-One aggregate read over `agent_runs` and the projections (`getInsightsSummary`), under
-the standalone-page header. Read-only; nothing here writes.
+One read over `agent_runs` and the projections (`getInsightsSummary`), under the
+standalone-page header. Read-only; nothing here writes. Ruling 635: the instance's own
+record (tasks, packets, the audit trail) covers every backend, and the agent runs are read
+one backend at a time, because Claude and Codex do not measure alike (only Claude reports
+a cost, their tokens are different models' tokens, Codex reports no cache write).
 
-- **Totals**: runs, cost, tokens (input, cached input, output), turns. Cost is a
-  Claude-only observation (the Codex envelope carries tokens and no price), so every
-  cost figure is null, "not reported", where nothing reported one, never $0.00.
-- **Coordination share** (operator and controller runs against delivery runs). The
-  dollar share is null unless EVERY run on both sides reported a cost (rulings 190,
-  201); the card then gives the real dollars and names how many runs, on which backend,
-  reported none. A second card gives coordination's share of TOKENS, the unit both
-  backends report, null when a side ran and landed no final figure.
+- **Oversight** (`oversightSummary`, every backend): owner clarity (active tasks with a
+  definite next actor), branch and PR traceability, packet resolution times from audit
+  rows, time to review, and long timelines, longest first. Each card that counts
+  exceptions names them by key, linked, capped at `INSIGHTS_NAMED_EXCEPTIONS` (8) with
+  the remainder counted (ruling 290).
+- **The backend switch** (`backendRuns`): every backend with its run count, one that never
+  ran included. The loader reads `runAnalytics` for each backend that ran; the page's
+  `?backend=` picks one in the browser (an unknown value is no choice), else the one with
+  the most runs, so switching costs no request.
+- **Measure**: cost when any of the backend's runs reported one, else tokens (input plus
+  output over final provider figures). Every cost figure is null, "not reported", where
+  nothing reported one, never $0.00, and tokens follow the same rule.
+- **Totals**: runs, cost, tokens (input, cached input, output), turns.
+- **Coordination share** (operator and controller runs against delivery runs, in the
+  backend's measure). Null when a side's runs reached the provider and put no figure in
+  at all (ruling 190); a run that never reached the provider is no evidence either way,
+  and a stopped run inside a backend is counted on the Cost and Tokens cards rather than
+  suppressing the share (ruling 635, amending 201).
 - **Outcomes** and success rate; a restart-interrupted run is stopped, not an error,
   and a never-started one is outside the completion rate (ruling 158).
-- **Breakdowns** by backend, kind, project, model, task and profile (ruling 308), each
-  the top 8 (half the slots reserved for the busiest groups) with `hidden`,
-  `hiddenRuns` and `hiddenCost` naming what the window left out. A task row is labelled
-  `project/task`.
-- **Prompt cache** table (ruling 369), by run kind, by backend and run kind (ruling 505,
-  `claude · primary`, so Codex has rows of its own) and by credential kind: runs, the
+- **Breakdowns** by kind, project, model, task and profile (ruling 308), each the top 8
+  (half the slots reserved for the busiest groups, the rest led by the measure) with
+  `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` naming what the window left
+  out. A task row is labelled `project/task` and links to its task; the page drops the
+  prefix when every row is one project's.
+- **Prompt cache** table (ruling 369), by run kind and by credential kind: runs, the
   warm-start rate over runs with a first call ("n/a" with none), the planning baseline's
   columns (ruling 505: the mean first-call write, cache reads per run over the runs that
   reached the provider, and the peak prompt's median · p90 · max), tokens written and
   read, the write/read ratio, first calls writing over 100k, and each cache lifetime's
-  count. A write figure, and the mean first write, is null for groups with no run on a
-  backend that reports one (`CACHE_WRITE_REPORTING_BACKENDS`, Claude only; ruling 395).
-  Under it (ruling 505): **resumes by idle time**, a row per backend and the credential
-  kind the earlier run billed, naming the TTL `cacheTtlMs` assumes for it, with the warm
-  resumes of all the resumes in each idle bucket (`RESUME_IDLE_EDGES_MS`: every assumed
-  TTL, then 24 hours; a bucket past the row's TTL is marked) and the sessions set aside
-  as stale and large (ruling 372); and the **operator bursts**, the Claude operator
-  starts within a minute of the previous one on the same project, principal and model,
-  with the cold ones and what their first calls wrote.
+  count. A backend that reports no cache write (`CACHE_WRITE_REPORTING_BACKENDS`, Claude
+  only; ruling 395) has no write columns. Under it (ruling 505): **resumes by idle
+  time**, a row per credential kind the earlier run billed, naming the TTL `cacheTtlMs`
+  assumes for it, with the warm resumes of all the resumes in each idle bucket
+  (`RESUME_IDLE_EDGES_MS`: every assumed TTL, then 24 hours; a bucket past the row's TTL
+  is marked) and the sessions set aside as stale and large (ruling 372); and, on Claude,
+  the **operator bursts**, the operator starts within a minute of the previous one on the
+  same project, principal and model, with the cold ones and what their first calls wrote
+  (Codex's cache does not cross threads, so it has none).
 - Average duration and a 30-day daily chart.
-- **Oversight**: owner clarity (active tasks with a definite next actor), branch and PR
-  traceability, packet resolution times from audit rows, time to review, and long
-  timelines. Each card that counts exceptions names them by key, linked, capped at
-  `INSIGHTS_NAMED_EXCEPTIONS` (8) with the remainder counted (ruling 290).
-- **Backend quota** readings.
+- **Backend quota**: the backend's latest reading, every window it lists (ruling 608),
+  each aged on its own reset (ruling 612), and when it was observed.
+
+The controller's `inspect_run_analytics` reads the same functions: `backends`, the
+instance's `oversight`, and `runs.<backend>` for each backend that ran (or the one asked
+for), never a sum across them.
 
 Branch and PR traceability counts, over the tasks that have **delivered** (a delivered
 work revision or a recorded pull request), how many carry both the task branch and a

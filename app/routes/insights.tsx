@@ -9,7 +9,9 @@ import { InsightsPage } from "~/features/insights/insights-page";
 /**
  * /insights — instance-wide agent-run analytics. Org-admin only (run cost and
  * token totals across every project are an instance-owner view). Read-only: the
- * loader runs one aggregate query and the page formats it.
+ * loader runs one aggregate query and the page formats it. Ruling 635: the
+ * loader reads every backend's runs, each alone, and the page's `?backend=`
+ * switch picks one in the browser, so the loader reads no search parameter.
  */
 export function meta() {
   return [{ title: pageTitle("Insights") }];

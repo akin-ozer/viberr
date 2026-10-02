@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { guardrailSchema } from "~/schemas/project-file.schema";
 import {
+  BACKENDS,
   latestBackendRateLimits,
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
@@ -24,8 +25,15 @@ import type { ContinuityLossReason } from "~/server/runtimes/run-service.server"
  * plain GROUP BY over the runs table; nothing here writes, and the page that
  * renders it is org-admin gated.
  *
- * `nowIso` is injected (not read from a clock) so the "last N days" window and
- * the generated-at stamp are deterministic and testable.
+ * Ruling 635: the run figures are ONE backend's at a time (`runAnalytics`).
+ * Claude and Codex do not measure alike: only Claude's result envelope carries
+ * a cost, their tokens are different models' tokens, and Codex reports no
+ * cache write. A sum across them is a number about neither. The instance's own
+ * record — tasks, packets, the audit trail (`oversightSummary`) — has no
+ * backend and is read whole.
+ *
+ * `nowIso` is injected (not read from a clock) so the "last N days" window is
+ * deterministic and testable.
  */
 
 const WINDOW_DAYS = 30;
@@ -34,7 +42,8 @@ const TOP_N = 8;
 export interface InsightsTotals {
   runs: number;
   /** Runs that actually reported a cost. `runs - costedRuns` is the slice the
-   *  `cost` sum below can say nothing about, because only Claude reports one. */
+   *  `cost` sum below can say nothing about: on Claude a run stopped before its
+   *  result envelope, and on Codex every run, whose envelope carries no price. */
   costedRuns: number;
   cost: number;
   /** F35-1: the three token sums cover only rows whose provider total landed
@@ -67,6 +76,8 @@ export interface Breakdown {
   /** Null when NO hidden group reported a cost, never 0 — the same rule
    *  `CountRow.cost` follows for the same reason. */
   hiddenCost: number | null;
+  /** The same rule for tokens (ruling 635). */
+  hiddenTokens: number | null;
 }
 
 export interface CountRow {
@@ -76,6 +87,9 @@ export interface CountRow {
    *  the Claude result envelope carries a cost, so a Codex group's cost is
    *  UNKNOWN, not zero. */
   cost: number | null;
+  /** Ruling 635: input plus output tokens over the runs whose provider total
+   *  landed (F35-1), or null when none in the group did. */
+  tokens: number | null;
 }
 
 export interface DailyPoint {
@@ -83,9 +97,57 @@ export interface DailyPoint {
   date: string;
   runs: number;
   /** Total cost for the day, or null when the day HAS runs but none reported a
-   *  cost (all-Codex) — rendered "not reported", never a dishonest $0.00. A
-   *  gap-filled quiet day (no runs) is a real 0. */
+   *  cost (any Codex day) — rendered "not reported", never a dishonest $0.00.
+   *  A gap-filled quiet day (no runs) is a real 0. */
   cost: number | null;
+  /** Ruling 635: the day's tokens, by `CountRow.tokens`' rule; a quiet day's
+   *  is a real 0. */
+  tokens: number | null;
+}
+
+/** Ruling 635: one backend's run count, which the switch names it with. */
+export interface BackendRuns {
+  backend: RunBackend;
+  runs: number;
+}
+
+/**
+ * Ruling 635: what one backend's runs are weighed in. Cost where the backend
+ * reported one at all, else tokens, the figure every backend reports. Read off
+ * the rows, never off a list of which backend prices its runs (ruling 191): a
+ * Codex that starts reporting a cost is weighed in it the day it does.
+ */
+export type RunMeasure = "cost" | "tokens";
+
+/**
+ * F31-D6, as ruling 635 left it: the coordination runs' share of one backend's
+ * measure. Coordination is `operator` + `controller` (RunKind): machinery that
+ * decides what the working agents do rather than doing the work, and both
+ * carry real cost.
+ */
+export interface CoordinationShare {
+  measure: RunMeasure;
+  /** The coordination runs' figure, and every run's, in `measure`. */
+  coordination: number;
+  total: number;
+  /**
+   * coordination / total; null when nothing was measured, or when a side's
+   * runs reached the provider and put no figure into the measure at all
+   * (ruling 190: a side that was never observed is not a zero, whichever side
+   * it is). A side with no run that reached the provider contributes a real
+   * zero.
+   */
+  share: number | null;
+  /** Per side, the runs that reached the provider: a turn, or a first call. */
+  reached: { delivery: number; coordination: number };
+  /**
+   * Of those, the ones that put no figure into the measure. Ruling 201 nulled
+   * the share when ANY run was silent, because across backends the silence was
+   * systematic: every Codex run. Inside one backend it is incidental — a run
+   * stopped before its result — so it is counted rather than suppressed, as
+   * F35-1 always treated the token sums' gap.
+   */
+  silent: { delivery: number; coordination: number };
 }
 
 /**
@@ -95,6 +157,9 @@ export interface DailyPoint {
  * long timelines — and until now the product measured none of them. These are
  * computed from the projections + audit trail the app already keeps; nothing
  * new is recorded. All-time (like the totals above), not windowed.
+ *
+ * Ruling 635: the instance's own record, so every backend's. (The coordination
+ * share F31-D6 kept here is a figure about runs, and moved to `RunAnalytics`.)
  */
 export interface OversightSummary {
   /** Active (non-archived, non-terminal-stage) tasks with a definite next
@@ -139,57 +204,9 @@ export interface OversightSummary {
    *  managing. A project with the guardrail off contributes none: nothing is
    *  compacting there. */
   longTimelines: number;
-  /** Ruling 290: WHICH of them, capped — the count alone names no task to open. */
+  /** Ruling 290: WHICH of them, capped — the count alone names no task to open.
+   *  The longest first (ruling 635). */
   longTimelineKeys: string[];
-  /** F31-D6 — coordination overhead: the COORDINATION runs' share of all
-   *  reported run spend in scope. Live pass 31 read 63% before anyone had a
-   *  number for it. Coordination is `operator` + `controller` (RunKind): both
-   *  are machinery that decides what the working agents do rather than doing
-   *  the work, they carry real cost, and the runtime treats them as one class
-   *  (claude-runtime: "the controller is coordination machinery like the
-   *  operator"). Counting only the operator understated the overhead by every
-   *  controller turn on the instance. Derived from the same cost column the
-   *  totals card sums; runs that reported no cost contribute to neither side,
-   *  and with zero reported spend the share is null (never a fake 0%). */
-  coordination: {
-    coordinationCostUsd: number;
-    totalCostUsd: number;
-    /** Ruling 201 (F37-21): coordination / total, and null unless EVERY run on
-     *  BOTH sides reported a cost. Ruling 190 suppressed the share when a side
-     *  reported *nothing*; the partial case is the same defect and is the
-     *  ordinary one — cost is a Claude-only observation (the Codex result
-     *  envelope carries tokens and no price), so a mixed-backend instance
-     *  computes this over whichever runs happen to bill. With both sides
-     *  partly silent the visible ratio is not even a bound: unreported
-     *  delivery spend pushes it down and unreported coordination spend pushes
-     *  it up. */
-    share: number | null;
-    /** Runs in scope per side, and how many of them reported no cost — the
-     *  population a share would have to ignore. The card reads the pair: all
-     *  of a side (the ruling-190 case, "no delivery run reported a cost") and
-     *  some of it (the ruling-201 case, "137 of 142") are different sentences
-     *  and the counts tell them apart. */
-    runs: { delivery: number; coordination: number };
-    uncosted: { delivery: number; coordination: number };
-    /** Those same cost-silent runs by backend, descending, zero counts
-     *  dropped. F35-1 counts the rows its token sums leave out so the card can
-     *  NAME them; cost gets the same treatment, and `agent_runs.backend` makes
-     *  it specific ("209 Codex runs report no cost") rather than the hedge
-     *  "cost-reporting runs", which names no quantity and reads as "all". */
-    uncostedByBackend: readonly { backend: string; runs: number }[];
-    /** Coordination's share of TOKENS processed — the unit both backends
-     *  report, so it survives the blind spot above. A different question from
-     *  the dollar share and never a substitute: a luna-max token and an opus
-     *  token are not the same money. Null when a side ran and contributed no
-     *  final provider figure at all (ruling 190's test, at the token level). */
-    tokenShare: number | null;
-    coordinationTokens: number;
-    totalTokens: number;
-    /** Runs whose provider usage never landed (F35-1: interrupted, or errored
-     *  with an empty usage block), per side — the token share's own excluded
-     *  population, named for the same reason. */
-    tokenless: { delivery: number; coordination: number };
-  };
 }
 
 /**
@@ -203,7 +220,7 @@ export interface OversightSummary {
  * anything else, is not a measurement, and the schema already draws this line
  * one column over (`cache_ttl_bucket`: "NULL on Codex (no such figure)").
  */
-const CACHE_WRITE_REPORTING_BACKENDS = ["claude"] as const;
+const CACHE_WRITE_REPORTING_BACKENDS: readonly RunBackend[] = ["claude"];
 
 /**
  * Ruling 369: what the prompt cache did for one group of runs — by run kind,
@@ -279,7 +296,8 @@ export interface ResumeCell {
  * keyed on, with its resumes sorted by how long the session sat idle.
  */
 export interface ResumeRow {
-  /** `claude · login`. */
+  /** The credential kind (`login`): the backend is the page's switch
+   *  (ruling 635). */
   label: string;
   backend: string;
   /** The kind the PRIOR run billed (the one whose writes the resume reads),
@@ -328,21 +346,27 @@ export interface OperatorBurstSummary {
 export interface CacheSummary {
   byKind: CacheRow[];
   byCredentialKind: CacheRow[];
-  /** Ruling 505: by backend and run kind (`claude · primary`), so Codex has
-   *  its own rows as PLAN.md's baseline table did, and a Claude specialist's
-   *  cold starts (ruling 371's shared prefix) are not averaged with Codex's
-   *  (per thread, ruling 375(c)). */
-  byBackendKind: CacheRow[];
+  /** Ruling 635: whether this backend reports a cache-write figure at all
+   *  (ruling 395). When it does not, the write columns are left out whole
+   *  rather than printed "not reported" in every cell. */
+  reportsWrites: boolean;
   /** The line `largeFirstWrites` counts against, so the card can name it. */
   largeWriteTokens: number;
   /** Ruling 505: resumes by idle time (PLAN.md's Codex retention probe). */
   resumes: ResumeSummary;
-  /** Ruling 505: operator bursts (PLAN.md's count before the gate). */
-  operatorBursts: OperatorBurstSummary;
+  /** Ruling 505: operator bursts (PLAN.md's count before the gate). Null on a
+   *  backend whose cache does not cross threads (Codex, ruling 375(c)): no
+   *  order of starts could make a second one warm, so there is no count. */
+  operatorBursts: OperatorBurstSummary | null;
 }
 
-export interface InsightsSummary {
+/** Ruling 635: one backend's runs, every figure read off them alone. */
+export interface RunAnalytics {
+  backend: RunBackend;
+  measure: RunMeasure;
   totals: InsightsTotals;
+  /** F31-D6: the operator and controller runs' share of this backend's measure. */
+  coordination: CoordinationShare;
   /** Ruling 369: the prompt-cache record, all-time like the totals. */
   cache: CacheSummary;
   /** Terminal-outcome breakdown + the success rate over terminal runs. */
@@ -367,7 +391,6 @@ export interface InsightsSummary {
      *  null when that denominator is zero. */
     successRate: number | null;
   };
-  byBackend: Breakdown;
   byKind: Breakdown;
   byProject: Breakdown;
   byModel: Breakdown;
@@ -379,32 +402,46 @@ export interface InsightsSummary {
   byProfile: Breakdown;
   /** Mean wall-clock duration of finished runs with both timestamps, in ms. */
   avgDurationMs: number | null;
-  /** Runs + cost per day over the last WINDOW_DAYS, oldest first, gap-filled. */
+  /** Runs, cost and tokens per day over the last WINDOW_DAYS, oldest first,
+   *  gap-filled. */
   daily: DailyPoint[];
-  oversight: OversightSummary;
-  /** Latest observed provider rate-limit reading per backend (null = none yet). */
-  backendQuota: BackendQuotaRow[];
+  /** The latest provider rate-limit reading for this backend. */
+  quota: BackendQuotaRow;
+  /** Ruling 635: the windows that reading lists. */
+  quotaWindows: QuotaWindow[];
   windowDays: number;
+}
+
+/**
+ * Ruling 635: one usage window of a backend's latest reading, as the page draws
+ * it — every window the reading lists (ruling 608: Codex's five-hour and
+ * weekly windows, Claude's plan windows), shortest first. A reading that lists
+ * none is its binding window alone. `reset` marks a window whose own reset
+ * instant has passed (ruling 612): its figure is history, and the page says so
+ * rather than drawing it as current.
+ */
+export interface QuotaWindow {
+  rateLimitType: string;
+  utilization: number | null;
+  resetsAt: number | null;
+  reset: boolean;
+}
+
+export interface InsightsSummary {
+  /** Ruling 635: the instance's own record, every backend's. */
+  oversight: OversightSummary;
+  /** Ruling 635: every backend with its run count, for the switch. */
+  backends: BackendRuns[];
+  /** Ruling 635: each backend that ran, its runs read alone, in `backends`
+   *  order. The page's switch picks one in the browser, so changing it costs
+   *  no request. */
+  runs: RunAnalytics[];
 }
 
 const totalsSchema = z.object({
   runs: z.number(),
   costed_runs: z.number(),
   cost: z.number().nullable(),
-  /** F31-D6's numerator, summed in the SAME pass as `cost` — it is the same
-   *  rows under the same scope, so a second full aggregate over `agent_runs`
-   *  bought nothing but another table scan. */
-  coordination_cost: z.number().nullable(),
-  /** Ruling 190: each side's runs, and how many of them put a figure into the
-   *  share. A side with runs but no figures was never observed, whichever side
-   *  it is; a side with no runs at all contributes a real zero. */
-  delivery_runs: z.number().nullable(),
-  costed_delivery_runs: z.number().nullable(),
-  coordination_runs: z.number().nullable(),
-  costed_coordination_runs: z.number().nullable(),
-  coordination_tokens: z.number().nullable(),
-  tokenless_delivery_runs: z.number().nullable(),
-  tokenless_coordination_runs: z.number().nullable(),
   input_tokens: z.number().nullable(),
   cached_input_tokens: z.number().nullable(),
   output_tokens: z.number().nullable(),
@@ -412,10 +449,21 @@ const totalsSchema = z.object({
   turns: z.number().nullable(),
 });
 
+/** F31-D6: one side of the coordination share, as SQLite returns it. */
+const sideSchema = z.object({
+  side: z.enum(["coordination", "delivery"]),
+  cost: z.number().nullable(),
+  tokens: z.number().nullable(),
+  reached: z.number().nullable(),
+  reached_uncosted: z.number().nullable(),
+  reached_tokenless: z.number().nullable(),
+});
+
 const groupSchema = z.object({
   label: z.string().nullable(),
   runs: z.number(),
   cost: z.number().nullable(),
+  tokens: z.number().nullable(),
 });
 
 /** Ruling 369: one grouped cache row as SQLite returns it; every SUM over a
@@ -481,23 +529,53 @@ const dailySchema = z.object({
   date: z.string(),
   runs: z.number(),
   cost: z.number().nullable(),
+  tokens: z.number().nullable(),
 });
 
-/** Optional project scope — null aggregates the whole instance. */
+/** Optional project scope — absent aggregates the whole instance. */
 export interface InsightsFilter {
   projectSlug?: string;
 }
 
-interface ScopeClause {
-  clause: string;
-  params: string[];
+/** Ruling 635: a read of runs is always one backend's. */
+export interface RunFilter extends InsightsFilter {
+  backend: RunBackend;
 }
 
-function scope(filter: InsightsFilter): ScopeClause {
+interface ScopeClause {
+  /** `WHERE …` over the scope, or "" with nothing to scope. */
+  clause: string;
+  /** The scope's conditions alone, for a read with a WHERE of its own. */
+  conditions: string;
+  params: string[];
+  /** `WHERE` the scope AND `extra`. */
+  and(extra: string): string;
+}
+
+/**
+ * The scope as SQL: `project_slug` (which `agent_runs` and `task_projections`
+ * share) and, on a read of runs, `backend`. `alias` prefixes the columns for a
+ * read that joins.
+ */
+function scope(filter: InsightsFilter & { backend?: RunBackend }, alias = ""): ScopeClause {
+  const terms: string[] = [];
+  const params: string[] = [];
   if (filter.projectSlug) {
-    return { clause: "WHERE project_slug = ?", params: [filter.projectSlug] };
+    terms.push(`${alias}project_slug = ?`);
+    params.push(filter.projectSlug);
   }
-  return { clause: "", params: [] };
+  if (filter.backend) {
+    terms.push(`${alias}backend = ?`);
+    params.push(filter.backend);
+  }
+  const conditions = terms.join(" AND ");
+  const clause = conditions ? `WHERE ${conditions}` : "";
+  return {
+    clause,
+    conditions,
+    params,
+    and: (extra) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`),
+  };
 }
 
 // ---------------------------------------------------------- governance
@@ -607,14 +685,13 @@ function nearestRank(sorted: number[], p: number): number | null {
   return sorted[Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length))) - 1]!;
 }
 
-function oversightSummary(
+/** Ruling 635: the instance's own record, so the scope is a project at most —
+ *  never a backend, which tasks, packets and the audit trail do not have. */
+export function oversightSummary(
   db: DatabaseSync,
-  filter: InsightsFilter,
-  // F31-D6 rides in from the totals aggregate rather than re-querying
-  // `agent_runs`: same rows, same scope, one scan.
-  coordination: OversightSummary["coordination"],
+  filter: InsightsFilter = {},
 ): OversightSummary {
-  const { clause, params } = scope(filter);
+  const { clause, params } = scope({ projectSlug: filter.projectSlug });
 
   const tasks = z.array(govTaskSchema).parse(
     db
@@ -772,16 +849,20 @@ function oversightSummary(
   }
   reviewDurations.sort((a, b) => a - b);
 
-  const longTimelineTasks = tasks.filter((t) => {
-    const threshold = compressionAt.get(t.project_slug);
-    // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
-    // opens with `if (events.length <= options.threshold) return events`, so a
-    // task sitting exactly ON the threshold is not compacted and is not one the
-    // readability machinery is managing. Counting it as "past their project's
-    // compression threshold" put a task in the card that the fold never touches
-    // — off by one against the only rule that decides.
-    return threshold != null && t.event_count > threshold;
-  });
+  const longTimelineTasks = tasks
+    .filter((t) => {
+      const threshold = compressionAt.get(t.project_slug);
+      // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
+      // opens with `if (events.length <= options.threshold) return events`, so a
+      // task sitting exactly ON the threshold is not compacted and is not one the
+      // readability machinery is managing. Counting it as "past their project's
+      // compression threshold" put a task in the card that the fold never touches
+      // — off by one against the only rule that decides.
+      return threshold != null && t.event_count > threshold;
+    })
+    // Ruling 635: the longest first. The card names eight, and in table order
+    // those were the oldest tasks (AWSC-1 to AWSC-8 of 70), not the longest.
+    .sort((a, b) => b.event_count - a.event_count);
 
   return {
     clarity: {
@@ -815,7 +896,6 @@ function oversightSummary(
     // — off by one against the only rule that decides.
     longTimelines: longTimelineTasks.length,
     longTimelineKeys: namedKeys(longTimelineTasks),
-    coordination,
   };
 }
 
@@ -842,8 +922,8 @@ function namedKeys(rows: readonly { project_slug: string; task_key: string }[]):
 const STALE_SESSION_SET_ASIDE = "stale_large_session" satisfies ContinuityLossReason;
 
 /**
- * Ruling 369: the prompt-cache record, grouped by run kind, by the credential
- * kind the runs billed and (ruling 505) by backend and run kind. Every figure
+ * Ruling 369: the prompt-cache record of one backend's runs (ruling 635),
+ * grouped by run kind and by the credential kind the runs billed. Every figure
  * is a plain SUM over the columns the sink folded; the rates are taken over the
  * runs that HAVE a first call, so a refused run is neither warm nor cold.
  *
@@ -855,9 +935,8 @@ const STALE_SESSION_SET_ASIDE = "stale_large_session" satisfies ContinuityLossRe
  * read off rows the sink already writes, so an instance's history since ruling
  * 369 answers at once.
  */
-function cacheSummary(db: DatabaseSync, filter: InsightsFilter): CacheSummary {
-  const { clause, params } = scope(filter);
-  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
+  const { clause, params, and } = scope(filter);
   const reportingPlaceholders = CACHE_WRITE_REPORTING_BACKENDS.map(() => "?").join(", ");
 
   // Ruling 505: each run's peak prompt, keyed by the same group expression, for
@@ -961,10 +1040,10 @@ function cacheSummary(db: DatabaseSync, filter: InsightsFilter): CacheSummary {
     byKind: cacheGroup("kind"),
     // A row written before the kind was stored, or a refused run, has none.
     byCredentialKind: cacheGroup("COALESCE(credential_kind, 'unknown')"),
-    byBackendKind: cacheGroup("backend || ' · ' || kind"),
+    reportsWrites: CACHE_WRITE_REPORTING_BACKENDS.includes(filter.backend),
     largeWriteTokens: FIRST_CALL_LARGE_WRITE_TOKENS,
     resumes: resumeSummary(db, filter),
-    operatorBursts: operatorBurstSummary(db, filter),
+    operatorBursts: filter.backend === "claude" ? operatorBurstSummary(db, filter) : null,
   };
 }
 
@@ -985,14 +1064,15 @@ function cacheSummary(db: DatabaseSync, filter: InsightsFilter): CacheSummary {
  * call landed are counted; the set-aside column counts the fresh starts
  * ruling 372 made instead of a replay, from their start audit.
  */
-function resumeSummary(db: DatabaseSync, filter: InsightsFilter): ResumeSummary {
-  const { clause, params } = scope(filter);
-  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
+  const { params, and } = scope(filter);
   const edgesMs = RESUME_IDLE_EDGES_MS;
   const rows = new Map<string, ResumeRow>();
   const rowFor = (backend: RunBackend, kind: CredentialKind | null): ResumeRow => {
     const credentialKind = kind ?? "unknown";
-    const label = `${backend} · ${credentialKind}`;
+    // Ruling 635: the backend is the page's switch, so a row is named by the
+    // credential kind alone.
+    const label = credentialKind;
     const known = rows.get(label);
     if (known) return known;
     const row: ResumeRow = {
@@ -1040,6 +1120,7 @@ function resumeSummary(db: DatabaseSync, filter: InsightsFilter): ResumeSummary 
     cell.warmRate = cell.warmStarts / cell.firstCalls;
   }
 
+  const runs = scope(filter, "r.");
   const setAside = z.array(setAsideSchema).parse(
     db
       .prepare(
@@ -1047,10 +1128,10 @@ function resumeSummary(db: DatabaseSync, filter: InsightsFilter): ResumeSummary 
          FROM audit_events a JOIN agent_runs r ON r.id = a.subject_id
          WHERE a.action = 'runtime.run.started' AND a.subject_kind = 'run'
            AND json_extract(a.details_json, '$.continuityReset') = ?
-           ${filter.projectSlug ? "AND r.project_slug = ?" : ""}
+           AND ${runs.conditions}
          GROUP BY r.backend, r.credential_kind`,
       )
-      .all(STALE_SESSION_SET_ASIDE, ...params),
+      .all(STALE_SESSION_SET_ASIDE, ...runs.params),
   );
   for (const r of setAside) rowFor(r.backend, r.credential_kind).setAside += r.runs;
 
@@ -1077,9 +1158,8 @@ function resumeSummary(db: DatabaseSync, filter: InsightsFilter): ResumeSummary 
  * starts that came within five minutes of the one before, which is why the
  * gate waits on this count.
  */
-function operatorBurstSummary(db: DatabaseSync, filter: InsightsFilter): OperatorBurstSummary {
-  const { clause, params } = scope(filter);
-  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+function operatorBurstSummary(db: DatabaseSync, filter: RunFilter): OperatorBurstSummary {
+  const { params, and } = scope(filter);
   const starts = z.array(operatorStartSchema).parse(
     db
       .prepare(
@@ -1115,21 +1195,104 @@ function operatorBurstSummary(db: DatabaseSync, filter: InsightsFilter): Operato
   return summary;
 }
 
-export function getInsightsSummary(
+/**
+ * F31-D6 under ruling 635: the coordination runs' share of one backend's
+ * measure. Coordination is `operator` + `controller` (RunKind), machinery that
+ * decides what the working agents do; delivery is every other kind.
+ *
+ * Ruling 190 (F37-12), one backend at a time: a side whose runs reached the
+ * provider and put no figure in at all was never observed, and its zero is not
+ * a measurement — "100%" for coordination when the delivery runs merely
+ * reported nothing, or "0%" in the mirror. A run that never reached the
+ * provider (no turn, no first call) is no evidence either way: it consumed
+ * nothing, as U35-7 keeps a never-started run out of the completion rate. Live,
+ * two Codex operator runs that errored in their first twelve seconds on day one
+ * held Codex's share at "n/a" for good. Ruling 201's stricter test (null unless
+ * EVERY run reported) guarded the cross-backend sum, where the silence was
+ * systematic; inside one backend it is a stopped run here and there, and the
+ * Cost and Tokens cards count it.
+ */
+function coordinationShare(
   db: DatabaseSync,
-  nowIso: string,
-  filter: InsightsFilter = {},
-): InsightsSummary {
+  filter: RunFilter,
+  measure: RunMeasure,
+): CoordinationShare {
   const { clause, params } = scope(filter);
-  const and = (extra: string) => (clause ? `${clause} AND ${extra}` : `WHERE ${extra}`);
+  const sides = z.array(sideSchema).parse(
+    db
+      .prepare(
+        `SELECT CASE WHEN kind IN ('operator', 'controller') THEN 'coordination' ELSE 'delivery' END AS side,
+                SUM(total_cost_usd) AS cost,
+                SUM(CASE WHEN usage_final = 1 THEN input_tokens + output_tokens END) AS tokens,
+                SUM(CASE WHEN turns > 0 OR first_call_warm IS NOT NULL THEN 1 ELSE 0 END) AS reached,
+                SUM(CASE WHEN (turns > 0 OR first_call_warm IS NOT NULL)
+                          AND total_cost_usd IS NULL THEN 1 ELSE 0 END) AS reached_uncosted,
+                SUM(CASE WHEN (turns > 0 OR first_call_warm IS NOT NULL)
+                          AND usage_final = 0 THEN 1 ELSE 0 END) AS reached_tokenless
+         FROM agent_runs ${clause}
+         GROUP BY side`,
+      )
+      .all(...params),
+  );
+  const side = (name: "coordination" | "delivery") => {
+    const row = sides.find((r) => r.side === name);
+    return {
+      figure: (measure === "cost" ? row?.cost : row?.tokens) ?? 0,
+      reached: row?.reached ?? 0,
+      silent: (measure === "cost" ? row?.reached_uncosted : row?.reached_tokenless) ?? 0,
+    };
+  };
+  const coordination = side("coordination");
+  const delivery = side("delivery");
+  const total = coordination.figure + delivery.figure;
+  const unobserved =
+    (delivery.reached > 0 && delivery.silent === delivery.reached) ||
+    (coordination.reached > 0 && coordination.silent === coordination.reached);
+  return {
+    measure,
+    coordination: coordination.figure,
+    total,
+    share: total > 0 && !unobserved ? coordination.figure / total : null,
+    reached: { delivery: delivery.reached, coordination: coordination.reached },
+    silent: { delivery: delivery.silent, coordination: coordination.silent },
+  };
+}
+
+/**
+ * Ruling 635: every backend with its run count, in `BACKENDS` order, a
+ * backend that never ran included with 0: the switch names each backend the
+ * instance can run, and an empty one is a real answer, not a missing option.
+ */
+export function backendRuns(db: DatabaseSync, filter: InsightsFilter = {}): BackendRuns[] {
+  const { clause, params } = scope({ projectSlug: filter.projectSlug });
+  const counted = z
+    .array(z.object({ backend: z.string(), runs: z.number() }))
+    .parse(
+      db
+        .prepare(`SELECT backend, count(*) AS runs FROM agent_runs ${clause} GROUP BY backend`)
+        .all(...params),
+    );
+  return BACKENDS.map((backend) => ({
+    backend,
+    runs: counted.find((c) => c.backend === backend)?.runs ?? 0,
+  }));
+}
+
+/**
+ * Ruling 635: one backend's runs, every figure read off them alone.
+ *
+ * Each figure is the one this backend's runs report, and nothing is summed
+ * across backends: only Claude's result envelope carries a cost, a Codex token
+ * and a Claude token are different models' tokens, and Codex reports no cache
+ * write. The backend is weighed in `measure`: cost when any of its runs
+ * reported one, else tokens.
+ */
+export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter): RunAnalytics {
+  const { clause, params, and } = scope(filter);
 
   const totals = totalsSchema.parse(
     db
       .prepare(
-        // F31-D6's numerator is one more CASE column here rather than its own
-        // aggregate: `operator` and `controller` are the coordination kinds
-        // (RunKind) — machinery that decides what the working agents do — and
-        // both carry real cost.
         // F35-1: the token columns count only rows whose PROVIDER figure has
         // landed (`usage_final = 1`). A running Claude row holds the adapter's
         // live estimate and a running Codex row holds nothing; neither is a
@@ -1141,27 +1304,6 @@ export function getInsightsSummary(
         `SELECT count(*) AS runs,
                 count(total_cost_usd) AS costed_runs,
                 COALESCE(SUM(total_cost_usd), 0) AS cost,
-                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
-                                  THEN total_cost_usd END), 0) AS coordination_cost,
-                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
-                                  THEN 1 ELSE 0 END), 0) AS delivery_runs,
-                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
-                                   AND total_cost_usd IS NOT NULL
-                                  THEN 1 ELSE 0 END), 0) AS costed_delivery_runs,
-                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
-                                  THEN 1 ELSE 0 END), 0) AS coordination_runs,
-                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
-                                   AND total_cost_usd IS NOT NULL
-                                  THEN 1 ELSE 0 END), 0) AS costed_coordination_runs,
-                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
-                                   AND usage_final = 1
-                                  THEN input_tokens + output_tokens END), 0) AS coordination_tokens,
-                COALESCE(SUM(CASE WHEN kind NOT IN ('operator', 'controller')
-                                   AND usage_final = 0
-                                  THEN 1 ELSE 0 END), 0) AS tokenless_delivery_runs,
-                COALESCE(SUM(CASE WHEN kind IN ('operator', 'controller')
-                                   AND usage_final = 0
-                                  THEN 1 ELSE 0 END), 0) AS tokenless_coordination_runs,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN input_tokens END), 0) AS input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN cached_input_tokens END), 0) AS cached_input_tokens,
                 COALESCE(SUM(CASE WHEN usage_final = 1 THEN output_tokens END), 0) AS output_tokens,
@@ -1172,86 +1314,11 @@ export function getInsightsSummary(
       .get(...params),
   );
 
-  // F31-D6: the share is read off the totals pair — both sides come from the
-  // same scan, so they can never disagree about what "all reported spend" is.
-  //
-  // Ruling 190 (F37-12): a share is a measurement only when BOTH sides could
-  // have been seen. Live, a Codex delivery fleet reported no cost at all, so
-  // the denominator held nothing but the four Claude controller turns and the
-  // quotient was 1 by construction — "100%" answering a question ("how much of
-  // my spend is coordination?") this data cannot answer. The mirror is just as
-  // wrong and just as reachable (a Codex operator and controller under a Claude
-  // delivery fleet reads 0%, claiming coordination is free when it merely never
-  // reported), so the rule is symmetric: a side that RAN and reported nothing
-  // was not observed, and the share is null. A side that never ran contributes
-  // a real zero and is not a gap — an instance with no delivery runs at all
-  // genuinely spent everything on coordination.
-  //
-  // Ruling 201 (F37-21): ruling 190 guards the EMPTY case and not the PARTIAL
-  // one, and the partial case is the ordinary one. Cost is a Claude-only
-  // observation — `costUsd` is assigned off the Claude result envelope, and the
-  // Codex envelope carries token counts with no price — so on a mixed-backend
-  // instance most runs never report. Live, at the time of the ruling: 209 of
-  // 215 runs, 94% of the tokens. Ruling 190's test passed the moment ONE run on
-  // each side reported, and the card would then divide 6 costed coordination
-  // runs by a denominator the other 137 never entered. So the share is a
-  // measurement only when every run on both sides reported one; short of that
-  // the ratio is not a bound in either direction, and the card says what it
-  // does not know and offers the token share instead.
-  const coordinationCost = totals.coordination_cost ?? 0;
-  const totalCost = totals.cost ?? 0;
-  const deliveryRuns = totals.delivery_runs ?? 0;
-  const costedDeliveryRuns = totals.costed_delivery_runs ?? 0;
-  const coordinationRuns = totals.coordination_runs ?? 0;
-  const costedCoordinationRuns = totals.costed_coordination_runs ?? 0;
-  const uncosted = {
-    delivery: deliveryRuns - costedDeliveryRuns,
-    coordination: coordinationRuns - costedCoordinationRuns,
-  };
-  const fullyCosted = uncosted.delivery === 0 && uncosted.coordination === 0;
-  // The card names the silent runs by backend rather than by a hedge. Derived
-  // from the rows, never from a list of backend names in the source: ruling
-  // 191's lesson is that advice which hardcodes what the environment contains
-  // goes stale the day the environment changes.
-  const uncostedByBackend = z
-    .array(z.object({ backend: z.string(), runs: z.number() }))
-    .parse(
-      db
-        .prepare(
-          `SELECT backend, count(*) AS runs FROM agent_runs ${and("total_cost_usd IS NULL")}
-           GROUP BY backend ORDER BY runs DESC, backend ASC`,
-        )
-        .all(...params),
-    );
-  // Tokens: the unit both backends report. Same suppression test as ruling 190
-  // applied one level down — a side that RAN and landed no provider figure at
-  // all was not observed, and its 0 is not a measurement. The incidental gap
-  // (F35-1: an interrupted run, or one that errored with an empty usage block)
-  // is COUNTED and named instead of suppressing the figure, because it is not
-  // systematic to one side the way the cost blind spot is.
-  const coordinationTokens = totals.coordination_tokens ?? 0;
-  const totalTokens = (totals.input_tokens ?? 0) + (totals.output_tokens ?? 0);
-  const tokenless = {
-    delivery: totals.tokenless_delivery_runs ?? 0,
-    coordination: totals.tokenless_coordination_runs ?? 0,
-  };
-  const tokenBlind =
-    (deliveryRuns > 0 && tokenless.delivery === deliveryRuns) ||
-    (coordinationRuns > 0 && tokenless.coordination === coordinationRuns);
-  const coordination = {
-    coordinationCostUsd: coordinationCost,
-    totalCostUsd: totalCost,
-    share: totalCost > 0 && fullyCosted ? coordinationCost / totalCost : null,
-    runs: { delivery: deliveryRuns, coordination: coordinationRuns },
-    uncosted,
-    uncostedByBackend,
-    tokenShare: totalTokens > 0 && !tokenBlind ? coordinationTokens / totalTokens : null,
-    coordinationTokens,
-    totalTokens,
-    tokenless,
-  };
-
-  const cache = cacheSummary(db, filter);
+  // Ruling 635: the backend is weighed in cost when any of its runs reported
+  // one. Read off the rows (ruling 191): which backend prices its runs is a
+  // fact about the data, not a list in the source.
+  const measure: RunMeasure = totals.costed_runs > 0 ? "cost" : "tokens";
+  const coordination = coordinationShare(db, filter, measure);
 
   const outcomeRows = z.array(outcomeSchema).parse(
     db
@@ -1284,17 +1351,18 @@ export function getInsightsSummary(
   const interruptedByRestart = interruptedFacts.by_restart ?? 0;
   const terminal = finished + errored + interrupted - interruptedNeverStarted;
 
-  // F26-4: order by COST first, then runs. This is a cost dashboard, and the
-  // breakdown is capped at TOP_N — a run-first order could truncate away a rare
-  // but expensive outlier (the exact thing "what's driving spend" needs), keeping
-  // eight cheap-but-frequent groups instead. Cost-first guarantees the top cost
-  // drivers always survive the cap.
-  // The cap is applied HERE rather than in SQL. Only the Claude result envelope
-  // reports a cost, so SUM over a Codex-only group is NULL and SQLite's DESC
-  // ordering sorts NULL last — the busiest groups on the instance were the
-  // first thing the LIMIT dropped. A label is a backend/kind/model/project, a
-  // handful of real entities, so grouping over the whole set is cheap; the top
-  // by RUNS is unioned in so no group is dropped purely for being unpriced.
+  // F26-4: order by the MEASURE first, then runs. This is where a person looks
+  // to see what drives spend, and the breakdown is capped at TOP_N — a
+  // run-first order could truncate away a rare but expensive outlier, keeping
+  // eight cheap-but-frequent groups instead. Measure-first guarantees the top
+  // drivers always survive the cap. Ruling 635: the measure is cost where the
+  // backend reports one and tokens where it does not, so a Codex breakdown
+  // leads with what its runs consumed instead of a column of nulls.
+  // The cap is applied HERE rather than in SQL: SQLite's DESC ordering sorts a
+  // NULL sum last, and grouping over the whole set is cheap (a label is a kind,
+  // model, project, profile or task). The top by RUNS is unioned in so no group
+  // is dropped purely for being unmeasured.
+  const weigh = (r: CountRow): number => (measure === "cost" ? r.cost : r.tokens) ?? -1;
   const group = (column: string): Breakdown => {
     const rows: CountRow[] = z
       .array(groupSchema)
@@ -1302,7 +1370,8 @@ export function getInsightsSummary(
         db
           .prepare(
             `SELECT ${column} AS label, count(*) AS runs,
-                    SUM(total_cost_usd) AS cost
+                    SUM(total_cost_usd) AS cost,
+                    SUM(CASE WHEN usage_final = 1 THEN input_tokens + output_tokens END) AS tokens
              FROM agent_runs ${clause}
              GROUP BY ${column}`,
           )
@@ -1314,36 +1383,36 @@ export function getInsightsSummary(
         label: r.label === "" ? "controller (instance)" : (r.label ?? "unknown"),
         runs: r.runs,
         cost: r.cost,
+        tokens: r.tokens,
       }));
 
-    const byCost = [...rows].sort(
-      (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.runs - a.runs,
-    );
+    const byMeasure = [...rows].sort((a, b) => weigh(b) - weigh(a) || b.runs - a.runs);
     const byRuns = [...rows].sort((a, b) => b.runs - a.runs);
     const kept = new Map<string, CountRow>();
-    // Half the slots are reserved for the busiest groups, so a cost dashboard
-    // still leads with spend without hiding where the work happens.
+    // Half the slots are reserved for the busiest groups, so a breakdown that
+    // leads with spend still shows where the work happens.
     const runSlots = Math.floor(TOP_N / 2);
     for (const row of byRuns.slice(0, runSlots)) kept.set(row.label, row);
-    for (const row of byCost) {
+    for (const row of byMeasure) {
       if (kept.size >= TOP_N) break;
       kept.set(row.label, row);
     }
-    const shown = [...kept.values()].sort(
-      (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.runs - a.runs,
-    );
+    const shown = [...kept.values()].sort((a, b) => weigh(b) - weigh(a) || b.runs - a.runs);
     // Ruling 308: say what the window left out. A breakdown that shows eight
     // of thirty groups and says nothing reads as the whole instance, which is
     // the same defect ruling 302 fixed on the timeline windows — and this one
     // is on the surface a person opens to decide where their money goes.
     const hiddenRows = rows.filter((r) => !kept.has(r.label));
+    const hiddenSum = (pick: (r: CountRow) => number | null): number | null =>
+      hiddenRows.some((r) => pick(r) !== null)
+        ? hiddenRows.reduce((n, r) => n + (pick(r) ?? 0), 0)
+        : null;
     return {
       rows: shown,
       hidden: hiddenRows.length,
       hiddenRuns: hiddenRows.reduce((n, r) => n + r.runs, 0),
-      hiddenCost: hiddenRows.some((r) => r.cost !== null)
-        ? hiddenRows.reduce((n, r) => n + (r.cost ?? 0), 0)
-        : null,
+      hiddenCost: hiddenSum((r) => r.cost),
+      hiddenTokens: hiddenSum((r) => r.tokens),
     };
   };
 
@@ -1371,11 +1440,12 @@ export function getInsightsSummary(
   const dailyRows = z.array(dailySchema).parse(
     db
       .prepare(
-        // No COALESCE: a day whose runs all report no cost (all-Codex) keeps a
-        // NULL sum, surfaced as "not reported" — never a dishonest $0.00, the
-        // same honesty the breakdown groups carry.
+        // No COALESCE: a day whose runs all report no cost keeps a NULL sum,
+        // surfaced as "not reported" — never a dishonest $0.00, the same honesty
+        // the breakdown groups carry. Tokens follow the same rule.
         `SELECT substr(started_at, 1, 10) AS date, count(*) AS runs,
-                SUM(total_cost_usd) AS cost
+                SUM(total_cost_usd) AS cost,
+                SUM(CASE WHEN usage_final = 1 THEN input_tokens + output_tokens END) AS tokens
          FROM agent_runs
          ${and("started_at IS NOT NULL AND substr(started_at, 1, 10) >= ?")}
          GROUP BY date ORDER BY date ASC`,
@@ -1389,11 +1459,34 @@ export function getInsightsSummary(
       .toISOString()
       .slice(0, 10);
     const row = byDate.get(d);
-    // A real day keeps its (possibly null) cost; a gap-filled quiet day is 0.
-    daily.push({ date: d, runs: row?.runs ?? 0, cost: row ? row.cost : 0 });
+    // A real day keeps its (possibly null) figures; a gap-filled quiet day is 0.
+    daily.push({
+      date: d,
+      runs: row?.runs ?? 0,
+      cost: row ? row.cost : 0,
+      tokens: row ? row.tokens : 0,
+    });
   }
 
+  // D5: `nowIso` retires an exhaustion record whose provider-named reset
+  // instant has already passed — the window it described is over.
+  const quota = latestBackendRateLimits(db, nowIso).find((r) => r.backend === filter.backend)!;
+  const nowMs = Date.parse(nowIso);
+  const reading = quota.reading;
+  const quotaWindows: QuotaWindow[] = (
+    reading == null ? [] : reading.windows?.length ? reading.windows : [reading]
+  ).map((w) => ({
+    rateLimitType: w.rateLimitType,
+    utilization: w.utilization,
+    resetsAt: w.resetsAt,
+    // `readingWindowReset`'s test, window by window: the provider's own epoch,
+    // no grace, and a reset nobody named never ages.
+    reset: w.resetsAt != null && Number.isFinite(nowMs) && w.resetsAt * 1000 <= nowMs,
+  }));
+
   return {
+    backend: filter.backend,
+    measure,
     totals: {
       runs: totals.runs,
       costedRuns: totals.costed_runs,
@@ -1404,7 +1497,8 @@ export function getInsightsSummary(
       tokenlessRuns: totals.tokenless_runs ?? 0,
       turns: totals.turns ?? 0,
     },
-    cache,
+    coordination,
+    cache: cacheSummary(db, filter),
     outcomes: {
       finished,
       error: errored,
@@ -1415,7 +1509,6 @@ export function getInsightsSummary(
       queued: byState("queued"),
       successRate: terminal > 0 ? finished / terminal : null,
     },
-    byBackend: group("backend"),
     byKind: group("kind"),
     byProject: group("project_slug"),
     byModel: group("model"),
@@ -1434,10 +1527,27 @@ export function getInsightsSummary(
     byProfile: group("agent_profile_id"),
     avgDurationMs: duration.avg_ms,
     daily,
-    oversight: oversightSummary(db, filter, coordination),
-    // D5: `nowIso` retires an exhaustion record whose provider-named reset
-    // instant has already passed — the window it described is over.
-    backendQuota: latestBackendRateLimits(db, nowIso),
+    quota,
+    quotaWindows,
     windowDays: WINDOW_DAYS,
+  };
+}
+
+/**
+ * The page's read: the instance's oversight, every backend's run count, and
+ * each backend that ran, read alone (ruling 635).
+ */
+export function getInsightsSummary(
+  db: DatabaseSync,
+  nowIso: string,
+  filter: InsightsFilter = {},
+): InsightsSummary {
+  const backends = backendRuns(db, filter);
+  return {
+    oversight: oversightSummary(db, filter),
+    backends,
+    runs: backends
+      .filter((b) => b.runs > 0)
+      .map((b) => runAnalytics(db, nowIso, { ...filter, backend: b.backend })),
   };
 }

@@ -118,7 +118,11 @@ import {
   utf8Bytes,
   writeStoreDoc,
 } from "~/server/org/store-files.server";
-import { getInsightsSummary } from "~/server/insights/insights-query.server";
+import {
+  backendRuns,
+  oversightSummary,
+  runAnalytics,
+} from "~/server/insights/insights-query.server";
 import { describePersonaChange } from "~/server/agents/persona-change.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
@@ -1681,31 +1685,46 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_run_analytics",
-      "Agent-run analytics: totals, success rate, cost and tokens, oversight stats, and breakdowns by backend, run kind, project, model, agent PROFILE and TASK. Org admins only, optionally scoped to one project. `byProfile` is how you answer which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` is how you answer what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: it carries `hidden`, `hiddenRuns` and `hiddenCost` for the groups the cap dropped, so eight of thirty never reads as thirty. A group whose runs never reported a cost is `null`, which means UNKNOWN and never zero: only the Claude result envelope carries one, so a Codex group's spend is unobservable rather than free.",
-      { projectSlug: z.string().optional() },
-      runWith((args: { projectSlug?: string }) => {
+      "Agent-run analytics. Org admins only, optionally scoped to one project. Ruling 635: run figures are PER BACKEND and never summed across backends, because Claude and Codex do not measure alike: only Claude reports a cost, a Codex token and a Claude token are different models' tokens, and Codex reports no cache write. `runs.<backend>` holds each backend's totals, outcomes, coordination share and breakdowns by run kind, project, model, agent PROFILE and TASK; pass `backend` for one. Each is weighed in its `measure`: `cost` where the backend reported one, else `tokens`. `byProfile` answers which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` answers what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` give the groups the cap dropped, so eight of thirty never reads as thirty. A null cost or token figure means UNKNOWN, never zero. `oversight` (owner clarity, branch and PR traceability, decision waits, time to review, long timelines) is the instance's own record and covers every backend.",
+      {
+        projectSlug: z.string().optional(),
+        backend: z.enum(["claude", "codex"]).optional(),
+      },
+      runWith((args: { projectSlug?: string; backend?: "claude" | "codex" }) => {
         requireOrgAdmin("inspect run analytics");
-        const summary = getInsightsSummary(
-          db,
-          new Date().toISOString(),
-          args.projectSlug ? { projectSlug: args.projectSlug } : undefined,
+        const filter = args.projectSlug ? { projectSlug: args.projectSlug } : {};
+        const now = new Date().toISOString();
+        const backends = backendRuns(db, filter);
+        // Every backend that ran, unless one was asked for: each its own
+        // figures (ruling 635), so the reply cannot add a Codex token to a
+        // Claude one or read Claude's dollars as the instance's.
+        const read = args.backend
+          ? [args.backend]
+          : backends.filter((b) => b.runs > 0).map((b) => b.backend);
+        const runs = Object.fromEntries(
+          read.map((backend) => {
+            const r = runAnalytics(db, now, { ...filter, backend });
+            return [
+              backend,
+              {
+                measure: r.measure,
+                totals: r.totals,
+                outcomes: r.outcomes,
+                coordination: r.coordination,
+                byKind: r.byKind,
+                byProject: r.byProject,
+                byModel: r.byModel,
+                // Ruling 308: the two the controller asked for and could not
+                // answer — "what did SHOP-27 cost across eleven rework rounds"
+                // and "which reviewer earns its runs".
+                byProfile: r.byProfile,
+                byTask: r.byTask,
+                avgDurationMs: r.avgDurationMs,
+              },
+            ];
+          }),
         );
-        return json({
-          totals: summary.totals,
-          outcomes: summary.outcomes,
-          byBackend: summary.byBackend,
-          byKind: summary.byKind,
-          byProject: summary.byProject,
-          byModel: summary.byModel,
-          // Ruling 308: the two the controller asked for and could not answer
-          // — "what did SHOP-27 cost across eleven rework rounds" and "which
-          // reviewer earns its runs". Every breakdown also carries what its
-          // window left out, so eight of thirty never reads as thirty.
-          byProfile: summary.byProfile,
-          byTask: summary.byTask,
-          avgDurationMs: summary.avgDurationMs,
-          oversight: summary.oversight,
-        });
+        return json({ backends, runs, oversight: oversightSummary(db, filter) });
       }),
     ),
     "inspect_run_analytics",
