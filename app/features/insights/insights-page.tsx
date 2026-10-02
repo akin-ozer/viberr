@@ -9,8 +9,8 @@ import type {
 } from "~/server/insights/insights-query.server";
 import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
-import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
-import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
+import { useHydrated } from "~/ui/local-time";
+import { formatDayDotTime, utcDayKey, formatClockUTC, formatCalendarDateUTC } from "~/shared/dates/format";
 import { observedAfter } from "~/shared/freshness";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 
@@ -66,8 +66,7 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
         <div>
           <h1>Insights</h1>
           <p className="sub">
-            Analytics across every agent run on this instance. Generated{" "}
-            <LocalDayDotTime iso={summary.generatedAt} />.
+            Analytics across every agent run on this instance.
           </p>
         </div>
       </div>
@@ -1014,8 +1013,9 @@ function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
   );
 }
 
-/** A 30-day column chart of runs per day, cost in the tooltip. Each column's
- *  height is its share of the busiest day; empty days render a floor tick. */
+/** A 30-day column chart of runs per day, its day's figures on hover. Each
+ *  column's height is its share of the busiest day; empty days render a floor
+ *  tick. */
 function DailyChart({ summary }: { summary: InsightsSummary }) {
   const max = summary.daily.reduce((m, d) => Math.max(m, d.runs), 0) || 1;
   return (
@@ -1026,23 +1026,35 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
       {/* Interface review 2026-09-24 (acce-5): a list, not role="img" — an
           image's children are presentational, so the per-day counts and costs
           reached nobody but a hovering mouse. Each column says its day in
-          `.vh`; the title stays the pointer's extra. */}
+          `.vh`. Ruling 634: the pointer's card (`.daily-tip`) shows the same
+          figures the moment a column is hovered; the native `title` it
+          replaces took a second to appear and was clipped at the window. */}
       <div className="daily-chart" role="list" aria-label={`Agent runs per day over the last ${summary.windowDays} days`}>
         {summary.daily.map((d) => {
-          const day = `${d.date}: ${countLabel(d.runs, "run")}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`;
+          const cost = d.cost == null ? "not reported" : fmtCost(d.cost);
           return (
             <span
               key={d.date}
               className="daily-col"
               role="listitem"
-              title={day}
               data-empty={d.runs === 0 || undefined}
             >
               <span
                 className="daily-bar"
                 style={{ height: `${Math.max(3, Math.round((d.runs / max) * 100))}%` }}
-              />
-              <span className="vh">{day}</span>
+              >
+                <span className="daily-tip" aria-hidden="true">
+                  <span className="daily-tip-date">{formatCalendarDateUTC(d.date)}</span>
+                  <span className="daily-tip-row">
+                    <span className="daily-tip-key" />
+                    Runs <b>{fmtCount(d.runs)}</b>
+                  </span>
+                  <span className="daily-tip-row cost">
+                    Cost <b>{cost}</b>
+                  </span>
+                </span>
+              </span>
+              <span className="vh">{`${d.date}: ${countLabel(d.runs, "run")}, ${d.cost == null ? "cost not reported" : cost}`}</span>
             </span>
           );
         })}

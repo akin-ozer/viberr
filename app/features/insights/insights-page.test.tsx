@@ -257,7 +257,6 @@ const FULL: InsightsSummary = {
     { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
   ],
   windowDays: 30,
-  generatedAt: "2026-08-23T12:00:00.000Z",
 };
 
 describe("InsightsPage", () => {
@@ -332,7 +331,6 @@ describe("InsightsPage", () => {
     expect(chart.getAttribute("role")).toBe("list");
     expect(chart.querySelectorAll('[role="listitem"]')).toHaveLength(30);
     const last = chart.querySelectorAll(".daily-col")[29]!;
-    expect(last.querySelector(".vh")?.textContent).toBe(last.getAttribute("title"));
     expect(last.querySelector(".vh")?.textContent).toMatch(/^2026-07-30: 5 runs, /);
     // The busiest backend bar fills 100%, the other proportionally less.
     const fills = container.querySelectorAll<HTMLElement>(".bar-fill");
