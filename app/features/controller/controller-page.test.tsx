@@ -1533,6 +1533,11 @@ describe("ruling 476: the controller page", () => {
       try {
         const { update } = renderLive(at(three, busy("p2")));
         await screen.findByText("Two.");
+        // The open puts the box at its end in a passive effect, which a slow
+        // runner can commit after `findByText` returns: scrolled away before
+        // it, the reader is pulled back to the end and the reply lands on a
+        // reader who follows, so nothing says New reply (CI, PR #458).
+        await waitFor(() => expect(transcript().scrollTop).toBe(5000));
         await scrollTo(100);
         update(at([...three, msg("r2", 4, "controller", "Answer two.", "p2")]));
         await within(transcript()).findByRole("button", { name: "New reply" });
