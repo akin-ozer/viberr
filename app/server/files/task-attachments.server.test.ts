@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, utimesSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -464,6 +465,60 @@ describe("ruling 574: readTaskAttachment reads any text file", () => {
       const docx = readTaskAttachment("p1", "VIB-1", "report.docx", root);
       expect(docx).toEqual({
         unreadable: expect.stringContaining("`report.docx` is a binary .docx file (6 bytes): its bytes are not text."),
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+/** A one-page PDF drawing `lines` in Helvetica, with a correct cross-reference
+ *  table, so `pdftotext` reads it as it reads a calculator export. No lines
+ *  makes a page with no text layer. */
+function onePagePdf(lines: readonly string[]): Uint8Array {
+  const draw = lines.map((line, i) => `${i ? "0 -16 Td " : ""}(${line}) Tj`).join(" ");
+  const stream = lines.length ? `BT /F1 12 Tf 72 720 Td ${draw} ET` : "";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = objects.map((body, i) => {
+    const at = pdf.length;
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+    return at;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets.map((at) => `${String(at).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(pdf);
+}
+
+/** The image installs poppler (ruling 566); a host without it skips these. */
+const hasPdftotext = spawnSync("pdftotext", ["-v"]).error === undefined;
+
+describe("ruling 629: a PDF attachment reads as its text", () => {
+  it.skipIf(!hasPdftotext)("reads a calculator export's lines, and names a PDF with no text layer", () => {
+    // Live on AWSC-85 the Estimate Judge reviewed a delivery whose PDF export
+    // it could not open: "the attachment reader does not parse its binary
+    // contents". CANARY: drop the PDF branch from the reader and the export is
+    // refused as a binary .pdf.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-629-"));
+    try {
+      const put = (name: string, bytes: Uint8Array) => writeTaskAttachment("p1", "VIB-1", name, bytes, root);
+      put("My-Estimate.pdf", onePagePdf(["Amazon EC2   73.58 USD", "Total monthly   1,704.11 USD"]));
+      put("scan.pdf", onePagePdf([]));
+      const pdf = readTaskAttachment("p1", "VIB-1", "My-Estimate.pdf", root);
+      expect(pdf).toMatchObject({ kind: "text", name: "My-Estimate.pdf", truncated: false });
+      const text = pdf && "text" in pdf ? pdf.text : "";
+      expect(text).toContain("Amazon EC2");
+      expect(text).toContain("1,704.11 USD");
+      expect(readTaskAttachment("p1", "VIB-1", "scan.pdf", root)).toEqual({
+        unreadable: expect.stringMatching(/^`scan\.pdf` is a PDF with no text layer .*`pdftoppm`/),
       });
     } finally {
       rmSync(root, { recursive: true, force: true });

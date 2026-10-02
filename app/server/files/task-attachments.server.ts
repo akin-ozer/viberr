@@ -31,6 +31,7 @@ import {
   taskAttachmentsDir,
 } from "./file-store-root.server";
 import { resolveKeptDeliveryFile } from "./kept-deliveries.server";
+import { pdfToText } from "./pdf-text.server";
 import { xlsxToText } from "./xlsx-text.server";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 
@@ -726,11 +727,12 @@ function textPage(
   return page;
 }
 
-/** Ruling 551: the most of a workbook's text a reader can page through. The
- *  whole of it is rendered and sliced like any text, because the renderer
- *  stops at whole lines and a page cut at its budget would skip the rest of
- *  the line it stopped before. */
-const XLSX_TEXT_MAX_CHARS = 16_000_000;
+/** Ruling 551: the most of a rendered file's text (a workbook's sheets, ruling
+ *  533; a PDF's pages, ruling 629) a reader can page through. The whole of it
+ *  is rendered and sliced like any text, because the renderer stops at whole
+ *  lines and a page cut at its budget would skip the rest of the line it
+ *  stopped before. */
+const RENDERED_TEXT_MAX_CHARS = 16_000_000;
 
 /**
  * Ruling 533: the pictures a reader is handed as the picture itself. A person
@@ -828,7 +830,7 @@ function binaryFile(name: string, ext: string, bytes: number, where: string): At
   return {
     unreadable:
       `\`${name}\` is a binary ${ext || "typeless"} file (${bytes.toLocaleString("en-US")} bytes): its bytes are not text. ` +
-      `This reads text files of any name, spreadsheets (.xlsx) and images ` +
+      `This reads text files of any name, PDFs (as their text), spreadsheets (.xlsx) and images ` +
       `(${[...IMAGE_READ_TYPES.keys()].join(", ")}). Open it ${where} rather than describing it from its name.`,
   };
 }
@@ -879,9 +881,19 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
     return { kind: "image", name, bytes: bytes.length, mimeType, data: bytes.toString("base64") };
   }
   if (ext === ".xlsx") {
-    const text = xlsxToText(bytes, XLSX_TEXT_MAX_CHARS);
+    const text = xlsxToText(bytes, RENDERED_TEXT_MAX_CHARS);
     if ("unreadable" in text) {
       return { unreadable: `\`${name}\` ${text.unreadable}` };
+    }
+    if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
+    return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
+  }
+  // Ruling 629: a PDF reads as its text, through the poppler ruling 566 put in
+  // the image, paged like any text.
+  if (ext === ".pdf") {
+    const text = pdfToText(bytes, RENDERED_TEXT_MAX_CHARS);
+    if ("unreadable" in text) {
+      return { unreadable: `\`${name}\` ${text.unreadable} Open it ${where} rather than describing it from its name.` };
     }
     if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
     return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
