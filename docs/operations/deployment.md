@@ -681,9 +681,10 @@ docker images --filter dangling=true --filter label=com.docker.compose.service=a
 docker tag <image id> viberr-app:latest && docker compose up -d --no-build
 ```
 
-Then it trims Docker's build cache to the most recently used 3 GiB (`docker builder prune
---max-used-space`, ruling 628), which holds a whole build's layers, so the next build stays
-incremental. Every build adds the layers it made, and after deploy 48 the cache had grown to
+Then it trims Docker's build cache to at most 3 GiB of reclaimable cache, the most recently
+used first (`docker builder prune --max-used-space`, ruling 628). That holds a whole build's
+layers, so the next build stays incremental; the layers the running build holds are kept
+beside it and not counted. Every build adds the layers it made, and after deploy 48 the cache had grown to
 6.7 GB, 4.8 GB of it reclaimable.
 
 It runs `git` on the host, sets `VIBERR_BUILD_VERSION` (from `package.json`),
