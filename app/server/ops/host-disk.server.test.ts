@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  BUILD_CACHE_KEEP_BYTES,
   buildRoomRefusal,
   MIN_FREE_FOR_BUILD_BYTES,
   supersededImagesToRemove,
@@ -83,5 +85,18 @@ describe("supersededImagesToRemove (ruling 605)", () => {
   it("removes nothing when the replaced build is the only one left", () => {
     expect(supersededImagesToRemove(left.slice(0, 1))).toEqual([]);
     expect(supersededImagesToRemove([])).toEqual([]);
+  });
+});
+
+describe("BUILD_CACHE_KEEP_BYTES (ruling 628)", () => {
+  it("keeps a whole build's layers, and every deploy trims the cache to it", () => {
+    // Deploy 48's build used 2.17 GB of BuildKit's cache (`docker buildx du`,
+    // 2026-10-01). A cap below that makes every deploy a cold build, the 5-6 GB
+    // write ruling 603 measures the host for. CANARY: cap at 2 GiB, or drop the
+    // prune from scripts/deploy.ts, and this fails.
+    expect(BUILD_CACHE_KEEP_BYTES).toBeGreaterThan(2.17e9);
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+    const deploy = readFileSync(path.join(root, "scripts/deploy.ts"), "utf8");
+    expect(deploy).toContain('dockerOut("builder", "prune", "-f", "--max-used-space", String(BUILD_CACHE_KEEP_BYTES))');
   });
 });

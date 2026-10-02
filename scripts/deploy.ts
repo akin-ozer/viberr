@@ -42,6 +42,7 @@ import { composePort } from "../app/server/ops/compose-port.server";
 import { formatBytes } from "../app/server/ops/disk-space.server";
 import {
   buildRoomRefusal,
+  BUILD_CACHE_KEEP_BYTES,
   supersededImagesToRemove,
   tightestHostDisk,
   type SupersededImage,
@@ -268,4 +269,13 @@ const removable = supersededImagesToRemove(supersededImages());
 const removed = removable.filter((id) => dockerOut("image", "rm", id) !== null);
 if (removed.length > 0) {
   console.log(`removed ${removed.length} older build(s) of this app; kept the one this deploy replaced to roll back to.`);
+}
+
+// Ruling 628: BuildKit's cache grows with every build and nothing trimmed it.
+// Keep the most recently used BUILD_CACHE_KEEP_BYTES, a whole build's layers,
+// so the next build stays incremental; Docker evicts the rest oldest first.
+const cacheTrim = dockerOut("builder", "prune", "-f", "--max-used-space", String(BUILD_CACHE_KEEP_BYTES));
+const reclaimed = cacheTrim?.match(/^Total:\s*(\S+)/m)?.[1];
+if (reclaimed && reclaimed !== "0B") {
+  console.log(`trimmed Docker's build cache by ${reclaimed}; kept the most recently used ${formatBytes(BUILD_CACHE_KEEP_BYTES)}.`);
 }
