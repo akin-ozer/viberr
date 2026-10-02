@@ -1,34 +1,49 @@
+import { Fragment, type ReactNode } from "react";
 import type {
+  BackendRuns,
   Breakdown,
   CacheRow,
   CacheSummary,
+  CoordinationShare,
   OperatorBurstSummary,
   OversightSummary,
   InsightsSummary,
   ResumeSummary,
+  RunAnalytics,
+  RunMeasure,
 } from "~/server/insights/insights-query.server";
-import { Link } from "react-router";
+import type { RunBackend } from "~/features/runtime/runtime-types";
+import { Link, useSearchParams } from "react-router";
 import { Icon } from "~/ui/icon";
 import { useHydrated } from "~/ui/local-time";
 import { formatDayDotTime, utcDayKey, formatClockUTC, formatCalendarDateUTC } from "~/shared/dates/format";
 import { observedAfter } from "~/shared/freshness";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 
 /**
- * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
- * per-backend/kind/project/model breakdowns and a 30-day activity chart. All
- * numbers come from ONE server query (`getInsightsSummary`); the page only
- * formats and draws. Org-admin gated at the route.
+ * Insights: a read-only analytics dashboard. All numbers come from ONE server
+ * read (`getInsightsSummary`); the page only formats and draws. Org-admin gated
+ * at the route.
+ *
+ * Ruling 635: the instance's own record (delivery oversight) comes first and
+ * covers every backend. Below it the agent runs are read one backend at a time,
+ * under a switch that names each backend with its run count: Claude and Codex
+ * do not measure alike, so nothing on the page sums across them.
  */
 
 function fmtCost(usd: number): string {
   if (usd === 0) return "$0.00";
   if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
+  return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Each unit starts where the one below would round up to 1,000 of itself, so
+ *  nothing prints "1000.0M". Ruling 635: a backend's input passes a billion in
+ *  days, and "5361.5M" read as a typo. */
 function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 999_950_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 999_950) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
@@ -52,9 +67,15 @@ function fmtPercent(rate: number | null): string {
   return rate === null ? "n/a" : `${Math.round(rate * 100)}%`;
 }
 
+/** A figure in its backend's measure (ruling 635): dollars, or tokens. Null is
+ *  "not reported", never a zero the data cannot vouch for. */
+function fmtMeasure(measure: RunMeasure, value: number | null): string {
+  if (value === null) return "not reported";
+  return measure === "cost" ? fmtCost(value) : fmtTokens(value);
+}
+
 export function InsightsPage({ summary }: { summary: InsightsSummary }) {
-  const { totals, outcomes } = summary;
-  const empty = totals.runs === 0;
+  const empty = summary.backends.every((b) => b.runs === 0);
   // D33-3: Insights was the one full-page surface with no screen label, so
   // tests and agents could not address it by name like every other one
   // (docs/ui/surfaces.md §4).
@@ -90,36 +111,108 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
         </div>
       ) : (
         <>
-          <div className="stat-grid">
-            <StatCard label="Total runs" value={fmtCount(totals.runs)} icon="cpu" />
+          <OversightCards oversight={summary.oversight} />
+          <AgentRuns backends={summary.backends} runs={summary.runs} />
+        </>
+      )}
+    </main>
+  );
+}
+
+/**
+ * Ruling 635: one backend's runs. Everything from the switch down reads only
+ * that backend: its totals, its days, where its runs went, its quota and its
+ * prompt cache. Each backend is weighed in what it reports (`runs.measure`):
+ * cost on a backend that reports one, tokens on one that does not.
+ *
+ * The loader reads every backend that ran, so the switch only rewrites the
+ * URL: no request, and a link holds the choice. With no choice, or one the
+ * page does not know, it opens on the backend doing most of the work.
+ */
+function AgentRuns({ backends, runs: read }: { backends: BackendRuns[]; runs: RunAnalytics[] }) {
+  const [params, setParams] = useSearchParams();
+  const busiest = backends.reduce((most, b) => (b.runs > most.runs ? b : most)).backend;
+  const backend = backends.find((b) => b.backend === params.get("backend"))?.backend ?? busiest;
+  const runs = read.find((r) => r.backend === backend);
+  const choose = (next: RunBackend) =>
+    setParams(
+      (prev) => {
+        const url = new URLSearchParams(prev);
+        url.set("backend", next);
+        return url;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  return (
+    <>
+      <section>
+        <div className="sec-h">
+          <Icon name="cpu" />
+          <h2>Agent runs</h2>
+          <BackendSwitch backends={backends} selected={backend} onSelect={choose} />
+        </div>
+        {runs ? <RunTotals runs={runs} /> : <div className="empty">No {BACKEND_LABEL[backend]} runs yet.</div>}
+      </section>
+      {runs && (
+        <>
+          <DailyChart runs={runs} />
+          <div className="insights-cols">
+            <BreakdownCard title="By run kind" data={runs.byKind} measure={runs.measure} />
+            <BreakdownCard title="By project" data={runs.byProject} measure={runs.measure} />
+            <BreakdownCard title="By model" data={runs.byModel} measure={runs.measure} />
+            <BreakdownCard title="By agent profile" data={runs.byProfile} measure={runs.measure} />
+            <BreakdownCard title="By task" data={runs.byTask} measure={runs.measure} tasks />
+            <BackendQuotaPanel runs={runs} />
+          </div>
+          <CachePanel cache={runs.cache} backend={runs.backend} />
+        </>
+      )}
+    </>
+  );
+}
+
+/** Ruling 635: one backend's totals, seven wells. */
+function RunTotals({ runs }: { runs: RunAnalytics }) {
+  const name = BACKEND_LABEL[runs.backend];
+  const { totals, outcomes } = runs;
+  // A backend whose envelope carries no price is "not reported", never $0.00
+  // (ruling 395), and says so once, on this card. A Claude run stopped before
+  // its result reports no cost either, so the headline names the runs it
+  // leaves out.
+  const silentRuns = totals.runs - totals.costedRuns;
+  const costSub =
+    totals.costedRuns === 0
+      ? `none of the ${fmtCount(totals.runs)} ${name} runs reported one`
+      : silentRuns > 0
+        ? `${fmtCount(silentRuns)} of ${fmtCount(totals.runs)} runs reported no cost`
+        : undefined;
+  return (
+          <div className="stat-grid four">
+            <StatCard label="Runs" value={fmtCount(totals.runs)} icon="cpu" />
             <StatCard
-              label="Total cost"
-              value={fmtCost(totals.cost)}
+              label="Cost"
               icon="bolt"
-              // Only Claude runs report a cost, so a silent headline reads as
-              // the whole instance's spend when it covers a subset of the runs.
-              {...(totals.costedRuns < totals.runs
-                ? {
-                    sub: `${fmtCount(totals.runs - totals.costedRuns)} of ${fmtCount(totals.runs)} runs reported no cost`,
-                  }
-                : {})}
+              value={totals.costedRuns === 0 ? "not reported" : fmtCost(totals.cost)}
+              absent={totals.costedRuns === 0}
+              sub={costSub}
             />
             <StatCard
-              label="Output tokens"
-              value={fmtTokens(totals.outputTokens)}
+              label="Tokens"
+              value={fmtTokens(totals.inputTokens + totals.outputTokens)}
               icon="memory"
-              // `in` is the whole prompt of every call on both backends and
-              // `cached` the subset of it served from the prompt cache.
-              // F35-1: the sums cover provider totals only, so the card names
-              // how many runs are outside them, in the shape the Cost card
-              // uses for the runs that reported no cost. The count is the
-              // sums' own (`tokenlessRuns`), not "runs in flight": a stopped
-              // run and one that errored before the provider answered never
-              // get a total either, and the reader has to be told.
+              // `in` is the whole prompt of every call and `cached` the share
+              // of it served from the prompt cache. F35-1: the sums cover
+              // provider totals only, so the card names how many runs are
+              // outside them: a stopped run and one that errored before the
+              // provider answered never get a total.
               sub={
-                `${fmtTokens(totals.inputTokens)} in (${fmtTokens(totals.cachedInputTokens)} cached)` +
+                `${fmtTokens(totals.inputTokens)} in` +
+                (totals.inputTokens > 0
+                  ? `, ${fmtPercent(totals.cachedInputTokens / totals.inputTokens)} cached`
+                  : "") +
+                ` · ${fmtTokens(totals.outputTokens)} out` +
                 (totals.tokenlessRuns > 0
-                  ? ` · ${fmtCount(totals.tokenlessRuns)} of ${fmtCount(totals.runs)} runs report no provider token total`
+                  ? ` · ${fmtCount(totals.tokenlessRuns)} of ${fmtCount(totals.runs)} runs report no provider total`
                   : "")
               }
             />
@@ -128,49 +221,97 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
               // measures runs that RAN to completion (finished vs errored/stopped),
               // which is not the same as work that was accepted on review. F26-5:
               // running/queued join the sub-label when present, so the outcome
-              // counts always reconcile with "Total runs". Pass 35 U35-7: the
-              // stopped count names how many a restart stopped and how many
-              // never started; the latter are out of the rate's denominator.
+              // counts always reconcile with "Runs". Pass 35 U35-7: the stopped
+              // count names how many a restart stopped and how many never
+              // started; the latter are out of the rate's denominator.
               label="Completion rate"
               value={fmtPercent(outcomes.successRate)}
               icon="check"
               sub={[
-                `${outcomes.finished} finished`,
-                `${outcomes.error} error`,
+                `${fmtCount(outcomes.finished)} finished`,
+                `${fmtCount(outcomes.error)} error`,
                 stoppedLabel(outcomes),
-                ...(outcomes.running ? [`${outcomes.running} running`] : []),
-                ...(outcomes.queued ? [`${outcomes.queued} queued`] : []),
+                ...(outcomes.running ? [`${fmtCount(outcomes.running)} running`] : []),
+                ...(outcomes.queued ? [`${fmtCount(outcomes.queued)} queued`] : []),
               ].join(" · ")}
             />
             <StatCard
               label="Avg run time"
-              value={fmtDuration(summary.avgDurationMs)}
+              value={fmtDuration(runs.avgDurationMs)}
               icon="clock"
               sub="finished runs"
             />
             <StatCard label="Turns" value={fmtCount(totals.turns)} icon="refresh" />
+            {/* F31-D6: coordination cost was invisible next to the work it
+                coordinated (pass 31 measured 63% with no card saying so).
+                "Coordination" is the operator AND the controller: both decide
+                what the working agents do rather than doing the work. */}
+            <StatCard
+              label="Coordination share"
+              value={fmtPercent(runs.coordination.share)}
+              icon="shield"
+              sub={coordinationSentence(runs.coordination)}
+            />
           </div>
-
-          <DailyChart summary={summary} />
-
-          <CachePanel cache={summary.cache} />
-
-          <OversightCards oversight={summary.oversight} />
-
-          <div className="insights-cols">
-            <BreakdownCard title="By backend" data={summary.byBackend} />
-            <BreakdownCard title="By run kind" data={summary.byKind} />
-            <BreakdownCard title="By project" data={summary.byProject} />
-            <BreakdownCard title="By model" data={summary.byModel} />
-            <BreakdownCard title="By agent profile" data={summary.byProfile} />
-            <BreakdownCard title="By task" data={summary.byTask} />
-          </div>
-
-          <BackendQuotaPanel quota={summary.backendQuota} />
-        </>
-      )}
-    </main>
   );
+}
+
+/**
+ * Ruling 635: Claude | Codex, each with its run count, so the split between
+ * them reads at a glance without a sum that means nothing. The choice is the
+ * URL's (`?backend=`, replaced in place like the board's filters).
+ */
+function BackendSwitch({
+  backends,
+  selected,
+  onSelect,
+}: {
+  backends: BackendRuns[];
+  selected: RunBackend;
+  onSelect: (backend: RunBackend) => void;
+}) {
+  return (
+    <div className="seg push" role="group" aria-label="Backend">
+      {backends.map(({ backend, runs }) => (
+        <button
+          key={backend}
+          type="button"
+          className={backend === selected ? "on" : ""}
+          aria-pressed={backend === selected}
+          onClick={() => {
+            if (backend !== selected) onSelect(backend);
+          }}
+        >
+          {BACKEND_LABEL[backend]}
+          <span className="tally">{fmtCount(runs)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * F31-D6 under ruling 635: the coordination runs' share of one backend's
+ * measure. Ruling 190 still decides when there is no share: a side that RAN and
+ * put no figure in at all was never observed, so "100%" or "0%" would be the
+ * quotient of a gap. A stopped run here and there is the Cost and Tokens cards'
+ * disclosure, beside this one.
+ */
+function coordinationSentence(c: CoordinationShare): string {
+  const what = c.measure === "cost" ? "a cost" : "a token total";
+  if (c.total <= 0) return `no run has reported ${what} yet`;
+  if (c.share === null) {
+    const side =
+      c.reached.delivery > 0 && c.silent.delivery === c.reached.delivery
+        ? "no delivery run"
+        : "no operator or controller run";
+    return `${side} reported ${what}, so there is no share to take`;
+  }
+  const figures =
+    c.measure === "cost"
+      ? `${fmtCost(c.coordination)} of ${fmtCost(c.total)}`
+      : `${fmtTokens(c.coordination)} of ${fmtTokens(c.total)} tokens`;
+  return `operator and controller runs, ${figures}`;
 }
 
 /**
@@ -178,36 +319,37 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
  * toll reads as what it was, and the never-started share says why the rate's
  * denominator is smaller than the terminal count.
  */
-function stoppedLabel(outcomes: InsightsSummary["outcomes"]): string {
+function stoppedLabel(outcomes: RunAnalytics["outcomes"]): string {
   const detail = [
     ...(outcomes.interruptedByRestart
-      ? [`${outcomes.interruptedByRestart} by a restart`]
+      ? [`${fmtCount(outcomes.interruptedByRestart)} by a restart`]
       : []),
     ...(outcomes.interruptedNeverStarted
-      ? [`${outcomes.interruptedNeverStarted} never started`]
+      ? [`${fmtCount(outcomes.interruptedNeverStarted)} never started`]
       : []),
   ];
-  return `${outcomes.interrupted} stopped${detail.length ? ` (${detail.join(", ")})` : ""}`;
+  return `${fmtCount(outcomes.interrupted)} stopped${detail.length ? ` (${detail.join(", ")})` : ""}`;
 }
 
 /**
  * Delivery-oversight outcomes (pass 29): the PRD's own measurable-outcome criteria,
  * finally measured — ownership/state clarity, key↔branch↔PR traceability,
  * blocked-decision latency and time-to-review — from the projections and the
- * audit trail the product already keeps.
+ * audit trail the product already keeps. Ruling 635: the instance's own record,
+ * so it covers every backend and sits above the switch.
  */
 function OversightCards({ oversight }: { oversight: OversightSummary }) {
   const g = oversight;
   return (
-    // Pass 30: this second stat band was visually identical to the run totals
-    // above with nothing introducing it — every other band on the page has a
-    // heading, so this one gets the same section-label idiom.
+    // Pass 30: this stat band was visually identical to the run totals with
+    // nothing introducing it — every other band on the page has a heading, so
+    // this one gets the same section-label idiom.
     <section>
       <div className="sec-h">
         <Icon name="check" />
         <h2>Delivery oversight</h2>
       </div>
-      <div className="stat-grid four">
+      <div className="stat-grid">
       <StatCard
         label="Owner & state clarity"
         value={fmtPercent(g.clarity.pct)}
@@ -265,322 +407,211 @@ function OversightCards({ oversight }: { oversight: OversightSummary }) {
         label="Long timelines"
         value={fmtCount(g.longTimelines)}
         icon="memory"
-        sub="tasks past their project's compression threshold"
+        sub="tasks past their project's compression threshold, longest first"
         names={g.longTimelineKeys}
         more={g.longTimelines - g.longTimelineKeys.length}
-      />
-      {/* F31-D6: pass 31 measured coordination at 63% of all run spend with
-          no card saying so — coordination cost was invisible next to the
-          work it coordinated. "Coordination" is the operator AND the
-          controller: both decide what the working agents do rather than doing
-          the work, so the sub-text names both instead of implying the
-          controller's turns are free.
-
-          Ruling 190 → 201: the share is shown only when EVERY run on both
-          sides reported a cost. Anything less and the figure is a ratio of
-          whichever runs happened to bill — on a mixed-backend instance that is
-          a small minority, because only Claude's result envelope carries a
-          price. The suppressed case gives the dollars that ARE real and names
-          the silent runs by their count and their backend; the token card
-          beside it carries the share that survives the blind spot. */}
-      <StatCard
-        label="Coordination overhead"
-        value={fmtPercent(g.coordination.share)}
-        icon="shield"
-        sub={
-          g.coordination.totalCostUsd <= 0
-            ? "no run has reported a cost yet"
-            : g.coordination.share === null
-              ? `operator and controller runs reported $${g.coordination.coordinationCostUsd.toFixed(2)}; ${costSilence(g.coordination)}, so there is no share to take`
-              : // D04-U12 (pass 32): name the denominator. It is now every run
-                // in scope, which is what makes the quotient a measurement.
-                `operator and controller runs spent $${g.coordination.coordinationCostUsd.toFixed(2)} of $${g.coordination.totalCostUsd.toFixed(2)}; every run reported a cost`
-        }
-      />
-      {/* Ruling 201: the owner's call on F37-21 — suppress the dollar share
-          when it cannot be measured, and put a real number beside it rather
-          than a gap. Tokens are the unit BOTH backends report. Its own unit is
-          stated on the card, because a token is not a dollar and the models on
-          either side of this ratio are not priced alike. */}
-      <StatCard
-        label="Coordination tokens"
-        value={fmtPercent(g.coordination.tokenShare)}
-        icon="memory"
-        sub={
-          g.coordination.totalTokens <= 0
-            ? "no run has reported a provider token total yet"
-            : g.coordination.tokenShare === null
-              ? `operator and controller runs processed ${fmtTokens(g.coordination.coordinationTokens)} tokens; ${tokenSilence(g.coordination)}, so there is no share to take`
-              : `${fmtTokens(g.coordination.coordinationTokens)} of ${fmtTokens(g.coordination.totalTokens)} tokens processed; tokens, not dollars` +
-                (g.coordination.tokenless.delivery + g.coordination.tokenless.coordination > 0
-                  ? ` · ${fmtCount(g.coordination.tokenless.delivery + g.coordination.tokenless.coordination)} of ${fmtCount(g.coordination.runs.delivery + g.coordination.runs.coordination)} runs report no provider total`
-                  : "")
-        }
       />
       </div>
     </section>
   );
 }
 
-/** Ruling 201: which runs left the dollar share unmeasurable, in the reader's
- *  terms. A side that reported NOTHING and a side that reported SOME are
- *  different facts and get different sentences; the backend clause comes off
- *  the rows, so it names whatever actually went silent rather than a backend
- *  this file guessed at. */
-function costSilence(c: OversightSummary["coordination"]): string {
-  const backends = c.uncostedByBackend
-    // Title-cased from the row, not matched against a list of backend names
-    // this file knows: ruling 191's lesson is that copy which hardcodes what
-    // the environment contains goes stale the day the environment changes.
-    .map((b) => `${fmtCount(b.runs)} on ${b.backend.charAt(0).toUpperCase()}${b.backend.slice(1)}`)
-    .join(" and ");
-  const silent = c.uncosted.delivery + c.uncosted.coordination;
-  const total = c.runs.delivery + c.runs.coordination;
-  // Ruling 211(g): the parenthetical counts the WHOLE cost-silent population,
-  // so it may only ride a clause that names the whole population. Attached to
-  // "no delivery run reported a cost" it told the reader a number that belongs
-  // to both sides while blaming one — and hid that coordination was partly
-  // silent too, which is the very thing ruling 201 exists to disclose.
-  const wholeSideSilent =
-    c.runs.delivery > 0 && c.uncosted.delivery === c.runs.delivery
-      ? "no delivery run reported a cost"
-      : c.runs.coordination > 0 && c.uncosted.coordination === c.runs.coordination
-        ? "no operator or controller run reported a cost"
-        : null;
-  // Only when the OTHER side is partly silent too does the count span more than
-  // the clause names; when the named side owns every silent run, the original
-  // single clause is exact.
-  const otherPartlySilent =
-    wholeSideSilent === "no delivery run reported a cost"
-      ? c.uncosted.coordination > 0
-      : c.uncosted.delivery > 0;
-  if (wholeSideSilent !== null && otherPartlySilent) {
-    // One side is entirely silent AND the other is partly silent: say both, and
-    // keep the backend breakdown on the total where it belongs.
-    const rest = `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost in total`;
-    return backends
-      ? `${wholeSideSilent}, and ${rest} (${backends})`
-      : `${wholeSideSilent}, and ${rest}`;
-  }
-  const counted = wholeSideSilent ?? `${fmtCount(silent)} of ${fmtCount(total)} runs report no cost`;
-  return backends ? `${counted} (${backends})` : counted;
-}
-
-/** The same sentence for the token share, whose gap is a side that landed no
- *  provider figure at all (F35-1's excluded rows, concentrated on one side). */
-function tokenSilence(c: OversightSummary["coordination"]): string {
-  return c.runs.delivery > 0 && c.tokenless.delivery === c.runs.delivery
-    ? "no delivery run reported a provider token total"
-    : "no operator or controller run reported a provider token total";
-}
-
 /**
- * Latest provider rate-limit reading per backend (pass 29): approaching quota
- * exhaustion is visible here BEFORE a run fails on it. A backend with no
- * reading renders neutral — this is an observation log, never a probe.
+ * The latest provider rate-limit reading for the chosen backend (pass 29):
+ * approaching quota exhaustion is visible here BEFORE a run fails on it. A
+ * backend with no reading renders neutral — this is an observation log, never
+ * a probe. Ruling 635: one row per window the reading lists (ruling 608), so
+ * Codex's five-hour window and its weekly one both show, each aged on its own
+ * reset (ruling 612).
  *
  * D5 (pass 31): the live reading channel was Claude-only, so a Codex account
  * that was ALREADY spent showed "no reading yet" while every run on it was
  * being refused. (Ruling 604 reads Codex's from its rollout, once a run makes a
- * model call.) A refused run is now its own row state, rendered as what it is
- * ("from a refused run"), never merged into the utilization number.
+ * model call.) A refused run is its own row state, rendered as what it is
+ * ("from a refused run"), never merged into a utilization number.
  */
-function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }) {
+function BackendQuotaPanel({ runs }: { runs: RunAnalytics }) {
   const hydrated = useHydrated();
-  const pctOf = (u: number | null) =>
-    u == null ? null : Math.max(0, Math.min(100, Math.round(u * 100)));
+  const { backend, reading, exhausted, credentialRefused } = runs.quota;
+  const name = BACKEND_LABEL[backend];
+  const pctOf = (u: number) => Math.max(0, Math.min(100, Math.round(u * 100)));
+  // D32-2 (ruling 4): the app's ONE date formatter, never the server locale's
+  // `toLocaleString`. Every localized instant here is hydration-gated: rendered
+  // during SSR it would be the SERVER's timezone, and React re-renders the page
+  // rather than patching a text mismatch.
+  const instant = (unixSeconds: number) =>
+    formatDayDotTime(new Date(unixSeconds * 1000).toISOString());
+  // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
+  // utilization reading this backend reported AFTER that moment is fresher
+  // evidence from the same provider, so it wins — the refusal is history by
+  // then, and showing it would pin the row at 100% while the backend is
+  // demonstrably answering runs again.
+  const refusal =
+    exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt) ? exhausted : null;
+
+  let rows: ReactNode;
+  if (credentialRefused) {
+    // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state — no
+    // run on this backend can start until someone fixes it, whatever the
+    // utilization window says. It is its own record (the failed run + the
+    // provider's sentence) and is cleared by a run that completes on the
+    // backend or by the named account being replaced or disconnected (ruling
+    // 165); the row says exactly that.
+    const refused = hydrated
+      ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(credentialRefused.observedAt)}: ${credentialRefused.providerText}`
+      : undefined;
+    rows = (
+      <li className="bar-row">
+        <span className="bar-label" title={name}>
+          {name}
+        </span>
+        <span className="bar-track">
+          <span className="bar-fill full" />
+        </span>
+        <span className="bar-val">
+          credential refused
+          {credentialRefused.credentialLabel ? ` · ${credentialRefused.credentialLabel}'s account` : ""}
+          <span className="bar-cost" title={refused}>
+            from a refused run · clears when a run on this backend completes or the account changes
+            {/* Interface review 2026-09-24 (acce-5): the title is the
+                pointer's extra; touch, keyboard and screen readers get the
+                same sentence from `.vh`. */}
+            {refused && <span className="vh">{" · " + refused}</span>}
+          </span>
+        </span>
+      </li>
+    );
+  } else if (refusal) {
+    const refused = hydrated
+      ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
+      : undefined;
+    rows = (
+      <li className="bar-row">
+        <span className="bar-label" title={name}>
+          {name}
+        </span>
+        <span className="bar-track">
+          {/* D5: a provider that REFUSED a run said the window is spent, so
+              the track is full. That is the provider's own words, not an
+              invented utilization number. */}
+          <span className="bar-fill full" />
+        </span>
+        <span className="bar-val">
+          usage limit reached
+          <span className="bar-cost" title={refused}>
+            {[
+              // Say where this came from. It is NOT a utilization reading the
+              // provider volunteered. Ruling 130(d): and WHOSE account it was.
+              refusal.credentialLabel
+                ? `from a refused run on ${refusal.credentialLabel}'s account`
+                : "from a refused run",
+              // V9: only an `exact` reset is a real instant (the provider
+              // emitted a unix epoch). A `prose` one was reconstructed from
+              // wall-clock words in the ACCOUNT's timezone, which this app does
+              // not know, so it renders as the calendar DATE it named and never
+              // as a to-the-minute local time we cannot stand behind. Pass 34
+              // review: `clock` is a to-the-minute UTC instant too (a
+              // provider's "resets 11:50am (UTC)"), so it keeps its hour.
+              refusal.resetsAt != null
+                ? `retry after ${
+                    hydrated &&
+                    (refusal.resetsAtPrecision === "exact" || refusal.resetsAtPrecision === "clock")
+                      ? instant(refusal.resetsAt)
+                      : // P07-I: a prose-derived date is a UTC calendar day,
+                        // and says so — it can be a day off locally.
+                        `${utcDayKey(new Date(refusal.resetsAt * 1000).toISOString())} (UTC)`
+                  }`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            {refused && <span className="vh">{" · " + refused}</span>}
+          </span>
+        </span>
+      </li>
+    );
+  } else if (reading == null) {
+    rows = (
+      <li className="bar-row">
+        <span className="bar-label" title={name}>
+          {name}
+        </span>
+        <span className="bar-track" />
+        <span className="bar-val na">no reading yet</span>
+      </li>
+    );
+  } else {
+    rows = runs.quotaWindows.map((w) => {
+      const window = w.rateLimitType.replaceAll("_", " ");
+      // Ruling 481(d): a window whose reset has passed keeps its row, in the
+      // past tense, with no percentage and no bar.
+      const pct = w.reset || w.utilization == null ? null : pctOf(w.utilization);
+      // The provider's status and overage belong to the binding window.
+      const binding = w.rateLimitType === reading.rateLimitType;
+      return (
+        <li key={w.rateLimitType} className="bar-row" data-quota-window={w.rateLimitType}>
+          <span className="bar-label" title={window}>
+            {window}
+          </span>
+          <span className="bar-track">
+            <span className="bar-fill" style={{ width: `${pct ?? 0}%` }} />
+          </span>
+          <span className={"bar-val" + (pct == null ? " na" : "")}>
+            {/* Three honest states: a percentage; a window that has reset since
+                (no reading on the new one yet); a reading whose envelope
+                carried no utilization (the provider's five_hour events often
+                omit it). Absent states render de-emphasized (.na), never at
+                value weight. */}
+            {w.reset
+              ? "window reset, no reading since"
+              : pct == null
+                ? "utilization not reported"
+                : `${pct}%`}
+            <span className="bar-cost">
+              {[
+                // A provider warning outranks the reset — the panel exists to
+                // warn BEFORE a run fails, so "warning" must never hide behind
+                // a date. Not once the window it warned about has reset.
+                binding && reading.status !== "allowed" && !w.reset
+                  ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ")
+                  : null,
+                binding && reading.isUsingOverage && !w.reset ? "overage" : null,
+                // Ruling 130(d): the HOUR when the provider sent one. Before
+                // hydration, the timezone-neutral UTC day and clock, marked as
+                // such (P07-I), so the first paint is honest either way.
+                w.resetsAt != null
+                  ? `${w.reset ? "reset" : "resets"} ${
+                      hydrated
+                        ? instant(w.resetsAt)
+                        : `${utcDayKey(new Date(w.resetsAt * 1000).toISOString())} ${formatClockUTC(new Date(w.resetsAt * 1000).toISOString())} (UTC)`
+                    }`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </span>
+        </li>
+      );
+    });
+  }
+
   return (
     <section className="panel breakdown">
       <div className="panel-head">
         <h2>Backend quota</h2>
       </div>
-      <ul className="bar-list">
-        {quota.map(({ backend, reading, exhausted, credentialRefused, readingWindowReset }) => {
-          // Ruling 481(d) (F40-50): a reading whose own window has reset
-          // describes a window that is over. It keeps its row, in the past
-          // tense, but no percentage and no bar: "92% of five hour · resets
-          // 03:30" at 09:00 read as a nearly spent window about to reopen.
-          const lapsed = reading != null && readingWindowReset === true;
-          const pct = reading && !lapsed ? pctOf(reading.utilization) : null;
-          // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
-          // utilization reading this backend reported AFTER that moment is
-          // fresher evidence from the same provider, so it wins — the refusal
-          // is history by then, and showing it would pin the row at 100% while
-          // the backend is demonstrably answering runs again.
-          const refusal =
-            exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt)
-              ? exhausted
-              : null;
-          // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state —
-          // no run on this backend can start until someone fixes it, whatever
-          // the utilization window says. It is its own record (the failed run
-          // + the provider's sentence) and is cleared by a run that completes
-          // on the backend or by the named account being replaced or
-          // disconnected (ruling 165); the row says exactly that.
-          if (credentialRefused) {
-            // D32-2 (ruling 4): the app's ONE date formatter, never the
-            // server locale's `toLocaleString`.
-            const refused = hydrated
-              ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(
-                  credentialRefused.observedAt,
-                )}: ${credentialRefused.providerText}`
-              : undefined;
-            return (
-              <li key={backend} className="bar-row">
-                <span className="bar-label" title={backend}>
-                  {backend}
-                </span>
-                <span className="bar-track">
-                  <span className="bar-fill full" />
-                </span>
-                <span className="bar-val">
-                  credential refused
-                  {credentialRefused.credentialLabel ? ` · ${credentialRefused.credentialLabel}'s account` : ""}
-                  <span className="bar-cost" title={refused}>
-                    from a refused run · clears when a run on this backend completes or the account changes
-                    {/* Interface review 2026-09-24 (acce-5): the title is the
-                        pointer's extra; touch, keyboard and screen readers get
-                        the same sentence from `.vh` (the rows below too). */}
-                    {refused && <span className="vh">{" · " + refused}</span>}
-                  </span>
-                </span>
-              </li>
-            );
-          }
-          // Hydration-gated: a localized instant rendered during SSR is the
-          // SERVER's timezone, and React re-renders rather than patching it.
-          const refused =
-            refusal && hydrated
-              ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
-              : undefined;
-          // The reading's own age — a weeks-old 91% must be visibly stale, not
-          // current (the server module's honesty rule). Same hydration gate.
-          const observed =
-            reading && hydrated ? `observed ${formatDayDotTime(reading.observedAt)}` : undefined;
-          return (
-            <li key={backend} className="bar-row">
-              <span className="bar-label" title={backend}>
-                {backend}
-              </span>
-              <span className="bar-track">
-                <span
-                  className="bar-fill"
-                  // D5: a provider that REFUSED a run said the window is spent,
-                  // so the track is full. That is the provider's own words, not
-                  // an invented utilization number: the refusal is a separate
-                  // record from `reading`, and the label below says which one
-                  // the row is showing.
-                  style={{ width: `${refusal ? 100 : (pct ?? 0)}%` }}
-                />
-              </span>
-              <span
-                className={
-                  "bar-val" +
-                  (refusal == null && (reading == null || pct == null) ? " na" : "")
-                }
-              >
-                {/* Four honest states: the provider refused a run for being over
-                    its limit (D5 — the strongest signal there is, and the only
-                    one a backend with no live rate-limit channel ever produces);
-                    no reading ever; a reading whose envelope carried no
-                    utilization number (the provider's five_hour events often
-                    omit it, so say so rather than "no reading yet" next to a
-                    reset date); a full percentage reading. Absent states render
-                    de-emphasized (.na), never at value weight. */}
-                {refusal
-                  ? "usage limit reached"
-                  : reading == null
-                    ? "no reading yet"
-                    : lapsed
-                      ? `${reading.rateLimitType.replaceAll("_", " ")} · window reset, no reading since`
-                      : pct == null
-                        ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
-                        : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
-                {refusal && (
-                  <span className="bar-cost" title={refused}>
-                    {[
-                      // Say where this came from. It is NOT a utilization
-                      // reading the provider volunteered, and a card that
-                      // blurred the two would be claiming a live measurement it
-                      // never took. Ruling 130(d): and WHOSE account it was.
-                      refusal.credentialLabel
-                        ? `from a refused run on ${refusal.credentialLabel}'s account`
-                        : "from a refused run",
-                      // V9: only an `exact` reset is a real instant (the
-                      // provider emitted a unix epoch). A `prose` one was
-                      // reconstructed from wall-clock words in the ACCOUNT's
-                      // timezone, which this app does not know, so it renders
-                      // as the calendar DATE it named and never as a
-                      // to-the-minute local time we cannot stand behind.
-                      refusal.resetsAt != null
-                        ? `retry after ${
-                            // Pass 34 review: `clock` is a to-the-minute UTC
-                            // instant too (a provider's "resets 11:50am (UTC)"),
-                            // so it keeps its hour like `exact` — it used to
-                            // fall into the prose branch and lose it.
-                            hydrated &&
-                            (refusal.resetsAtPrecision === "exact" ||
-                              refusal.resetsAtPrecision === "clock")
-                              ? formatDayDotTime(new Date(refusal.resetsAt * 1000).toISOString())
-                              : // P07-I: a prose-derived date is a UTC calendar
-                                // day, and says so — it can be a day off locally.
-                                `${utcDayKey(new Date(refusal.resetsAt * 1000).toISOString())} (UTC)`
-                          }`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    {refused && <span className="vh">{" · " + refused}</span>}
-                  </span>
-                )}
-                {!refusal && reading && (
-                  <span className="bar-cost" title={observed}>
-                    {[
-                      // A provider warning outranks the reset date — the panel
-                      // exists to warn BEFORE a run fails, so "allowed_warning"
-                      // must never hide behind "resets 9/18". Not once the
-                      // window it warned about has reset (ruling 481(d)).
-                      reading.status !== "allowed" && !lapsed
-                        ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ")
-                        : null,
-                      reading.isUsingOverage && !lapsed ? "overage" : null,
-                      // Hydration-gated for the same reason the `title` above
-                      // is: a local calendar date renders in the SERVER's
-                      // timezone during SSR and the viewer's on the client, and
-                      // React never patches a text mismatch — it re-renders the
-                      // whole page. The ungated form is the timezone-neutral
-                      // UTC day, marked as such (P07-I), so the first paint is
-                      // honest either way. D32-2: the shared formatter, not
-                      // `toLocaleDateString`.
-                      // Ruling 130(d): the reading names the HOUR when the
-                      // provider sent one, not a bare calendar date.
-                      reading.resetsAt != null
-                        ? // Ruling 481(d): past tense once it has passed.
-                          `${lapsed ? "reset" : "resets"} ${
-                            hydrated
-                              ? formatDayDotTime(new Date(reading.resetsAt * 1000).toISOString())
-                              : `${utcDayKey(new Date(reading.resetsAt * 1000).toISOString())} ${formatClockUTC(new Date(reading.resetsAt * 1000).toISOString())} (UTC)`
-                          }`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || reading.status}
-                    {observed && <span className="vh">{" · " + observed}</span>}
-                  </span>
-                )}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+      <ul className="bar-list">{rows}</ul>
       <p className="fine">
-        Latest reading each backend reported during a run. A high number here
-        means new runs may start failing when the window is exhausted. A row
-        reading &ldquo;usage limit reached&rdquo; is derived from a run the
-        provider refused, not from a reported utilization figure; it clears as
-        soon as a run on that backend completes, when the account it names is
-        disconnected or replaced, when the window it names has passed, or when
-        the backend reports a newer reading.
+        {/* The reading's own age, on the page: a weeks-old 91% must be visibly
+            stale, not current (the server module's honesty rule). */}
+        {reading
+          ? `The latest reading a ${name} run reported${hydrated ? `, observed ${formatDayDotTime(reading.observedAt)}` : ""}.`
+          : `No ${name} run has reported a reading yet.`}{" "}
+        A window near 100% means new runs may be refused until it resets.
+        {refusal && !credentialRefused
+          ? " “Usage limit reached” comes from a run the provider refused, not from a reported figure; it clears when a run on this backend completes, when the account it names changes, when the window it names has passed, or when the backend reports a newer reading."
+          : ""}
       </p>
     </section>
   );
@@ -591,6 +622,7 @@ function StatCard({
   value,
   icon,
   sub,
+  absent = value === "n/a",
   /** Ruling 290: the exceptions this number counts, BY NAME. A card that
    *  reports "41 of 42 delivered tasks carry branch + PR" and will not say
    *  which one cannot be traced has withheld the only fact a reader needs. */
@@ -603,12 +635,12 @@ function StatCard({
   value: string;
   icon: Parameters<typeof Icon>[0]["name"];
   sub?: string;
+  /** An absent reading must not be the loudest thing on the card: "n/a" or
+   *  "not reported" at full stat emphasis reads like a data point. */
+  absent?: boolean;
   names?: readonly string[];
   more?: number;
 }) {
-  // An absent reading must not be the loudest thing on the card: "n/a" at
-  // full stat emphasis reads like a data point.
-  const absent = value === "n/a";
   return (
     <div className="stat-card">
       <span className="stat-ico">
@@ -631,86 +663,138 @@ function StatCard({
   );
 }
 
+/** One column of the prompt-cache table: its head and its cell. `writes` marks
+ *  a column made of a figure only some backends report (ruling 395), which
+ *  ruling 635 leaves out whole on a backend that reports none. */
+interface CacheColumn {
+  head: ReactNode;
+  cell: (r: CacheRow) => ReactNode;
+  writes?: true;
+}
+
 /**
- * Ruling 369: the prompt-cache record, by run kind, by backend and run kind
- * (ruling 505) and by credential kind: the warm-start rate over the runs that
- * have a first call, the write/read ratio, the first calls that wrote more than
- * the large-write line, and how many runs' writes were billed under each cache
+ * Ruling 369: the prompt-cache record of the chosen backend's runs, by run kind
+ * and by credential kind: the warm-start rate over the runs that have a first
+ * call, the write/read ratio, the first calls that wrote more than the
+ * large-write line, and how many runs' writes were billed under each cache
  * lifetime. Ruling 505 adds PLAN.md's baseline columns (the mean first write,
  * reads per run, the peak prompt's median · p90 · max), and under the table the
  * resumes by idle time and the operator bursts. Every figure is on a `data-`
  * attribute so the DOM reads without the words; a rate with no first call
  * behind it prints "n/a", never 0%.
  */
-function CachePanel({ cache }: { cache: CacheSummary }) {
+function CachePanel({ cache, backend }: { cache: CacheSummary; backend: RunBackend }) {
   const warmWhy = (r: CacheRow) =>
     `${fmtCount(r.warmStarts)} of ${fmtCount(r.firstCalls)} first calls read more than they wrote`;
+  const columns: CacheColumn[] = [
+    { head: "group", cell: (r) => <td>{r.label}</td> },
+    { head: "runs", cell: (r) => <td data-runs={r.runs}>{fmtCount(r.runs)}</td> },
+    {
+      head: "warm starts",
+      cell: (r) => (
+        <td
+          data-warm-rate={r.warmRate === null ? "" : r.warmRate}
+          className={r.warmRate === null ? "na" : undefined}
+          title={warmWhy(r)}
+        >
+          {r.warmRate === null ? "n/a" : fmtPercent(r.warmRate)}
+          {/* Interface review 2026-09-24 (acce-5): the fraction behind the
+              rate was title-only. */}
+          <span className="vh">{", " + warmWhy(r)}</span>
+        </td>
+      ),
+    },
+    { head: "mean first write", writes: true, cell: (r) => <FirstWriteCell r={r} /> },
+    {
+      head: "read / run",
+      cell: (r) => (
+        <td
+          data-read-per-run={r.readPerRun === null ? "" : r.readPerRun}
+          className={r.readPerRun === null ? "na" : undefined}
+          title={
+            r.readPerRun === null
+              ? "No run in this group reached the provider."
+              : `Over the ${fmtCount(r.firstCalls)} runs that reached the provider`
+          }
+        >
+          {r.readPerRun === null ? "n/a" : fmtTokens(Math.round(r.readPerRun))}
+        </td>
+      ),
+    },
+    {
+      head: "peak prompt (median · p90 · max)",
+      cell: (r) => (
+        <td
+          data-peak-median={r.peakPrompt?.median ?? ""}
+          data-peak-p90={r.peakPrompt?.p90 ?? ""}
+          data-peak-max={r.peakPrompt?.max ?? ""}
+          className={r.peakPrompt === null ? "na" : undefined}
+        >
+          {r.peakPrompt === null
+            ? "n/a"
+            : [r.peakPrompt.median, r.peakPrompt.p90, r.peakPrompt.max].map(fmtTokens).join(" · ")}
+        </td>
+      ),
+    },
+    {
+      head: "written",
+      writes: true,
+      // Ruling 395: a group with no run on a backend that reports the figure
+      // has no figure, and the rest of this page already says "not reported"
+      // rather than printing a zero it cannot vouch for.
+      cell: (r) => (
+        <td
+          data-write={r.writeTokens === null ? "" : r.writeTokens}
+          className={r.writeTokens === null ? "na" : undefined}
+          title={
+            r.writeTokens === null
+              ? NO_WRITE_FIGURE
+              : `${fmtCount(r.writeReportingRuns)} of ${fmtCount(r.runs)} runs report one`
+          }
+        >
+          {r.writeTokens === null ? "not reported" : fmtTokens(r.writeTokens)}
+        </td>
+      ),
+    },
+    { head: "read", cell: (r) => <td data-read={r.readTokens}>{fmtTokens(r.readTokens)}</td> },
+    {
+      head: "write / read",
+      writes: true,
+      cell: (r) => (
+        <td
+          data-write-read={r.writeReadRatio === null ? "" : r.writeReadRatio}
+          className={r.writeReadRatio === null ? "na" : undefined}
+        >
+          {r.writeReadRatio === null ? "n/a" : r.writeReadRatio.toFixed(3)}
+        </td>
+      ),
+    },
+    {
+      head: <>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</>,
+      writes: true,
+      cell: (r) => <td data-large={r.largeFirstWrites}>{fmtCount(r.largeFirstWrites)}</td>,
+    },
+    {
+      head: "lifetime",
+      writes: true,
+      cell: (r) => (
+        <td data-ttl-5m={r.ttl.fiveMinute} data-ttl-1h={r.ttl.oneHour} data-ttl-mixed={r.ttl.mixed}>
+          {ttlLabel(r)}
+        </td>
+      ),
+    },
+  ];
+  const shown = columns.filter((c) => cache.reportsWrites || !c.writes);
   const rows = (group: string, list: CacheRow[]) => (
     <>
       <tr className="group">
-        <td colSpan={11}>{group}</td>
+        <td colSpan={shown.length}>{group}</td>
       </tr>
       {list.map((r) => (
         <tr key={`${group}:${r.label}`} data-cache-row={`${group}:${r.label}`}>
-          <td>{r.label}</td>
-          <td data-runs={r.runs}>{fmtCount(r.runs)}</td>
-          <td
-            data-warm-rate={r.warmRate === null ? "" : r.warmRate}
-            className={r.warmRate === null ? "na" : undefined}
-            title={warmWhy(r)}
-          >
-            {r.warmRate === null ? "n/a" : fmtPercent(r.warmRate)}
-            {/* Interface review 2026-09-24 (acce-5): the fraction behind the
-                rate was title-only. */}
-            <span className="vh">{", " + warmWhy(r)}</span>
-          </td>
-          <FirstWriteCell r={r} />
-          <td
-            data-read-per-run={r.readPerRun === null ? "" : r.readPerRun}
-            className={r.readPerRun === null ? "na" : undefined}
-            title={
-              r.readPerRun === null
-                ? "No run in this group reached the provider."
-                : `Over the ${fmtCount(r.firstCalls)} runs that reached the provider`
-            }
-          >
-            {r.readPerRun === null ? "n/a" : fmtTokens(Math.round(r.readPerRun))}
-          </td>
-          <td
-            data-peak-median={r.peakPrompt?.median ?? ""}
-            data-peak-p90={r.peakPrompt?.p90 ?? ""}
-            data-peak-max={r.peakPrompt?.max ?? ""}
-            className={r.peakPrompt === null ? "na" : undefined}
-          >
-            {r.peakPrompt === null
-              ? "n/a"
-              : [r.peakPrompt.median, r.peakPrompt.p90, r.peakPrompt.max].map(fmtTokens).join(" · ")}
-          </td>
-          {/* Ruling 395: a group with no run on a backend that reports the
-              figure has no figure, and the rest of this page already says
-              "not reported" rather than printing a zero it cannot vouch for. */}
-          <td
-            data-write={r.writeTokens === null ? "" : r.writeTokens}
-            className={r.writeTokens === null ? "na" : undefined}
-            title={
-              r.writeTokens === null
-                ? NO_WRITE_FIGURE
-                : `${fmtCount(r.writeReportingRuns)} of ${fmtCount(r.runs)} runs report one`
-            }
-          >
-            {r.writeTokens === null ? "not reported" : fmtTokens(r.writeTokens)}
-          </td>
-          <td data-read={r.readTokens}>{fmtTokens(r.readTokens)}</td>
-          <td
-            data-write-read={r.writeReadRatio === null ? "" : r.writeReadRatio}
-            className={r.writeReadRatio === null ? "na" : undefined}
-          >
-            {r.writeReadRatio === null ? "n/a" : r.writeReadRatio.toFixed(3)}
-          </td>
-          <td data-large={r.largeFirstWrites}>{fmtCount(r.largeFirstWrites)}</td>
-          <td data-ttl-5m={r.ttl.fiveMinute} data-ttl-1h={r.ttl.oneHour} data-ttl-mixed={r.ttl.mixed}>
-            {ttlLabel(r)}
-          </td>
+          {shown.map((c, i) => (
+            <Fragment key={i}>{c.cell(r)}</Fragment>
+          ))}
         </tr>
       ))}
     </>
@@ -721,14 +805,20 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
         <h2>Prompt cache</h2>
       </div>
       <p className="fine">
-        What the provider's prompt cache did for the runs on this instance: a warm start read more
-        than it wrote on its first model call; the mean first write and the reads per run are over
-        the runs that reached the provider; the peak prompt is each run's largest, as median · p90
-        · max; the ratio is tokens written over tokens read; a large first write is one above{" "}
-        {fmtTokens(cache.largeWriteTokens)}, the whole-history replay a stale resume causes. The
-        lifetime column is how many runs' writes were billed under each cache TTL. Claude reports
-        both the write figure and the lifetime; Codex reports neither, so a group of Codex runs
-        reads "not reported" rather than zero.
+        What the provider&rsquo;s prompt cache did for these runs: a warm start read more than it
+        wrote on its first model call; the reads per run are over the runs that reached the
+        provider; the peak prompt is each run&rsquo;s largest, as median · p90 · max.
+        {cache.reportsWrites ? (
+          <>
+            {" "}
+            The mean first write is over the same runs; the ratio is tokens written over tokens
+            read; a large first write is one above {fmtTokens(cache.largeWriteTokens)}, the
+            whole-history replay a stale resume causes. The lifetime column is how many
+            runs&rsquo; writes were billed under each cache TTL.
+          </>
+        ) : (
+          ` ${BACKEND_LABEL[backend]} reports no cache write and no cache lifetime, so those columns are left out.`
+        )}
       </p>
       {/* Interface review 2026-09-24 (layo-21): the nowrap columns are wider
           than a phone, so the table scrolls in its own box (the markdown
@@ -742,28 +832,19 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
         <table className="cache-table">
           <thead>
             <tr>
-              <th>group</th>
-              <th>runs</th>
-              <th>warm starts</th>
-              <th>mean first write</th>
-              <th>read / run</th>
-              <th>peak prompt (median · p90 · max)</th>
-              <th>written</th>
-              <th>read</th>
-              <th>write / read</th>
-              <th>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</th>
-              <th>lifetime</th>
+              {shown.map((c, i) => (
+                <th key={i}>{c.head}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows("by run kind", cache.byKind)}
-            {rows("by backend and run kind", cache.byBackendKind)}
             {rows("by credential kind", cache.byCredentialKind)}
           </tbody>
         </table>
       </div>
       <ResumeTable resumes={cache.resumes} />
-      <BurstNote bursts={cache.operatorBursts} />
+      {cache.operatorBursts && <BurstNote bursts={cache.operatorBursts} />}
     </section>
   );
 }
@@ -817,12 +898,13 @@ function fmtSpanRange(lower: number, upper: number): string {
 }
 
 /**
- * Ruling 505: resumes by how long their session sat idle, one row per backend
- * and the credential kind the earlier run billed (the pair the TTL table is
- * keyed on). A warm cell past the row's assumed TTL says the cache outlived it,
- * which is what PLAN.md's Codex retention probe asks; a cold one inside it says
- * the cache lapsed sooner. Each bucket lies wholly inside or wholly past every
- * TTL, because the edges are those TTLs.
+ * Ruling 505: resumes by how long their session sat idle, one row per
+ * credential kind the earlier run billed (the TTL table is keyed on that kind
+ * and the backend, which ruling 635's switch has chosen). A warm cell past the
+ * row's assumed TTL says the cache outlived it, which is what PLAN.md's Codex
+ * retention probe asks; a cold one inside it says the cache lapsed sooner. Each
+ * bucket lies wholly inside or wholly past every TTL, because the edges are
+ * those TTLs.
  */
 function ResumeTable({ resumes }: { resumes: ResumeSummary }) {
   const edges = resumes.edgesMs;
@@ -853,7 +935,7 @@ function ResumeTable({ resumes }: { resumes: ResumeSummary }) {
           <table className="cache-table">
             <thead>
               <tr>
-                <th>backend · credential</th>
+                <th>credential</th>
                 <th>assumed TTL</th>
                 {buckets.map((b) => (
                   <th key={b.label}>{b.label}</th>
@@ -954,14 +1036,32 @@ function taskHref(projectAndKey: string): string {
 }
 
 /** A labelled horizontal bar list, each bar sized to the row's share of the
- *  busiest row (by runs). Cost rides the value column. */
-function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
+ *  busiest row (by runs). The backend's measure rides the value column. */
+function BreakdownCard({
+  title,
+  data,
+  measure,
+  tasks,
+}: {
+  title: string;
+  data: Breakdown;
+  measure: RunMeasure;
+  /** Ruling 635: the rows are `project/KEY` tasks, each a link to its page,
+   *  named by its key alone when every row is one project's: the prefix
+   *  ruling 308 adds so two projects' A-1 stay apart wrapped every row onto
+   *  two lines on an instance with one project. */
+  tasks?: true;
+}) {
   const rows = data.rows;
   const max = rows.reduce((m, r) => Math.max(m, r.runs), 0) || 1;
+  const projects = new Set(rows.flatMap((r) => (r.label.includes("/") ? [r.label.split("/")[0]] : [])));
   return (
     <section className="panel breakdown">
       <div className="panel-head">
         <h2>{title}</h2>
+        {/* Ruling 635: what the two figures are. "1.2B" beside a run count
+            says nothing on its own, and the unit changes with the backend. */}
+        <span className="right fine">runs · {measure}</span>
       </div>
       {rows.length === 0 ? (
         <p className="fine">No runs.</p>
@@ -970,7 +1070,13 @@ function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
           {rows.map((r) => (
             <li key={r.label} className="bar-row">
               <span className="bar-label" title={r.label}>
-                {r.label}
+                {tasks && r.label.includes("/") ? (
+                  <Link to={taskHref(r.label)} className="linkish">
+                    {projects.size === 1 ? r.label.split("/")[1] : r.label}
+                  </Link>
+                ) : (
+                  r.label
+                )}
               </span>
               <span className="bar-track">
                 <span
@@ -979,18 +1085,14 @@ function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
                 />
               </span>
               <span className="bar-val">
-                {/* Fixed right-aligned slots: the counts and costs of a
+                {/* Fixed right-aligned slots: the counts and figures of a
                     breakdown must line up vertically to be comparable. */}
                 <span className="bar-num">{fmtCount(r.runs)}</span>
-                {/* The same honesty rule `BackendQuotaPanel` uses for an
-                    absent utilization: a group whose runs never reported a cost
-                    is UNKNOWN, not free. Only the Claude result envelope
-                    carries one, so "$0.00" on a Codex group was a claim the
-                    data cannot support. `.bar-cost` is already the
-                    de-emphasized column, so the absent state never reads at
-                    value weight. */}
+                {/* A group whose runs never reported the figure is UNKNOWN,
+                    not free. `.bar-cost` is the de-emphasized column, so the
+                    absent state never reads at value weight. */}
                 <span className="bar-cost">
-                  {r.cost == null ? "not reported" : fmtCost(r.cost)}
+                  {fmtMeasure(measure, measure === "cost" ? r.cost : r.tokens)}
                 </span>
               </span>
             </li>
@@ -999,39 +1101,48 @@ function BreakdownCard({ title, data }: { title: string; data: Breakdown }) {
       )}
       {/* Ruling 308: the window says what it left out. Eight of thirty groups
           with nothing said reads as the whole instance, on the surface a
-          person opens to decide where their money goes. The cost follows
-          `CountRow`'s own rule: absent is "not reported", never $0. */}
+          person opens to decide where their money goes. The figure follows
+          `CountRow`'s own rule: absent is "not reported", never 0. */}
       {data.hidden > 0 ? (
         <p className="fine dim">
           {fmtCount(data.hidden)} more {data.hidden === 1 ? "group" : "groups"} not
           shown, {fmtCount(data.hiddenRuns)}{" "}
-          {data.hiddenRuns === 1 ? "run" : "runs"} between them
-          {data.hiddenCost == null ? ", cost not reported" : `, ${fmtCost(data.hiddenCost)}`}.
+          {data.hiddenRuns === 1 ? "run" : "runs"} between them,{" "}
+          {spokenMeasure(measure, measure === "cost" ? data.hiddenCost : data.hiddenTokens)}.
         </p>
       ) : null}
     </section>
   );
 }
 
-/** A 30-day column chart of runs per day, its day's figures on hover. Each
- *  column's height is its share of the busiest day; empty days render a floor
- *  tick. */
-function DailyChart({ summary }: { summary: InsightsSummary }) {
-  const max = summary.daily.reduce((m, d) => Math.max(m, d.runs), 0) || 1;
+/** A figure in a sentence: "$0.40", "1.2B tokens", "cost not reported". */
+function spokenMeasure(measure: RunMeasure, value: number | null): string {
+  if (value === null) return measure === "cost" ? "cost not reported" : "tokens not reported";
+  return measure === "cost" ? fmtCost(value) : `${fmtTokens(value)} tokens`;
+}
+
+/** A 30-day column chart of the backend's runs per day, its day's figures on
+ *  hover. Each column's height is its share of the busiest day; empty days
+ *  render a floor tick. */
+function DailyChart({ runs }: { runs: RunAnalytics }) {
+  const max = runs.daily.reduce((m, d) => Math.max(m, d.runs), 0) || 1;
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>Runs · last {summary.windowDays} days</h2>
+        <h2>Runs · last {runs.windowDays} days</h2>
       </div>
       {/* Interface review 2026-09-24 (acce-5): a list, not role="img" — an
           image's children are presentational, so the per-day counts and costs
           reached nobody but a hovering mouse. Each column says its day in
           `.vh`. Ruling 634: the pointer's card (`.daily-tip`) shows the same
-          figures the moment a column is hovered; the native `title` it
-          replaces took a second to appear and was clipped at the window. */}
-      <div className="daily-chart" role="list" aria-label={`Agent runs per day over the last ${summary.windowDays} days`}>
-        {summary.daily.map((d) => {
-          const cost = d.cost == null ? "not reported" : fmtCost(d.cost);
+          figures the moment a column is hovered. */}
+      <div
+        className="daily-chart"
+        role="list"
+        aria-label={`${BACKEND_LABEL[runs.backend]} runs per day over the last ${runs.windowDays} days`}
+      >
+        {runs.daily.map((d) => {
+          const figure = runs.measure === "cost" ? d.cost : d.tokens;
           return (
             <span
               key={d.date}
@@ -1049,12 +1160,12 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
                     <span className="daily-tip-key" />
                     Runs <b>{fmtCount(d.runs)}</b>
                   </span>
-                  <span className="daily-tip-row cost">
-                    Cost <b>{cost}</b>
+                  <span className="daily-tip-row plain">
+                    {runs.measure === "cost" ? "Cost" : "Tokens"} <b>{fmtMeasure(runs.measure, figure)}</b>
                   </span>
                 </span>
               </span>
-              <span className="vh">{`${d.date}: ${countLabel(d.runs, "run")}, ${d.cost == null ? "cost not reported" : cost}`}</span>
+              <span className="vh">{`${d.date}: ${countLabel(d.runs, "run")}, ${spokenMeasure(runs.measure, figure)}`}</span>
             </span>
           );
         })}

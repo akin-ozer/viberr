@@ -6488,7 +6488,7 @@ a.card:active { transform: scale(.99); }
 .insights > .set-head { margin-bottom: .5rem; }
 .insights > section:has(> .sec-h) { margin-top: .5rem; }
 .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
-/* Seven oversight tiles: 4 + 3 rather than 3 + 3 + an orphan. */
+/* Seven run tiles (ruling 635): 4 + 3 rather than 3 + 3 + an orphan. */
 .stat-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 /* Ruling 625: the stat tile is `.ag-stat`'s well (the 2026-09-08 pass), not a
    raised card at another radius beside the page's panels. */
@@ -6554,8 +6554,9 @@ a.card:active { transform: scale(.99); }
 .daily-tip-date { font-weight: 500; color: var(--fg); }
 .daily-tip-row { display: flex; align-items: center; gap: .5rem; }
 .daily-tip-key { flex: none; width: .625rem; height: .625rem; border-radius: 2px; background: var(--blue); }
-/* Cost is not drawn, so it has no key; its label lines up with Runs'. */
-.daily-tip-row.cost { padding-left: 1.125rem; }
+/* The cost or tokens row is not drawn, so it has no key; its label lines up
+   with Runs'. */
+.daily-tip-row.plain { padding-left: 1.125rem; }
 .daily-tip-row b { margin-left: auto; padding-left: 1rem; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
 
 .deny-note.before { margin-bottom: .5rem; }

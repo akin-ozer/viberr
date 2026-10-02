@@ -5,7 +5,12 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { compactTimelineEvents } from "~/server/tasks/timeline-compaction.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { startTemperature } from "~/server/runtimes/context-policy.server";
-import { INSIGHTS_NAMED_EXCEPTIONS, getInsightsSummary } from "./insights-query.server";
+import {
+  INSIGHTS_NAMED_EXCEPTIONS,
+  getInsightsSummary,
+  runAnalytics,
+  type InsightsFilter,
+} from "./insights-query.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -90,6 +95,16 @@ function insertRun(
 
 const NOW = "2026-08-23T12:00:00.000Z";
 
+/** Ruling 635: one backend's runs, read alone — Claude's unless another is
+ *  asked for. */
+function runsOf(
+  db: DatabaseSync,
+  filter: InsightsFilter & { backend?: "claude" | "codex" } = {},
+  now = NOW,
+) {
+  return runAnalytics(db, now, { backend: "claude", ...filter });
+}
+
 describe("U39-22: the task breakdown", () => {
   it("counts controller turns as one row named for what they are, never as a task called /cnv_…", () => {
     // CANARY: group on `project_slug || '/' || task_key` alone again.
@@ -97,14 +112,95 @@ describe("U39-22: the task breakdown", () => {
     insertRun(db, { kind: "controller", project: "", taskKey: "cnv_a", cost: 1 });
     insertRun(db, { kind: "controller", project: "", taskKey: "cnv_b", cost: 2 });
     insertRun(db, { taskKey: "VIB-7", cost: 0.5 });
-    const labels = getInsightsSummary(db, NOW).byTask.rows.map((r) => [r.label, r.runs]);
+    const labels = runsOf(db).byTask.rows.map((r) => [r.label, r.runs]);
     expect(labels).toContainEqual(["controller conversations", 2]);
     expect(labels).toContainEqual(["viberr-core/VIB-7", 1]);
     expect(labels.some(([l]) => String(l).includes("cnv_"))).toBe(false);
   });
 });
 
-describe("getInsightsSummary", () => {
+/**
+ * Ruling 635 (owner, 2026-10-03: "since claude and codex parity on numbers
+ * can't be achieved, let's just have a selector on backends on the token data
+ * etc. viberr data itself is global"). Only Claude's result envelope carries a
+ * cost, a Codex token and a Claude token are different models' tokens, and
+ * Codex reports no cache write, so a sum across the two is a number about
+ * neither. Live: "estimate-judge 187 runs · $135.89" was 31 Claude runs' cost
+ * over 187 runs, and "5361.5M in" added Claude's tokens to Codex's.
+ */
+describe("ruling 635: run figures are one backend's", () => {
+  it("names every backend with its run count, one that never ran included, and reads each that ran", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { backend: "claude", project: "p1" });
+    insertRun(db, { backend: "codex", project: "p1" });
+    insertRun(db, { backend: "codex", project: "p2" });
+    const s = getInsightsSummary(db, NOW);
+    expect(s.backends).toEqual([
+      { backend: "claude", runs: 1 },
+      { backend: "codex", runs: 2 },
+    ]);
+    expect(s.runs.map((r) => [r.backend, r.totals.runs])).toEqual([
+      ["claude", 1],
+      ["codex", 2],
+    ]);
+    // Scoped to a project, the counts are that project's.
+    expect(getInsightsSummary(db, NOW, { projectSlug: "p2" }).backends).toEqual([
+      { backend: "claude", runs: 0 },
+      { backend: "codex", runs: 1 },
+    ]);
+    // CANARY: build `backends` from the GROUP BY rows alone and a backend that
+    // never ran drops out of the switch.
+    const one = ctx.makeDb();
+    insertRun(one, { backend: "claude" });
+    const only = getInsightsSummary(one, NOW);
+    expect(only.backends).toEqual([
+      { backend: "claude", runs: 1 },
+      { backend: "codex", runs: 0 },
+    ]);
+    // A backend with no run has nothing to read.
+    expect(only.runs.map((r) => r.backend)).toEqual(["claude"]);
+  });
+
+  it("reads one backend's runs alone: none of the other's enter its totals, days or breakdowns", () => {
+    const db = ctx.makeDb();
+    const day = "2026-08-22";
+    insertRun(db, { backend: "claude", kind: "operator", model: "opus", cost: 2, inTok: 100, outTok: 10, turns: 3, startedAt: `${day}T09:00:00.000Z` });
+    insertRun(db, { backend: "codex", kind: "primary", model: "gpt-6-luna", cost: null, inTok: 5_000, cachedTok: 4_000, outTok: 500, turns: 40, startedAt: `${day}T10:00:00.000Z` });
+    insertRun(db, { backend: "codex", kind: "reviewer", model: "gpt-6-luna", cost: null, inTok: 3_000, outTok: 300, turns: 20, startedAt: `${day}T11:00:00.000Z` });
+    // CANARY: drop the backend term from `scope` and Claude's view counts
+    // three runs, 60 turns of Codex's and a model it never ran.
+    const claude = runsOf(db);
+    expect(claude.totals).toMatchObject({ runs: 1, costedRuns: 1, cost: 2, inputTokens: 100, outputTokens: 10, turns: 3 });
+    expect(claude.byModel.rows.map((r) => r.label)).toEqual(["opus"]);
+    expect(claude.daily.find((d) => d.date === day)).toMatchObject({ runs: 1, cost: 2, tokens: 110 });
+    const codex = runsOf(db, { backend: "codex" });
+    expect(codex.totals).toMatchObject({ runs: 2, costedRuns: 0, inputTokens: 8_000, cachedInputTokens: 4_000, outputTokens: 800, turns: 60 });
+    expect(codex.byKind.rows.map((r) => r.label).sort()).toEqual(["primary", "reviewer"]);
+    // A Codex day has no cost to report and says so; its tokens are real.
+    expect(codex.daily.find((d) => d.date === day)).toMatchObject({ runs: 2, cost: null, tokens: 8_800 });
+  });
+
+  it("weighs a backend in cost when its runs report one, else in tokens, and leads its breakdowns with that", () => {
+    const db = ctx.makeDb();
+    // One rare Codex model that consumed the most, and eight busier ones.
+    insertRun(db, { backend: "codex", model: "heavy", inTok: 50_000_000, outTok: 1_000_000 });
+    for (let m = 0; m < 8; m++) {
+      for (let r = 0; r < 3; r++) {
+        insertRun(db, { backend: "codex", model: `light-${m}`, inTok: 1_000, outTok: 100 });
+      }
+    }
+    const codex = runsOf(db, { backend: "codex" });
+    expect(codex.measure).toBe("tokens");
+    // CANARY: order by cost alone, every Codex cost being null, and the
+    // heaviest model is the first one the cap drops.
+    expect(codex.byModel.rows[0]).toMatchObject({ label: "heavy", runs: 1, cost: null, tokens: 51_000_000 });
+    expect(codex.byModel).toMatchObject({ hidden: 1, hiddenRuns: 3, hiddenCost: null, hiddenTokens: 3_300 });
+    insertRun(db, { backend: "claude", cost: 0.4 });
+    expect(runsOf(db).measure).toBe("cost");
+  });
+});
+
+describe("run analytics", () => {
   it("sums totals and counts outcomes with a success rate", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "finished", cost: 0.1, outTok: 100, inTok: 50, turns: 2 });
@@ -114,7 +210,7 @@ describe("getInsightsSummary", () => {
     insertRun(db, { state: "interrupted", cost: null, outTok: 5, startedAt: "2026-08-22T09:00:00.000Z" });
     insertRun(db, { state: "running", cost: null });
 
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.totals.runs).toBe(5);
     expect(s.totals.cost).toBeCloseTo(0.35, 5);
     expect(s.totals.outputTokens).toBe(315);
@@ -139,7 +235,7 @@ describe("getInsightsSummary", () => {
     insertRun(db, { state: "finished", outTok: 100, inTok: 50, cachedTok: 20, turns: 2 });
     // Canary: restore the plain SUM and the totals read 5100 / 1050 / 420.
     insertRun(db, { state: "running", outTok: 5000, inTok: 1000, cachedTok: 400, turns: 3, usageFinal: 0 });
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.totals.runs).toBe(2);
     expect(s.totals.turns).toBe(5);
     expect(s.totals.outputTokens).toBe(100);
@@ -151,8 +247,8 @@ describe("getInsightsSummary", () => {
    * The rows the sums drop are not only the ones in flight: a run somebody
    * stopped, and one that errored before the provider answered, never get a
    * provider figure, so they are out of the token sums for good while they
-   * still count in Total runs and Turns. The totals therefore report HOW MANY
-   * runs they leave out, so the card can name them (the sums cannot be read
+   * still count in Runs and Turns. The totals therefore report HOW MANY runs
+   * they leave out, so the card can name them (the sums cannot be read
    * honestly without that number). Canary: drop `tokenless_runs` from the
    * SELECT and the count is 0.
    */
@@ -170,7 +266,7 @@ describe("getInsightsSummary", () => {
       finishedAt: "2026-08-22T09:12:00.000Z",
     });
     insertRun(db, { state: "running", outTok: 20, inTok: 10, usageFinal: 0 });
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.totals.runs).toBe(3);
     expect(s.totals.outputTokens).toBe(100);
     expect(s.totals.tokenlessRuns).toBe(2);
@@ -180,9 +276,9 @@ describe("getInsightsSummary", () => {
     const db = ctx.makeDb();
     const day = "2026-08-22";
     // Both runs on this day are Codex — no cost reported (total_cost_usd NULL).
-    insertRun(db, { state: "finished", cost: null, startedAt: `${day}T09:00:00.000Z` });
-    insertRun(db, { state: "finished", cost: null, startedAt: `${day}T10:00:00.000Z` });
-    const s = getInsightsSummary(db, NOW);
+    insertRun(db, { backend: "codex", state: "finished", cost: null, startedAt: `${day}T09:00:00.000Z` });
+    insertRun(db, { backend: "codex", state: "finished", cost: null, startedAt: `${day}T10:00:00.000Z` });
+    const s = runsOf(db, { backend: "codex" });
     const point = s.daily.find((d) => d.date === day)!;
     expect(point.runs).toBe(2);
     // Unknown, not a dishonest $0.00 — the same honesty the breakdown groups carry.
@@ -219,7 +315,7 @@ describe("getInsightsSummary", () => {
       startedAt: null,
       finishedAt: "2026-08-22T10:40:30.000Z",
     });
-    const s = getInsightsSummary(db, NOW).outcomes;
+    const s = runsOf(db).outcomes;
     expect(s.error).toBe(0);
     expect(s.interrupted).toBe(2);
     expect(s.interruptedByRestart).toBe(2);
@@ -235,7 +331,7 @@ describe("getInsightsSummary", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "finished", turns: 2, startedAt: "2026-08-22T09:00:00.000Z" });
     insertRun(db, { state: "interrupted", turns: 0, startedAt: null });
-    const s = getInsightsSummary(db, NOW).outcomes;
+    const s = runsOf(db).outcomes;
     expect(s.interruptedNeverStarted).toBe(1);
     expect(s.interruptedByRestart).toBe(0);
     expect(s.successRate).toBe(1);
@@ -244,34 +340,32 @@ describe("getInsightsSummary", () => {
   it("successRate is null when every terminal run never started", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "interrupted", interruptedReason: "restart", turns: 0, startedAt: null });
-    expect(getInsightsSummary(db, NOW).outcomes.successRate).toBeNull();
+    expect(runsOf(db).outcomes.successRate).toBeNull();
   });
 
   it("successRate is null with no terminal runs", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "running" });
     insertRun(db, { state: "queued" });
-    expect(getInsightsSummary(db, NOW).outcomes.successRate).toBeNull();
+    expect(runsOf(db).outcomes.successRate).toBeNull();
   });
 
-  it("groups by backend, kind, project and model", () => {
+  it("groups by kind, project and model", () => {
     const db = ctx.makeDb();
-    insertRun(db, { backend: "claude", kind: "primary", project: "p1", model: "sonnet", cost: 0.1 });
-    insertRun(db, { backend: "claude", kind: "reviewer", project: "p1", model: "sonnet", cost: 0.1 });
-    insertRun(db, { backend: "codex", kind: "operator", project: "p2", model: "gpt-5", cost: 0.3 });
+    insertRun(db, { kind: "primary", project: "p1", model: "sonnet", cost: 0.1 });
+    insertRun(db, { kind: "reviewer", project: "p1", model: "sonnet", cost: 0.1 });
+    insertRun(db, { kind: "operator", project: "p2", model: "opus", cost: 0.3 });
 
-    const s = getInsightsSummary(db, NOW);
-    const claude = s.byBackend.rows.find((r) => r.label === "claude")!;
-    expect(claude.runs).toBe(2);
-    expect(claude.cost).toBeCloseTo(0.2, 5);
-    expect(s.byBackend.rows.find((r) => r.label === "codex")?.runs).toBe(1);
+    const s = runsOf(db);
     expect(s.byKind.rows.map((r) => r.label).sort()).toEqual([
       "operator",
       "primary",
       "reviewer",
     ]);
     expect(s.byProject.rows.find((r) => r.label === "p2")?.cost).toBeCloseTo(0.3, 5);
-    expect(s.byModel.rows.find((r) => r.label === "gpt-5")?.runs).toBe(1);
+    const sonnet = s.byModel.rows.find((r) => r.label === "sonnet")!;
+    expect(sonnet.runs).toBe(2);
+    expect(sonnet.cost).toBeCloseTo(0.2, 5);
   });
 
   it("averages finished-run wall-clock duration in ms", () => {
@@ -289,7 +383,7 @@ describe("getInsightsSummary", () => {
     });
     // An unfinished run and one missing timestamps are excluded.
     insertRun(db, { state: "running", startedAt: "2026-08-20T10:00:00.000Z" });
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.avgDurationMs).toBeCloseTo(180000, -2);
   });
 
@@ -302,7 +396,7 @@ describe("getInsightsSummary", () => {
       startedAt: "2026-08-20T10:10:00.000Z",
       finishedAt: "2026-08-20T10:00:00.000Z", // 10 min BEFORE start
     });
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.avgDurationMs).toBe(0);
   });
 
@@ -319,11 +413,10 @@ describe("getInsightsSummary", () => {
         insertRun(db, { model: `cheap-${m}`, cost: 0.01, state: "finished" });
       }
     }
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.byModel.rows).toHaveLength(8);
     // The expensive outlier is present (a run-first order would have dropped it).
     expect(s.byModel.rows[0]?.label).toBe("pricey-xl");
-    expect(s.byModel.rows.some((r) => r.label === "pricey-xl")).toBe(true);
   });
 
   /**
@@ -338,18 +431,19 @@ describe("getInsightsSummary", () => {
     const db = ctx.makeDb();
     // 12 models — four more than the cap — so four are dropped.
     for (let m = 0; m < 12; m++) {
-      insertRun(db, { model: `m-${m}`, cost: 1, state: "finished" });
-      insertRun(db, { model: `m-${m}`, cost: 1, state: "finished" });
+      insertRun(db, { model: `m-${m}`, cost: 1, inTok: 10, state: "finished" });
+      insertRun(db, { model: `m-${m}`, cost: 1, inTok: 10, state: "finished" });
     }
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.byModel.rows).toHaveLength(8);
     // CANARY: return the rows alone and eight of twelve reads as all of them.
     expect(s.byModel.hidden).toBe(4);
     expect(s.byModel.hiddenRuns).toBe(8);
     expect(s.byModel.hiddenCost).toBe(8);
+    expect(s.byModel.hiddenTokens).toBe(80);
     // Nothing dropped says so as zero, never as a missing field.
-    expect(s.byBackend.hidden).toBe(0);
-    expect(s.byBackend.hiddenRuns).toBe(0);
+    expect(s.byKind.hidden).toBe(0);
+    expect(s.byKind.hiddenRuns).toBe(0);
   });
 
   /**
@@ -384,13 +478,13 @@ describe("getInsightsSummary", () => {
 
     // CANARY: group on `task_key` alone when unscoped and the two projects'
     // A-1 collapse into one row that belongs to neither.
-    const all = getInsightsSummary(db, NOW);
+    const all = runsOf(db);
     const labels = all.byTask.rows.map((r) => r.label).sort();
     expect(labels).toContain("alpha/A-1");
     expect(labels).toContain("beta/A-1");
 
     // Scoped to a project, the prefix is noise: the keys are already local.
-    const scoped = getInsightsSummary(db, NOW, { projectSlug: "alpha" });
+    const scoped = runsOf(db, { projectSlug: "alpha" });
     expect(scoped.byTask.rows.map((r) => r.label).sort()).toEqual(["A-1", "A-2"]);
 
     // The question byKind cannot answer: which PROFILE earns its runs.
@@ -401,29 +495,29 @@ describe("getInsightsSummary", () => {
   });
 
   /**
-   * Only the Claude result envelope reports a cost, so every Codex run row is
-   * NULL. Coalescing that to 0 turned "unobservable" into "free", and because
-   * the breakdown was ordered cost-first and capped, the busiest groups on the
-   * instance were the first thing the cap dropped.
+   * A run stopped before its result reports no cost, so its row is NULL.
+   * Coalescing that to 0 turned "unobservable" into "free", and because the
+   * breakdown is ordered by cost and capped, the busiest group was the first
+   * thing the cap dropped.
    */
   it("keeps an unpriced but busy group in the breakdown and reports its cost as absent, not $0", () => {
     const db = ctx.makeDb();
-    // Eight priced Claude models, one run each.
+    // Eight priced models, one run each.
     for (let m = 0; m < 8; m++) {
-      insertRun(db, { backend: "claude", model: `claude-${m}`, cost: 0.5 });
+      insertRun(db, { model: `claude-${m}`, cost: 0.5 });
     }
-    // The busiest model on the instance reports no cost at all.
+    // The busiest model's runs were all stopped before they reported a cost.
     for (let r = 0; r < 12; r++) {
-      insertRun(db, { backend: "codex", model: "gpt-5", cost: null });
+      insertRun(db, { model: "opus", state: "interrupted", cost: null });
     }
 
-    const s = getInsightsSummary(db, NOW);
-    const busiest = s.byModel.rows.find((r) => r.label === "gpt-5");
+    const s = runsOf(db);
+    const busiest = s.byModel.rows.find((r) => r.label === "opus");
     expect(busiest, "the busiest model must survive the cap").toBeTruthy();
     expect(busiest!.runs).toBe(12);
     // Unknown, never "$0.00".
     expect(busiest!.cost).toBeNull();
-    // And the headline says how much of the instance the cost covers.
+    // And the headline says how much of the backend the cost covers.
     expect(s.totals.runs).toBe(20);
     expect(s.totals.costedRuns).toBe(8);
   });
@@ -432,7 +526,7 @@ describe("getInsightsSummary", () => {
     const db = ctx.makeDb();
     insertRun(db, { state: "finished", startedAt: "2026-08-22T09:00:00.000Z", cost: 0.5 });
     insertRun(db, { state: "finished", startedAt: "2026-08-22T15:00:00.000Z", cost: 0.5 });
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     expect(s.daily).toHaveLength(s.windowDays);
     expect(s.daily[0]?.date < s.daily[s.daily.length - 1]!.date).toBe(true);
     const aug22 = s.daily.find((d) => d.date === "2026-08-22")!;
@@ -440,16 +534,111 @@ describe("getInsightsSummary", () => {
     expect(aug22.cost).toBeCloseTo(1.0, 5);
     // A day with no runs is a real zero, not absent.
     const aug21 = s.daily.find((d) => d.date === "2026-08-21")!;
-    expect(aug21.runs).toBe(0);
+    expect(aug21).toMatchObject({ runs: 0, cost: 0, tokens: 0 });
   });
 
   it("scopes to one project when asked", () => {
     const db = ctx.makeDb();
     insertRun(db, { project: "p1", cost: 0.1 });
     insertRun(db, { project: "p2", cost: 0.2 });
-    const s = getInsightsSummary(db, NOW, { projectSlug: "p1" });
+    const s = runsOf(db, { projectSlug: "p1" });
     expect(s.totals.runs).toBe(1);
     expect(s.totals.cost).toBeCloseTo(0.1, 5);
+  });
+});
+
+/**
+ * F31-D6 (pass 31): the coordination runs' share of spend, which live pass 31
+ * read at 63% before anyone had a number for it. Coordination is the operator
+ * AND the controller: both decide what the working agents do, both carry real
+ * cost, and the runtime treats them as one class.
+ *
+ * Ruling 635 takes the share one backend at a time, in the backend's measure.
+ * Rulings 190 and 201 guarded the cross-backend sum, where a whole side was
+ * silent by construction (every Codex run); ruling 190's test still decides
+ * when there is no share, and ruling 201's stricter one gives way to counting
+ * the incidental silence inside one backend.
+ */
+describe("coordination share (F31-D6, rulings 190 and 635)", () => {
+  it("F31-D6: is the operator AND controller share of the backend's cost", () => {
+    const db = ctx.makeDb();
+    // $0.50 operator + $0.10 controller = $0.60 coordination, over $1.00 → 60%.
+    insertRun(db, { kind: "operator", cost: 0.5 });
+    insertRun(db, { kind: "controller", cost: 0.1 });
+    insertRun(db, { kind: "primary", cost: 0.3 });
+    insertRun(db, { kind: "reviewer", cost: 0.1 });
+    const s = runsOf(db);
+    // CANARY: narrow the totals CASE back to `kind = 'operator'` and the share
+    // drops to 50%, hiding the controller's spend inside the denominator.
+    expect(s.coordination).toMatchObject({ measure: "cost", coordination: 0.6, share: 0.6 });
+    // The denominator is the SAME number the Cost card renders — both come off
+    // one aggregate, so they cannot disagree.
+    expect(s.coordination.total).toBeCloseTo(s.totals.cost, 5);
+  });
+
+  it("ruling 635: a run that reported no cost is counted inside one backend, not a reason to drop the share", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "operator", cost: 1.0, turns: 2 });
+    insertRun(db, { kind: "primary", cost: 3.0, turns: 9 });
+    // Stopped mid-run, before its result envelope: incidental, as F35-1's
+    // token gap is.
+    insertRun(db, { kind: "primary", state: "interrupted", cost: null, turns: 4 });
+    const s = runsOf(db);
+    // CANARY: restore ruling 201's test (null unless EVERY run reported) and
+    // one stopped run blanks the card for good on an ordinary instance.
+    expect(s.coordination.share).toBeCloseTo(0.25, 5);
+    expect(s.coordination.silent).toEqual({ delivery: 1, coordination: 0 });
+    expect(s.coordination.reached).toEqual({ delivery: 2, coordination: 1 });
+  });
+
+  /**
+   * Ruling 190 (F37-12, live): a delivery fleet that reported no cost left the
+   * controller's turns as the whole denominator, and the card read "100%" —
+   * arithmetic that cannot be wrong and an answer that cannot be right. The
+   * mirror reads "0%" and claims coordination is free. A side whose runs
+   * reached the provider and put no figure in was never observed; one with no
+   * such run is a real zero. Each row is [kind, cost, turns].
+   */
+  it.each([
+    { name: "delivery ran and reported nothing", runs: [["controller", 4.0, 3], ["primary", null, 5], ["reviewer", null, 2]], share: null },
+    { name: "coordination ran and reported nothing", runs: [["operator", null, 2], ["controller", null, 1], ["primary", 3.0, 6]], share: null },
+    { name: "a genuine $0.00 delivery run was observed, so 100% is earned", runs: [["controller", 2.0, 3], ["primary", 0, 1]], share: 1 },
+    { name: "no delivery run at all, so everything spent was coordination", runs: [["controller", 2.0, 3], ["operator", 1.0, 2]], share: 1 },
+    { name: "no coordination run at all, so 0% is earned", runs: [["primary", 2.0, 4]], share: 0 },
+    // Live: two Codex operator runs errored in their first twelve seconds on
+    // day one and held Codex's share at "n/a" for good. CANARY: test the
+    // side's runs instead of the ones that reached the provider.
+    { name: "an operator run that never reached the provider is no evidence, so 0% stands", runs: [["operator", null, 0], ["primary", 2.0, 4]], share: 0 },
+  ] as const)("ruling 190: $name", ({ runs, share }) => {
+    // CANARY: drop the `unobserved` test from the share and the first row
+    // reads 1, the second 0.
+    const db = ctx.makeDb();
+    for (const [kind, cost, turns] of runs) insertRun(db, { kind, cost, turns });
+    // Exact: `toBeCloseTo(0)` passes a null share, which is the defect.
+    expect(runsOf(db).coordination.share).toBe(share);
+  });
+
+  it("a backend that reports no cost is weighed in tokens, over final provider figures only", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { backend: "codex", kind: "operator", inTok: 1000, outTok: 200, turns: 1 });
+    insertRun(db, { backend: "codex", kind: "primary", inTok: 5000, outTok: 1000, turns: 3 });
+    insertRun(db, { backend: "codex", kind: "reviewer", inTok: 2000, outTok: 200, turns: 2 });
+    // F35-1: a live estimate is not a total. Counted as silent, not summed —
+    // on BOTH sides, because the numerator has its own guard and a fixture that
+    // only strands a delivery row would let that guard rot untested.
+    insertRun(db, { backend: "codex", kind: "primary", inTok: 900_000, outTok: 900_000, usageFinal: 0, turns: 7 });
+    insertRun(db, { backend: "codex", kind: "operator", inTok: 900_000, outTok: 900_000, usageFinal: 0, turns: 7 });
+    const c = runsOf(db, { backend: "codex" }).coordination;
+    // CANARY: drop the `usage_final = 1` guard from `coordination_tokens` and
+    // the numerator swallows 1.8M of estimate while the denominator stays 9.4K.
+    expect(c).toMatchObject({ measure: "tokens", coordination: 1200, total: 9400 });
+    expect(c.share).toBeCloseTo(1200 / 9400, 5);
+    expect(c.silent).toEqual({ delivery: 1, coordination: 1 });
+    // Ruling 190 at the token level: a side that landed NO provider figure.
+    const blind = ctx.makeDb();
+    insertRun(blind, { backend: "codex", kind: "operator", inTok: 1000, outTok: 200, turns: 1 });
+    insertRun(blind, { backend: "codex", kind: "primary", inTok: 5000, outTok: 1000, usageFinal: 0, turns: 2 });
+    expect(runsOf(blind, { backend: "codex" }).coordination.share).toBeNull();
   });
 });
 
@@ -571,235 +760,6 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.clarity.activeTasks).toBe(3);
     expect(g.clarity.clearTasks).toBe(2);
     expect(g.clarity.pct).toBeCloseTo(2 / 3, 5);
-  });
-
-  /**
-   * V3 (pass 31): the numerator is every COORDINATION run, and `RunKind` has
-   * two of them. A controller turn (ruling 99) decides what the working agents
-   * do exactly as the operator does, carries real cost, and the runtime treats
-   * the pair as one class — counting only `operator` understated the overhead
-   * by every controller turn on the instance. The kind list is pinned here.
-   */
-  it("F31-D6: coordination overhead is the operator AND controller share of REPORTED spend, null when nothing reported", () => {
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    // $0.50 operator + $0.10 controller = $0.60 coordination, over $1.00
-    // reported → 60%. Ruling 201: every run here reports, which is what makes
-    // the quotient a measurement — a single cost-less run and this share is
-    // suppressed instead (asserted in its own test below).
-    insertRun(db, { kind: "operator", cost: 0.5 });
-    insertRun(db, { kind: "controller", cost: 0.1 });
-    insertRun(db, { kind: "primary", cost: 0.3 });
-    insertRun(db, { kind: "reviewer", cost: 0.1 });
-    const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: narrow the totals CASE back to `kind = 'operator'` and the share
-    // drops to 50%, hiding the controller's spend inside the denominator.
-    expect(g.coordination.coordinationCostUsd).toBeCloseTo(0.6, 5);
-    expect(g.coordination.totalCostUsd).toBeCloseTo(1.0, 5);
-    expect(g.coordination.share).toBeCloseTo(0.6, 5);
-    // The denominator is the SAME number the totals card renders — both sides
-    // now come off one aggregate, so they cannot disagree.
-    expect(getInsightsSummary(db, NOW).totals.cost).toBeCloseTo(
-      g.coordination.totalCostUsd,
-      5,
-    );
-
-    // Canary: with ZERO reported spend the share is null — never a fake 0%.
-    const empty = ctx.makeDb();
-    insertProject(empty, "gp");
-    insertRun(empty, { kind: "operator", cost: null });
-    expect(getInsightsSummary(empty, NOW).oversight.coordination.share).toBeNull();
-  });
-
-  /**
-   * Ruling 190 (F37-12, live): a Codex-only delivery fleet reports no cost at
-   * all, so the instance's four Claude CONTROLLER runs were the entire
-   * denominator and the card read "Coordination overhead 100%" — arithmetic
-   * that cannot be wrong and an answer that cannot be right. The share is a
-   * measurement only when its complement could have been observed.
-   */
-  it("ruling 190: the share is null when a side RAN and reported nothing — no fake 100%, no fake 0%", () => {
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    // The live shape: Claude controller turns cost money, every Codex delivery
-    // run reports nothing.
-    insertRun(db, { kind: "controller", cost: 4.0 });
-    insertRun(db, { kind: "operator", cost: null });
-    insertRun(db, { kind: "primary", cost: null });
-    insertRun(db, { kind: "reviewer", cost: null });
-    const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: drop the `unobserved` guard from the share and this is 1 — the
-    // card prints "100%" off a denominator delivery never entered.
-    expect(g.coordination.share).toBeNull();
-    // Ruling 201 replaced the `unobserved` enum with the counts the card reads:
-    // a side whose every run is cost-silent is the ruling-190 case, and it is
-    // legible here as uncosted === runs.
-    expect(g.coordination.uncosted.delivery).toBe(g.coordination.runs.delivery);
-    expect(g.coordination.uncosted.coordination).toBe(1);
-    // The dollar figure that IS real survives: the card still reports it.
-    expect(g.coordination.coordinationCostUsd).toBeCloseTo(4.0, 5);
-    expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
-
-    // One delivery run reporting a cost makes the complement observable, and
-    // the share comes back — including a real, earned 100%-adjacent figure.
-    insertRun(db, { kind: "primary", cost: 1.0 });
-    const seen = getInsightsSummary(db, NOW).oversight;
-    // Ruling 201: one delivery run reporting is no longer enough — the
-    // operator run in this fixture still reports nothing, so there is still no
-    // share. Ruling 190 stopped here and printed 0.8.
-    expect(seen.coordination.share).toBeNull();
-    expect(seen.coordination.uncosted).toEqual({ delivery: 2, coordination: 1 });
-
-    // A delivery run reporting a genuine $0.00 is an observation, not a gap:
-    // the complement was seen, it was just free, so 100% is earned and shown.
-    const free = ctx.makeDb();
-    insertProject(free, "gp");
-    insertRun(free, { kind: "controller", cost: 2.0 });
-    insertRun(free, { kind: "primary", cost: 0 });
-    const g3 = getInsightsSummary(free, NOW).oversight;
-    expect(g3.coordination.uncosted).toEqual({ delivery: 0, coordination: 0 });
-    expect(g3.coordination.share).toBeCloseTo(1, 5);
-  });
-
-  /**
-   * Self-review of ruling 190's first draft, which guarded only the delivery
-   * side. The mirror is just as reachable — a Codex operator and controller
-   * under a Claude delivery fleet — and reads **0%**, which claims coordination
-   * is free when it merely never reported. Same defect, opposite sign.
-   */
-  it("ruling 190: coordination that ran and reported nothing is a gap too, not a free 0%", () => {
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    insertRun(db, { kind: "operator", cost: null });
-    insertRun(db, { kind: "controller", cost: null });
-    insertRun(db, { kind: "primary", cost: 3.0 });
-    insertRun(db, { kind: "reviewer", cost: 1.0 });
-    const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: guard only the delivery side and this reads 0 — "coordination
-    // costs you nothing", off runs that never reported a figure.
-    expect(g.coordination.share).toBeNull();
-    expect(g.coordination.uncosted.coordination).toBe(g.coordination.runs.coordination);
-    expect(g.coordination.totalCostUsd).toBeCloseTo(4.0, 5);
-  });
-
-  it("ruling 190: a side that never RAN contributes a real zero, not a gap", () => {
-    // No delivery runs at all is not an unobserved side — this instance really
-    // did spend everything it spent on coordination, and 100% is the answer.
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    insertRun(db, { kind: "controller", cost: 2.0 });
-    insertRun(db, { kind: "operator", cost: 1.0 });
-    const g = getInsightsSummary(db, NOW).oversight;
-    expect(g.coordination.runs.delivery).toBe(0);
-    expect(g.coordination.share).toBeCloseTo(1, 5);
-
-    // And the mirror: no coordination runs at all, so 0% is earned.
-    const none = ctx.makeDb();
-    insertProject(none, "gp");
-    insertRun(none, { kind: "primary", cost: 2.0 });
-    const g2 = getInsightsSummary(none, NOW).oversight;
-    expect(g2.coordination.runs.coordination).toBe(0);
-    expect(g2.coordination.share).toBeCloseTo(0, 5);
-  });
-
-  /**
-   * Ruling 201 (F37-21). Ruling 190 asked whether a side reported ANYTHING and
-   * printed a confident percentage the moment it did. Cost is a Claude-only
-   * observation — the Codex result envelope carries tokens and no price — so on
-   * the live instance 209 of 215 runs reported nothing, and the rule's test was
-   * satisfied by the 6 that did. The share is a measurement only when every run
-   * on both sides reported one.
-   */
-  it("ruling 201: a partly-costed instance has no share, and the silent runs are counted and attributed", () => {
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    // The live shape in miniature: a Codex fleet that never reports, one Claude
-    // controller that does, and one Claude deliverer — the single ordinary
-    // change that turned ruling 190's honest "n/a" into a confident lie.
-    insertRun(db, { kind: "operator", backend: "codex", cost: null });
-    insertRun(db, { kind: "operator", backend: "codex", cost: null });
-    insertRun(db, { kind: "operator", backend: "codex", cost: null });
-    insertRun(db, { kind: "controller", backend: "claude", cost: 12.0 });
-    insertRun(db, { kind: "primary", backend: "codex", cost: null });
-    insertRun(db, { kind: "reviewer", backend: "codex", cost: null });
-    insertRun(db, { kind: "primary", backend: "claude", cost: 36.0 });
-    const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: restore ruling 190's test (`costedDelivery === 0 || costedCoord
-    // === 0`) and this is 0.25 — "coordination is a quarter of the bill", off
-    // one of four coordination runs, with the other three unpriced.
-    expect(g.coordination.share).toBeNull();
-    expect(g.coordination.coordinationCostUsd).toBeCloseTo(12.0, 5);
-    expect(g.coordination.totalCostUsd).toBeCloseTo(48.0, 5);
-    expect(g.coordination.runs).toEqual({ delivery: 3, coordination: 4 });
-    expect(g.coordination.uncosted).toEqual({ delivery: 2, coordination: 3 });
-    // Named, not hedged: the card can say "5 on Codex" because the rows say so.
-    expect(g.coordination.uncostedByBackend).toEqual([{ backend: "codex", runs: 5 }]);
-
-    // And the complement: price every run and the share is a real measurement.
-    const all = ctx.makeDb();
-    insertProject(all, "gp");
-    insertRun(all, { kind: "operator", cost: 1.0 });
-    insertRun(all, { kind: "primary", cost: 3.0 });
-    const g2 = getInsightsSummary(all, NOW).oversight;
-    expect(g2.coordination.uncostedByBackend).toEqual([]);
-    expect(g2.coordination.share).toBeCloseTo(0.25, 5);
-  });
-
-  /**
-   * Ruling 201, the other half of the owner's call: suppressing the dollar
-   * share leaves the card with nothing to say on an ordinary instance, so it
-   * carries the share that CAN be measured. Tokens are the unit both backends
-   * report.
-   */
-  it("ruling 201: the token share is computed over final provider figures, and names the rows it leaves out", () => {
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    insertRun(db, { kind: "operator", backend: "codex", cost: null, inTok: 1000, outTok: 200 });
-    insertRun(db, { kind: "controller", backend: "claude", cost: 12.0, inTok: 500, outTok: 100 });
-    insertRun(db, { kind: "primary", backend: "codex", cost: null, inTok: 5000, outTok: 1000 });
-    insertRun(db, { kind: "reviewer", backend: "codex", cost: null, inTok: 2000, outTok: 200 });
-    // F35-1: a live estimate is not a total. Counted as excluded, not summed —
-    // on BOTH sides, because the numerator has its own guard and a fixture that
-    // only strands a delivery row would let that guard rot untested.
-    insertRun(db, {
-      kind: "primary",
-      backend: "codex",
-      cost: null,
-      inTok: 900_000,
-      outTok: 900_000,
-      usageFinal: 0,
-    });
-    insertRun(db, {
-      kind: "operator",
-      backend: "codex",
-      cost: null,
-      inTok: 900_000,
-      outTok: 900_000,
-      usageFinal: 0,
-    });
-    const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: drop the `usage_final = 1` guard from `coordination_tokens` and
-    // the numerator swallows 1.8M of estimate — a share of 181, printed as
-    // "18100%" — while the guarded denominator stays at 10k.
-    expect(g.coordination.tokenShare).toBeCloseTo(0.18, 5);
-    expect(g.coordination.coordinationTokens).toBe(1800);
-    expect(g.coordination.totalTokens).toBe(10_000);
-    expect(g.coordination.tokenless).toEqual({ delivery: 1, coordination: 1 });
-    // The dollar share is still suppressed on the same data: the two questions
-    // are independent, and only one of them has an answer here.
-    expect(g.coordination.share).toBeNull();
-  });
-
-  it("ruling 201: a side that landed NO provider figure has no token share either", () => {
-    const db = ctx.makeDb();
-    insertProject(db, "gp");
-    insertRun(db, { kind: "operator", inTok: 1000, outTok: 200 });
-    insertRun(db, { kind: "primary", inTok: 5000, outTok: 1000, usageFinal: 0 });
-    const g = getInsightsSummary(db, NOW).oversight;
-    // CANARY: drop the `tokenBlind` test and this reads 1 — "coordination is
-    // all of the tokens", which is ruling 190's fake 100% in the other unit.
-    expect(g.coordination.tokenShare).toBeNull();
-    expect(g.coordination.tokenless).toEqual({ delivery: 1, coordination: 0 });
   });
 
   it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {
@@ -989,6 +949,9 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
 
     const all = getInsightsSummary(db, NOW).oversight;
     expect(all.longTimelines).toBe(2);
+    // Ruling 635: named longest first. CANARY: drop the sort and the card
+    // names table order (here gp/VIB-2 first; live, AWSC-1 to AWSC-8 of 70).
+    expect(all.longTimelineKeys).toEqual(["other/OT-1", "gp/VIB-2"]);
     const scoped = getInsightsSummary(db, NOW, { projectSlug: "gp" }).oversight;
     expect(scoped.longTimelines).toBe(1);
     expect(scoped.clarity.activeTasks).toBe(2);
@@ -1031,11 +994,17 @@ describe("backend quota readings (pass 29)", () => {
     const { recordBackendRateLimit } = await import(
       "~/server/runtimes/backend-quota.server"
     );
-    const before = getInsightsSummary(db, NOW).backendQuota;
-    expect(before).toEqual([
-      { backend: "claude", reading: null, credentialRefused: null, exhausted: null, readingWindowReset: false },
-      { backend: "codex", reading: null, credentialRefused: null, exhausted: null, readingWindowReset: false },
-    ]);
+    for (const backend of ["claude", "codex"] as const) {
+      const before = runsOf(db, { backend });
+      expect(before.quota).toEqual({
+        backend,
+        reading: null,
+        credentialRefused: null,
+        exhausted: null,
+        readingWindowReset: false,
+      });
+      expect(before.quotaWindows).toEqual([]);
+    }
 
     recordBackendRateLimit(db, "claude", {
       credentialUserId: null,
@@ -1059,13 +1028,17 @@ describe("backend quota readings (pass 29)", () => {
       observedAt: "2026-08-23T11:30:00.000Z",
     });
 
-    const after = getInsightsSummary(db, NOW).backendQuota;
-    const claude = after.find((q) => q.backend === "claude")!;
+    const claude = runsOf(db).quota;
     expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
     expect(claude.reading?.observedAt).toBe("2026-08-23T11:30:00.000Z");
-    expect(after.find((q) => q.backend === "codex")!.reading).toBeNull();
+    // Ruling 635: each backend's view holds its own reading alone.
+    expect(runsOf(db, { backend: "codex" }).quota.reading).toBeNull();
     // The window resets 2026-08-27T12:00Z, after NOW: still current.
     expect(claude.readingWindowReset).toBe(false);
+    // A reading that lists no windows is its binding window alone.
+    expect(runsOf(db).quotaWindows).toEqual([
+      { rateLimitType: "seven_day", utilization: 0.92, resetsAt: 1_787_832_000, reset: false },
+    ]);
   });
 
   /**
@@ -1090,14 +1063,12 @@ describe("backend quota readings (pass 29)", () => {
       isUsingOverage: false,
       observedAt: "2026-08-23T03:01:00.000Z",
     });
-    const summary = getInsightsSummary(db, NOW);
-    const claude = summary.backendQuota.find((q) => q.backend === "claude")!;
+    const claude = runsOf(db).quota;
     expect(claude.readingWindowReset).toBe(true);
     // The reading itself is kept, as history.
     expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
     // One second before the reset it was still current.
-    const earlier = getInsightsSummary(db, "2026-08-23T03:29:59.000Z").backendQuota;
-    expect(earlier.find((q) => q.backend === "claude")!.readingWindowReset).toBe(false);
+    expect(runsOf(db, {}, "2026-08-23T03:29:59.000Z").quota.readingWindowReset).toBe(false);
   });
 
   /**
@@ -1115,8 +1086,7 @@ describe("backend quota readings (pass 29)", () => {
     const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
     const fiveHourReset = Date.parse("2026-08-23T03:30:00.000Z") / 1000; // before NOW
     const weekReset = Date.parse("2026-08-27T12:00:00.000Z") / 1000; // after NOW
-    const read = (at: string, backend: "claude" | "codex") =>
-      getInsightsSummary(db, at).backendQuota.find((q) => q.backend === backend)!;
+    const read = (at: string, backend: "claude" | "codex") => runsOf(db, { backend }, at).quota;
     // The five-hour window binds, then resets: the week binds in its place.
     recordBackendRateLimit(db, "codex", {
       credentialUserId: null,
@@ -1176,6 +1146,17 @@ describe("backend quota readings (pass 29)", () => {
     const later = read("2026-08-28T00:00:00.000Z", "claude");
     expect(later.readingWindowReset).toBe(true);
     expect(later.reading).toMatchObject({ rateLimitType: "seven_day", utilization: 0.71 });
+    // Ruling 635: the page draws every window, each marked once its own reset
+    // has passed. CANARY: draw the binding reading alone and the five-hour
+    // window drops off the card the moment the week binds.
+    expect(runsOf(db, { backend: "codex" }).quotaWindows).toEqual([
+      { rateLimitType: "five_hour", utilization: null, resetsAt: fiveHourReset, reset: true },
+      { rateLimitType: "seven_day", utilization: 0.47, resetsAt: weekReset, reset: false },
+    ]);
+    expect(runsOf(db, { backend: "codex" }, "2026-08-23T03:29:59.000Z").quotaWindows).toEqual([
+      { rateLimitType: "five_hour", utilization: 0.8, resetsAt: fiveHourReset, reset: false },
+      { rateLimitType: "seven_day", utilization: 0.47, resetsAt: weekReset, reset: false },
+    ]);
   });
 });
 
@@ -1197,9 +1178,9 @@ describe("backend quota readings (pass 29)", () => {
  * 0%".
  */
 describe("ruling 395: a backend that reports no cache write reports no cache write", () => {
-  it("prints nothing rather than zero for an all-Codex group, and keeps the ratio out", () => {
+  it("prints nothing rather than zero for Codex, and says the backend reports none", () => {
     const db = ctx.makeDb();
-    // 21 Codex runs, millions read, and the provider's flat zero written.
+    // Codex runs, millions read, and the provider's flat zero written.
     for (let i = 0; i < 3; i++) {
       insertRun(db, {
         kind: "primary",
@@ -1210,36 +1191,32 @@ describe("ruling 395: a backend that reports no cache write reports no cache wri
         cacheWrite: 0,
       });
     }
-    const s = getInsightsSummary(db, NOW);
-    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    const cache = runsOf(db, { backend: "codex" }).cache;
+    const primary = cache.byKind.find((r) => r.label === "primary")!;
     expect(primary.readTokens).toBe(5_400_000);
     // CANARY: fall back to `r.write_tokens ?? 0` and this is 0 with a 0.000
     // ratio beside 5.4M read, which is the live defect verbatim.
     expect(primary.writeTokens).toBeNull();
     expect(primary.writeReadRatio).toBeNull();
     expect(primary.writeReportingRuns).toBe(0);
+    // Ruling 635: so the page leaves the write columns out whole.
+    expect(cache.reportsWrites).toBe(false);
   });
 
-  it("reports the figure when a Claude run is in the group, and says how many report it", () => {
-    const db = ctx.makeDb();
-    insertRun(db, { kind: "primary", backend: "codex", cachedTok: 1_000_000, cacheWrite: 0 });
-    insertRun(db, { kind: "primary", backend: "claude", cachedTok: 1_000_000, cacheWrite: 400_000 });
-    const s = getInsightsSummary(db, NOW);
-    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
-    expect(primary.writeTokens).toBe(400_000);
-    expect(primary.writeReportingRuns).toBe(1);
-    expect(primary.writeReadRatio).toBeCloseTo(0.2, 5);
-  });
-
-  it("keeps a genuine zero from a reporting backend as a zero", () => {
+  it("keeps Claude's figure, a genuine zero included", () => {
     // Claude answers the question and the answer is none: that IS a
     // measurement, and this ruling must not swallow it.
     const db = ctx.makeDb();
     insertRun(db, { kind: "primary", backend: "claude", cachedTok: 1_000_000, cacheWrite: 0 });
-    const s = getInsightsSummary(db, NOW);
-    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
-    expect(primary.writeTokens).toBe(0);
-    expect(primary.writeReadRatio).toBe(0);
+    insertRun(db, { kind: "reviewer", backend: "claude", cachedTok: 1_000_000, cacheWrite: 400_000 });
+    const cache = runsOf(db).cache;
+    expect(cache.reportsWrites).toBe(true);
+    expect(cache.byKind.find((r) => r.label === "primary")).toMatchObject({ writeTokens: 0, writeReadRatio: 0 });
+    expect(cache.byKind.find((r) => r.label === "reviewer")).toMatchObject({
+      writeTokens: 400_000,
+      writeReportingRuns: 1,
+      writeReadRatio: 0.4,
+    });
   });
 });
 
@@ -1266,7 +1243,7 @@ describe("ruling 505: the prompt-cache table reproduces PLAN.md's baseline", () 
     for (const peak of [30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000]) {
       insertRun(db, { kind: "reviewer", peak });
     }
-    const s = getInsightsSummary(db, NOW);
+    const s = runsOf(db);
     const primary = s.cache.byKind.find((r) => r.label === "primary")!;
     expect(primary.avgFirstCallWrite).toBe(8_000);
     expect(primary.readPerRun).toBe(4_000_000);
@@ -1279,22 +1256,21 @@ describe("ruling 505: the prompt-cache table reproduces PLAN.md's baseline", () 
     expect(reviewer.readPerRun).toBeNull();
   });
 
-  it("splits the rows by backend as PLAN.md's table did; Codex's first write is not reported, not zero", () => {
+  it("gives each backend its own rows, as PLAN.md's table did; Codex's first write is not reported, not zero", () => {
     const db = ctx.makeDb();
     insertRun(db, { backend: "claude", kind: "primary", firstCall: { write: 14_000, read: 0 }, peak: 108_000 });
     insertRun(db, { backend: "codex", kind: "primary", model: "gpt-5.6-terra", firstCall: { write: 0, read: 0 }, cachedTok: 0, peak: 26_000 });
     insertRun(db, { backend: "codex", kind: "primary", model: "gpt-5.6-terra", firstCall: { write: 0, read: 30_000 }, cachedTok: 4_200_000, peak: 175_000 });
-    const cache = getInsightsSummary(db, NOW).cache;
-    // By run kind alone, a Claude specialist's cold start (its prefix is shared
-    // across tasks) and a Codex one (per thread) read as one rate.
-    expect(cache.byKind.find((r) => r.label === "primary")).toMatchObject({ firstCalls: 3, warmStarts: 1 });
-    expect(cache.byBackendKind.map((r) => r.label)).toEqual(["codex · primary", "claude · primary"]);
-    const [codex, claude] = cache.byBackendKind;
+    // A Claude specialist's cold start (its prefix is shared across tasks) and
+    // a Codex one (per thread) are not one rate. CANARY: drop the backend from
+    // the scope and "primary" reads 1 warm start of 3 on either backend.
+    const codex = runsOf(db, { backend: "codex" }).cache.byKind.find((r) => r.label === "primary")!;
     expect(codex).toMatchObject({ runs: 2, firstCalls: 2, warmStarts: 1, writeTokens: null, readPerRun: 2_100_000 });
-    // CANARY: average the first writes over every backend and Codex reads 0,
+    // Averaging the first writes over every backend would read Codex as 0,
     // the zero ruling 395 retired one column over.
-    expect(codex!.avgFirstCallWrite).toBeNull();
-    expect(codex!.peakPrompt).toEqual({ median: 26_000, p90: 175_000, max: 175_000 });
+    expect(codex.avgFirstCallWrite).toBeNull();
+    expect(codex.peakPrompt).toEqual({ median: 26_000, p90: 175_000, max: 175_000 });
+    const claude = runsOf(db).cache.byKind.find((r) => r.label === "primary")!;
     expect(claude).toMatchObject({ runs: 1, warmStarts: 0, avgFirstCallWrite: 14_000, readPerRun: 0 });
   });
 });
@@ -1356,12 +1332,15 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     // A fresh session per run, as every operator turn is: no resume at all.
     session(db, { backend: "claude", sessionId: "s-op-1", runs: [{ idle: 0, warm: false }] });
     session(db, { backend: "claude", sessionId: "s-op-2", runs: [{ idle: 1, warm: false }] });
-    const { resumes } = getInsightsSummary(db, NOW).cache;
+    const { resumes } = runsOf(db).cache;
     expect(resumes.edgesMs).toEqual([5 * 60_000, 10 * 60_000, 60 * 60_000, 24 * 60 * 60_000]);
     // The size past which a stale session is set aside, so the card can name it.
     expect(resumes.freshContextTokens).toBe(150_000);
-    expect(resumes.rows.map((r) => r.label)).toEqual(["claude · login", "codex · login"]);
-    const [claude, codex] = resumes.rows;
+    // Ruling 635: each backend's resumes are its own, a row per credential kind.
+    expect(resumes.rows.map((r) => r.label)).toEqual(["login"]);
+    const claude = resumes.rows[0];
+    const codex = runsOf(db, { backend: "codex" }).cache.resumes.rows[0];
+    expect(codex).toMatchObject({ label: "login", backend: "codex" });
     // The TTL each row's verdict assumes, from the one table.
     expect(claude!.assumedTtlMs).toBe(60 * 60_000);
     expect(codex!.assumedTtlMs).toBe(10 * 60_000);
@@ -1382,7 +1361,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
       runs: [
         // The earlier run billed an API key: the resume reads its writes, and
         // ruling 372 takes the TTL from it. CANARY: key by the resume's own
-        // kind and this lands on "claude · login".
+        // kind and this lands on "login".
         { idle: 0, warm: false, kind: "api_key" },
         { idle: 4, warm: true, kind: "login" },
         // A resume whose first call never landed says nothing about the cache.
@@ -1399,8 +1378,8 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
       firstCall: { write: 10, read: 50_000 },
       credentialKind: "login",
     });
-    const rows = getInsightsSummary(db, NOW).cache.resumes.rows;
-    expect(rows.map((r) => r.label)).toEqual(["claude · api_key"]);
+    const rows = runsOf(db).cache.resumes.rows;
+    expect(rows.map((r) => r.label)).toEqual(["api_key"]);
     expect(rows[0]!.assumedTtlMs).toBe(5 * 60_000);
     expect(rows[0]!.cells.map((c) => c.firstCalls)).toEqual([1, 0, 0, 0, 0]);
   });
@@ -1421,12 +1400,13 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     started(fresh, "stale_large_session");
     // A vanished transcript is a fault, not the policy's decision.
     started(lost, "transcript_gone");
-    const rows = getInsightsSummary(db, NOW).cache.resumes.rows;
+    const rows = runsOf(db, { backend: "codex" }).cache.resumes.rows;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ label: "codex · login", setAside: 1 });
+    expect(rows[0]).toMatchObject({ label: "login", setAside: 1 });
     expect(rows[0]!.cells.every((c) => c.firstCalls === 0)).toBe(true);
-    // Scoped to another project, the set-aside is not there.
-    expect(getInsightsSummary(db, NOW, { projectSlug: "elsewhere" }).cache.resumes.rows).toEqual([]);
+    // Scoped to another project, or to the other backend, it is not there.
+    expect(runsOf(db, { backend: "codex", projectSlug: "elsewhere" }).cache.resumes.rows).toEqual([]);
+    expect(runsOf(db).cache.resumes.rows).toEqual([]);
   });
 });
 
@@ -1459,7 +1439,7 @@ describe("ruling 505: operator bursts (PLAN.md's count before the gate)", () => 
     // (ten seconds) instead of with second 200 (a minute and forty).
     operator(db, { second: 290, warm: null });
     operator(db, { second: 300, warm: true });
-    const b = getInsightsSummary(db, NOW).cache.operatorBursts;
+    const b = runsOf(db).cache.operatorBursts;
     expect(b).toEqual({
       starts: 5,
       inBursts: 2,
@@ -1477,8 +1457,11 @@ describe("ruling 505: operator bursts (PLAN.md's count before the gate)", () => 
     operator(db, { second: 10, warm: false, seat: "usr_bea" });
     operator(db, { second: 15, warm: false, model: "claude-sonnet-5" });
     operator(db, { second: 20, warm: false, backend: "codex" });
-    const b = getInsightsSummary(db, NOW).cache.operatorBursts;
+    const b = runsOf(db).cache.operatorBursts;
     // CANARY: partition by project alone and three of these read as a burst.
     expect(b).toMatchObject({ starts: 4, inBursts: 0, coldInBursts: 0, coldStarts: 4 });
+    // Codex's cache does not cross threads (ruling 375(c)): no order of starts
+    // could make a second one warm, so its view has no burst count at all.
+    expect(runsOf(db, { backend: "codex" }).cache.operatorBursts).toBeNull();
   });
 });

@@ -39,10 +39,13 @@ async function loadInsights(userId: string) {
 describe("/insights loader", () => {
   it("returns an aggregate summary for an admin", async () => {
     const result = await loadInsights(ardaId);
-    expect(result.summary).toBeDefined();
-    expect(result.summary.totals.runs).toBeGreaterThanOrEqual(0);
-    expect(result.summary.windowDays).toBe(30);
-    expect(result.summary.daily).toHaveLength(30);
+    // The demo seed has no run history: every backend is named, none is read.
+    expect(result.summary.backends).toEqual([
+      { backend: "claude", runs: 0 },
+      { backend: "codex", runs: 0 },
+    ]);
+    expect(result.summary.runs).toEqual([]);
+    expect(result.summary.oversight.clarity.activeTasks).toBeGreaterThan(0);
   });
 
   it("refuses a non-admin", async () => {
