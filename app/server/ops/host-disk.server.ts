@@ -72,3 +72,16 @@ export function supersededImagesToRemove(images: readonly SupersededImage[]): st
     .slice(1)
     .map((image) => image.id);
 }
+
+/**
+ * Ruling 628: how much of BuildKit's build cache a deploy keeps.
+ *
+ * Every build adds the layers it made to the cache, and nothing trimmed it:
+ * after deploy 48 on 2026-10-01 it held 6.7 GB, 2.2 GB of it the layers that
+ * build used and about 4.5 GB left by builds a day and more old, on the host
+ * whose disk a cold build had filled (ruling 603). The deploy keeps the most
+ * recently used 3 GiB, a whole build's layers with room to spare, so the next
+ * build stays incremental, and Docker evicts the rest, least recently used
+ * first (`docker builder prune --max-used-space`).
+ */
+export const BUILD_CACHE_KEEP_BYTES = 3 * 1024 ** 3;
