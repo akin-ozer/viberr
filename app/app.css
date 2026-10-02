@@ -4173,8 +4173,11 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 
   --agent: #957fff;
   --agent-dark: #c6baff;
-  --agent-soft: #3a2649;
-  --codex-soft: #3a2649;
+  /* Ruling 630 (owner, 2026-10-02): the blue-violet from before ruling 625.
+     Its plum (#3a2649) turned the Live run card and every message to an agent
+     into pink-purple slabs that read as a highlight left on the page. */
+  --agent-soft: #2b2452;
+  --codex-soft: #2b2450;
   --claude-soft: #40261a;
   --claude-fg: #ffb98a;
   --claude-line: rgba(255, 185, 138, .35);
