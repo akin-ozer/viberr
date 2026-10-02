@@ -385,7 +385,6 @@ export interface InsightsSummary {
   /** Latest observed provider rate-limit reading per backend (null = none yet). */
   backendQuota: BackendQuotaRow[];
   windowDays: number;
-  generatedAt: string;
 }
 
 const totalsSchema = z.object({
@@ -1440,6 +1439,5 @@ export function getInsightsSummary(
     // instant has already passed — the window it described is over.
     backendQuota: latestBackendRateLimits(db, nowIso),
     windowDays: WINDOW_DAYS,
-    generatedAt: nowIso,
   };
 }

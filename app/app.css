@@ -6529,10 +6529,34 @@ a.card:active { transform: scale(.99); }
 .bar-val.na { color: var(--muted); font-weight: 500; }
 .daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 110px; margin-top: .5rem; }
 .daily-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
-.daily-bar { display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
+.daily-bar { position: relative; display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
 .daily-col:hover .daily-bar { background: var(--blue-pressed); }
 /* Ruling 625: an empty day is a neutral floor tick, not a brand-blue mark. */
 .daily-col[data-empty] .daily-bar { background: var(--border); }
+/* Ruling 634: the day's figures float above its bar the moment its column is
+   hovered, on the floating layer's card: the date, then each figure with its
+   key. The first and last columns hold the card to their outer edge, so it
+   stays over the chart. */
+.daily-tip {
+  position: absolute; bottom: calc(100% + .375rem); left: 50%; z-index: 2;
+  transform: translateX(-50%);
+  display: grid; gap: .25rem; min-width: 8.5rem; padding: .375rem .625rem;
+  border-radius: var(--radius-button);
+  background: var(--surface-float); box-shadow: var(--shadow-ring), var(--shadow-menu);
+  font-size: .75rem; line-height: 1.3; color: var(--muted); white-space: nowrap;
+  pointer-events: none; opacity: 0; visibility: hidden;
+}
+/* It fades in and leaves at once, so a pointer sweeping the bars shows one
+   card, never the last one fading out beside it. */
+.daily-col:hover .daily-tip { opacity: 1; visibility: visible; transition: opacity .1s var(--ease-out); }
+.daily-col:nth-child(-n+4) .daily-tip { left: 0; transform: none; }
+.daily-col:nth-last-child(-n+4) .daily-tip { left: auto; right: 0; transform: none; }
+.daily-tip-date { font-weight: 500; color: var(--fg); }
+.daily-tip-row { display: flex; align-items: center; gap: .5rem; }
+.daily-tip-key { flex: none; width: .625rem; height: .625rem; border-radius: 2px; background: var(--blue); }
+/* Cost is not drawn, so it has no key; its label lines up with Runs'. */
+.daily-tip-row.cost { padding-left: 1.125rem; }
+.daily-tip-row b { margin-left: auto; padding-left: 1rem; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
 
 .deny-note.before { margin-bottom: .5rem; }
 .probe-note {
