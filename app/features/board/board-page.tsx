@@ -1719,7 +1719,8 @@ function FilterBar({
             key={f.id}
             className={"fchip" + (filter === f.id ? " on" : "")}
             aria-pressed={filter === f.id}
-            onClick={() => setParam("filter", f.id === "all" ? null : f.id)}
+            // Ruling 632: clicking the active chip clears it, back to All tasks.
+            onClick={() => setParam("filter", f.id === "all" || filter === f.id ? null : f.id)}
           >
             <Icon name={f.icon} />
             {f.label}
