@@ -3555,10 +3555,19 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       // forbade "edit files / git commit" for EVERY supporting run — a prompt
       // stricter than the enforcement, the mirror image of XS-4 — so a granted
       // reviewer asked to try a fix refused work its tools allowed.
+      // Ruling 641: the prohibition is the CHECKOUT's. Live on AWSC-95 a
+      // supporting Cloud Solutions Architect read "do NOT ... edit files" over
+      // the attachments folder the contract above hands it, saved neither the
+      // mapping nor the ledger its directive asked for, and the operator spent
+      // a second run telling it the task's files are separate. A run that may
+      // post files is told so in the same line.
+      const taskFiles = input.attachmentsDropDir
+        ? ` Saving files on the task is not editing the checkout: a file a directive asks you to save (a report, a ledger) goes into the task's attachments folder above, as "Files on the task thread" says.`
+        : ``;
       prompt +=
         (input.delivery.canCommitPush
-          ? `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout; nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Your repo-write grant lets you edit files and commit LOCALLY here (to reproduce, prototype or verify a fix), but that work does not ship: do NOT \`git push\`, do NOT open a PR, and do not describe local edits as delivered. Put proposed changes in your reply for the delivering agent. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n`
-          : `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout; nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Do NOT create a branch, edit files, run \`git commit\`/\`git push\`, or open a PR, even if a directive says to; that is not a supporting agent's job and would not ship. Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n`) +
+          ? `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout; nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Your repo-write grant lets you edit files and commit LOCALLY here (to reproduce, prototype or verify a fix), but that work does not ship: do NOT \`git push\`, do NOT open a PR, and do not describe local edits as delivered. Put proposed changes in your reply for the delivering agent.${taskFiles} Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n`
+          : `- You are a SUPPORTING agent: this workspace is your OWN isolated checkout; nothing you write here reaches the delivered PR (the delivering agent's tree is separate). Do NOT create a branch, edit files in this checkout, run \`git commit\`/\`git push\`, or open a PR, even if a directive says to; that is not a supporting agent's job and would not ship.${taskFiles} Read the code and the change on the branch \`${input.branch}\` as needed, then reply.\n`) +
         (input.reviewSubject
           ? `- The review subject is PINNED to the delivered revision \`${input.reviewSubject.headSha}\`` +
             (input.reviewSubject.prNumber

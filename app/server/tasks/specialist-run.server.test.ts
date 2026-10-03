@@ -2758,6 +2758,38 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(withheld).toContain("isolated checkout");
   });
 
+  it("ruling 641: a supporting run that may post files is told saving them on the task is not editing the checkout", () => {
+    // Live on AWSC-95 a supporting Cloud Solutions Architect read "do NOT ...
+    // edit files" over the attachments folder the same contract hands it, and
+    // saved neither the mapping nor the ledger its directive asked for.
+    // CANARY: drop `taskFiles` from the supporting line and the prohibition
+    // reads as covering the task's files again.
+    const dropDir = "/data/projects/p/tasks/VIB-1/attachments";
+    for (const delivery of [
+      { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+      { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
+    ]) {
+      const prompt = buildAnalyzePrompt({ ...base, delivers: false, delivery, attachmentsDropDir: dropDir });
+      expect(prompt, JSON.stringify(delivery)).toContain(
+        "Saving files on the task is not editing the checkout",
+      );
+    }
+    const withheld = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+      attachmentsDropDir: dropDir,
+    });
+    expect(withheld).toContain("edit files in this checkout");
+    // A run that cannot post files is promised no folder to save into.
+    const readOnly = buildAnalyzePrompt({
+      ...base,
+      delivers: false,
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+    });
+    expect(readOnly).not.toContain("Saving files on the task");
+  });
+
   it("F10-31: frames the turn directive as untrusted guidance the contract outranks", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
