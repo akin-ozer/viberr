@@ -756,6 +756,36 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     expect(second.nextOffset).toBeNull();
   });
 
+  it("ruling 637: edit_knowledge_base_doc changes one passage of a long document in place", async () => {
+    // Live, three sentences into a 104 KB document cost a replace that cut it
+    // to 19,587 bytes and eight appends that typed the rest back in. The tool
+    // takes the KB's id, as every other KB tool does, and writes the document
+    // once with the passage swapped.
+    // CANARY: resolve the KB folder from the id's own text instead of its row
+    // and the edit finds no document.
+    const tail = "\n\n" + "- unrelated line\n".repeat(6_000);
+    const body = `# Mapping\n\n- RDS: OnDemand only.${tail}`;
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "edit-in-place",
+      doc: { path: "mapping.md", content: body },
+    });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    const dir = /grantKey ([\w-]+)/.exec(created)?.[1];
+    expect(kb && dir, created).toBeTruthy();
+
+    const edited = await call(ids.orgAdmin, "edit_knowledge_base_doc", {
+      id: kb!,
+      path: "mapping.md",
+      was: "- RDS: OnDemand only.",
+      now: "- RDS: OnDemand or Reserved, by instance class.",
+    });
+
+    expect(edited).toContain("[done] Edited mapping.md");
+    expect(readFileSync(path.join(app.dataRoot, "kb", dir!, "mapping.md"), "utf8")).toBe(
+      `# Mapping\n\n- RDS: OnDemand or Reserved, by instance class.${tail}`,
+    );
+  });
+
   it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
     const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
     const kb = /id (kb_[\w-]+)/.exec(created)?.[1];

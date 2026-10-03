@@ -611,6 +611,125 @@ export async function mergeKbCorrection(
   });
 }
 
+// ------------------------------------------------------------------ editing
+
+export interface EditKbPassageInput {
+  /** The knowledge base's store directory. */
+  kb: string;
+  /** The document's path inside it. */
+  doc: string;
+  /** The passage to replace, exactly as the document has it. */
+  was: string;
+  /** What takes its place; empty deletes the passage. */
+  now: string;
+  actor: AuditActor;
+}
+
+export type EditKbPassageResult =
+  | { ok: true; bytes: number; previousBytes: number }
+  | { ok: false; message: string };
+
+/**
+ * Ruling 637: a person's edit of one passage of a knowledge-base document,
+ * made through the controller.
+ *
+ * The controller could only replace a document whole or append to it. Live on
+ * 2026-10-03, to put three sentences into the 104 KB
+ * `aws-migration-mapping/mapping.md`, it read the document in four pages and
+ * typed it back in nine calls: a replace that cut it to 19,587 bytes, then
+ * eight appends. Between the first call and the last, every run that read the
+ * document read part of it, and every line in it was the model's copy of what
+ * it had read. This replaces one passage the way an agent's correction does:
+ * the passage must stand exactly once, and the document is written once, under
+ * the lock corrections take. It keeps no correction record, because the person
+ * who asked for the edit decided it and there is nothing left for a person to
+ * undo; the audit row of the write names the passage and what replaced it.
+ *
+ * Refuses, writing nothing: a document the knowledge base does not hold; an
+ * empty passage (adding at the end is an append); a passage that does not stand
+ * exactly once, handing back the document's closest lines; an edit that changes
+ * nothing; and a side over {@link KB_CORRECTION_MAX_BYTES}.
+ */
+export async function editKbPassage(
+  db: DatabaseSync,
+  input: EditKbPassageInput,
+  ctx: { dataRoot?: string } = {},
+): Promise<EditKbPassageResult> {
+  if (utf8Bytes(input.was) > KB_CORRECTION_MAX_BYTES || utf8Bytes(input.now) > KB_CORRECTION_MAX_BYTES) {
+    return {
+      ok: false,
+      message:
+        `An edit replaces a passage: \`was\` and \`now\` are each at most ${KB_CORRECTION_MAX_BYTES} bytes. ` +
+        "Nothing was written. Change a long section in more than one edit.",
+    };
+  }
+  const located = resolveKbDocPath(input.kb, input.doc, ctx.dataRoot);
+  if (!located) {
+    return {
+      ok: false,
+      message:
+        `"${input.doc}" is not a document in the knowledge base ${input.kb}. Nothing was written. ` +
+        heldDocsSentence(input.kb, ctx.dataRoot),
+    };
+  }
+  const target = kbStoreTargetForDir(db, input.kb, ctx);
+  if (!target) {
+    return {
+      ok: false,
+      message: `The knowledge base "${input.kb}" no longer resolves in the store. Nothing was written.`,
+    };
+  }
+  const where = `${input.kb}/${located.rel}`;
+  return withFileLock(`kb-doc:${located.abs}`, () => {
+    const raw = readFileSync(located.abs, "utf8");
+    const eol = eolOf(raw);
+    const was = asDocText(input.was, eol);
+    const now = asDocText(input.now, eol);
+    if (!was.trim()) {
+      return {
+        ok: false as const,
+        message:
+          "An edit names the passage it replaces in `was`. Nothing was written. To add text at the end of the document, append it.",
+      };
+    }
+    const count = occurrences(raw, was);
+    if (count === 0) {
+      const near = closestLines(raw, was);
+      return {
+        ok: false as const,
+        message:
+          `The passage you sent as \`was\` is not in ${where} exactly as you sent it. Nothing was written. ` +
+          "Copy it character for character from the document (read_knowledge_base_doc returns it), list marker and emphasis included" +
+          (near.length > 0
+            ? `; the lines closest to it read:\n${fenceFor(near.join("\n"))}\n${near.join("\n")}\n${fenceFor(near.join("\n"))}`
+            : ". No line of the document is close to it."),
+      };
+    }
+    if (count > 1) {
+      return {
+        ok: false as const,
+        message: `The passage you sent as \`was\` stands ${count} times in ${where}. Nothing was written. Send more of it, so it stands once.`,
+      };
+    }
+    if (was === now) {
+      return {
+        ok: false as const,
+        message: `${where} already says that: \`now\` is the passage it would replace. Nothing needed writing.`,
+      };
+    }
+    const at = raw.indexOf(was);
+    const next = raw.slice(0, at) + now + raw.slice(at + was.length);
+    const segments = located.rel.split("/");
+    const name = segments.pop()!;
+    const written = writeStoreDoc(db, target, segments, name, next, input.actor, {
+      overwrite: true,
+      edit: { replaced: was, text: now },
+    });
+    publishResourceUpdated("kb", target.id);
+    return { ok: true as const, bytes: written.bytes, previousBytes: written.previousBytes ?? 0 };
+  });
+}
+
 // ------------------------------------------------------------------ undoing
 
 export interface UndoKbCorrectionInput {

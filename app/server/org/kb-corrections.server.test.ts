@@ -12,6 +12,7 @@ import {
   KB_CORRECTION_MAX_BYTES,
   KB_CORRECTION_MERGED_ACTION,
   KB_CORRECTION_UNDONE_ACTION,
+  editKbPassage,
   listKbCorrections,
   mergeKbCorrection,
   undoKbCorrection,
@@ -351,3 +352,49 @@ describe("undoKbCorrection", () => {
     expect(read(kb)).toBe("# Facts\n\n- T-003: wrangler 4.138.0\n");
   });
 });
+
+describe("editKbPassage (ruling 637)", () => {
+  const edit = (kb: string, was: string, now: string) =>
+    editKbPassage(store.db, { kb, doc: "facts.md", was, now, actor: person() }, { dataRoot: store.dataRoot });
+
+  it("replaces the one passage, writes nothing else, and the write's audit row names the edit", async () => {
+    // Live, three sentences into a 104 KB document were a replace that cut it
+    // to 19,587 bytes and eight appends that typed the rest back in.
+    // CANARY: write `now` as the whole document and the lines around it are
+    // gone; drop `edit` from the write and the audit row says only "replaced".
+    const before = "# Facts\n\n- RDS: OnDemand only.\n- Aurora: OnDemand or Reserved.\n";
+    const kb = await seedKb("edit-facts", "facts.md", before);
+
+    const result = await edit(kb, "- RDS: OnDemand only.", "- RDS: OnDemand or Reserved, by instance class.");
+
+    expect(result).toEqual({ ok: true, bytes: expect.any(Number), previousBytes: Buffer.byteLength(before) });
+    expect(read(kb)).toBe("# Facts\n\n- RDS: OnDemand or Reserved, by instance class.\n- Aurora: OnDemand or Reserved.\n");
+    // Newest first: the edit's write, then the seed's.
+    const row = listAuditEvents(store.db, { action: "org.store.doc_written" })[0];
+    expect(row?.details).toMatchObject({
+      replaced: true,
+      edited: { replaced: "- RDS: OnDemand only.", text: "- RDS: OnDemand or Reserved, by instance class." },
+    });
+  });
+
+  it("refuses a passage that is not there or stands twice, writing nothing, and an empty `now` deletes", async () => {
+    // A passage one character off is not edited somewhere near it, and one
+    // that stands twice is not edited at its first.
+    // CANARY: drop the count of occurrences and the repeated note is edited at
+    // its first; take any match instead of exactly one and both refusals write.
+    const before = "# Facts\n\n- RDS: OnDemand only.\n- Note: as above.\n- Note: as above.\n";
+    const kb = await seedKb("edit-refusals", "facts.md", before);
+
+    const missing = await edit(kb, "- RDS: OnDemand only!", "- RDS: Reserved.");
+    expect(missing.ok).toBe(false);
+    expect(!missing.ok && missing.message).toContain("is not in edit-refusals/facts.md exactly as you sent it");
+    expect(!missing.ok && missing.message).toContain("- RDS: OnDemand only.");
+    const twice = await edit(kb, "- Note: as above.", "- Note: see above.");
+    expect(!twice.ok && twice.message).toContain("stands 2 times");
+    expect(read(kb)).toBe(before);
+
+    expect((await edit(kb, "- RDS: OnDemand only.\n", "")).ok).toBe(true);
+    expect(read(kb)).toBe("# Facts\n\n\n- Note: as above.\n- Note: as above.\n");
+  });
+});
+

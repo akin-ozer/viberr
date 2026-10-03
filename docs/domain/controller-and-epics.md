@@ -708,6 +708,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `set_user_org_role` | Admin or member; the last active admin cannot be demoted | org admin |
 | `request_resource_grant` | Records an ask for a skill, KB or MCP server on the controller's OWN profile in `agents/controller-requests.md`; idempotent per (kind, name) while open; a name no resource carries is refused (§6, ruling 390) | org admin |
 | `save_knowledge_base` | Create or update a KB (name, refresh mode) and optionally write one document (§4.1) | org admin |
+| `edit_knowledge_base_doc` | Replace one passage of a KB document in place (ruling 637): `was` must stand exactly once, `now` takes its place (empty deletes it); one write under the lock agent corrections take, each side at most 8 KB, and the `org.store.doc_written` row carries `edited` (the passage and what replaced it) | org admin |
 | `resolve_kb_proposal` | Close one open knowledge-base proposal by id (§4.3, ruling 483; filed before ruling 498): `promote` writes `text` into the document's settled text in place of `replaces` (which must stand there once, outside the proposals section) or appended to it, and removes the entry; `dismiss` removes the entry only; audited `org.kb.proposal_promoted` / `org.kb.proposal_dismissed` with the `reason` | org admin |
 | `undo_kb_correction` | Undo one knowledge-base correction an agent wrote, by its `kc-` id (§4.3, ruling 498): puts back the passage it replaced (or removes the text it added) when the written text still stands once, notes the undo on the task that made it, and records `task.kb_correction.undone` with the person's `reason`, which an agent that tries to write the same text again is shown; a document edited since is refused | org admin, when a person asks |
 | `save_skill` | Create or update a skill (name, summary, SKILL.md body) (§4.1) | org admin |
@@ -846,7 +847,10 @@ as intended).
   and needs no version, so a long document is built a section at a time; append and
   replace together are refused. An append concatenates EXACTLY the text sent, nothing
   trimmed and no separator inserted, so the caller owns the newlines and a part may end
-  mid-table or inside a fenced block (ruling 466, F40-13). Every size a store, KB or
+  mid-table or inside a fenced block (ruling 466, F40-13). To change PART of a document,
+  `edit_knowledge_base_doc` replaces one passage in place (ruling 637): live, three sentences
+  into a 104 KB document had cost a replace that cut it to 19,587 bytes and eight appends
+  that typed the rest back, so every run that read it in between read part of it. Every size a store, KB or
   skill write reports or audits (`org.store.doc_written`'s `bytes`, the reply's
   "Appended N bytes", "its previous N bytes are gone", `read_knowledge_base_doc`'s
   `bytes`) is a UTF-8 byte count (ruling 466).

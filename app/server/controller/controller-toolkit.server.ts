@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   STAGE_COLORS,
   STAGE_COLOR_LIST,
@@ -236,7 +237,7 @@ import {
   listProjectKbProposals,
   resolveKbProposal,
 } from "~/server/org/kb-proposals.server";
-import { listKbCorrections } from "~/server/org/kb-corrections.server";
+import { editKbPassage, listKbCorrections } from "~/server/org/kb-corrections.server";
 import { undoKbCorrectionOnTask } from "~/server/tasks/kb-correction-actions.server";
 import {
   describeDriftLists,
@@ -825,7 +826,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_knowledge_base_doc",
-      "Read one document out of a knowledge base, so a `save_knowledge_base` write can carry the text forward instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type). Ruling 580: a long document comes back in pages; `nextOffset` is where the next read starts, null at the end, and a whole-document replace needs every page.",
+      "Read one document out of a knowledge base: the passage an `edit_knowledge_base_doc` replaces is copied from here, and a whole-document `save_knowledge_base` write carries the text forward from here instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type). Ruling 580: a long document comes back in pages; `nextOffset` is where the next read starts, null at the end, and a whole-document replace needs every page.",
       {
         id: z.string().describe("KB id, from list_knowledge_bases."),
         path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
@@ -870,7 +871,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode, `private`), optionally writing one document into its folder. Org admins only. Ruling 578: every agent can read an open knowledge base from its shell, granted or not (a grant decides what a run is given, not what it can read), so anything the agents under test must not see, such as a benchmark's answer key, goes into a private one. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
+      "Create or update a knowledge base (name, refresh mode, `private`), optionally writing one document into its folder. Org admins only. Ruling 578: every agent can read an open knowledge base from its shell, granted or not (a grant decides what a run is given, not what it can read), so anything the agents under test must not see, such as a benchmark's answer key, goes into a private one. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). Ruling 637: to change part of a document that exists, use edit_knowledge_base_doc, which replaces one passage in place: a replace sends the whole document back, so every line becomes your copy of it, and a document rebuilt over several calls is partial to every reader in between. A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
       {
         id: z
           .string()
@@ -1056,6 +1057,39 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "save_knowledge_base",
   );
 
+  // Ruling 637: one passage, in place. A whole-document replace was the only
+  // way to change part of a document, and live it re-typed 104 KB in nine
+  // calls to add three sentences.
+  add(
+    tool(
+      "edit_knowledge_base_doc",
+      "Replace ONE passage of a knowledge-base document in place (ruling 637). Org admins only. `was` is the passage exactly as the document has it: copy it character for character from read_knowledge_base_doc, list markers and emphasis included, and send enough of it to stand exactly once. `now` is what takes its place; an empty `now` deletes the passage. The document is written once, under the lock agent corrections take, so no reader ever sees half of it and nothing you did not send changes. Refused, with nothing written, when the passage is not there (the reply shows the closest lines) or stands more than once, when `now` changes nothing, and when either side is over 8 KB: change a long section in several edits. To add text at the end of a document, use save_knowledge_base with `doc.append`. Every size the reply names is in UTF-8 bytes.",
+      {
+        id: z.string().describe("KB id, from list_knowledge_bases."),
+        path: z.string().describe("File name inside the KB folder, e.g. mapping.md."),
+        was: z.string().describe("The passage to replace, exactly as the document has it, standing once in it."),
+        now: z.string().describe("What takes its place. Empty deletes the passage."),
+      },
+      runWith(async (args: { id: string; path: string; was: string; now: string }) => {
+        requireOrgAdmin("edit the org knowledge bases");
+        const target = resolveStoreTarget(db, "kb", args.id, { dataRoot });
+        if (!target) return `[denied] No knowledge base with id ${args.id}.`;
+        const edited = await editKbPassage(
+          db,
+          { kb: path.basename(target.rootAbs), doc: args.path, was: args.was, now: args.now, actor: auditActor },
+          { dataRoot },
+        );
+        if (!edited.ok) return `[denied] ${edited.message}`;
+        return (
+          `[done] Edited ${args.path} in ${target.name}: one passage replaced; it went from ` +
+          `${edited.previousBytes} to ${edited.bytes} bytes (version ${storeDocVersion(target, [args.path])}). ` +
+          "Nothing else in it changed."
+        );
+      }),
+    ),
+    "edit_knowledge_base_doc",
+  );
+
   // Ruling 483 (F40-59): the door a person's Promote or Dismiss button asks
   // the controller to walk. Ruling 378 left promotion to "a human or the
   // controller" and gave neither a way to find or close a proposal; live on
@@ -1122,7 +1156,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "undo_kb_correction",
-      "Undo one knowledge-base correction an agent wrote (ruling 498), by its id (`kc-` and ten hex characters; get_project lists a project's in `kbCorrections`). Org admins only, and only when the person asked you to. It puts back the passage the correction replaced (or removes the text it added) and notes the undo on the task that made it; an agent that later tries to write the same text into that document is refused and told who undid it and why, so pass the person's `reason`. It refuses, writing nothing, when the document was edited since: then read it with read_knowledge_base_doc and change it with save_knowledge_base.",
+      "Undo one knowledge-base correction an agent wrote (ruling 498), by its id (`kc-` and ten hex characters; get_project lists a project's in `kbCorrections`). Org admins only, and only when the person asked you to. It puts back the passage the correction replaced (or removes the text it added) and notes the undo on the task that made it; an agent that later tries to write the same text into that document is refused and told who undid it and why, so pass the person's `reason`. It refuses, writing nothing, when the document was edited since: then read it with read_knowledge_base_doc and change the passage with edit_knowledge_base_doc.",
       {
         id: z.string().describe("The correction's id, e.g. 'kc-3f9a1c2b7d'."),
         projectSlug: z

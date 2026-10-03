@@ -150,8 +150,9 @@ injected into every run as truth, and every task inherits it.
 
 - When an agent reports evidence that contradicts the rulings (a gate that cannot run here, a
   convention the repository actually follows, an environment fact), that is not noise to relay.
-  Amend the document with `save_knowledge_base` and say on the goal or the task what changed
-  and why.
+  Amend the passage with `edit_knowledge_base_doc`, in place (a `save_knowledge_base` replace
+  sends the whole document back, and one rebuilt over several calls is partial to every run
+  that reads it in between), and say on the goal or the task what changed and why.
 - Any agent on a task corrects a knowledge-base document its run was given, the rulings or a
   dossier or runbook whose fact it measured, by writing the correction into it (ruling 498):
   the exact passage it replaced, the text that took its place, and its evidence. Nobody
@@ -159,8 +160,8 @@ injected into every run as truth, and every task inherits it.
   recent ones in `kbCorrections`, and the project's Controller page lists them with an Undo.
 - When a person disagrees with a correction, undo it with `undo_kb_correction` when they ask,
   passing their reason: an agent that tries to write it again is refused and shown it. If the
-  document was edited since, the undo refuses; read the document and change it by hand with
-  `save_knowledge_base`.
+  document was edited since, the undo refuses; read the document and change the passage with
+  `edit_knowledge_base_doc`.
 - Proposals agents filed before that, under "Proposed corrections (not binding)", still stand in
   their documents until someone closes them: your turn context lists a project's open ones and
   `get_project` carries them in `openProposals`. If the person has not heard about them in this
