@@ -4628,6 +4628,48 @@ describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
     // References alone are no checks to count.
     expect(card.querySelector(".vd-tally")).toBeNull();
   });
+
+  /**
+   * Ruling 639: a result the line cuts opens in place. The owner read "The
+   * proposed pay-as-you-go default list…" on AWSC-90's verdict with no way to
+   * read the rest. jsdom lays nothing out, so the long result reports a cut
+   * (its words 900px wide in a 300px box) and the short one fits.
+   * CANARY: render every result as plain text and the cut one has no control.
+   */
+  it("ruling 639: a cut result is the control that opens it, a result that fits stays text", () => {
+    const why =
+      "The proposed pay-as-you-go default lists the old tier price and leaves the flat-rate plan out of the totals.";
+    const cutText = (el: HTMLElement) => el.classList.contains("ev-result-text") && el.textContent === why;
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return cutText(this) ? 900 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return cutText(this) ? 300 : 0;
+    });
+    try {
+      const { container, getByRole } = render(
+        <TimelineItem
+          ev={verdictNote({
+            evidence: [
+              { label: "questions.md Q35", result: why, status: "fail" },
+              { label: "npm test (vitest)", result: "102 passed, 0 failed", status: "pass" },
+            ],
+            attachments: null,
+          })}
+        />,
+      );
+      const open = getByRole("button", { name: why });
+      expect(open.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(open);
+      expect(open.getAttribute("aria-expanded")).toBe("true");
+      // The whole sentence is the row's, open or not.
+      expect(open.textContent).toBe(why);
+      const fits = [...container.querySelectorAll(".ev-result")].find((el) => el.textContent === "102 passed, 0 failed")!;
+      expect(fits.tagName).toBe("SPAN");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 describe("ruling 478: the task page's timeline, packet and GitHub panel", () => {

@@ -774,8 +774,8 @@ Packet notes:
   itself hold ` · `: the result is the last segment, and a writer strips the separator from a
   result. A row written before ruling 526, `- <label> · <add> · <del>`, still reads, as an
   `info` row whose result is its two cells (signed counts spaced, words joined by a comma,
-  `—` dropped); the next write of the file puts it in the new form. At most 8 rows (label 200
-  characters, result 40). An optional `attachments:` block follows the same way, one `- <file name>`
+  `—` dropped); the next write of the file puts it in the new form. At most 8 rows (label and
+  result 200 characters each, ruling 639). An optional `attachments:` block follows the same way, one `- <file name>`
   per file the event's run saved under `tasks/<KEY>/attachments/` (ruling 96), or, on a
   person's note or comment, per file that person put there with it (rulings 533(b) and 573);
   the directory stays the truth.

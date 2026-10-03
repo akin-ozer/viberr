@@ -69,6 +69,7 @@ import { convertTemplateReviewEntry } from "./seed/review-entry-conversion.serve
 import { startScheduleRunner } from "./tasks/schedule.server";
 import { startDependencyRunner } from "./tasks/dependencies.server";
 import { convertGoalsToEpics } from "./tasks/goal-epic-conversion.server";
+import { restoreCutEvidenceResults } from "./tasks/evidence-result-restore.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
 import { purgeOrphanedConversationLogs } from "./controller/controller-purge.server";
 import { backfillMcpGrantScopes } from "./org/mcp-oauth.server";
@@ -914,6 +915,17 @@ export async function bootServer(): Promise<void> {
     await convertGoalsToEpics(db);
   } catch (error) {
     logger.error("goal-to-epic conversion failed", {
+      err: toError(error),
+    });
+  }
+
+  // Ruling 639: an evidence result the old 40-character cap cut gets back the
+  // words its run reported. After the rescan (the event rows exist) and before
+  // the watcher (no concurrent writer); a restored row is no longer cut.
+  try {
+    await restoreCutEvidenceResults(db);
+  } catch (error) {
+    logger.error("restoring cut evidence results failed", {
       err: toError(error),
     });
   }

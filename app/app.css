@@ -2370,6 +2370,20 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .ev-label { flex: 1 1 12rem; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .ev-result { color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* Ruling 639: a result rests on one line. Too long to sit beside its label, it
+   takes the line under it and is cut there (its max-content is wider than the
+   row, so the wrap puts it on a line of its own); one the line cuts is a
+   button whose chevron, the disclosures' own, says it opens, and open it
+   wraps whole. Its colour and weight stay the row's: the button reset sets
+   neither over `.ev-result`. */
+.ev-result { display: flex; align-items: baseline; gap: .25rem; min-width: 0; max-width: 100%; }
+.ev-result-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.ev-result { padding: 0; border: 0; text-align: left; }
+button.ev-result:hover .ev-result-text { text-decoration: underline; text-underline-offset: 2px; }
+.ev-result > .disc-chev { flex: none; align-self: center; }
+.ev-result[aria-expanded="true"] { flex-basis: 100%; }
+.ev-result[aria-expanded="true"] .ev-result-text { white-space: normal; }
+.ev-result[aria-expanded="true"] > .disc-chev { transform: rotate(-90deg); }
 .ev-add { color: var(--teal-dark); }
 .ev-del { color: var(--coral-dark); }
 /* A label token that names a real attachment. The text-link token (P13-D-18
