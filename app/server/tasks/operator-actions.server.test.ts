@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -87,6 +88,7 @@ import {
   RULINGS_CORRECTED_TITLE,
   undoKbCorrectionOnTask,
 } from "./kb-correction-actions.server";
+import { readTimelineEntry } from "./board-read.server";
 import { KB_CORRECTION_MERGED_ACTION } from "~/server/org/kb-corrections.server";
 
 /**
@@ -4535,6 +4537,9 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(top.text).toMatch(/^Corrected `ax-rulings\/environment-and-gates.md` as `kc-[0-9a-f]{10}`:/);
     expect(top.text).toContain("- **Was:** ~~- Every test must pass under `go test -race ./...`.~~");
     expect(top.text).toContain("- **Now:** - Every test must pass under `go test ./...`");
+    // Ruling 645. CANARY: leave the evidence off and the entry reads as a claim
+    // nobody proved.
+    expect(top.text).toContain("- **Evidence:** `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.");
     expect(top.text).not.toContain("binding");
 
     const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION });
@@ -4614,6 +4619,17 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
       `Corrected \`${keys}/sample-01.md\` as \`${id}\`. The passage is not quoted here: ` +
         `\`${keys}\` is not given to Rev, who read this task. The project's Controller page shows the correction whole.`,
     );
+    // Ruling 645: the whole reading quotes no more than the entry does, the
+    // evidence included. CANARY: return the record without the ruling 568
+    // check and the expected total reaches Rev.
+    const whole = await readTimelineEntry(
+      { db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug },
+      "VIB-1",
+      top.occurredAt,
+    );
+    expect(whole).toContain("is not given to Rev");
+    expect(whole).not.toContain("5,614.00");
+    expect(whole).not.toContain("384 MBps");
     const undone = await undoKbCorrectionOnTask(
       store.db,
       { dataRoot: store.dataRoot },
@@ -4657,6 +4673,57 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(r.outcome).toBe("done");
     expect(r.message).not.toContain("without quoting it");
     expect(task().timeline[0]!.text).toContain("- **Was:** ~~- SAN: FSx for ONTAP.~~");
+  });
+
+  it("ruling 645: read_timeline_entry reads a correction whole, its evidence and its undo included", async () => {
+    // Live on AWSC-97 the Estimate Judge, whose board requires a correction
+    // that narrows a VERIFIED entry to cite its re-test, read two corrections'
+    // entries (each side clipped to a line, no evidence, \`truncated: false\`)
+    // and asked a person to read them; their evidence was on the record.
+    // CANARIES: drop \`correction\` from the reading and the evidence is nowhere
+    // an agent reads; read the standing off the entry and the undo is missed.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const was = `- Every test must pass under \`go test -race ./...\`, ${"on every package of the module ".repeat(12)}before review.`;
+    await seedRulingsKb(`# Environment and gates\n\n${was}\n- Lint clean.\n`);
+    const now = "- Every test must pass under `go test ./...`: this host has no C compiler.";
+    const evidence = `\`CGO_ENABLED=1 go test -race ./...\` exited 127: ${"no cc, gcc or clang on PATH; ".repeat(15).trim()}`;
+    expect((await correct({ replaces: was, text: now, evidence })).outcome).toBe("done");
+    const entry = task().timeline[0]!;
+    expect(entry.text).not.toContain(evidence);
+    const id = /kc-[0-9a-f]{10}/.exec(entry.text)![0];
+    const read = async () =>
+      z
+        .object({ correction: z.record(z.string(), z.unknown()) })
+        .parse(
+          JSON.parse(
+            await readTimelineEntry(
+              { db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug },
+              "VIB-1",
+              entry.occurredAt,
+            ),
+          ),
+        ).correction;
+    expect(await read()).toEqual({
+      id,
+      where: "ax-rulings/environment-and-gates.md",
+      filedBy: "Operator",
+      standing: "stands",
+      was,
+      now,
+      evidence,
+    });
+    await undoKbCorrectionOnTask(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        id,
+        projectSlug: store.slug,
+        reason: "the host has cc now",
+        person: { userId: store.users.arda.id, label: "arda", name: "Arda" },
+      },
+    );
+    expect((await read()).standing).toMatch(/^undone by Arda at \S+: "the host has cc now"$/);
   });
 
   it("refuses a knowledge base no run on the task was given, and a passage the document does not hold exactly", async () => {

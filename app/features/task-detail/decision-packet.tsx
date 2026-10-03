@@ -1471,11 +1471,10 @@ export function DecisionPacket({
               onChange={(e) => setCustomText(e.target.value)}
               aria-invalid={customInvalid || undefined}
               aria-describedby={customInvalid ? CUSTOM_ERR_ID : undefined}
-              // Ruling 291: the placeholder is Viberr TEACHING what a good
-              // directive looks like, at the moment a person is writing one —
-              // so it must not model the operation the product forbids. It
-              // used to model the very operation the product forbids.
-              placeholder="e.g. Hold the merge, bring the branch up to date with main first, and re-run the reviewer on the new head."
+              // Ruling 646 (643's rule, on the box it missed): a required
+              // answer has no example. Ruling 291's merge-and-rebase directive
+              // sat under every agent's question on every board, a Free Tier
+              // stance on the AWS estimates board included.
               rows={2}
               data-autofocus=""
             />

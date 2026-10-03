@@ -758,8 +758,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * the first in the file: on AWSC-96 the Estimate Judge asked for its own
    * earlier verdict, got the marker, and rebuilt the score split from memory.
    * CANARY: `find` instead of `filter` and the report never comes back.
+   *
+   * Ruling 645: in the order they were written. The file holds them newest
+   * first; on AWSC-97 the Judge read the first listed as the first sent.
+   * CANARY: drop the `.reverse()` and the marker comes back before its report.
    */
-  it("ruling 644: read_timeline_entry returns every entry a stamp names", async () => {
+  it("ruling 644: read_timeline_entry returns every entry a stamp names, in the order they were written", async () => {
     const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_twins");
     const store = lastStore;
     const at = "2026-10-03T13:02:29.579Z";
@@ -785,11 +789,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       })
       .parse(JSON.parse(out.content[0]!.text));
     expect(read.occurredAt).toBe(at);
+    expect(read.shared).toContain("in the order they were written: the first was written first");
     expect(read.entries.map((e) => [e.type, e.title, e.truncated])).toEqual([
-      ["quality", "Changes requested", false],
       ["comment", "Review verdict", false],
+      ["quality", "Changes requested", false],
     ]);
-    expect(read.entries[1]!.text).toBe(report);
+    expect(read.entries[0]!.text).toBe(report);
   });
 
   it("ruling 594: read_task_attachment reads one file of this task or another, and read_board lists a task's files", async () => {

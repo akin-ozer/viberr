@@ -726,8 +726,9 @@ Packet notes:
   corrected" (or "Rulings corrected" in the project's rulings), or a person's undo of one,
   titled "Knowledge-base correction undone" (ruling 498, §8). Its text names the document and
   the correction's id, then lists the passage before and after as `- **Was:** ~~…~~` and
-  `- **Now:** …` (`- **Added:**` or `- **Removed:**` for text added at the end), each side
-  flattened to one line and clipped; an undo adds `**Why:**` with the person's reason.
+  `- **Now:** …` (`- **Added:**` or `- **Removed:**` for text added at the end), then, on a
+  correction, its `- **Evidence:** …` (ruling 645), each flattened to one line and clipped; an
+  undo adds `**Why:**` with the person's reason.
   `continuity` marks a runtime-continuity RESET — a resumed session whose provider
   transcript was gone, so the agent re-anchored on `task.md` in a fresh one. It is
   warning-toned on purpose: nothing was violated (not `policy`) and nothing is stuck (not
