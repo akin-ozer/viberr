@@ -107,6 +107,21 @@ describe("normalizeEvidenceRows", () => {
     expect(rows[0]!.result).not.toContain(" · ");
   });
 
+  /**
+   * Ruling 639: a failure's result says why in a sentence, and the file is the
+   * only copy. At 40 characters the row kept "The proposed pay-as-you-go
+   * default list…" and no surface could show the rest. CANARY: put the result
+   * cap back to 40 and the sentence is cut.
+   */
+  it("keeps a result's sentence whole, and cuts only past 200 characters", () => {
+    const why =
+      "The proposed pay-as-you-go default lists the old tier price and leaves the flat-rate plan out of the totals, so Q35 has no cost.";
+    const [row] = normalizeEvidenceRows([{ label: "questions.md Q35", result: why, status: "fail" }])!;
+    expect(row!.result).toBe(why);
+    const [long] = normalizeEvidenceRows([{ label: "a", result: "x".repeat(260), status: "info" }])!;
+    expect(long!.result).toBe(`${"x".repeat(199)}…`);
+  });
+
   it("caps the row count", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({
       label: `suite-${i}`,

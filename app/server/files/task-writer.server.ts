@@ -127,12 +127,15 @@ function assertTaskFileTrusted(
 
 /**
  * Locked read-modify-write cycle. `mutate` edits the parsed file in place
- * (or returns a replacement); `updatedAt` is bumped automatically.
+ * (or returns a replacement); `updatedAt` is bumped automatically, except for
+ * a write that changes no fact of the task (`stamp: false`, ruling 639: a
+ * restoration of words an earlier write cut).
  * Returns the parsed file as written.
  */
 export async function updateTaskFile(
   ref: TaskFileRef,
   mutate: (parsed: ParsedTaskFile) => ParsedTaskFile | void,
+  options: { stamp?: boolean } = {},
 ): Promise<ParsedTaskFile> {
   const absPath = resolveTaskFilePath(ref);
   return withFileLock(absPath, () => {
@@ -146,7 +149,7 @@ export async function updateTaskFile(
     assertTaskFileTrusted(ref, absPath, fresh.diagnostics);
     const base = fresh.parsed;
     const next = mutate(base) ?? base;
-    next.frontmatter.updatedAt = new Date().toISOString();
+    if (options.stamp !== false) next.frontmatter.updatedAt = new Date().toISOString();
     const serialized = serializeTaskFile(next);
     writeAndRemember(absPath, serialized);
     return next;

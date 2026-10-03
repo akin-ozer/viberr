@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { EvidenceStatus } from "~/schemas/task-file.schema";
 import type { EvidenceRowRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
@@ -133,6 +133,48 @@ function Result({ text }: { text: string }) {
   );
 }
 
+/**
+ * Ruling 639: a result rests on one line and opens in place.
+ *
+ * A result that fits beside its label keeps the row's end; a longer one drops
+ * under the label and is cut there with an ellipsis, so a verdict's rows stay
+ * one look each. A result the line actually cuts becomes the control that
+ * opens it (`aria-expanded`, a chevron after the cut), and opening wraps the
+ * whole sentence under the label. The text is always all in the DOM, so a
+ * screen reader hears it whole either way. Measured after layout, as
+ * `Collapsible` measures its height: a result that fits stays plain text.
+ */
+function EvidenceResult({ text }: { text: string }) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    // An open result wraps, so it measures whole; it stays the control.
+    if (!el || open) return;
+    const measure = () => setCut(el.scrollWidth > el.clientWidth);
+    measure();
+    // The first measure is the whole contract where there is no
+    // ResizeObserver (jsdom); only the re-measure on resize is lost.
+    if (!("ResizeObserver" in globalThis)) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, open, cut]);
+  const words = (
+    <span ref={textRef} className="ev-result-text">
+      <Result text={text} />
+    </span>
+  );
+  if (!cut) return <span className="ev-result">{words}</span>;
+  return (
+    <button type="button" className="ev-result" aria-expanded={open} onClick={() => setOpen(!open)}>
+      {words}
+      <Icon name="chevron" className="disc-chev" />
+    </button>
+  );
+}
+
 export function EvidenceList({
   rows,
   attachments,
@@ -162,11 +204,7 @@ export function EvidenceList({
               {MARK_WORD[row.status] ? <span className="vh">{MARK_WORD[row.status]}</span> : null}
               <EvidenceLabel label={row.label} attachments={attachments} base={base} openFile={openFile} />
             </span>
-            {row.result ? (
-              <span className="ev-result">
-                <Result text={row.result} />
-              </span>
-            ) : null}
+            {row.result ? <EvidenceResult text={row.result} /> : null}
           </span>
         </li>
       ))}

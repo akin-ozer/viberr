@@ -2556,11 +2556,16 @@ export const EVIDENCE_MAX_ROWS = 8;
  *  passed (vitest, node environment)") without becoming a dump: at 120 the
  *  cap chopped verdict rows mid-word and the tail was lost from the FILE, so
  *  no surface could recover it. Rows re-enter every agent prompt, so the
- *  ceiling stays bounded — 8 rows x 200 is the worst case. */
+ *  ceiling stays bounded — 8 rows of a 200-character label and a 200-character
+ *  result is the worst case. */
 const EVIDENCE_LABEL_MAX_CHARS = 200;
-/** A result is a few words ("75 of 77 right"); the two count cells it
- *  replaced held 16 characters each. */
-const EVIDENCE_RESULT_MAX_CHARS = 40;
+/** Ruling 639: a result is asked for in a few words ("75 of 77 right"), and a
+ *  failure's says why in a sentence. At 40 the file kept "The proposed
+ *  pay-as-you-go default list…" and no surface could show the rest, the
+ *  label's 120 again: on the AWS calculator board 1,940 of 2,071 results ran
+ *  past 40 (median 79, 95th percentile 138, longest 364). At the label's 200,
+ *  99.5% of them are whole. */
+const EVIDENCE_RESULT_MAX_CHARS = 200;
 
 /**
  * What a row's file line holds for an empty result. A row serializes as ONE

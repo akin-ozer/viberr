@@ -173,7 +173,10 @@ for governed state.
     503): every chained-goal file still in a project's `goals/` becomes the epic with its
     number, its tasks join it, its unstarted links become held tasks in it, and every
     goal-link wait is respelled by task key; the goal file is then filed under
-    `goals/converted/`, so this runs once.
+    `goals/converted/`, so this runs once. Then `restoreCutEvidenceResults` (ruling 639):
+    an evidence result the old 40-character cap cut gets back the words its run's report
+    holds, each task file written once and keeping its `updatedAt`; a restored row is no
+    longer cut, so a later boot reads only what it could not restore.
 12. Start the file watcher and the KB watcher.
 13. Store maintenance: clear MCP warm-ups a restart interrupted, one retention pass (no
     workspace reclaim), arm the maintenance scheduler.
