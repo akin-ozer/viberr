@@ -38,6 +38,9 @@ function insertRun(
     /** Ruling 308: the two columns the task and profile breakdowns group on. */
     taskKey?: string;
     agentProfileId?: string;
+    /** Ruling 642: the agent's name as its run was stamped, and when. */
+    agentName?: string | null;
+    createdAt?: string;
     /** Ruling 395: what the provider said it wrote into the cache. */
     cacheWrite?: number;
     /** Ruling 505: the provider session the run used (a resume reuses one). */
@@ -59,9 +62,9 @@ function insertRun(
         output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
         interrupted_reason, cache_write_tokens, session_id, first_call_cache_write,
         first_call_cache_read, first_call_warm, peak_prompt_tokens, credential_kind,
-        credential_user_id)
+        credential_user_id, agent_name)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ?, '2026-08-01T00:00:00.000Z', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     r.taskKey ?? `VIB-${seq}`,
@@ -79,6 +82,7 @@ function insertRun(
     r.outTok ?? 0,
     r.usageFinal ?? 1,
     r.cost ?? null,
+    r.createdAt ?? "2026-08-01T00:00:00.000Z",
     r.agentProfileId ?? "developer",
     r.interruptedReason ?? null,
     r.cacheWrite ?? 0,
@@ -89,6 +93,7 @@ function insertRun(
     r.peak ?? 0,
     r.credentialKind ?? null,
     r.credentialUserId ?? null,
+    r.agentName ?? null,
   );
   return id;
 }
@@ -366,6 +371,33 @@ describe("run analytics", () => {
     const sonnet = s.byModel.rows.find((r) => r.label === "sonnet")!;
     expect(sonnet.runs).toBe(2);
     expect(sonnet.cost).toBeCloseTo(0.2, 5);
+  });
+
+  /**
+   * Ruling 642: a group carries the name the page prints, and keeps its key.
+   * The page printed the keys: "primary" and "reviewer" (the rows' machinery,
+   * which UXV19-3 took off the run consoles), `estimate-judge`, `opus[1m]`,
+   * `aws-cost-calculator`.
+   */
+  it("ruling 642: names each group as the page prints it, keeping the key", () => {
+    const db = ctx.makeDb();
+    db.prepare(
+      `INSERT INTO projects (slug, name, task_prefix, source_path, content_hash, parsed_at)
+       VALUES ('p1', 'Payments Core', 'PAY', 'p1/project.md', 'h', '2026-08-01T00:00:00.000Z')`,
+    ).run();
+    insertRun(db, { kind: "primary", project: "p1", model: "sonnet", agentProfileId: "estimate-judge", agentName: "Judge", createdAt: "2026-08-01T00:00:00.000Z" });
+    // The newest run's stamp wins: the profile was renamed since.
+    insertRun(db, { kind: "reviewer", project: "p1", model: "sonnet", agentProfileId: "estimate-judge", agentName: "Estimate Judge", createdAt: "2026-08-02T00:00:00.000Z" });
+    insertRun(db, { kind: "operator", project: "gone", model: "opus", agentProfileId: "operator", agentName: null });
+    const s = runsOf(db);
+    const names = (rows: { label: string; name: string }[]) =>
+      Object.fromEntries(rows.map((r) => [r.label, r.name]));
+    // CANARY: map kinds through `label` again and "primary" reaches the page.
+    expect(names(s.byKind.rows)).toEqual({ primary: "Delivering", reviewer: "Supporting", operator: "Operator" });
+    expect(names(s.byProfile.rows)).toEqual({ "estimate-judge": "Estimate Judge", operator: "operator" });
+    // A project the projection no longer holds keeps its slug.
+    expect(names(s.byProject.rows)).toEqual({ p1: "Payments Core", gone: "gone" });
+    expect(names(s.byModel.rows)).toEqual({ sonnet: "Claude Sonnet", opus: "Claude Opus" });
   });
 
   it("averages finished-run wall-clock duration in ms", () => {

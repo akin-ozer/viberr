@@ -527,7 +527,8 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
     // Canary: delete the variant branch in modelDisplayName (the cold case
     // echoes the id) or the live lookup (the warm case does).
     resetModelCatalogCache();
-    expect(modelDisplayName("claude", "opus[1m]")).toBe("Claude Opus [1m]");
+    // Ruling 642: in the live row's words, never the bracketed id.
+    expect(modelDisplayName("claude", "opus[1m]")).toBe("Claude Opus (1M context)");
     expect(modelDisplayName("claude", "opus-next")).toBe("opus-next");
     await getModelCatalog("claude", {
       credential: VIEWER_CREDENTIAL,

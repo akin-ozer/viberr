@@ -20,12 +20,18 @@ function visibleText(el: Element | null): string {
   return copy.textContent ?? "";
 }
 
-/** The quota card's note, under its rows. */
+/** The usage-limits card's note, under its rows. */
 function quotaNote(container: Element): string {
-  const card = [...container.querySelectorAll(".panel")].find(
-    (p) => p.querySelector("h2")?.textContent === "Backend quota",
+  return container.querySelector(".usage-limits > p.fine")?.textContent ?? "";
+}
+
+/** One figure of a band, by its label (ruling 642). */
+function metric(container: Element, label: string): Element {
+  const found = [...container.querySelectorAll(".metric")].find(
+    (m) => m.querySelector(".metric-label")?.textContent === label,
   );
-  return card?.querySelector("p.fine")?.textContent ?? "";
+  if (!found) throw new Error(`no figure labelled ${label}`);
+  return found;
 }
 
 /** The URL's query, where the switch writes its choice. */
@@ -49,8 +55,12 @@ function renderPage(summary: InsightsSummary, search = "") {
   return render(<Stub initialEntries={[`/insights${search}`]} />);
 }
 
-const breakdown = (rows: RunAnalytics["byKind"]["rows"]): RunAnalytics["byKind"] => ({
-  rows,
+type Row = RunAnalytics["byKind"]["rows"][number];
+/** A breakdown row; its printed name is its key unless the row says. */
+const named = (row: Omit<Row, "name"> & { name?: string }): Row => ({ ...row, name: row.name ?? row.label });
+
+const breakdown = (rows: (Omit<Row, "name"> & { name?: string })[]): RunAnalytics["byKind"] => ({
+  rows: rows.map(named),
   hidden: 0,
   hiddenRuns: 0,
   hiddenCost: null,
@@ -179,15 +189,15 @@ const CLAUDE: RunAnalytics = {
   },
   // Ruling 308: a breakdown is its rows PLUS what the window left out.
   byKind: breakdown([
-    { label: "primary", runs: 20, cost: 2.0, tokens: 1_500_000 },
-    { label: "reviewer", runs: 15, cost: 1.0, tokens: 800_000 },
-    { label: "operator", runs: 7, cost: 0.5, tokens: 220_000 },
+    { label: "primary", name: "Delivering", runs: 20, cost: 2.0, tokens: 1_500_000 },
+    { label: "reviewer", name: "Supporting", runs: 15, cost: 1.0, tokens: 800_000 },
+    { label: "operator", name: "Operator", runs: 7, cost: 0.5, tokens: 220_000 },
   ]),
   byProject: breakdown([{ label: "viberr-core", runs: 42, cost: 3.5, tokens: 2_520_000 }]),
   byModel: breakdown([{ label: "claude-sonnet-4-5", runs: 42, cost: 3.5, tokens: 2_520_000 }]),
   byProfile: breakdown([{ label: "code-reviewer", runs: 15, cost: 1.0, tokens: 800_000 }]),
   byTask: {
-    rows: [{ label: "viberr-core/VIB-1", runs: 9, cost: 0.75, tokens: 400_000 }],
+    rows: [named({ label: "viberr-core/VIB-1", runs: 9, cost: 0.75, tokens: 400_000 })],
     hidden: 3,
     hiddenRuns: 11,
     hiddenCost: 0.4,
@@ -247,7 +257,7 @@ const CODEX: RunAnalytics = {
     { label: "primary", runs: 150, cost: null, tokens: 2_550_000_000 },
   ]),
   byTask: {
-    rows: [{ label: "aws-cost-calculator/AWSC-52", runs: 41, cost: null, tokens: 210_000_000 }],
+    rows: [named({ label: "aws-cost-calculator/AWSC-52", runs: 41, cost: null, tokens: 210_000_000 })],
     hidden: 3,
     hiddenRuns: 11,
     hiddenCost: null,
@@ -361,9 +371,9 @@ describe("InsightsPage", () => {
   it("renders the headline stats", () => {
     const { getByText, container } = renderPage(FULL);
     expect(getByText("Insights")).toBeTruthy();
-    // The stat cards carry the headline values (some also appear in a breakdown
-    // row, so read them from the `.stat-val` column specifically).
-    const statVals = [...container.querySelectorAll(".stat-val")].map(
+    // The figures carry the headline values (some also appear in a breakdown
+    // row, so read them from the `.metric-val` slot specifically).
+    const statVals = [...container.querySelectorAll(".metric-val")].map(
       (el) => el.textContent,
     );
     expect(statVals).toContain("42"); // runs
@@ -399,8 +409,22 @@ describe("InsightsPage", () => {
   });
 
   it("renders the breakdown bars and the daily chart", () => {
-    const { container, getByText } = renderPage(FULL);
-    expect(getByText("By run kind")).toBeTruthy();
+    const { container } = renderPage(FULL, "?by=kind");
+    // Ruling 642: one table under a switch, its columns named once.
+    const table = container.querySelector(".breakdown-table")!;
+    expect([...table.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual(["Kind", "Runs", "Cost"]);
+    // Each row prints its name and keeps its key in the title.
+    const names = [...table.querySelectorAll<HTMLElement>("tbody .bd-name")];
+    expect(names.map((n) => n.textContent)).toEqual(["Delivering", "Supporting", "Operator"]);
+    expect(names.map((n) => n.title)).toEqual(["primary", "reviewer", "operator"]);
+    // A row's bar measures what the rows are ordered by: cost here.
+    // CANARY: size the bars by runs again and the second reads 75%, a bar
+    // that answers a different question from the order beside it.
+    expect([...table.querySelectorAll<HTMLElement>(".bd-fill")].map((f) => f.style.width)).toEqual([
+      "100%",
+      "50%",
+      "25%",
+    ]);
     // One daily column per window day.
     expect(container.querySelectorAll(".daily-col")).toHaveLength(30);
     // Interface review 2026-09-24 (acce-5): the chart is a list whose items
@@ -412,9 +436,12 @@ describe("InsightsPage", () => {
     expect(chart.querySelectorAll('[role="listitem"]')).toHaveLength(30);
     const last = chart.querySelectorAll(".daily-col")[29]!;
     expect(last.querySelector(".vh")?.textContent).toBe("2026-07-30: 5 runs, $1.20");
-    // The busiest group's bar fills 100%, the others proportionally less.
-    const fills = container.querySelectorAll<HTMLElement>(".insights-cols .bar-fill");
-    expect(fills[0]?.style.width).toBe("100%"); // primary (20, the max)
+    // Ruling 642: the base names its first, middle and last days, and the head
+    // totals the window.
+    expect([...chart.querySelectorAll(".daily-tick")].map((t) => t.textContent)).toEqual(["Jul 1", "Jul 15", "Jul 30"]);
+    expect(container.querySelector(".daily-panel .panel-head .right")?.textContent).toBe(
+      "Last 30 days · 5 runs · $1.20",
+    );
   });
 
   it("renders the oversight outcomes (pass 29)", () => {
@@ -462,18 +489,21 @@ describe("InsightsPage", () => {
       oversight: { ...FULL.oversight, traceability: { deliveredTasks: 4, tracedTasks: 2, pct: 0.5, untraced: [] } },
     });
     // CANARY: hand `share: 1` back and "100%" appears on the card.
-    expect([...container.querySelectorAll(".stat-val")].map((v) => v.textContent)).not.toContain("100%");
+    expect([...container.querySelectorAll(".metric-val")].map((v) => v.textContent)).not.toContain("100%");
     expect(getByText("no delivery run reported a cost, so there is no share to take")).toBeTruthy();
   });
 
   it("names whose quota it reads, and a neutral 'no reading yet' for a backend that never reported", () => {
-    const { getByText } = renderPage(FULL);
-    expect(getByText("Backend quota")).toBeTruthy();
-    // Claude's 91% seven-day window, and the provider's own warning beside it.
-    const row = getByText("seven day").closest(".bar-row")!;
-    expect(visibleText(row.querySelector(".bar-val"))).toMatch(/^91%warning · resets /);
+    const { getByText, container } = renderPage(FULL);
+    expect(getByText("Usage limits")).toBeTruthy();
+    // Claude's 91% weekly window, and the provider's own warning under it.
+    const row = container.querySelector('[data-quota-window="seven_day"]')!;
+    expect(row.querySelector(".quota-name")?.textContent).toBe("Weekly");
+    expect(row.querySelector(".quota-val")?.textContent).toBe("91%");
+    expect(row.querySelector(".quota-meta")?.textContent).toMatch(/^warning · resets /);
+    expect(row.classList.contains("warn")).toBe(true);
     cleanup();
-    expect(renderPage(FULL, "?backend=codex").getByText("no reading yet")).toBeTruthy();
+    expect(renderPage(FULL, "?backend=codex").getByText("No reading yet")).toBeTruthy();
   });
 
   /**
@@ -506,21 +536,27 @@ describe("InsightsPage", () => {
     );
     // CANARY: draw the binding reading alone and the five-hour row is gone.
     const rows = [...container.querySelectorAll("[data-quota-window]")];
-    expect(rows.map((r) => r.querySelector(".bar-label")?.textContent)).toEqual([
-      "five hour",
-      "seven day",
-      "seven day fable",
+    // Ruling 642: a window by the name a person reads, its id in the title.
+    expect(rows.map((r) => r.querySelector(".quota-name")?.textContent)).toEqual([
+      "5-hour",
+      "Weekly",
+      "Weekly · Fable",
     ]);
-    expect(rows.map((r) => r.querySelector<HTMLElement>(".bar-fill")!.style.width)).toEqual(["68%", "42%", "0%"]);
-    expect(visibleText(rows[2]!.querySelector(".bar-val"))).toMatch(/^window reset, no reading since/);
-    await waitFor(() => expect(rows[2]!.querySelector(".bar-cost")!.textContent).toMatch(/^reset /));
+    expect(rows.map((r) => r.querySelector(".quota-name")?.getAttribute("title"))).toEqual([
+      "five_hour",
+      "seven_day",
+      "seven_day_fable",
+    ]);
+    expect(rows.map((r) => r.querySelector<HTMLElement>(".quota-fill")!.style.width)).toEqual(["68%", "42%", "0%"]);
+    expect(rows[2]!.querySelector(".quota-val")?.textContent).toBe("Window reset");
+    await waitFor(() => expect(rows[2]!.querySelector(".quota-meta")!.textContent).toMatch(/^no reading since · reset /));
   });
 
   it("a reading WITHOUT a utilization number says so — never 'no reading yet' beside a reset date", () => {
     // Live-caught (pass 29): the provider's five_hour envelopes often omit
     // `utilization`; the row used to render the contradiction
     // "no reading yet · resets 8/27/2026".
-    const { getByText, queryByText } = renderPage(
+    const { container, queryByText } = renderPage(
       withQuota(
         {
           backend: "claude",
@@ -540,8 +576,8 @@ describe("InsightsPage", () => {
         [{ rateLimitType: "five_hour", utilization: null, resetsAt: 1_787_848_800, reset: false }],
       ),
     );
-    expect(getByText(/utilization not reported/)).toBeTruthy();
-    expect(queryByText("no reading yet")).toBeNull();
+    expect(container.querySelector('[data-quota-window="five_hour"] .quota-val')?.textContent).toBe("Not reported");
+    expect(queryByText("No reading yet")).toBeNull();
   });
 
   /**
@@ -551,9 +587,7 @@ describe("InsightsPage", () => {
    */
   it("says when the reading was observed, and names a refused credential's sentence for everyone", () => {
     const observed = renderPage(FULL);
-    expect(quotaNote(observed.container)).toMatch(
-      /^The latest reading a Claude run reported, observed .+\. A window near 100% means/,
-    );
+    expect(quotaNote(observed.container)).toMatch(/^Latest reading from a Claude run, .+\. Near 100%, new runs may be refused/);
     cleanup();
     const { container } = renderPage(
       withQuota({
@@ -570,7 +604,7 @@ describe("InsightsPage", () => {
       }),
       "?backend=codex",
     );
-    const refused = container.querySelector(".bar-cost[title^='run run_2 was refused ']")!;
+    const refused = container.querySelector(".quota-meta[title^='run run_2 was refused ']")!;
     expect(refused.querySelector(".vh")?.textContent).toBe(" · " + refused.getAttribute("title"));
     expect(refused.querySelector(".vh")?.textContent).toContain("token revoked");
   });
@@ -599,7 +633,7 @@ describe("InsightsPage", () => {
 
   it("says the window is exhausted when a run was refused, and names that as its source", async () => {
     const { getByText, container } = renderPage(refusedQuota(REFUSED), "?backend=codex");
-    expect(getByText("usage limit reached")).toBeTruthy();
+    expect(getByText("Usage limit reached")).toBeTruthy();
     // Honest about its provenance: this is not a utilization reading.
     expect(getByText(/^from a refused run/)).toBeTruthy();
     // D32-2 (ruling 4): the refusal's hover title dates the run with the app's
@@ -607,7 +641,7 @@ describe("InsightsPage", () => {
     // toLocaleString ("9/1/2026, 9:00:00 AM") — and with no stray "$" before
     // the date (a template-literal slip the first D32-2 edit shipped).
     await waitFor(() => {
-      const bar = container.querySelector(".bar-cost[title^='run run_abc was refused ']")!;
+      const bar = container.querySelector(".quota-meta[title^='run run_abc was refused ']")!;
       expect(bar).toBeTruthy();
       // formatDayDotTime: "HH:MM" today, else "<Yesterday | Mar 30> · HH:MM".
       expect(bar.getAttribute("title")).toMatch(
@@ -661,7 +695,7 @@ describe("InsightsPage", () => {
       ),
       "?backend=codex",
     );
-    expect(getByText("credential refused")).toBeTruthy();
+    expect(getByText("Credential refused")).toBeTruthy();
     expect(getByText(/clears when a run on this backend completes/)).toBeTruthy();
     // The stale 20% reading does not get to reassure anyone.
     expect(queryByText("20%")).toBeNull();
@@ -734,10 +768,10 @@ describe("InsightsPage", () => {
     );
     // CANARY: collapse `refusal` back to `exhausted` and the later reading's
     // row reads "usage limit reached" at 100% over a backend answering runs.
-    expect(queryByText("usage limit reached") !== null).toBe(refusalStands);
+    expect(queryByText("Usage limit reached") !== null).toBe(refusalStands);
     expect(queryByText("12%") !== null).toBe(!refusalStands);
     // The refusal's full track, or the reading's 12%.
-    const fill = container.querySelector<HTMLElement>(".breakdown:last-child .bar-fill")!;
+    const fill = container.querySelector<HTMLElement>(".usage-limits .quota-fill")!;
     expect(refusalStands ? fill.classList.contains("full") : fill.style.width).toBe(refusalStands ? true : "12%");
   });
 
@@ -750,7 +784,7 @@ describe("InsightsPage", () => {
       ],
     });
     expect(getByText(/No agent runs yet/)).toBeTruthy();
-    expect(container.querySelector(".stat-grid")).toBeNull();
+    expect(container.querySelector(".metric-band")).toBeNull();
   });
 
   it("renders with a null success rate and null duration", () => {
@@ -760,14 +794,14 @@ describe("InsightsPage", () => {
         avgDurationMs: null,
       }),
     );
-    // Both the success-rate and avg-duration cards read the "n/a" placeholder,
-    // and no other stat card does: the cache panel prints its own "n/a" cells,
-    // so a page-wide count of the placeholder proves nothing about these two.
+    // Both the success-rate and avg-duration figures read as absent, and no
+    // other figure does: the cache panel prints its own "n/a" cells, so a
+    // page-wide count of a placeholder proves nothing about these two.
     // CANARY: render a null rate as "0%" and "Completion rate" drops out.
-    const na = [...container.querySelectorAll(".stat-card")]
-      .filter((c) => c.querySelector(".stat-val")?.textContent === "n/a")
-      .map((c) => c.querySelector(".stat-label")?.textContent);
-    expect(na).toEqual(["Completion rate", "Avg run time"]);
+    const na = [...container.querySelectorAll(".metric")]
+      .filter((c) => c.querySelector(".metric-val.na"))
+      .map((c) => `${c.querySelector(".metric-label")?.textContent}: ${c.querySelector(".metric-val")?.textContent}`);
+    expect(na).toEqual(["Completion rate: No outcomes yet", "Avg run time: No finished runs"]);
   });
 });
 
@@ -790,7 +824,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
     expect(buttons.map((b) => b.textContent)).toEqual(["Claude· 42", "Codex· 14"]);
     expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
     const search = () => container.querySelector("output")!.getAttribute("data-search");
-    const cost = () => container.querySelector(".stat-grid.four .stat-card:nth-child(2) .stat-val")?.textContent;
+    const cost = () => metric(container, "Cost").querySelector(".metric-val")?.textContent;
     expect(cost()).toBe("$3.50");
     // The pressed backend is already on screen: no navigation.
     fireEvent.click(buttons[0]!);
@@ -799,7 +833,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
     fireEvent.click(buttons[1]!);
     await waitFor(() => expect(search()).toBe("?backend=codex"));
     expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
-    expect(cost()).toBe("not reported");
+    expect(cost()).toBe("Not reported");
   });
 
   it("opens on the backend doing most of the work, unless the URL names one it knows", () => {
@@ -847,43 +881,47 @@ describe("ruling 635: one backend's runs under a switch", () => {
    * figure none of them had.
    */
   it("weighs a backend that reports no cost in tokens, says so once, and prints a billion as B", () => {
-    const { container, getByText } = renderPage(FULL, "?backend=codex");
-    const card = (label: string) =>
-      [...container.querySelectorAll(".stat-card")].find((c) => c.querySelector(".stat-label")?.textContent === label)!;
+    const { container } = renderPage(FULL, "?backend=codex&by=kind");
     // CANARY: render `fmtCost(totals.cost)` for a backend with no costed run
-    // and the card reads "$0.00", a price Codex never quoted.
-    expect(card("Cost").querySelector(".stat-val")?.textContent).toBe("not reported");
-    expect(card("Cost").querySelector(".stat-val")?.classList.contains("na")).toBe(true);
-    expect(card("Cost").querySelector(".stat-sub")?.textContent).toBe("none of the 14 Codex runs reported one");
-    // Ruling 635: "3864.3M" read as a typo.
-    expect(card("Tokens").querySelector(".stat-val")?.textContent).toBe("3.86B");
-    expect(card("Tokens").querySelector(".stat-sub")?.textContent).toBe("3.83B in, 96% cached · 33.0M out");
-    expect(card("Coordination share").querySelector(".stat-sub")?.textContent).toBe(
+    // and the figure reads "$0.00", a price Codex never quoted.
+    const cost = metric(container, "Cost");
+    expect(cost.querySelector(".metric-val")?.textContent).toBe("Not reported");
+    expect(cost.querySelector(".metric-val")?.classList.contains("na")).toBe(true);
+    expect(cost.querySelector(".metric-sub")?.textContent).toBe("none of the 14 Codex runs reported one");
+    // Ruling 635: "3864.3M" read as a typo. Ruling 642: "33.0M" is 33M.
+    const tokens = metric(container, "Tokens");
+    expect(tokens.querySelector(".metric-val")?.textContent).toBe("3.86B");
+    expect(tokens.querySelector(".metric-sub")?.textContent).toBe("3.83B in, 96% cached · 33M out");
+    expect(metric(container, "Coordination share").querySelector(".metric-sub")?.textContent).toBe(
       "operator and controller runs, 1.2K of 9.4K tokens",
     );
-    // The breakdowns say their unit, and give it.
-    const kinds = getByText("By run kind").closest(".panel")!;
-    expect(kinds.querySelector(".panel-head .right")?.textContent).toBe("runs · tokens");
-    expect([...kinds.querySelectorAll(".bar-cost")].map((c) => c.textContent)).toEqual(["1.15B", "2.55B"]);
-    expect(getByText("By task").closest(".panel")!.querySelector(".fine.dim")?.textContent).toBe(
-      "3 more groups not shown, 11 runs between them, 3.3K tokens.",
-    );
+    // The breakdown says its unit, and gives it.
+    const table = container.querySelector(".breakdown-table")!;
+    expect(table.querySelector("thead th:last-child")?.textContent).toBe("Tokens");
+    expect([...table.querySelectorAll("tbody td:last-child")].map((c) => c.textContent)).toEqual(["1.15B", "2.55B"]);
     // And so does the day card.
     const last = container.querySelectorAll(".daily-col")[29]!;
-    expect(last.querySelector(".daily-tip-row.plain")?.textContent).toBe("Tokens 2.40B");
-    expect(last.querySelector(".vh")?.textContent).toBe("2026-07-30: 5 runs, 2.40B tokens");
+    expect(last.querySelector(".daily-tip-row.plain")?.textContent).toBe("Tokens 2.4B");
+    expect(last.querySelector(".vh")?.textContent).toBe("2026-07-30: 5 runs, 2.4B tokens");
+    cleanup();
+    // Ruling 308: the window says what it left out, in the backend's unit.
+    const tasks = renderPage(FULL, "?backend=codex&by=task");
+    expect(tasks.container.querySelector(".breakdown .fine.dim")?.textContent).toBe(
+      "3 more not shown · 11 runs · 3.3K tokens",
+    );
   });
 });
 
 describe("ruling 635: the task breakdown", () => {
   it("links each task to its page, by its key alone when every row is one project's", () => {
-    const one = renderPage(FULL);
+    const one = renderPage(FULL, "?by=task");
     expect(one.getByRole("link", { name: "VIB-1" }).getAttribute("href")).toBe("/projects/viberr-core/tasks/VIB-1");
     cleanup();
     // CANARY: drop the one-project test and two projects' A-1 read alike.
-    const row = (label: string) => ({ label, runs: 2, cost: 0.1, tokens: 1_000 });
+    const row = (label: string) => named({ label, runs: 2, cost: 0.1, tokens: 1_000 });
     const two = renderPage(
       withRuns({ byTask: { ...CLAUDE.byTask, rows: [row("alpha/A-1"), row("beta/A-1"), row("controller conversations")] } }),
+      "?by=task",
     );
     expect(two.getByRole("link", { name: "alpha/A-1" }).getAttribute("href")).toBe("/projects/alpha/tasks/A-1");
     expect(two.getByRole("link", { name: "beta/A-1" })).toBeTruthy();
@@ -960,11 +998,11 @@ describe("ruling 130(d): whose account, and the hour", () => {
         [{ rateLimitType: "five_hour", utilization: 0.92, resetsAt, reset: true }],
       ),
     );
-    expect(getByText(/window reset, no reading since/)).toBeTruthy();
+    expect(getByText("Window reset")).toBeTruthy();
     expect(queryByText(/92%/)).toBeNull();
-    const row = getByText(/window reset/).closest(".bar-row")!;
-    expect(row.querySelector<HTMLElement>(".bar-fill")!.style.width).toBe("0%");
-    await waitFor(() => expect(row.querySelector(".bar-cost")!.textContent).toMatch(/^reset /));
+    const row = getByText("Window reset").closest(".quota-row")!;
+    expect(row.querySelector<HTMLElement>(".quota-fill")!.style.width).toBe("0%");
+    await waitFor(() => expect(row.querySelector(".quota-meta")!.textContent).toMatch(/^no reading since · reset /));
     // The old window's warning warns about nothing now.
     expect(row.textContent).not.toContain("warning");
   });
@@ -978,7 +1016,7 @@ describe("ruling 130(d): whose account, and the hour", () => {
         exhausted: null,
       }),
     );
-    expect(getByText(/credential refused · Arda Kaya's account/)).toBeTruthy();
+    expect(getByText(/Credential refused · Arda Kaya's account/)).toBeTruthy();
   });
 });
 
@@ -1036,7 +1074,11 @@ describe("the prompt-cache panel (ruling 369)", () => {
     expect(operator.querySelector("[data-ttl-1h]")?.textContent).toBe("not reported");
     expect(panel.querySelector('[data-cache-row="by credential kind:login"]')).not.toBeNull();
     // The line the large-write column counts against is named.
-    expect(panel.textContent).toContain("above 100.0K");
+    expect(panel.querySelector("thead")?.textContent).toContain("first writes > 100K");
+    // Ruling 642: the panel's one line, over every run, with the tables folded
+    // under it.
+    expect(panel.querySelector(".panel-head .right")?.textContent).toBe("28% warm starts · 95M read · 1.9M written");
+    expect(panel.querySelector("details.cache-more")?.hasAttribute("open")).toBe(false);
   });
 
   it("scrolls the table in its own keyboard-reachable box, not the page (layo-21)", () => {
@@ -1119,9 +1161,9 @@ describe("the prompt-cache panel: PLAN.md's baseline columns (ruling 505)", () =
     const { container } = renderPage(FULL);
     const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
     const primary = panel.querySelector('[data-cache-row="by run kind:primary"]')!;
-    expect(primary.querySelector("[data-first-write-mean]")?.textContent).toBe("14.0K");
+    expect(primary.querySelector("[data-first-write-mean]")?.textContent).toBe("14K");
     expect(primary.querySelector("[data-read-per-run]")?.textContent).toBe("5.3M");
-    expect(primary.querySelector("[data-peak-median]")?.textContent).toBe("108.0K · 226.0K · 482.0K");
+    expect(primary.querySelector("[data-peak-median]")?.textContent).toBe("108K · 226K · 482K");
     expect(primary.querySelector("[data-peak-p90]")?.getAttribute("data-peak-p90")).toBe("226000");
     // No first call behind a group: nothing to average, and it says so.
     const operator = panel.querySelector('[data-cache-row="by run kind:operator"]')!;
@@ -1199,7 +1241,7 @@ describe("the prompt-cache panel: resumes by idle time (ruling 505)", () => {
       withRuns({ cache: { ...CLAUDE.cache, resumes: { ...CLAUDE.cache.resumes, rows: [] } } }),
     );
     const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
-    expect(panel.textContent).toContain("larger than 150.0K tokens");
+    expect(panel.textContent).toContain("larger than 150K tokens");
     expect(queryByRole("region", { name: "Resumes by idle time" })).toBeNull();
     expect(getByText("No resumed session yet.")).toBeTruthy();
   });
