@@ -681,7 +681,7 @@ export function AcceptConfirm({
                   Everywhere else the first one is the refusal, and a list would
                   be noise about a click the server is going to refuse anyway. */}
               {force && blockedGates.length > 1 ? (
-                <ul className="tight">
+                <ul>
                   {blockedGates.map((gate) => (
                     <li key={gate}>{gate}</li>
                   ))}
@@ -721,7 +721,10 @@ export function AcceptConfirm({
       <div className="modal-foot">
         <span className="foot-hint">
           {force
-            ? "Admin override. The bypassed gate is recorded to the audit log."
+            ? // Ruling 638: the count the Bypassing row above lists.
+              blockedGates.length > 1
+              ? "Admin override. The bypassed gates are recorded to the audit log."
+              : "Admin override. The bypassed gate is recorded to the audit log."
             : // F21-23: before the one-way warning, because a PR GitHub already
               // merged is not one-way from HERE — there is nothing left to do
               // that could be undone, and warning about it invents a decision.

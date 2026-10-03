@@ -4999,14 +4999,14 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     expect(declsFor(plain, ".be-opt:hover:where(:not(:disabled))").get("border-color")).toBe("var(--border)");
     expect(declsFor(plain, ".stage-menu-btn:hover:where(:not(:disabled))").get("background")).toBe("var(--tint-press)");
     // Disabled only while their own request is in flight: the busy step.
-    for (const busy of [".deploy-row:disabled", ".rev-x:disabled", ".stage-menu-btn:disabled", '.stg-x[aria-busy="true"]:disabled']) {
+    for (const busy of [".lib-row:disabled", ".rev-x:disabled", ".stage-menu-btn:disabled", '.stg-x[aria-busy="true"]:disabled']) {
       expect(declsFor(plain, busy).get("opacity"), busy).toBe(".7");
       expect(declsFor(plain, busy).get("cursor"), busy).toBe("default");
     }
     // Every press on a class that renders disabled or refused is guarded, and
     // a locked grant chip (a <span>) is not a control.
     for (const part of [
-      ".be-opt:active:not(:disabled)", ".deploy-row:active:not(:disabled)", "button.pick-chip:active:not(:disabled)",
+      ".be-opt:active:not(:disabled)", ".lib-row:active:not(:disabled)", "button.pick-chip:active:not(:disabled)",
       ".rev-add:active:not(:disabled)", ".handoff-chip:active:not(:disabled)", ".rev-x:active:not(:disabled)",
       ".stg-x:active:not(:disabled)",
     ]) {
@@ -5029,7 +5029,8 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     for (const [hover, prop] of [
       [".ag-item:hover", "border-color"],
       [".pcap-row:hover", "border-color"],
-      [".deploy-row:hover:not(:disabled)", "border-color"],
+      [".deploy-row:hover", "border-color"],
+      [".lib-row:hover:not(:disabled)", "border-color"],
       [".pj-row:hover", "border-color"],
       [".fm-act:hover", "border-color"],
       [".pj-star:hover", "background"],
@@ -5692,6 +5693,8 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/task-detail/changes-panel.tsx: send → loader (spins)",
         // Ruling 503: an epic task row's Remove.
         "features/epics/epic-page.tsx: x → loader (spins)",
+        // Ruling 638: a library row's Add while its deploy is in flight.
+        "features/agents/agents-page.tsx: plus → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box, in one grid area: drop

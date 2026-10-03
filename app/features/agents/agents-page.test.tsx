@@ -2128,6 +2128,73 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
   }
 
+  // Ruling 638 (and ruling 368's in-flight rule): the picked row names the
+  // work while the deploy is in flight, read off the page's own fetcher; the
+  // other rows only wait at the busy step.
+  it("the picked library row says Adding while its deploy is in flight", async () => {
+    let finish: (result: FailedActionResult) => void = () => {};
+    const pending = new Promise<FailedActionResult>((resolve) => {
+      finish = resolve;
+    });
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/viberr-core/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[mkProfile({})]}
+              library={[
+                {
+                  id: "reviewer",
+                  name: "Reviewer",
+                  role: "Review",
+                  desc: "Reviews the branch.",
+                  backends: ["claude"],
+                  stages: ["review"],
+                  spanAll: false,
+                  resources: { skills: [], mcps: [], kb: [] },
+                },
+                {
+                  id: "docs-writer",
+                  name: "Docs Writer",
+                  role: "Documentation",
+                  desc: "Writes the change notes.",
+                  backends: ["codex"],
+                  stages: ["impl"],
+                  spanAll: false,
+                  resources: { skills: [], mcps: [], kb: [] },
+                },
+              ]}
+              deployments={[]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="viberr-core"
+              projectName="Viberr Core"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+        action: () => pending,
+      },
+    ]);
+    const { getAllByText, getByText } = render(
+      <Stub initialEntries={["/projects/viberr-core/agents"]} />,
+    );
+    fireEvent.click(getAllByText(/Add from library/)[0]!);
+    fireEvent.click(getByText("Reviewer").closest("button")!);
+    const picked = getByText("Reviewer").closest("button")!;
+    const other = getByText("Docs Writer").closest("button")!;
+    // CANARY: pass the picker no `adding` and the picked row reads "Add" like
+    // its sibling, with nothing saying which deploy is running.
+    await waitFor(() => expect(picked.getAttribute("aria-busy")).toBe("true"));
+    expect(picked.textContent).toContain("Adding");
+    expect(other.getAttribute("aria-busy")).toBeNull();
+    expect(other.textContent).not.toContain("Adding");
+    expect(other.disabled).toBe(true);
+    finish({ ok: false, error: "That template no longer exists." });
+    await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
+  });
+
   it("renders the alert glyph, not the success tick, when a deploy fails", async () => {
     const { getAllByText, getByText } = renderPage({
       ok: false,

@@ -1995,8 +1995,17 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .packet-body { padding: .5rem 1rem 1rem; }
 .packet-body h2 { font-size: 1rem; line-height: 1.35; margin-bottom: .25rem; }
-.packet-obs { display: grid; gap: .375rem; margin: .75rem 0; }
-/* Inside the packet card the observations are EVIDENCE, not a form: the boxed
+/* Ruling 638: a dialog's facts are one sheet, a single well whose rows a
+   hairline divides. They were a stack of separately tinted boxes, a warning
+   one framed in coral besides, so a force-accept with four facts read as five
+   cards (owner, 2026-10-03: "it looks hideous"). A warning row is the rose
+   wash across the sheet; the sheet's clip keeps it inside the corners. */
+.packet-obs {
+  display: grid; margin: .75rem 0;
+  border-radius: var(--radius-box); background: var(--tint-well);
+  overflow: hidden;
+}
+/* Inside the packet card the observations are EVIDENCE, not a form: the
    two-column grid (below, kept for the acceptance/archive dialogs) turned
    long operator-authored labels ("SCREENSHOT INFRA EXISTS") into a huge label
    gutter with values wrapping raggedly beside it — three heavy boxes for
@@ -2009,10 +2018,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   gap: .25rem; margin: .5rem 0 0;
   padding-left: .75rem;
   border-left: 2px solid var(--hairline);
+  border-radius: 0; background: none; overflow: visible;
 }
 .packet-body .obs {
   display: block;
-  padding: 0; border: 0; background: none; border-radius: 0;
+  padding: 0; border: 0; background: none;
   font-size: .75rem; color: var(--muted); line-height: 1.45;
 }
 .packet-body .obs .k { display: inline; padding-top: 0; margin-right: .55em; }
@@ -2025,21 +2035,24 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: grid; grid-template-columns: minmax(92px, max-content) 1fr; gap: .75rem;
   align-items: start;
   font-size: .75rem; color: var(--fg); line-height: 1.45;
-  padding: .375rem .5rem;
-  border-radius: var(--radius-button);
-  /* The tint alone separates the row (border-plus-background was the boxed-in
-     double signal); .obs.warn declares its own full border below because it IS
-     semantic. */
-  background: var(--tint-well);
+  padding: .5rem .75rem;
 }
+/* No weight of its own, so the packet card's `border: 0` keeps its rows
+   undivided. */
+:where(.obs + .obs) { border-top: 1px solid var(--hairline); }
 .obs .k { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); padding-top: .125rem; }
 /* Ruling 419(e): a code observation keeps its own lines. The conflict packet's
    `git` row is git's multi-line output ("Auto-merging a.go" / "CONFLICT (content):
    …"), and without this it ran together into one line, live on ax-clone AX-24. */
 .obs code { font-family: var(--font-mono); font-size: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Ruling 638: a list in a row (the gates a force-accept bypasses, ruling 393)
+   hangs its bullets in the value column; it kept the browser's 40px indent and
+   a line of margin above and below. */
+.obs ul { margin: 0; padding-left: 1rem; }
+.obs li + li { margin-top: .25rem; }
 /* R17-1: a divergence warning row inside an acceptance dialog — the reviewed
    revision moved on, so the value reads in the warning tone. */
-.obs.warn { border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 55%); background: var(--rose-light); }
+.obs.warn { background: var(--rose-light); }
 .obs.warn > span:last-child { color: var(--coral-dark); }
 /* Hard rule: never grey text on a colored background — on the pink warning
    wash the kicker label takes the wash's own dark text partner. */
@@ -2810,18 +2823,47 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   transition: border-color .14s ease, transform .14s var(--ease-out);
 }
 /* Ruling 459: the hover is the blue edge, not a 2px slide (a list row is
-   hovered on every pass). Only the library picker disables its rows, all of
-   them together, while its fetcher is busy and while the modal plays its exit
-   (agents-page.tsx `busy || done`). The picker is in flight, not refused, so
-   the rows take the busy step and neither hover nor press meanwhile. */
-.deploy-row:hover:not(:disabled) { border-color: var(--blue); }
-.deploy-row:disabled { opacity: .7; cursor: default; }
+   hovered on every pass). */
+.deploy-row:hover { border-color: var(--blue); }
 .deploy-eng {
   flex: none; width: 84px;
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
 }
 .deploy-task { flex: 1 1 14rem; min-width: 0; font-size: .88rem; font-weight: 600; line-height: 1.35; }
 .deploy-task .key, .live-task .key { color: var(--faint); margin-right: .375rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Ruling 638: a library picker row is the global profile as Settings draws it
+   (`.rsrc-row`: the backend's tile, the name, the blurb clamped, a line of
+   facts), with its add on the right. It wore `.deploy-row`, whose 84px label
+   column holds an engagement ("delivering"): a role ran on under the blurb.
+   The hover is the blue edge (ruling 459) and the add takes the blue with it.
+   The picker disables every row together while its fetcher is busy and while
+   it plays its exit (agents-page.tsx `busy || done`): in flight, not refused,
+   so the rows take the busy step and neither hover nor press meanwhile, and
+   the row whose deploy is in flight says so on its add (ruling 368). */
+.lib-list { display: flex; flex-direction: column; gap: .5rem; }
+.lib-row {
+  display: flex; align-items: flex-start; gap: .75rem;
+  width: 100%; text-align: left;
+  padding: .75rem;
+  border: 1px solid var(--hairline); border-radius: var(--radius-box); background: var(--surface);
+  transition: border-color .14s ease, transform .14s var(--ease-out);
+}
+.lib-row:hover:not(:disabled) { border-color: var(--blue); }
+.lib-row:disabled { opacity: .7; cursor: default; }
+.lib-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .125rem; }
+.lib-main .nm { font-family: var(--font-display); font-weight: 600; font-size: .88rem; line-height: 1.35; }
+.lib-desc { font-size: .75rem; line-height: 1.45; color: var(--muted); }
+.lib-meta { margin-top: .25rem; font-size: .75rem; line-height: 1.45; color: var(--faint); }
+.lib-add {
+  flex: none; display: inline-flex; align-items: center; gap: .25rem;
+  padding: .25rem .5rem; border-radius: var(--radius-chip);
+  background: var(--tint-well); color: var(--muted);
+  font-size: .75rem; font-weight: 600;
+  transition: background-color .14s ease, color .14s ease;
+}
+.lib-add .ico { width: 12px; height: 12px; }
+.lib-row:hover:not(:disabled) .lib-add { background: var(--blue-soft); color: var(--blue-pressed); }
 
 /* live roster */
 .live-wrap { padding: .125rem 1.5rem var(--dock-clear); overflow-y: auto; flex: 1; min-height: 0; }
@@ -3840,7 +3882,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    drags (settings-page.tsx `canDrag`). A refused ✕ (a viewer's stage row)
    takes the disabled step, .45. A ✕ disabled only while its own request is in
    flight says so with `aria-busy` (the member row's `busy`) and takes the busy
-   step, .7, like `.rev-x` and `.deploy-row`: in flight is not refused. The
+   step, .7, like `.rev-x` and `.lib-row`: in flight is not refused. The
    busy rule has the refusal rule's weight (0,3,0), so it stays after it.
    `.off` keeps its own dimmer step. */
 .stg-x:disabled, .stg-name:disabled { pointer-events: none; }
@@ -6029,6 +6071,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .pager-word { display: none; }
   .pager .pager-list { gap: .125rem; }
   .pager .pager-btn, .pager .pager-gap { min-width: 1.75rem; }
+  /* Ruling 638: a dialog's fact sheet puts each label over its value. Beside
+     the 92px label column a value kept about 170px, and the gates a
+     force-accept bypasses read four words to a line. */
+  .obs { grid-template-columns: minmax(0, 1fr); gap: .125rem; }
 }
 
 /* Neutralize anchor defaults on link-shaped controls. */
@@ -6092,7 +6138,7 @@ a.keybtn { display: inline-block; }
 a.card:active { transform: scale(.99); }
 .opt:active:where(:not(:disabled, [aria-disabled="true"])), .ag-item:active, .rq-row:active, .pcap-row:active,
 .be-opt:active:not(:disabled), .org-tile.go:active, .pj-card:has(> .pj-link:active) { transform: translateY(0) scale(.99); }
-.deploy-row:active:not(:disabled), .pj-row:has(> .pj-link:active) { transform: scale(.99); }
+.deploy-row:active, .lib-row:active:not(:disabled), .pj-row:has(> .pj-link:active) { transform: scale(.99); }
 .ag-newbtn:active, .live-row:active, .ctl-example:active:not(:disabled), .ctl-conv:active, .project-switch:active, .ntf-item:active:not([aria-disabled="true"]), .attach-file:active, .attach-thumb:active, .tl-attach-thumb:active, .tl-attach-file:active, button.top-search:active { transform: scale(.99); }
 .seg button:active:not(:disabled), .fchip:active:not(:disabled), button.pick-chip:active:not(:disabled), .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active:not(:disabled), .handoff-chip:active:not(:disabled), .keybtn:active, .goal-edit-btn:active, .prop-btn:active:where(:not([aria-busy="true"])) { transform: scale(.96); }
 .nav-item:active { transform: scale(.96); }

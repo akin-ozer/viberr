@@ -142,6 +142,9 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
     // records it.
     expect(text).toContain("Bypassing");
     for (const gate of gates) expect(text).toContain(gate);
+    // Ruling 638. CANARY: the footer's one sentence for every count read "The
+    // bypassed gate is recorded" under a list of two.
+    expect(text).toContain("The bypassed gates are recorded to the audit log.");
   });
 
   it("ruling 393: a single gate still reads as one sentence, not a list", () => {
@@ -164,7 +167,8 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
       'dialog[data-screen-label="Accept completion dialog"]',
     )!;
     expect(dialog.textContent).toContain(only);
-    expect(dialog.querySelector("ul.tight")).toBeNull();
+    expect(dialog.querySelector("ul")).toBeNull();
+    expect(dialog.textContent).toContain("The bypassed gate is recorded to the audit log.");
   });
 
   it("shows NO Withdraws row when there is no open decision", () => {
