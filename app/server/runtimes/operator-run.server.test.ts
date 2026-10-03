@@ -1746,6 +1746,16 @@ describe("pr-diverged turn instruction (both backends)", () => {
   }
   const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock } = operatorPrompts;
 
+  it("ruling 649: every turn, on both backends, closes with the people rule", async () => {
+    // Live on the AWS board the operator wrote "his words" on AWSC-43 and
+    // "Her words" on AWSC-80 about the same owner, from a rule buried in its
+    // definition. CANARY: drop it from `operatorTurnInstruction` and neither
+    // backend reads it on its turn.
+    const { PEOPLE_RULE } = await import("./people-rule.server");
+    expect(buildOperatorTurnPrompt(snapshot(), "pr-diverged")).toContain(PEOPLE_RULE);
+    expect(buildCodexOperatorPrompt(snapshot(), "pr-diverged")).toContain(PEOPLE_RULE);
+  });
+
   it("closed PR on an active task → ONE recovery packet with rework/archive/archive+deleteBranch, acceptance forbidden", () => {
     const prompt = buildOperatorTurnPrompt(snapshot(), "pr-diverged");
     expect(prompt).toContain("closed WITHOUT merging");

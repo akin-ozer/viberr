@@ -688,6 +688,7 @@ import {
 } from "~/server/runtimes/prompt-prefix.server";
 import { specialistCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { errorMessage, toError } from "~/shared/errors";
+import { PEOPLE_RULE } from "~/server/runtimes/people-rule.server";
 
 export {
   recordRunInputs,
@@ -3678,6 +3679,9 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `"@${trig}" (so they are notified) and "@operator" (so the operator ` +
       `picks your results up).`;
   }
+  // Ruling 649: every run, not only one a person asked directly; most runs
+  // are the operator's, and their reports quote the people they answer.
+  prompt += `\n\n## People\n${PEOPLE_RULE}`;
   // Prompt-injection guardrail (R-C): applies to BOTH backends. Codex has no
   // tool-denylist channel, so its capability + delivery constraints are enforced
   // only by this contract — make the boundary explicit rather than implicit. A

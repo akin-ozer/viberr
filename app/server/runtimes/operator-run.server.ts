@@ -172,6 +172,7 @@ import {
   clearModelMark,
 } from "./model-availability.server";
 import { errorMessage, toError } from "~/shared/errors";
+import { PEOPLE_RULE } from "./people-rule.server";
 
 /**
  * Runs the operator through Claude or Codex. The operator is given its persona
@@ -5493,7 +5494,8 @@ const operatorTurnInstruction = (
   // Ruling 487: what is already scheduled, for the same reason again: a hold
   // a pending run explains is decided before any trigger's doctrine runs.
   const scheduled = pendingSchedulesInstruction(args[0]);
-  return `${standing}${refused}${decided}${colliding}${unrefreshable}${staleCount}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  // Ruling 649: on every trigger, in a paragraph of its own.
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${staleCount}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}\n\n${PEOPLE_RULE}`;
 };
 
 /**
