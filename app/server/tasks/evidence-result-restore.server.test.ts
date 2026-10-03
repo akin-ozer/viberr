@@ -48,9 +48,20 @@ function writeVerdict(rows: EvidenceRow[], profileId = "estimate-judge") {
     toAgent: false,
     evidence: rows,
   };
+  // The completion writes the agent's reply in the same millisecond, and the
+  // file lists it first: the instant alone names two events.
+  const reply: TaskFileEvent = {
+    occurredAt: AT,
+    type: "comment",
+    actor: event.actor,
+    title: null,
+    text: "Reviewed the delivered files; findings in the verdict.",
+    toAgent: false,
+    evidence: null,
+  };
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter(KEY, { stage: "review", updatedAt: STAMP }),
-    timeline: [event],
+    timeline: [reply, event],
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
@@ -110,8 +121,9 @@ function claudeReport(runId: string, seq: number, rows: { label: string; result:
 }
 
 function rowsOnFile(): EvidenceRow[] {
-  return readTaskFile({ projectSlug: store.slug, taskKey: KEY, dataRoot: store.dataRoot })!.parsed.timeline[0]!
-    .evidence!;
+  return readTaskFile({ projectSlug: store.slug, taskKey: KEY, dataRoot: store.dataRoot })!.parsed.timeline.find(
+    (e) => e.evidence,
+  )!.evidence!;
 }
 
 const projectedSchema = z.object({ evidence_json: z.string() });
@@ -119,7 +131,9 @@ const projectedRowsSchema = z.array(z.object({ label: z.string(), result: z.stri
 
 function projectedResults(): string[] {
   const row = projectedSchema.parse(
-    store.db.prepare(`SELECT evidence_json FROM task_events WHERE project_slug = ? AND task_key = ?`).get(store.slug, KEY),
+    store.db
+      .prepare(`SELECT evidence_json FROM task_events WHERE project_slug = ? AND task_key = ? AND evidence_json IS NOT NULL`)
+      .get(store.slug, KEY),
   );
   return projectedRowsSchema.parse(JSON.parse(row.evidence_json)).map((r) => r.result);
 }
@@ -144,6 +158,8 @@ describe("restoreCutEvidenceResults (ruling 639)", () => {
       { label: "npm test (vitest)", result: "102 passed, 0 failed", status: "pass" },
     ]);
 
+    // CANARY: find the event by its instant alone and the reply, listed first,
+    // is taken for it: nothing is restored (live, 121 rows on the first boot).
     expect(await restoreCutEvidenceResults(store.db, { dataRoot: store.dataRoot })).toBe(1);
     // CANARY: take the farthest run instead of the nearest and Q35 reads the
     // round-six sentence.
