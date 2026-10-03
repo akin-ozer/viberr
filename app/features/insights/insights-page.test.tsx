@@ -787,7 +787,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
     ]);
     const group = getByRole("group", { name: "Backend" });
     const buttons = [...group.querySelectorAll("button")];
-    expect(buttons.map((b) => b.textContent)).toEqual(["Claude42", "Codex14"]);
+    expect(buttons.map((b) => b.textContent)).toEqual(["Claude· 42", "Codex· 14"]);
     expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
     const search = () => container.querySelector("output")!.getAttribute("data-search");
     const cost = () => container.querySelector(".stat-grid.four .stat-card:nth-child(2) .stat-val")?.textContent;
@@ -817,9 +817,9 @@ describe("ruling 635: one backend's runs under a switch", () => {
       return on;
     };
     // CANARY: default to the first backend and Codex's 589 runs open on Claude.
-    expect(pressed("")).toBe("Codex589");
-    expect(pressed("?backend=claude")).toBe("Claude42");
-    expect(pressed("?backend=gemini")).toBe("Codex589");
+    expect(pressed("")).toBe("Codex· 589");
+    expect(pressed("?backend=claude")).toBe("Claude· 42");
+    expect(pressed("?backend=gemini")).toBe("Codex· 589");
   });
 
   it("says so under the switch when the chosen backend never ran, and keeps the oversight", () => {
