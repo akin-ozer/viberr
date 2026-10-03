@@ -400,6 +400,56 @@ select:focus {
   box-shadow: 0 0 0 3px var(--focus-wash);
 }
 select:disabled { opacity: .45; cursor: default; }
+/* Ruling 640: every drop-down select is the app's own dropdown (owner,
+   2026-10-03, on the knowledge-base browser's "into" select: "arrow on
+   dropdown looks hideous use shadcn like dropdown element"). Chromium's
+   customizable select (`appearance: base-select`) restyles the control without
+   replacing it, so the element, its keyboard, its accessible name and every
+   test that changes it stay the platform's. The trigger keeps the base box
+   above and ends in the app's chevron (`::picker-icon`, turned up while open);
+   the list is a menu like the stage menu (`::picker(select)`: the float
+   surface edged by the ring, `--shadow-menu`, `menu-in`); the chosen option
+   ends in the stage menu's blue check (`::checkmark`). Both glyphs are the icon
+   set's paths as masks over a token's fill, so their ink follows both themes
+   and no colour ships in an image, the reason the arrow stayed native until
+   now. A browser without base-select keeps the native control. */
+@supports (appearance: base-select) {
+  select:not([multiple], [size]), select:not([multiple], [size])::picker(select) { appearance: base-select; }
+  select:not([multiple], [size]) { display: inline-flex; align-items: center; gap: .5rem; }
+  select::picker-icon {
+    content: ""; flex: none; width: 13px; height: 13px; margin-inline-start: auto;
+    background-color: var(--faint);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    transition: rotate .16s var(--ease-out);
+  }
+  select:open::picker-icon { rotate: 180deg; }
+  select::picker(select) {
+    margin-block: .25rem;
+    padding: .375rem;
+    border: 1px solid transparent; border-radius: var(--radius-box);
+    background: var(--surface-float); color: var(--fg);
+    box-shadow: var(--shadow-ring), var(--shadow-menu);
+    animation: menu-in .16s var(--ease-out);
+  }
+  select option {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .375rem .5rem; border-radius: var(--radius-small);
+    cursor: pointer; transition: background .12s ease;
+  }
+  select option:hover:not(:disabled) { background: var(--focus-wash); }
+  select option:focus-visible { background: var(--focus-wash); outline: 2px solid var(--blue); outline-offset: -2px; }
+  select option:disabled { color: var(--placeholder); cursor: default; }
+  select option::checkmark {
+    order: 1; margin-inline-start: auto;
+    content: ""; flex: none; width: 14px; height: 14px;
+    background-color: var(--blue);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    select::picker(select) { animation: none; }
+    select::picker-icon { transition: none; }
+  }
+}
 /* The app's two opacity steps for unavailable controls: .45 disabled (P14-LV-08),
    .7 busy. Every busy button already sets aria-busy, so the inline per-site
    opacities are gone. */
@@ -9240,6 +9290,15 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 /* A status on its way to the server: the select takes the sheet's disabled
    step, and the dot and the chevron drawn over it go with it. */
 .epic-status-select:has(> select:disabled) > :is(.epic-status-dot, .epic-status-chev) { opacity: .45; }
+/* Ruling 640: the chip's menu is the app's dropdown like every select's; its
+   trigger keeps the dot and the chevron drawn over it, so the select's own
+   arrow stays hidden. Its options are children of the 600-weight select, so
+   they take the body weight back: the chip's bold is the status, not the list. */
+@supports (appearance: base-select) {
+  .epic-status-select select { appearance: base-select; }
+  .epic-status-select select::picker-icon { display: none; }
+  .epic-status-select option { font-weight: 400; }
+}
 .epic-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
