@@ -454,6 +454,30 @@ export function shareDirWithAgents(dir: string, deps: { gid?: number } = {}): vo
 }
 
 /**
+ * Ruling 636: make `dir` (created when missing) a directory the agents pass
+ * THROUGH and never list: the server's own, in the agent group, 0710. An agent
+ * reaches an entry under it by the path it is given and cannot read the names
+ * beside it. Throws when `dir` is not the server's own directory (a symbolic
+ * link, or one an agent made first), so nothing is made under a parent an
+ * agent controls, and when the mode did not take. Beyond that check, a no-op
+ * when this server launches no agents.
+ */
+export function passThroughDirForAgents(dir: string, deps: { gid?: number } = {}): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = lstatSync(dir);
+  if (!st.isDirectory() || st.uid !== process.getuid?.()) {
+    throw new Error(`${dir} is not a directory of the server's own.`);
+  }
+  if (deps.gid === undefined && !launchesAgents()) return;
+  const gid = deps.gid ?? AGENT_GID;
+  shareEntry(dir, gid, () => 0o710);
+  const after = lstatSync(dir);
+  if (after.gid !== gid || (after.mode & 0o7777) !== 0o710) {
+    throw new Error(`${dir} could not be put in the agent group as 0710.`);
+  }
+}
+
+/**
  * Ruling 534: a file the server wrote into a private directory of its own,
  * made READABLE by the agent group: the directory traversable (0710), the file
  * readable (0640), both in the group, through the same no-follow descriptor

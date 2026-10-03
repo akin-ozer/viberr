@@ -2027,6 +2027,35 @@ describe("codex run marker and settle sweep (ruling 174)", () => {
     expect(servers.docs).not.toHaveProperty("env");
   });
 
+  it("names the run's own temporary directory to the model's shell and every stdio MCP server (ruling 636)", async () => {
+    // The shell inherits only the CLI's "core" names, which are the CLI's to
+    // change, and a stdio server starts with its short default env plus what it
+    // declares: undeclared, the shell and the browser write the shared /tmp.
+    // CANARY: drop `...RUN_TMP_ENV_KEYS` from `SHELL_EXPORTED_ENV_KEYS`, or
+    // from `stdioServerEnv`, and that declaration loses the directory.
+    const dir = "/tmp/viberr-runs/run_marked";
+    const tmp = { TMPDIR: dir, TMP: dir, TEMP: dir };
+    const run = fakeCodex([COMPLETED]);
+    createCodexAdapter({ codexFactory: run.factory, ...recordReaps() }).start(
+      {
+        ...MARKED,
+        env: { VIBERR_RUN_ID: "run_marked", ...tmp },
+        mcpServers: { files: { command: "npx", args: ["-y", "@example/files"] } },
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+    const config = run.factoryOptions()?.config;
+    expect(shellPolicySchema.parse(config?.shell_environment_policy).set).toEqual({
+      VIBERR_RUN_ID: "run_marked",
+      ...tmp,
+    });
+    expect(mcpServersSchema.parse(config?.mcp_servers).files?.env).toEqual({
+      VIBERR_RUN_ID: "run_marked",
+      ...tmp,
+    });
+  });
+
   it("a run the service did not mark declares no marker", async () => {
     const run = fakeCodex([COMPLETED]);
     createCodexAdapter({ codexFactory: run.factory, ...recordReaps() }).start(

@@ -117,6 +117,22 @@ if (suiteRoot) {
 }
 
 /**
+ * Ruling 636: a run that launches makes its own temporary directory under
+ * `VIBERR_RUN_TMP_ROOT` (else `viberr-runs` in the temp folder) and removes it
+ * a grace after it settles, which a test file does not wait for. The suite's
+ * root is this file's own and goes with it, like the data root above.
+ */
+const runTmpRoot = process.env.VIBERR_RUN_TMP_ROOT
+  ? null
+  : mkdtempSync(path.join(tmpdir(), "viberr-run-tmp-"));
+if (runTmpRoot) {
+  process.env.VIBERR_RUN_TMP_ROOT = runTmpRoot;
+  afterAll(() => {
+    rmSync(runTmpRoot, { recursive: true, force: true });
+  });
+}
+
+/**
  * Fail closed against PROBING THE HOST (ruling 182).
  *
  * `healthSnapshot` — and so the health route, `instance_health` and the boot

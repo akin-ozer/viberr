@@ -1,4 +1,4 @@
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
@@ -57,6 +57,7 @@ import {
   type FakeRun,
 } from "../../../test-support/fake-runtime";
 import { settle } from "../../../test-support/polling";
+import { RUN_TMP_REMOVE_DELAY_MS, runTmpDir } from "./run-tmp.server";
 
 // SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
 // mounting it assert how the service ROUTES the dictionary — key-derived
@@ -563,6 +564,38 @@ describe("a run with no credential principal (ruling 127)", () => {
     expect(spec.env?.VIBERR_RUN_ID).toBe(runId);
     expect(spec.env?.GIT_CEILING_DIRECTORIES).toBe("/tmp/ceiling");
     expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.arda.id);
+  });
+
+  it("gives a launched run a temporary directory of its own and removes it once the settle's grace is over (ruling 636)", async () => {
+    // Its processes find it under all three names, over a caller's overlay; it
+    // is still there when the settle is done, because the sweep has not yet
+    // stopped what the run left running; and it goes after that grace.
+    // CANARY: drop the `runTmpEnv` assignment in `launch` and the run carries
+    // the caller's /tmp; drop `scheduleRunTmpRemoval` from the settle and the
+    // directory outlives the grace.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
+      const { runId } = await startTestRun(store.db, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        role: "Primary specialist",
+        kind: "primary",
+        backend: "claude",
+        model: "claude-sonnet-4-5",
+        prompt: "go",
+        dataRoot: store.dataRoot,
+        env: { TMPDIR: "/tmp" },
+      });
+      await settle();
+      const dir = runTmpDir(runId);
+      expect(lastRunSpec()!.env).toMatchObject({ TMPDIR: dir, TMP: dir, TEMP: dir });
+      expect(existsSync(dir)).toBe(true);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS);
+      await vi.waitFor(() => expect(existsSync(dir)).toBe(false), { timeout: 5_000 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses a per-run env overlay that would decide whose account pays", async () => {

@@ -214,6 +214,16 @@ describe("shellInventoryPrompt (ruling 191)", () => {
     expect(text).toContain("exits 127");
   });
 
+  it("ruling 636: sends scratch files to the run's own $TMPDIR, never /tmp itself", () => {
+    // Every prompt that describes the shell says it: a specialist's, and the
+    // operator's and the controller's about the agents they dispatch.
+    // CANARY: drop the push and nothing says where scratch goes, so an agent
+    // writes /tmp, which every later run of its person can read.
+    const text = shellInventoryPrompt(host({}));
+    expect(text).toContain("Temporary files go in `$TMPDIR`: each run has its own");
+    expect(text).toContain("Nothing goes in `/tmp` itself");
+  });
+
   it("ruling 275: says nothing when the persona plans around what is actually here", () => {
     // CANARY: match on substrings instead of word boundaries and "nodemon" or
     // "encurl" would name `node`/`curl`; scan the PRESENT tools too and a

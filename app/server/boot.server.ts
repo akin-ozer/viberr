@@ -23,6 +23,7 @@ import { getDb, getProjectionDbPath } from "./db/sqlite.server";
 import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
 import { repairCodexRolloutPaths } from "./runtimes/user-homes.server";
 import { bootAgentIsolation } from "./runtimes/agent-isolation.server";
+import { sweepRunTmp } from "./runtimes/run-tmp.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
 import { startMcpGateway } from "./mcp-proxy/gateway.server";
@@ -811,6 +812,11 @@ export async function bootServer(): Promise<void> {
   } catch (error) {
     logger.error("agent isolation could not be set up at boot", { err: toError(error) });
   }
+  // Ruling 636: before anything can start a run, so every run's temporary
+  // directory still on disk is one a stopped server or a failed removal left.
+  // As each run's person, after isolation knows who that is. Never throws.
+  const runTmpSwept = sweepRunTmp(db);
+  if (runTmpSwept > 0) logger.info("removed temporary directories runs left", { count: runTmpSwept });
 
   await seedInitialAdmin(db, {
     email: env.VIBERR_SEED_ADMIN_EMAIL,
