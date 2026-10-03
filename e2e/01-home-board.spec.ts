@@ -245,7 +245,17 @@ test("cross-stage drop onto a column body appends and the card changes column", 
   await expect(confirm).toContainText("VIB-148");
   expect(reorders).toBe(0);
   const reason = "Needs its PAT scope rules settled before it is ready.";
-  await confirm.getByLabel("Why").fill(reason);
+  const why = confirm.getByLabel("Why");
+  // CI (PR #464, both attempts): a reason typed ~100 ms after the drop, while
+  // the dialog was still popping in over dnd-kit's drop animation, never
+  // reached the textarea. The trace's snapshot right after `fill` reads it
+  // empty, and Move back stayed disabled until the 45 s timeout. Not
+  // reproduced locally at 6x CPU throttling. A person cannot type that soon
+  // after letting go; the test can, so it types until the value holds.
+  await expect(async () => {
+    await why.fill(reason);
+    await expect(why).toHaveValue(reason, { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   await confirm.getByRole("button", { name: "Move back" }).click();
   const submitted = await request;
   // Column-body drop is an append: the slot is empty. The reason rides along.
