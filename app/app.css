@@ -618,7 +618,7 @@ h1, h2, h3, h4 {
    rule hands a container's own leading and wrap on to the prose inside it
    (markdown, the composer, a rules list), which this default would otherwise
    override. Paragraphs avoid a one-word last line. */
-:where(p, li, dd, td, th, blockquote, .sub, .fine, .hint, .fhint, .empty, .act-covers, .stat-sub, .stat-label, .mh-sub, .ho-exc, .ag-stat .l, .member-main .em, .logs-foot > span) { line-height: 1.45; text-wrap-style: pretty; }
+:where(p, li, dd, td, th, blockquote, .sub, .fine, .hint, .fhint, .empty, .act-covers, .metric-sub, .metric-label, .mh-sub, .ho-exc, .ag-stat .l, .member-main .em, .logs-foot > span) { line-height: 1.45; text-wrap-style: pretty; }
 :where(.md-body, .md-doc, .composer-ce, .pol-note, .chg-lines) :where(p, li, dd, td, blockquote) { line-height: inherit; text-wrap-style: inherit; }
 
 /* ---------- App shell ---------- */
@@ -3289,14 +3289,14 @@ dialog[data-closing]::backdrop {
    and screen-reader behavior come for free — the panel already ships in the
    WCAG sweep and must not regress it. */
 .cap-advisory { margin-top: .5rem; }
-.cap-advisory > summary {
+.cap-advisory > summary, .cache-more > summary {
   display: flex; align-items: center; gap: .5rem;
   font-size: .75rem; color: var(--muted); cursor: pointer;
   list-style: none; padding: .25rem 0;
   border-radius: var(--radius-chip);
 }
-.cap-advisory > summary::-webkit-details-marker { display: none; }
-.cap-advisory > summary:hover { color: var(--fg); }
+.cap-advisory > summary::-webkit-details-marker, .cache-more > summary::-webkit-details-marker { display: none; }
+.cap-advisory > summary:hover, .cache-more > summary:hover { color: var(--fg); }
 .cap-advisory > summary > .ico:not(.disc-chev) { width: 13px; height: 13px; flex: none; color: var(--placeholder); }
 /* Every <details> caret is the set's chevron (ruling 459), one rule for the
    disclosures (this one, the controller's chain head, "About this chain",
@@ -4800,6 +4800,15 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 }
 @media (max-width: 720px) {
   .app { grid-template-columns: minmax(0, 1fr); }
+  /* Ruling 642: Insights' bands go two to a row (four as 2 x 2, six as
+     2 x 3, the wide cell still across), and the chart and the usage limits
+     stack. Scoped to `.insights`: this block sits above the page's own
+     rules, which would win a tie. */
+  .insights :is(.metric-band, .metric-band.three) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insights .metric { padding: .75rem 1rem; }
+  .insights .metric-val { font-size: 1.25rem; letter-spacing: var(--track-section); }
+  .insights .metric-val.na { line-height: 1.4375rem; }
+  .insights .insights-pair { grid-template-columns: minmax(0, 1fr); }
   /* Ruling 625: a page overlay on a phone is the page: full screen, no frame
      (the max-* lift the UA's dialog:modal cap); and Home takes the workspace
      pages' 24px gutter (it was 32px; `main` outranks the later base rule). */
@@ -6597,52 +6606,102 @@ a.card:active { transform: scale(.99); }
 .insights { width: 100%; max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem var(--dock-clear); display: flex; flex-direction: column; gap: 1rem; }
 .insights > .set-head { margin-bottom: .5rem; }
 .insights > section:has(> .sec-h) { margin-top: .5rem; }
-.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
-/* Seven run tiles (ruling 635): 4 + 3 rather than 3 + 3 + an orphan. */
-.stat-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-/* Ruling 625: the stat tile is `.ag-stat`'s well (the 2026-09-08 pass), not a
-   raised card at another radius beside the page's panels. */
-.stat-card { display: flex; flex-direction: column; gap: .125rem; padding: 1rem; background: var(--sunken); border-radius: var(--radius-card); }
-.stat-ico { color: var(--blue-pressed); }
-.stat-ico .ico { width: 16px; height: 16px; }
-/* One big-number stat-tile treatment app-wide (matches .ag-stat's number).
-   The tile has THREE rungs — value, label, qualifier — so the label keeps a
-   step above the sub (weight+color, not size): collapsing them to one style
-   erased the name/qualifier hierarchy on the eight two-line cards. */
-.stat-val { font-size: 1.25rem; font-weight: 700; line-height: 1.1; letter-spacing: var(--track-section); font-variant-numeric: tabular-nums; }
-.stat-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
-.stat-sub { font-size: .75rem; color: var(--faint); }
-/* Ruling 290: the exceptions a stat counts, by name and linked. Wraps rather
-   than truncates — a name a reader can see but not finish is the shape this
+/* Ruling 642: a band of figures is ONE panel whose cells a hairline divides
+   (the panel's own hairline shows through a 1px grid gap), at the radius of
+   every other panel on the page. Ruling 625's sunken tiles beside raised
+   panels were two surfaces, and seven tiles at four to a row ended in a hole
+   at every width. A band holds the count its columns divide: four, or six at
+   three to a row; a `.wide` cell spans the row. */
+.metric-band {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
+  background: var(--hairline); border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel); box-shadow: var(--shadow-card); overflow: hidden;
+}
+.metric-band.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.metric { display: flex; flex-direction: column; gap: .25rem; min-width: 0; padding: 1rem 1.25rem; background: var(--surface); }
+.metric.wide { grid-column: 1 / -1; }
+/* Label, figure, context: the name first, as a reader scans for it; the
+   figure at the display step with display tracking; one quiet line under it. */
+.metric-label { font-size: .75rem; font-weight: 500; color: var(--muted); }
+.metric-val { font-size: 1.75rem; font-weight: 600; line-height: 1.15; letter-spacing: var(--track-page); font-variant-numeric: tabular-nums; }
+/* An absent reading is a phrase in the figure's place, at body size: "n/a" at
+   the figure's size read as a data point. */
+.metric-val.na { font-size: 1rem; font-weight: 500; line-height: 2.0125rem; letter-spacing: normal; color: var(--placeholder); }
+.metric-sub { font-size: .75rem; color: var(--faint); }
+/* Ruling 290: the exceptions a figure counts, by name and linked. Wraps rather
+   than truncates: a name a reader can see but not finish is the shape that
    rule exists to end. */
-.stat-names { display: flex; flex-wrap: wrap; gap: .25rem .5rem; margin-top: .25rem; }
-.stat-names .linkish { font-size: .75rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* Ruling 625: a one-row breakdown keeps its own height beside a six-row one. */
-.insights-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
-.bar-list { display: flex; flex-direction: column; gap: .5rem; margin: .5rem 0 0; padding: 0; list-style: none; }
-/* Interface review 2026-09-24 (layo-26, layo-4): the label column flexes
-   between 4rem and 8rem and the track keeps 3rem, so a 320px row still shows
-   its bar; a label wraps rather than truncating (ruling 290's stance above). */
-.bar-row { display: grid; grid-template-columns: minmax(4rem, 8rem) minmax(3rem, 1fr) auto; align-items: center; gap: .5rem; }
-.bar-label { font-size: .75rem; color: var(--fg); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.bar-track { height: .55rem; background: var(--tint-press); border-radius: var(--radius-chip); overflow: hidden; }
-.bar-fill { display: block; height: 100%; background: var(--blue); border-radius: var(--radius-chip); }
-.bar-val { font-size: .75rem; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: .5rem; }
-.bar-cost { font-size: .75rem; font-weight: 500; color: var(--muted); }
-/* Fixed right-aligned slots so counts and costs line up as columns across
-   rows (each .bar-row is its own grid, so auto-sized values drifted). */
-.breakdown .bar-num { min-width: 2.6rem; text-align: right; display: inline-block; }
-.breakdown .bar-cost { min-width: 3.2rem; text-align: right; }
-/* Absent readings ("n/a", "no reading yet") drop to secondary emphasis — an
-   absence is not a data point. */
-.stat-val.na { color: var(--placeholder); font-weight: 600; }
-.bar-val.na { color: var(--muted); font-weight: 500; }
-.daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 110px; margin-top: .5rem; }
-.daily-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
-.daily-bar { position: relative; display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
+.metric-names { display: flex; flex-wrap: wrap; gap: .25rem .5rem; margin-top: .125rem; }
+.metric-names .linkish { font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The day chart and the usage limits share a row: the busiest picture and the
+   one that warns. */
+.insights-pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 1rem; align-items: stretch; }
+.daily-panel, .usage-limits { display: flex; flex-direction: column; min-width: 0; }
+/* Ruling 642: a usage window is its name and figure over a full-width track,
+   its reset under it, so every track starts and ends on the same lines (the
+   value column's width used to move each track's end). */
+.quota-list { display: flex; flex-direction: column; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+.quota-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: .375rem .75rem; }
+.quota-name { font-size: .88rem; font-weight: 500; color: var(--fg); }
+.quota-val { font-size: .88rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.quota-val.na { font-weight: 500; color: var(--muted); }
+.quota-track { grid-column: 1 / -1; height: 6px; background: var(--tint-press); border-radius: var(--radius-chip); overflow: hidden; }
+.quota-fill { display: block; height: 100%; background: var(--blue); border-radius: var(--radius-chip); }
+.quota-fill.full { width: 100%; }
+.quota-row.warn .quota-fill { background: var(--amber-dark); }
+.quota-row.spent .quota-fill { background: var(--danger); }
+.quota-meta { grid-column: 1 / -1; font-size: .75rem; color: var(--faint); }
+.quota-meta:empty { display: none; }
+.usage-limits > p.fine { margin: auto 0 0; padding-top: .75rem; }
+/* Ruling 642: the five breakdowns are one table under a switch. A row's bar
+   sits behind its name and measures what the rows are ordered by. */
+.breakdown > .panel-head { flex-wrap: wrap; row-gap: .5rem; }
+/* Fixed layout: the numbers keep their columns and a long name ellipsizes,
+   where an automatic one let the name's width push Cost past a phone's edge. */
+.breakdown-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+.breakdown-table th, .breakdown-table td { padding: .375rem 0; text-align: right; white-space: nowrap; }
+.breakdown-table thead th { padding-top: 0; font-size: .75rem; font-weight: 500; color: var(--faint); }
+.breakdown-table th:first-child { text-align: left; }
+.breakdown-table .bd-num { width: 4rem; padding-left: .75rem; }
+.breakdown-table .bd-fig { width: 6.5rem; }
+.breakdown-table td.bd-num { font-weight: 600; }
+.breakdown-table td.bd-fig { font-weight: 500; color: var(--muted); }
+.breakdown-table td.bd-fig.na { color: var(--faint); }
+.bd-name { position: relative; font-weight: 500; color: var(--fg); }
+.bd-fill { position: absolute; inset: 2px auto 2px 0; min-width: 4px; background: var(--blue-soft); border-radius: var(--radius-small); }
+.bd-text { position: relative; display: block; padding: 0 .5rem; overflow: hidden; text-overflow: ellipsis; }
+/* The prompt cache's tables fold under its headline (ruling 642). */
+.cache-more { margin-top: .25rem; }
+.cache-more > summary { display: inline-flex; font-weight: 500; }
+.cache-more > * + * { margin-top: .75rem; }
+.cache-more > p.fine { max-width: 70ch; }
+.cache-defs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .25rem 1rem; margin: 1rem 0 0; max-width: 80ch; font-size: .75rem; line-height: 1.45; color: var(--faint); }
+.cache-defs dt { font-weight: 600; color: var(--muted); }
+.cache-defs dd { margin: 0; }
+/* Ruling 642: the busiest day's count over a hairline at the top, a baseline
+   at the foot, and the first, middle and last days under their columns. */
+/* Beside a taller usage panel the plot keeps its height and sits at the
+   foot, its count right over its top line. */
+.daily-plot { position: relative; margin: auto 0 1.5rem; padding-top: 1rem; }
+.daily-max { position: absolute; top: 0; left: 0; font-size: .69rem; line-height: 1rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+.daily-chart {
+  display: flex; align-items: flex-end; gap: 3px; height: 8.75rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(var(--hairline), var(--hairline)) top / 100% 1px no-repeat;
+}
+.daily-col { position: relative; flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.daily-bar { position: relative; display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 3px 3px 0 0; }
 .daily-col:hover .daily-bar { background: var(--blue-pressed); }
-/* Ruling 625: an empty day is a neutral floor tick, not a brand-blue mark. */
-.daily-col[data-empty] .daily-bar { background: var(--border); }
+/* An empty day is the bare baseline (ruling 642; ruling 625 drew a grey tick,
+   and a young instance's chart was a row of them). Hovered, it marks itself. */
+.daily-col[data-empty] .daily-bar { background: transparent; }
+.daily-col[data-empty]:hover .daily-bar { background: var(--border); }
+.daily-tick {
+  position: absolute; top: calc(100% + .375rem); left: 50%; transform: translateX(-50%);
+  font-size: .69rem; color: var(--faint); white-space: nowrap; pointer-events: none;
+}
+.daily-col:first-child .daily-tick { left: 0; transform: none; }
+.daily-col:last-child .daily-tick { left: auto; right: 0; transform: none; }
 /* Ruling 634: the day's figures float above its bar the moment its column is
    hovered, on the floating layer's card: the date, then each figure with its
    key. The first and last columns hold the card to their outer edge, so it
@@ -6835,11 +6894,6 @@ a.card:active { transform: scale(.99); }
   .profile-cols { grid-template-columns: 1fr; }
   /* the audit-export S3 field grid */
   .audit-s3-grid { grid-template-columns: 1fr; }
-  /* insights: the stat grids go 2-up, the breakdown columns 1-up */
-  .stat-grid, .stat-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* Interface review 2026-09-24 (layo-4): a zero floor, as `.activity-cols`;
-     a bare 1fr floored at the bar rows' min-content and widened the page. */
-  .insights-cols { grid-template-columns: minmax(0, 1fr); }
   /* review queue rows wrap instead of crushing the title */
   .rq-row { flex-wrap: wrap; }
   /* Interface review 2026-09-24 (layo-6): a basis, not a floor. The title
@@ -10127,7 +10181,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 /* Side-by-side panels: a head holding a control is 30px, one without it 20px,
    so the two titles sat 4.5px apart. Every head in a pair takes the control's
    height (the org-settings rule, for the other pairs). */
-:is(.activity-cols, .policy-cols, .insights-cols, .profile-cols) .panel > .panel-head { min-height: 1.875rem; }
+:is(.activity-cols, .policy-cols, .insights-pair, .profile-cols) .panel > .panel-head { min-height: 1.875rem; }
 /* A panel is not raised above the column that scrolls it: the scroller clips
    its shadow (or a gutter buys it back with a ragged edge). Border only. */
 :is(.ag-detail, .ctl-side) > .panel { box-shadow: none; }

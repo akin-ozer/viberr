@@ -15,6 +15,7 @@ import {
   RESUME_IDLE_EDGES_MS,
   cacheTtlMs,
 } from "~/server/runtimes/context-policy.server";
+import { modelDisplayName } from "~/server/runtimes/model-catalog.server";
 import type { RunBackend } from "~/features/runtime/runtime-types";
 import type { CredentialKind } from "~/server/runtimes/backend-credentials.server";
 import type { ContinuityLossReason } from "~/server/runtimes/run-service.server";
@@ -81,7 +82,13 @@ export interface Breakdown {
 }
 
 export interface CountRow {
+  /** The group's key: a run kind, project slug, model id, profile id or
+   *  `project/KEY` task, as the runs table holds it. */
   label: string;
+  /** Ruling 642: what the page prints for the group. A kind in the engagement
+   *  vocabulary the run consoles speak (UXV19-3), a project's and an agent's
+   *  own name, a model's display name; a task keeps its key. */
+  name: string;
   runs: number;
   /** Summed reported cost, or null when NO run in the group reported one. Only
    *  the Claude result envelope carries a cost, so a Codex group's cost is
@@ -465,6 +472,28 @@ const groupSchema = z.object({
   cost: z.number().nullable(),
   tokens: z.number().nullable(),
 });
+
+/** Ruling 642: a run kind as the run consoles name it (UXV19-3, `roleShort`):
+ *  "primary" and "reviewer" are the rows' machinery, and "reviewer" is written
+ *  for every non-delivering run, verdict or not. */
+const RUN_KIND_NAME = new Map([
+  ["operator", "Operator"],
+  ["controller", "Controller"],
+  ["primary", "Delivering"],
+  ["reviewer", "Supporting"],
+]);
+
+const nameRowSchema = z.object({ key: z.string(), name: z.string() });
+
+/** `key → name` from a two-column read (`key`, `name`). */
+function namesFrom(db: DatabaseSync, sql: string): Map<string, string> {
+  return new Map(
+    z
+      .array(nameRowSchema)
+      .parse(db.prepare(sql).all())
+      .map((r) => [r.key, r.name]),
+  );
+}
 
 /** Ruling 369: one grouped cache row as SQLite returns it; every SUM over a
  *  boolean or a nullable column is nullable. */
@@ -1362,8 +1391,18 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
   // NULL sum last, and grouping over the whole set is cheap (a label is a kind,
   // model, project, profile or task). The top by RUNS is unioned in so no group
   // is dropped purely for being unmeasured.
+  // Ruling 642: the names the page prints. An agent's is the one its newest run
+  // carried (`agent_name`, stamped at dispatch); a project's is its own.
+  const agentNames = namesFrom(
+    db,
+    `SELECT agent_profile_id AS key, agent_name AS name, MAX(created_at) AS newest
+       FROM agent_runs WHERE agent_profile_id IS NOT NULL AND agent_name IS NOT NULL
+      GROUP BY agent_profile_id`,
+  );
+  const projectNames = namesFrom(db, `SELECT slug AS key, name FROM projects`);
+  projectNames.set("controller (instance)", "Controller (instance)");
   const weigh = (r: CountRow): number => (measure === "cost" ? r.cost : r.tokens) ?? -1;
-  const group = (column: string): Breakdown => {
+  const group = (column: string, nameOf: (label: string) => string = (label) => label): Breakdown => {
     const rows: CountRow[] = z
       .array(groupSchema)
       .parse(
@@ -1379,12 +1418,10 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
       )
       // Ruling 99: controller turns carry project_slug "" (instance scope) —
       // label them honestly instead of rendering a blank bar.
-      .map((r) => ({
-        label: r.label === "" ? "controller (instance)" : (r.label ?? "unknown"),
-        runs: r.runs,
-        cost: r.cost,
-        tokens: r.tokens,
-      }));
+      .map((r) => {
+        const label = r.label === "" ? "controller (instance)" : (r.label ?? "unknown");
+        return { label, name: nameOf(label), runs: r.runs, cost: r.cost, tokens: r.tokens };
+      });
 
     const byMeasure = [...rows].sort((a, b) => weigh(b) - weigh(a) || b.runs - a.runs);
     const byRuns = [...rows].sort((a, b) => b.runs - a.runs);
@@ -1509,9 +1546,9 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
       queued: byState("queued"),
       successRate: terminal > 0 ? finished / terminal : null,
     },
-    byKind: group("kind"),
-    byProject: group("project_slug"),
-    byModel: group("model"),
+    byKind: group("kind", (kind) => RUN_KIND_NAME.get(kind) ?? kind),
+    byProject: group("project_slug", (slug) => projectNames.get(slug) ?? slug),
+    byModel: group("model", (model) => modelDisplayName(filter.backend, model)),
     // Ruling 308: the two the controller asked for and could not answer —
     // "what did SHOP-27 cost across eleven rework rounds" and "which reviewer
     // earns its runs". A task key is only unique inside its project, so an
@@ -1523,8 +1560,9 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
       `CASE WHEN kind = 'controller' THEN 'controller conversations' ELSE ${
         filter.projectSlug ? "task_key" : "project_slug || '/' || task_key"
       } END`,
+      (task) => (task === "controller conversations" ? "Controller conversations" : task),
     ),
-    byProfile: group("agent_profile_id"),
+    byProfile: group("agent_profile_id", (id) => agentNames.get(id) ?? id),
     avgDurationMs: duration.avg_ms,
     daily,
     quota,

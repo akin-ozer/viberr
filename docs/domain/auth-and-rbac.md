@@ -460,8 +460,11 @@ a cost, their tokens are different models' tokens, Codex reports no cache write)
 - **Breakdowns** by kind, project, model, task and profile (ruling 308), each the top 8
   (half the slots reserved for the busiest groups, the rest led by the measure) with
   `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` naming what the window left
-  out. A task row is labelled `project/task` and links to its task; the page drops the
-  prefix when every row is one project's.
+  out. Each row carries its key (`label`) and the name the page prints (`name`, ruling
+  642): a kind in the run consoles' engagement words (Operator, Controller, Delivering,
+  Supporting), a project's and an agent's own name (the newest run's `agent_name`), a
+  model's display name; a task keeps its key. A task row is labelled `project/task` and
+  links to its task; the page drops the prefix when every row is one project's.
 - **Prompt cache** table (ruling 369), by run kind and by credential kind: runs, the
   warm-start rate over runs with a first call ("n/a" with none), the planning baseline's
   columns (ruling 505: the mean first-call write, cache reads per run over the runs that
@@ -477,8 +480,19 @@ a cost, their tokens are different models' tokens, Codex reports no cache write)
   same project, principal and model, with the cold ones and what their first calls wrote
   (Codex's cache does not cross threads, so it has none).
 - Average duration and a 30-day daily chart.
-- **Backend quota**: the backend's latest reading, every window it lists (ruling 608),
-  each aged on its own reset (ruling 612), and when it was observed.
+- **Usage limits** (the backend quota): the backend's latest reading, every window it
+  lists (ruling 608) by the name a person reads ("5-hour", "Weekly", "Weekly · Fable",
+  `quotaWindowLabel`), each aged on its own reset (ruling 612), and when it was observed.
+
+The page (ruling 642) reads each band of figures in one panel, a hairline between cells:
+the four oversight figures with the long timelines across the foot, then the backend's
+six run figures three to a row (turns ride under runs). A figure reads label, number and
+one line; an absent one is a muted phrase in the number's place ("Not reported", "No
+deliveries yet"). The day chart and the usage limits share a row; the breakdowns are one
+table under an Agent · Task · Model · Project · Kind switch (`?by=`, read in the browser
+like `?backend=`), each row's bar behind its name measuring what the rows are ordered by;
+the prompt cache shows its headline (warm starts, read, written) and folds its tables
+and their definitions under "Details".
 
 The controller's `inspect_run_analytics` reads the same functions: `backends`, the
 instance's `oversight`, and `runs.<backend>` for each backend that ran (or the one asked

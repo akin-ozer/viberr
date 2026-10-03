@@ -470,7 +470,8 @@ export function resolveRunEffort(
  * catalog row's name whenever the cache holds the id ("Opus (1M context)" for
  * `opus[1m]`, pass 34 F34-7); else, for a family alias carrying a
  * context-window variant, the curated family name plus the variant ("Claude
- * Opus [1m]"), which is only the cold-process fallback; else the id itself
+ * Opus (1M context)", ruling 642), which is only the cold-process fallback;
+ * else the id itself
  * (a live-only or legacy value; the UI pairs that with a substitution flag).
  */
 export function modelDisplayName(backend: RealBackend, model: string): string {
@@ -483,9 +484,17 @@ export function modelDisplayName(backend: RealBackend, model: string): string {
   if (CLAUDE_ALIAS_VARIANT_RE.test(model)) {
     const { base, variant } = splitClaudeVariant(model);
     const family = cat.models.find((m) => m.value === base)?.displayName;
-    if (family && variant) return `${family} ${variant}`;
+    if (family && variant) return `${family} ${variantPhrase(variant)}`;
   }
   return model;
+}
+
+/** Ruling 642: a context-window variant in the live catalog's words, "[1m]" as
+ *  "(1M context)"; one this cannot read stays as written. Insights printed
+ *  "Claude Opus [1m]" whenever the process had not fetched the catalog yet. */
+function variantPhrase(variant: string): string {
+  const size = /^\[(\d+)([km])\]$/i.exec(variant);
+  return size ? `(${size[1]}${size[2]!.toUpperCase()} context)` : variant;
 }
 
 // ------------------------------------------------------------ live (claude)

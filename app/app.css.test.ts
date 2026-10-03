@@ -5403,8 +5403,8 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     // scopes an MCP server's OAuth sign-in was granted, and since ruling 498 a
     // knowledge-base correction's evidence. Ruling 503 took the goal chains'
     // three (a chain, a link's waits, "About this chain") and added an epic's
-    // archived tasks.
-    expect(summaries).toHaveLength(7);
+    // archived tasks, and ruling 642 the prompt cache's details on Insights.
+    expect(summaries).toHaveLength(8);
     expect(bare).toEqual([]);
   });
 
@@ -6786,7 +6786,6 @@ describe("app.css ruling 625: the controller, the dock, Agents and Policy", () =
 });
 
 describe("app.css ruling 625: org settings, Profile and Insights", () => {
-  const rem = (value: string | undefined) => Number.parseFloat(value ?? "NaN");
 
   it("lays Agent resources out one panel to a row, and a row's actions wrap before its text squeezes", () => {
     // CANARY: put `.rsrc-grid` back on `1fr 1fr`, and the two-row Agent
@@ -6797,22 +6796,19 @@ describe("app.css ruling 625: org settings, Profile and Insights", () => {
     expect(requiredDecls(plain, ".rsrc-acts").get("margin-left")).toBe("auto");
   });
 
-  it("gives both standalone pages one header at the page-title step, never quieter than a stat under it", () => {
+  it("gives both standalone pages one header at the page-title step", () => {
     // CANARY: put `.set-head h1` back on 1.75rem (Instance settings 8px over
-    // its sibling Insights), or `.stat-val` back on 1.75rem (KPIs over the h1).
+    // its sibling Insights). Ruling 642 sets Insights' figures above it on
+    // purpose: a dashboard's numbers are its content.
     const title = requiredDecls(plain, ".set-head h1");
     expect([title.get("font-size"), title.get("letter-spacing")]).toEqual(["1.25rem", "var(--track-section)"]);
-    const stat = requiredDecls(plain, ".stat-val");
-    expect(rem(stat.get("font-size"))).toBeLessThanOrEqual(rem(title.get("font-size")));
-    expect(stat.get("font-variant-numeric")).toBe("tabular-nums");
   });
 
-  it("sets Insights breakdowns flush, with no UA list indent, and lets a one-row card keep its own height", () => {
-    // CANARY: drop `padding: 0` from `.bar-list`: every label column loses
-    // 40px and "viberr-core/VIB-145" breaks at the hyphen.
-    const list = requiredDecls(plain, ".bar-list");
+  it("sets the Insights usage windows flush, with no UA list indent", () => {
+    // CANARY: drop `padding: 0` from `.quota-list`: every track starts 40px in
+    // from the panel's other content.
+    const list = requiredDecls(plain, ".quota-list");
     expect([list.get("padding"), list.get("list-style")]).toEqual(["0", "none"]);
-    expect(requiredDecls(plain, ".insights-cols").get("align-items")).toBe("start");
   });
 
   it("leads each Profile grant with its marker on one column, and wraps a preference's control under its text", () => {
@@ -6838,7 +6834,7 @@ describe("app.css ruling 625: org settings, Profile and Insights", () => {
 
   it("keeps the code face off addresses, chips and labels on these surfaces (ruling 365)", () => {
     // CANARY: put `font-family: var(--font-mono)` back on `.member-main .em`.
-    for (const selector of [".member-main .em", ".idp-chip", ".bar-label", ".stat-names .linkish", ".cache-table td:first-child"]) {
+    for (const selector of [".member-main .em", ".idp-chip", ".bd-name", ".metric-names .linkish", ".cache-table td:first-child"]) {
       expect(requiredDecls(plain, selector).get("font-family"), selector).toBeUndefined();
     }
   });
