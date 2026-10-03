@@ -15,9 +15,11 @@ import {
   TRANSITION_TO_DONE_EXCEPTION,
 } from "~/features/policy/policy-data";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName, storeIcon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -697,12 +699,21 @@ function StageEligibility({
 
 // ------------------------------------------------------------ library picker
 
+/** A no-break space before the dot keeps it on the line it closes. */
+const META_DOT = "\u00a0· ";
+
 /**
  * "Add from library" — deploy an org-level template into this project
  * (owner ruling 1 / P13-AP-05). Until this existed, a profile created in
  * Settings → Global agent profiles could never be deployed, run or selected:
  * no code path copied a template into a project's roster, so the org editor
  * offered a lifecycle it could not finish.
+ *
+ * Ruling 638: a row is the profile as Settings → Global agent profiles shows
+ * it, with its add on the right. It borrowed the deployments row instead, whose
+ * 84px label column holds "delivering" and not a role: "IMPLEMENTATION" ran on
+ * under the description, the name sat in the faint key voice beside a bold
+ * paragraph, and the stage pill wrapped under one row and sat beside the next.
  */
 export function LibraryPicker({
   library,
@@ -710,6 +721,7 @@ export function LibraryPicker({
   workflow,
   projectName,
   busy,
+  adding = null,
   done = false,
   onClose,
   onAdd,
@@ -725,6 +737,9 @@ export function LibraryPicker({
   workflow: WorkflowEdgeView[];
   projectName: string;
   busy: boolean;
+  /** The profile whose deploy is in flight: its row names the work while the
+   *  others wait at the busy step (ruling 368). */
+  adding?: string | null;
   /** The deploy landed: the picker plays its exit, then onClose unmounts it
    *  (ruling 459). */
   done?: boolean;
@@ -743,9 +758,12 @@ export function LibraryPicker({
         </span>
         <div className="mh-main">
           <h2>Add from library</h2>
+          {/* Ruling 638: one sentence. The footer said the copy part again
+              ("the global profile stays the source"), beside a Close the
+              head's ✕ already is, so the footer went. */}
           <div className="mh-sub">
-            Global agent profiles not yet deployed in {projectName}. Adding one
-            copies its definition and capability grants into this project.
+            Adding a global profile gives {projectName} its own editable copy,
+            capability grants included.
           </div>
         </div>
         <button
@@ -764,51 +782,62 @@ export function LibraryPicker({
             settings → Global agent profiles.
           </div>
         ) : (
-          <div className="deploy-list">
+          <div className="lib-list">
             {library.map((t) => {
               const here = resolveDeclaredStages(t.stages, stages, workflow);
               // Mirrors the roster's own reading of the same declaration: no
               // restriction (or one that means nothing here) = every stage.
               const everywhere =
                 t.spanAll || t.stages.length === 0 || here.length === 0;
+              const inFlight = adding === t.id;
+              // A run uses the first backend (P13-UI-52), so the tile is that
+              // one's, as on the template's own row in Settings.
+              const primary = t.backends[0];
               return (
                 <button
                   type="button"
-                  className="deploy-row"
+                  className="lib-row"
                   key={t.id}
                   disabled={busy || done}
+                  aria-busy={inFlight || undefined}
                   onClick={() => onAdd(t.id)}
                 >
-                  <span className="deploy-eng">
-                    {profileRoleLabel(t.name, t.role, "specialist")}
+                  {primary && <AgentGlyph backend={primary} decorative />}
+                  <span className="lib-main">
+                    <span className="nm">{t.name}</span>
+                    {t.desc && (
+                      <span className="lib-desc clamp" title={t.desc}>
+                        {t.desc}
+                      </span>
+                    )}
+                    {/* One line of text that wraps as one: each dot holds to
+                        the fact before it, so a phone's wrapped line never
+                        opens on a separator. */}
+                    <span className="lib-meta">
+                      <span>{profileRoleLabel(t.name, t.role, "specialist")}</span>
+                      {t.backends.length > 0 && (
+                        <>
+                          {META_DOT}
+                          <span>{t.backends.map((b) => BACKEND_LABEL[b]).join(", ")}</span>
+                        </>
+                      )}
+                      {META_DOT}
+                      <span>
+                        {everywhere
+                          ? "every stage here"
+                          : `${countLabel(here.length, "stage")} here`}
+                      </span>
+                    </span>
                   </span>
-                  <span className="deploy-task">
-                    <span className="key">{t.name}</span> {t.desc}
+                  <span className="lib-add">
+                    <GlyphSwap rest="plus" alt="loader" on={inFlight} spinAlt />
+                    {inFlight ? "Adding…" : "Add"}
                   </span>
-                  {t.backends.map((b) => (
-                    <BackendChip key={b} b={b} />
-                  ))}
-                  <Pill kind="neutral" sm>
-                    {everywhere
-                      ? "every stage here"
-                      : `${countLabel(here.length, "stage")} here`}
-                  </Pill>
                 </button>
               );
             })}
           </div>
         )}
-      </div>
-      <div className="modal-foot">
-        <span className="foot-hint">
-          The global profile stays the source; this project gets its own
-          editable copy.
-        </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Close
-          </button>
-        </div>
       </div>
     </dialog>
   );
@@ -2064,6 +2093,11 @@ export function AgentsPage({
           workflow={workflow}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
+          adding={
+            inFlightIntent(fetcher) === "deploy-profile"
+              ? String(fetcher.formData?.get("profileId") ?? "")
+              : null
+          }
           done={modalDone}
           onClose={() => {
             setLibraryOpen(false);
