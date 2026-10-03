@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -23,6 +24,7 @@ import {
   agentUidFor,
   enforceStoreLayout,
   measureAgentIsolation,
+  passThroughDirForAgents,
   resetAgentIsolationForTests,
   shareTreeBuiltForAgents,
 } from "./agent-isolation.server";
@@ -389,5 +391,32 @@ describe("agentLaunchFor (ruling 460)", () => {
     expect(() =>
       agentLaunchFor(ctx.makeDb(), "u_ada", "/elsewhere/claude-home", ctx.makeTempDir()),
     ).toThrow(/could not prepare .*the path is not under/);
+  });
+});
+
+describe("passThroughDirForAgents: the root of the runs' temporary directories (ruling 636)", () => {
+  const gid = process.getgid?.() ?? 0;
+
+  it("is the server's own, in the agent group, 0710: entered by a known path, never listed", () => {
+    // CANARY: make it with `shareDirWithAgents` (2770) and an agent lists, and
+    // writes beside, every run's temporary directory.
+    const dir = path.join(ctx.makeTempDir("viberr-pass-"), "viberr-runs");
+    passThroughDirForAgents(dir, { gid });
+    expect(mode(dir)).toBe(0o710);
+    expect(statSync(dir).gid).toBe(gid);
+  });
+
+  it("refuses a link where the root should be, and changes nothing behind it", () => {
+    // An agent that put a link (or a directory of its own) there first would
+    // own the parent of every run's temporary directory.
+    // CANARY: drop the `lstatSync` check and the link's target becomes 0710.
+    const base = ctx.makeTempDir("viberr-pass-");
+    const target = path.join(base, "elsewhere");
+    mkdirSync(target, { mode: 0o755 });
+    chmodSync(target, 0o755);
+    const link = path.join(base, "viberr-runs");
+    symlinkSync(target, link);
+    expect(() => passThroughDirForAgents(link, { gid })).toThrow(/not a directory of the server's own/);
+    expect(mode(target)).toBe(0o755);
   });
 });

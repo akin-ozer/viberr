@@ -52,6 +52,7 @@ import {
   type ReapRunProcesses,
   compactionMarkerEnv,
 } from "./run-processes.server";
+import { RUN_TMP_ENV_KEYS } from "./run-tmp.server";
 import { codexCompactionConfig } from "./context-policy.server";
 import {
   codexVendor,
@@ -242,6 +243,23 @@ const codexMcpServerSchema = z.union([
     })),
 ]);
 
+/**
+ * What a stdio server is started with beyond the CLI's short default
+ * environment: the run marker (ruling 174) and the run's own temporary
+ * directory (ruling 636), so a browser it launches writes its profile there and
+ * the settle removes it. Ids and paths, never secrets, so argv is a fine place.
+ */
+const STDIO_SERVER_ENV_KEYS = [RUN_MARKER_ENV, ...RUN_TMP_ENV_KEYS] as const;
+
+function stdioServerEnv(runEnv: RunSpec["env"]) {
+  const out: Partial<Record<(typeof STDIO_SERVER_ENV_KEYS)[number], string>> = {};
+  for (const key of STDIO_SERVER_ENV_KEYS) {
+    const value = runEnv?.[key];
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
 /** Translate only the portable external-server subset shared by both SDKs.
  * Claude's in-process `{ type: "sdk" }` server has no Codex equivalent and is
  * intentionally skipped rather than serialized into invalid CLI config.
@@ -279,9 +297,10 @@ const codexMcpServerSchema = z.union([
  * Codex" (F40-3): both backends now get the same gateway config. */
 function codexMcpServers(
   servers: RunSpec["mcpServers"],
-  runMarker: string | undefined,
+  runEnv: RunSpec["env"],
   toolDenials: RunSpec["mcpToolDenials"] = [],
 ): CodexConfig {
+  const serverEnv = stdioServerEnv(runEnv);
   const translated: CodexConfig = {};
   // Ruling 370: servers in name order and their withheld tools sorted, so two
   // runs of one profile hand the CLI the same argv whatever order the grants
@@ -316,7 +335,7 @@ function codexMcpServers(
     };
     // An empty `args` is not the same declaration as none at all.
     if (declaration.data.args.length) stdio.args = declaration.data.args;
-    if (runMarker) stdio.env = { [RUN_MARKER_ENV]: runMarker };
+    if (Object.keys(serverEnv).length) stdio.env = serverEnv;
     if (disabledTools.length) stdio.disabled_tools = disabledTools;
     // Ruling 554: the browser's supervisor answers a stuck call at its own
     // deadline, saying the browser was restarted, so Codex must still be
@@ -374,6 +393,9 @@ function resolveCodexReasoningEffort(
  * Ruling 174: the run marker crosses too, so a command the model backgrounds
  * (`npm run dev &`) carries it and the settle sweep can find it after the CLI
  * is gone.
+ *
+ * Ruling 636: so does the run's own temporary directory, named rather than
+ * left to "core", which is the CLI's list to change.
  */
 const SHELL_EXPORTED_ENV_KEYS = [
   "GIT_CEILING_DIRECTORIES",
@@ -382,6 +404,7 @@ const SHELL_EXPORTED_ENV_KEYS = [
   "GIT_COMMITTER_NAME",
   "GIT_COMMITTER_EMAIL",
   RUN_MARKER_ENV,
+  ...RUN_TMP_ENV_KEYS,
 ] as const;
 
 /** The `shell_environment_policy.set` table — closed over the keys above, so a
@@ -492,11 +515,7 @@ function codexConfigForRun(
     // run sees only the MCPs its profile selected. NOTE: the CLI merges this
     // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
     // home declares — the app-owned run home is what makes this exhaustive.
-    mcp_servers: codexMcpServers(
-      spec.mcpServers,
-      spec.env?.[RUN_MARKER_ENV],
-      spec.mcpToolDenials,
-    ),
+    mcp_servers: codexMcpServers(spec.mcpServers, spec.env, spec.mcpToolDenials),
     shell_environment_policy: shellEnvironmentPolicy,
   };
   // The persona/expertise prompt, when the run carries one. Set after the

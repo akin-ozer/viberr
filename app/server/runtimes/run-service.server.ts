@@ -109,6 +109,7 @@ import {
   reapRunProcesses,
 } from "./run-processes.server";
 import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
+import { prepareRunTmp, removeRunTmp, runTmpEnv, scheduleRunTmpRemoval } from "./run-tmp.server";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
 import {
   bindRunToMcpGateway,
@@ -886,6 +887,10 @@ export interface RunStartResult {
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
 export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
+
+/** Ruling 636: the console line of a run that starts without a temporary
+ *  directory of its own. */
+export const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
 
 /**
  * Starts a run: selects the requested provider adapter, inserts the queued
@@ -2270,6 +2275,33 @@ function launch(
     });
   }
 
+  // Ruling 636: the run's own temporary directory, made now that it launches
+  // (a queued run never had one) and set over every overlay, so no caller
+  // renames it. A run whose directory cannot be made starts without one, and
+  // its console says so first: the shell inventory's "keep temporary files in
+  // $TMPDIR" would otherwise be a promise nobody kept.
+  {
+    try {
+      spec.tmpDir = prepareRunTmp(spec.runId, spec.agent ?? null);
+      spec.env = { ...spec.env, ...runTmpEnv(spec.tmpDir) };
+    } catch (error) {
+      const now = new Date().toISOString();
+      const message =
+        `This run has no temporary directory of its own (ruling 636): ${errorMessage(error)}. ` +
+        "Its tools use the shared /tmp.";
+      logger.warn("a run's temporary directory could not be made", {
+        runId: spec.runId,
+        err: toError(error),
+      });
+      sink.line({
+        raw: JSON.stringify({ type: "notice", source: "viberr", reason: "run_tmp_unavailable", message }),
+        display: { t: now.slice(11, 19), ev: "meta", tag: RUN_TMP_UNAVAILABLE_TAG, text: message },
+        facts: {},
+        occurredAt: now,
+      });
+    }
+  }
+
   // R21-4: phase writes are throttled — a chatty run emits one per stream
   // message, and the strip only ever renders the latest. A CHANGED phase is
   // always written immediately (the transitions are the informative part);
@@ -2381,6 +2413,8 @@ function launch(
     // Ruling 461: an adapter that throws before it runs anything leaves no
     // process to settle, so the run's gateway token is revoked here.
     revokeRunMcpGateway(spec.runId);
+    // Ruling 636: nor anything that wrote its temporary directory.
+    if (spec.tmpDir) void removeRunTmp(spec.tmpDir, spec.agent ?? null, spec.runId);
     throw error;
   }
   // Only track the handle if the run is still in flight. A synchronously-exiting
@@ -2539,6 +2573,10 @@ function launch(
       // Ruling 180: the settled run's skill plugin goes with it — the CLI
       // that read it has exited, and nothing else names the path.
       removeSkillPlugin(spec.skillPlugin);
+      // Ruling 636: and its temporary directory, after the completion
+      // compaction above (which wrote it too) and once the settle sweep has
+      // had its grace, so no process of the run is still writing it.
+      if (spec.tmpDir) scheduleRunTmpRemoval(spec.tmpDir, spec.agent ?? null, spec.runId);
       // This run's slot is now free — promote the oldest queued run behind the
       // concurrency cap. Before the completion callback, so a chain of queued
       // runs keeps flowing even if the callback throws.

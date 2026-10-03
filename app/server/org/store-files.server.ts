@@ -536,6 +536,12 @@ export function writeStoreDoc(
      * destroys nothing, so it needs no `overwrite`.
      */
     append?: boolean;
+    /**
+     * Ruling 637: the write replaces one passage (`editKbPassage`). The audit
+     * row names the passage and what replaced it, so what an edit changed is
+     * on the record and not only in the editor's transcript.
+     */
+    edit?: { replaced: string; text: string };
   } = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
@@ -589,6 +595,7 @@ export function writeStoreDoc(
     replaced,
   };
   if (appendedBytes !== undefined) details.appended = appendedBytes;
+  if (opts.edit) details.edited = { replaced: opts.edit.replaced, text: opts.edit.text };
   recordAudit(db, {
     action: "org.store.doc_written",
     actor,

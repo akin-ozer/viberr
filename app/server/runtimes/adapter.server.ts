@@ -183,6 +183,11 @@ export interface RunSpec {
    *  `startRun` whenever this server launches agents; absent (the host dev
    *  server, the test harness) the CLI spawns as the server's own user. */
   agent?: AgentLaunch;
+  /** Ruling 636: the run's own temporary directory (`<root>/<runId>`), made
+   *  when it launches and named to its processes as `TMPDIR`, `TMP` and `TEMP`
+   *  in `env`; run-service removes it once the run has settled. Absent before
+   *  the launch and on a run whose directory could not be made. */
+  tmpDir?: string;
   /** Ruling 507: the vendor home of the ACCOUNT this run bills (the person's
    *  active one when it started). Claude reads it as `CLAUDE_CONFIG_DIR` from
    *  `env`; the Codex adapter's private home (ruling 181) takes the account's

@@ -221,6 +221,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 637 (2026-10-03): before "Keeping a project's rulings current"
+    // named `edit_knowledge_base_doc` for amending a passage and for the edit
+    // after an undo refuses. It named `save_knowledge_base`, whose only ways to
+    // change part of a document were a whole replace or a rebuild by appends.
+    "5e48eafda1f249b350a641060d2d56117b16e2ed3b130d07240e3a55151342b4",
     // Ruling 530 (owner, 2026-09-27): before "Bringing up a new project"
     // opened by settling what the board delivers, scoped its toolchain and
     // gate bullets to a software board, and "A board that delivers results"

@@ -185,6 +185,12 @@ const envSchema = z.object({
   // this machine can rule out.
   VIBERR_FORCE_DATA_ROOT_LOCK: z.string().optional(),
 
+  // Ruling 636: where each agent run's own temporary directory is made
+  // (`<root>/<runId>`, the run's TMPDIR), removed when the run settles. Unset,
+  // it is `viberr-runs` under the server's temp directory: in the image the
+  // container's /tmp, which goes with the container.
+  VIBERR_RUN_TMP_ROOT: z.string().min(1).optional(),
+
   // R19-19: absolute path of the chromium binary the browser MCP server drives.
   // The image sets it (/usr/bin/chromium); when set, the mount builder passes
   // --executable-path AND --no-sandbox (docker's default seccomp blocks the

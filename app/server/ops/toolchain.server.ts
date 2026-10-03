@@ -492,5 +492,14 @@ export function shellInventoryPrompt(
         "following the description into a command that exits 127.",
     );
   }
+  // Ruling 636: where a run's scratch goes, said where every prompt describes
+  // the shell (the operator's and the controller's describe their agents').
+  lines.push(
+    "",
+    "Temporary files go in `$TMPDIR`: each run has its own, removed when the run ends " +
+      "(`mktemp` and most tools use it already). Nothing goes in `/tmp` itself, where every " +
+      "later run of the same person can read it; whatever is needed after the run belongs " +
+      "in the workspace or on the task.",
+  );
   return lines.join("\n");
 }

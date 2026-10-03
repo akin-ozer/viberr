@@ -101,7 +101,7 @@ function assertPathSafeUserId(userId: string): string {
   return userId;
 }
 
-function assertPathSafeRunId(runId: string): string {
+export function assertPathSafeRunId(runId: string): string {
   if (!PATH_SAFE_SEGMENT_RE.test(runId)) {
     throw AppError.validation(
       "That run id cannot be used for a runtime home.",
