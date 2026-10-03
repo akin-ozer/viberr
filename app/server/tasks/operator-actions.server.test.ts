@@ -7661,6 +7661,12 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
     // point at read_timeline_entry, which a Codex plan cannot call.
     expect(snap([failure, report], { toolless: true }).unfinishedReport?.text).toBe(report.text);
     expect(snap([failure, report]).unfinishedReport?.text).toBeUndefined();
+    // Ruling 644: the failure is often written in the report's own millisecond
+    // (17 such pairs on the live AWS board), first in the file. CANARY: look
+    // the report up by its stamp alone and the operator is handed the failure
+    // notice as the report.
+    const twin = { ...failure, occurredAt: report.occurredAt };
+    expect(snap([twin, report], { toolless: true }).unfinishedReport?.text).toBe(report.text);
   });
 
   /**

@@ -16,6 +16,7 @@ import {
   RESERVED_MENTION_HANDLES,
 } from "~/ui/mention-spans";
 import { toError } from "~/shared/errors";
+import type { TaskFileEvent } from "~/schemas/task-file.schema";
 
 /**
  * @mention → `mention`-notification fan-out, shared by EVERY comment writer
@@ -524,6 +525,11 @@ export function mentionedUserIdsOf(
  * of comments. Never throws: the notification and the comment are both already
  * real, and failing to annotate one is not worth losing either.
  *
+ * Ruling 644: the event is named by its stamp AND its type. One write often
+ * stamps two entries with one instant (an agent's reply and its quality marker,
+ * a failed run's report and its failure), and the stamp alone took whichever
+ * came first in the file.
+ *
  * Ruling 457 (CS-4): the stamp is re-projected right here, like every other
  * task write. It used to be the one write nothing re-projected, so the file
  * watcher did it ~250 ms later: a second `task.updated` to every open board and
@@ -533,13 +539,13 @@ export function mentionedUserIdsOf(
 export async function stampNotifiedRecipients(
   db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string; dataRoot?: string },
-  occurredAt: string,
+  at: Pick<TaskFileEvent, "occurredAt" | "type">,
   reached: string[],
 ): Promise<string[]> {
   if (reached.length === 0) return reached;
   try {
     await updateTaskFile(ref, (parsed) => {
-      const event = parsed.timeline.find((e) => e.occurredAt === occurredAt);
+      const event = parsed.timeline.find((e) => e.occurredAt === at.occurredAt && e.type === at.type);
       if (event) event.notified = reached;
     });
     rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ref.dataRoot });

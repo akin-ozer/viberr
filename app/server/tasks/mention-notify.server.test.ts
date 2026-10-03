@@ -18,6 +18,7 @@ import {
   mentionNonDeliveryNote,
   notifyMentionedUsers,
   resolveMentionTargets,
+  stampNotifiedRecipients,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
@@ -631,6 +632,35 @@ describe("mentions stay inside the project (F33-9)", () => {
  * on the failure — and {@link COMMENT_WRITER_SITES} below fails when a writer is
  * ADDED that this table does not cover.
  */
+/**
+ * Ruling 644: one write often stamps two entries with one instant (an agent's
+ * reply and its quality marker, a failed run's report and its failure), and the
+ * recipients were recorded on whichever came first in the file.
+ */
+describe("ruling 644: the recipients land on the event that was written", () => {
+  it("stamps the comment, not the quality marker in its millisecond", async () => {
+    const store = setupTestStore(ctx);
+    const at = "2026-10-03T13:02:29.579Z";
+    const judge: FileActorRef = { kind: "agent", backend: "codex", profileId: "estimate-judge", roleHint: "Estimate Judge" };
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+      timeline: [
+        { occurredAt: at, type: "quality", actor: judge, title: "Changes requested", text: "failing", toAgent: false, evidence: null },
+        { occurredAt: at, type: "comment", actor: judge, title: "Review verdict", text: "@Arda please read", toAgent: false, evidence: null },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    await stampNotifiedRecipients(store.db, ref, { occurredAt: at, type: "comment" }, [store.users.arda.id]);
+    // CANARY: find the event by its stamp alone and the marker carries Arda.
+    const timeline = readTaskFile(ref)!.parsed.timeline;
+    expect(timeline.map((e) => [e.type, e.notified ?? []])).toEqual([
+      ["quality", []],
+      ["comment", [store.users.arda.id]],
+    ]);
+  });
+});
+
 describe("every comment writer notifies the human it @tags (NEW-4)", () => {
   const AGENT: FileActorRef = {
     kind: "agent",

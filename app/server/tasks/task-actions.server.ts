@@ -1980,7 +1980,7 @@ export async function appendComment(
     mentionedUserIds = await stampNotifiedRecipients(
       db,
       taskRef(ctx, input.projectSlug, input.taskKey),
-      event.occurredAt,
+      event,
       notifyMentionedUsers(db, {
         text,
         projectSlug: input.projectSlug,
@@ -3626,7 +3626,7 @@ export async function postAgentReplyComment(
     await stampNotifiedRecipients(
       db,
       taskRef(ctx, input.projectSlug, input.taskKey),
-      event.occurredAt,
+      event,
       notifyMentionedUsers(db, {
         text:
           prepared.status === "event" && !prepared.duplicate
@@ -4409,7 +4409,7 @@ export async function recordAgentCompletion(
     await stampNotifiedRecipients(
       db,
       taskRef(ctx, projectSlug, taskKey),
-      prepared.event.occurredAt,
+      prepared.event,
       notifyMentionedUsers(db, {
         // B-FD8b: pre-trim form, so an added @tag inside a separated fence counts.
         text: prepared.mentionSourceText,
@@ -5092,7 +5092,7 @@ export async function recordAgentCompletion(
       await stampNotifiedRecipients(
         db,
         taskRef(ctx, projectSlug, taskKey),
-        prepared.event.occurredAt,
+        prepared.event,
         notifyMentionedUsers(db, {
           // B-FD8b: the PRE-trim reply text — a handle inside a separated
           // evidence fence must still reach the tagged human's inbox.
@@ -7172,7 +7172,7 @@ export async function operatorPromptAgent(
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, input.projectSlug, input.taskKey),
-    comment.occurredAt,
+    comment,
     notifyMentionedUsers(db, {
       text: commentText,
       projectSlug: input.projectSlug,

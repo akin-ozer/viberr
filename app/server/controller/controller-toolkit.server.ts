@@ -2465,7 +2465,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_timeline_entry",
-      "Read ONE timeline entry of a task in full, addressed by the `at` stamp `get_task` prints for it. `get_task` cuts every entry at 700 characters; this is how you read the rest. Call it before you summarise an agent's report for a person, before you raise anything that turns on what a report said, and before you conclude a report did not mention something - findings are routinely past the cut, and a report you only half-read is one you cannot coordinate from. Read-only.",
+      "Read ONE timeline entry of a task in full, addressed by the `at` stamp `get_task` prints for it. `get_task` cuts every entry at 700 characters; this is how you read the rest. Call it before you summarise an agent's report for a person, before you raise anything that turns on what a report said, and before you conclude a report did not mention something - findings are routinely past the cut, and a report you only half-read is one you cannot coordinate from. Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`. Read-only.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),

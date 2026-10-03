@@ -380,8 +380,30 @@ function boardRows(deps: BoardReadContext) {
  */
 const TIMELINE_ENTRY_READ_CHARS = 40_000;
 
+/**
+ * Ruling 644: how a shared budget splits between entries. Each gets an equal
+ * part of what is left, shortest first, so an entry under its part leaves the
+ * rest to the longer ones.
+ */
+function shareBudget(lengths: readonly number[], total: number): number[] {
+  const caps = lengths.map(() => 0);
+  let left = total;
+  const order = lengths.map((len, i) => ({ len, i })).sort((a, b) => a.len - b.len);
+  order.forEach(({ len, i }, k) => {
+    caps[i] = Math.min(len, Math.floor(left / (order.length - k)));
+    left -= caps[i]!;
+  });
+  return caps;
+}
+
 /** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
- *  prints or `read_board` lists (ruling 596). */
+ *  prints or `read_board` lists (ruling 596). Ruling 644: every entry the stamp
+ *  names. One write often stamps two entries with one instant (a verdict's
+ *  report and its quality marker, a failed run's report and its failure, a
+ *  task's opening notes), and the read returned the first in the file: on
+ *  AWSC-96 the Estimate Judge asked for its own earlier verdict and got the
+ *  quality marker, so it scored the rework against a split it rebuilt from
+ *  memory. */
 export function readTimelineEntry(
   deps: BoardReadContext,
   taskKey: string,
@@ -396,8 +418,8 @@ export function readTimelineEntry(
     return `[noop] No task ${taskKey} in this project.`;
   }
   const wanted = occurredAt.trim();
-  const entry = file.parsed.timeline.find((e) => e.occurredAt === wanted);
-  if (!entry) {
+  const entries = file.parsed.timeline.filter((e) => e.occurredAt === wanted);
+  if (entries.length === 0) {
     // Ruling 246's shape: say what this reader IS and how to address it, rather
     // than implying the entry was deleted. The likeliest caller error is a
     // stamp retyped by hand or trimmed of its milliseconds.
@@ -410,19 +432,31 @@ export function readTimelineEntry(
       `\`timeline\` (or \`get_task\` prints it). The eight most recent:\n${recent.join("\n")}`
     );
   }
-  const text = entry.text;
-  const clipped = text.length > TIMELINE_ENTRY_READ_CHARS;
-  return JSON.stringify(
-    {
-      occurredAt: entry.occurredAt,
+  const caps = shareBudget(
+    entries.map((e) => e.text.length),
+    TIMELINE_ENTRY_READ_CHARS,
+  );
+  const readings = entries.map((entry, i) => {
+    const cap = caps[i]!;
+    return {
       type: entry.type,
       actor: entry.actor.kind === "human" ? (entry.actor.nameHint ?? "human") : entry.actor.kind,
       title: entry.title,
       // Reported, never hidden: a clipped entry that reads as complete is how a
-      // model states a half-read report as fact — the very failure this tool
+      // model states a half-read report as fact, the very failure this tool
       // exists to end.
-      truncated: clipped,
-      text: clipped ? text.slice(0, TIMELINE_ENTRY_READ_CHARS) : text,
+      truncated: entry.text.length > cap,
+      text: entry.text.slice(0, cap),
+    };
+  });
+  if (readings.length === 1) {
+    return JSON.stringify({ occurredAt: wanted, ...readings[0] }, null, 1);
+  }
+  return JSON.stringify(
+    {
+      occurredAt: wanted,
+      shared: `${readings.length} entries were written with this stamp; each is here, in the timeline's order.`,
+      entries: readings,
     },
     null,
     1,
