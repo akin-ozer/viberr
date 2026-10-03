@@ -283,7 +283,7 @@ function BackendSwitch({
           }}
         >
           {BACKEND_LABEL[backend]}
-          <span className="tally">{fmtCount(runs)}</span>
+          <span className="tally">· {fmtCount(runs)}</span>
         </button>
       ))}
     </div>
