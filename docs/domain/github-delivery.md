@@ -333,8 +333,9 @@ steps below, with the hold sentence on the timeline (ruling 240).
    branch, PR, revision or commits, with `defaultBranchEvidence.verified === true`,
    sets `noChanges`, mints a `kind: verified` work revision at the default-branch head
    and routes the task to the "Completed, no changes" acceptance path. A task whose
-   deliverable is not a commit (`deliveredAt` set, ruling 388) is told that no commits
-   is the right outcome and not to deliver again (ruling 391).
+   deliverable is the files saved on it (`deliveredAt` set, no work revision, ruling 388)
+   never reaches the push: delivery refuses it first, and the task page offers none
+   (ruling 647, which retired ruling 391's no-commits sentence for it).
 4. **`openTaskPr`** (`pr-open.server.ts`): reuse a cached live PR if GitHub still
    reports it open. A pull request closed WITHOUT merging is a person's decision
    (ruling 160): a cached `closed` PR whose `closure` no person has answered refuses
