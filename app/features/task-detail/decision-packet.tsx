@@ -1547,11 +1547,15 @@ export function DecisionPacket({
               aria-invalid={replyInvalid || undefined}
               aria-describedby={replyInvalid ? REPLY_ERR_ID : undefined}
               // U39-7: this box sits under every packet, and "before
-              // reopening" fitted only the closed-pull-request one.
+              // reopening" fitted only the closed-pull-request one. Ruling
+              // 643: a required answer has no example; its label already says
+              // whose answer it is, and the one example ("what it asked for,
+              // exactly as you see it") fitted only a question about a value
+              // on the person's screen.
               placeholder={
                 answerTo
                   ? needsReply
-                    ? "e.g. what it asked for, exactly as you see it"
+                    ? undefined
                     : `e.g. anything ${answerTo} should also know`
                   : "e.g. anything the operator should also know"
               }
