@@ -2477,8 +2477,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "read this task");
+        // Ruling 648: an org admin reads every knowledge base (the Controller
+        // page shows each correction whole), so its corrections read whole.
         return await readTimelineEntry(
-          { db, ctx: { dataRoot }, projectSlug: slug },
+          { db, ctx: { dataRoot }, projectSlug: slug, readerKbs: orgAdmin() ? "all" : [] },
           key,
           args.at,
         );

@@ -1409,7 +1409,14 @@ function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeM
  * file of any task in the project.
  */
 function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
-  const context = { db: grant.db, projectSlug: grant.projectSlug, taskKey: grant.taskKey, mount };
+  const context = {
+    db: grant.db,
+    projectSlug: grant.projectSlug,
+    taskKey: grant.taskKey,
+    mount,
+    // Ruling 648: what the run's knowledge server lets it read.
+    readerKbs: [...grant.knowledge.values()].flatMap((knowledge) => knowledge.kb),
+  };
   return openOwnSession(grant, server, BOARD_TOOLS, async (tool, raw) => {
     if (tool === BOARD_READ_TOOL.name) {
       const args = boardReadArgsSchema.safeParse(raw);

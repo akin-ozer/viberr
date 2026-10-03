@@ -6,8 +6,10 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
 } from "../../../test-support/test-store";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -1184,6 +1186,22 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         "# Facts\n\n- T-003: wrangler 4.138.0\n- T-013: dist/server/ (see run 12)\n",
         admin,
       );
+      // Ruling 648: an agent on the project is not given the dossier, so the
+      // correction's entry quotes none of it (ruling 568).
+      const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...project.parsed.frontmatter,
+        agents: [
+          ...project.parsed.frontmatter.agents,
+          {
+            profileId: "inventory-analyst",
+            capabilities: [],
+            extras: [],
+            definition: { kind: "specialist", name: "Inventory Analyst", role: "Intake", backends: ["claude"], model: "sonnet" },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       const built = buildAgentToolkit({
         db: store.db,
         ctx: { dataRoot: store.dataRoot },
@@ -1191,7 +1209,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         taskKey: "VIB-3",
         actorRef: AGENT_REF,
         outcomeKey: "oc_kb_propose",
-        collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: false },
+        collab: { comment: true, ask: false, verdict: false, evidence: false, githubRead: false },
         kb: [kb.dir],
       })!;
       const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
@@ -1230,6 +1248,22 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       expect(listKbCorrections(store.db, { projectSlug: store.slug })[0]).toMatchObject({
         filedBy: "Security review",
         taskKey: "VIB-3",
+      });
+      // Ruling 648: this run is given the dossier, so it reads the correction
+      // whole though the entry quotes none of it. CANARY: drop `readerKbs` from
+      // the toolkit's read_timeline_entry and this reads `notQuoted`.
+      expect(top.text).toContain("The passage is not quoted here");
+      const reading = z
+        .object({ correction: z.object({ now: z.string(), evidence: z.string() }) })
+        .parse(
+          JSON.parse(
+            textResult.parse(await client.callTool({ name: "read_timeline_entry", arguments: { occurredAt: top.occurredAt } })),
+          ),
+        );
+      expect(reading.correction).toEqual({
+        ...reading.correction,
+        now: "- T-003: wrangler 4.139.0",
+        evidence: "`npx wrangler --version` printed 4.139.0.",
       });
 
       // Ruling 581: an empty `text` deletes the passage. Live on AWSC-18 the

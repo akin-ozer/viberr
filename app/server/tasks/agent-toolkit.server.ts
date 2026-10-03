@@ -767,7 +767,8 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         async (args) => {
           try {
             const entryTask = args.taskKey?.trim() || taskKey;
-            return textResult(await readTimelineEntry({ db, ctx, projectSlug }, entryTask, args.occurredAt));
+            // Ruling 648: a correction to a knowledge base this run is given reads whole.
+            return textResult(await readTimelineEntry({ db, ctx, projectSlug, readerKbs: kb }, entryTask, args.occurredAt));
           } catch (error) {
             logger.warn("agent read_timeline_entry failed", { taskKey, err: toError(error) });
             return textResult("[error] The timeline could not be read.");

@@ -203,13 +203,21 @@ export type CorrectionReading =
  *
  * Ruling 568 holds here as on the entry: while a deployed agent is not given
  * the knowledge base, the reading names the document and the id and quotes
- * neither the passage nor the evidence that may restate it.
+ * neither the passage nor the evidence that may restate it. Ruling 648: that
+ * is for a reader the knowledge base is not given to. One given it, which
+ * reads the document anyway, reads its corrections whole: live on AWSC-97 the
+ * Calculator Builder corrected `aws-calculator-research`, which the Inventory
+ * Analyst is not given, so the Estimate Judge, given it and charged with
+ * checking that correction's re-test, read no evidence again. `readerKbs` is
+ * what the reader is given, "all" for a person's controller; undefined reads
+ * as given none.
  */
 export async function readCorrectionOfEntry(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   entryText: string,
+  readerKbs?: readonly string[] | "all",
 ): Promise<CorrectionReading | null> {
   const id = ENTRY_CORRECTION_ID_RE.exec(entryText)?.[1];
   if (!id) return null;
@@ -228,8 +236,11 @@ export async function readCorrectionOfEntry(
       ? `undone by ${c.undone.by} at ${c.undone.at}${c.undone.reason ? `: "${c.undone.reason}"` : ""}`
       : "stands",
   };
-  const leftOut = await agentsLeftOut(ctx, projectSlug, c);
-  if (leftOut.length > 0) return { ...head, notQuoted: notQuotedSentence(c.kb, leftOut) };
+  const given = readerKbs === "all" || (readerKbs?.includes(c.kb) ?? false);
+  if (!given) {
+    const leftOut = await agentsLeftOut(ctx, projectSlug, c);
+    if (leftOut.length > 0) return { ...head, notQuoted: notQuotedSentence(c.kb, leftOut) };
+  }
   return { ...head, was: c.replaced, now: c.text, evidence: c.evidence };
 }
 
