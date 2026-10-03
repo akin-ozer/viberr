@@ -901,7 +901,7 @@ async function writeOperatorComment(
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, projectSlug, taskKey),
-    event.occurredAt,
+    event,
     notifyMentionedUsers(db, {
       text,
       projectSlug,
@@ -1010,6 +1010,16 @@ async function addRecommendation(
   );
   let wasNew = false;
   const reasoningAt = new Date().toISOString();
+  // Ruling 644: built once, so the recipients are stamped on this event.
+  const reasoningComment: TaskFileEvent = {
+    occurredAt: reasoningAt,
+    type: "comment",
+    actor: { kind: "operator" },
+    title: null,
+    text: commentText,
+    toAgent: false,
+    evidence: null,
+  };
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     const existing = parsed.frontmatter.recommendations.find(
       (r) =>
@@ -1058,15 +1068,7 @@ async function addRecommendation(
       wasNew = true;
     }
     parsed.frontmatter.waiting = "human";
-    parsed.timeline.unshift({
-      occurredAt: reasoningAt,
-      type: "comment",
-      actor: { kind: "operator" },
-      title: null,
-      text: commentText,
-      toAgent: false,
-      evidence: null,
-    });
+    parsed.timeline.unshift(reasoningComment);
   });
   reprojectTask(db, ctx, projectSlug, taskKey);
   recordAudit(db, {
@@ -1083,7 +1085,7 @@ async function addRecommendation(
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, projectSlug, taskKey),
-    reasoningAt,
+    reasoningComment,
     notifyMentionedUsers(db, {
       text: commentText,
       projectSlug,
@@ -3647,7 +3649,11 @@ export function operatorSnapshot(
       // report itself. Ruling 440: bounded by the one cut such an operator
       // gets everywhere, and saying so when that cut lands.
       if (toolless) {
-        const report = file.parsed.timeline.find((e) => e.occurredAt === found.reportedAt);
+        // Ruling 644: the report is the comment at that stamp; the failure is
+        // often written in the same millisecond.
+        const report = file.parsed.timeline.find(
+          (e) => e.occurredAt === found.reportedAt && e.type === "comment",
+        );
         if (report) {
           const cut = report.text.length > AGENT_REPORT_CAP_TOOLLESS;
           found.text = cut

@@ -14,6 +14,7 @@ import {
   normalizeEvidenceRows,
   type EvidenceStatus,
   type FileActorRef,
+  type TaskFileEvent,
 } from "~/schemas/task-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
@@ -212,16 +213,18 @@ export async function postAgentComment(
   );
   const text = note ? `${ambiguity}\n\n${note}` : ambiguity;
   const occurredAt = new Date().toISOString();
+  // Ruling 644: built once, so the recipients are stamped on this event.
+  const comment: TaskFileEvent = {
+    occurredAt,
+    type: "comment",
+    actor: input.actorRef,
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt,
-      type: "comment",
-      actor: input.actorRef,
-      title: null,
-      text,
-      toAgent: false,
-      evidence: null,
-    });
+    parsed.timeline.unshift(comment);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // P11-23: attribute the audit row to the AGENT that commented, not the
@@ -244,7 +247,7 @@ export async function postAgentComment(
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, input.projectSlug, input.taskKey),
-    occurredAt,
+    comment,
     notifyMentionedUsers(db, {
       text,
       projectSlug: input.projectSlug,

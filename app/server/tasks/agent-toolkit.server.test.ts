@@ -752,6 +752,46 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(out.content[0]!.text).toContain(JSON.stringify(answer));
   });
 
+  /**
+   * Ruling 644: a stamp names every entry written with it. A verdict's quality
+   * marker and its report comment land in one millisecond, and the read took
+   * the first in the file: on AWSC-96 the Estimate Judge asked for its own
+   * earlier verdict, got the marker, and rebuilt the score split from memory.
+   * CANARY: `find` instead of `filter` and the report never comes back.
+   */
+  it("ruling 644: read_timeline_entry returns every entry a stamp names", async () => {
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_twins");
+    const store = lastStore;
+    const at = "2026-10-03T13:02:29.579Z";
+    const judge = { kind: "agent" as const, backend: "codex" as const, profileId: "estimate-judge", roleHint: "Estimate Judge" };
+    const report = "## Verdict: request changes\n\n| Section | Score |\n|---|---:|\n| Questions | 3/10 |";
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
+      timeline: [
+        { occurredAt: at, type: "quality", actor: judge, title: "Changes requested", text: "**Validation:** failing.", toAgent: false, evidence: null },
+        { occurredAt: at, type: "comment", actor: judge, title: "Review verdict", text: report, toAgent: false, evidence: null },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: every tool in this toolkit answers `{ content: [{ type: "text", text }] }`.
+    const out = (await tools.read_timeline_entry!.handler({ occurredAt: at } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    const read = z
+      .object({
+        occurredAt: z.string(),
+        shared: z.string(),
+        entries: z.array(z.object({ type: z.string(), title: z.string().nullable(), truncated: z.boolean(), text: z.string() })),
+      })
+      .parse(JSON.parse(out.content[0]!.text));
+    expect(read.occurredAt).toBe(at);
+    expect(read.entries.map((e) => [e.type, e.title, e.truncated])).toEqual([
+      ["quality", "Changes requested", false],
+      ["comment", "Review verdict", false],
+    ]);
+    expect(read.entries[1]!.text).toBe(report);
+  });
+
   it("ruling 594: read_task_attachment reads one file of this task or another, and read_board lists a task's files", async () => {
     // Live on AWSC-33 the Estimate Judge was told to read two registers on
     // other tasks "where they are", which its workspace contract puts

@@ -269,7 +269,7 @@ export async function relayToTask(
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, req.projectSlug, to),
-    occurredAt,
+    comment,
     notifyMentionedUsers(db, {
       text,
       projectSlug: req.projectSlug,
@@ -436,7 +436,7 @@ export async function takeFromTask(
     await stampNotifiedRecipients(
       db,
       taskRef(ctx, req.projectSlug, to),
-      comment.occurredAt,
+      comment,
       notifyMentionedUsers(db, {
         text: why,
         projectSlug: req.projectSlug,
