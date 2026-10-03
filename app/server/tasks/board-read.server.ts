@@ -55,6 +55,9 @@ export interface BoardReadContext {
   db: DatabaseSync;
   ctx: TaskMutationContext;
   projectSlug: string;
+  /** Ruling 648: the knowledge bases the reader is given, "all" for a
+   *  person's controller; a correction to one of them reads whole. */
+  readerKbs?: readonly string[] | "all";
 }
 
 /**
@@ -471,7 +474,13 @@ export async function readTimelineEntry(
         text: entry.text.slice(0, cap),
       };
       if (entry.type === "kb_correction") {
-        const correction = await readCorrectionOfEntry(deps.db, deps.ctx, deps.projectSlug, entry.text);
+        const correction = await readCorrectionOfEntry(
+          deps.db,
+          deps.ctx,
+          deps.projectSlug,
+          entry.text,
+          deps.readerKbs,
+        );
         if (correction) reading.correction = correction;
       }
       return reading;

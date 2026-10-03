@@ -4630,6 +4630,16 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(whole).toContain("is not given to Rev");
     expect(whole).not.toContain("5,614.00");
     expect(whole).not.toContain("384 MBps");
+    // Ruling 648: a reader given the knowledge base reads it whole, which it
+    // can read in the document anyway. CANARY: ignore `readerKbs` and the
+    // reader who holds the answer keys is told they are not quoted.
+    const given = await readTimelineEntry(
+      { db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug, readerKbs: [keys] },
+      "VIB-1",
+      top.occurredAt,
+    );
+    expect(given).toContain("5,614.00");
+    expect(given).toContain("384 MBps");
     const undone = await undoKbCorrectionOnTask(
       store.db,
       { dataRoot: store.dataRoot },

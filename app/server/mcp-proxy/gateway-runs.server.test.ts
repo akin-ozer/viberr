@@ -8,6 +8,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -23,6 +24,7 @@ import {
 import { settle, waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
 import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -296,6 +298,22 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
 
 describe("ruling 585: the gateway answers a Codex run's knowledge server itself", () => {
   it("reads and corrects the knowledge bases the run holds, a private one included, and nothing else, while the run lives", async () => {
+    // An agent on the project is not given `answer-keys`, as AWSC-97's
+    // Inventory Analyst is not given the calculator research.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "inventory-analyst",
+          capabilities: [],
+          extras: [],
+          definition: { kind: "specialist", name: "Inventory Analyst", role: "Intake", backends: ["codex"], model: defaultModelFor("codex") },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const dir = path.join(store.dataRoot, "kb", "answer-keys");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "sample-01.md"), "# Sample 01\n\nThe expected total is 1234.56.\n");
@@ -306,6 +324,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     expect(resolveKnowledgeMcp({ backend: "claude", kb: ["answer-keys"], dataRoot: store.dataRoot, agent })).toBeNull();
     expect(resolveKnowledgeMcp({ backend: "codex", kb: [], dataRoot: store.dataRoot, agent })).toBeNull();
     const mount = resolveKnowledgeMcp({ backend: "codex", kb: ["answer-keys"], dataRoot: store.dataRoot, agent });
+    const boardMount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
     queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "scoring" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug,
@@ -316,7 +335,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
       model: defaultModelFor("codex"),
       prompt: "go",
       dataRoot: store.dataRoot,
-      mcpServers: { viberr_knowledge: mount! },
+      mcpServers: { viberr_knowledge: mount!, viberr_board: boardMount! },
       agentProfileId: "estimate-judge",
       credentialUserId: store.users.arda.id,
     });
@@ -353,6 +372,24 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     const [entry] = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline;
     expect(entry).toMatchObject({ type: "kb_correction", actor: { kind: "agent", backend: "codex", profileId: "estimate-judge" } });
     await client.close();
+
+    // Ruling 648: the run is given `answer-keys`, so its board server reads
+    // the correction whole, though the entry quotes none of it for the agents
+    // that are not (ruling 568). Live on AWSC-97 the Estimate Judge, given the
+    // calculator research, could not read the evidence of a correction to it.
+    // CANARY: drop `readerKbs` from the board session and this reads
+    // `notQuoted`.
+    expect(entry!.text).toContain("The passage is not quoted here");
+    const boardConfig = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+    const board = new Client({ name: "codex-cli", version: "1.0.0" });
+    await board.connect(new StreamableHTTPClientTransport(new URL(boardConfig.url), { requestInit: { headers: boardConfig.headers } }));
+    const read = await board.callTool({ name: "read_timeline_entry", arguments: { occurredAt: entry!.occurredAt } });
+    const reading = z
+      .object({ correction: z.object({ now: z.string(), evidence: z.string() }) })
+      .parse(JSON.parse(z.array(z.object({ text: z.string() })).parse(read.content)[0]!.text));
+    expect(reading.correction.now).toContain("The expected total is 1250.00.");
+    expect(reading.correction.evidence).toBe("The calculator's own total for the saved estimate.");
+    await board.close();
 
     await interrupt(runId);
     await settle();
