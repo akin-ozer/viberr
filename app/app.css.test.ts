@@ -323,6 +323,28 @@ describe("app.css select treatment (P16-UI-05)", () => {
     expect(variant.size).toBeGreaterThan(0);
     expect([variant.has("border"), variant.has("background")]).toEqual([false, false]);
   });
+
+  it("ruling 640: under base-select a select is the app's dropdown, its glyphs inked by tokens", () => {
+    // The arrow stayed native because a drawn one meant a colour shipped in an
+    // image. CANARY: draw the chevron as a background image with a stroke colour
+    // and it keeps one ink in both themes.
+    const layer = RULES.filter((r) => r.at.includes("@supports (appearance: base-select)"));
+    for (const [glyph, ink] of [
+      ["select::picker-icon", "var(--faint)"],
+      ["select option::checkmark", "var(--blue)"],
+    ] as const) {
+      const decls = requiredDecls(layer, glyph);
+      expect(decls.get("background-color"), glyph).toBe(ink);
+      expect(decls.get("mask"), glyph).toMatch(/^url\("data:image\/svg\+xml,/);
+      expect(decls.has("background-image"), glyph).toBe(false);
+    }
+    // The list is a menu like the stage menu's.
+    const picker = requiredDecls(layer, "select::picker(select)");
+    const menu = requiredDecls(plain, ".stage-menu-pop");
+    for (const prop of ["background", "border-radius", "box-shadow"]) {
+      expect(picker.get(prop), prop).toBe(menu.get(prop));
+    }
+  });
 });
 
 describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
