@@ -1025,7 +1025,11 @@ export function TaskDetailPage({
           {...(onForceAccept
             ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
             : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver, onRunGates } : {})}
+          {...(canDeliver && !taskClosed ? { onRunGates } : {})}
+          {
+            // Ruling 647: a delivery that is files has no branch to push.
+            ...(canDeliver && !taskClosed && !filesDeliveredAt ? { onDeliver } : {})
+          }
           delivering={deliverBusy}
           runIntent={runIntent}
           runningGates={gatesBusy}

@@ -8533,6 +8533,19 @@ export async function performDelivery(
         await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
         return { status: "failed", message };
       }
+      // Ruling 647: a task delivered as the files its deliverer saved on it
+      // (rulings 388, 531) has no branch or pull request (rulings 546, 550).
+      // The task page offered this push on every delivered task of the AWS
+      // estimates board, whose repository the Calculator Builder's workspace
+      // checks out, so one press would have opened a review pull request for
+      // a benchmark estimate.
+      if (heldFile && deliveredAsFiles(heldFile.parsed.frontmatter)) {
+        const message =
+          `${taskKey} is delivered as the files saved on it, so there is no branch or pull request to deliver. ` +
+          "Its review reads those files; Viberr pushes a branch and opens a pull request only for work committed to one.";
+        await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
+        return { status: "failed", message };
+      }
     }
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
@@ -8835,25 +8848,13 @@ export async function performDelivery(
         verifiedNoChange && preFm && !activeWorkRevision(preFm.workRevision)
           ? await resolveNoChangeBaseRevision(db, ctx, projectSlug, taskKey)
           : null;
-      // Ruling 391 (F39-18): a task whose deliverable is NOT a commit has no
-      // commits by design, and telling its operator "if the agent produced
-      // work, it never reached the task branch. Re-run the delivering agent"
-      // is advice that would run a finished research task again and still find
-      // nothing. Live on ax-clone AX-12: the report was written, attached, and
-      // sitting in `deliveredAt`, which ruling 388 had just taught the file to
-      // record — and this sentence said the work was missing.
-      const deliveredFiles = preFm?.deliveredAt ?? null;
+      // Ruling 391's sentence for a task whose deliverable is files is gone with
+      // the push it followed: ruling 647 refuses that task before the push.
       const message =
-        push.status === "no_commits" && deliveredFiles
-          ? `${taskKey} carries no commits ahead of the default branch, and it is not supposed ` +
-            `to: its deliverable is the files a run saved (last on ${deliveredFiles}), not a ` +
-            `diff. Nothing was pushed and no PR was opened, which is the right outcome. Do not ` +
-            `deliver this task again; the reviewers judge what it produced, and it is accepted ` +
-            `from the review boundary like any other task.`
-          : push.status === "no_commits"
-            ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
-              `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
-              `the task branch. Re-run the delivering agent, then deliver again.`
+        push.status === "no_commits"
+          ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
+            `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
+            `the task branch. Re-run the delivering agent, then deliver again.`
           : verifiedNoChange
             ? `${taskKey} has never produced a branch, a commit or a pull request, and the server ` +
               `inspected its workspace before recording this: ${push.reason}. The task is recorded as ` +

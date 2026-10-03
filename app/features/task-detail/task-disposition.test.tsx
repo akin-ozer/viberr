@@ -146,6 +146,8 @@ function renderPage(props: {
   entry?: string;
   /** Ruling 521: the completion packet as the loader read it. */
   completion?: CompletionView | null;
+  /** Ruling 550: the task is delivered as the files saved on it. */
+  filesDeliveredAt?: string | null;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -182,6 +184,7 @@ function renderPage(props: {
             baseBehindBy={props.baseBehindBy ?? null}
             changesUrl={props.changesUrl ?? null}
             completion={props.completion ?? null}
+            filesDeliveredAt={props.filesDeliveredAt ?? null}
           />
         </ToastProvider>
       ),
@@ -1434,6 +1437,13 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     fireEvent.click(btn!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("deliver-review");
+  });
+
+  it("ruling 647: offers no delivery for a task delivered as the files saved on it", () => {
+    // CANARY: hand the panel `onDeliver` whatever the delivery is, and every
+    // estimate on the AWS board offers to push a branch and open a PR again.
+    const { container } = renderPage({ canDeliver: true, filesDeliveredAt: "2026-10-03T19:15:48.581Z" });
+    expect(findButton(container, "Deliver branch & open PR")).toBeUndefined();
   });
 
   it("ruling 134(c): offers the push control when the open PR does not carry the delivered revision, and it submits deliver-review", async () => {

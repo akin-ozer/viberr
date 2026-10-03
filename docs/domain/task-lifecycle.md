@@ -786,7 +786,9 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
 Delivery (push the task branch, open the review PR) is an operator decision executed
 by the server (ruling 21); humans trigger it with the `deliver-review` intent
 (`run-agents` or the owner). `performDelivery` first refuses a task that waits on other
-work, with the hold sentence on the timeline (ruling 240). It then makes sure the
+work, with the hold sentence on the timeline (ruling 240), and a task delivered as the files
+saved on it, which has no branch or pull request (ruling 647; the task page offers no
+delivery for one). It then makes sure the
 repository's default branch exists (ruling 128: an empty repository is bootstrapped,
 never misreported as unreachable), pushes the workspace branch (auto-committing a dirty
 tree; refusing a non-fast-forward as a `push_conflict` whose remedy names what is on the
@@ -815,8 +817,8 @@ description is rewritten to describe the new revision unless a person edited it 
 GitHub (ruling 474); nobody is ever asked to push by hand. The task page offers the same door as "Push `<sha>` to PR #N"
 whenever the open PR does not carry the delivered revision (ruling 134(c)), and shows a
 disabled control naming the refusal for a diverged remote. A task whose deliverable is
-not a commit (`deliveredAt` set, no commits) is told that no commits is the right outcome
-and not to deliver again (ruling 391). Entering the review stage with no PR writes a
+the files saved on it is refused before the push and offered no delivery (ruling 647,
+which retired ruling 391's no-commits sentence for it). Entering the review stage with no PR writes a
 typed event, never silence (§5). Ruling 163: a delivery that moved the PR's head on a
 task standing PAST the stage where its reviewers can run, with a revision that changed
 or failed after the last verdict, records the transition back to that stage in the same

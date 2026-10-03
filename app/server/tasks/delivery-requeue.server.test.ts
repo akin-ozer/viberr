@@ -341,6 +341,44 @@ describe("ruling 240 — a held task refuses delivery", () => {
   });
 });
 
+/**
+ * Ruling 647: a task delivered as the files its deliverer saved on it has no
+ * branch or pull request to deliver (rulings 546, 550). Every delivered task of
+ * the AWS estimates board offered "Deliver branch & open PR", and a press would
+ * have pushed the Calculator Builder's workspace and opened a review pull
+ * request for a benchmark estimate.
+ */
+describe("ruling 647: a task delivered as files has no branch to deliver", () => {
+  it("refuses before anything is pushed, and says why on the task", async () => {
+    deployDeliveryOperator(store, "full");
+    seedTask({ deliveredAt: "2026-10-03T19:15:48.581Z" });
+    const pushesBefore = pushMock.mock.calls.length;
+
+    const outcome = await performDelivery(
+      store.db,
+      { dataRoot: store.dataRoot, deps: DEPS },
+      store.slug,
+      "VIB-1",
+      OPERATOR_TASK_ACTOR,
+    );
+
+    // CANARY: delete the files check at the top of `performDelivery` and this
+    // reads "delivered".
+    expect(outcome.status).toBe("failed");
+    const failed = outcome.status === "failed" ? outcome : null;
+    expect(failed?.message).toContain("VIB-1 is delivered as the files saved on it");
+    // Ruling 391's point, held here now: a finished files task is never told
+    // its work went missing or to run its agent again.
+    expect(failed?.message).not.toContain("Re-run");
+    expect(pushMock.mock.calls.length).toBe(pushesBefore);
+    expect(openTaskPrMock).not.toHaveBeenCalled();
+    const events = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline.map((e) => e.text)
+      .join("\n");
+    expect(events).toContain("no branch or pull request to deliver");
+  });
+});
+
 describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   const FAILURE_PACKET: TaskPacket = {
     type: "blocked",
