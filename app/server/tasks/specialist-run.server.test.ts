@@ -2531,6 +2531,20 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("open a pull request");
   });
 
+  it("ruling 649: every run reads the people rule, one the operator dispatched included", async () => {
+    // Live on AWSC-43 a Cloud Solutions Architect the operator dispatched
+    // wrote "His existing answers still stand" about the board's owner: the
+    // sentence was only in the prompt of a run a person asked directly.
+    // CANARY: put it back under `directiveFrom` alone and this run never reads it.
+    const { PEOPLE_RULE } = await import("~/server/runtimes/people-rule.server");
+    const prompt = buildAnalyzePrompt({
+      ...base,
+      delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
+      directive: "Map the estate's services.",
+    });
+    expect(prompt).toContain(`## People\n${PEOPLE_RULE}`);
+  });
+
   it("F39-59: a cloned workspace says fetching is the server's, before an agent finds out by failing", () => {
     // Live on AX-29: `git fetch origin` failed with "could not read a
     // username" and the run was spent reporting it. CANARY: drop the sentence.

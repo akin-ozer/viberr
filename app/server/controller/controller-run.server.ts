@@ -105,6 +105,7 @@ import { HUMANIZER_PROMPT_SECTION } from "~/server/runtimes/humanizer.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { normalizeTimeZone } from "~/shared/dates/time-zone";
 import { toError } from "~/shared/errors";
+import { PEOPLE_RULE } from "~/server/runtimes/people-rule.server";
 import {
   DROPPED_AFTER_QUEUED_START,
   DROPPED_AFTER_START,
@@ -1591,6 +1592,8 @@ export function buildControllerSystemPrompt(
       "instructions list its tools. Use them to answer how this instance and its runs are really " +
       "doing instead of guessing.\n" +
       "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.\n" +
+      // Ruling 649: the goals and comments you write name people too.
+      `${PEOPLE_RULE}\n` +
       // Ruling 312: two numbering systems, one word. The note is shared with
       // the operator, which reads both namespaces at once.
       RULING_NAMESPACE_NOTE +
