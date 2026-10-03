@@ -200,11 +200,16 @@ export async function restoreCutEvidenceResults(
         ref,
         (parsed) => {
           for (const fix of restorations) {
-            const event = parsed.timeline.find((e) => e.occurredAt === fix.occurredAt);
-            const row = event?.evidence?.[fix.index];
             // Re-read under the lock: only the row as it was measured changes.
-            if (!event?.evidence || !row || row.label !== fix.label || row.result !== fix.cut) continue;
-            event.evidence[fix.index] = { ...row, result: fix.whole };
+            // A completion writes the agent's reply and its outcome in the
+            // same millisecond, so the instant alone names two events (live:
+            // 121 of the first boot's 122 unrestored rows); the row says which.
+            const event = parsed.timeline.find((e) => {
+              const row = e.occurredAt === fix.occurredAt ? e.evidence?.[fix.index] : undefined;
+              return row?.label === fix.label && row.result === fix.cut;
+            });
+            if (!event?.evidence) continue;
+            event.evidence[fix.index] = { ...event.evidence[fix.index]!, result: fix.whole };
             slot.rows += 1;
           }
         },
