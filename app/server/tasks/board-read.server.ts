@@ -17,6 +17,7 @@ import { keptDeliveryMiss, listKeptDeliveries, type KeptDelivery } from "~/serve
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { currentCompletionPacket } from "./completion-packet.server";
+import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-actions.server";
 import type { TaskMutationContext } from "./task-actions.server";
 
 /**
@@ -396,6 +397,17 @@ function shareBudget(lengths: readonly number[], total: number): number[] {
   return caps;
 }
 
+/** One entry as `read_timeline_entry` returns it. */
+interface TimelineEntryReading {
+  type: string;
+  actor: string;
+  title: string | null;
+  truncated: boolean;
+  text: string;
+  /** Ruling 645: a `kb_correction` entry's correction, whole from its record. */
+  correction?: CorrectionReading;
+}
+
 /** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
  *  prints or `read_board` lists (ruling 596). Ruling 644: every entry the stamp
  *  names. One write often stamps two entries with one instant (a verdict's
@@ -403,12 +415,19 @@ function shareBudget(lengths: readonly number[], total: number): number[] {
  *  task's opening notes), and the read returned the first in the file: on
  *  AWSC-96 the Estimate Judge asked for its own earlier verdict and got the
  *  quality marker, so it scored the rework against a split it rebuilt from
- *  memory. */
-export function readTimelineEntry(
+ *  memory.
+ *
+ *  Ruling 645: entries that share a stamp come back in the order they were
+ *  written. The file holds them newest first, and "in the timeline's order"
+ *  read as first written first: on AWSC-97 the Estimate Judge read an agent's
+ *  question as sent before the report that saved its ledger, which was written
+ *  first, and marked the run down for it. A knowledge-base correction's entry
+ *  comes back with the correction whole ({@link readCorrectionOfEntry}). */
+export async function readTimelineEntry(
   deps: BoardReadContext,
   taskKey: string,
   occurredAt: string,
-): string {
+): Promise<string> {
   const file = readTaskFile({
     projectSlug: deps.projectSlug,
     taskKey,
@@ -418,7 +437,9 @@ export function readTimelineEntry(
     return `[noop] No task ${taskKey} in this project.`;
   }
   const wanted = occurredAt.trim();
-  const entries = file.parsed.timeline.filter((e) => e.occurredAt === wanted);
+  // Every writer puts its entry at the head of the file, so the reverse of
+  // the file's order is the order they were written.
+  const entries = file.parsed.timeline.filter((e) => e.occurredAt === wanted).reverse();
   if (entries.length === 0) {
     // Ruling 246's shape: say what this reader IS and how to address it, rather
     // than implying the entry was deleted. The likeliest caller error is a
@@ -436,26 +457,33 @@ export function readTimelineEntry(
     entries.map((e) => e.text.length),
     TIMELINE_ENTRY_READ_CHARS,
   );
-  const readings = entries.map((entry, i) => {
-    const cap = caps[i]!;
-    return {
-      type: entry.type,
-      actor: entry.actor.kind === "human" ? (entry.actor.nameHint ?? "human") : entry.actor.kind,
-      title: entry.title,
-      // Reported, never hidden: a clipped entry that reads as complete is how a
-      // model states a half-read report as fact, the very failure this tool
-      // exists to end.
-      truncated: entry.text.length > cap,
-      text: entry.text.slice(0, cap),
-    };
-  });
+  const readings = await Promise.all(
+    entries.map(async (entry, i) => {
+      const cap = caps[i]!;
+      const reading: TimelineEntryReading = {
+        type: entry.type,
+        actor: entry.actor.kind === "human" ? (entry.actor.nameHint ?? "human") : entry.actor.kind,
+        title: entry.title,
+        // Reported, never hidden: a clipped entry that reads as complete is how a
+        // model states a half-read report as fact, the very failure this tool
+        // exists to end.
+        truncated: entry.text.length > cap,
+        text: entry.text.slice(0, cap),
+      };
+      if (entry.type === "kb_correction") {
+        const correction = await readCorrectionOfEntry(deps.db, deps.ctx, deps.projectSlug, entry.text);
+        if (correction) reading.correction = correction;
+      }
+      return reading;
+    }),
+  );
   if (readings.length === 1) {
     return JSON.stringify({ occurredAt: wanted, ...readings[0] }, null, 1);
   }
   return JSON.stringify(
     {
       occurredAt: wanted,
-      shared: `${readings.length} entries were written with this stamp; each is here, in the timeline's order.`,
+      shared: `${readings.length} entries were written with this stamp. They are listed in the order they were written: the first was written first.`,
       entries: readings,
     },
     null,

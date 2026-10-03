@@ -764,11 +764,10 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           occurredAt: z.string().describe(READ_TIMELINE_ENTRY_AT_DESCRIPTION),
           taskKey: z.string().optional().describe(READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION),
         },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
             const entryTask = args.taskKey?.trim() || taskKey;
-            return textResult(readTimelineEntry({ db, ctx, projectSlug }, entryTask, args.occurredAt));
+            return textResult(await readTimelineEntry({ db, ctx, projectSlug }, entryTask, args.occurredAt));
           } catch (error) {
             logger.warn("agent read_timeline_entry failed", { taskKey, err: toError(error) });
             return textResult("[error] The timeline could not be read.");

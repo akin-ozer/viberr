@@ -8,6 +8,7 @@ import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import { updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  listKbCorrections,
   mergeKbCorrection,
   undoKbCorrection,
   type KbCorrection,
@@ -27,8 +28,9 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * it. The owner, 2026-09-26: "proposal spam is exhausting … No human can
  * approve all of these while inspecting them thoroughly." A correction is now
  * written as it is made. The task records it in one short entry, what the
- * passage was and what it is now, and nobody is notified: nothing is owed.
- * The project's Controller page lists the corrections, with Undo.
+ * passage was, what it is now and what proves it (ruling 645), and nobody is
+ * notified: nothing is owed. The project's Controller page lists the
+ * corrections, with Undo.
  */
 
 export const RULINGS_CORRECTED_TITLE = "Rulings corrected";
@@ -146,8 +148,9 @@ function notQuotedSentence(kb: string, leftOut: readonly string[]): string {
   );
 }
 
-/** The task's entry for a correction: where, its id, what the passage was and
- *  what it is now. The evidence stays on the record the Controller page reads.
+/** The task's entry for a correction: where, its id, what the passage was,
+ *  what it is now, and what proves it, each clipped to a line;
+ *  `read_timeline_entry` reads them whole ({@link readCorrectionOfEntry}).
  *  Ruling 568: with agents the knowledge base is not given to, only where and
  *  the id. */
 export function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
@@ -155,11 +158,79 @@ export function correctionEventText(c: KbCorrection, leftOut: readonly string[] 
   if (leftOut.length > 0) {
     return `${c.replaced === null ? "Added to" : "Corrected"} ${where} as \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`;
   }
+  // Ruling 645: a correction without its proof on the task reads as a claim
+  // nobody proved.
+  const evidence = `- **Evidence:** ${clipLine(c.evidence, 280)}`;
   return c.replaced === null
-    ? `Added to ${where} as \`${c.id}\`:\n\n- **Added:** ${clipLine(c.text, 280)}`
+    ? `Added to ${where} as \`${c.id}\`:\n\n- **Added:** ${clipLine(c.text, 280)}\n${evidence}`
     : `Corrected ${where} as \`${c.id}\`:\n\n` +
         `- **Was:** ~~${clipLine(c.replaced, 160)}~~\n` +
-        `- **Now:** ${clipLine(c.text, 280)}`;
+        `- **Now:** ${clipLine(c.text, 280)}\n` +
+        evidence;
+}
+
+/** The correction an entry {@link correctionEventText} or an undo wrote names. */
+const ENTRY_CORRECTION_ID_RE = /`(kc-[0-9a-f]{10})`/;
+
+/** A correction as `read_timeline_entry` hands it to whoever reads its entry. */
+export type CorrectionReading =
+  | {
+      id: string;
+      where: string;
+      filedBy: string;
+      /** "stands", or who undid it, when, and why. */
+      standing: string;
+      /** The passage it replaced, whole; null when it added text at the end. */
+      was: string | null;
+      /** The text it wrote, whole. */
+      now: string;
+      evidence: string;
+    }
+  | { id: string; where: string; filedBy: string; standing: string; notQuoted: string }
+  | { id: string; gone: string };
+
+/**
+ * Ruling 645: the correction a `kb_correction` entry names, whole, from its
+ * record; null for an entry that names none.
+ *
+ * The entry clips each side to a line and, before this ruling, left the
+ * evidence out, so no agent could read what proved a correction: the
+ * Controller page, which shows it whole, is a person's. Live on AWSC-97 the
+ * Estimate Judge, whose board requires a correction that narrows a VERIFIED
+ * entry to cite its re-test, read both of the Cloud Solutions Architect's
+ * corrections, found no citation, and asked a person to read them. Both
+ * carried their evidence, the AWS guide that proved them, on the record.
+ *
+ * Ruling 568 holds here as on the entry: while a deployed agent is not given
+ * the knowledge base, the reading names the document and the id and quotes
+ * neither the passage nor the evidence that may restate it.
+ */
+export async function readCorrectionOfEntry(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  entryText: string,
+): Promise<CorrectionReading | null> {
+  const id = ENTRY_CORRECTION_ID_RE.exec(entryText)?.[1];
+  if (!id) return null;
+  const c = listKbCorrections(db, { id, projectSlug })[0];
+  if (!c) {
+    return {
+      id,
+      gone: "Its record is no longer kept (audit retention), so the entry's clipped lines are all there is.",
+    };
+  }
+  const head = {
+    id,
+    where: `${c.kb}/${c.doc}`,
+    filedBy: c.filedBy,
+    standing: c.undone
+      ? `undone by ${c.undone.by} at ${c.undone.at}${c.undone.reason ? `: "${c.undone.reason}"` : ""}`
+      : "stands",
+  };
+  const leftOut = await agentsLeftOut(ctx, projectSlug, c);
+  if (leftOut.length > 0) return { ...head, notQuoted: notQuotedSentence(c.kb, leftOut) };
+  return { ...head, was: c.replaced, now: c.text, evidence: c.evidence };
 }
 
 /**

@@ -38,7 +38,7 @@ export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Om
 
 /** Ruling 563: what `read_timeline_entry` says it does, on either backend. */
 export const READ_TIMELINE_ENTRY_DESCRIPTION =
-  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline` (ruling 596). Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`. Read-only.";
+  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline` (ruling 596). Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.";
 
 export const READ_TIMELINE_ENTRY_AT_DESCRIPTION =
   "The entry's stamp, exactly as your prompt or `read_board`'s `timeline` prints it (ISO, to the millisecond).";
@@ -171,7 +171,7 @@ export async function timelineEntryResult(
   try {
     const { readTimelineEntry } = await import("~/server/tasks/board-read.server");
     const taskKey = args.taskKey?.trim() || input.taskKey;
-    return textResult(readTimelineEntry(readContext(input), taskKey, args.occurredAt));
+    return textResult(await readTimelineEntry(readContext(input), taskKey, args.occurredAt));
   } catch (error) {
     logger.warn("gateway read_timeline_entry failed", { taskKey: input.taskKey, err: toError(error) });
     return textResult("[error] The timeline could not be read.", true);
