@@ -294,15 +294,7 @@ export function ControllerAdminPanel({
   // The controller always runs on Claude (controller-run resolves
   // `resolveRunModel("claude", …)`), so the catalog backend is fixed — no
   // backend picker, no cross-backend model incoherence to guard against.
-  const {
-    catalog,
-    catalogLoading,
-    catalogFailed,
-    loadCatalog,
-    selectedModel,
-    showEffort,
-    effortOptions,
-  } = useModelCatalog("claude", model, setModel, effort, setEffort);
+  const modelCatalog = useModelCatalog("claude", model, setModel, effort, setEffort);
 
   const toggle = (
     set: Set<string>,
@@ -321,7 +313,7 @@ export function ControllerAdminPanel({
       model,
       // A model without effort tiers submits none — the same rule the profile
       // editor's payload applies.
-      effort: showEffort ? effort : "",
+      effort: modelCatalog.showEffort ? effort : "",
       // Ruling 108: a locked section posts BLANK, which the server reads as
       // "keep the stored value". This is what makes a model/effort-only save
       // succeed under a lock, and it means a stale grant/doctrine copy the
@@ -431,13 +423,7 @@ export function ControllerAdminPanel({
         setModel={setModel}
         effort={effort}
         setEffort={setEffort}
-        catalog={catalog}
-        catalogLoading={catalogLoading}
-        catalogFailed={catalogFailed}
-        onRetryCatalog={loadCatalog}
-        selectedModel={selectedModel}
-        showEffort={showEffort}
-        effortOptions={effortOptions}
+        {...modelCatalog}
       />
       <div className="field">
         <span className="flabel">

@@ -147,7 +147,9 @@ export function effortLabel(id: string): string {
 export interface ModelCatalogState {
   catalog: ModelCatalog | null;
   catalogLoading: boolean;
+  /** D5: the model-catalog load settled with no data — a real fetch failure. */
   catalogFailed: boolean;
+  /** D5: re-fire the model-catalog load. */
   loadCatalog: () => void;
   selectedModel: CatalogModel | null;
   showEffort: boolean;
@@ -621,26 +623,17 @@ export function ModelEffortFields({
   catalog,
   catalogLoading,
   catalogFailed,
-  onRetryCatalog,
+  loadCatalog,
   selectedModel,
   showEffort,
   effortOptions,
-}: {
+}: ModelCatalogState & {
   uid: string;
   backend: "codex" | "claude" | "";
   model: string;
   setModel: (v: string) => void;
   effort: string;
   setEffort: (v: string) => void;
-  catalog: ModelCatalog | null;
-  catalogLoading: boolean;
-  /** D5: the model-catalog load settled with no data — a real fetch failure. */
-  catalogFailed: boolean;
-  /** D5: re-fire the model-catalog load. */
-  onRetryCatalog: () => void;
-  selectedModel: CatalogModel | null;
-  showEffort: boolean;
-  effortOptions: string[];
 }) {
   return (
     <div className="field-row">
@@ -661,7 +654,7 @@ export function ModelEffortFields({
             <button
               type="button"
               className="btn ghost xs"
-              onClick={onRetryCatalog}
+              onClick={loadCatalog}
             >
               Retry
             </button>
@@ -1456,15 +1449,8 @@ export function CreateProfileModal({
 
   // Model + effort catalog machinery — shared with the controller settings
   // panel (the hook holds the fetch, D5 failure/retry and default-seeding).
-  const {
-    catalog,
-    catalogLoading,
-    catalogFailed,
-    loadCatalog,
-    selectedModel,
-    showEffort,
-    effortOptions,
-  } = useModelCatalog(backend, model, setModel, effort, setEffort);
+  const modelCatalog = useModelCatalog(backend, model, setModel, effort, setEffort);
+  const { catalogLoading, catalogFailed, showEffort } = modelCatalog;
 
   // F21-13: this profile has a backend but no model for it — `pickBackend`
   // cleared the previous backend's id and the new catalog has not answered yet
@@ -1620,13 +1606,7 @@ export function CreateProfileModal({
           setModel={setModel}
           effort={effort}
           setEffort={setEffort}
-          catalog={catalog}
-          catalogLoading={catalogLoading}
-          catalogFailed={catalogFailed}
-          onRetryCatalog={loadCatalog}
-          selectedModel={selectedModel}
-          showEffort={showEffort}
-          effortOptions={effortOptions}
+          {...modelCatalog}
         />
 
         <StagesField stages={stages} stg={stg} toggleStage={toggleStage} />
