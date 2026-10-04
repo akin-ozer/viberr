@@ -1702,7 +1702,7 @@ runtime's answer for a missing grant.
   the GitHub read section) and a per-run tail (the servers that failed their probe or
   did not mount, the attachments drop and the browser section — both carry the task's own
   directory — and the grants whose content did not arrive), every list sorted by name;
-  `buildSpecialistPersona` is the same text joined. Two tasks of one profile therefore
+  Codex receives the same text joined (`joinedPrompt`). Two tasks of one profile therefore
   produce a byte-identical static block, which is what the Claude preset's
   `excludeDynamicSections` caches once (ruling 371).
 - **Knowledge bases arrive as an INDEX** (ruling 283, `kb-injection.server.ts`): each KB's

@@ -155,19 +155,15 @@ export interface ProfileBackend {
     paste: PastedKind[];
   };
   /** Ruling 507: every account the viewer holds on this backend, the active
-   *  one first. Optional so fixtures that predate it stay valid (absent reads
-   *  as the one account `health` describes); the loader always sets it. */
-  accounts?: ProfileBackendAccount[];
+   *  one first. */
+  accounts: ProfileBackendAccount[];
   /** Ruling 507: the store's own limits, so the card offers what the store
-   *  accepts. Optional for the same reason. */
-  limits?: { maxAccounts: number; maxLabelLength: number };
-  /** The viewer's own last observed refusal on this backend, or null. Optional
-   *  so fixtures that predate it stay valid; the loader always sets it. */
-  lastRefusal?: ProfileBackendRefusal | null;
-  /** Ruling 294: the viewer's OWN last reading on this backend, or null.
-   *  Optional so fixtures that predate it stay valid; the loader always sets
-   *  it. */
-  usage?: ProfileBackendUsage | null;
+   *  accepts. */
+  limits: { maxAccounts: number; maxLabelLength: number };
+  /** The viewer's own last observed refusal on this backend, or null. */
+  lastRefusal: ProfileBackendRefusal | null;
+  /** Ruling 294: the viewer's OWN last reading on this backend, or null. */
+  usage: ProfileBackendUsage | null;
 }
 
 /**

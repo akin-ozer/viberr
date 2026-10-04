@@ -23,7 +23,8 @@ import { DecisionPacket } from "./decision-packet";
 import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
+import { taskDetail } from "../../../test-support/task-detail";
 
 /** Ruling 127: the task owner whose accounts a run bills, both backends
  *  connected — the ordinary case, so the run controls render live and these
@@ -51,65 +52,12 @@ afterEach(cleanup);
  *   existed anywhere.
  */
 
-const STAGES = [
-  { id: "triage", name: "Triage", color: "slate" },
-  { id: "review", name: "Review", color: "blue" },
-  { id: "done", name: "Done", color: "green" },
-];
-
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
-  return {
-    projectSlug: "viberr-core",
-    key: "VIB-151",
-    title: "Compress long-running task timelines",
-    stage: "review",
-    readiness: "ready",
-    displayReadiness: "ready",
+  return taskDetail({
     waiting: "human",
-    urgent: false,
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    archived: false,
-    validation: "healthy",
-    continuity: null,
-    blockReason: null,
-    // The BOARD's own boundary predicate — nothing the task page renders reads
-    // it, so it stays neutral and the `acceptance` prop remains the single
-    // answer these tests vary.
-    atAcceptanceBoundary: false,
     owner: { kind: "human", userId: "u-selin", name: "Selin Aksoy", initials: "SA", tone: "" },
-    specialist: null,
-    reviewers: [],
-    operator: null,
-    branch: "vib-151",
-    repo: "akin-ozer/viberr",
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
-    goal: "Keep the timeline readable on long tasks.",
-    packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: null,
-    updatedAt: null,
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-151/task.md",
-    timeline: [],
-    diagnostics: [],
-    stages: STAGES,
-    workflow: [],
-    lastActivityAt: null,
-    quiet: false,
     ...patch,
-  };
+  });
 }
 
 const ACCEPTANCE: AcceptanceAffordance = {
@@ -1198,7 +1146,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
  * the server would have merged it on their click.
  *
  * The fix reads the server's OWN answer — `acceptance.hasAuthority` from
- * `resolveAcceptanceAffordance`, which computes the identical predicate
+ * `acceptanceStanding`, which computes the identical predicate
  * (`roleCan(role, "accept-completion") || (owner && roleCan(role, "own-task"))`)
  * and keeps it across the terminal-stage early return that every merge-pending
  * task lands in (acceptance stamps `stage = doneStageId` + `pr.state:
@@ -1353,7 +1301,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
     // Off-boundary WITHOUT force is a server refusal, not a jump — the dialog
     // says "Blocked", and promising a skip would promise a power nobody has.
     // The `complete-merge` mode is the sharpest case and the reason this went
-    // wrong: `resolveAcceptanceAffordance` returns the `denied` shape (which
+    // wrong: `acceptanceStanding` returns the `denied` shape (which
     // carries `atBoundary: false`) for a task ALREADY at the terminal stage,
     // and a merge-pending task is exactly that — so a bare `!atBoundary` made
     // every "Complete merge" confirm announce that a task already at Done

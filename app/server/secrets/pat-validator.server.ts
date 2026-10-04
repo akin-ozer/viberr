@@ -56,7 +56,7 @@ import {
  *   and branch-protection tooling, and it is one GitHub validation-ordering
  *   change away from actually creating a file. Health checks do not write.
  *   The dry-run survives only as an explicit, disclosed opt-in
- *   (`VIBERR_GITHUB_WRITE_PROBE=1` / `writeProbe: true`) for operators who
+ *   (`VIBERR_GITHUB_WRITE_PROBE=1`) for operators who
  *   want `pull_request:write` proven rather than assumed — that one has no
  *   read-only signal (a fine-grained token can hold Contents:write while
  *   Pull requests is read-only, so `permissions.push` must NOT be read as
@@ -82,20 +82,19 @@ export interface ValidatePatTokenOptions {
   knownExpiresAt?: string | null;
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
-  /**
-   * Opt in to the authorization-only WRITE dry-run for scopes with no
-   * read-only signal (A8). Default OFF — validation never writes to a user's
-   * repository unless someone asked for it. Falls back to the
-   * `VIBERR_GITHUB_WRITE_PROBE` env opt-in when omitted.
-   */
-  writeProbe?: boolean;
 }
 
-/** Env opt-in for the write dry-run (see {@link ValidatePatTokenOptions}). The
- *  env schema parses `VIBERR_GITHUB_WRITE_PROBE` and refuses a spelling it does
- *  not know at boot (ruling 458(c)). */
-function writeProbeEnabled(explicit?: boolean): boolean {
-  return explicit ?? getEnv().VIBERR_GITHUB_WRITE_PROBE;
+/** The one opt-in to the authorization-only WRITE dry-run for scopes with no
+ *  read-only signal (A8). Default OFF: validation, and a "Re-check scopes"
+ *  press, never write to a user's repository unless someone asked for it.
+ *  Consequence, deliberately: `pull_request:write` stays `assumed`, and B-GH8
+ *  (write scopes need PROVEN evidence) keeps its violation open until a real
+ *  delivery succeeds or an operator opts in; turning "we don't know" into
+ *  "granted" is the failure B-GH8 exists to prevent. The env schema parses
+ *  `VIBERR_GITHUB_WRITE_PROBE` and refuses a spelling it does not know at boot
+ *  (ruling 458(c)). */
+function writeProbeEnabled(): boolean {
+  return getEnv().VIBERR_GITHUB_WRITE_PROBE;
 }
 
 /** The legacy permission block GitHub computes for the AUTHENTICATED token on
@@ -412,7 +411,7 @@ export async function validatePatToken(
     // no read-only signal, so it stays honestly "assumed" unless an operator
     // turns this on. Any other answer (404 resource-hiding, 5xx, network)
     // stays UNKNOWN → the same "assumed" fallback.
-    const writeProbe = writeProbeEnabled(options.writeProbe);
+    const writeProbe = writeProbeEnabled();
     const dryRunWrite = async (
       method: "POST" | "PUT",
       path: string,
@@ -546,16 +545,6 @@ export interface RevalidateContext {
   repo?: string | null;
   /** Injectable clock for the revalidation cooldown (tests). */
   now?: () => number;
-  /**
-   * Allow the authorization-only WRITE dry-run for scopes with no read-only
-   * signal (A8). Default OFF — a "Re-check scopes" press must not write to the
-   * user's repository. Consequence, deliberately: `pull_request:write` stays
-   * `assumed`, and B-GH8 (write scopes need PROVEN evidence) therefore keeps
-   * its violation open until either a real delivery succeeds or an operator
-   * opts in. Turning "we don't know" into "granted" is the failure B-GH8 exists
-   * to prevent, so the honest degraded state wins over a convenient clear.
-   */
-  writeProbe?: boolean;
 }
 
 /**
@@ -686,7 +675,6 @@ export async function revalidateProjectCredential(
   };
   if (requiredScopes) validateOptions.requiredScopes = requiredScopes;
   if (ctx.fetchImpl) validateOptions.fetchImpl = ctx.fetchImpl;
-  if (ctx.writeProbe !== undefined) validateOptions.writeProbe = ctx.writeProbe;
 
   const validation =
     reusable ?? (await validatePat(db, credential.id, validateOptions));

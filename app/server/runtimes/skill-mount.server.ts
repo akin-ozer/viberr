@@ -151,7 +151,7 @@ export async function stripUngovernedRepoCatalog(
  * store folder only passes `resolveStoreSegment`, which allows spaces, `*`,
  * `(`, `,` and friends. So this is an ALLOW-list, not a mirror of the SDK's
  * deny-list: anything outside it does not mount and is injected as prompt text
- * instead (see `buildSpecialistPersona`) — a name we cannot prove safe must
+ * instead (see `buildSpecialistPromptPrefix`) — a name we cannot prove safe must
  * never be able to fail a run.
  */
 const SDK_SKILL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;

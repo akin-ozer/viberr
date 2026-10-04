@@ -276,7 +276,7 @@ pins the set by name:
   `RUN_REAP_GRACE_MS`). There is no environment variable for the sweep.
 
 No context window rides a run's child env (ruling 376): every `AUTO_COMPACT_WINDOW` entry
-in `app/server/runtimes/context-policy.server.ts` is null and `CONTEXT_ENV_KEYS` is empty,
+in `app/server/runtimes/context-policy.server.ts` is null,
 so the CLI compacts at its model's own limit, and a session above
 `COMPACT_AT_COMPLETION_TOKENS` (100k) is compacted at the end of its run instead (not
 after an interrupt, and not after a run its provider refused, ruling 599). The key

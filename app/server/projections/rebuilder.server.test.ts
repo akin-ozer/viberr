@@ -32,7 +32,7 @@ import {
   rebuildTaskFile,
   reprojectProject,
 } from "./rebuilder.server";
-import { getBoard, listProjectTasks } from "./board-query.server";
+import { getBoardWithTasks, listProjectTasks } from "./board-query.server";
 import {
   projectionFault,
   projectionFaultCount,
@@ -79,7 +79,7 @@ describe("rebuilder", () => {
     expect(summary.changed).toBe(3);
     expect(summary.errors).toBe(0);
 
-    const board = getBoard(store.db, store.slug);
+    const board = getBoardWithTasks(store.db, store.slug)?.board;
     expect(board?.project.name).toBe("Viberr Core");
     expect(board?.members).toHaveLength(4);
     expect(board?.columns.map((c) => c.tasks.length)).toEqual([1, 1, 0, 0, 0]);
@@ -442,7 +442,7 @@ describe("rebuilder", () => {
       detail?.diagnostics.some((d) => d.code === "reference.unknown_stage"),
     ).toBe(true);
     // ends up in the orphan bucket, not silently dropped
-    const board = getBoard(store.db, store.slug);
+    const board = getBoardWithTasks(store.db, store.slug)?.board;
     expect(board?.orphanTasks.map((t) => t.key)).toEqual(["VIB-1"]);
   });
 
@@ -1428,7 +1428,7 @@ describe("LV-20: waiting is normalized at the terminal stage", () => {
     expect(summary.waiting).toBe("none");
 
     // The board counter reads the same projection, so it agrees.
-    const board = getBoard(store.db, store.slug)!;
+    const board = getBoardWithTasks(store.db, store.slug)!.board;
     const all = board.columns.flatMap((c) => c.tasks);
     expect(all.filter((t) => t.waiting === "human")).toHaveLength(0);
   });

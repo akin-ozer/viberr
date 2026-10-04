@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
-import { act, cleanup } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { act } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import {
   advance,
   BrokerEventSource,
   connect,
   dropCard,
+  harnessLifecycle,
   markRead,
-  mountHarness,
   OTHER_TASK,
   runStateChanged,
   sendComment,
@@ -17,8 +16,8 @@ import {
   SLUG,
   TASK,
   taskUpdated,
+  tab,
   typeInFilter,
-  type HarnessOptions,
 } from "../../../test-support/revalidation-harness";
 
 /**
@@ -32,30 +31,7 @@ import {
 const BOARD = `/projects/${SLUG}/board`;
 const TASK_PAGE = `/projects/${SLUG}/tasks/${TASK}`;
 
-beforeEach(() => {
-  resetSseBrokerForTests();
-  BrokerEventSource.instances = [];
-  vi.stubGlobal("EventSource", BrokerEventSource);
-  vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}", { status: 404 })));
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-  resetSseBrokerForTests();
-});
-
-/** A tab on `path` with its streams open and the first load behind it. */
-async function tab(options: HarnessOptions) {
-  const harness = mountHarness(options);
-  await settle();
-  await connect();
-  await advance(1_000);
-  harness.resetCounts();
-  return harness;
-}
+harnessLifecycle();
 
 describe("loaders re-run per trigger (ruling 457)", () => {
   it("BOARD-1 / RF-3: five keystrokes in the board filter", async () => {

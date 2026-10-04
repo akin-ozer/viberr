@@ -29,7 +29,7 @@ import {
   type RunInputs,
   type RunView,
 } from "./runtime-types";
-import { NO_RUN_CACHE } from "./runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 
 const base: RunView = {
   id: "primary", serverRunId: "run_1", role: "Primary specialist", kind: "primary",

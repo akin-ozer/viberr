@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { createContext, StrictMode, useContext, useEffect, type ReactNode } from "react";
+import { StrictMode, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import {
@@ -12,58 +11,24 @@ import {
 } from "./use-run-log-stream";
 import type { ConsoleThreadInput } from "./run-log-store";
 import {
-  NO_RUN_CACHE,
   runBoundaryLine,
   type LogLine,
   type RunLiveFacts,
   type RunLogWindow,
 } from "./runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
+import { DataRouter, loaderRunCount, resetDataRouter } from "../../../test-support/data-router";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 
 /**
- * The hook calls `useRevalidator`, so it runs under a REAL data router here,
- * whose one route counts its loader runs (a revalidation is observable the way
- * the product sees one). The subject renders through a context slot rather
- * than as the route's own element, so `rerender` with new props reaches it.
+ * The hook calls `useRevalidator`, so it runs under a real data router
+ * (`test-support/data-router.tsx`).
  *
  * Ruling 457: the console opens no connection of its own. Its frames come from
  * the tab's one live stream (`useLiveUpdates`, the layout's on a task page),
  * so every probe here mounts that stream beside the hook, on the scope the
  * page's layout holds.
  */
-const SubjectContext = createContext<ReactNode>(null);
-
-function Subject() {
-  return <>{useContext(SubjectContext)}</>;
-}
-
-let loaderRuns = 0;
-let router = makeRouter();
-
-function makeRouter() {
-  loaderRuns = 0;
-  return createMemoryRouter(
-    [
-      {
-        path: "*",
-        Component: Subject,
-        loader: () => {
-          loaderRuns += 1;
-          return null;
-        },
-      },
-    ],
-    { hydrationData: { loaderData: { "0": null } } },
-  );
-}
-
-function DataRouter({ children }: { children: ReactNode }) {
-  return (
-    <SubjectContext.Provider value={children}>
-      <RouterProvider router={router} />
-    </SubjectContext.Provider>
-  );
-}
-
 /** The `run.log-appended` frame body, as the broker puts it on the wire. */
 interface RunLogAppended {
   projectSlug: string;
@@ -106,36 +71,13 @@ interface FakeResponse {
 
 let nextId = 1;
 
-class FakeEventSource {
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSED = 2;
-  static instances: FakeEventSource[] = [];
-  readyState = 1;
-  closed = false;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  listeners = new Map<string, ((e: MessageEvent<string>) => void)[]>();
-  url: string;
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-  }
-  addEventListener(name: string, fn: (e: MessageEvent<string>) => void) {
-    this.listeners.set(name, [...(this.listeners.get(name) ?? []), fn]);
-  }
-  close() {
-    this.closed = true;
-  }
-  emit(name: string, data: RunLogAppended | ControllerLogAppended) {
-    const lastEventId = String(nextId++);
-    for (const fn of this.listeners.get(name) ?? []) {
-      fn(new MessageEvent(name, { data: JSON.stringify({ data }), lastEventId }));
-    }
-  }
-  static last() {
-    return FakeEventSource.instances.at(-1)!;
-  }
+/** One frame as the broker sends it: the payload under `data`, a fresh id. */
+function emitFrame(
+  source: FakeEventSource,
+  name: string,
+  data: RunLogAppended | ControllerLogAppended,
+): void {
+  source.emit(name, String(nextId++), JSON.stringify({ data }));
 }
 
 const line = (text: string): LogLine => ({
@@ -269,7 +211,7 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource);
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
-  router = makeRouter();
+  resetDataRouter();
 });
 
 afterEach(() => {
@@ -285,7 +227,7 @@ describe("one live connection per tab (ruling 457, TASK-6 / LIVE-5)", () => {
     render(<Page />, { wrapper: DataRouter });
     expect(FakeEventSource.instances).toHaveLength(1);
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(0));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(0));
       await flush();
     });
     expect(texts()).toEqual(["a"]);
@@ -314,8 +256,8 @@ describe("UI-35: run-log tail deduplication", () => {
 
     // Two appended lines arrive back-to-back, as the sink really emits them.
     act(() => {
-      es.emit("run.log-appended", frame(0));
-      es.emit("run.log-appended", frame(1));
+      emitFrame(es, "run.log-appended", frame(0));
+      emitFrame(es, "run.log-appended", frame(1));
     });
     // Exactly ONE request — the second event waits for the first read.
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -338,7 +280,7 @@ describe("UI-35: run-log tail deduplication", () => {
       ]),
     );
     await act(async () => {
-      es.emit("run.log-appended", frame(2));
+      emitFrame(es, "run.log-appended", frame(2));
       await flush();
     });
     expect(texts()).toEqual(["a", "b", "c"]);
@@ -362,8 +304,8 @@ describe("UI-35: run-log tail deduplication", () => {
     render(<Page />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
     act(() => {
-      es.emit("run.log-appended", frame(0));
-      es.emit("run.log-appended", frame(1));
+      emitFrame(es, "run.log-appended", frame(0));
+      emitFrame(es, "run.log-appended", frame(1));
     });
     await act(async () => {
       // The first read was answered before line 1 was written.
@@ -374,7 +316,7 @@ describe("UI-35: run-log tail deduplication", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1]![0])).toContain("since=0");
     expect(texts()).toEqual(["a", "b"]);
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 });
 
@@ -382,7 +324,7 @@ describe("UI-30 / UI-03: the tail says when it stopped", () => {
   it("asks for nothing when the viewer cannot read logs", async () => {
     render(<Page enabled={false} />, { wrapper: DataRouter });
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(0));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(0));
       await flush();
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -392,7 +334,7 @@ describe("UI-30 / UI-03: the tail says when it stopped", () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
     render(<Page />, { wrapper: DataRouter });
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(0));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(0));
       await flush();
     });
     expect(store.streamError()).toMatch(/project-member only/);
@@ -432,7 +374,7 @@ describe("P13-D-11: the live tail seeds from logWindow.headSeq", () => {
       { wrapper: DataRouter },
     );
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(10, "run_3"));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(10, "run_3"));
       await flush();
     });
 
@@ -549,7 +491,7 @@ describe("a thread the page did not carry", () => {
     // The tail follows from the window's head, without the envelopes.
     fetchMock.mockResolvedValueOnce(tailOf([{ seq: 5, text: "l5" }]));
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(5));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(5));
       await flush();
     });
     expect(String(fetchMock.mock.calls[1]![0])).toBe("/resources/run-log?runId=run_1&since=4&raw=0");
@@ -677,7 +619,7 @@ describe("the raw view (ruling 457: envelopes load when it opens)", () => {
 
     fetchMock.mockResolvedValueOnce(tailOf([{ seq: 5, text: "c" }]));
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(5));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(5));
       await flush();
     });
     // With the raw view open the tail asks for the envelopes too.
@@ -694,11 +636,11 @@ describe("the Live run strip's facts (ruling 457, LIVE-1)", () => {
       tailOf([{ seq: 0, text: "a" }], { facts: { ...FACTS, step: "Edit · app.ts", turns: 2 } }),
     );
     await act(async () => {
-      FakeEventSource.last().emit("run.log-appended", frame(0));
+      emitFrame(FakeEventSource.last(), "run.log-appended", frame(0));
       await flush();
     });
     expect(store.facts("run_1")).toMatchObject({ step: "Edit · app.ts", turns: 2 });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 });
 
@@ -924,7 +866,7 @@ describe("the controller channel", () => {
     expect(FakeEventSource.last().url).toBe("/resources/events?scope=user");
 
     await act(async () => {
-      FakeEventSource.last().emit("controller.log-appended", controllerFrame());
+      emitFrame(FakeEventSource.last(), "controller.log-appended", controllerFrame());
       await flush();
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -938,7 +880,8 @@ describe("the controller channel", () => {
     fetchMock.mockResolvedValue(tailOf([{ seq: 0, text: "elsewhere" }]));
     render(<Page source={conversation} threads={[ctlThread]} />, { wrapper: DataRouter });
     await act(async () => {
-      FakeEventSource.last().emit(
+      emitFrame(
+        FakeEventSource.last(),
         "controller.log-appended",
         controllerFrame({ conversationId: "cnv_other", runId: "run_9" }),
       );
@@ -952,7 +895,7 @@ describe("the controller channel", () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
     render(<Page source={conversation} threads={[ctlThread]} />, { wrapper: DataRouter });
     await act(async () => {
-      FakeEventSource.last().emit("controller.log-appended", controllerFrame());
+      emitFrame(FakeEventSource.last(), "controller.log-appended", controllerFrame());
       await flush();
     });
     expect(store.streamError()).toBe(
@@ -979,7 +922,7 @@ describe("the controller channel", () => {
       });
     }
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     fetchMock.mockResolvedValue(tailOf([], { state: "finished", headSeq: -1 }));
     for (let i = 0; i < 2; i++) {
@@ -989,6 +932,6 @@ describe("the controller channel", () => {
       });
     }
     // CANARY: revalidate on every poll and this reads 2.
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 });

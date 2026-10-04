@@ -78,7 +78,7 @@ const PROMPT_CACHE_ENV_RE =
  * written in did, and ruling 376's hermeticity tests failed there.
  *
  * Neither list stops Viberr choosing a value on purpose: a run's own overlay
- * (`spec.env`) is spread over this base, as a window from `CONTEXT_ENV_KEYS`
+ * (`spec.env`) is spread over this base, as a window from `contextWindowEnv`
  * would be.
  */
 const COMPACTION_ENV: ReadonlySet<string> = new Set([

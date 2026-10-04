@@ -10,6 +10,7 @@ import { serializeProjectFile } from "~/server/files/project-file.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { serializeTaskFile } from "~/server/files/task-file.server";
 import type {
+  AgentDeployment,
   ProjectFrontmatter,
   ProjectRole,
   WorkflowBoundary,
@@ -154,6 +155,36 @@ export function approveReviewEntry(store: Pick<TestStore, "dataRoot" | "slug">):
     file.parsed.description,
   );
 }
+
+/**
+ * The k9s clone's board (pass 35): a Merge stage past Review, whose step to
+ * Done is the person's. Rulings 162 and 163 (acceptance and rework at a stage
+ * past review) run on it.
+ */
+export const MERGE_STAGE_BOARD = {
+  stages: [
+    { id: "triage", name: "Triage", color: "slate" },
+    { id: "impl", name: "In Progress", color: "violet" },
+    { id: "review", name: "Review", color: "blue" },
+    { id: "merge", name: "Merge", color: "teal" },
+    { id: "done", name: "Done", color: "green" },
+  ],
+  workflow: [
+    { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+    { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
+    { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
+    { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
+  ],
+} satisfies Pick<ProjectFrontmatter, "stages" | "workflow">;
+
+/** A verdict-capable reviewer eligible at Review only, as the k9s board's
+ *  reviewers were: nobody can give a verdict at Merge. */
+export const REVIEW_STAGE_REVIEWER = {
+  profileId: "reviewer",
+  capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+  extras: [],
+  definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
+} satisfies AgentDeployment;
 
 export function baseTaskFrontmatter(
   key: string,

@@ -4374,7 +4374,7 @@ export function buildOperatorSystemPrompt(
   parts.push(
     ...attachedResourcesBlock({
       // A6: the trusted-provenance banner every specialist gets
-      // (`buildSpecialistPersona`, F7-RES4) — the operator, which holds the
+      // (`buildSpecialistPromptPrefix`, F7-RES4) — the operator, which holds the
       // highest-authority toolkit in the product, was the one profile whose
       // injected skill/KB text arrived with no framing at all. Without it an
       // agent can (and live did) mistake an attached skill's instructions for a

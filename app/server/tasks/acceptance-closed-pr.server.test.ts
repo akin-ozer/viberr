@@ -20,7 +20,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   forceAcceptCompletion,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
@@ -451,14 +451,14 @@ describe("R16-3: a terminal GitHub fact outranks the process gates in the refusa
     // Canary: move closedPrBlockedReason back below verdictGateReason and this
     // reads "no approving verdict yet" again.
     seedClosedPrTask({ workRevision: REVISION, validation: "changed" });
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         viewerUserId: store.users.arda.id,
       },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.blockedReason).toMatch(/closed on GitHub without merging/i);
     expect(affordance.blockedReason).not.toMatch(/approving verdict/i);
     // The machine-readable half the rail uses to withhold force-accept.
@@ -472,14 +472,14 @@ describe("R16-3: a terminal GitHub fact outranks the process gates in the refusa
       workRevision: REVISION,
       validation: "changed",
     });
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         viewerUserId: store.users.arda.id,
       },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.blockedReason).toMatch(/approving verdict/i);
     expect(affordance.terminallyBlocked).toBe(false);
   });
@@ -562,10 +562,10 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
       archived: true,
       pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },
     });
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.terminallyBlocked).toBe(true);
     expect(affordance.canAccept).toBe(false);
   });

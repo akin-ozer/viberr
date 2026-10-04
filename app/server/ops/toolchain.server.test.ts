@@ -15,7 +15,6 @@ import {
   cachedToolchain,
   probeTool,
   probeTools,
-  resetProbeCacheForTests,
   resolveToolchain,
   shellInventoryPrompt,
   versionOf,
@@ -365,8 +364,6 @@ describe("ruling 196: the runtime image installs what a run reaches for", () => 
  * program: the runner is the seam, exactly as above.
  */
 describe("F39-1: probeTool", () => {
-  beforeEach(() => resetProbeCacheForTests());
-
   /** A runner that reports which argv it was handed, and answers for `present`. */
   const runnerFor = (present: readonly string[], version = "golangci-lint 2.6.0") => {
     const calls: { command: string; args: readonly string[] }[] = [];

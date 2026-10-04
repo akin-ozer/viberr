@@ -10,6 +10,7 @@ import {
   type DeployedSpecialistView,
 } from "./execution-profile";
 import type { TaskRunPrincipalView } from "./run-principal-view";
+import { taskSummary } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
@@ -29,48 +30,12 @@ const deployedFixture: DeployedSpecialistView[] = [
  *  rest is a neutral projection row: nothing here is accepted/merged/archived,
  *  so the section renders its live controls. */
 function unownedTask(): TaskSummary {
-  return {
-    key: "VIB-151",
-    title: "Compress long-running task timelines",
-    projectSlug: "viberr-core",
+  return taskSummary({
     stage: "impl",
-    readiness: "ready",
-    displayReadiness: "ready",
-    waiting: "agent",
-    urgent: false,
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    archived: false,
-    validation: "healthy",
-    continuity: null,
-    blockReason: null,
-    atAcceptanceBoundary: false,
-    packet: null,
-    owner: null,
-    specialist: null,
-    reviewers: [],
-    operator: null,
     branch: null,
     repo: null,
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
     goal: "Keep the console readable on long runs.",
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: null,
-    updatedAt: null,
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-151/task.md",
-  };
+  });
 }
 
 /** The same row, OWNED by the viewer — the fixture for anything that presses a

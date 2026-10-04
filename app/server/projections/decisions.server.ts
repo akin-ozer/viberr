@@ -124,7 +124,7 @@ export function decisionsRequiring(
   // and each project's RESOLVED review stage (the acceptance boundary — never
   // the literal id "review", which a customized board need not use).
   // An ARCHIVED PROJECT is read-only (R6-3): `requireProjectMutable` refuses
-  // every governed mutation inside it and `resolveAcceptanceAffordance` denies
+  // every governed mutation inside it and `acceptanceStanding` denies
   // outright, so nothing in one is a decision anybody can act on. Dropping the
   // project here covers all three kinds at once — the task-level `archived = 0`
   // filters below only ever caught individually-archived tasks.

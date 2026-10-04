@@ -14139,16 +14139,6 @@ const compareStatusSchema = z.object({ status: z.string().optional() }).catch({}
 /** Ruling 135: the one field the never-pushed probe reads. */
 const commitShaSchema = z.object({ sha: z.string() }).loose();
 
-/** @see acceptancePrHeadCheck — the refusal alone, for callers that need no pin. */
-export async function acceptancePrHeadMismatch(
-  db: DatabaseSync,
-  ctx: TaskActionContext,
-  projectSlug: string,
-  taskKey: string,
-): Promise<string | null> {
-  return (await evaluateAcceptancePrHead(db, ctx, projectSlug, taskKey)).refusal;
-}
-
 /**
  * The one live PR-head evaluation, reporting BOTH the refusal (a KNOWN mismatch)
  * and WHY a null refusal is null — `verified` (containment confirmed) vs
@@ -14396,6 +14386,13 @@ export interface AcceptanceAffordance {
   gates?: GatesView | null;
 }
 
+/** The affordance, and the project's required-reviewer rules it was read with. */
+export interface AcceptanceStanding {
+  affordance: AcceptanceAffordance;
+  /** Ruling 178's rules, resolved; empty when the project cannot be read. */
+  requiredReviewers: RequiredReviewerView[];
+}
+
 /**
  * P14-LV-06 — the ONE predicate behind "can this human accept this task".
  *
@@ -14408,29 +14405,15 @@ export interface AcceptanceAffordance {
  *
  * A pure READ: it classifies by project role + ownership exactly like
  * `decisionsRequiring`, and never calls the audited authority path.
- */
-export function resolveAcceptanceAffordance(
-  // Deliberately DB-free: membership and ownership both live in the canonical
-  // files, so this resolves on a loader path without a projection read (and
-  // mirrors the review queue's own role+owner test).
-  input: { projectSlug: string; taskKey: string; viewerUserId: string },
-  ctx: TaskMutationContext = {},
-): AcceptanceAffordance {
-  return acceptanceStanding(input, ctx).affordance;
-}
-
-/** The affordance, and the project's required-reviewer rules it was read with. */
-export interface AcceptanceStanding {
-  affordance: AcceptanceAffordance;
-  /** Ruling 178's rules, resolved; empty when the project cannot be read. */
-  requiredReviewers: RequiredReviewerView[];
-}
-
-/**
- * Ruling 521: `resolveAcceptanceAffordance` with the rules it read. The task
+ *
+ * Ruling 521: it answers with the required-reviewer rules it read. The task
  * page's completion packet marks a rule's reviewer required whether or not
  * anyone engaged it, and taking the rules from this read of project.md keeps
  * the page's revalidation at its store-read budget (ruling 457).
+ *
+ * Deliberately DB-free: membership and ownership both live in the canonical
+ * files, so this resolves on a loader path without a projection read (and
+ * mirrors the review queue's own role+owner test).
  */
 export function acceptanceStanding(
   input: { projectSlug: string; taskKey: string; viewerUserId: string },

@@ -14,7 +14,8 @@ import {
   baseAgentDeployments,
   SEED_AGENT_PROFILES,
 } from "./agent-catalog.server";
-import { buildSpecialistPersona } from "~/server/tasks/specialist-run.server";
+import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
+import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-run.server";
 import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
 
@@ -118,7 +119,7 @@ describe("seedDefaultAgentAssets", () => {
   });
 });
 
-describe("buildSpecialistPersona", () => {
+describe("buildSpecialistPromptPrefix", () => {
   it("assembles the definition + declared skill body once the assets are shipped", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
@@ -130,12 +131,12 @@ describe("buildSpecialistPersona", () => {
       "utf8",
     );
     const definition = profileMd.split(/\n---\n/).slice(1).join("\n---\n").trim();
-    const persona = buildSpecialistPersona({
+    const persona = joinedPrompt(buildSpecialistPromptPrefix({
       profileId: "developer",
       skills: ["developer-expertise"],
       definition,
       dataRoot,
-    });
+    }));
     expect(persona).toContain("You are the Developer"); // the persona body
     expect(persona).toContain("developer-expertise (skill)"); // the skill header
     expect(persona).toContain("Reporting rules"); // skill body content
@@ -147,11 +148,11 @@ describe("buildSpecialistPersona", () => {
 
   it("is empty when the store ships neither a definition nor the skill", () => {
     const dataRoot = ctx.makeTempDir();
-    const persona = buildSpecialistPersona({
+    const persona = joinedPrompt(buildSpecialistPromptPrefix({
       profileId: "nonexistent",
       skills: ["also-nonexistent"],
       dataRoot,
-    });
+    }));
     // C1 (pass 16): a grant that resolves to nothing is no longer silent. There
     // is still no trusted content — what the run now gets is the disclosure that
     // a declared resource did not arrive, so the agent reports the gap instead

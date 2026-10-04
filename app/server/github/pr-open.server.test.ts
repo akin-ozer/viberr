@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -15,7 +15,6 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
   PrBodyWritten,
-  PrClosure,
   PrRef,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
@@ -23,10 +22,27 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { composePrBody, openTaskPr, prBodySha256 } from "./pr-open.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+
+/** N20-4: the public origin a PR body links back to, set where production reads
+ *  it: `BETTER_AUTH_URL`, through `appOrigin()`. */
+function useAppOrigin(origin: string) {
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.BETTER_AUTH_URL;
+    process.env.BETTER_AUTH_URL = origin;
+    resetEnvCacheForTests();
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.BETTER_AUTH_URL;
+    else process.env.BETTER_AUTH_URL = saved;
+    resetEnvCacheForTests();
+  });
+}
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
 const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
@@ -131,6 +147,8 @@ describe("composePrBody", () => {
 });
 
 describe("openTaskPr", () => {
+  useAppOrigin("https://viberr.example");
+
   it("creates a PR whose body embeds the task link + title, writes fm.pr, audits", async () => {
     const store = setupWithBranch();
     const gh = fakeGithubFetch({
@@ -146,7 +164,7 @@ describe("openTaskPr", () => {
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-201" },
       { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(res.status).toBe("ok");
     if (res.status !== "ok") throw new Error("expected ok");
@@ -198,7 +216,7 @@ describe("openTaskPr", () => {
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-201" },
       { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(res.status).toBe("ok");
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
@@ -228,7 +246,7 @@ describe("openTaskPr", () => {
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-201" },
       { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(res.status).toBe("ok");
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
@@ -784,7 +802,7 @@ describe("openTaskPr", () => {
 
   /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with or without a
    *  person's answer on it. The three tests below share this seed. */
-  function seedClosedCache(closure: PrClosure | null) {
+  function seedClosedCache(closure: NonNullable<PrRef["closure"]> | null) {
     const store = setupTestStore(ctx);
     const pr: NonNullable<TaskFrontmatter["pr"]> = {
       number: 7,
@@ -1239,6 +1257,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
 });
 
 describe("ruling 474: a reused PR's body follows the delivery it describes", () => {
+  useAppOrigin("https://viberr.example");
   // The live shape (akin-ozer/website PR #2, WEB-4): opened on revision
   // 7cf1edc with 3 commits and +814/−15; the rework pushed cc9aa30, 5 commits,
   // +823/−15, to the same PR, and the body went on describing the first one.
@@ -1335,7 +1354,7 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-201" },
       { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
   }
 

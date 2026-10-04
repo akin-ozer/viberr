@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { act, cleanup } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import type { ShouldRevalidateFunctionArgs } from "react-router";
-import { getSseBrokerStats, resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { getSseBrokerStats } from "~/server/events/sse-broker.server";
 import {
   advance,
   BrokerEventSource,
   connect,
   dropCard,
+  harnessLifecycle,
   markRead,
   mountHarness,
   notificationRead,
@@ -23,8 +24,8 @@ import {
   SLUG,
   TASK,
   taskUpdated,
+  tab,
   typeInFilter,
-  type HarnessOptions,
 } from "../../../test-support/revalidation-harness";
 import { REVALIDATION_RULES, revalidateWhen } from "./revalidation-policy";
 
@@ -38,29 +39,7 @@ import { REVALIDATION_RULES, revalidateWhen } from "./revalidation-policy";
 const BOARD = `/projects/${SLUG}/board`;
 const TASK_PAGE = `/projects/${SLUG}/tasks/${TASK}`;
 
-beforeEach(() => {
-  resetSseBrokerForTests();
-  BrokerEventSource.instances = [];
-  vi.stubGlobal("EventSource", BrokerEventSource);
-  vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}", { status: 404 })));
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-  resetSseBrokerForTests();
-});
-
-async function tab(options: HarnessOptions) {
-  const harness = mountHarness(options);
-  await settle();
-  await connect();
-  await advance(1_000);
-  harness.resetCounts();
-  return harness;
-}
+harnessLifecycle();
 
 /** Settles until `done` holds (a load reached its loader), or fails. */
 async function until(done: () => boolean): Promise<void> {

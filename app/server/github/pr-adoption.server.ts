@@ -18,7 +18,7 @@ import type { PrCacheState } from "./pr-linker.server";
  *
  * The rule: adopt ONLY a PR that is OPEN **and** whose head sha IS the task's
  * delivered revision. Identity, not containment — the acceptance gate
- * (`acceptancePrHeadMismatch`) accepts a head that CONTAINS the delivered
+ * (`acceptancePrHeadCheck`) accepts a head that CONTAINS the delivered
  * commit because an auto-commit on top of the delivery is legitimate there;
  * adoption is the stronger claim "this PR is the one we opened for this
  * revision", and a task that has delivered nothing may adopt nothing at all.

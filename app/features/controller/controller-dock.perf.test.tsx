@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import type { ControllerDockView } from "./controller-dock-query.server";
 import { mountDock } from "../../../test-support/controller-dock-stub";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 
 /**
  * Ruling 457, the controller journey: what the dock costs the page under it.
@@ -114,29 +115,6 @@ async function closeDock() {
   fireEvent.click(screen.getByRole("button", { name: "Close the controller dock" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
   await settle();
-}
-
-/** A minimal `EventSource` the page's live stream can open, for emitting one
- *  event by name. */
-class FakeEventSource {
-  static CLOSED = 2;
-  static instances: FakeEventSource[] = [];
-  readyState = 1;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  listeners = new Map<string, ((e: MessageEvent<string>) => void)[]>();
-  url: string;
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-  }
-  addEventListener(name: string, fn: (e: MessageEvent<string>) => void) {
-    this.listeners.set(name, [...(this.listeners.get(name) ?? []), fn]);
-  }
-  close() {}
-  emit(name: string, data = "{}") {
-    for (const fn of this.listeners.get(name) ?? []) fn(new MessageEvent<string>(name, { data }));
-  }
 }
 
 describe("the closed dock's cost to every page (ruling 457, RF-8 / CTL-3)", () => {

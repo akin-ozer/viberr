@@ -288,7 +288,7 @@ export function AcceptConfirm({
   blockedGates?: readonly string[];
   /** Ruling 162's interlock applies to the refusal the SERVER will re-decide
    *  from the same facts (the task page reads the live task file through
-   *  `resolveAcceptanceAffordance`), so a dialog quoting it may disable its own
+   *  `acceptanceStanding`), so a dialog quoting it may disable its own
    *  confirm. The board composes its refusal from a projection summary instead
    *  (`boardAcceptRefusal`, deliberately belt-and-braces so a stale row fails
    *  CLOSED), and it has no force path: disabling there would dead-end the only
@@ -337,12 +337,12 @@ export function AcceptConfirm({
   //   refuses any off-boundary stage with a 409 and the task stays where it was
   //   (proven by the standing server test `acceptance-graph.server.test.ts` →
   //   "refuses a manual board move from Triage straight to Done"). `atBoundary`
-  //   is literally that same predicate (`resolveAcceptanceAffordance` sets it
+  //   is literally that same predicate (`acceptanceStanding` sets it
   //   from `acceptanceStageBlockedReason === null`), so the disjunct rendered
   //   "goes straight to Done" directly beside the "Blocked" row quoting the
   //   refusal that contradicts it.
   // - a bare `!atBoundary`: `complete-merge` is the sharpest case, because
-  //   `resolveAcceptanceAffordance` returns its `denied` shape (`atBoundary:
+  //   `acceptanceStanding` returns its `denied` shape (`atBoundary:
   //   false`) for a task ALREADY at the terminal stage — which every
   //   merge-pending task is (accepted, merge pending, R16-6). So it announced
   //   "goes straight to Done" about a task already at Done, on the dialog that

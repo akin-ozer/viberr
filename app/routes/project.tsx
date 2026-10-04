@@ -43,7 +43,7 @@ import { WORKSPACE_FONT_PRELOADS } from "~/features/shell/font-preloads";
  * drifted from it), settings = open policy violations (Phase-4 derivation — see
  * policy-violations.server.ts).
  *
- * F19-9 (pass 19): "live" is the load-bearing word. `getBoard` loads with
+ * F19-9 (pass 19): "live" is the load-bearing word. `getBoardWithTasks` loads with
  * `includeArchived: true` (the board's Archived filter is the only way back to
  * an archived task), and both badges used to count that raw list — while the
  * two surfaces they link to exclude archived work: the board header counts

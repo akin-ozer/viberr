@@ -207,7 +207,7 @@ export function listProjectTasks(
 }
 
 /** {@link listProjectTasks} over a project row and member set the caller has
- *  already read (getBoard reads both for its own header). */
+ *  already read (getBoardWithTasks reads both for its own header). */
 function mapProjectTasks(
   db: DatabaseSync,
   slug: string,
@@ -327,13 +327,9 @@ export function listProjectLabels(db: DatabaseSync, slug: string): string[] {
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
-/** Full board read model: columns in project stage order. */
-export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
-  return getBoardWithTasks(db, slug)?.board ?? null;
-}
-
 /**
- * {@link getBoard} plus the flat task list the columns were built from, in
+ * The full board read model (columns in project stage order) plus the flat
+ * task list the columns were built from, in
  * {@link listProjectTasks} order and archived tasks included. Ruling 457: the
  * workspace layout also needs the review queue, which reads the same rows, so
  * it hands this list on instead of mapping every task a second time.

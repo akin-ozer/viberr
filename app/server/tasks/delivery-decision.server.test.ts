@@ -1834,17 +1834,17 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
 });
 
 describe("F15-11: no acceptance affordance on a task already at the terminal stage", () => {
-  it("resolveAcceptanceAffordance denies on Done (the button used to render live)", async () => {
-    const { resolveAcceptanceAffordance } = await import("./task-actions.server");
+  it("the acceptance affordance denies on Done (the button used to render live)", async () => {
+    const { acceptanceStanding } = await import("./task-actions.server");
     seed({ stage: "done" });
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         viewerUserId: store.users.arda.id,
       },
       dataCtx(),
-    );
+    ).affordance;
     expect(affordance.hasAuthority).toBe(true);
     expect(affordance.atBoundary).toBe(false);
     expect(affordance.canAccept).toBe(false);
@@ -1948,7 +1948,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
 
   it("refuses the packet acceptance when the PR head does not contain the delivered revision (F15-15)", async () => {
     // Fails on wave-1 (and on main): the packet path never called
-    // acceptancePrHeadMismatch — the junk-head PR merged through the
+    // acceptancePrHeadCheck — the junk-head PR merged through the
     // operator's own acceptance packet.
     // As in githubReportsHead: a real credential + canned transport, answering
     // this packet's PR #7 with a junk head and the compare with "diverged".

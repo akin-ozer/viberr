@@ -50,11 +50,7 @@ describe("clipTaskFile", () => {
   it("returns the file verbatim when it fits", async () => {
     const { clipTaskFile } = await import("./controller-context.server");
     const content = taskFile(3);
-    expect(clipTaskFile(content, content.length)).toEqual({
-      text: content,
-      omittedEntries: 0,
-      clippedHead: false,
-    });
+    expect(clipTaskFile(content, content.length)).toBe(content);
   });
 
   it("keeps the head whole and the NEWEST entries when over budget, and says how many it dropped", async () => {
@@ -62,32 +58,31 @@ describe("clipTaskFile", () => {
     const content = taskFile(40);
     const budget = 1_200;
     const clipped = clipTaskFile(content, budget);
-    expect(clipped.text.length).toBeLessThanOrEqual(budget);
-    expect(clipped.clippedHead).toBe(false);
+    expect(clipped.length).toBeLessThanOrEqual(budget);
+    expect(clipped).not.toContain("the file head was cut");
     // Head intact, first (newest) entry present, last (oldest) gone.
-    expect(clipped.text).toContain("## Goal\n\nProbe the budget.");
-    expect(clipped.text).toContain("entry number 0 of the timeline");
-    expect(clipped.text).not.toContain("entry number 39 of the timeline");
-    expect(clipped.omittedEntries).toBeGreaterThan(0);
-    expect(clipped.text).toContain(
-      `${clipped.omittedEntries} older timeline entries omitted to fit the context budget; get_task reads more`,
+    expect(clipped).toContain("## Goal\n\nProbe the budget.");
+    expect(clipped).toContain("entry number 0 of the timeline");
+    expect(clipped).not.toContain("entry number 39 of the timeline");
+    // The marker says how many went, and that count is what is missing.
+    const omitted = Number(
+      /\[\.\.\. (\d+) older timeline entries omitted to fit the context budget; get_task reads more/.exec(clipped)?.[1],
     );
+    expect(omitted).toBeGreaterThan(0);
     // The kept entries are a PREFIX of the file's order: nothing was reordered.
-    const kept = 40 - clipped.omittedEntries;
+    const kept = 40 - omitted;
     for (let i = 0; i < kept; i += 1) {
-      expect(clipped.text).toContain(`entry number ${i} of the timeline`);
+      expect(clipped).toContain(`entry number ${i} of the timeline`);
     }
-    expect(clipped.text).not.toContain(`entry number ${kept} of the timeline`);
+    expect(clipped).not.toContain(`entry number ${kept} of the timeline`);
   });
 
   it("cuts the head itself when even the head does not fit, and says so", async () => {
     const { clipTaskFile } = await import("./controller-context.server");
     const content = taskFile(5, " ".repeat(3_000));
     const clipped = clipTaskFile(content, 500);
-    expect(clipped.clippedHead).toBe(true);
-    expect(clipped.omittedEntries).toBe(5);
-    expect(clipped.text.length).toBeLessThanOrEqual(500);
-    expect(clipped.text).toContain("the file head was cut and 5 older timeline entries omitted");
+    expect(clipped.length).toBeLessThanOrEqual(500);
+    expect(clipped).toContain("the file head was cut and 5 older timeline entries omitted");
   });
 
   /** Review finding 20: the kept===0 path used to append the marker after the
@@ -100,8 +95,7 @@ describe("clipTaskFile", () => {
     // Every budget in the window where the head fits but no entry plus its
     // marker does — the exact band the old branch missed.
     for (let budget = headLength; budget <= headLength + 120; budget += 1) {
-      const clipped = clipTaskFile(content, budget);
-      expect(clipped.text.length).toBeLessThanOrEqual(budget);
+      expect(clipTaskFile(content, budget).length).toBeLessThanOrEqual(budget);
     }
   });
 
@@ -109,9 +103,8 @@ describe("clipTaskFile", () => {
     const { clipTaskFile } = await import("./controller-context.server");
     const content = `---\nkey: VIB-1\n---\n\n## Goal\n\n${"x".repeat(2_000)}\n`;
     const clipped = clipTaskFile(content, 300);
-    expect(clipped.clippedHead).toBe(true);
-    expect(clipped.omittedEntries).toBe(0);
-    expect(clipped.text.length).toBeLessThanOrEqual(300);
+    expect(clipped).toContain("[... the file head was cut and 0 older timeline entries omitted");
+    expect(clipped.length).toBeLessThanOrEqual(300);
   });
 });
 

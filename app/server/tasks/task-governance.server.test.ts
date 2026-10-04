@@ -31,7 +31,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { getBoard, listProjectTasks } from "~/server/projections/board-query.server";
+import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
   completeTaskMerge,
@@ -144,7 +144,7 @@ function seedTasks(store: TestStore, tasks: { key: string; stage: string }[]): v
 }
 
 function stageOrder(store: TestStore, stageId: string): string[] {
-  const board = getBoard(store.db, store.slug)!;
+  const board = getBoardWithTasks(store.db, store.slug)!.board;
   return board.columns.find((c) => c.stage.id === stageId)!.tasks.map((t) => t.key);
 }
 

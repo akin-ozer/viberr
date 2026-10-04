@@ -468,17 +468,6 @@ export interface RunCacheView {
   compactions: number;
 }
 
-/** Ruling 369: the record of a run that has reported nothing yet. */
-export const NO_RUN_CACHE: RunCacheView = {
-  writeTokens: 0,
-  readTokens: 0,
-  firstCall: null,
-  ttlBucket: null,
-  peakPromptTokens: 0,
-  lastPromptTokens: 0,
-  compactions: 0,
-};
-
 /** Identity chip shape (mock `who`). Operator: no backend, no role. */
 export interface RunWho {
   kind: "agent";

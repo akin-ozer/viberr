@@ -228,7 +228,7 @@ export function saveControllerConfig(
   db: DatabaseSync,
   input: SaveControllerConfigInput,
   actor: AuditActor,
-  ctx: { dataRoot?: string; locks?: ControllerSectionLocks } = {},
+  ctx: { dataRoot?: string } = {},
 ): SavedControllerConfig {
   const existing = readControllerProfile(ctx.dataRoot);
   if (!existing) {
@@ -243,9 +243,8 @@ export function saveControllerConfig(
   // 32: documented for scripted callers in configuration.md). A NON-empty list
   // that changes the stored one is refused, naming the section and its unlock
   // variable, so a scripted caller is told rather than silently ignored.
-  // Enforced here, not in the route, so every save path is bound; `ctx.locks`
-  // exists for tests only.
-  const locks = ctx.locks ?? controllerSectionLocks();
+  // Enforced here, not in the route, so every save path is bound.
+  const locks = controllerSectionLocks();
   const sameSet = (a: string[], b: string[]) => {
     const bs = new Set(b);
     return new Set(a).size === bs.size && a.every((x) => bs.has(x));

@@ -42,14 +42,6 @@ const AUTO_COMPACT_WINDOW = {
 /** The env key the Claude CLI reads a mid-run window from (see `contextWindowEnv`). */
 export const CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
-/**
- * Every env key this policy may put into a run's child environment. The
- * hermeticity test pins the child env's Viberr-added keys against this list
- * plus the credential and marker keys, so a key added here without a test
- * naming it fails the suite. Empty since ruling 376: no window rides the env.
- */
-export const CONTEXT_ENV_KEYS: readonly string[] = [];
-
 /** The mid-run window for one run, or null when the CLI's default stands. */
 function autoCompactWindow(backend: ContextBackend, kind: RunKind): number | null {
   return AUTO_COMPACT_WINDOW[backend][kind];

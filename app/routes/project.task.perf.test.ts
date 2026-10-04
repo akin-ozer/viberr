@@ -111,7 +111,6 @@ describe("task-page revalidation (ruling 457)", () => {
     // Correctness first: the same slice and counts the page always showed.
     const task = result[2];
     expect(task.task.timeline).toHaveLength(30);
-    expect(task.timelineTotal).toBe(9 + EXTRA_EVENTS);
     expect(task.timelineRemaining).toBe(9 + EXTRA_EVENTS - 30);
     expect(task.task.timeline[0]?.text).toContain(`comment ${EXTRA_EVENTS - 1}`);
 

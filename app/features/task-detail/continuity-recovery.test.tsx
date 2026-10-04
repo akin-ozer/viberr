@@ -6,7 +6,7 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { ToastProvider } from "~/ui/toast";
 import {
   ContinuityRecoveryPanel,
@@ -14,6 +14,7 @@ import {
   deriveContinuityLoss,
 } from "./continuity-recovery";
 import { TaskDetailPage } from "./task-detail-page";
+import { taskDetail } from "../../../test-support/task-detail";
 
 /** Ruling 127: the task owner whose accounts a run bills, both backends
  *  connected — the ordinary case, so the run controls render live and these
@@ -405,12 +406,6 @@ describe("ContinuityRecoveryPanel", () => {
 
 /* ------------------------------------------------------------ page wiring */
 
-const STAGES = [
-  { id: "triage", name: "Triage", color: "slate" },
-  { id: "review", name: "Review", color: "blue" },
-  { id: "done", name: "Done", color: "green" },
-];
-
 const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: true,
   atBoundary: true,
@@ -422,35 +417,11 @@ const ACCEPTANCE: AcceptanceAffordance = {
 };
 
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
-  return {
-    projectSlug: "viberr-core",
+  return taskDetail({
     key: "VIB-160",
     title: "Rehydrate a specialist after a lost session",
-    stage: "review",
-    readiness: "ready",
-    displayReadiness: "ready",
     waiting: "human",
-    urgent: false,
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    validation: "healthy",
-    blockReason: null,
-    owner: null,
-    specialist: null,
-    reviewers: [],
-    operator: null,
     branch: "vib-160",
-    repo: "akin-ozer/viberr",
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
     goal: "Keep going from the record.",
     packet: {
       type: "input",
@@ -464,23 +435,10 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
       ],
     },
     eventCount: 1,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: null,
-    updatedAt: null,
-    boardRank: null,
     filePath: "projects/viberr-core/tasks/VIB-160/task.md",
-    archived: false,
-    continuity: null,
-    atAcceptanceBoundary: false,
-    lastActivityAt: null,
-    quiet: false,
     timeline: [continuityEvent],
-    diagnostics: [],
-    stages: STAGES,
-    workflow: [],
     ...patch,
-  };
+  });
 }
 
 function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [brokenRun()]) {

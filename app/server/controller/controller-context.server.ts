@@ -91,14 +91,6 @@ export interface ControllerContextRead {
 
 const TIMELINE_HEADING = "\n## Timeline";
 
-export interface ClippedTaskFile {
-  text: string;
-  /** Timeline entries dropped to fit the budget. */
-  omittedEntries: number;
-  /** The head itself (frontmatter, goal, packet) did not fit and was cut. */
-  clippedHead: boolean;
-}
-
 function omissionMarker(omitted: number, clippedHead: boolean): string {
   const entries = countLabel(omitted, "older timeline entry", "older timeline entries");
   return clippedHead
@@ -107,22 +99,17 @@ function omissionMarker(omitted: number, clippedHead: boolean): string {
 }
 
 /**
- * Bound a task file to `budget` characters, newest timeline entries first.
- * Pure: the file's own grammar is the only input.
+ * Bound a task file to `budget` characters, newest timeline entries first;
+ * what was dropped is said in the text itself (`omissionMarker`). Pure: the
+ * file's own grammar is the only input.
  */
-export function clipTaskFile(content: string, budget: number): ClippedTaskFile {
-  if (content.length <= budget) {
-    return { text: content, omittedEntries: 0, clippedHead: false };
-  }
+export function clipTaskFile(content: string, budget: number): string {
+  if (content.length <= budget) return content;
   const at = content.indexOf(TIMELINE_HEADING);
   if (at === -1) {
     // No timeline section to trim: the head is the whole file.
     const marker = omissionMarker(0, true);
-    return {
-      text: content.slice(0, Math.max(0, budget - marker.length)) + marker,
-      omittedEntries: 0,
-      clippedHead: true,
-    };
+    return content.slice(0, Math.max(0, budget - marker.length)) + marker;
   }
   const headEnd = at + TIMELINE_HEADING.length;
   const head = content.slice(0, headEnd);
@@ -137,16 +124,11 @@ export function clipTaskFile(content: string, budget: number): ClippedTaskFile {
   // MORE than the budget the caller was promised.
   if (head.length + lead.length + omissionMarker(entries.length, false).length > budget) {
     const marker = omissionMarker(entries.length, true);
-    return {
-      // A budget with no room for the marker itself keeps the head and says
-      // nothing, rather than returning a marker that is longer than the budget.
-      text:
-        marker.length >= budget
-          ? head.slice(0, budget)
-          : head.slice(0, budget - marker.length) + marker,
-      omittedEntries: entries.length,
-      clippedHead: true,
-    };
+    // A budget with no room for the marker itself keeps the head and says
+    // nothing, rather than returning a marker that is longer than the budget.
+    return marker.length >= budget
+      ? head.slice(0, budget)
+      : head.slice(0, budget - marker.length) + marker;
   }
   let text = head + lead;
   let kept = 0;
@@ -160,11 +142,7 @@ export function clipTaskFile(content: string, budget: number): ClippedTaskFile {
     kept += 1;
   }
   const omitted = entries.length - kept;
-  return {
-    text: omitted > 0 ? text + omissionMarker(omitted, false) : text,
-    omittedEntries: omitted,
-    clippedHead: false,
-  };
+  return omitted > 0 ? text + omissionMarker(omitted, false) : text;
 }
 
 /**
@@ -314,14 +292,14 @@ function taskContext(
     header.push(`waits on: ${summary.blockedBy.map((e) => `${e.label} (${e.state})`).join(", ")}`);
   }
   const clipped = clipTaskFile(file.content, TASK_FILE_CONTEXT_CHARS);
-  const fence = fenceFor(clipped.text);
+  const fence = fenceFor(clipped);
   return (
     `## Task ${key} (project ${project.name}, slug ${slug})\n` +
     `${header.join("\n")}\n\n` +
     `### task.md (${storeRelativePath(file.absPath, dataRoot)})\n` +
     `${FILE_IS_DATA_NOTE}\n` +
     `${fence}markdown\n` +
-    `${clipped.text.replace(/\n?$/, "\n")}` +
+    `${clipped.replace(/\n?$/, "\n")}` +
     fence
   );
 }

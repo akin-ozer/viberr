@@ -11,7 +11,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
 import {
   acceptanceRefusalFor,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
 } from "~/server/tasks/task-actions.server";
 import {
   derivePrHumanApproval,
@@ -282,14 +282,14 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
         status: "counted",
       }),
     );
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       {
         projectSlug: store.slug,
         taskKey: "VIB-301",
         viewerUserId: store.users.arda.id,
       },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.canAccept).toBe(true);
     expect(affordance.verdictSatisfiedBy).toContain("Approved on GitHub by");
     expect(affordance.verdictSatisfiedBy).toContain(store.users.murat.name);
@@ -323,14 +323,14 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
         status: "unlinked_handle",
       }),
     );
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       {
         projectSlug: store.slug,
         taskKey: "VIB-301",
         viewerUserId: store.users.arda.id,
       },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.canAccept).toBe(false);
     expect(affordance.verdictSatisfiedBy).toBeNull();
     expect(affordance.blockedReason).toContain("@octocat");

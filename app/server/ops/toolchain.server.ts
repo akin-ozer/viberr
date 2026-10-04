@@ -347,11 +347,6 @@ export function probeTools(
   return out;
 }
 
-/** Test-only: forget probed names (the version cache is separate). */
-export function resetProbeCacheForTests(): void {
-  probeCache.clear();
-}
-
 /**
  * The shell tools a run can invoke, in the order a reader wants them — the
  * runtimes (`codexCli`, `claudeAgentSdk`) are deliberately out: they are what
