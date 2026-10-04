@@ -183,6 +183,28 @@ function heldDocsSentence(kb: string, dataRoot?: string): string {
   );
 }
 
+/** The document a correction or an edit writes and the store target it is
+ *  written through, or the refusal that names which one is missing. */
+function locateKbDoc(db: DatabaseSync, kb: string, doc: string, ctx: { dataRoot?: string }) {
+  const located = resolveKbDocPath(kb, doc, ctx.dataRoot);
+  if (!located) {
+    return {
+      ok: false as const,
+      message:
+        `"${doc}" is not a document in the knowledge base ${kb}. Nothing was written. ` +
+        heldDocsSentence(kb, ctx.dataRoot),
+    };
+  }
+  const target = kbStoreTargetForDir(db, kb, ctx);
+  if (!target) {
+    return {
+      ok: false as const,
+      message: `The knowledge base "${kb}" no longer resolves in the store. Nothing was written.`,
+    };
+  }
+  return { ok: true as const, located, target, where: `${kb}/${located.rel}` };
+}
+
 function clipEvidence(value: string): string {
   return value.length > EVIDENCE_KEPT_CHARS
     ? `${value.slice(0, EVIDENCE_KEPT_CHARS).trimEnd()}…`
@@ -417,23 +439,9 @@ export async function mergeKbCorrection(
         "Nothing was written. Correct the lines that are wrong, one passage at a time.",
     };
   }
-  const located = resolveKbDocPath(input.kb, input.doc, ctx.dataRoot);
-  if (!located) {
-    return {
-      ok: false,
-      message:
-        `"${input.doc}" is not a document in the knowledge base ${input.kb}. Nothing was written. ` +
-        heldDocsSentence(input.kb, ctx.dataRoot),
-    };
-  }
-  const target = kbStoreTargetForDir(db, input.kb, ctx);
-  if (!target) {
-    return {
-      ok: false,
-      message: `The knowledge base "${input.kb}" no longer resolves in the store. Nothing was written.`,
-    };
-  }
-  const where = `${input.kb}/${located.rel}`;
+  const found = locateKbDoc(db, input.kb, input.doc, ctx);
+  if (!found.ok) return found;
+  const { located, target, where } = found;
   const undoneBefore = (text: string) => {
     const refused = listKbCorrections(db).find(
       (c) => c.undone && c.kb === input.kb && c.doc === located.rel && looseText(c.text) === looseText(text),
@@ -663,23 +671,9 @@ export async function editKbPassage(
         "Nothing was written. Change a long section in more than one edit.",
     };
   }
-  const located = resolveKbDocPath(input.kb, input.doc, ctx.dataRoot);
-  if (!located) {
-    return {
-      ok: false,
-      message:
-        `"${input.doc}" is not a document in the knowledge base ${input.kb}. Nothing was written. ` +
-        heldDocsSentence(input.kb, ctx.dataRoot),
-    };
-  }
-  const target = kbStoreTargetForDir(db, input.kb, ctx);
-  if (!target) {
-    return {
-      ok: false,
-      message: `The knowledge base "${input.kb}" no longer resolves in the store. Nothing was written.`,
-    };
-  }
-  const where = `${input.kb}/${located.rel}`;
+  const found = locateKbDoc(db, input.kb, input.doc, ctx);
+  if (!found.ok) return found;
+  const { located, target, where } = found;
   return withFileLock(`kb-doc:${located.abs}`, () => {
     const raw = readFileSync(located.abs, "utf8");
     const eol = eolOf(raw);
