@@ -119,27 +119,16 @@ export function listTaskAttachmentNames(slug: string, key: string, dataRoot?: st
 /**
  * C8: `listTaskAttachments` caps its return at `LIST_CAP` with nothing to
  * tell a caller the store actually holds more — a task with 140 saved files
- * rendered as if it had exactly 100, no "and N more" anywhere. The honest fix
- * is a total the panel can compare against the list length, but the route
- * loader (`project.task.tsx`) that feeds the panel is out of this change's
- * scope, so this stays a SIBLING export rather than a shape change to
- * `listTaskAttachments` (which would have forced every existing caller,
- * including that loader, to update in lockstep). Cheap on purpose: a dirent
- * type check, no per-file `statSync`.
+ * rendered as if it had exactly 100, no "and N more" anywhere. This is the
+ * total the panel compares against the list length. Cheap on purpose: a
+ * dirent type check, no per-file `statSync`.
  */
 export function countTaskAttachments(
   slug: string,
   key: string,
   dataRoot?: string,
 ): number {
-  const dir = taskAttachmentsDir(slug, key, dataRoot);
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return 0; // no attachments dir yet — the common case
-  }
-  return entries.filter((e) => !e.name.startsWith(".") && e.isFile()).length;
+  return listTaskAttachmentNames(slug, key, dataRoot).length;
 }
 
 /**
