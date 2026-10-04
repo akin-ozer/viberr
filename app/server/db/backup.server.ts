@@ -176,18 +176,11 @@ export function projectionPathIn(dataRoot: string): string {
   return path.join(dataRoot, "state", PROJECTION_NAME);
 }
 
-/** Default artefact name — sortable, and unambiguous about which instant. */
-function backupDirName(at: Date = new Date()): string {
-  return `viberr-backup-${at.toISOString().replace(/[:.]/g, "-")}`;
-}
-
 export interface CreateBackupOptions {
   dataRoot?: string;
   /** Directory the artefact is created INSIDE. */
   destination: string;
   includeRuntimes?: boolean;
-  /** Override the generated artefact directory name. */
-  name?: string;
 }
 
 /**
@@ -196,7 +189,11 @@ export interface CreateBackupOptions {
  */
 export function createBackup(options: CreateBackupOptions): BackupResult {
   const dataRoot = getDataRoot(options.dataRoot);
-  const dir = path.resolve(options.destination, options.name ?? backupDirName());
+  // The artefact's name: sortable, and unambiguous about which instant.
+  const dir = path.resolve(
+    options.destination,
+    `viberr-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+  );
   if (existsSync(dir)) {
     throw new Error(`refusing to overwrite an existing backup at ${dir}`);
   }

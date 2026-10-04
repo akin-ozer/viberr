@@ -231,13 +231,12 @@ describe("createBackup", () => {
     mkdirSync(home, { recursive: true });
     writeFileSync(path.join(home, "auth.json"), "{}");
 
-    const without = createBackup({ dataRoot: f.dataRoot, destination: f.out, name: "a" });
+    const without = createBackup({ dataRoot: f.dataRoot, destination: path.join(f.out, "a") });
     expect(existsSync(path.join(without.dir, "store", "runtimes"))).toBe(false);
 
     const with_ = createBackup({
       dataRoot: f.dataRoot,
-      destination: f.out,
-      name: "b",
+      destination: path.join(f.out, "b"),
       includeRuntimes: true,
     });
     expect(
