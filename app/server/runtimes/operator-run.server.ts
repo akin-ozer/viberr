@@ -830,15 +830,6 @@ function leaseRefFromKey(key: string) {
 }
 
 /**
- * C2 (pass-24 fix): a queued @operator turn that FAILS at fire time must not
- * vanish into the log. The pass-23 C2 work surfaced only the cap-overflow drop
- * (`MAX_PENDING_HUMAN_TRIGGERS`); a fired trigger that THROWS left the comment
- * recorded but never coordinated, and — because a queued trigger existed —
- * `settleWaitingAfterOperator` was skipped, so the task stayed "waiting for agent"
- * with nothing live. Note it on the timeline and settle the waiting flag so the
- * board stops lying and the human can run the operator manually.
- */
-/**
  * Ruling 141 (pass 34, F34-8): a queued trigger that is REFUSED when it reaches
  * the front of the lease queue says so on the task — the refusal used to exist
  * only in the server log while the timeline still said "Scheduled action
@@ -956,6 +947,15 @@ async function noteQueuedTriggerRefused(
   }
 }
 
+/**
+ * C2 (pass-24 fix): a queued @operator turn that FAILS at fire time must not
+ * vanish into the log. The pass-23 C2 work surfaced only the cap-overflow drop
+ * (`MAX_PENDING_CARRIED_TRIGGERS`); a fired trigger that THROWS left the comment
+ * recorded but never coordinated, and — because a queued trigger existed —
+ * `settleWaitingAfterOperator` was skipped, so the task stayed "waiting for agent"
+ * with nothing live. Note it on the timeline and settle the waiting flag so the
+ * board stops lying and the human can run the operator manually.
+ */
 async function noteQueuedTriggerFireFailed(
   db: DatabaseSync,
   queued: RunOperatorInput,
@@ -2633,12 +2633,6 @@ const operatorPlanRuntimeSchema = z.strictObject({
 
 type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
 
-/**
- * The Codex plan schema is flat, so it can't author rich per-option packets the
- * way Claude's `open_decision_packet` tool does. We give the Codex operator a
- * usable default option set keyed to the packet type instead — the human still
- * gets a real, resolvable FR26 packet rather than a comment wall.
- */
 /**
  * Normalize the Codex operator's AUTHORED packet options (P11-27) into the shape
  * `operatorOpenPacket` expects, or null when it supplied nothing usable (empty,

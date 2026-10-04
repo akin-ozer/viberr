@@ -570,12 +570,6 @@ export function assertRunReservationLive(db: DatabaseSync, runId: string): void 
 }
 
 /**
- * Claim a run row up front so the task page has something live to render while
- * the server prepares the workspace. Never throws for display reasons — a
- * reservation that cannot be written degrades to today's behavior (no strip),
- * which must not be able to block a run from starting.
- */
-/**
  * Translate a SQLITE_CONSTRAINT_UNIQUE from the two single-flight partial
  * indexes (`idx_agent_runs__one_delivering`, F10-05, and
  * `idx_agent_runs__one_live_per_support`, dispatch-rework hunt 2026-08-29)
@@ -618,6 +612,12 @@ function singleFlightConflict(
   return null;
 }
 
+/**
+ * Claim a run row up front so the task page has something live to render while
+ * the server prepares the workspace. Never throws for display reasons — a
+ * reservation that cannot be written degrades to today's behavior (no strip),
+ * which must not be able to block a run from starting.
+ */
 export function reserveRun(
   db: DatabaseSync,
   input: ReserveRunInput,
