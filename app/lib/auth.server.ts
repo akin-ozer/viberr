@@ -39,12 +39,6 @@ import {
  *   (seed admin, org-users invite, OAuth provisioning hooks), never open reg.
  */
 
-// The mount point lives in a SHARED module so client code (the Sign-in & SSO
-// card) can render the callback URL without importing this server-only file.
-// Re-exported here because every existing server importer reads it from this
-// module.
-export { AUTH_BASE_PATH };
-
 /**
  * The ONLY Better Auth endpoints the app drives (P11-02) — everything else on
  * the `/api/auth/*` splat is rejected with a 404. An allow-list, not a
