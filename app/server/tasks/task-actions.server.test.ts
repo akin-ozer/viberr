@@ -20,7 +20,7 @@ import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
   Engagement,
   FileActorRef,
-  PrClosure,
+  PrRef,
   TaskFileEvent,
   TaskFrontmatter,
   WorkRevision,
@@ -6141,7 +6141,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
  * `resolvePacket` (second test).
  */
 describe("ruling 160: a PR closed by a person refuses delivery until the packet is answered", () => {
-  function seedClosedPr(store: TestStore, closure: PrClosure | null = {
+  function seedClosedPr(store: TestStore, closure: NonNullable<PrRef["closure"]> | null = {
     at: "2026-09-06T19:33:19.000Z",
     by: "akin-ozer",
     answered: null,

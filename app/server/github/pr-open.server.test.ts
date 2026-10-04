@@ -15,7 +15,6 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
   PrBodyWritten,
-  PrClosure,
   PrRef,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
@@ -784,7 +783,7 @@ describe("openTaskPr", () => {
 
   /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with or without a
    *  person's answer on it. The three tests below share this seed. */
-  function seedClosedCache(closure: PrClosure | null) {
+  function seedClosedCache(closure: NonNullable<PrRef["closure"]> | null) {
     const store = setupTestStore(ctx);
     const pr: NonNullable<TaskFrontmatter["pr"]> = {
       number: 7,

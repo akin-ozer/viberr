@@ -789,7 +789,6 @@ export const prRefSchema = z
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
 export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
-export type PrClosure = NonNullable<PrRef["closure"]>;
 export type PrBodyWritten = NonNullable<PrRef["bodyWritten"]>;
 
 /**
