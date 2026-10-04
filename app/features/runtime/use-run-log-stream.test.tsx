@@ -12,12 +12,12 @@ import {
 } from "./use-run-log-stream";
 import type { ConsoleThreadInput } from "./run-log-store";
 import {
-  NO_RUN_CACHE,
   runBoundaryLine,
   type LogLine,
   type RunLiveFacts,
   type RunLogWindow,
 } from "./runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 
 /**
  * The hook calls `useRevalidator`, so it runs under a REAL data router here,

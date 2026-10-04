@@ -13,7 +13,7 @@ import type { PacketRender } from "~/shared/mapping/task.server";
 import { taskDetail } from "../../../test-support/task-detail";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import type { DeployedSpecialistView } from "./execution-profile";
 import type { RecommendationView } from "./operator-recommendations";
 

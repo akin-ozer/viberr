@@ -5,7 +5,7 @@ import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage } from "./controller-page";
 import type { ControllerSurfaceView } from "./controller-query.server";
-import { NO_RUN_CACHE, type RunView } from "~/features/runtime/runtime-types";
+import { controllerRun, NO_RUN_CACHE } from "../../../test-support/run-view";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 
 /**
@@ -41,34 +41,7 @@ class FakeEventSource {
   }
 }
 
-const run: RunView = {
-  id: "controller",
-  serverRunId: "run_ctl",
-  role: "Controller",
-  kind: "controller",
-  profileId: "controller",
-  who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" },
-  backend: "claude",
-  sdk: "Claude Agent SDK",
-  model: "claude-opus-4-8",
-  sid: "sess-ctl",
-  exportable: false,
-  state: "running",
-  lifecycle: "running",
-  interruptedBy: null,
-  phase: "Working",
-  step: "viberr_controller · list_tasks",
-  startedAt: "2026-09-24T09:59:00.000Z",
-  finished: null,
-  turns: 3,
-  tokens: 1200,
-  tokensEstimated: false,
-  cache: NO_RUN_CACHE,
-  lines: [{ t: "10:00:01", ev: "text", tag: "assistant", text: "Reading the board." }],
-  raw: ['{"type":"assistant"}'],
-  lineCount: 1,
-  logWindow: { totalLines: 1, hasMore: false, runIds: ["run_ctl"], oldest: null, headSeq: 0 },
-};
+const run = controllerRun();
 
 const VIEW: ControllerSurfaceView = {
   available: true,

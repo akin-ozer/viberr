@@ -6,11 +6,8 @@ import { createRoutesStub, Outlet } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
-import {
-  NO_RUN_CACHE,
-  type LogLine,
-  type RunView,
-} from "~/features/runtime/runtime-types";
+import type { LogLine, RunView } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { TaskDetailPage } from "./task-detail-page";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";

@@ -7,8 +7,7 @@ import { ToastProvider } from "~/ui/toast";
 import { ControllerPage, surfaceLabel } from "./controller-page";
 import { readableStep } from "~/features/runtime/readable-step";
 import type { ControllerSurfaceView } from "./controller-query.server";
-import type { RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { controllerRun } from "../../../test-support/run-view";
 
 /**
  * Ruling 121 on the full controller page: the project is named, task-anchored
@@ -397,34 +396,7 @@ describe("ruling 259: the box is compared with what went out, trimmed", () => {
  * console with the turn's own lines.
  */
 describe("the open conversation's execution", () => {
-  const run: RunView = {
-    id: "controller",
-    serverRunId: "run_ctl",
-    role: "Controller",
-    kind: "controller",
-    profileId: "controller",
-    who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" },
-    backend: "claude",
-    sdk: "Claude Agent SDK",
-    model: "claude-opus-4-8",
-    sid: "sess-ctl",
-    exportable: false,
-    state: "running",
-    lifecycle: "running",
-    interruptedBy: null,
-    phase: "Working",
-    step: "viberr_controller · list_tasks",
-    startedAt: new Date(Date.now() - 65_000).toISOString(),
-    finished: null,
-    turns: 3,
-    tokens: 1200,
-    tokensEstimated: false,
-    cache: NO_RUN_CACHE,
-    lines: [{ t: "10:00:01", ev: "text", tag: "assistant", text: "Reading the board." }],
-    raw: ['{"type":"assistant"}'],
-    lineCount: 1,
-    logWindow: { totalLines: 1, hasMore: false, runIds: ["run_ctl"], oldest: null, headSeq: 0 },
-  };
+  const run = controllerRun({ startedAt: new Date(Date.now() - 65_000).toISOString() });
   const working = (over: Partial<ControllerSurfaceView> = {}) =>
     view({
       conversation: BOARD_THREAD,

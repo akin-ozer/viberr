@@ -13,7 +13,7 @@ import {
   type RunInputs,
   type RunView,
 } from "./runtime-types";
-import { NO_RUN_CACHE } from "./runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { createLiveRunLogStore, staticRunLogStore, type OlderLogState } from "./run-log-store";
 
 /** A console line as a test hands it over; the key defaults to its position. */

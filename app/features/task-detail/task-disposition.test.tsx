@@ -23,7 +23,7 @@ import { DecisionPacket } from "./decision-packet";
 import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { taskDetail } from "../../../test-support/task-detail";
 
 /** Ruling 127: the task owner whose accounts a run bills, both backends

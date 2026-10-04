@@ -6,7 +6,7 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { ToastProvider } from "~/ui/toast";
 import {
   ContinuityRecoveryPanel,
