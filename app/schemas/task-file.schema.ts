@@ -2004,17 +2004,11 @@ export interface TolerantTaskFrontmatterResult {
   diagnostics: FileDiagnostic[];
 }
 
-/** What the tolerant parse reads out of a task.md. (The legacy `specialist` /
- *  `reviewers` / `consultants` slot absorption was deleted in the
- *  dynamic-dispatch rework, 2026-08-29 — preprod, no back-compat by owner
- *  ruling. A file still carrying those keys keeps them as unknown keys.) */
-type ReadableFrontmatterKey = keyof TaskFrontmatter;
-
 /** The shared tolerant readers (`file-diagnostics.ts`), held to this file's
  *  keys: `tolerant` falls a whole field back, `tolerantRows` keeps a list's
  *  good rows (the F18 contract). */
-const tolerant: TolerantField<ReadableFrontmatterKey> = tolerantField;
-const tolerantRows: TolerantListField<ReadableFrontmatterKey> = tolerantListField;
+const tolerant: TolerantField<keyof TaskFrontmatter> = tolerantField;
+const tolerantRows: TolerantListField<keyof TaskFrontmatter> = tolerantListField;
 
 /**
  * C01-A8 (pass 32): `github.commits` gets the per-row tolerance every other
@@ -2050,23 +2044,8 @@ function githubWithCleanCommits(
 
 /**
  * Engagement parsing enforces one row per profile and at most one delivering
- * workspace owner. (The legacy `specialist`/`reviewers`/`consultants` slot
- * absorption lived here until the dynamic-dispatch rework, 2026-08-29 —
- * deleted with the rest of the slot model, preprod no-back-compat.)
+ * workspace owner.
  */
-/** Validate the `engagements` list one row at a time, keeping the good ones. */
-function parseEngagementRows(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-): Engagement[] {
-  return tolerantRows(
-    diagnostics,
-    data,
-    "engagements",
-    taskFrontmatterFields.engagements.element,
-  );
-}
-
 function parseEngagements(
   diagnostics: FileDiagnostic[],
   data: RawFrontmatter,
@@ -2077,7 +2056,12 @@ function parseEngagements(
   // the diagnostic is only a warning, so the file is still writable and the
   // next `updateTaskFile` serialized `engagements: []` back over the rows that
   // had been fine. One bad row now drops only itself.
-  const engagements: Engagement[] = parseEngagementRows(diagnostics, data);
+  const engagements: Engagement[] = tolerantRows(
+    diagnostics,
+    data,
+    "engagements",
+    taskFrontmatterFields.engagements.element,
+  );
   // profileId-uniqueness invariant (defense-in-depth): a profile has at most
   // ONE engagement. A duplicate profileId corrupts run routing (startAgentRun
   // resolves by the FIRST match), so keep the first occurrence and drop the
