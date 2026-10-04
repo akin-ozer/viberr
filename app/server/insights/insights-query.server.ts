@@ -913,12 +913,6 @@ export function oversightSummary(
       avgMs: avg(reviewDurations),
       medianMs: median(reviewDurations),
     },
-    // The boundary is the MACHINERY's, not a guess: `compactTimelineEvents`
-    // opens with `if (events.length <= options.threshold) return events`, so a
-    // task sitting exactly ON the threshold is not compacted and is not one the
-    // readability machinery is managing. Counting it as "past their project's
-    // compression threshold" put a task in the card that the fold never touches
-    // — off by one against the only rule that decides.
     longTimelines: longTimelineTasks.length,
     longTimelineKeys: namedKeys(longTimelineTasks),
   };
