@@ -6,6 +6,7 @@ import { insertUser } from "~/server/auth/user-store.server";
 import {
   approveReviewEntry,
   baseTaskFrontmatter,
+  MERGE_STAGE_BOARD,
   setupTestStore,
   writeProject,
   writeTask,
@@ -6853,19 +6854,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
-      stages: [
-        { id: "triage", name: "Triage", color: "slate" },
-        { id: "impl", name: "In Progress", color: "violet" },
-        { id: "review", name: "Review", color: "blue" },
-        { id: "merge", name: "Merge", color: "teal" },
-        { id: "done", name: "Done", color: "green" },
-      ],
-      workflow: [
-        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
-        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
-        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
-        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
-      ],
+      ...MERGE_STAGE_BOARD,
       // The reviewer is eligible at Review only (the k9s board's shape): no
       // verdict can be given at Merge.
       agents: file.parsed.frontmatter.agents.map((a) =>

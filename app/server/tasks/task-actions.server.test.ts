@@ -1,4 +1,3 @@
-import type { StageDef } from "~/schemas/project-file.schema";
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
@@ -10,6 +9,8 @@ import {
   actorOf,
   approveReviewEntry,
   baseTaskFrontmatter,
+  MERGE_STAGE_BOARD,
+  REVIEW_STAGE_REVIEWER,
   writeProject,
   writeTask,
   type TestStore,
@@ -5375,36 +5376,12 @@ describe("pass 35: operator and task actions", () => {
  * Merge had no route back to a stage where a reviewer could run.
  */
 describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
-  const MERGE_STAGES: StageDef[] = [
-    { id: "triage", name: "Triage", color: "slate" },
-    { id: "impl", name: "In Progress", color: "violet" },
-    { id: "review", name: "Review", color: "blue" },
-    { id: "merge", name: "Merge", color: "teal" },
-    { id: "done", name: "Done", color: "green" },
-  ];
-  const MERGE_WORKFLOW = [
-    { from: "triage", to: "impl", boundary: "auto" as const, by: "Operator", locked: false },
-    { from: "impl", to: "review", boundary: "approval" as const, by: "Operator", locked: false },
-    { from: "review", to: "merge", boundary: "approval" as const, by: "Operator", locked: false },
-    { from: "merge", to: "done", boundary: "human" as const, by: "Human", locked: true },
-  ];
-
   function withMergeBoard(store: TestStore): void {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    // The verdict-capable profile is eligible at Review only, as the k9s
-    // board's reviewers were: nobody can give a verdict at Merge.
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
-      stages: MERGE_STAGES,
-      workflow: MERGE_WORKFLOW,
-      agents: [
-        {
-          profileId: "reviewer",
-          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
-          extras: [],
-          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
-        },
-      ],
+      ...MERGE_STAGE_BOARD,
+      agents: [REVIEW_STAGE_REVIEWER],
     });
   }
 
