@@ -21,7 +21,7 @@ export function ConfirmDelete({
    *  against the hand-written ceremonies that say "Archive VIB-4". Each caller
    *  now passes the outcome ("Remove MCP server"); the blast radius stays in
    *  `detail` (resources-panel already counts the grants that drop). */
-  confirmLabel?: string;
+  confirmLabel: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -32,7 +32,7 @@ export function ConfirmDelete({
       screenLabel="Resource removal dialog"
       title={`Remove ${what}?`}
       body={detail}
-      confirmLabel={confirmLabel ?? `Remove ${what}`}
+      confirmLabel={confirmLabel}
       onCancel={onCancel}
       onConfirm={onConfirm}
     />
