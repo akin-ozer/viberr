@@ -126,8 +126,8 @@ export function holdRefusal(
     `${taskKey} waits on ${holdEntriesSentence(entries)} and Viberr is holding it, ` +
     `so ${verb} is refused. `;
   // Ruling 355 (pass 38, F38-9): "Viberr releases it when every entry is done"
-  // is a promise `dependenciesSatisfied` can never keep for a failed, missing
-  // or cancelled entry — the release engine writes "can never complete … edit
+  // is a promise `dependenciesSatisfied` can never keep for a failed or missing
+  // entry — the release engine writes "can never complete … edit
   // what it waits on" on the same task, and this sentence stood beside it
   // promising the opposite. The states are on the entries; say what they say.
   if (dead.length > 0) {

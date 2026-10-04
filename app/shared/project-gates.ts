@@ -5,6 +5,7 @@ import {
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import type { ProjectGate } from "~/schemas/project-file.schema";
+import { slugify } from "~/shared/ids/slugify";
 
 /**
  * Ruling 482 (pass 40, F40-52): what the project's gates say about the
@@ -101,12 +102,7 @@ const GATE_LOG_RE = /^gate-[0-9a-f]{7}-\d{2}-[a-z0-9-]*-\d{8}T\d{6}Z\.log$/;
 
 /** The attachment name one gate's log is saved under. */
 export function gateLogName(sha: string, index: number, name: string, startedAt: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 30)
-    .replace(/-+$/, "");
+  const slug = slugify(name).slice(0, 30).replace(/-+$/, "");
   const stamp = startedAt.replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
   return `gate-${sha.slice(0, 7).toLowerCase()}-${String(index).padStart(2, "0")}-${slug}-${stamp}.log`;
 }

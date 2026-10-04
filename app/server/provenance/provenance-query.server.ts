@@ -48,15 +48,6 @@ export function taskProvenancePath(
   return `projects/${projectSlug}/tasks/${taskKey}/task.md`;
 }
 
-/**
- * Latest reconciled `behindBy` per task file — or **null when the branch was
- * never compared** (UI-05). Null is load-bearing: `deriveSyncState` cannot
- * distinguish "no data" from a real "0 commits behind", so returning 0 painted
- * an unreconciled branch green "synced".
- *
- * Factory: the statement is prepared ONCE and many branch rows are mapped
- * through it, instead of re-preparing per row inside a `.map` (pass-4 WI-10).
- */
 /** The one field a `github.reconcile` row is read for. A row whose `behindBy`
  *  is missing or not a number is "never compared", exactly as before. */
 const reconcileDetailsSchema = z.object({ behindBy: z.number() });
@@ -246,6 +237,15 @@ export function createBaseCompareLookup(
   };
 }
 
+/**
+ * Latest reconciled `behindBy` per task file — or **null when the branch was
+ * never compared** (UI-05). Null is load-bearing: `deriveSyncState` cannot
+ * distinguish "no data" from a real "0 commits behind", so returning 0 painted
+ * an unreconciled branch green "synced".
+ *
+ * Factory: the statement is prepared ONCE and many branch rows are mapped
+ * through it, instead of re-preparing per row inside a `.map` (pass-4 WI-10).
+ */
 export function createReconcileBehindByLookup(
   db: DatabaseSync,
 ): (sourcePath: string) => number | null {

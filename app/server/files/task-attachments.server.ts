@@ -119,27 +119,16 @@ export function listTaskAttachmentNames(slug: string, key: string, dataRoot?: st
 /**
  * C8: `listTaskAttachments` caps its return at `LIST_CAP` with nothing to
  * tell a caller the store actually holds more — a task with 140 saved files
- * rendered as if it had exactly 100, no "and N more" anywhere. The honest fix
- * is a total the panel can compare against the list length, but the route
- * loader (`project.task.tsx`) that feeds the panel is out of this change's
- * scope, so this stays a SIBLING export rather than a shape change to
- * `listTaskAttachments` (which would have forced every existing caller,
- * including that loader, to update in lockstep). Cheap on purpose: a dirent
- * type check, no per-file `statSync`.
+ * rendered as if it had exactly 100, no "and N more" anywhere. This is the
+ * total the panel compares against the list length. Cheap on purpose: a
+ * dirent type check, no per-file `statSync`.
  */
 export function countTaskAttachments(
   slug: string,
   key: string,
   dataRoot?: string,
 ): number {
-  const dir = taskAttachmentsDir(slug, key, dataRoot);
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return 0; // no attachments dir yet — the common case
-  }
-  return entries.filter((e) => !e.name.startsWith(".") && e.isFile()).length;
+  return listTaskAttachmentNames(slug, key, dataRoot).length;
 }
 
 /**
@@ -527,7 +516,9 @@ export function checkAttachmentBatch(
 const claimsInFlight = new Map<string, Map<string, number>>();
 
 /** Puts one file on the task inside {@link withAttachmentClaims}: the store's
- *  own write, with {@link writeTaskAttachment}'s refusals. */
+ *  own write, with {@link writeTaskAttachment}'s refusals. `refuseReplace` is
+ *  the sentence that refuses overwriting a file already there, or null to
+ *  allow it. The caller knows whose file it is; the store does not. */
 export type PutAttachment = (name: string, data: Uint8Array, refuseReplace?: string | null) => WrittenAttachment;
 
 /**
@@ -598,11 +589,8 @@ export function writeTaskAttachment(
   name: string,
   data: Uint8Array,
   dataRoot?: string,
-  /** The sentence that refuses overwriting a file already there, or null to
-   *  allow it. The caller knows whose file it is; the store does not. */
-  refuseReplace: string | null = null,
 ): WrittenAttachment {
-  const file = landTaskAttachment(slug, key, name, data, dataRoot, refuseReplace);
+  const file = landTaskAttachment(slug, key, name, data, dataRoot, null);
   file.keep();
   return file.written;
 }

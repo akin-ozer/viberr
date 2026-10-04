@@ -13,13 +13,11 @@ import {
 } from "./activity-page";
 import {
   auditTimeLabel,
-  auditTimeLabelUTC,
-  groupStreamByDay,
-  groupStreamByDayUTC,
   matchesActorFilter,
   type ActivityStreamRowView,
   type AuditLogEntryView,
 } from "./feed-helpers";
+import { daySections } from "~/shared/dates/day-sections";
 
 afterEach(cleanup);
 
@@ -109,11 +107,28 @@ function renderActivity(
 }
 
 describe("helpers", () => {
-  it("groupStreamByDay buckets DESC-ordered rows without empty groups", () => {
-    const groups = groupStreamByDay(STREAM);
+  it("daySections buckets the DESC-ordered stream without empty groups", () => {
+    const groups = daySections(STREAM, (r) => r.occurredAt, true);
     expect(groups.map((g) => g.day)).toEqual(["Today", "Yesterday"]);
     expect(groups[0]!.rows.map((r) => r.id)).toEqual([3, 2]);
     expect(groups[1]!.rows.map((r) => r.id)).toEqual([1]);
+  });
+
+  it("the hydration first pass buckets by absolute UTC day", () => {
+    // 23:50Z / 00:10Z straddle a UTC midnight: two groups with absolute
+    // labels, whatever the host timezone (a UTC+3 host merges them locally).
+    const rows = [
+      { ...STREAM[0]!, id: 21, occurredAt: "2026-07-04T00:10:00.000Z" },
+      { ...STREAM[1]!, id: 20, occurredAt: "2026-07-03T23:50:00.000Z" },
+    ];
+    expect(daySections(rows, (r) => r.occurredAt, false).map((g) => g.day)).toEqual([
+      "Jul 4",
+      "Jul 3",
+    ]);
+    // Never now-relative — that is exactly what a UTC server and a non-UTC
+    // viewer disagree on.
+    const fresh = { ...STREAM[0]!, occurredAt: new Date().toISOString() };
+    expect(daySections([fresh], (r) => r.occurredAt, false)[0]!.day).not.toBe("Today");
   });
 
   it("matchesActorFilter matches on actor.kind; missing actors only under All", () => {
@@ -128,24 +143,6 @@ describe("helpers", () => {
     expect(auditTimeLabel(iso(0, 9, 38))).toBe("today 09:38");
     expect(auditTimeLabel(iso(1, 16, 4))).toBe("yesterday 16:04");
     expect(auditTimeLabel("2026-03-30T14:00:00.000Z")).toMatch(/^Mar \d+$/);
-  });
-
-  it("UTC variants bucket by absolute UTC day — the hydration first pass", () => {
-    // 23:50Z / 00:10Z straddle a UTC midnight: two groups with absolute
-    // labels, whatever the host timezone (a UTC+3 host merges them locally).
-    const rows = [
-      { ...STREAM[0]!, id: 21, occurredAt: "2026-07-04T00:10:00.000Z" },
-      { ...STREAM[1]!, id: 20, occurredAt: "2026-07-03T23:50:00.000Z" },
-    ];
-    expect(groupStreamByDayUTC(rows).map((g) => g.day)).toEqual([
-      "Jul 4",
-      "Jul 3",
-    ]);
-    // Never now-relative — that is exactly what a UTC server and a non-UTC
-    // viewer disagree on.
-    const fresh = { ...STREAM[0]!, occurredAt: new Date().toISOString() };
-    expect(groupStreamByDayUTC([fresh])[0]!.day).not.toBe("Today");
-    expect(auditTimeLabelUTC("2026-07-03T23:50:00.000Z")).toBe("Jul 3");
   });
 });
 
@@ -175,6 +172,21 @@ describe("ActivityPage", () => {
     // Per-type icon tint + task keybtn.
     expect(rows[1]!.querySelector(".pev-ico.act-completion")).toBeTruthy();
     expect(rows[1]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
+  });
+
+  it("ruling 652(c): same-day rows from different YEARS get their own sections, in order", () => {
+    // The day label carries no year, and the stream grouped on the label, so
+    // two Mar 30s a year apart merged into one section with the old row inside
+    // the recent block. Canary: group the stream by `g.day` again.
+    const rows = [
+      { ...STREAM[0]!, id: 31, text: "recent row", occurredAt: "2026-03-30T10:00:00.000Z" },
+      { ...STREAM[1]!, id: 30, text: "a year older", occurredAt: "2025-03-30T10:00:00.000Z" },
+    ];
+    const { container } = renderActivity(rows, []);
+    expect(container.querySelectorAll(".act-day")).toHaveLength(2);
+    const shown = container.querySelectorAll(".panel:first-child .pol-ev");
+    expect(shown[0]!.textContent).toContain("recent row");
+    expect(shown[1]!.textContent).toContain("a year older");
   });
 
   it("ruling 148: a row with no actor names none, rather than a '−'", () => {

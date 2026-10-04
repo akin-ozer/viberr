@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { data } from "react-router";
+import { requireFormAction } from "~/server/auth/form-action.server";
 import {
   assertProjectAction,
   type AuthorityActor,
@@ -41,4 +42,22 @@ export function requireVisibleProject(
     }
     throw error;
   }
+}
+
+/**
+ * A project route's action preamble: `requireFormAction`, then the gate above.
+ * React Router runs a child action WITHOUT the layout's loader, so every
+ * project action repeats the members-only refusal first, outside its own
+ * `try`, so a non-member gets the thrown unknown-slug 404 rather than an inner
+ * guard's 403 (WI-13). A refused CSRF check skips the gate: the caller returns
+ * `refused` before it touches the project.
+ */
+export async function requireProjectFormAction(
+  request: Request,
+  projectSlug: string,
+  what = "act on this project",
+) {
+  const action = await requireFormAction(request);
+  if (!action.refused) requireVisibleProject(action.db, projectSlug, action.actor, what);
+  return action;
 }

@@ -51,7 +51,7 @@ describe("activeFileLeases", () => {
     seedHolder({ stage: "review" });
     leaseTo("VIB-7", ["pnpm-lock.yaml"]);
     expect(activeFileLeases(store.slug, { dataRoot: store.dataRoot })).toHaveLength(1);
-    expect(staleFileLeases(null, store.slug, { dataRoot: store.dataRoot })).toEqual([]);
+    expect(staleFileLeases(store.slug, { dataRoot: store.dataRoot })).toEqual([]);
   });
 
   it("stops binding the moment the holder reaches the terminal stage", () => {
@@ -64,7 +64,7 @@ describe("activeFileLeases", () => {
     seedHolder({ stage: "done" });
     expect(activeFileLeases(store.slug, { dataRoot: store.dataRoot })).toEqual([]);
     // Named, not silently dropped, so a surface can offer to clear the row.
-    expect(staleFileLeases(null, store.slug, { dataRoot: store.dataRoot })).toHaveLength(1);
+    expect(staleFileLeases(store.slug, { dataRoot: store.dataRoot })).toHaveLength(1);
   });
 
   it("stops binding when the holder is ARCHIVED, not only when it is Done", () => {

@@ -4190,6 +4190,30 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
   });
 });
 
+function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
+  const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...projectFile.parsed.frontmatter,
+    agents: [
+      {
+        profileId: "operator",
+        capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
+        extras: [],
+        definition: {
+          kind: "operator" as const,
+          name: "Operator",
+          role: "Coordination",
+          icon: "shield",
+          backends: ["claude" as const],
+          model: "sonnet",
+          autonomy: "supervised" as const,
+        },
+      },
+    ],
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
 /**
  * Ruling 533: a task is filed WITH its input. On a board that delivers results
  * the file a person hands over (an inventory, a screenshot) is the task, and it
@@ -4197,30 +4221,6 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
  * show it.
  */
 describe("ruling 533: a task filed with its input", () => {
-  function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
-    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...projectFile.parsed.frontmatter,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
-          extras: [],
-          definition: {
-            kind: "operator" as const,
-            name: "Operator",
-            role: "Coordination",
-            icon: "shield",
-            backends: ["claude" as const],
-            model: "sonnet",
-            autonomy: "supervised" as const,
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  }
-
   it("the operator's create trigger finds the files on disk and claimed for the person", async () => {
     // CANARY: leave the files out of `createTask`'s own writes (attach them
     // afterwards, the way the task page does) and the triage run starts on a
@@ -4400,27 +4400,7 @@ describe("ruling 140(a): a named owner at creation", () => {
     const store = setupProjectedStore(ctx);
     // `autoInvokeOperator` returns early when no operator is deployed, so the
     // hand-off this case is about needs one on the project.
-    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...projectFile.parsed.frontmatter,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
-          extras: [],
-          definition: {
-            kind: "operator" as const,
-            name: "Operator",
-            role: "Coordination",
-            icon: "shield",
-            backends: ["claude" as const],
-            model: "sonnet",
-            autonomy: "supervised" as const,
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperatorOn(store);
     const seen: { ownerUserId: string | null; trigger: string | undefined }[] = [];
     let settle: (() => void) | null = null;
     const observed = new Promise<void>((resolve) => {
@@ -6019,26 +5999,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     const store = setupProjectedStore(ctx);
     // `autoInvokeOperator` returns early with no operator deployed, and the
     // hand-off is the whole subject of this test.
-    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...projectFile.parsed.frontmatter,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: [{ capabilityId: "dispatch-agents", mode: "direct" as const }],
-          extras: [],
-          definition: {
-            kind: "operator" as const,
-            name: "Operator",
-            role: "Coordination",
-            icon: "shield",
-            backends: ["claude" as const],
-            model: "sonnet",
-            autonomy: "supervised" as const,
-          },
-        },
-      ],
-    });
+    deployOperatorOn(store);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
       verdicts: [

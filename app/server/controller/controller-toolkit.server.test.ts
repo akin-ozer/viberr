@@ -319,12 +319,6 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   }
 
   /**
-   * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
-   * out by hand, across two turns, that five tasks sat behind them: "the one
-   * number that should order a decision queue does not exist, so the ordering
-   * depends on whoever happens to have walked the graph recently."
-   */
-  /**
    * Ruling 302, extended to the sibling it was first written without.
    *
    * It fixed the OPERATOR's timeline window and left the controller's, which
@@ -403,6 +397,12 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
+  /**
+   * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
+   * out by hand, across two turns, that five tasks sat behind them: "the one
+   * number that should order a decision queue does not exist, so the ordering
+   * depends on whoever happens to have walked the graph recently."
+   */
   it("ruling 300 (+336): every decision says what answering it releases, and when", async () => {
     await openPacketOn(PACKET_TASK);
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
@@ -2120,13 +2120,6 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 263's second half: R21-9's law on the one dispatch door that skipped
-   * it. The task page and the operator's `run_agent` both write
-   * `@<agent> <prompt>` before the start (ruling 375 for the page); through
-   * the controller the directive went into the agent's prompt and nowhere
-   * else, so the timeline showed a run appearing for no stated reason.
-   */
-  /**
    * Ruling 583, amended. The controller had no `noVerdict` on its own dispatch
    * door: on AWSC-25 it asked the task's operator to start the Estimate Judge
    * with the verdict withheld, because it could not.
@@ -2150,6 +2143,13 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(withheld()).toEqual({ verdict_withheld: 1 });
   });
 
+  /**
+   * Ruling 263's second half: R21-9's law on the one dispatch door that skipped
+   * it. The task page and the operator's `run_agent` both write
+   * `@<agent> <prompt>` before the start (ruling 375 for the page); through
+   * the controller the directive went into the agent's prompt and nowhere
+   * else, so the timeline showed a run appearing for no stated reason.
+   */
   it("run_agent_on_task: the directive is recorded on the timeline (ruling 263)", async () => {
     await call(ids.maintainer, "run_agent_on_task", {
       taskKey: "VIB-142",
@@ -2900,13 +2900,6 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 264 (pass 37, F37-94): the deploy reply says which delivery posture
-   * it stored, because since ruling 156 the deploy COPIES the template's own
-   * grants. Live, the shipped `developer` template carries
-   * `execute-code-or-write-repo: direct`, so every deploy of it produced a
-   * profile that can push to the repo under a reply promising the opposite.
-   */
-  /**
    * Ruling 280 (pass 37, F37-113): `deploy_agent` said "No removal exists
    * here." It is true of this toolkit and false of the product —
    * `deleteAgentProfile` removes a deployment from the project's Agents page.
@@ -2939,6 +2932,13 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(def.description).not.toContain("This toolkit does not remove a deployment");
   });
 
+  /**
+   * Ruling 264 (pass 37, F37-94): the deploy reply says which delivery posture
+   * it stored, because since ruling 156 the deploy COPIES the template's own
+   * grants. Live, the shipped `developer` template carries
+   * `execute-code-or-write-repo: direct`, so every deploy of it produced a
+   * profile that can push to the repo under a reply promising the opposite.
+   */
   it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
     // A template with repo write. `save_global_agent` has no capability field,
     // so the grants have to be written the way a shipped template carries them.

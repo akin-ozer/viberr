@@ -141,10 +141,7 @@ import {
   joinDependencyEntries,
   type DependencyReleasePayload,
 } from "~/shared/dependencies";
-import {
-  compactTimelineEvents,
-  DEFAULT_COMPACTION,
-} from "./timeline-compaction.server";
+import { compactTimelineEvents } from "./timeline-compaction.server";
 import {
   canAcceptFromStage,
   resolveStageRoles,
@@ -197,6 +194,7 @@ import {
 // predicate the write below and the accept dialog's loader both read.
 import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 import {
+  appendPolicyNote,
   taskRef,
   reprojectTask,
   summaryOrThrow,
@@ -452,9 +450,6 @@ function terminalStageIdOf(project: ProjectContext): string | null {
   return stageRolesOf(project).terminalId;
 }
 
-/** The operator's canonical notification actor. */
-
-
 /** The loosest membership gate: ANY live member (idempotent/no-op paths).
  *  Routes through the single authority resolution, so an org admin passes as
  *  the audited D2 override. */
@@ -553,14 +548,6 @@ function requireDecisionAuthority(
 
 const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
 
-/** The user's DISPLAY name — what the `@operator` mention path passes as
- *  `humanCommentBy`, so the operator's reply tags a name the mention matcher
- *  knows (NEW-4: an email tag chips nothing and notifies nobody). Exported for
- *  the steered manual run, which must speak the same name. */
-export function userName(db: DatabaseSync, userId: string): string {
-  return userDisplayName(db, userId);
-}
-
 /** The user's avatar tint for a notification's `from` render; "" when the user
  *  is gone or never picked one. */
 function avatarTone(db: DatabaseSync, userId: string): string {
@@ -574,7 +561,7 @@ function humanActorRef(db: DatabaseSync, actor: TaskActor) {
   return {
     kind: "human" as const,
     userId: actor.userId,
-    nameHint: userName(db, actor.userId),
+    nameHint: userDisplayName(db, actor.userId),
   };
 }
 
@@ -675,12 +662,6 @@ function attachmentKb(bytes: number): string {
 }
 
 /**
- * Board "New task" flow: allocates the next `<PREFIX>-<n>` key atomically
- * from the per-project counter in project.md, writes the task file with the
- * mock create defaults, reprojects, audits.
- * RBAC: any project member except viewers (board spec §5.1).
- */
-/**
  * Ruling 140(a): the ONE rule for who may hold the owner seat, shared by a
  * hand-off through `setOwner` and a named owner at creation, so the pinned
  * sentence never forks. The ACTOR-side guard of `setOwner` (who may hand off)
@@ -695,6 +676,12 @@ function requireOwnable(project: ProjectContext, targetUserId: string): void {
   }
 }
 
+/**
+ * Board "New task" flow: allocates the next `<PREFIX>-<n>` key atomically
+ * from the per-project counter in project.md, writes the task file with the
+ * mock create defaults, reprojects, audits.
+ * RBAC: any project member except viewers (board spec §5.1).
+ */
 export async function createTask(
   db: DatabaseSync,
   input: CreateTaskInput,
@@ -963,7 +950,7 @@ export async function createTask(
       projectSlug: input.projectSlug,
       recipientUserId: namedOwnerId,
       actor: creator,
-      actorName: userName(db, creator.userId),
+      actorName: userDisplayName(db, creator.userId),
       change: { kind: "seated_at_creation", taskKey: key },
       // The creation's `assign` event carries the file's own `now`.
       eventAt: now,
@@ -1621,11 +1608,6 @@ export interface AutoInvokeOptions {
   relay?: RelayPayload;
 }
 
-/** Best-effort operator handoff; dynamically imported to avoid a module cycle.
- *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
- *  change (`pr-diverged`) is a coordination event like any other, so the
- *  reconciler wakes the operator through the same seam instead of leaving the
- *  divergence as prose only a human ever acts on. */
 /**
  * Ruling 330: the record that a task had stopped.
  *
@@ -1641,18 +1623,10 @@ export async function noteStranded(
   task: { projectSlug: string; taskKey: string; waiting: string | null; quietForMs: number },
 ): Promise<void> {
   const { STRANDED_NOTE_TITLE, strandedNoteText } = await import("./stranded-sweep.server");
-  await updateTaskFile(taskRef(ctx, task.projectSlug, task.taskKey), (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "note",
-      actor: { kind: "system", systemId: "policy-engine" },
-      title: STRANDED_NOTE_TITLE,
-      text: strandedNoteText(task),
-      toAgent: false,
-      evidence: null,
-    });
+  await appendPolicyNote(db, ctx, task.projectSlug, task.taskKey, {
+    title: STRANDED_NOTE_TITLE,
+    text: strandedNoteText(task),
   });
-  reprojectTask(db, ctx, task.projectSlug, task.taskKey);
 }
 
 /**
@@ -1722,6 +1696,11 @@ function oneLineDetail(excerpt: string): string {
   return flat.length > 200 ? `${flat.slice(0, 199)}…` : flat;
 }
 
+/** Best-effort operator handoff; dynamically imported to avoid a module cycle.
+ *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
+ *  change (`pr-diverged`) is a coordination event like any other, so the
+ *  reconciler wakes the operator through the same seam instead of leaving the
+ *  divergence as prose only a human ever acts on. */
 export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -1910,11 +1889,8 @@ export async function appendComment(
 
   // Timeline compaction fires on HUMAN comments too — a comment flood used to
   // never compact because compaction only ran inside operator writes.
-  const { guardrailOn, guardrailValue } = await import(
-    "./comment-guardrails.server"
-  );
-  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
-  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  const { guardrailCompaction } = await import("./comment-guardrails.server");
+  const compaction = guardrailCompaction(ctx, input.projectSlug);
   // B-FD2 (H3): a handle that matched several people notifies NOBODY. The
   // author is the only one who can retag and is still on the page, so the
   // non-delivery lands next to their comment in the same write — resolved
@@ -1942,20 +1918,7 @@ export async function appendComment(
         evidence: null,
       });
     }
-    if (compactOn) {
-      parsed.timeline = compactTimelineEvents(
-        parsed.timeline,
-        compactAt != null
-          ? {
-              threshold: compactAt,
-              keepRecent: Math.min(
-                DEFAULT_COMPACTION.keepRecent,
-                Math.max(4, Math.floor(compactAt / 2)),
-              ),
-            }
-          : DEFAULT_COMPACTION,
-      );
-    }
+    if (compaction) parsed.timeline = compactTimelineEvents(parsed.timeline, compaction);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -1976,7 +1939,7 @@ export async function appendComment(
   // are not even looked up.
   let mentionedUserIds: string[] = [];
   if (text.includes("@")) {
-    const actorName = userName(db, actor.userId);
+    const actorName = userDisplayName(db, actor.userId);
     mentionedUserIds = await stampNotifiedRecipients(
       db,
       taskRef(ctx, input.projectSlug, input.taskKey),
@@ -2314,7 +2277,6 @@ export function specialistReplyDirective(input: {
   );
 }
 
-/** Append a comment and, when authorized, resume or start its mentioned agent. */
 /**
  * F35-5 (pass 35): the durable trace of an @mention whose run did not start.
  * Best-effort, like the ambiguous-handle note beside it: the comment is
@@ -2331,20 +2293,12 @@ async function noteMentionNotStarted(
 ): Promise<void> {
   try {
     const detail = reason.trim().replace(/\.?$/, ".");
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: "Mention not started",
-        text:
-          `**Not started:** @${agentName} was mentioned, but its run did not start: ${detail} ` +
-          `The comment stays on the record.`,
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      title: "Mention not started",
+      text:
+        `**Not started:** @${agentName} was mentioned, but its run did not start: ${detail} ` +
+        `The comment stays on the record.`,
     });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     recordAudit(db, {
       action: "task.comment.unrouted",
       actor: { userId: actor.userId, label: actor.label },
@@ -2437,6 +2391,7 @@ function commentFiles(
   };
 }
 
+/** Append a comment and, when authorized, resume or start its mentioned agent. */
 export async function commentToAgent(
   db: DatabaseSync,
   input: {
@@ -2503,21 +2458,9 @@ export async function commentToAgent(
       ? ambiguousBackendHandle(ctx, input.projectSlug, input.text)
       : null;
     if (ambiguous) {
-      await updateTaskFile(
-        taskRef(ctx, input.projectSlug, input.taskKey),
-        (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "note",
-            actor: { kind: "system", systemId: "policy-engine" },
-            title: null,
-            text: ambiguousBackendHandleNote(ambiguous),
-            toAgent: false,
-            evidence: null,
-          });
-        },
-      );
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text: ambiguousBackendHandleNote(ambiguous),
+      });
       // Its own action id: the comment itself is already audited as
       // `task.comment`, and re-using that id would double-count the comment in
       // every action-keyed projection that reads it.
@@ -2542,25 +2485,13 @@ export async function commentToAgent(
       const fm = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))
         ?.parsed.frontmatter;
       if (fm && deliveringEngagement(fm) === null) {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text:
-                "**Note:** `@agent` addresses the task's delivering agent, and no agent " +
-                "delivers this task yet; the comment reached no agent. Run one from the " +
-                "Execution profile (a repo-write agent's first run makes it the deliverer), " +
-                "or mention a deployed agent by name.",
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text:
+            "**Note:** `@agent` addresses the task's delivering agent, and no agent " +
+            "delivers this task yet; the comment reached no agent. Run one from the " +
+            "Execution profile (a repo-write agent's first run makes it the deliverer), " +
+            "or mention a deployed agent by name.",
+        });
         recordAudit(db, {
           action: "task.comment.unrouted",
           actor: { userId: actor.userId, label: actor.label },
@@ -2603,7 +2534,7 @@ export async function commentToAgent(
     };
   }
 
-  const commenterName = userName(db, actor.userId);
+  const commenterName = userDisplayName(db, actor.userId);
 
   // 3b. `@operator` → run the OPERATOR (a governed run), not a specialist. The
   //     human's comment is already on the timeline (appended above), so the
@@ -3579,29 +3510,13 @@ export async function postAgentReplyComment(
   // for. It ran only on operator and human comment writes, so a run of agent
   // replies accreted with no compaction pass even though B-FD9 made those
   // replies foldable. Same threshold/keepRecent shape as the other two paths.
-  const { guardrailOn, guardrailValue } = await import(
-    "./comment-guardrails.server"
-  );
-  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
-  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  const { guardrailCompaction } = await import("./comment-guardrails.server");
+  const compaction = guardrailCompaction(ctx, input.projectSlug);
   // The reply write, on its own so it can be RETRIED (C3).
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift(event);
-      if (compactOn) {
-        parsed.timeline = compactTimelineEvents(
-          parsed.timeline,
-          compactAt != null
-            ? {
-                threshold: compactAt,
-                keepRecent: Math.min(
-                  DEFAULT_COMPACTION.keepRecent,
-                  Math.max(4, Math.floor(compactAt / 2)),
-                ),
-              }
-            : DEFAULT_COMPACTION,
-        );
-      }
+      if (compaction) parsed.timeline = compactTimelineEvents(parsed.timeline, compaction);
     });
   const finalizeReply = async () => {
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
@@ -3984,26 +3899,17 @@ async function noteStuckLoopEscalationFailed(
       : why.kind === "refused"
         ? "Viberr refused it and gave no reason."
         : "Writing it failed and the error carried no message.";
-    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: null,
-        text:
-          "This task's operator turns stopped making progress, and the recovery packet that " +
-          `would have asked you how to proceed was not opened. ${said} ` +
-          "There is no packet on this task to resolve; it is waiting on a person. " +
-          (why.kind === "refused"
-            ? "Clear what the refusal names and the next operator turn escalates on its own, " +
-              "or run the operator yourself and decide from there."
-            : "Run the operator yourself and decide from there; the next turn will try the " +
-              "escalation again."),
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, projectSlug, taskKey, {
+      text:
+        "This task's operator turns stopped making progress, and the recovery packet that " +
+        `would have asked you how to proceed was not opened. ${said} ` +
+        "There is no packet on this task to resolve; it is waiting on a person. " +
+        (why.kind === "refused"
+          ? "Clear what the refusal names and the next operator turn escalates on its own, " +
+            "or run the operator yourself and decide from there."
+          : "Run the operator yourself and decide from there; the next turn will try the " +
+            "escalation again."),
     });
-    reprojectTask(db, ctx, projectSlug, taskKey);
   } catch {
     // Best-effort: the stuck state is already logged above.
   }
@@ -4306,7 +4212,6 @@ export function deliveredWorkEvidence(fm: {
   return rows;
 }
 
-/** Atomically record a finished run's reply, verdict, and human question. */
 /**
  * Ruling 237 (F37-57): display names for the escalation card, read from the
  * project file so a handle is a NAME even on a project whose run history was
@@ -4349,6 +4254,7 @@ function clipVerdictReason(text: string): string {
   );
 }
 
+/** Atomically record a finished run's reply, verdict, and human question. */
 export async function recordAgentCompletion(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -5329,7 +5235,7 @@ export async function deliverDeferredMention(
     mine.length === 1
       ? oldest.text
       : mine
-          .map((m) => (authors.size > 1 ? `${userName(db, m.userId)}: ${m.text}` : m.text))
+          .map((m) => (authors.size > 1 ? `${userDisplayName(db, m.userId)}: ${m.text}` : m.text))
           .join("\n\n");
   logger.info("delivering the @mention(s) refused while the agent was running", {
     projectSlug: input.projectSlug,
@@ -5348,7 +5254,7 @@ export async function deliverDeferredMention(
     },
     // The person who has been waiting longest is the one the agent is told to
     // tag back.
-    { userId: oldest.userId, label: userName(db, oldest.userId) },
+    { userId: oldest.userId, label: userDisplayName(db, oldest.userId) },
     ctx,
   );
   // Ruling 211(b): the caller needs to know a delivery was OWED, not only
@@ -5372,23 +5278,15 @@ async function appendUndeliveredMentionNote(
   owed: number,
 ): Promise<void> {
   try {
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: "Mention still not delivered",
-        text:
-          `**Not delivered:** ${owed === 1 ? "a comment" : `${owed} comments`} addressed to ` +
-          `@${input.agentHandle} could not be started when its run finished, so the delivery ` +
-          `promised when the comment was refused has not happened. ` +
-          `${owed === 1 ? "It stays" : "They stay"} on the record; mention the agent again once ` +
-          `the task can run one.`,
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      title: "Mention still not delivered",
+      text:
+        `**Not delivered:** ${owed === 1 ? "a comment" : `${owed} comments`} addressed to ` +
+        `@${input.agentHandle} could not be started when its run finished, so the delivery ` +
+        `promised when the comment was refused has not happened. ` +
+        `${owed === 1 ? "It stays" : "They stay"} on the record; mention the agent again once ` +
+        `the task can run one.`,
     });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   } catch (error) {
     logger.warn("undelivered-mention note failed", {
       taskKey: input.taskKey,
@@ -5397,50 +5295,58 @@ async function appendUndeliveredMentionNote(
   }
 }
 
+/** The finished run a completion acts on: what the live callback registers and
+ *  boot recovery replays. */
+interface AgentCompletionInput {
+  projectSlug: string;
+  taskKey: string;
+  backend: RealBackend;
+  /** The engaged profile's stable identity. */
+  profileId: string;
+  role: string;
+  /** The engagement owns the workspace/branch/PR (G1) — gates delivery
+   *  reconcile + the single-flight semantics; NEVER a behavior kind. */
+  delivers: boolean;
+  /** Staging key for a Claude toolkit report_outcome envelope (absent for
+   *  Codex/recovered runs — their envelope re-parses from the stored reply). */
+  outcomeKey?: string;
+  workdir: string | null;
+  /** The agent's @mention handle, for the stuck-loop packet copy. */
+  agentHandle: string;
+  /** C5 (pass 25): this run was started to answer a human's @mention/directive
+   *  (`directiveFrom` was set), not as a bare review invocation. A reviewer
+   *  answering a conversational @mention produces no verdict BY DESIGN, so the
+   *  "reviewer finished without a readable verdict" note must NOT fire for it —
+   *  even while the task sits at the review stage. Only a run started FOR review
+   *  (Run button / operator review, no human directive quoted) expects a verdict. */
+  fromHumanDirective?: boolean;
+  /** F-P11 (pass 25): this Codex run was actually given the outcome-envelope
+   *  outputSchema (verdict/ask/evidence-capable). When explicitly `false`, its
+   *  reply is plain prose and must NOT be re-parsed as an envelope (a plain
+   *  developer's reply that happens to be a bare JSON object would otherwise be
+   *  silently truncated to its `summary` field). Undefined → unknown (recovery),
+   *  which keeps the legacy re-parse so a recovered envelope still resolves. */
+  envelopeRequested?: boolean;
+  /** Dispatch-completion contract (2026-08-29): display name of the human
+   *  whose manual/scheduled dispatch started this run. Presence makes the
+   *  final report always tag them + @operator (appended when the model forgot)
+   *  and always re-invokes the operator. PERSISTED on the run row (pass 32,
+   *  C02-R11) so a run recovered after a restart keeps the contract — it used
+   *  to be closure-only and degrade to the react heuristic with no cc line. */
+  dispatchedByName?: string;
+  /** The dispatcher's user id — what the cc-append verifies notification
+   *  against (the mention ladder resolves people, not substrings). */
+  dispatchedByUserId?: string;
+  /** Present when started inside an operator react loop (continue the chain). */
+  operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
+}
+
 /** Register the single completion pipeline: record, reconcile, and continue coordination. */
 export async function registerAgentCompletion(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
+  input: AgentCompletionInput & {
     runId: string;
-    backend: RealBackend;
-    /** The engaged profile's stable identity. */
-    profileId: string;
-    role: string;
-    /** The engagement owns the workspace/branch/PR (G1) — gates delivery
-     *  reconcile + the single-flight semantics; NEVER a behavior kind. */
-    delivers: boolean;
-    /** Staging key for a Claude toolkit report_outcome envelope (absent for
-     *  Codex/recovered runs — their envelope re-parses from the stored reply). */
-    outcomeKey?: string;
-    workdir: string | null;
-    /** The agent's @mention handle, for the stuck-loop packet copy. */
-    agentHandle: string;
-    /** C5 (pass 25): this run answers a human's @mention/directive, not a bare
-     *  review invocation — gates the reviewer no-verdict note (see
-     *  applyAgentCompletionEffects). */
-    fromHumanDirective?: boolean;
-    /** F-P11 (pass 25): this Codex run was actually given the outcome-envelope
-     *  outputSchema (verdict/ask/evidence-capable). When explicitly `false`, its
-     *  reply is plain prose and must NOT be re-parsed as an envelope (a plain
-     *  developer's reply that happens to be a bare JSON object would otherwise be
-     *  silently truncated to its `summary` field). Undefined → unknown (recovery),
-     *  which keeps the legacy re-parse so a recovered envelope still resolves. */
-    envelopeRequested?: boolean;
-    /** Dispatch-completion contract (2026-08-29): display name of the human
-     *  whose manual/scheduled dispatch started this run. Presence makes the
-     *  final report always tag them + @operator (appended when the model forgot)
-     *  and always re-invokes the operator. PERSISTED on the run row (pass 32,
-     *  C02-R11) so a run recovered after a restart keeps the contract — it used
-     *  to be closure-only and degrade to the react heuristic with no cc line. */
-    dispatchedByName?: string;
-    /** The dispatcher's user id — what the cc-append verifies notification
-     *  against (the mention ladder resolves people, not substrings). */
-    dispatchedByUserId?: string;
-    /** Present when started inside an operator react loop (continue the chain). */
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
     /** Ruling 248 (F37-77): the workspace checkout could not be provisioned, so
      *  this run executed with NO working tree. PERSISTED on the run row for the
      *  same reason as `outcomeKey` — the closure that would otherwise carry it
@@ -5564,33 +5470,7 @@ export async function applyAgentCompletionEffects(
   /** `deps.runOperator` (tests) replaces the react's operator run, as it does
    *  every other operator hand-off. */
   ctx: TaskActionContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    backend: RealBackend;
-    profileId: string;
-    role: string;
-    delivers: boolean;
-    outcomeKey?: string;
-    workdir: string | null;
-    agentHandle: string;
-    /** C5 (pass 25): this run was started to answer a human's @mention/directive
-     *  (`directiveFrom` was set), not as a bare review invocation. A reviewer
-     *  answering a conversational @mention produces no verdict BY DESIGN, so the
-     *  "reviewer finished without a readable verdict" note must NOT fire for it —
-     *  even while the task sits at the review stage. Only a run started FOR review
-     *  (Run button / operator review, no human directive quoted) expects a verdict. */
-    fromHumanDirective?: boolean;
-    /** F-P11 (pass 25): this Codex run was given the outcome-envelope outputSchema
-     *  (verdict/ask/evidence-capable). Explicit `false` skips the Codex reply-JSON
-     *  re-parse so a plain developer's prose reply that happens to be a bare JSON
-     *  object is never silently truncated to its `summary`. Undefined (recovery)
-     *  keeps the legacy re-parse so a recovered envelope still resolves. */
-    envelopeRequested?: boolean;
-    /** Dispatch-completion contract (2026-08-29) — see registerAgentCompletion. */
-    dispatchedByName?: string;
-    dispatchedByUserId?: string;
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
+  input: AgentCompletionInput & {
     /** Ruling 211(c): set by boot recovery, which replays a run's lost effects
      *  possibly days later. The deferred-@mention redelivery is a promise made
      *  by the LIVE refusal and belongs to the live completion; replaying it from
@@ -6099,21 +5979,9 @@ export async function applyAgentCompletionEffects(
       !input.fromHumanDirective
     ) {
       try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text: noteText,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text: noteText,
+        });
       } catch (noteError) {
         logger.error("could not write the no-verdict note", {
           taskKey: input.taskKey,
@@ -7155,9 +7023,7 @@ export async function operatorPromptAgent(
     toAgent: true,
     evidence: null,
   };
-  await updateTaskFile(taskRef(opCtx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(comment);
-  });
+  await appendTimelineEvent(taskRef(opCtx, input.projectSlug, input.taskKey), comment);
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
   // P14-GV-06 added this fan-out so a human @tagged inside an operator directive
   // ("…coordinate with @Arda") was not silently dropped. Ruling 232 (owner,
@@ -7215,25 +7081,13 @@ export async function operatorPromptAgent(
     // noop it is.
     if (isDispatchHeld(error)) throw error;
     const message = errorMessage(error);
-    await updateTaskFile(
-      taskRef(opCtx, input.projectSlug, input.taskKey),
-      (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          // Hunt 2026-08-29: this note used to add "@X has not been engaged" —
-          // written before auto-engage existed, and now a lie whenever the
-          // engage half succeeded and only the RUN refused (a single-flight
-          // 409, an unavailable backend). State only what is known true.
-          text: `**Note:** the prompt above did NOT start a run: ${message} The directive needs to be re-sent once the blocker is resolved.`,
-          toAgent: false,
-          evidence: null,
-        });
-      },
-    );
-    reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
+    await appendPolicyNote(db, opCtx, input.projectSlug, input.taskKey, {
+      // Hunt 2026-08-29: this note used to add "@X has not been engaged" —
+      // written before auto-engage existed, and now a lie whenever the
+      // engage half succeeded and only the RUN refused (a single-flight
+      // 409, an unavailable backend). State only what is known true.
+      text: `**Note:** the prompt above did NOT start a run: ${message} The directive needs to be re-sent once the blocker is resolved.`,
+    });
     throw error;
   }
 
@@ -7357,16 +7211,15 @@ export async function setOwner(
     text =
       "Took task ownership. The owner is the human reviewer and acceptance authority for this task.";
   } else if (isTake) {
-    text = `Took over task ownership from **${userName(db, currentOwnerId!)}**. The owner is the human reviewer and acceptance authority.`;
+    text = `Took over task ownership from **${userDisplayName(db, currentOwnerId!)}**. The owner is the human reviewer and acceptance authority.`;
   } else {
-    text = `Handed task ownership to **${userName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
+    text = `Handed task ownership to **${userDisplayName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
   }
 
   const event = ownerAssignEvent(db, actor, text);
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.ownerUserId = input.targetUserId;
-    parsed.timeline.unshift(event);
+  await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), event, {
+    ownerUserId: input.targetUserId,
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -7382,7 +7235,7 @@ export async function setOwner(
   // displaced owner lost the credential principal role, the review duty and
   // the acceptance authority in silence, and the audit row named the wrong
   // person as the one told (pass 34 review).
-  const actorName = userName(db, actor.userId);
+  const actorName = userDisplayName(db, actor.userId);
   const notified = notifyOwnerSeatChange(db, {
     projectSlug: input.projectSlug,
     recipientUserId: input.targetUserId,
@@ -7471,7 +7324,7 @@ export async function releaseOwner(
   // is the server half, read by exactly the same humans.
   const text = isSelf
     ? "Released task ownership. Review & acceptance stall until another member takes the seat."
-    : `Released **${userName(db, currentOwnerId)}** from task ownership (admin). The seat is open to any contributor or above.`;
+    : `Released **${userDisplayName(db, currentOwnerId)}** from task ownership (admin). The seat is open to any contributor or above.`;
 
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
@@ -7483,10 +7336,7 @@ export async function releaseOwner(
     evidence: null,
   };
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.ownerUserId = null;
-    parsed.timeline.unshift(event);
-  });
+  await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), event, { ownerUserId: null });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   // Ruling 140(b): an ADMIN release takes the seat away from someone; they are
@@ -7497,7 +7347,7 @@ export async function releaseOwner(
         projectSlug: input.projectSlug,
         recipientUserId: currentOwnerId,
         actor,
-        actorName: userName(db, actor.userId),
+        actorName: userDisplayName(db, actor.userId),
         change: { kind: "admin_released", taskKey: input.taskKey },
         eventAt: event.occurredAt,
       });
@@ -8248,6 +8098,21 @@ async function resolveDeliveryPushGrant(
   }
 }
 
+/** GitHub's commit JSON, decoded rather than asserted. The head sha and the
+ *  tree sha carry SEPARATE tolerance so a commit whose `tree` is missing or
+ *  junk still yields the revision — the tree is an extra (`null` when it can't
+ *  be read), the head is the subject (the whole read is `null` without it). */
+const commitRevisionSchema = z
+  .object({
+    sha: z.string().min(1),
+    commit: z
+      .object({ tree: z.object({ sha: z.string().min(1) }) })
+      .nullable()
+      .catch(null),
+  })
+  .nullable()
+  .catch(null);
+
 /**
  * F19-21 — the review SUBJECT for a verified no-change completion: the default
  * branch exactly as it stands, as a real (sha, tree) pair read from GitHub.
@@ -8265,21 +8130,6 @@ async function resolveDeliveryPushGrant(
  * branch cannot be read, this returns null and the delivery says so — an
  * unverifiable base is not a verified no-change.
  */
-/** GitHub's commit JSON, decoded rather than asserted. The head sha and the
- *  tree sha carry SEPARATE tolerance so a commit whose `tree` is missing or
- *  junk still yields the revision — the tree is an extra (`null` when it can't
- *  be read), the head is the subject (the whole read is `null` without it). */
-const commitRevisionSchema = z
-  .object({
-    sha: z.string().min(1),
-    commit: z
-      .object({ tree: z.object({ sha: z.string().min(1) }) })
-      .nullable()
-      .catch(null),
-  })
-  .nullable()
-  .catch(null);
-
 async function resolveNoChangeBaseRevision(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -9474,12 +9324,6 @@ export async function runProjectGatesByHand(
 }
 
 /**
- * Surface a delivery-stage signal as a timeline event + watcher notification
- * (P11-11/P11-12): a policy refusal, a push failure, or an empty-diff review is
- * something a human must see, not just a log line. Best-effort — a failure to
- * surface only logs.
- */
-/**
  * Ruling 128: make sure the project's default branch exists before the push.
  * Reads the GitHub context the same way the PR open does; a project with no
  * repository or credential is `skipped` (the push path reports those itself).
@@ -9532,7 +9376,7 @@ async function recordPushedHead(
   if (!input.headSha) return;
   const humanUserId =
     !ctx.operatorAuthorized && input.actor.userId ? input.actor.userId : null;
-  const nameHint = humanUserId ? userName(db, humanUserId) : null;
+  const nameHint = humanUserId ? userDisplayName(db, humanUserId) : null;
   const actor: FileActorRef = ctx.operatorAuthorized
     ? { kind: "operator" }
     : humanUserId
@@ -9639,6 +9483,12 @@ export async function returnChangedRevisionToReview(
   reprojectTask(db, ctx, projectSlug, taskKey);
 }
 
+/**
+ * Surface a delivery-stage signal as a timeline event + watcher notification
+ * (P11-11/P11-12): a policy refusal, a push failure, or an empty-diff review is
+ * something a human must see, not just a log line. Best-effort — a failure to
+ * surface only logs.
+ */
 async function surfaceDeliveryEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -10875,7 +10725,6 @@ export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
 
 // ------------------------------------------------------------ resolvePacket
 
-/** Resolve the active packet by stable option kind and mark its notifications read. */
 /** Identify a packet across an awaited resolution so replacements cannot be cleared. */
 export function packetIdentity(p: TaskPacket): string {
   if (p.id) return `id:${p.id}`;
@@ -10927,6 +10776,7 @@ function contractHoldsDecision(goal: string, question: string, answer: string): 
   return false;
 }
 
+/** Resolve the active packet by stable option kind and mark its notifications read. */
 export async function resolvePacket(
   db: DatabaseSync,
   input: {
@@ -11964,7 +11814,7 @@ export async function resolvePacket(
           `Only a signed-in person can accept ${key} without the containment check.`,
         );
       }
-      const waiverLabel = userName(db, waiverUserId) ?? "";
+      const waiverLabel = userDisplayName(db, waiverUserId) ?? "";
       event = {
         occurredAt: now,
         type: "transition",
@@ -12457,21 +12307,9 @@ export async function resolvePacket(
                 ? `Branch \`${outcome.branch}\` was **not** deleted: ${outcome.message}`
                 : "The branch was **not** deleted: this project has no GitHub repo or credential configured.";
       if (outcomeText) {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text: outcomeText,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text: outcomeText,
+        });
       }
 
       // F20-24: `deleteTaskRemoteBranch` removes only the REMOTE ref — the local
@@ -12560,21 +12398,9 @@ export async function resolvePacket(
   if (option.kind === "discard_branch") {
     const branch = existing.parsed.frontmatter.branch;
     if (!branch) {
-      await updateTaskFile(
-        taskRef(ctx, input.projectSlug, input.taskKey),
-        (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "note",
-            actor: { kind: "system", systemId: "policy-engine" },
-            title: null,
-            text: "This task has no workspace branch, so there is nothing to discard.",
-            toAgent: false,
-            evidence: null,
-          });
-        },
-      );
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text: "This task has no workspace branch, so there is nothing to discard.",
+      });
     } else {
       const defaultBranch =
         readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot })
@@ -12985,21 +12811,12 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         err: toError(error),
       });
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
-            `The decision stands and nothing was started, but nothing releases this task either; ` +
-            `set what it waits on from the task page.`,
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text:
+          `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
+          `The decision stands and nothing was started, but nothing releases this task either; ` +
+          `set what it waits on from the task page.`,
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 
@@ -13028,25 +12845,17 @@ export async function resolvePacket(
         createInput.epic = deciderEpic;
       }
       const made = await createTask(db, createInput, actor, ctx);
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: "Task created from a decision",
-          // Ruling 322: same correction as the decision event's own sentence.
-          // The wait itself is written by the `blocks` loop below, through the
-          // task's own dependency editor; this note is what a person reads.
-          text:
-            `**${made.key}** (${spec.title}) was created by this decision. ` +
-            (createTaskHoldsDecider(spec, input.taskKey)
-              ? `${input.taskKey} now waits on it and is released when it is done.`
-              : `It carries the work; ${input.taskKey} is unchanged.`),
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        title: "Task created from a decision",
+        // Ruling 322: same correction as the decision event's own sentence.
+        // The wait itself is written by the `blocks` loop below, through the
+        // task's own dependency editor; this note is what a person reads.
+        text:
+          `**${made.key}** (${spec.title}) was created by this decision. ` +
+          (createTaskHoldsDecider(spec, input.taskKey)
+            ? `${input.taskKey} now waits on it and is released when it is done.`
+            : `It carries the work; ${input.taskKey} is unchanged.`),
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       // Ruling 287 (F37-122): connect it in the direction the work runs. A task
       // is usually created to UNBLOCK something, so the dependency points from
       // the EXISTING work to the new task — and that is the one direction
@@ -13100,22 +12909,14 @@ export async function resolvePacket(
             reprojectTask(db, ctx, input.projectSlug, other);
             continue;
           }
-          await updateTaskFile(taskRef(ctx, input.projectSlug, other), (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: already ? "Already waiting on that task" : "Now waits on a new task",
-              text: already
-                ? `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
-                  `to unblock this task, which already waited on it. Nothing changed here.`
-                : `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
-                  `to unblock this task. This task now waits on it and is released when it is done.`,
-              toAgent: false,
-              evidence: null,
-            });
+          await appendPolicyNote(db, ctx, input.projectSlug, other, {
+            title: already ? "Already waiting on that task" : "Now waits on a new task",
+            text: already
+              ? `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
+                `to unblock this task, which already waited on it. Nothing changed here.`
+              : `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
+                `to unblock this task. This task now waits on it and is released when it is done.`,
           });
-          reprojectTask(db, ctx, input.projectSlug, other);
         } catch (error) {
           const why = errorMessage(error);
           logger.warn("create_task resolution could not record the reverse wait", {
@@ -13123,21 +12924,12 @@ export async function resolvePacket(
             blocked: other,
             err: toError(error),
           });
-          await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text:
-                `**${made.key}** was created, but **${other}** was NOT set to wait on it: ${why} ` +
-                `Add the wait on ${other}'s own page, or ${other} may start work the new task ` +
-                `was created to come first.`,
-              toAgent: false,
-              evidence: null,
-            });
+          await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+            text:
+              `**${made.key}** was created, but **${other}** was NOT set to wait on it: ${why} ` +
+              `Add the wait on ${other}'s own page, or ${other} may start work the new task ` +
+              `was created to come first.`,
           });
-          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
         }
       }
     } catch (error) {
@@ -13146,21 +12938,12 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         err: toError(error),
       });
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `The task "${spec.title}" was **not** created: ${message} The decision stands and ` +
-            `${input.taskKey} is unchanged, but the work it named has no task; create it from ` +
-            `the board, or ask the operator to offer the decision again.`,
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text:
+          `The task "${spec.title}" was **not** created: ${message} The decision stands and ` +
+          `${input.taskKey} is unchanged, but the work it named has no task; create it from ` +
+          `the board, or ask the operator to offer the decision again.`,
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 
@@ -13204,20 +12987,11 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         err: toError(error),
       });
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `${input.taskKey} was **not** scheduled to resume when the window reopens: ${message} ` +
-            `Nothing is waiting on this task automatically; run it yourself when the window is back.`,
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text:
+          `${input.taskKey} was **not** scheduled to resume when the window reopens: ${message} ` +
+          `Nothing is waiting on this task automatically; run it yourself when the window is back.`,
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 
@@ -13259,21 +13033,9 @@ export async function resolvePacket(
           taskKey: input.taskKey,
           err: toError(error),
         });
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text: `${input.taskKey} was **not** moved to ${target.stage.name}: ${message}`,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text: `${input.taskKey} was **not** moved to ${target.stage.name}: ${message}`,
+        });
       }
     }
   }
@@ -13463,18 +13225,9 @@ async function answerFromStandingDecision(
       { userId: decision.byUserId, label: decision.byLabel },
       ctx,
     );
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: null,
-        text: standingArrivalText(decision),
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      text: standingArrivalText(decision),
     });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   } catch (error) {
     logger.warn("standing decision could not answer the packet", {
       taskKey: input.taskKey,
@@ -13571,22 +13324,13 @@ async function fanOutByCause(
         actor,
         ctx,
       );
-      await updateTaskFile(taskRef(ctx, sibling.projectSlug, sibling.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text: fanOutArrivalText({
-            fromTaskKey: input.taskKey,
-            byName: actor.label,
-            optionTitle: input.option.t,
-          }),
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, sibling.projectSlug, sibling.taskKey, {
+        text: fanOutArrivalText({
+          fromTaskKey: input.taskKey,
+          byName: actor.label,
+          optionTitle: input.option.t,
+        }),
       });
-      reprojectTask(db, ctx, sibling.projectSlug, sibling.taskKey);
       outcomes.push({ taskKey: sibling.taskKey, applied: true });
     } catch (error) {
       const message = errorMessage(error);
@@ -13703,7 +13447,7 @@ export async function requestPacketMaintainerDecision(
 
   // Notification `from` is an ActorRender (a render shape), not the FileActorRef
   // the timeline event carries — build the human render when we have a user id.
-  const fromName = actor.userId ? userName(db, actor.userId) : ownerLabel;
+  const fromName = actor.userId ? userDisplayName(db, actor.userId) : ownerLabel;
   const notice: TaskWatcherNotice = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -14123,33 +13867,6 @@ export interface AcceptancePrHeadCheck {
   liveHeadSha: string | null;
 }
 
-/**
- * R15-1 gate 2 (F15-15): the PR head must CONTAIN the delivered revision, or
- * the acceptance would merge content the delivery never produced (the live
- * failure: a PR opened over stale remote junk, approved from the local tree).
- * A live GitHub read; `refusal: null` when it cannot be verified (offline / no
- * PR / no revision / PR already merged) — the merge attempt's own honesty
- * covers those.
- *
- * This is the ONE acceptance gate force-accept can never bypass — and, since
- * A2, the one every Done writer runs: it used to be called by two of the four,
- * so a full-autonomy operator accept followed by a human "Complete merge"
- * merged a stale-head PR through the two doors that skipped it.
- */
-/**
- * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
- *
- * A refusal with no exit is its own defect, and this one could otherwise strand
- * a task permanently — the cause is GitHub declining a comparison, which no
- * amount of re-delivering necessarily fixes. So the gate does not just throw a
- * sentence into a toast: it records the question on the task, with both shas in
- * it, and the three real answers.
- *
- * Written from the ONE gate all four Done writers share, so the packet appears
- * whichever door was tried. Never clobbers an open decision (one packet slot per
- * task), and never re-writes itself while its own packet is standing — a human
- * pressing Accept twice gets one question, not two.
- */
 /** The timeline title ruling 235's record carries, and the idempotence key. */
 const UNPUSHED_HEAD_TITLE = "Acceptance refused: the reviewed revision is not on the pull request";
 
@@ -14233,6 +13950,20 @@ async function recordUnpushedHeadRefusal(
   }
 }
 
+/**
+ * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
+ *
+ * A refusal with no exit is its own defect, and this one could otherwise strand
+ * a task permanently — the cause is GitHub declining a comparison, which no
+ * amount of re-delivering necessarily fixes. So the gate does not just throw a
+ * sentence into a toast: it records the question on the task, with both shas in
+ * it, and the three real answers.
+ *
+ * Written from the ONE gate all four Done writers share, so the packet appears
+ * whichever door was tried. Never clobbers an open decision (one packet slot per
+ * task), and never re-writes itself while its own packet is standing — a human
+ * pressing Accept twice gets one question, not two.
+ */
 async function refuseUnverifiedHead(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -14341,6 +14072,19 @@ async function refuseUnverifiedHead(
   throw AppError.conflict(refusal);
 }
 
+/**
+ * R15-1 gate 2 (F15-15): the PR head must CONTAIN the delivered revision, or
+ * the acceptance would merge content the delivery never produced (the live
+ * failure: a PR opened over stale remote junk, approved from the local tree).
+ * A live GitHub read; `refusal: null` when it cannot be verified (offline / no
+ * PR / no revision / PR already merged) — the merge attempt's own honesty
+ * covers those.
+ *
+ * This is the ONE acceptance gate force-accept can never bypass — and, since
+ * A2, the one every Done writer runs: it used to be called by two of the four,
+ * so a full-autonomy operator accept followed by a human "Complete merge"
+ * merged a stale-head PR through the two doors that skipped it.
+ */
 export async function acceptancePrHeadCheck(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -14968,23 +14712,6 @@ function assertAcceptanceDisclosure(
   });
 }
 
-/**
- * The ONE Done write every acceptance path shares (B-WF6). Exported for
- * `operatorAcceptCompletion`, whose full-autonomy branch historically
- * re-implemented this block inline and drifted gate by gate.
- *
- * Unless `skipInLockRecheck` (the audited force override), the acceptance
- * refusal gates are re-evaluated INSIDE the write lock against the freshly
- * parsed state (B-WF1): the direct human path awaits a real GitHub merge
- * between its gate check and this write, and a verdict/revision/packet change
- * in that window used to be accepted anyway.
- *
- * A2: the PR-head gate runs HERE, for every caller, and `skipInLockRecheck`
- * does not relax it. `operatorAcceptCompletion` reached this write without ever
- * checking the head — so a full-autonomy operator could stamp "merge pending"
- * on a PR carrying content its task never delivered. Callers that already
- * verified pass their `headCheck` through rather than paying a second read.
- */
 /** F32-11: the open decision an acceptance closed unanswered, captured inside
  *  the file lock (a ref, because the capture happens in the write callback). */
 interface WithdrawnPacket {
@@ -15006,6 +14733,23 @@ interface ClosedDecisionRef {
   current: ClosedDecision | null;
 }
 
+/**
+ * The ONE Done write every acceptance path shares (B-WF6). Exported for
+ * `operatorAcceptCompletion`, whose full-autonomy branch historically
+ * re-implemented this block inline and drifted gate by gate.
+ *
+ * Unless `skipInLockRecheck` (the audited force override), the acceptance
+ * refusal gates are re-evaluated INSIDE the write lock against the freshly
+ * parsed state (B-WF1): the direct human path awaits a real GitHub merge
+ * between its gate check and this write, and a verdict/revision/packet change
+ * in that window used to be accepted anyway.
+ *
+ * A2: the PR-head gate runs HERE, for every caller, and `skipInLockRecheck`
+ * does not relax it. `operatorAcceptCompletion` reached this write without ever
+ * checking the head — so a full-autonomy operator could stamp "merge pending"
+ * on a PR carrying content its task never delivered. Callers that already
+ * verified pass their `headCheck` through rather than paying a second read.
+ */
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -15758,23 +15502,11 @@ async function cleanUpEmptyTaskBranch(
       // quietly standing with no record that the cleanup was attempted and lost.
       // Surface it, guarded so a second failure can never escape this handler.
       try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text:
-                `The empty branch \`${branchDisposition.branch}\` may not have been ` +
-                "deleted: the cleanup step failed. Remove it on GitHub if it is still there.",
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text:
+            `The empty branch \`${branchDisposition.branch}\` may not have been ` +
+            "deleted: the cleanup step failed. Remove it on GitHub if it is still there.",
+        });
       } catch {
         // Already logged above; nothing more we can safely do here.
       }
@@ -16097,7 +15829,7 @@ export async function applyRecommendation(
       profileId: rec.profileId,
       // Display name, not `actor.label` (the email) — the run's report tags
       // the applying human, and only a display name notifies (R21-9).
-      triggeredByName: userName(db, actor.userId),
+      triggeredByName: userDisplayName(db, actor.userId),
       triggeredByUserId: actor.userId,
     };
     if (rec.prompt?.trim()) dispatch.directive = rec.prompt.trim();
@@ -16314,6 +16046,16 @@ export async function dismissRecommendation(
 }
 
 /**
+ * Ruling 295: the longest task title, and the length a refusal names.
+ *
+ * 200 characters is well past any title a person writes and short of the point
+ * where a board card stops being scannable. There is no cap on creation today,
+ * so this bounds only what a RENAME may set: a task that arrived with a longer
+ * title keeps it until someone edits it, and is then held to this.
+ */
+export const TASK_TITLE_MAX_CHARS = 200;
+
+/**
  * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
  *
  * It could not be, by anyone. `updateTaskGoal` writes the goal — the contract
@@ -16342,16 +16084,6 @@ export async function dismissRecommendation(
  * existing reference to the old words look like a reference to something else.
  * The note carries both, which is what lets a reader join them.
  */
-/**
- * Ruling 295: the longest task title, and the length a refusal names.
- *
- * 200 characters is well past any title a person writes and short of the point
- * where a board card stops being scannable. There is no cap on creation today,
- * so this bounds only what a RENAME may set: a task that arrived with a longer
- * title keeps it until someone edits it, and is then held to this.
- */
-export const TASK_TITLE_MAX_CHARS = 200;
-
 export async function updateTaskTitle(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; title: string },

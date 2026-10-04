@@ -55,6 +55,10 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
+/** Push VIB-1's workspace branch over the fake git runner `git`. */
+const push = (git: ReturnType<typeof fakeGit>) =>
+  pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
+
 /**
  * git's own `core.quotePath` rendering: a path with a byte outside printable
  * ASCII is emitted as a C-quoted string (octal escapes, wrapped in double
@@ -239,10 +243,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
   it("pushes the task branch to origin when local commits are ahead", async () => {
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 2 });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res).toEqual({
       status: "pushed",
       branch: "vib-1-work",
@@ -284,17 +285,11 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       pushOk: false,
       pushStderr: "remote: error: GH006: Protected branch update failed",
     });
-    const failed = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: refused.exec,
-    });
+    const failed = await push(refused);
     expect(failed.status).toBe("push_failed");
     expect(repoChip()).toMatchObject({ source: "unchecked" });
     const git = fakeGit({ branch: "vib-1-work", ahead: 2 });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("pushed");
     expect(repoChip()).toEqual({ id: "repo", ok: true, source: "probe" });
   });
@@ -308,10 +303,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       // Canary: delete the early `up_to_date` return and this pushes anyway.
       bindPat();
       const git = fakeGit({ branch: "vib-1-work", ahead: 2, remoteHead: "a".repeat(40) });
-      const res = await pushWorkspaceBranch({
-        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-        dataRoot: store.dataRoot, exec: git.exec,
-      });
+      const res = await push(git);
       expect(res).toEqual({ status: "up_to_date", branch: "vib-1-work", headSha: "a".repeat(40) });
       expect(git.calls.some((c) => c.includes("push"))).toBe(false);
       // The remote was read under the askpass env, the same channel the push uses.
@@ -332,10 +324,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     it("the remote read and the push share ONE credential channel", async () => {
       bindPat();
       const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: "0".repeat(40) });
-      await pushWorkspaceBranch({
-        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-        dataRoot: store.dataRoot, exec: git.exec,
-      });
+      await push(git);
       const lsEnv = git.envs.find((e) => e.args.includes("ls-remote"))!.env;
       const pushEnv = git.envs.find((e) => e.args.includes("push"))!.env;
       expect(lsEnv).toBe(pushEnv);
@@ -346,19 +335,13 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       // remote head reads null on a lagging origin and the ls-remote call is gone.
       bindPat();
       const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: "0".repeat(40) });
-      const res = await pushWorkspaceBranch({
-        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-        dataRoot: store.dataRoot, exec: git.exec,
-      });
+      const res = await push(git);
       expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: "0".repeat(40), workflowFiles: [] });
       expect(git.calls.filter((c) => c.includes("push"))).toHaveLength(1);
       expect(git.calls.filter((c) => c.includes("ls-remote"))).toHaveLength(1);
       // An absent remote branch (first push) records no previous head.
       const first = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: null });
-      const fresh = await pushWorkspaceBranch({
-        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-        dataRoot: store.dataRoot, exec: first.exec,
-      });
+      const fresh = await push(first);
       expect(fresh).toMatchObject({ status: "pushed", remoteHeadBefore: null, workflowFiles: [] });
     });
 
@@ -366,10 +349,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       // Canary: fail the push when ls-remote fails and this reads `push_failed`.
       bindPat();
       const git = fakeGit({ branch: "vib-1-work", ahead: 1, lsRemoteFails: true });
-      const res = await pushWorkspaceBranch({
-        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-        dataRoot: store.dataRoot, exec: git.exec,
-      });
+      const res = await push(git);
       expect(res).toMatchObject({ status: "pushed", headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
       expect(git.calls.filter((c) => c.includes("push"))).toHaveLength(1);
     });
@@ -378,10 +358,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
   it("no-ops when there are no local commits ahead AND a clean tree", async () => {
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 0 });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("no_commits");
     // F19-21: a clean tree at this point is the EVIDENCE that there was genuinely
     // nothing to deliver — the only shape a no-change completion may be read from.
@@ -399,10 +376,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // "completed with no changes required".
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 0, dirty: true, commitFails: true });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("no_commits");
     if (res.status !== "no_commits") throw new Error("expected no_commits");
     expect(res).toMatchObject({ defaultBranchEvidence: { verified: false } });
@@ -418,10 +392,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // reached. Canary: restore the `: 0` fallback and this returns no_commits.
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 4, countFails: true });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("pushed");
     expect(git.calls.some((c) => c.includes("push"))).toBe(true);
   });
@@ -432,10 +403,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // the LOCAL default branch with no guard at all.
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 2, shallow: true });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("pushed");
     const deepen = git.calls.find((c) => c.includes("fetch"));
     expect(deepen).toEqual([
@@ -450,10 +418,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     const git = fakeGit({
       branch: "vib-1-work", ahead: 0, shallow: true, deepenOk: false,
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("pushed");
     // Never even asked for a count it could not trust.
     expect(git.calls.some((c) => c.includes("--count"))).toBe(false);
@@ -463,10 +428,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     bindPat();
     const info = vi.spyOn(logger, "info");
     const counted = fakeGit({ branch: "vib-1-work", ahead: 2 });
-    await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: counted.exec,
-    });
+    await push(counted);
     const pushedLog = () =>
       info.mock.calls.find((c) => c[0] === "pushed workspace branch to origin")?.[1] ?? {};
     expect(pushedLog()).toMatchObject({ commits: 2 });
@@ -479,10 +441,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     const unknown = fakeGit({
       branch: "vib-1-work", ahead: 0, shallow: true, deepenOk: false,
     });
-    await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: unknown.exec,
-    });
+    await push(unknown);
     expect(pushedLog()).toEqual({
       taskKey: "VIB-1",
       branch: "vib-1-work",
@@ -496,10 +455,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     // The agent wrote files but never committed (e.g. execute-code-or-write-repo
     // withheld, or it read its workspace contract as prohibiting commit).
     const git = fakeGit({ branch: "vib-1-work", ahead: 0, dirty: true });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res).toEqual({ status: "pushed", branch: "vib-1-work", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: "b".repeat(40), workflowFiles: [] });
     // Staged everything, then committed with an inline identity + task-key message.
     expect(git.calls.some((c) => c.includes("add") && c.includes("-A"))).toBe(true);
@@ -533,20 +489,14 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
   it("never auto-commits onto the default branch (HEAD on main)", async () => {
     bindPat();
     const git = fakeGit({ branch: "main", ahead: 0, dirty: true });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("no_branch");
     expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
   });
 
   it("degrades to no_pat when the project has no credential", async () => {
     const git = fakeGit({ branch: "vib-1-work", ahead: 3 });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("no_pat");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
@@ -554,10 +504,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
   it("does not push from a detached/default-branch HEAD", async () => {
     bindPat();
     const git = fakeGit({ branch: "main", ahead: 5 });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("no_branch");
   });
 
@@ -571,12 +518,6 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
    * staged or committed, whatever it holds.
    */
   describe("F19-21: default-branch evidence", () => {
-    const push = (git: ReturnType<typeof fakeGit>) =>
-      pushWorkspaceBranch({
-        db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-        dataRoot: store.dataRoot, exec: git.exec,
-      });
-
     it("verifies a CLEAN default-branch workspace — the shape a no-change completion is read from", async () => {
       bindPat();
       const git = fakeGit({ branch: "main", ahead: 0 });
@@ -693,10 +634,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       pushOk: false,
       pushStderr: "remote: error: GH006: Protected branch update failed",
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("push_failed");
     expect(res.status === "push_failed" && res.detail).toContain("GH006");
   });
@@ -720,10 +658,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         " ! [remote rejected] vib-1-work -> vib-1-work (protected branch hook declined)\n" +
         "error: failed to push some refs",
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     // NOT push_conflict — isNonFastForwardStderr must not claim this one.
     expect(res.status).toBe("push_failed");
     const detail = res.status === "push_failed" ? (res.detail ?? "") : "";
@@ -759,10 +694,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         "To https://github.com/acme/app.git\n" +
         " ! [remote rejected] vib-1-work -> vib-1-work (protected branch hook declined)\n",
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("push_failed");
     const reason = res.status === "push_failed" ? res.reason : "";
     expect(reason).toContain("GH006: Protected branch update failed");
@@ -789,10 +721,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         "fatal: Authentication failed using ghp_faketoken123 for " +
         "'https://x-access-token:ghp_faketoken123@github.com/acme/app.git/'\n",
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("push_failed");
     const serialized = JSON.stringify(res);
     expect(serialized).not.toContain("ghp_faketoken123");
@@ -802,10 +731,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
   it("F19-18: a push that printed nothing says so, rather than inventing a cause", async () => {
     bindPat();
     const git = fakeGit({ branch: "vib-1-work", ahead: 1, pushOk: false, pushStderr: "" });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     const reason = res.status === "push_failed" ? res.reason : "";
     expect(reason).toContain("git printed nothing");
     expect(res.status === "push_failed" ? res.stderrExcerpt : "x").toBeUndefined();
@@ -824,10 +750,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       pushOk: false,
       pushTimedOut: true,
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("push_failed");
     const reason = res.status === "push_failed" ? res.reason : "";
     expect(reason).toContain("ran past its time limit");
@@ -867,10 +790,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
         "error: failed to push some refs\n" +
         "hint: Updates were rejected because the tip of your current branch is behind\n",
     });
-    const res = await pushWorkspaceBranch({
-      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
-      dataRoot: store.dataRoot, exec: git.exec,
-    });
+    const res = await push(git);
     expect(res.status).toBe("push_conflict");
     if (res.status === "push_conflict") {
       expect(res.branch).toBe("vib-1-work");
@@ -1109,8 +1029,6 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
       detail: "",
     });
   }
-  const push = (git: ReturnType<typeof fakeGit>) =>
-    pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
 
   it("refuses BEFORE the push when a classic token lacks `workflow` and the push changes a workflow file", async () => {
     bindPatWith({ tokenKind: "classic", headerScopes: ["repo"] });
@@ -1297,8 +1215,6 @@ describe("ruling 245: a leased file refuses the push", () => {
 });
 
 describe("ruling 159: the store layout never reaches origin", () => {
-  const push = (git: ReturnType<typeof fakeGit>) =>
-    pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
   const STRAY = (slug: string) => `projects/${slug}/tasks/VIB-1/attachments/knc-9-licence-verification.txt`;
 
   it("refuses a revision whose tree holds projects/<slug>/tasks/..., names the path, and runs no push", async () => {

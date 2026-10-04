@@ -139,7 +139,6 @@ export interface RaiseResourceRequestInput {
   reason: string;
   askedByUserId: string;
   askedByLabel: string;
-  now?: string;
 }
 
 /** What {@link raiseResourceRequest} answers: the row that now carries the ask,
@@ -170,7 +169,7 @@ export function raiseResourceRequest(
     kind: input.kind,
     name: input.name,
     reason: input.reason.trim(),
-    askedAt: input.now ?? new Date().toISOString(),
+    askedAt: new Date().toISOString(),
     askedByUserId: input.askedByUserId,
     askedByLabel: input.askedByLabel,
     status: "open",
@@ -187,7 +186,6 @@ export function closeResourceRequest(
   status: Exclude<ResourceRequestStatus, "open">,
   closedByLabel: string,
   dataRoot?: string,
-  now?: string,
 ): ResourceRequest | null {
   const rows = readResourceRequests(dataRoot);
   const at = rows.findIndex((r) => r.id === id && r.status === "open");
@@ -195,7 +193,7 @@ export function closeResourceRequest(
   const closed: ResourceRequest = {
     ...rows[at]!,
     status,
-    closedAt: now ?? new Date().toISOString(),
+    closedAt: new Date().toISOString(),
     closedByLabel,
   };
   const next = [...rows];
@@ -274,13 +272,12 @@ export function declineResourceRequest(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
-  dataRoot?: string,
 ): ResourceRequest {
-  const closed = closeResourceRequest(id, "declined", actor.label, dataRoot);
+  const closed = closeResourceRequest(id, "declined", actor.label);
   if (!closed) {
     // Say which: the stored answer, or that there is no such request. A
     // blanket "already answered" would be wrong for an id nobody raised.
-    const onFile = readResourceRequests(dataRoot).find((r) => r.id === id);
+    const onFile = readResourceRequests().find((r) => r.id === id);
     throw onFile
       ? AppError.conflict(
           `That grant request was already ${onFile.status}${onFile.closedByLabel ? ` by ${onFile.closedByLabel}` : ""}. Reload to see the current list.`,

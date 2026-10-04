@@ -38,6 +38,7 @@ import {
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
 } from "~/server/mcp-proxy/board-tool.server";
 import {
+  appendTimelineEvent,
   readTaskFile,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
@@ -223,9 +224,7 @@ export async function postAgentComment(
     toAgent: false,
     evidence: null,
   };
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(comment);
-  });
+  await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), comment);
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // P11-23: attribute the audit row to the AGENT that commented, not the
   // operator. Auditing every mid-run agent comment under OPERATOR_AUDIT_ACTOR

@@ -27,11 +27,12 @@ import { EpicChip, type EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
+import { useActionToast } from "~/ui/use-action-toast";
 import { useDismiss } from "~/ui/use-dismiss";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableValue } from "~/ui/use-stable-rows";
 import type { DependencyCandidatesView } from "~/routes/task-dependency-candidates";
-import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
+import type { ActionResult } from "./task-detail-hooks";
 import { WaitChip } from "./wait-chip";
 
 /**
@@ -179,7 +180,7 @@ function editState(prop: DetailProp, { open, setOpen }: RowControl): EditState {
 /** A property's own fetcher, with its toast or refusal. */
 function usePropFetcher(): Fetcher {
   const fetcher = useFetcher<ActionResult>();
-  useActionFeedback(fetcher);
+  useActionToast(fetcher);
   return fetcher;
 }
 
@@ -348,7 +349,7 @@ const PriorityRow = memo(function PriorityRow({
       value={
         // `normal` is the default: the shared flag draws nothing for it, and
         // the row says it quietly rather than in bold.
-        current === "normal" ? <Quiet icon="flag">Normal</Quiet> : <PriorityFlag priority={current} sm />
+        current === "normal" ? <Quiet icon="flag">Normal</Quiet> : <PriorityFlag priority={current} />
       }
       editor={(done) => (
         <PriorityMenu
@@ -368,6 +369,25 @@ const PriorityRow = memo(function PriorityRow({
   );
 });
 
+/** A property menu's keys: roving arrows (wrapping), Home and End. */
+function onMenuKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+  const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+  const at = items.findIndex((el) => el === document.activeElement);
+  const to =
+    e.key === "ArrowDown"
+      ? (at + 1) % items.length
+      : e.key === "ArrowUp"
+        ? (at - 1 + items.length) % items.length
+        : e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? items.length - 1
+            : null;
+  if (to === null) return;
+  e.preventDefault();
+  items[to]?.focus();
+}
+
 /** The priorities as an ARIA menu: roving arrows, Home and End, the current
  *  one checked. */
 function PriorityMenu({
@@ -377,25 +397,8 @@ function PriorityMenu({
   current: TaskPriority;
   onPick: (priority: TaskPriority) => void;
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    const at = items.findIndex((el) => el === document.activeElement);
-    const to =
-      e.key === "ArrowDown"
-        ? (at + 1) % items.length
-        : e.key === "ArrowUp"
-          ? (at - 1 + items.length) % items.length
-          : e.key === "Home"
-            ? 0
-            : e.key === "End"
-              ? items.length - 1
-              : null;
-    if (to === null) return;
-    e.preventDefault();
-    items[to]?.focus();
-  };
   return (
-    <div className="prop-menu-list" onKeyDown={onKeyDown}>
+    <div className="prop-menu-list" onKeyDown={onMenuKeyDown}>
       {PRIORITY_MENU.map((p) => (
         <button
           key={p}
@@ -562,25 +565,8 @@ function EpicMenu({
   current: string | null;
   onPick: (epicId: string | null) => void;
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    const at = items.findIndex((el) => el === document.activeElement);
-    const to =
-      e.key === "ArrowDown"
-        ? (at + 1) % items.length
-        : e.key === "ArrowUp"
-          ? (at - 1 + items.length) % items.length
-          : e.key === "Home"
-            ? 0
-            : e.key === "End"
-              ? items.length - 1
-              : null;
-    if (to === null) return;
-    e.preventDefault();
-    items[to]?.focus();
-  };
   return (
-    <div className="prop-menu-list epic-menu" onKeyDown={onKeyDown}>
+    <div className="prop-menu-list epic-menu" onKeyDown={onMenuKeyDown}>
       <button
         type="button"
         role="menuitemradio"
@@ -644,7 +630,7 @@ const DueRow = memo(function DueRow({ due, ...control }: { due: string | null } 
       popup="calendar"
       value={
         due ? (
-          <DueDatePill dueDate={due} sm />
+          <DueDatePill dueDate={due} />
         ) : edit ? (
           <Quiet icon="clock">Set due date</Quiet>
         ) : (

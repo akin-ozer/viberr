@@ -1,8 +1,6 @@
 import { data, redirect } from "react-router";
 import type { Route } from "./+types/notifications.read";
-import { requireAuth } from "~/server/auth/require-user.server";
-import { csrfError } from "~/features/shell/csrf-result.server";
-import { getDb } from "~/server/db/sqlite.server";
+import { requireFormAction } from "~/server/auth/form-action.server";
 import {
   markAllNotificationsRead,
   markNotificationsRead,
@@ -19,21 +17,11 @@ import {
  */
 
 export async function action({ request }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  // UI-32: `assertCsrf` throws a raw 403 Response. A thrown response from a
-  // fetcher renders the nearest error boundary, so a stale token replaced the
-  // WHOLE UI with root's "403 Forbidden" page — and the carefully written
-  // `{ok:false,error}` toast branches in top-bell.tsx / notifications.tsx
-  // ("reports the failure instead of a false success") could never fire. Map it
-  // to the same result shape those handlers already read.
-  const csrfFailure = await csrfError(request, ctx.sessionId, formData);
-  if (csrfFailure) return csrfFailure;
-  const intent = String(formData.get("intent") ?? "read");
+  const { refused, auth, db, formData, intent } = await requireFormAction(request);
+  if (refused) return refused;
 
   if (intent === "read-all") {
-    return { ok: true as const, changed: markAllNotificationsRead(db, ctx.user.id) };
+    return { ok: true as const, changed: markAllNotificationsRead(db, auth.user.id) };
   }
   const ids = formData.getAll("id").flatMap((value) => {
     const id = String(value);
@@ -42,7 +30,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (ids.length === 0) {
     return data({ ok: false as const, error: "No notification ids." }, { status: 400 });
   }
-  return { ok: true as const, changed: markNotificationsRead(db, ctx.user.id, ids) };
+  return { ok: true as const, changed: markNotificationsRead(db, auth.user.id, ids) };
 }
 
 export function loader() {

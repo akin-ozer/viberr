@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { resolveTaskFilePath, readTaskFile } from "~/server/files/task-writer.server";
+import { resolveTaskFilePath, readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
@@ -242,6 +242,29 @@ export function reprojectTask(
   });
 }
 
+/** Prepend a policy-engine note to the task's timeline, stamped inside the
+ *  file lock, then re-project the task. */
+export async function appendPolicyNote(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  note: { title?: string | null; text: string },
+): Promise<void> {
+  await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: { kind: "system", systemId: "policy-engine" },
+      title: note.title ?? null,
+      text: note.text,
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, projectSlug, taskKey);
+}
+
 /** The task's projected summary right after a write that re-projected it. A
  *  missing row there is a broken projection, not a user error. */
 export function summaryOrThrow(
@@ -270,6 +293,7 @@ export function stageDisplayName(
   return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
 }
 
+/** The operator's canonical notification actor. */
 export const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operator" };
 
 /** The policy engine as a notification sender: the `ActorRender` of the
@@ -328,7 +352,6 @@ export interface TaskWatcherNotice {
   exceptUserIds?: readonly string[];
 }
 
-/** Notify the owner and project supervisors, respecting routing preferences. */
 /** Ruling 140(b): why the owner seat changed hands, in the words the row uses. */
 export type OwnerSeatChange =
   | { kind: "handed_off"; taskKey: string }
@@ -434,6 +457,7 @@ export function notifyOwnerSeatChange(
   }
 }
 
+/** Notify the owner and project supervisors, respecting routing preferences. */
 export function notifyTaskWatchers(
   db: DatabaseSync,
   notice: TaskWatcherNotice,

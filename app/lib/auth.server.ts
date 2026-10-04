@@ -39,12 +39,6 @@ import {
  *   (seed admin, org-users invite, OAuth provisioning hooks), never open reg.
  */
 
-// The mount point lives in a SHARED module so client code (the Sign-in & SSO
-// card) can render the callback URL without importing this server-only file.
-// Re-exported here because every existing server importer reads it from this
-// module.
-export { AUTH_BASE_PATH };
-
 /**
  * The ONLY Better Auth endpoints the app drives (P11-02) — everything else on
  * the `/api/auth/*` splat is rejected with a 404. An allow-list, not a
@@ -70,15 +64,14 @@ const ALLOWED_AUTH_PATHS = new Set<string>([
   "/sign-out", // logout route
 ]);
 
-/** The concrete better-auth instance type (with our plugins). */
+/** The concrete better-auth instance type. */
 export type ViberrAuth = ReturnType<typeof betterAuth>;
 
 /**
  * The slice of a Better Auth endpoint context the provider resolution reads.
  * Narrow on purpose: the database hooks hand over a full
  * `GenericEndpointContext`, but the provider id is readable from the declared
- * path and its route params alone, and a two-field contract is what lets the
- * unit test drive it with a literal instead of a whole auth context.
+ * path and its route params alone.
  */
 export interface AuthEndpointContext {
   path?: string;
@@ -88,8 +81,9 @@ export interface AuthEndpointContext {
 /**
  * P13-D-22: which provider's callback is running, read off the endpoint the
  * database hook fires under. The social callback endpoint is declared
- * `/callback/:id` (and `/oauth2/callback/:id`), so `params.id` IS the provider
- * id — the same resolution better-auth's own `lastLoginMethod` plugin uses.
+ * `/callback/:id`, so `params.id` IS the provider id — the same resolution
+ * better-auth's own `lastLoginMethod` plugin uses. (Ruling 652(d): the generic
+ * OAuth plugin's `/oauth2/callback/:id` is not installed, so it is not read.)
  *
  * This has to be threaded explicitly: `databaseHooks.user.create` receives only
  * the user record, and the whitelist previously had to GUESS the provider from
@@ -103,9 +97,7 @@ function oauthProviderOf(
   context: AuthEndpointContext | null | undefined,
 ): OAuthProvider | null {
   const path = context?.path ?? "";
-  if (!path.startsWith("/callback/") && !path.startsWith("/oauth2/callback/")) {
-    return null;
-  }
+  if (!path.startsWith("/callback/")) return null;
   const id = context?.params?.id ?? path.split("/").pop();
   return id === "github" || id === "google" ? id : null;
 }

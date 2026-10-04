@@ -410,15 +410,14 @@ export async function connectHttpUpstream(
   }
 }
 
-/** Page through `tools/list` (at most `maxPages` pages). */
+/** Page through `tools/list` (at most 50 pages). */
 export async function listAllTools(
   client: Client,
-  options: { timeoutMs?: number; maxPages?: number } = {},
+  options: { timeoutMs?: number } = {},
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
   let cursor: string | undefined;
-  const maxPages = options.maxPages ?? 50;
-  for (let page = 0; page < maxPages; page++) {
+  for (let page = 0; page < 50; page++) {
     const result = await client.listTools(
       cursor ? { cursor } : undefined,
       options.timeoutMs ? { timeout: options.timeoutMs } : undefined,

@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupProjectedStore } from "../../../test-support/projected-store";
+import type { TestStore } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import {
   createConnection,
@@ -27,6 +28,22 @@ afterEach(ctx.cleanup);
 const REPO = "akin-ozer/viberr";
 const FINE = "github_pat_11ATTACH0123456789_attachattach";
 
+/** The org-level connection add of akin-ozer's fine-grained token: no repo
+ *  context exists there. */
+async function addFineConnection(store: TestStore, actor: { userId: string; label: string }) {
+  const addTime = fakeGithubFetch({
+    "GET /user": { body: { login: "akin-ozer" } },
+    "GET /user/orgs": { body: [] },
+    "GET /users/akin-ozer": { body: { public_repos: 3 } },
+  });
+  return createConnection(
+    store.db,
+    { owner: "akin-ozer", token: FINE, userId: store.users.arda.id },
+    actor,
+    { fetchImpl: addTime.fetchImpl },
+  );
+}
+
 /**
  * The add-connection → attach story behind the "eternal ~ chips" complaint:
  * the connection modal necessarily validates with `repo: null`, which pins a
@@ -41,17 +58,7 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
 
     // 1. Org-level connection add — no repo context exists here.
-    const addTime = fakeGithubFetch({
-      "GET /user": { body: { login: "akin-ozer" } },
-      "GET /user/orgs": { body: [] },
-      "GET /users/akin-ozer": { body: { public_repos: 3 } },
-    });
-    const created = await createConnection(
-      store.db,
-      { owner: "akin-ozer", token: FINE, userId: store.users.arda.id },
-      actor,
-      { fetchImpl: addTime.fetchImpl },
-    );
+    const created = await addFineConnection(store, actor);
     expect(created.status).toBe("saved");
 
     // 2. Attach to the project — the revalidation now runs WITH the repo.
@@ -86,18 +93,7 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
   it("an unreachable GitHub degrades the refresh but never fails the attach", async () => {
     const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-
-    const addTime = fakeGithubFetch({
-      "GET /user": { body: { login: "akin-ozer" } },
-      "GET /user/orgs": { body: [] },
-      "GET /users/akin-ozer": { body: { public_repos: 3 } },
-    });
-    await createConnection(
-      store.db,
-      { owner: "akin-ozer", token: FINE, userId: store.users.arda.id },
-      actor,
-      { fetchImpl: addTime.fetchImpl },
-    );
+    await addFineConnection(store, actor);
 
     // Attach while GitHub is down: bind still lands, cache stays org-level.
     const down = fakeGithubFetch({}); // every route 404s; validator reports it
@@ -121,18 +117,7 @@ describe("runReconcile on a project with no branched tasks", () => {
   it("names the nothing-to-sync case and records a freshness heartbeat", async () => {
     const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-
-    const addTime = fakeGithubFetch({
-      "GET /user": { body: { login: "akin-ozer" } },
-      "GET /user/orgs": { body: [] },
-      "GET /users/akin-ozer": { body: { public_repos: 3 } },
-    });
-    await createConnection(
-      store.db,
-      { owner: "akin-ozer", token: FINE, userId: store.users.arda.id },
-      actor,
-      { fetchImpl: addTime.fetchImpl },
-    );
+    await addFineConnection(store, actor);
     const attachTime = fakeGithubFetch({
       "GET /user": { body: { login: "akin-ozer" } },
       "GET /user/orgs": { body: [] },

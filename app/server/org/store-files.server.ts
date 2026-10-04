@@ -444,10 +444,6 @@ export function utf8Bytes(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
 
-/** Read one store text doc for the editor (`null` when absent). A doc the
- *  editor cannot round-trip safely is refused by TYPE rather than reported as
- *  missing (P14-KM-08 — this reader had no production caller at all until the
- *  editor could open existing files). */
 /**
  * Ruling 305: the version of a store document, for an optimistic write.
  *
@@ -464,6 +460,10 @@ export function storeDocVersion(target: StoreTarget, nodePath: string[]): string
   return sha256Hex(readFileSync(abs)).slice(0, 12);
 }
 
+/** Read one store text doc for the editor (`null` when absent). A doc the
+ *  editor cannot round-trip safely is refused by TYPE rather than reported as
+ *  missing (P14-KM-08 — this reader had no production caller at all until the
+ *  editor could open existing files). */
 export function readStoreDoc(
   target: StoreTarget,
   nodePath: string[],

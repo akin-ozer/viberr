@@ -9,9 +9,9 @@ import { LocalDayDotTime } from "~/ui/local-time";
 import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
-import { useToast } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
 import { MiniModal } from "./mini-modal";
+import { useModalAction } from "./resource-helpers";
 import { ResourcesPanel } from "./resources-panel";
 import { SsoPanel } from "./sso-panel";
 import { useOrgAction } from "./use-org-action";
@@ -412,25 +412,11 @@ function S3TargetModal({
   const [secret, setSecret] = useState("");
   /** The field a refused save named; null on a pristine form (147(c)). */
   const [flagged, setFlagged] = useState<S3Field | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Closing on the result is what folds the form: a secret-only rotation
+  // changes no summary field, so the card's remount key cannot see it.
   const [done, setDone] = useState(false);
-  const push = useToast();
-  // `useOrgAction` returns EARLY once `onResult` is supplied, so the server's
-  // success and failure toasts are pushed HERE or they are lost. Closing on the
-  // result is what folds the form: a secret-only rotation changes no summary
-  // field, so the card's remount key cannot see it.
-  const { submit, busy } = useOrgAction({
-    onResult: (d) => {
-      if (d.ok) {
-        // The toast host lives in the root provider — safe to push, then unmount.
-        if (d.toast) push(d.toast);
-        setDone(true);
-        return;
-      }
-      setErr(d.error);
-    },
-  });
+  const { action: { submit, busy }, err, setErr } = useModalAction(() => setDone(true));
   const missing: S3Field | null = !bucket.trim()
     ? "bucket"
     : !region.trim()

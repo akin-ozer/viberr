@@ -11,7 +11,8 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
 import { MiniModal } from "./mini-modal";
-import { useOrgAction, type OrgActionData } from "./use-org-action";
+import { useModalAction } from "./resource-helpers";
+import { useOrgAction } from "./use-org-action";
 
 /**
  * Users & access tab (org-settings spec §4.2) — the REAL org-user surface
@@ -87,25 +88,16 @@ function InviteModal({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"admin" | "member">(initialRole);
-  const [err, setErr] = useState<string | null>(null);
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
-  const push = useToast();
-  const action = useOrgAction({
-    onResult: (d: OrgActionData) => {
-      if (!d.ok) {
-        setErr(d.error);
-        return;
-      }
-      if (d.toast) push(d.toast);
-      if (d.tempPassword !== undefined) {
-        onSetupNotice({
-          email: d.email ?? "",
-          tempPassword: d.tempPassword,
-        });
-      }
-      setDone(true);
-    },
+  const { action, err, setErr } = useModalAction((d) => {
+    if (d.tempPassword !== undefined) {
+      onSetupNotice({
+        email: d.email ?? "",
+        tempPassword: d.tempPassword,
+      });
+    }
+    setDone(true);
   });
 
   const g = email.trim();
@@ -352,22 +344,12 @@ function EditUserModal({
   // account here; a GitHub account's handle syncs from the provider instead.
   const linksHandle = user.idp !== "github";
   const [githubHandle, setGithubHandle] = useState(user.githubHandle ?? "");
-  const [err, setErr] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const push = useToast();
 
-  const saveAction = useOrgAction({
-    onResult: (d) => {
-      if (!d.ok) {
-        setErr(d.error);
-        return;
-      }
-      if (d.toast) push(d.toast);
-      setDone(true);
-    },
-  });
+  const { action: saveAction, err, setErr } = useModalAction(() => setDone(true));
   const resetAction = useOrgAction({
     onResult: (d) => {
       if (!d.ok) {

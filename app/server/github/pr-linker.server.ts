@@ -334,6 +334,19 @@ export function summarizeCheckRuns(input: {
   return summary;
 }
 
+/** Each reviewer's LATEST verdict review, by login, with its state upper-cased:
+ *  a `COMMENTED` or `PENDING` entry is not a verdict and never replaces one. */
+function latestVerdicts(reviews: readonly GhReview[]): Map<string, { state: string; review: GhReview }> {
+  const latest = new Map<string, { state: string; review: GhReview }>();
+  for (const review of reviews) {
+    const state = (review.state ?? "").toUpperCase();
+    if (state === "COMMENTED" || state === "PENDING" || state === "") continue;
+    const login = review.user?.login;
+    if (login) latest.set(login, { state, review });
+  }
+  return latest;
+}
+
 /**
  * P13-D-28 — the PR's CURRENT review state from GitHub's review EVENT log.
  *
@@ -361,15 +374,7 @@ export function deriveReviewState(
   reviews: readonly GhReview[],
   requestedReviewers: number,
 ): PrReviewState | null {
-  const latestByReviewer = new Map<string, string>();
-  for (const review of reviews) {
-    const state = (review.state ?? "").toUpperCase();
-    if (state === "COMMENTED" || state === "PENDING" || state === "") continue;
-    const login = review.user?.login;
-    if (!login) continue;
-    latestByReviewer.set(login, state);
-  }
-  const states = [...latestByReviewer.values()];
+  const states = [...latestVerdicts(reviews).values()].map((verdict) => verdict.state);
   if (states.includes("CHANGES_REQUESTED")) return "changes_requested";
   if (states.includes("APPROVED")) return "approved";
   return requestedReviewers > 0 ? "review_required" : null;
@@ -390,22 +395,13 @@ export function deriveReviewState(
  * construction: their latest state is not APPROVED.
  */
 export function deriveApprovals(reviews: readonly GhReview[]): PrApproval[] {
-  const latest = new Map<string, PrApproval & { state: string }>();
-  for (const review of reviews) {
-    const state = (review.state ?? "").toUpperCase();
-    if (state === "COMMENTED" || state === "PENDING" || state === "") continue;
-    const login = review.user?.login;
-    if (!login) continue;
-    latest.set(login, {
-      state,
+  return [...latestVerdicts(reviews)]
+    .filter(([, verdict]) => verdict.state === "APPROVED")
+    .map(([login, { review }]) => ({
       login,
       commitSha: review.commit_id ?? null,
       at: review.submitted_at ?? null,
-    });
-  }
-  return [...latest.values()]
-    .filter((r) => r.state === "APPROVED")
-    .map(({ login, commitSha, at }) => ({ login, commitSha, at }));
+    }));
 }
 
 /**

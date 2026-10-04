@@ -8,7 +8,7 @@ import type { SseEventName } from "~/schemas/sse-event.schema";
  */
 
 export { SSE_EVENT_NAMES } from "~/schemas/sse-event.schema";
-export type { SseEvent, SseEventName } from "~/schemas/sse-event.schema";
+export type { SseEventName } from "~/schemas/sse-event.schema";
 
 /** Control events carry connection bookkeeping, not domain changes — the
  * initial `stream.open` must never trigger a revalidation. */

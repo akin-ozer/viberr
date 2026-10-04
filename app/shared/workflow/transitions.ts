@@ -44,11 +44,6 @@ const STRICTNESS = {
   human: 2,
 } satisfies Record<Boundary, number>;
 
-/** The tighter of two boundaries (auto < approval < human). */
-function strictestBoundary(a: Boundary, b: Boundary): Boundary {
-  return STRICTNESS[a] >= STRICTNESS[b] ? a : b;
-}
-
 /**
  * Display copy for an auto-wired rule. Deliberately names no stage — stages are
  * renamed freely (`renameStage` keeps ids), and copy that embedded a name would
@@ -207,11 +202,7 @@ export function rejoinChainAroundStage(
           ? inEdge
           : outEdge
         : (inEdge ?? outEdge)!;
-    const boundary =
-      inEdge && outEdge
-        ? strictestBoundary(inEdge.boundary, outEdge.boundary)
-        : winner.boundary;
-    merged = createdRule(prev, next, boundary, terminalId, winner.by);
+    merged = createdRule(prev, next, winner.boundary, terminalId, winner.by);
   }
 
   const out: WorkflowBoundary[] = [];
@@ -267,9 +258,7 @@ export function realignChainToStages(
       continue;
     }
     const inherited = guardingEntry.get(to);
-    const boundary: Boundary =
-      inherited?.boundary ?? (to === terminalId ? "human" : "approval");
-    chain.push(createdRule(from, to, boundary, terminalId, inherited?.by));
+    chain.push(createdRule(from, to, inherited?.boundary ?? "approval", terminalId, inherited?.by));
   }
   return chain;
 }

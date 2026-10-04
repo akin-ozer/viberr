@@ -2,7 +2,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FileActorRef, TaskFileEvent } from "~/schemas/task-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
-import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent, readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   checkAttachmentUpload,
   listTaskAttachmentNames,
@@ -23,7 +23,7 @@ import {
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import { loadProjectContext, reprojectTask, taskRef } from "./task-mutation.server";
+import { appendPolicyNote, loadProjectContext, reprojectTask, taskRef } from "./task-mutation.server";
 // Type-only: the wake goes through `autoInvokeOperator`, imported at call time
 // because task-actions reaches this module from its completion pipeline.
 import type { TaskActionContext } from "./task-actions.server";
@@ -482,9 +482,7 @@ async function landCarriedFiles(
     names,
     async (put) => {
       for (const f of files) if (!f.reused) put(f.as, f.data);
-      await updateTaskFile(taskRef(ctx, projectSlug, to), (parsed) => {
-        parsed.timeline.unshift(comment);
-      });
+      await appendTimelineEvent(taskRef(ctx, projectSlug, to), comment);
     },
     ctx.dataRoot,
   );
@@ -678,19 +676,11 @@ export async function postOutcomeRelays(
   }
   if (unsent.length === 0) return;
   const who = input.author?.name ?? "The agent";
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "note",
-      actor: { kind: "system", systemId: "policy-engine" },
-      title: "Not relayed",
-      text:
-        `${who}'s report asked for ${unsent.length === 1 ? "a relay" : "relays"} that did not go out:\n` +
-        unsent.map((u) => `- ${u}`).join("\n") +
-        "\n\nThe text is in the report. The operator can post it with `relay_to_task` where that is allowed; nobody is to copy it by hand.",
-      toAgent: false,
-      evidence: null,
-    });
+  await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+    title: "Not relayed",
+    text:
+      `${who}'s report asked for ${unsent.length === 1 ? "a relay" : "relays"} that did not go out:\n` +
+      unsent.map((u) => `- ${u}`).join("\n") +
+      "\n\nThe text is in the report. The operator can post it with `relay_to_task` where that is allowed; nobody is to copy it by hand.",
   });
-  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 }

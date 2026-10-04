@@ -354,20 +354,11 @@ export function projectionMissingColumns(db: DatabaseSync): string[] {
     runMigrations(expectedDb);
     const missing: string[] = [];
     for (const table of rebuilderTables) {
-      // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
-      // column; only `name` is read.
-      const live = db
-        .prepare(`PRAGMA table_info(${table})`)
-        .all() as Array<{ name: string }>;
+      const live = new Set(tableColumns(db, table));
       // No table at all is the migration runner's problem, same stance as above.
-      if (live.length === 0) continue;
-      // SAFETY: same `PRAGMA table_info` row shape as the live read above.
-      const expected = expectedDb
-        .prepare(`PRAGMA table_info(${table})`)
-        .all() as Array<{ name: string }>;
-      const liveNames = new Set(live.map((column) => column.name));
-      for (const column of expected) {
-        if (!liveNames.has(column.name)) missing.push(`${table}.${column.name}`);
+      if (live.size === 0) continue;
+      for (const column of tableColumns(expectedDb, table)) {
+        if (!live.has(column)) missing.push(`${table}.${column}`);
       }
     }
     return missing;

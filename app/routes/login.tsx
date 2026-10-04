@@ -171,7 +171,6 @@ export async function action({ request }: Route.ActionArgs) {
   return refuse("Unknown action.", null);
 }
 
-/** The forced set-new-password step (mock's `reset` screen). */
 /** The error the card shows, with the input it belongs to. */
 type ShownError = { text: string; field: ErrorField };
 
@@ -201,6 +200,7 @@ function refusalKey(refusal: Refusal | null | undefined): string | undefined {
   return key;
 }
 
+/** The forced set-new-password step (mock's `reset` screen). */
 function SetNewPassword({
   returnTo,
   actionData,

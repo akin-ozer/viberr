@@ -4,12 +4,9 @@ import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
 import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
   getProject,
@@ -175,14 +172,8 @@ interface ProfileMutationSuccess {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
-
-  // E2 (pass 16): the layout loader does not run for an action, so the
-  // members-only gate is repeated here. Without it a signed-in non-member got
-  // the inner guard's 403 — a reply that confirms the project exists — while
-  // every other surface answered 404. Same placement as project.board.tsx.
-  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   const parsePayload = (): JsonPayload => {
     try {

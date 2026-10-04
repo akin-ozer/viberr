@@ -6,10 +6,10 @@ import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
-import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
 import { MiniModal } from "./mini-modal";
-import { useOrgAction, type OrgActionData } from "./use-org-action";
+import { useModalAction } from "./resource-helpers";
+import { useOrgAction } from "./use-org-action";
 
 /**
  * Sign-in & SSO tab (R19-16).
@@ -59,20 +59,9 @@ function ProviderModal({
   const meta = PROVIDER_META[provider];
   const [clientId, setClientId] = useState(existing.clientId ?? "");
   const [secret, setSecret] = useState("");
-  const [err, setErr] = useState<string | null>(null);
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
-  const push = useToast();
-  const action = useOrgAction({
-    onResult: (d: OrgActionData) => {
-      if (d.ok) {
-        if (d.toast) push(d.toast);
-        setDone(true);
-        return;
-      }
-      setErr(d.error);
-    },
-  });
+  const { action, err, setErr } = useModalAction(() => setDone(true));
   // On a NEW provider both values are required; on an existing one the secret
   // may be left blank to keep the stored value (it can never be read back).
   const canSave =

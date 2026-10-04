@@ -20,6 +20,7 @@ import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { useDialog } from "~/ui/use-dialog";
 import type { AgentProfileView } from "./agent-types";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
+import type { CatalogModel, ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
@@ -94,26 +95,6 @@ const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
   { id: "claude", label: BACKEND_LABEL.claude },
 ];
 
-/** Client mirror of the /resources/model-catalog payload shape. Exported for
- *  the controller settings panel, which picks its model/effort with the same
- *  machinery (ruling 106). */
-export interface CatalogModel {
-  value: string;
-  displayName: string;
-  description: string;
-  supportsEffort: boolean;
-  efforts?: string[];
-  /** R20-3 / F20-4: set when a real run proved the provider refuses this model
-   *  for this account — the option is disabled and the reason explained. */
-  unavailable?: { reason: string; markedAt: string };
-}
-export interface ModelCatalog {
-  models: CatalogModel[];
-  efforts: string[];
-  defaultModel: string;
-  defaultEffort: string;
-}
-
 const EFFORT_LABEL = new Map<string, string>([
   ["minimal", "Minimal"],
   ["low", "Low"],
@@ -147,7 +128,9 @@ export function effortLabel(id: string): string {
 export interface ModelCatalogState {
   catalog: ModelCatalog | null;
   catalogLoading: boolean;
+  /** D5: the model-catalog load settled with no data — a real fetch failure. */
   catalogFailed: boolean;
+  /** D5: re-fire the model-catalog load. */
   loadCatalog: () => void;
   selectedModel: CatalogModel | null;
   showEffort: boolean;
@@ -307,9 +290,6 @@ const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
   { id: "off", word: "Off" },
 ];
 
-// Repo-write grants that mark a profile as a DELIVERING builder (mirrors
-// listDeployedSpecialists' delivery heuristic) — used to seed the verdict
-// toggle from its RUNTIME-effective mode below.
 /** Owner ruling (2026-08-20): a granted browser carries web egress with it —
  * the browser IS egress, and `resolveBrowserMcp` refuses to mount the pair in
  * disagreement, so the editor never lets the disagreement exist. Applied on
@@ -621,26 +601,17 @@ export function ModelEffortFields({
   catalog,
   catalogLoading,
   catalogFailed,
-  onRetryCatalog,
+  loadCatalog,
   selectedModel,
   showEffort,
   effortOptions,
-}: {
+}: ModelCatalogState & {
   uid: string;
   backend: "codex" | "claude" | "";
   model: string;
   setModel: (v: string) => void;
   effort: string;
   setEffort: (v: string) => void;
-  catalog: ModelCatalog | null;
-  catalogLoading: boolean;
-  /** D5: the model-catalog load settled with no data — a real fetch failure. */
-  catalogFailed: boolean;
-  /** D5: re-fire the model-catalog load. */
-  onRetryCatalog: () => void;
-  selectedModel: CatalogModel | null;
-  showEffort: boolean;
-  effortOptions: string[];
 }) {
   return (
     <div className="field-row">
@@ -661,7 +632,7 @@ export function ModelEffortFields({
             <button
               type="button"
               className="btn ghost xs"
-              onClick={onRetryCatalog}
+              onClick={loadCatalog}
             >
               Retry
             </button>
@@ -1456,15 +1427,8 @@ export function CreateProfileModal({
 
   // Model + effort catalog machinery — shared with the controller settings
   // panel (the hook holds the fetch, D5 failure/retry and default-seeding).
-  const {
-    catalog,
-    catalogLoading,
-    catalogFailed,
-    loadCatalog,
-    selectedModel,
-    showEffort,
-    effortOptions,
-  } = useModelCatalog(backend, model, setModel, effort, setEffort);
+  const modelCatalog = useModelCatalog(backend, model, setModel, effort, setEffort);
+  const { catalogLoading, catalogFailed, showEffort } = modelCatalog;
 
   // F21-13: this profile has a backend but no model for it — `pickBackend`
   // cleared the previous backend's id and the new catalog has not answered yet
@@ -1620,13 +1584,7 @@ export function CreateProfileModal({
           setModel={setModel}
           effort={effort}
           setEffort={setEffort}
-          catalog={catalog}
-          catalogLoading={catalogLoading}
-          catalogFailed={catalogFailed}
-          onRetryCatalog={loadCatalog}
-          selectedModel={selectedModel}
-          showEffort={showEffort}
-          effortOptions={effortOptions}
+          {...modelCatalog}
         />
 
         <StagesField stages={stages} stg={stg} toggleStage={toggleStage} />

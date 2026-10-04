@@ -16,8 +16,8 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
 import { MiniModal } from "./mini-modal";
-import { useBusyRow } from "./resource-helpers";
-import { useOrgAction, type OrgActionData } from "./use-org-action";
+import { useBusyRow, useModalAction } from "./resource-helpers";
+import { useOrgAction } from "./use-org-action";
 
 /**
  * GitHub connections tab (org-settings spec §4.1). Row markup is the
@@ -45,21 +45,9 @@ function ConnectionModal({
 }) {
   const [owner, setOwner] = useState(initial ? initial.owner : "");
   const [token, setToken] = useState("");
-  const [err, setErr] = useState<string | null>(null);
   // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
-  const push = useToast();
-  const action = useOrgAction({
-    onResult: (d: OrgActionData) => {
-      if (d.ok) {
-        // Toast lives in the root provider — safe to push, then unmount.
-        if (d.toast) push(d.toast);
-        setDone(true);
-        return;
-      }
-      setErr(d.error);
-    },
-  });
+  const { action, err, setErr } = useModalAction(() => setDone(true));
   const checking = action.busy;
   const canSave =
     (!!initial || owner.trim().length > 1) &&

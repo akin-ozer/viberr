@@ -344,13 +344,8 @@ function withTaskReconcileLock<T>(
  * R19-B — the project's member user ids, from the CANONICAL project file (the
  * same source `loadProjectContext` reads for every RBAC decision), so "a
  * project member approved it" can never be answered from a stale projection.
- * `db` is unused here on purpose: membership is file truth.
  */
-function projectMemberIds(
-  _db: DatabaseSync,
-  projectSlug: string,
-  dataRoot: string | undefined,
-): ReadonlySet<string> {
+function projectMemberIds(projectSlug: string, dataRoot: string | undefined): ReadonlySet<string> {
   const file = readProjectFile({ projectSlug, dataRoot });
   if (!file) return new Set();
   return new Set(file.parsed.frontmatter.members.map((m) => m.userId));
@@ -705,7 +700,7 @@ async function reconcileTaskUnlocked(
         ? derivePrHumanApproval({
             approvals: pr.approvals,
             deliveredSha: reviewedSha,
-            memberUserIds: projectMemberIds(db, input.projectSlug, ctx.dataRoot),
+            memberUserIds: projectMemberIds(input.projectSlug, ctx.dataRoot),
             db,
           })
         : readPrHumanApproval(cachedPr);

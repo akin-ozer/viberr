@@ -70,7 +70,7 @@ import {
 } from "~/server/files/actor-ref.server";
 import { AGENT_QUESTION_PACKET_KIND } from "~/server/tasks/agent-outcome.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { canAcceptFromStage } from "~/shared/workflow/stage-roles";
 
 /**
  * Centralized snake_case → camelCase mapping for `task_projections` and the
@@ -443,16 +443,6 @@ function unaccountedChecks(checks: PrChecks): number {
 }
 
 /**
- * Null when there is nothing honest to draw: no PR, GitHub never read (the
- * `checks` key is absent — see the schema), or the head commit genuinely ran no
- * checks (`total: 0`, i.e. the repo has no CI). "Zero checks" must not render as
- * a green passing pill.
- *
- * Neither may runs nobody could read: `passing` is reserved for a summary where
- * every one of `total` runs was counted and concluded well. The precedence is
- * the worst TRUE statement first — failing, then still-running, then unknown.
- */
-/**
  * Ruling 276 (pass 37, F37-109): has GitHub's check state ever been READ for
  * this PR?
  *
@@ -484,6 +474,16 @@ export function mapPrChecksUnread(pr: PrRef | null): PrChecksUnread | null {
   return { status: pr.checksUnread.status, message: pr.checksUnread.message, at: pr.checksUnread.at };
 }
 
+/**
+ * Null when there is nothing honest to draw: no PR, GitHub never read (the
+ * `checks` key is absent — see the schema), or the head commit genuinely ran no
+ * checks (`total: 0`, i.e. the repo has no CI). "Zero checks" must not render as
+ * a green passing pill.
+ *
+ * Neither may runs nobody could read: `passing` is reserved for a summary where
+ * every one of `total` runs was counted and concluded well. The precedence is
+ * the worst TRUE statement first — failing, then still-running, then unknown.
+ */
 export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
   const checks = pr?.checks;
   if (!checks || checks.total <= 0) return null;
@@ -527,32 +527,11 @@ export function mapPrMergeable(pr: PrRef | null): PrMergeable | null {
 
 /**
  * F19-27 — the client-answerable half of `acceptanceStageBlockedReason`
- * (task-actions.server.ts): may a completion be accepted FROM `stageId`?
- *
- * Same three questions the server asks, against the same `resolveStageRoles`
- * the server resolves the terminal/review ids with, so the two cannot drift:
- * acceptance is the human authority at the boundary the workflow puts before
- * the terminal stage, so it may only be exercised from a stage with a declared
- * edge into that stage (a custom board may have several) or from the resolved
- * review stage. Everything else must walk the graph first.
- *
- * True — not false — when there is no terminal stage to reason about or the
- * task is ALREADY terminal: the server refuses neither (its writers' idempotent
- * "already Done" return owns the second), and a projected `false` there would
- * put a refusal on a click the server would accept.
+ * (task-actions.server.ts): may a completion be accepted FROM `stageId`? It is
+ * the server's own predicate (`canAcceptFromStage`), projected so the board
+ * can answer it without the graph, so the two cannot drift.
  */
-export function isAtAcceptanceBoundary(
-  stageId: string,
-  stages: readonly { id: string }[],
-  workflow: readonly { from: string; to: string }[],
-): boolean {
-  const { terminalId, reviewId } = resolveStageRoles(stages, workflow);
-  if (terminalId === null || stageId === terminalId) return true;
-  return (
-    workflow.some((w) => w.from === stageId && w.to === terminalId) ||
-    stageId === reviewId
-  );
-}
+export const isAtAcceptanceBoundary = canAcceptFromStage;
 
 function mapAgentRef(ref: AgentRef | null): AgentRender | null {
   if (!ref) return null;

@@ -161,6 +161,16 @@ function authority(autonomy: OperatorAutonomy) {
   return resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug, { autonomy });
 }
 
+function snapOf(): ReturnType<typeof operatorSnapshot> {
+  return operatorSnapshot(
+    store.db,
+    { dataRoot: store.dataRoot },
+    store.slug,
+    "VIB-1",
+    authority("full"),
+  );
+}
+
 function task(key = "VIB-1") {
   return readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!
     .parsed;
@@ -5523,21 +5533,12 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
-  const snapshot = () =>
-    operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    );
-
   it("labels the operator's own policy and carries the note that stops the misread", () => {
     // Canary: rename `operatorPolicy` back to `policy` (or drop the note) and
     // this fails.
     deployScopedRoster();
     seedTask("impl");
-    const snap = snapshot();
+    const snap = snapOf();
 
     expect(snap.operatorPolicy.scope).toBe("operator");
     expect(snap.operatorPolicy.capabilities["use-web-search-fetch"]).toBe("off");
@@ -5550,7 +5551,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
   it("carries each specialist's OWN browser/web grants — the right place to look", () => {
     deployScopedRoster();
     seedTask("impl");
-    const byId = new Map(snapshot().deployedSpecialists.map((s) => [s.id, s]));
+    const byId = new Map(snapOf().deployedSpecialists.map((s) => [s.id, s]));
 
     // The profile the human actually granted: both true, while the operator's
     // own egress row above is `off`.
@@ -5586,7 +5587,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const snap = snapshot();
+    const snap = snapOf();
     // The exact fields the get_task tool exposes to the operator, and that the
     // "Triage signals (advisory)" prompt note points it at.
     expect(snap.priority).toBe("urgent");
@@ -5598,7 +5599,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
   it("R26-1: a plain task reports normal priority, no labels, no due date", () => {
     deployScopedRoster();
     seedTask("impl");
-    const snap = snapshot();
+    const snap = snapOf();
     expect(snap.priority).toBe("normal");
     expect(snap.labels).toEqual([]);
     expect(snap.dueDate).toBeNull();
@@ -5638,7 +5639,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const snap = snapshot();
+    const snap = snapOf();
     // The one required reviewer approved the current revision -> healthy.
     expect(snap.validation).toBe("healthy");
     expect(snap.reviewers.find((r) => r.profileId === "reviewer")?.verdict).toBe(
@@ -5669,7 +5670,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    expect(snapshot().pr?.revisionDrift).toEqual({
+    expect(snapOf().pr?.revisionDrift).toEqual({
       headSha: "cab10477beef1234",
       authored: 2,
       baseRefresh: null,
@@ -5688,7 +5689,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
       goal: file.parsed.goal,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const pr = snapshot().pr!;
+    const pr = snapOf().pr!;
     expect(pr.revisionDrift).toEqual(record);
     expect(pr.revisionDriftSentence).toBe(describeRevisionDrift(record).sentence);
   });
@@ -6932,13 +6933,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     // acceptance stage and its own remedy is this move. The shipped tool and
     // persona texts keyed the refusal on it; only `mergeReadinessRefusal` may.
     seedReviewedWithPr("impl", "clean");
-    const standing = operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    );
+    const standing = snapOf();
     expect(standing.notAcceptableReason).toContain("Move the task through the workflow first.");
     const ok = await operatorTransitionStage(
       store.db,
@@ -7040,16 +7035,6 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
  * never a reason to skip the call.
  */
 describe("F37-11: the operator snapshot carries the base compare", () => {
-  function snapOf(): ReturnType<typeof operatorSnapshot> {
-    return operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    );
-  }
-
   /** One `github.reconcile` observation row, shaped exactly as the reconciler
    *  writes it — the same three fields `latestReconcileSync` and
    *  `createReconcileBehindByLookup` read back. */
@@ -7106,16 +7091,6 @@ describe("F37-11: the operator snapshot carries the base compare", () => {
  * read from the function the tool refuses with.
  */
 describe("ruling 424: the operator snapshot carries the branch-refresh refusal", () => {
-  function snapOf(): ReturnType<typeof operatorSnapshot> {
-    return operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    );
-  }
-
   function seedAt(stage: string, mergeable: "clean" | "conflicting"): void {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -7330,13 +7305,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
   }
 
   function reviewerRow() {
-    const snap = operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    );
+    const snap = snapOf();
     return snap.reviewers.find((r) => r.profileId === "reviewer");
   }
 
@@ -7448,13 +7417,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
       timeline: timeline as never,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    return operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    );
+    return snapOf();
   }
 
   it("finds the pair and carries both stamps", () => {
@@ -7627,13 +7590,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
 
     // CANARY: drop the `collisions` block and this is undefined, which is what
     // every operator on the ax-clone board was given.
-    const collisions = operatorSnapshot(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      authority("full"),
-    ).collisions;
+    const collisions = snapOf().collisions;
     expect(collisions).toEqual([
       {
         taskKey: "VIB-2",

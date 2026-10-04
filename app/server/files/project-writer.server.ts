@@ -185,23 +185,14 @@ function scanMaxTaskNumber(ref: ProjectFileRef, prefix: string): number {
  * bumped counter — concurrent calls can never mint the same key.
  */
 export async function allocateTaskKey(ref: ProjectFileRef): Promise<string> {
-  const absPath = resolveProjectFilePath(ref);
-  return withFileLock(absPath, () => {
-    const current = readProjectFile(ref);
-    if (!current) {
-      throw AppError.notFound(`Project not found: ${ref.projectSlug}`);
-    }
-    // P11-51: repair a stale read before advancing the counter, so a cached
-    // pre-write read can't rewind `nextTaskNumber`.
-    const fresh = repairStaleProjectRead(absPath, current, ref);
-    assertProjectFileTrusted(ref, absPath, fresh.diagnostics);
-    const parsed = fresh.parsed;
-    const fm = parsed.frontmatter;
+  let key = "";
+  // P11-51: `updateProjectFile` repairs a stale read before the counter
+  // advances, so a cached pre-write read can't rewind `nextTaskNumber`.
+  await updateProjectFile(ref, ({ frontmatter: fm }) => {
     const scanned = scanMaxTaskNumber(ref, fm.taskPrefix);
     const next = Math.max(fm.nextTaskNumber ?? 1, scanned + 1);
     fm.nextTaskNumber = next + 1;
-    const serialized = serializeProjectFile(parsed);
-    writeAndRemember(absPath, serialized);
-    return `${fm.taskPrefix}-${next}`;
+    key = `${fm.taskPrefix}-${next}`;
   });
+  return key;
 }

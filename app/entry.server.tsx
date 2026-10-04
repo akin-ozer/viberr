@@ -4,7 +4,6 @@ import type {
   EntryContext,
   HandleDataRequestFunction,
   HandleErrorFunction,
-  RouterContextProvider,
 } from "react-router";
 import { isRouteErrorResponse, ServerRouter } from "react-router";
 import type { RenderToPipeableStreamOptions } from "react-dom/server";
@@ -70,7 +69,6 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  loadContext: RouterContextProvider,
 ) {
   // P13-D-30: bind the request correlation for the document render, so the
   // streaming-render logs below (and anything they reach) carry the same
@@ -88,7 +86,6 @@ export default function handleRequest(
       responseStatusCode,
       responseHeaders,
       routerContext,
-      loadContext,
     ),
   );
 }
@@ -98,7 +95,6 @@ function renderDocument(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  _loadContext: RouterContextProvider,
 ) {
   // https://httpwg.org/specs/rfc9110.html#HEAD
   if (request.method.toUpperCase() === "HEAD") {

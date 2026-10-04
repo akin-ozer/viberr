@@ -255,7 +255,7 @@ function controllerBlock(g: Grants): Block {
     updatedAt: "2026-09-24T00:00:00.000Z",
     lastMessageAt: null,
   };
-  const build = buildControllerSystemPrompt(store.db, {
+  const build = buildControllerSystemPrompt({
     conversation,
     user: { ...store.users.arda, orgRole: "admin" },
     config: {

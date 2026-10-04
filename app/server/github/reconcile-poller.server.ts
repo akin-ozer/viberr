@@ -341,7 +341,7 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
   cache[POLLER_KEY] = handle;
 }
 
-/** Stop the poller (tests + graceful shutdown). */
+/** Stop the poller (tests; the unref'd interval needs no stop at shutdown). */
 export function stopGithubReconcilePoller(): void {
   const cache = pollerCache();
   const handle = cache[POLLER_KEY];

@@ -303,8 +303,8 @@ export interface ControllerMountInput {
   projectSlug: string | null;
   /** Ruling 121: the conversation's anchored task, when it has one. */
   taskKey: string | null;
-  /** Ruling 476(h): the conversation the turn answers in, which a goal the
-   *  turn creates records. */
+  /** Ruling 476(h): the conversation the turn answers in, which an epic the
+   *  turn creates records (ruling 503). */
   conversationId?: string | null;
   /** The ORG MCP grants that resolved and pre-flighted for this turn. */
   orgServers: RunMcpServers;
@@ -324,23 +324,6 @@ export interface ControllerMounts {
 }
 
 /**
- * Everything one controller turn mounts, assembled in one place.
- *
- * The two IN-PROCESS servers are machinery, not grants: `viberr_controller`
- * (ruling 99) is how the controller reads and changes the product, and
- * `viberr_ops` (ruling 107) is how it reads this instance's ops layer. Both go
- * on EVERY turn with no config consulted, which is the whole of "not removable
- * by anyone" — there is no grant row to clear and no toggle to flip, so no
- * surface can offer one that does nothing (P14-KM-14).
- *
- * Org grants land last and cannot shadow either, because the RESOLVER refuses
- * to resolve a reserved name (`~/shared/mcp-reserved`, applied in
- * `resolveSpecialistMcpServersDetailed`). The save-time refusal only ever
- * governed new rows; a row written straight into SQLite or restored from a
- * backup reaches this spread, so the layer that decides what a run mounts is
- * the one that has to hold.
- */
-/**
  * The knowledge bases ONE controller turn holds (ruling 239 + ruling 283).
  *
  * Read in two places that must not disagree: the system prompt indexes these,
@@ -358,6 +341,23 @@ function controllerKbNames(
     : [...kb];
 }
 
+/**
+ * Everything one controller turn mounts, assembled in one place.
+ *
+ * The two IN-PROCESS servers are machinery, not grants: `viberr_controller`
+ * (ruling 99) is how the controller reads and changes the product, and
+ * `viberr_ops` (ruling 107) is how it reads this instance's ops layer. Both go
+ * on EVERY turn with no config consulted, which is the whole of "not removable
+ * by anyone" — there is no grant row to clear and no toggle to flip, so no
+ * surface can offer one that does nothing (P14-KM-14).
+ *
+ * Org grants land last and cannot shadow either, because the RESOLVER refuses
+ * to resolve a reserved name (`~/shared/mcp-reserved`, applied in
+ * `resolveSpecialistMcpServersDetailed`). The save-time refusal only ever
+ * governed new rows; a row written straight into SQLite or restored from a
+ * backup reaches this spread, so the layer that decides what a run mounts is
+ * the one that has to hold.
+ */
 export function buildControllerMounts(
   db: DatabaseSync,
   input: ControllerMountInput,
@@ -685,15 +685,6 @@ export function retractWaitingMessage(db: DatabaseSync, input: WaitingMessageRef
 }
 
 /**
- * The controller's OWN refusal sentence.
- *
- * `principalRefusalMessage` is written for a TASK run — it says "the task
- * owner", which is not who this refusal is about — so the controller writes
- * its own first line and appends the specific half (a missing sign-in file)
- * from the health detail, which is person-agnostic. The one thing both must
- * say, and do: nothing was started.
- */
-/**
  * The refusal a person with no Claude connected reads: in the transcript
  * (this engine) and, U35-4 (pass 35), from the HTTP send door itself, which
  * answers it as a 409 before any thread is created, so the door says no where
@@ -790,7 +781,7 @@ async function startTurnRun(
   // produces this turn's input disclosure and both lists belong in it.
   const disallowedTools = ["Read", "Grep", "Glob", "WebFetch", "WebSearch"];
 
-  const promptBuild = buildControllerSystemPrompt(db, {
+  const promptBuild = buildControllerSystemPrompt({
     conversation,
     user: input.user,
     config,
@@ -1323,7 +1314,6 @@ export function conversationTurnState(
  * unanswered like a queued one.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
-  const note = RESTART_NOTE;
   let recovered = 0;
 
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
@@ -1382,13 +1372,13 @@ export function recoverControllerConversations(db: DatabaseSync): number {
         conversationId,
         author: "controller",
         runId,
-        text: note,
+        text: RESTART_NOTE,
         replyTo: messages.shift() ?? null,
       });
       recovered += 1;
     }
     for (const messageId of messages) {
-      appendMessage(db, { conversationId, author: "controller", text: note, replyTo: messageId });
+      appendMessage(db, { conversationId, author: "controller", text: RESTART_NOTE, replyTo: messageId });
       recovered += 1;
     }
   }
@@ -1518,10 +1508,7 @@ export interface ControllerPromptBuild {
  *  the conversation contract (whose authority this turn runs under) — and,
  *  ruling 344, the resource half of this turn's own input disclosure, off the
  *  same resolution rather than a second reading of the grants. */
-export function buildControllerSystemPrompt(
-  _db: DatabaseSync,
-  input: SystemPromptInput,
-): ControllerPromptBuild {
+export function buildControllerSystemPrompt(input: SystemPromptInput): ControllerPromptBuild {
   const parts: string[] = [readControllerDefinition(input.dataRoot)];
 
   // C03-OC3: `resolveControllerConfig` already applied the one rule (an empty

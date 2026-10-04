@@ -781,8 +781,8 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     const { container, getByText } = render(
       detail(withGrants(), {
         resourceCatalog: [
-          { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill", def: false }] },
-          { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http", def: false }] },
+          { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill" }] },
+          { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http" }] },
           { group: "Knowledge bases", key: "kb", mono: true, items: [] },
         ],
         projectName: "P",
@@ -1187,7 +1187,7 @@ describe("CreateProfileModal", () => {
           group: "Skills",
           key: "skills",
           mono: true,
-          items: [{ id: "developer-expertise", def: false }],
+          items: [{ id: "developer-expertise" }],
         },
         { group: "MCP servers", key: "mcps", mono: true, items: [] },
         // The store has ZERO knowledge bases — both grants dangle.
@@ -1517,8 +1517,8 @@ describe("CreateProfileModal", () => {
           key: "skills",
           mono: true,
           items: [
-            { id: "repo-write", def: false },
-            { id: "release-notes", def: false },
+            { id: "repo-write" },
+            { id: "release-notes" },
           ],
         },
         { group: "MCP servers", key: "mcps", mono: true, items: [] },
@@ -1565,8 +1565,8 @@ describe("CreateProfileModal", () => {
           key: "skills",
           mono: true,
           items: [
-            { id: "repo-write", def: false },
-            { id: "release-notes", def: false },
+            { id: "repo-write" },
+            { id: "release-notes" },
           ],
         },
       ],
@@ -1599,7 +1599,7 @@ describe("CreateProfileModal", () => {
           group: "Skills",
           key: "skills",
           mono: true,
-          items: [{ id: "repo-write", def: false }],
+          items: [{ id: "repo-write" }],
         },
       ],
     });
@@ -2093,7 +2093,21 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
    *  whose toast kind is on trial here. */
   type FailedActionResult = { ok: false; error: string };
 
-  function renderPage(actionResult: FailedActionResult) {
+  const REVIEWER: LibraryProfileView = {
+    id: "reviewer",
+    name: "Reviewer",
+    role: "Review",
+    desc: "Reviews the branch.",
+    backends: ["claude"],
+    stages: ["review"],
+    spanAll: false,
+    resources: { skills: [], mcps: [], kb: [] },
+  };
+
+  function renderPage(
+    action: () => Promise<FailedActionResult>,
+    library: LibraryProfileView[] = [REVIEWER],
+  ) {
     const Stub = createRoutesStub([
       {
         path: "/projects/viberr-core/agents",
@@ -2101,18 +2115,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
           <ToastProvider>
             <AgentsPage
               profiles={[mkProfile({})]}
-              library={[
-                {
-                  id: "reviewer",
-                  name: "Reviewer",
-                  role: "Review",
-                  desc: "Reviews the branch.",
-                  backends: ["claude"],
-                  stages: ["review"],
-                  spanAll: false,
-                  resources: { skills: [], mcps: [], kb: [] },
-                },
-              ]}
+              library={library}
               deployments={[]}
               stages={STAGES}
               workflow={WORKFLOW}
@@ -2122,7 +2125,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
             />
           </ToastProvider>
         ),
-        action: async () => actionResult,
+        action,
       },
     ]);
     return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
@@ -2136,49 +2139,21 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     const pending = new Promise<FailedActionResult>((resolve) => {
       finish = resolve;
     });
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/viberr-core/agents",
-        Component: () => (
-          <ToastProvider>
-            <AgentsPage
-              profiles={[mkProfile({})]}
-              library={[
-                {
-                  id: "reviewer",
-                  name: "Reviewer",
-                  role: "Review",
-                  desc: "Reviews the branch.",
-                  backends: ["claude"],
-                  stages: ["review"],
-                  spanAll: false,
-                  resources: { skills: [], mcps: [], kb: [] },
-                },
-                {
-                  id: "docs-writer",
-                  name: "Docs Writer",
-                  role: "Documentation",
-                  desc: "Writes the change notes.",
-                  backends: ["codex"],
-                  stages: ["impl"],
-                  spanAll: false,
-                  resources: { skills: [], mcps: [], kb: [] },
-                },
-              ]}
-              deployments={[]}
-              stages={STAGES}
-              workflow={WORKFLOW}
-              projectSlug="viberr-core"
-              projectName="Viberr Core"
-              myRole="admin"
-            />
-          </ToastProvider>
-        ),
-        action: () => pending,
-      },
-    ]);
-    const { getAllByText, getByText } = render(
-      <Stub initialEntries={["/projects/viberr-core/agents"]} />,
+    const { getAllByText, getByText } = renderPage(
+      () => pending,
+      [
+        REVIEWER,
+        {
+          id: "docs-writer",
+          name: "Docs Writer",
+          role: "Documentation",
+          desc: "Writes the change notes.",
+          backends: ["codex"],
+          stages: ["impl"],
+          spanAll: false,
+          resources: { skills: [], mcps: [], kb: [] },
+        },
+      ],
     );
     fireEvent.click(getAllByText(/Add from library/)[0]!);
     fireEvent.click(getByText("Reviewer").closest("button")!);
@@ -2196,10 +2171,10 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
   });
 
   it("renders the alert glyph, not the success tick, when a deploy fails", async () => {
-    const { getAllByText, getByText } = renderPage({
+    const { getAllByText, getByText } = renderPage(async () => ({
       ok: false,
       error: "That template no longer exists.",
-    });
+    }));
     fireEvent.click(getAllByText(/Add from library/)[0]!);
     fireEvent.click(getByText("Reviewer").closest("button")!);
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
@@ -3295,14 +3270,13 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
             items: [
               {
                 id: "cloudflare-api",
-                def: false,
                 warning: {
                   note: "needs sign-in",
                   title:
                     "Runs do not mount cloudflare-api until an org admin signs it in (Instance settings → Agent resources).",
                 },
               },
-              { id: "cloudflare-docs", def: false },
+              { id: "cloudflare-docs" },
             ],
           },
           { group: "Knowledge bases", key: "kb", mono: true, items: [] },

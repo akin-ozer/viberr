@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { useFetcher } from "react-router";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -8,7 +7,8 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AttachmentThumb } from "./attachment-image";
-import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
+import { IMAGE_RE } from "./attachment-kind";
+import { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
  * R19-19 — the task's attachments: files an agent's browser saved
@@ -186,7 +186,6 @@ export function AttachmentsPanel({
 function AttachFile() {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const csrf = useCsrfToken();
-  const input = useRef<HTMLInputElement>(null);
   const busy = fetcher.state !== "idle";
   const error = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null;
   return (
@@ -199,7 +198,6 @@ function AttachFile() {
         <GlyphSwap rest="file" alt="loader" on={busy} spinAlt />
         {busy ? "Attaching…" : "Attach a file"}
         <input
-          ref={input}
           type="file"
           disabled={busy}
           onChange={(event) => {

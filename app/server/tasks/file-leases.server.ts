@@ -20,7 +20,6 @@
  * made and is now spent, and `staleFileLeases` names exactly those so a surface
  * can offer to tidy them.
  */
-import type { DatabaseSync } from "node:sqlite";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
@@ -72,7 +71,6 @@ export function activeFileLeases(
  * "these three are done, clear them?" instead of leaving a person to notice.
  */
 export function staleFileLeases(
-  _db: DatabaseSync | null,
   projectSlug: string,
   ctx: { dataRoot?: string } = {},
 ): FileLease[] {

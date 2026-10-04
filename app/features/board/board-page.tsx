@@ -18,8 +18,6 @@ import {
 } from "react-router";
 import {
   DragDropProvider,
-  KeyboardSensor,
-  PointerSensor,
   useDroppable,
   type DragEndEvent,
   type DragMoveEvent,
@@ -32,13 +30,14 @@ import {
   Accessibility,
   defaultPreset,
   Feedback,
-  PointerActivationConstraints,
   type DragDropManager,
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
+import { DRAG_SENSORS } from "~/ui/drag-sensors";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
-import { addFiledFiles, FiledFiles } from "./filed-files";
-import { filesFromPaste } from "~/ui/picked-files";
+import { FiledFiles } from "./filed-files";
+import { FILING_BATCH } from "~/shared/attachment-kinds";
+import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
 import type { BoardCard } from "./board-card";
 import {
@@ -142,34 +141,6 @@ export interface BoardColumnData {
   stage: BoardStage;
   tasks: BoardTask[];
 }
-
-/* Drag-and-drop configuration (dnd-kit).
- *
- * The whole card stays the drag surface — no grip handle. A small pointer
- * distance keeps plain clicks navigating to the task; touch requires a short
- * press so column scrolling is not hijacked. Escape cancels a lifted drag. */
-const BOARD_SENSORS = [
-  PointerSensor.configure({
-    // The card face is a Link, and the sensor's default refuses to lift from
-    // inside interactive elements — which would demand a grip handle. Only
-    // real controls (the StageMenu button) opt out of dragging.
-    preventActivation: (event: PointerEvent) => {
-      const target = event.target;
-      return (
-        target instanceof Element &&
-        Boolean(target.closest("button, input, select, textarea"))
-      );
-    },
-    // Mouse is distance-only (the default's hold-to-lift delay would swallow
-    // a slow press-and-release on the link, which must stay a navigation);
-    // touch keeps the long-press so column scrolling is never hijacked.
-    activationConstraints: (event: PointerEvent) =>
-      event.pointerType === "touch"
-        ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
-        : [new PointerActivationConstraints.Distance({ value: 5 })],
-  }),
-  KeyboardSensor,
-];
 
 /* No ARIA decoration on the cards: the plugin's role="button" on the card
  * wrapper nests the task link and StageMenu inside an interactive control
@@ -574,11 +545,6 @@ const TaskCard = memo(function TaskCard({
     transition: null,
     plugins: cardPlugins,
   });
-  // Pass 30: the wait-human/urgent class pushes are gone — ruling 16 removed
-  // the card-level accent layer and no rule has styled either class since
-  // (the P16-UI-04 comment in app.css records the removal). The facts render
-  // as the wait tag and the priority flag.
-  const cls = ["card"];
   const wrapCls = ["card-wrap"];
   if (canTransition && !archived) wrapCls.push("draggable");
   if (inFlight) wrapCls.push("in-flight");
@@ -597,7 +563,7 @@ const TaskCard = memo(function TaskCard({
       data-card-key={task.key}
     >
       <Link
-        className={cls.join(" ")}
+        className="card"
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
         // The wrapper carries the drag; the anchor must not start its own
         // (URL) drag, but a plain click still navigates.
@@ -1206,7 +1172,7 @@ function NewTaskModal({
   const [files, setFiles] = useState<File[]>([]);
   const [filesProblem, setFilesProblem] = useState<string | null>(null);
   const addFiles = (incoming: File[]) => {
-    const next = addFiledFiles(files, incoming);
+    const next = addPickedFiles(files, incoming, FILING_BATCH);
     setFiles(next.files);
     setFilesProblem(next.problem);
   };
@@ -1490,8 +1456,6 @@ function NewTaskModal({
 
 /** Visible label filter chips before the "+N more" overflow chip. */
 const LABEL_CHIP_CAP = 6;
-
-/** Full-strength state pills on one card before the "+N" fold (pass 30). */
 
 const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
@@ -2127,14 +2091,13 @@ export function BoardPage({
    *  ceremony always names a real target even before the loader wires it. */
   defaultBranch?: string;
   /**
-   * U33-2: GitHub's own answer for this project's repository, as the GitHub
-   * view already computes it (`checkRepoAccess`). Optional and absent by
-   * default: no loader carries this fact yet, and the board must NOT reach for
+   * U33-2: GitHub's own answer for this project's repository, the last one
+   * recorded (`readRepoHealth`, ruling 517). The board must NOT reach for
    * GitHub itself — the check is a live `GET /repos/:repo`, and project-scope
-   * SSE revalidates this view on every task event. `undefined` means "nobody
+   * SSE revalidates this view on every task event. Null or absent means "nobody
    * has established it", which the banner reads as silence, never as health.
    */
-  repoAccess?: RepoAccessResult;
+  repoAccess?: RepoAccessResult | null;
   /** Ruling 503: the project's epics, for the epic filter and the New-task
    *  Epic pick. */
   epics?: readonly EpicOption[];
@@ -2186,7 +2149,6 @@ export function BoardPage({
   /** D19: the card the roving tab stop sits on. Null until an arrow moves it —
    *  the resting stop is then the first card the layout draws (`rovingKey`). */
   const [focusKey, setFocusKey] = useState<string | null>(null);
-  /** B1: a move into the final stage waits here for an explicit confirmation. */
   /** Ruling 381: a backward drag waiting on its reason. */
   const [pendingMoveBack, setPendingMoveBack] = useState<{
     taskKey: string;
@@ -2194,6 +2156,7 @@ export function BoardPage({
     to: string;
     beforeKey: string;
   } | null>(null);
+  /** B1: a move into the final stage waits here for an explicit confirmation. */
   const [pendingAccept, setPendingAccept] = useState<{
     taskKey: string;
     to: string;
@@ -2326,7 +2289,6 @@ export function BoardPage({
     submitReorder(active.key, resolution.to, resolution.beforeKey ?? "");
   };
 
-  /** Commit a confirmed board acceptance (B1). */
   const submitReorder = (
     taskKey: string,
     to: string,
@@ -2861,7 +2823,7 @@ export function BoardPage({
 
       {group === "stage" ? (
         <DragDropProvider
-          sensors={BOARD_SENSORS}
+          sensors={DRAG_SENSORS}
           plugins={BOARD_PLUGINS}
           onDragStart={onDragStart}
           onDragOver={onDragOver}
@@ -2922,12 +2884,6 @@ export function BoardPage({
         />
       )}
 
-      {/* B1 / D3: the acceptance a board move really performs, confirmed
-          through the ONE shared ceremony. F19-27: the card's own summary is what
-          the dialog discloses from — looked up fresh so a revalidation between
-          the gesture and the confirmation shows the CURRENT PR head, not the one
-          the drag started on. A lookup that MISSES is handled by the effect
-          above (clear + toast), never by this silent `&&`. */}
       {pendingMoveBack && (
         <MoveBackConfirm
           taskKey={pendingMoveBack.taskKey}
@@ -2955,6 +2911,12 @@ export function BoardPage({
           }
         />
       )}
+      {/* B1 / D3: the acceptance a board move really performs, confirmed
+          through the ONE shared ceremony. F19-27: the card's own summary is what
+          the dialog discloses from — looked up fresh so a revalidation between
+          the gesture and the confirmation shows the CURRENT PR head, not the one
+          the drag started on. A lookup that MISSES is handled by the effect
+          above (clear + toast), never by this silent `&&`. */}
       {pendingAccept && pendingAcceptTask && (
         <AcceptOnBoardConfirm
           task={pendingAcceptTask}

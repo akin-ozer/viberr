@@ -12,6 +12,7 @@ import {
 } from "./mention-autocomplete";
 import type { DeployedSpecialistView } from "./execution-profile";
 import {
+  backendLabelOf,
   backendRunMark,
   type TaskRunPrincipalView,
 } from "./run-principal-view";
@@ -61,8 +62,7 @@ function toOptions(
     kind: "agent",
     handle: a.id,
     name: a.name,
-    // Spelled here, not `BACKEND_LABEL`: ruling 457 (shared/text/backend-label.ts).
-    sub: `${a.role} · ${a.backend === "claude" ? "Claude" : "Codex"}`,
+    sub: `${a.role} · ${backendLabelOf(a.backend)}`,
     backend: a.backend,
     id: a.id,
     noRepoWrite: a.capabilities?.delivery === false,

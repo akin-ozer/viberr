@@ -155,9 +155,6 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   return parsed;
 }
 
-/** Resolve the live controller configuration (profile + doctrine). Tolerant:
- *  a missing/invalid template degrades to defaults rather than downing the
- *  surface — the settings panel discloses `profilePresent: false`. */
 /** The seeded controller profile's `model:` placeholder for "no model
  *  chosen — the runtime default applies". C01-A9 (pass 32): named, so the
  *  no-model check below is a rule rather than a magic string. */
@@ -185,6 +182,9 @@ export function resolveControllerName(dataRoot?: string): string {
   return controllerNameOf(readControllerProfile(dataRoot)?.frontmatter);
 }
 
+/** Resolve the live controller configuration (profile + doctrine). Tolerant:
+ *  a missing/invalid template degrades to defaults rather than downing the
+ *  surface — the settings panel discloses `profilePresent: false`. */
 export function resolveControllerConfig(dataRoot?: string): ControllerConfig {
   const parsed = readControllerProfile(dataRoot);
   const fm = parsed?.frontmatter;

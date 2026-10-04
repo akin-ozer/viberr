@@ -184,6 +184,21 @@ export function resolveProjectAuthority(
   ) {
     return { allowed: true, role: memberRole, isOrgAdminOverride: false };
   }
+  // The override row and the denial row (P13-D-8, below) carry the same facts.
+  const recordAuthority = (action: string) =>
+    recordAudit(db, {
+      action,
+      actor: { userId: actor.userId, label: actor.label },
+      subjectKind: "project",
+      subjectId: project.slug,
+      projectSlug: project.slug,
+      details: {
+        action: audit.action,
+        what: audit.what,
+        projectSlug: project.slug,
+        memberRole,
+      },
+    });
   if (isOrgAdmin(db, actor.userId)) {
     // F19-30: the `"any-member"` gate used to be exempt from the override row,
     // justified as "config-surface route READs plus a couple of idempotent
@@ -212,21 +227,7 @@ export function resolveProjectAuthority(
         `ovr|${actor.userId}|${project.slug}|${audit.what}`,
         Date.now(),
       );
-    if (record) {
-      recordAudit(db, {
-        action: "project.org_admin.override",
-        actor: { userId: actor.userId, label: actor.label },
-        subjectKind: "project",
-        subjectId: project.slug,
-        projectSlug: project.slug,
-        details: {
-          action: audit.action,
-          what: audit.what,
-          projectSlug: project.slug,
-          memberRole,
-        },
-      });
-    }
+    if (record) recordAuthority("project.org_admin.override");
     return { allowed: true, role: "admin", isOrgAdminOverride: true };
   }
   // P13-D-8: the attempt is refused — record it. `details` carries the
@@ -240,19 +241,7 @@ export function resolveProjectAuthority(
       Date.now(),
     )
   ) {
-    recordAudit(db, {
-      action: "project.authority.denied",
-      actor: { userId: actor.userId, label: actor.label },
-      subjectKind: "project",
-      subjectId: project.slug,
-      projectSlug: project.slug,
-      details: {
-        action: audit.action,
-        what: audit.what,
-        projectSlug: project.slug,
-        memberRole,
-      },
-    });
+    recordAuthority("project.authority.denied");
   }
   return { allowed: false, memberRole };
 }

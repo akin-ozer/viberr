@@ -202,6 +202,23 @@ describe("Codex structured operator completion", () => {
       dataRoot: store.dataRoot,
     })!.parsed;
 
+  /** The deployed Codex operator, holding `capabilities`. */
+  const codexOperator = (
+    capabilities: AgentDeployment["capabilities"],
+    over: AgentDeploymentDefinition = {},
+  ): AgentDeployment => ({
+    profileId: "operator",
+    capabilities,
+    extras: [],
+    definition: {
+      kind: "operator",
+      name: "Operator",
+      backends: ["codex"],
+      model: defaultModelFor("codex"),
+      ...over,
+    },
+  });
+
   beforeEach(async () => {
     ctx = createTestDbContext();
     store = setupTestStore(ctx);
@@ -212,23 +229,10 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       repo: null,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: OPERATOR_POLICY,
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-            // R19-A: per-run autonomy is CLAMPED to the project's configured
-            // level, so `start()`'s `autonomy: "full"` below only means
-            // something on a project that CONFIGURED full autonomy.
-            autonomy: "full",
-          },
-        },
-      ],
+      // R19-A: per-run autonomy is CLAMPED to the project's configured level,
+      // so `start()`'s `autonomy: "full"` below only means something on a
+      // project that CONFIGURED full autonomy.
+      agents: [codexOperator(OPERATOR_POLICY, { autonomy: "full" })],
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -394,21 +398,11 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "append-typed-events", mode: "direct" },
-            { capabilityId: "generate-packets", mode: "off" },
-            { capabilityId: "stage-transitions", mode: "off" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-          },
-        },
+        codexOperator([
+          { capabilityId: "append-typed-events", mode: "direct" },
+          { capabilityId: "generate-packets", mode: "off" },
+          { capabilityId: "stage-transitions", mode: "off" },
+        ]),
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -578,21 +572,13 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
+        codexOperator(
+          [
             { capabilityId: "append-typed-events", mode: "off" },
             { capabilityId: "dispatch-agents", mode: "direct" },
           ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-            autonomy: "full",
-          },
-        },
+          { autonomy: "full" },
+        ),
         {
           // Deployed but WITHOUT a repo-write grant — the dispatch below runs
           // it as supporting, and the pre-inserted LIVE run row makes the
@@ -670,20 +656,10 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "append-typed-events", mode: "direct" },
-            { capabilityId: "generate-packets", mode: "off" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-          },
-        },
+        codexOperator([
+          { capabilityId: "append-typed-events", mode: "direct" },
+          { capabilityId: "generate-packets", mode: "off" },
+        ]),
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -791,21 +767,10 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
-            ...OPERATOR_POLICY,
-            { capabilityId: "update-task-branch", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-            autonomy: "full",
-          },
-        },
+        codexOperator(
+          [...OPERATOR_POLICY, { capabilityId: "update-task-branch", mode: "direct" }],
+          { autonomy: "full" },
+        ),
       ],
     });
     writeTask(store.dataRoot, store.slug, {
@@ -872,21 +837,10 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
-            ...OPERATOR_POLICY,
-            { capabilityId: "completion-for-acceptance", mode: "recommend" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-            autonomy: "full",
-          },
-        },
+        codexOperator(
+          [...OPERATOR_POLICY, { capabilityId: "completion-for-acceptance", mode: "recommend" }],
+          { autonomy: "full" },
+        ),
       ],
     });
     writeTask(store.dataRoot, store.slug, {
@@ -971,21 +925,11 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "append-typed-events", mode: "direct" },
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "stage-transitions", mode: "off" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-          },
-        },
+        codexOperator([
+          { capabilityId: "append-typed-events", mode: "direct" },
+          { capabilityId: "generate-packets", mode: "direct" },
+          { capabilityId: "stage-transitions", mode: "off" },
+        ]),
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1282,18 +1226,9 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: OPERATOR_POLICY,
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-            resources: { skills: [], kb: [], mcps: ["ops-readonly"] },
-          },
-        },
+        codexOperator(OPERATOR_POLICY, {
+          resources: { skills: [], kb: [], mcps: ["ops-readonly"] },
+        }),
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -1326,21 +1261,10 @@ describe("Codex structured operator completion", () => {
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
       agents: [
-        {
-          profileId: "operator",
-          capabilities: [
-            ...OPERATOR_POLICY,
-            { capabilityId: "dispatch-agents", mode: dispatchMode },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-            autonomy: "full",
-          },
-        },
+        codexOperator(
+          [...OPERATOR_POLICY, { capabilityId: "dispatch-agents", mode: dispatchMode }],
+          { autonomy: "full" },
+        ),
         {
           profileId: "developer",
           // Repo-write so the explicit delivers:true hand-off below engages it

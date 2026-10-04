@@ -62,7 +62,6 @@ export interface RunSpec {
   taskKey: string;
   /** Thread id within the task ("op" | "primary" | "r0"). */
   threadId: string;
-  role: string;
   kind: RunKind;
   /** The requested provider backend. */
   backend: "claude" | "codex";
@@ -267,6 +266,12 @@ export function postTurnTransportLine(detail: string): EmittedLine {
     facts: {},
     occurredAt,
   };
+}
+
+/** A console line Viberr writes itself, stamped now: no wire envelope, no facts. */
+export function viberrLine(display: Omit<LogLine, "t">): EmittedLine {
+  const occurredAt = new Date().toISOString();
+  return { raw: "", display: { t: occurredAt.slice(11, 19), ...display }, facts: {}, occurredAt };
 }
 
 /** How the run ended (from the stream, not the exit code — see research §1.6). */

@@ -84,7 +84,6 @@ export interface BranchRowView {
     state: string;
     /** P13-D-28. */
     checks: PrChecksRender | null;
-    checksUnread?: PrChecksUnread | null;
     review: PrReviewState | null;
     /** F17-L6: conflict/mergeable state for an open PR (null when settled). */
     mergeable: PrMergeable | null;
@@ -239,7 +238,6 @@ export async function getGithubViewData(
               number: t.pr.number,
               state: t.pr.state,
               checks: mapPrChecks(t.pr),
-              checksUnread: mapPrChecksUnread(t.pr),
               review: mapPrReview(t.pr),
               mergeable: mapPrMergeable(t.pr),
             }

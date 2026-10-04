@@ -14,6 +14,7 @@ import {
   type ControllerConversation,
 } from "~/server/controller/controller-conversations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { taskExists } from "~/server/projections/task-query.server";
 import {
   connectFakeBackend,
   disconnectFakeBackend,
@@ -21,7 +22,6 @@ import {
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import {
   conversationMatchesScope,
-  dockTaskExists,
   getControllerDock,
   unavailableDockView,
 } from "./controller-dock-query.server";
@@ -60,7 +60,7 @@ afterEach(() => {
 /**
  * The seeded store plus a SECOND project, so "another board" and "a task key
  * that belongs to a different project" are real rows rather than hypotheticals
- * — the wrong-project case is the one `dockTaskExists` exists to refuse.
+ * — the wrong-project case is the one the dock's `taskExists` check refuses.
  */
 function storeWithTwoProjects(): TestStore {
   const store = setupTestStore(ctx);
@@ -127,7 +127,7 @@ function dock(
 ) {
   return getControllerDock(
     store.db,
-    { id: viewer.id, email: viewer.email },
+    { id: viewer.id },
     { ...input, dataRoot: store.dataRoot },
   );
 }
@@ -497,7 +497,7 @@ describe("getControllerDock's scope — the pill and the one-line disclosure", (
   });
 });
 
-describe("dockTaskExists — asked before a thread is bound to a task", () => {
+describe("taskExists — asked before a dock thread is bound to a task", () => {
   /**
    * The refusal that matters is the middle one. Task keys are per-project, so
    * a key that is real SOMEWHERE ELSE is the shape a stale link or a hand-
@@ -507,11 +507,11 @@ describe("dockTaskExists — asked before a thread is bound to a task", () => {
    */
   it("is true only for a task of the project it is asked about", () => {
     const store = storeWithTwoProjects();
-    expect(dockTaskExists(store.db, SLUG, "VIB-101")).toBe(true);
-    expect(dockTaskExists(store.db, OTHER_SLUG, "BIL-1")).toBe(true);
-    expect(dockTaskExists(store.db, SLUG, "VIB-999")).toBe(false);
-    expect(dockTaskExists(store.db, SLUG, "BIL-1")).toBe(false);
-    expect(dockTaskExists(store.db, "no-such-project", "VIB-101")).toBe(false);
+    expect(taskExists(store.db, SLUG, "VIB-101")).toBe(true);
+    expect(taskExists(store.db, OTHER_SLUG, "BIL-1")).toBe(true);
+    expect(taskExists(store.db, SLUG, "VIB-999")).toBe(false);
+    expect(taskExists(store.db, SLUG, "BIL-1")).toBe(false);
+    expect(taskExists(store.db, "no-such-project", "VIB-101")).toBe(false);
   });
 });
 

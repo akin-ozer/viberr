@@ -242,13 +242,7 @@ export function ControllerPage({
             conversationId={view.conversation.id}
           >
             <Transcript view={view} restoreDraft={restoreDraft} />
-            <Composer
-              view={view}
-              csrf={csrf}
-              send={send}
-              conversationId={view.conversation.id}
-              restoreDraft={restoreDraft}
-            />
+            <Composer view={view} csrf={csrf} send={send} restoreDraft={restoreDraft} />
           </ConversationRuntime>
         ) : (
           <div className="ctl-main">
@@ -262,7 +256,7 @@ export function ControllerPage({
                 })
               }
             />
-            <Composer view={view} csrf={csrf} send={send} conversationId={null} />
+            <Composer view={view} csrf={csrf} send={send} />
           </div>
         )}
         {/* Ruling 419(a)/(b): the conversations lead the rail, and on a
@@ -871,13 +865,11 @@ function Composer({
   view,
   csrf,
   send,
-  conversationId,
   restoreDraft,
 }: {
   view: ControllerSurfaceView;
   csrf: string;
   send: ReturnType<typeof useFetcher<ActionResult>>;
-  conversationId: string | null;
   /** Ruling 527: lent to the transcript's Retract. */
   restoreDraft?: RestoreDraft;
 }) {
@@ -951,7 +943,7 @@ function Composer({
     pending.current = value;
     pendingFiles.current = files;
     send.submit(
-      sendForm(csrf, value, `${location.pathname}${location.search}`, conversationId, mode, files),
+      sendForm(csrf, value, `${location.pathname}${location.search}`, view.conversation?.id ?? null, mode, files),
       files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" },
     );
   };

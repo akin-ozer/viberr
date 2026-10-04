@@ -23,13 +23,13 @@ describe("AgentGlyph", () => {
   it("names the operator shield and the codex fallback", () => {
     const { container } = render(
       <>
-        <AgentGlyph op lg />
+        <AgentGlyph op />
         <AgentGlyph backend="anything-else" />
       </>,
     );
     const [op, codex] = [...container.querySelectorAll(".agent-glyph")];
     expect(op.getAttribute("aria-label")).toBe("Operator");
-    expect(op.className).toBe("agent-glyph op lg");
+    expect(op.className).toBe("agent-glyph op");
     expect(codex.getAttribute("aria-label")).toBe("Codex");
   });
 

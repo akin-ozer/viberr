@@ -64,6 +64,19 @@ function makeDbWithUser() {
   return db;
 }
 
+/** Save akin-ozer's valid token as the admin, validated over `fetchImpl`. */
+function connectValid(
+  db: ReturnType<typeof makeDbWithUser>,
+  fetchImpl: typeof fetch = validTransport().fetchImpl,
+) {
+  return createConnection(
+    db,
+    { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+    ACTOR,
+    { fetchImpl },
+  );
+}
+
 /** Classic token with all required scopes granted via the header. */
 function validTransport(owner = "akin-ozer") {
   return fakeGithubFetch({
@@ -138,12 +151,7 @@ describe("createConnection", () => {
   it("persists on success: masked suffix, reach, expiry, first = default", async () => {
     const db = makeDbWithUser();
     const gh = validTransport();
-    const result = await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: gh.fetchImpl },
-    );
+    const result = await connectValid(db, gh.fetchImpl);
     expect(result.status).toBe("saved");
     const [conn] = listConnections(db);
     expect(conn).toMatchObject({
@@ -169,12 +177,7 @@ describe("createConnection", () => {
   it("ruling 144(a): the workflow-scope advisory rides the connection record from the token's header", async () => {
     // Canary: return `[]` for `advisories` in the record builder.
     const db = makeDbWithUser();
-    const withWorkflow = await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    const withWorkflow = await connectValid(db);
     expect(withWorkflow.status).toBe("saved");
     expect(listConnections(db)[0]!.advisories).toEqual([]);
 
@@ -198,12 +201,7 @@ describe("createConnection", () => {
   it("refuses duplicates without a network round-trip", async () => {
     const db = makeDbWithUser();
     const gh = validTransport();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: gh.fetchImpl },
-    );
+    await connectValid(db, gh.fetchImpl);
     const before = gh.calls.length;
     const dup = await createConnection(
       db,
@@ -221,12 +219,7 @@ describe("replaceConnectionToken", () => {
   it("keeps the old token active when validation fails", async () => {
     const db = makeDbWithUser();
     const gh = validTransport();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: gh.fetchImpl },
-    );
+    await connectValid(db, gh.fetchImpl);
     const bad = fakeGithubFetch({
       "GET /user": { status: 401, body: { message: "Bad credentials" } },
     });
@@ -244,12 +237,7 @@ describe("replaceConnectionToken", () => {
   it("swaps the token + refreshes facts on success", async () => {
     const db = makeDbWithUser();
     const gh = validTransport();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: gh.fetchImpl },
-    );
+    await connectValid(db, gh.fetchImpl);
     const result = await replaceConnectionToken(
       db,
       { connectionId: "akin-ozer", token: "ghp_replacement_beef" },
@@ -266,12 +254,7 @@ describe("replaceConnectionToken", () => {
 
 describe("default + remove", () => {
   async function twoConnections(db: ReturnType<typeof makeDbWithUser>) {
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     await createConnection(
       db,
       { owner: "hepapi", token: "ghp_valid_token_1111", userId: "u_admin" },
@@ -365,12 +348,7 @@ describe("PAT-validation rate limit", () => {
       name: "Other Admin",
       role: "admin",
     });
-    const saved = await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    const saved = await connectValid(db);
     expect(saved.status).toBe("saved");
 
     // Drain the rest of this actor's bucket.
@@ -409,12 +387,7 @@ describe("stale connection revalidation", () => {
 
   it("leaves a fresh verdict alone — no probe at all", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const gh = fakeGithubFetch({});
     const fresh = await ensureConnectionFresh(db, "akin-ozer", {
       fetchImpl: gh.fetchImpl,
@@ -425,12 +398,7 @@ describe("stale connection revalidation", () => {
 
   it("re-probes past the staleness window and DOWNGRADES a revoked token", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const revoked = fakeGithubFetch({
       "GET /user": {
         status: 401,
@@ -450,12 +418,7 @@ describe("stale connection revalidation", () => {
 
   it("an unreachable GitHub is NOT a downgrade", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const after = await ensureConnectionFresh(db, "akin-ozer", {
       fetchImpl: unreachableFetch(),
       now: () => Date.now() + 2 * DAY,
@@ -630,12 +593,7 @@ describe("ruling 463: what the token reaches", () => {
   // survives the new token.
   it("a replaced token's reach replaces the old one", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const narrower = reachTransport({
       body: [{ full_name: "akin-ozer/website", private: true, permissions: { push: true } }],
     });
@@ -657,12 +615,7 @@ describe("ruling 463: what the token reaches", () => {
   // the second arm asks /user/repos.
   it("the 24-hour re-proof re-reads the reach; a token GitHub refuses has an unknown reach and no read is spent", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const grown = fakeGithubFetch({
       "GET /user": { body: { login: "akin-ozer" }, headers: { "x-oauth-scopes": "repo" } },
       "GET /user/repos": { body: page(5) },
@@ -694,12 +647,7 @@ describe("ruling 463: what the token reaches", () => {
   // stays unread; drop its audit and the row is missing.
   it("Re-check reads the reach of a connection saved before the read existed, and audits it", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     // A root that predates ruling 463: the column is NULL.
     db.prepare(`UPDATE github_connections SET reach_json = NULL`).run();
     expect(listConnections(db)[0]!.reach).toBeNull();
@@ -725,12 +673,7 @@ describe("ruling 463: what the token reaches", () => {
 
   it("Re-check: an unreachable GitHub changes nothing, a refused token is refused out loud, a missing connection says so", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const down = await recheckConnection(db, "akin-ozer", ACTOR, {
       fetchImpl: unreachableFetch(),
     });
@@ -827,12 +770,7 @@ describe("ruling 480: a connection Re-check never unproves a repository", () => 
 
   it("a classic token's header answers for every repository, so no repository line repeats it", async () => {
     const db = makeDbWithUser();
-    await createConnection(
-      db,
-      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: validTransport().fetchImpl },
-    );
+    await connectValid(db);
     const patId = listConnections(db)[0]!.patId;
     markWriteScopeProven(db, patId, REPO, "push");
     const card = listConnections(db)[0]!;

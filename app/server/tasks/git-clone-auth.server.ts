@@ -113,6 +113,7 @@ export function createGitHubAskpassEnv(input: {
   baseEnv?: NodeJS.ProcessEnv;
 }): GitHubAskpassEnv {
   const env: NodeJS.ProcessEnv = credentialedGitEnv(input.baseEnv);
+  // Never reuse an ambient askpass program.
   delete env.GIT_ASKPASS;
   delete env.SSH_ASKPASS;
 
@@ -121,6 +122,7 @@ export function createGitHubAskpassEnv(input: {
     askpassDir = mkdtempSync(path.join(tmpdir(), "viberr-git-askpass-"));
     const askpassPath = path.join(askpassDir, "askpass.sh");
     writeFileSync(askpassPath, ASKPASS_SCRIPT, { encoding: "utf8", mode: 0o700 });
+    // Do not rely on the host's umask to leave the helper executable.
     chmodSync(askpassPath, 0o700);
     env.GIT_ASKPASS = askpassPath;
     env[ASKPASS_USERNAME_ENV] = "x-access-token";
@@ -204,42 +206,9 @@ export function createGitHubClonePlan(input: {
   /** Test seam; production callers build on `filteredSpawnEnv()`. */
   baseEnv?: NodeJS.ProcessEnv;
 }): GitHubClonePlan {
-  const url = githubRepositoryUrl(input.repo);
-  // An empty helper resets any lower-priority helper list for this one Git
-  // process. These environment-backed config entries are never persisted.
-  const env: NodeJS.ProcessEnv = credentialedGitEnv(input.baseEnv);
-
-  // Never reuse an ambient askpass program for a project clone.
-  delete env.GIT_ASKPASS;
-  delete env.SSH_ASKPASS;
-
-  let askpassDir: string | null = null;
-  if (input.token) {
-    askpassDir = mkdtempSync(path.join(tmpdir(), "viberr-git-askpass-"));
-    const askpassPath = path.join(askpassDir, "askpass.sh");
-    writeFileSync(askpassPath, ASKPASS_SCRIPT, {
-      encoding: "utf8",
-      mode: 0o700,
-    });
-    // Do not rely on the host's umask to leave the helper executable.
-    chmodSync(askpassPath, 0o700);
-    env.GIT_ASKPASS = askpassPath;
-    env[ASKPASS_USERNAME_ENV] = "x-access-token";
-    env[ASKPASS_PASSWORD_ENV] = input.token;
-  }
-
-  let disposed = false;
   return {
-    args: ["clone", "--depth", "1", url, input.destination],
-    env,
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      delete env[ASKPASS_USERNAME_ENV];
-      delete env[ASKPASS_PASSWORD_ENV];
-      delete env.GIT_ASKPASS;
-      if (askpassDir) rmSync(askpassDir, { recursive: true, force: true });
-    },
+    args: ["clone", "--depth", "1", githubRepositoryUrl(input.repo), input.destination],
+    ...createGitHubAskpassEnv(input),
   };
 }
 

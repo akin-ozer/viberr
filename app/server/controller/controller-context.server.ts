@@ -27,6 +27,7 @@ import { notVisible } from "./controller-tool-guards.server";
 import { openRequestsContextLine } from "./controller-requests.server";
 import { countLabel } from "~/shared/text/plural";
 import { fenceFor } from "~/shared/text/fence";
+import { isEpicOpen } from "~/shared/task-refs";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import {
   kbProposalCountsByProject,
@@ -395,7 +396,7 @@ function boardContext(
   }
   // Ruling 503: the open epics, with how far each has got. A closed one
   // (done, cancelled) is history the board no longer works in.
-  const allEpics = listEpics(db, slug).filter((e) => e.status !== "done" && e.status !== "cancelled");
+  const allEpics = listEpics(db, slug).filter((e) => isEpicOpen(e.status));
   const epics = allEpics
     .slice(0, BOARD_CONTEXT_EPICS)
     .map(
@@ -410,7 +411,7 @@ function boardContext(
     `## Board ${project.name} (slug ${slug})${project.archived ? " · ARCHIVED (read-only)" : ""}\n` +
     // Ruling 292: the excerpt names its reader, exactly as the epics line
     // above already does ("list_epics reads them"). `get_project`
-    // carries the description whole (line ~1342); without the pointer this
+    // carries the description whole; without the pointer this
     // ellipsis was a cut with nowhere to go, on the one text a board's owner
     // writes to explain what the board IS.
     (description

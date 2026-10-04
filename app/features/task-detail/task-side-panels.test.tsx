@@ -92,38 +92,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
   };
 }
 
-function renderPanel(patch: Partial<TaskDetail> = {}) {
-  const task = detail(patch);
-  const Stub = createRoutesStub([
-    {
-      path: "/",
-      Component: () => (
-        <CurrentStatePanel
-          task={task}
-          stage={STAGES[1]}
-          meId="u-arda"
-          myRole="viewer"
-          archived={task.archived === true}
-          acceptance={ACCEPTANCE}
-          ownerBusy={false}
-          onOwner={() => {}}
-          onRelease={() => {}}
-          onArchive={() => {}}
-          onAccept={() => {}}
-          onTransition={() => {}}
-          transitionBusy={false}
-          acceptInFlight={null}
-          dispositionBusy={false}
-        />
-      ),
-    },
-  ]);
-  return render(<Stub initialEntries={["/"]} />);
-}
-
-/** Same panel, as a CONTRIBUTOR (the tier that may take the owner seat) — or
- *  any role passed in. */
-function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contributor") {
+function renderPanel(patch: Partial<TaskDetail> = {}, myRole = "viewer") {
   const task = detail(patch);
   const Stub = createRoutesStub([
     {
@@ -150,6 +119,12 @@ function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contribu
     },
   ]);
   return render(<Stub initialEntries={["/"]} />);
+}
+
+/** Same panel, as a CONTRIBUTOR (the tier that may take the owner seat) — or
+ *  any role passed in. */
+function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contributor") {
+  return renderPanel(patch, myRole);
 }
 
 /**

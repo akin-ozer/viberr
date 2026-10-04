@@ -69,7 +69,7 @@ import {
 } from "~/server/tasks/operator-repo-read.server";
 import { EPIC_COLORS, EPIC_STATUS_VALUES, type EpicStatus } from "~/schemas/epic-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
-import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
   queryAuditEventsForExport,
   type AuditExportFilters,
@@ -203,6 +203,7 @@ import {
 } from "~/server/projections/epic-query.server";
 import {
   acceptanceRefusalFor,
+  appendComment,
   createTask,
   loadProjectContext,
   releaseOwner,
@@ -212,9 +213,9 @@ import {
   transitionStage,
   updateTaskGoal,
   updateTaskTitle,
-  userName,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import {
@@ -380,8 +381,6 @@ function grantOf(scope: string | null) {
   };
 }
 
-
-/** Build the toolkit for one controller turn. */
 /**
  * Ruling 302: the controller's own timeline window, and the most it will widen
  * to. The operator's twins are OPERATOR_TIMELINE_DEFAULT / _MAX; this window
@@ -397,6 +396,7 @@ interface TimelineWindowNote {
   timelineOlder?: string;
 }
 
+/** Build the toolkit for one controller turn. */
 export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerToolkit {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;
@@ -406,7 +406,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   // one definition, so a reworded refusal cannot drift between them.
   const { actor, orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
     controllerToolGuards(db, user, dataRoot);
-  const auditActor: AuditActor = actor;
 
   const boundSlug = deps.projectSlug ?? null;
   /** Resolve the tool's project argument against the conversation binding. */
@@ -587,7 +586,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const result = await createLocalAccount(
           db,
           { name: personName(args.name), email: args.email, role: args.role },
-          auditActor,
+          actor,
         );
         return (
           `[done] ${result.user.email} created (org ${result.user.role}). ` +
@@ -638,19 +637,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 email: args.email ?? current.email,
                 role: args.role ?? current.role,
               },
-              auditActor,
+              actor,
             );
             done.push(`profile updated (${updated.email}, org ${updated.role})`);
           }
           if (args.access === "disable") {
-            await disableUser(db, args.userId, auditActor);
+            await disableUser(db, args.userId, actor);
             done.push("account disabled");
           } else if (args.access === "enable") {
-            await enableUser(db, args.userId, auditActor);
+            await enableUser(db, args.userId, actor);
             done.push("account enabled");
           }
           if (args.resetPassword) {
-            const reset = await resetLocalPassword(db, args.userId, auditActor);
+            const reset = await resetLocalPassword(db, args.userId, actor);
             done.push(
               `password reset. Temporary password (single use): ${reset.tempPassword}`,
             );
@@ -676,7 +675,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const updated = setOrgUserRole(
           db,
           { userId: args.userId, role: args.role },
-          auditActor,
+          actor,
         );
         return `[done] ${updated.email} is now an org ${updated.role}.`;
       }),
@@ -762,7 +761,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             kind: args.kind,
             name,
             reason: args.reason,
-            askedByUserId: actor.userId ?? "",
+            askedByUserId: actor.userId,
             askedByLabel: actor.label,
           },
           dataRoot,
@@ -939,7 +938,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const saved = await saveKnowledgeBase(
             db,
             { id: args.id ?? null, name: args.name, refresh: args.refresh ?? "on change" },
-            auditActor,
+            actor,
             { dataRoot },
           );
           // U36-4 (pass 36): the reply carries what the next call needs — the
@@ -949,7 +948,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const privacy =
             args.private === undefined
               ? ""
-              : setKnowledgeBasePrivacy(db, { id: saved.kb.id, private: args.private }, auditActor, { dataRoot }).changed
+              : setKnowledgeBasePrivacy(db, { id: saved.kb.id, private: args.private }, actor, { dataRoot }).changed
                 ? args.private
                   ? " It is now private: no agent's shell can open its folder, and the runs it is granted to read it through read_knowledge_doc."
                   : " It is open again: every agent can read its folder."
@@ -1000,7 +999,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 [],
                 args.doc.path,
                 args.doc.content,
-                auditActor,
+                actor,
                 { append: true },
               );
               return (
@@ -1043,7 +1042,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               [],
               args.doc.path,
               args.doc.content,
-              auditActor,
+              actor,
               { overwrite: args.doc.replace === true },
             );
             docNote = written.replaced
@@ -1076,7 +1075,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!target) return `[denied] No knowledge base with id ${args.id}.`;
         const edited = await editKbPassage(
           db,
-          { kb: path.basename(target.rootAbs), doc: args.path, was: args.was, now: args.now, actor: auditActor },
+          { kb: path.basename(target.rootAbs), doc: args.path, was: args.was, now: args.now, actor },
           { dataRoot },
         );
         if (!edited.ok) return `[denied] ${edited.message}`;
@@ -1241,7 +1240,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             summary: args.summary,
             body: args.body ?? "",
           },
-          auditActor,
+          actor,
           { dataRoot },
         );
         // U36-4: the same re-enterable reply as save_knowledge_base.
@@ -1377,7 +1376,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           };
           if (args.writeTools !== undefined) input.writeTools = args.writeTools;
           if (args.requestedScopes !== undefined) input.requestedScopes = args.requestedScopes;
-          const saved = await saveMcpServer(db, input, auditActor, {}, { dataRoot });
+          const saved = await saveMcpServer(db, input, actor, {}, { dataRoot });
           // `saveMcpServer` answers with the row it wrote, so the reply states
           // the marking that actually landed rather than the one we asked for.
           const policy = saved.mcp.writeTools;
@@ -1570,7 +1569,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.model !== undefined) input.model = args.model;
           if (args.effort !== undefined) input.effort = args.effort;
           if (args.propagate) input.propagate = true;
-          const saved = await saveGlobalAgentProfile(db, input, auditActor, {
+          const saved = await saveGlobalAgentProfile(db, input, actor, {
             dataRoot,
           });
           // Ruling 153: the reply states the defaults a deploy will take.
@@ -1683,7 +1682,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // is what the controller had to do.
           const unfiltered = { ...filters };
           delete unfiltered.actionPrefix;
-          delete unfiltered.action;
           const counts = new Map<string, number>();
           for (const r of queryAuditEventsForExport(db, unfiltered)) {
             counts.set(r.action, (counts.get(r.action) ?? 0) + 1);
@@ -2027,7 +2025,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           fileLeases: activeFileLeases(slug, dataRoot ? { dataRoot } : {}),
           // Named, not dropped: the declaration was made and is now spent, and
           // somebody may want to clear the row.
-          spentFileLeases: staleFileLeases(db, slug, dataRoot ? { dataRoot } : {}),
+          spentFileLeases: staleFileLeases(slug, dataRoot ? { dataRoot } : {}),
           // Ruling 482: the commands Viberr itself runs on every delivered
           // revision; set with set_project_gates.
           gates: fm.gates ?? [],
@@ -2181,7 +2179,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .map((e) => ({
             at: e.occurredAt,
             type: e.type,
-            by: e.actor.kind === "human" ? e.actor.name : e.actor.kind === "system" ? e.actor.name : `${e.actor.name} (agent)`,
+            by: e.actor.kind === "agent" ? `${e.actor.name} (agent)` : e.actor.name,
             title: e.title,
             // Ruling 292: the cut says it is a cut and names the way out. This
             // is ruling 285 for the CONTROLLER, which that ruling gave only to
@@ -2303,7 +2301,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .int()
           .min(0)
           .optional()
-          .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
+          .describe(READ_TASK_ATTACHMENT_FIELDS.offset),
         delivery: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.delivery),
       },
       runWith((args: { projectSlug?: string; taskKey?: string; name: string; offset?: number; delivery?: string }) => {
@@ -2665,7 +2663,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         );
         const summary = getTaskSummary(db, slug, key);
         if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
-        const text = `${prose(args.text).trim()}\n\n_Posted by the controller for ${userName(db, user.id)}._`;
+        const text = `${prose(args.text).trim()}\n\n_Posted by the controller for ${userDisplayName(db, user.id)}._`;
         await postAgentComment(db, { dataRoot }, {
           projectSlug: slug,
           taskKey: key,
@@ -2777,15 +2775,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               "Pass a title and/or a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy, epic).",
             );
           }
-          // Two writers, two gates. Each part reports on its own so a goal that
-          // wrote is never hidden behind a metadata refusal (or the reverse);
-          // when nothing was applied the first refusal is the answer.
+          // Each axis has its own writer and gate and reports on its own, so a
+          // goal that wrote is never hidden behind a metadata refusal (or the
+          // reverse); when nothing was applied the first refusal is the answer.
           //
-          // Both writers short-circuit when the value is already what was
+          // Every writer short-circuits when the value is already what was
           // asked for: no file write, no timeline note, no audit row. Reporting
           // that as "[done] updated" told the person something happened when
-          // nothing did (review finding 14), so the before/after comparison
-          // below decides which axes really changed.
+          // nothing did (review finding 14), so each axis says whether it
+          // really changed (the metadata by the before/after comparison below).
           const before = getTaskSummary(db, slug, key);
           const applied: string[] = [];
           const unchanged: string[] = [];
@@ -2918,6 +2916,21 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "update_task",
   );
 
+  /** The `run-agents` tier on this project for the asking person, as the task
+   *  page decides it (`canRunAgents`); a project that is gone is not visible. */
+  function mayRunAgents(slug: string, what: string): boolean {
+    const file = readProjectFile({ projectSlug: slug, dataRoot });
+    if (!file) throw new NotVisibleError(notVisible(slug));
+    const authority = {
+      slug,
+      memberRoles: new Map(
+        file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
+      ),
+      archived: file.parsed.frontmatter.archived === true,
+    };
+    return canRunAgents(db, authority, actor, what);
+  }
+
   add(
     tool(
       "run_agent_on_task",
@@ -2941,19 +2954,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "run agents");
-          const file = readProjectFile({ projectSlug: slug, dataRoot });
-          if (!file) throw new NotVisibleError(notVisible(slug));
-          const authority = {
-            slug,
-            memberRoles: new Map(
-              file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
-            ),
-            archived: file.parsed.frontmatter.archived === true,
-          };
-          if (!canRunAgents(db, authority, actor, "run agents through the controller")) {
+          if (!mayRunAgents(slug, "run agents through the controller")) {
             return "[denied] Running agents needs the maintainer role (or project admin) in this project.";
           }
-          const display = userName(db, user.id);
+          const display = userDisplayName(db, user.id);
+          // Ruling 263 (R21-9's law): the directive goes on the record as the
+          // person's own comment, addressed to the agent it is for.
+          const recordDirective = (handle: string, prompt: string) =>
+            appendComment(
+              db,
+              { projectSlug: slug, taskKey: key, text: `@${handle} ${prose(prompt)}`, forceToAgent: true },
+              actor,
+              { dataRoot },
+            );
           if (args.agent.trim().toLowerCase() === "operator") {
             const { runOperator } = await import(
               "~/server/runtimes/operator-run.server"
@@ -2962,7 +2975,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               projectSlug: slug,
               taskKey: key,
               trigger: "manual",
-              actor: auditActor,
+              actor,
             };
             if (args.prompt) {
               operatorInput.humanComment = prose(args.prompt);
@@ -3009,20 +3022,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // this arm does. Written only when the run was NOT refused, like
             // the task page: a refused run would strand a comment with nothing
             // to address it.
-            if (args.prompt && !result.refused) {
-              const { appendComment } = await import("~/server/tasks/task-actions.server");
-              await appendComment(
-                db,
-                {
-                  projectSlug: slug,
-                  taskKey: key,
-                  text: `@operator ${prose(args.prompt)}`,
-                  forceToAgent: true,
-                },
-                actor,
-                { dataRoot },
-              );
-            }
+            if (args.prompt) await recordDirective("operator", args.prompt);
             if (result.queued) {
               return `[done] The operator is already working ${key}; your directive was queued for it.`;
             }
@@ -3069,20 +3069,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const handle =
             listDeployedSpecialists(slug, { dataRoot }).find((s) => s.id === profileId)
               ?.name ?? profileId;
-          const { appendComment } = await import("~/server/tasks/task-actions.server");
-          if (args.prompt) {
-            await appendComment(
-              db,
-              {
-                projectSlug: slug,
-                taskKey: key,
-                text: `@${handle} ${prose(args.prompt)}`,
-                forceToAgent: true,
-              },
-              actor,
-              { dataRoot },
-            );
-          }
+          if (args.prompt) await recordDirective(handle, args.prompt);
           let started: Awaited<ReturnType<typeof startAgentRun>>;
           try {
             started = await startAgentRun(db, runInput, actor, { dataRoot });
@@ -3150,16 +3137,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   /** Ruling 153: the `run-agents` tier the task page's schedule form needs. */
   function requireScheduleTier(slug: string, what: string): string | null {
-    const file = readProjectFile({ projectSlug: slug, dataRoot });
-    if (!file) throw new NotVisibleError(notVisible(slug));
-    const authority = {
-      slug,
-      memberRoles: new Map(
-        file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
-      ),
-      archived: file.parsed.frontmatter.archived === true,
-    };
-    return canRunAgents(db, authority, actor, what)
+    return mayRunAgents(slug, what)
       ? null
       : "[denied] Scheduling a run needs the maintainer role (or project admin) in this project.";
   }
@@ -3224,7 +3202,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // The actor is the audit actor (`<email> · via controller`): the
           // entry's `createdByLabel` discloses the instrument, as every other
           // controller write does.
-          const sched = await scheduleTaskAction(db, schedInput, auditActor, {
+          const sched = await scheduleTaskAction(db, schedInput, actor, {
             dataRoot,
           });
           let what = "an operator re-run";
@@ -3264,7 +3242,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const result = await cancelScheduledAction(
             db,
             { projectSlug: slug, taskKey: key, scheduleId },
-            auditActor,
+            actor,
             { dataRoot },
           );
           return result.cancelled
@@ -3411,7 +3389,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // through the controller" has to be answerable from the trail.
           recordAudit(db, {
             action: "controller.github.read",
-            actor: auditActor,
+            actor,
             subjectKind: "project",
             subjectId: slug,
             projectSlug: slug,
@@ -4100,7 +4078,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       runWith((args: { projectSlug?: string; taskKey?: string }) => {
         // Scope, in the order a person means it: an explicit argument, then the
         // conversation's own anchor, then everything they can see.
-        const explicit = args.projectSlug ?? boundSlug ?? null;
+        const explicit = args.projectSlug ?? boundSlug;
         if (explicit) requireVisible(explicit, "read this project's decisions");
         // Ruling 256: the anchor belongs to the project it was anchored IN. A
         // conversation anchored to VIB-1 in one project, asked about another,

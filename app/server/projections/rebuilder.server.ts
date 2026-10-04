@@ -59,6 +59,7 @@ import {
 import { deriveReadiness } from "~/server/interpretation/readiness-policy.server";
 import { logger } from "~/server/logging/logger.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
+import type { TaskEventRow } from "~/shared/mapping/task-event.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 import { toError } from "~/shared/errors";
@@ -83,7 +84,7 @@ export interface RebuildOptions {
   /** Bypass the content-hash short-circuit. */
   force?: boolean;
   /**
-   * Internal (rebuildAll only): suppress the project→tasks cascade because
+   * Internal (the rescans only): suppress the project→tasks cascade because
    * the caller walks the project's task files itself (with force when the
    * project row changed) — avoids projecting every task twice per rescan.
    */
@@ -1016,21 +1017,9 @@ function rebuildTaskFileNow(
   return { action: "projected", kind: "task", projectSlug: slug, taskKey: fm.key };
 }
 
-/** One `task_events` row's columns, as the rebuilder writes them. A type alias,
- *  not an interface, so the SELECT-row assertion in `syncTaskEvents` is checked
- *  against SQLite's own output types (see `TaskEventRow`). */
-type TaskEventColumns = {
-  occurred_at: string;
-  type: string;
-  actor_kind: "human" | "agent" | "operator" | "controller" | "system";
-  actor_ref: string;
-  actor_json: string;
-  title: string | null;
-  text: string;
-  to_agent: 0 | 1;
-  evidence_json: string | null;
-  attachments_json: string | null;
-};
+/** One `task_events` row's columns, as the rebuilder writes them: the stored
+ *  row (`TaskEventRow`) less its identity and place. */
+type TaskEventColumns = Omit<TaskEventRow, "id" | "project_slug" | "task_key" | "position">;
 
 /** A stored row: the columns plus its identity and place. */
 type StoredTaskEventRow = TaskEventColumns & { id: number; position: number };
@@ -1473,21 +1462,10 @@ export function reprojectProject(
   });
 }
 
-// --------------------------------------------------------- scoped rescan
+// --------------------------------------------------------- the rescans
 
-/**
- * Scoped rescan: reproject a SINGLE project's files (project.md + its task
- * files) and prune only THAT project's vanished rows. Same reconciliation as
- * `rebuildAll`, confined to `slug`, so the project-scoped Board "Re-scan"
- * action can't trigger an instance-wide rebuild of projects the caller has no
- * authority over (F20 — the gate is project-scoped, so the effect must be too).
- */
-export function rebuildProject(
-  db: DatabaseSync,
-  slug: string,
-  options: RebuildOptions = {},
-): RescanSummary {
-  const startedAt = Date.now();
+/** A rescan's summary, and `track`, which counts one file's result into it. */
+function rescanTally() {
   const summary: RescanSummary = {
     projects: 0,
     tasks: 0,
@@ -1503,15 +1481,28 @@ export function rebuildProject(
     else if (result.action === "removed") summary.removed += 1;
     else if (result.action === "error") summary.errors += 1;
   };
+  return { summary, track };
+}
 
-  const seenTasks = new Set<string>();
+/**
+ * Both rescans' walk of one project's files: project.md, its task files, its
+ * epics. When a field tasks derive from changed, its tasks must be re-projected
+ * too — stage-reference diagnostics, effective repo and guest flags are baked
+ * into task rows, so the task-side content-hash short-circuit would otherwise
+ * keep them stale forever. The cascade inside rebuildProjectFile is suppressed
+ * here (skipTaskCascade) because this walk visits every task file itself —
+ * with force when needed. Answers what it found on disk, for the prune.
+ */
+function rescanProjectFiles(
+  db: DatabaseSync,
+  slug: string,
+  options: RebuildOptions,
+  { summary, track }: ReturnType<typeof rescanTally>,
+) {
   const projectExists = existsSync(projectFilePath(slug, options.dataRoot));
   let projectChanged = false;
   if (projectExists) {
     summary.projects += 1;
-    // Suppress the in-file cascade — this walk re-projects every task itself
-    // (with force when a field tasks derive from changed), matching rebuildAll's
-    // pattern.
     const result = rebuildPath(db, projectFilePath(slug, options.dataRoot), {
       ...options,
       skipTaskCascade: true,
@@ -1520,22 +1511,39 @@ export function rebuildProject(
     // SRV-3: only a change tasks derive from forces them (see rebuildProjectFile).
     projectChanged = result.action === "projected" && result.taskFacingChanged === true;
   }
-
   const taskOptions = projectChanged ? { ...options, force: true } : options;
+  const taskKeys: string[] = [];
   for (const key of listTaskDirs(slug, options.dataRoot)) {
     if (!existsSync(taskFilePath(slug, key, options.dataRoot))) continue;
     summary.tasks += 1;
-    seenTasks.add(key);
+    taskKeys.push(key);
     track(rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions));
   }
-
   // Ruling 503: epics. Their rows derive from their own files alone, so
   // neither the order nor a changed project row matters to them.
-  const seenEpics = new Set<string>();
-  for (const epicId of listEpicIds(slug, options.dataRoot)) {
-    seenEpics.add(epicId);
-    track(rebuildEpicFile(db, slug, epicId, options));
-  }
+  const epicIds = listEpicIds(slug, options.dataRoot);
+  for (const epicId of epicIds) track(rebuildEpicFile(db, slug, epicId, options));
+  return { projectExists, taskKeys, epicIds };
+}
+
+/**
+ * Scoped rescan: reproject a SINGLE project's files (project.md + its task
+ * files) and prune only THAT project's vanished rows. Same reconciliation as
+ * `rebuildAll`, confined to `slug`, so the project-scoped Board "Re-scan"
+ * action can't trigger an instance-wide rebuild of projects the caller has no
+ * authority over (F20 — the gate is project-scoped, so the effect must be too).
+ */
+export function rebuildProject(
+  db: DatabaseSync,
+  slug: string,
+  options: RebuildOptions = {},
+): RescanSummary {
+  const startedAt = Date.now();
+  const tally = rescanTally();
+  const { summary, track } = tally;
+  const { projectExists, taskKeys, epicIds } = rescanProjectFiles(db, slug, options, tally);
+  const seenTasks = new Set(taskKeys);
+  const seenEpics = new Set(epicIds);
   // SAFETY: `epic_id` is a single NOT NULL column (half the `epic_projections`
   // primary key).
   const epicRows = db
@@ -1593,15 +1601,8 @@ export function rebuildAll(
   const startedAt = Date.now();
   const root = getDataRoot(options.dataRoot);
   const projRoot = projectsDir(options.dataRoot);
-  const summary: RescanSummary = {
-    projects: 0,
-    tasks: 0,
-    changed: 0,
-    unchanged: 0,
-    removed: 0,
-    errors: 0,
-    durationMs: 0,
-  };
+  const tally = rescanTally();
+  const { summary, track } = tally;
 
   const seenProjects = new Set<string>();
   const seenTasks = new Set<string>();
@@ -1613,46 +1614,11 @@ export function rebuildAll(
       )
     : [];
 
-  const track = (result: RebuildFileResult) => {
-    if (result.action === "projected") summary.changed += 1;
-    else if (result.action === "unchanged") summary.unchanged += 1;
-    else if (result.action === "removed") summary.removed += 1;
-    else if (result.action === "error") summary.errors += 1;
-  };
-
   for (const slug of slugs) {
-    // When a field tasks derive from changed, its tasks must be re-projected
-    // too — stage-reference diagnostics, effective repo and guest flags are
-    // baked into task rows, so the task-side content-hash short-circuit
-    // would otherwise keep them stale forever. The cascade inside
-    // rebuildProjectFile is suppressed here (skipTaskCascade) because this
-    // walk visits every task file itself — with force when needed.
-    let projectChanged = false;
-    if (existsSync(projectFilePath(slug, options.dataRoot))) {
-      summary.projects += 1;
-      seenProjects.add(slug);
-      const result = rebuildPath(db, projectFilePath(slug, options.dataRoot), {
-        ...options,
-        skipTaskCascade: true,
-      });
-      track(result);
-      // SRV-3: only a change tasks derive from forces them (see rebuildProjectFile).
-      projectChanged = result.action === "projected" && result.taskFacingChanged === true;
-    }
-    const taskOptions = projectChanged ? { ...options, force: true } : options;
-    for (const key of listTaskDirs(slug, options.dataRoot)) {
-      if (!existsSync(taskFilePath(slug, key, options.dataRoot))) continue;
-      summary.tasks += 1;
-      seenTasks.add(`${slug}\u0000${key}`);
-      track(
-        rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions),
-      );
-    }
-    // Ruling 503: epics, from their own files alone.
-    for (const epicId of listEpicIds(slug, options.dataRoot)) {
-      seenEpics.add(`${slug}\u0000${epicId}`);
-      track(rebuildEpicFile(db, slug, epicId, options));
-    }
+    const walked = rescanProjectFiles(db, slug, options, tally);
+    if (walked.projectExists) seenProjects.add(slug);
+    for (const key of walked.taskKeys) seenTasks.add(`${slug}\u0000${key}`);
+    for (const epicId of walked.epicIds) seenEpics.add(`${slug}\u0000${epicId}`);
   }
 
   // Prune rows whose backing files are gone.

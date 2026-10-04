@@ -25,7 +25,7 @@ import {
   probeTools,
   type ProbedTool,
 } from "~/server/ops/toolchain.server";
-import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
+import { runConcurrencySnapshot, runLogPage } from "~/server/runtimes/run-service.server";
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
 import {
   getRun,
@@ -57,7 +57,7 @@ import { countLabel } from "~/shared/text/plural";
  * `viberr_ops` — the controller's built-in diagnostics server (ruling 107).
  *
  * The `viberr_controller` toolkit reads and changes the PRODUCT: projects,
- * tasks, agents, goals, org resources. It has no reach at all into the ops
+ * tasks, agents, epics, org resources. It has no reach at all into the ops
  * layer that already sits behind routes — per-run logs, subsystem health,
  * backend credential state, the run concurrency queue, store documents — so
  * asked "why did that run fail" or "is the instance healthy" the controller
@@ -97,8 +97,8 @@ export interface ControllerOpsMcp {
   tools: SdkMcpToolDefinition<any>[];
 }
 
-/** The mount key, exported so the run assembly and the reserved-name guard
- *  can never disagree about what this server is called. */
+/** The mount key, exported so the run assembly can never disagree about
+ *  what this server is called. */
 export const CONTROLLER_OPS_MCP_NAME = "viberr_ops";
 
 const CONTROLLER_OPS_INSTRUCTIONS =
@@ -318,13 +318,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // The READING is ungated: it is what `/resources/health` already serves
         // UNAUTHENTICATED (aggregate counts, the lock holder's pid and host,
         // free bytes, build identity), plus availability booleans and three
-        // integers about run load that carry no name, project or run in them.
-        //
-        // Ruling 127 removed the org-admin-only credential DETAIL arm: it
-        // existed to withhold a deployment config path, and no such path
-        // exists any more. The per-backend reading below is now two integers
-        // and one boolean about the ASKER's own account — nothing that names
-        // another person, a host path or an environment variable.
+        // integers about run load that carry no name, project or run in them
+        // (`backendCredential` says why the per-backend reading is open too).
         const admin = orgAdmin();
         // Ruling 130(d): a signed-in read carries whose account a refusal was.
         const snapshot = healthSnapshot(db, { principal: true });
@@ -354,11 +349,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         const probed = probeTools(args.probe ?? []);
         if (probed.length > 0) body.probe = probed;
         // C05-A: the browser's configured executable PATH is deployment
-        // configuration and stays org-admin-only, which is why `admin` is
-        // still resolved above even though the per-backend reading beside it
-        // is now open to any asker (ruling 127 deleted the credential DETAIL
-        // arm this gate used to be paired with). The key is present only for
-        // an org admin, never carried empty.
+        // configuration and stays org-admin-only (`admin`, above). The key is
+        // present only for an org admin, never carried empty.
         const browserDetail = admin ? browserRuntimeStatus().detail : undefined;
         if (browserDetail) body.browserDetail = browserDetail;
         return json(body);
@@ -408,6 +400,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           Math.max(args.limit ?? DEFAULT_RUN_ROWS, 1),
           MAX_RUN_ROWS,
         );
+        let scope = "live";
+        let visible: AgentRunRow[];
         if (args.taskKey) {
           const slug = (args.projectSlug ?? "").trim();
           if (!slug) {
@@ -422,25 +416,17 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // asked FOR a project, so "you cannot see this project" is the true
           // and useful refusal, not an empty list.
           requireVisible(slug, "read this task's runs");
-          const visible = listRunsForTaskRows(db, slug, args.taskKey)
-            .filter(runVisible)
-            .reverse();
-          const rows = visible.slice(0, limit);
-          auditRead("list_runs", `${slug}/${args.taskKey}`);
-          return json({
-            scope: `${slug}/${args.taskKey}`,
-            total: visible.length,
-            ...windowNote(visible.length, rows.length),
-            runs: rows.map(runRow),
-          });
+          scope = `${slug}/${args.taskKey}`;
+          visible = listRunsForTaskRows(db, slug, args.taskKey).filter(runVisible).reverse();
+        } else {
+          // The LIVE listing spans every project, so an invisible row is
+          // dropped rather than refused.
+          visible = listLiveRunRows(db).filter(runVisible);
         }
-        // The LIVE listing spans every project, so an invisible row is dropped
-        // rather than refused — the same posture `list_projects` takes.
-        const visible = listLiveRunRows(db).filter(runVisible);
         const rows = visible.slice(0, limit);
-        auditRead("list_runs", "live");
+        auditRead("list_runs", scope);
         return json({
-          scope: "live",
+          scope,
           total: visible.length,
           ...windowNote(visible.length, rows.length),
           runs: rows.map(runRow),
@@ -510,28 +496,21 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           if (args.since === undefined) {
             // Backward: the newest page, or the page older than `before`. An
             // absent cursor must leave its key OFF rather than carry undefined,
-            // which is how `getRunLog` selects its mode.
+            // which is how `runLogPage` selects its mode.
             const query: RunLogQuery = { limit };
             if (args.before !== undefined) query.before = args.before;
-            const log = getRunLog(db, args.runId, query);
-            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
-            page = log.lines;
+            page = runLogPage(db, row, query).lines;
           } else {
-            // Forward. `getRunLog` ignores `limit` in this mode BY DESIGN (the
+            // Forward. `runLogPage` ignores `limit` in this mode BY DESIGN (the
             // console's live tail is bounded by its own cursor), so the bound
             // travels as `forwardLimit` — pushed into the SELECT (C02-R12,
             // pass 32) rather than applied on lines already materialized. What
             // this tool must keep bounded is the REPLY it puts in a model's
             // context; the SQL bound keeps the read proportional to it too.
-            const log = getRunLog(db, args.runId, {
-              since: args.since,
-              forwardLimit: limit,
-            });
-            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
-            page = log.lines;
+            page = runLogPage(db, row, { since: args.since, forwardLimit: limit }).lines;
           }
 
-          // Page position, computed against the RUN's real bounds. `getRunLog`'s
+          // Page position, computed against the RUN's real bounds. `runLogPage`'s
           // own headSeq/oldestSeq/hasMore are page-local cursors for a stateful
           // console (headSeq is this page's last line, hasMore means "older
           // lines exist"), and a model with no second source reads them as facts

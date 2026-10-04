@@ -36,7 +36,6 @@ export function splitNotifications(
   // The server decides which kinds can wait on you (`listNotifications` sets
   // `waitingOnYou` only on `DECISION_NOTIFICATION_KINDS`, ruling 481(a)); a
   // second copy of that set here missed the agent question.
-  const needsYou = (n: NotificationPageItem) => n.waitingOnYou;
   // R8-3: exactly one "Waiting on you" card per task — a task needs one human
   // action, so a superseded packet's leftover notification (or a stale approval
   // beside a newer packet) must NOT show as a second pending decision. Items are
@@ -54,7 +53,7 @@ export function splitNotifications(
   for (const n of items) {
     const taskKey =
       n.projectSlug && n.taskKey ? `${n.projectSlug}::${n.taskKey}` : null;
-    if (needsYou(n) && (!taskKey || !seenTasks.has(taskKey))) {
+    if (n.waitingOnYou && (!taskKey || !seenTasks.has(taskKey))) {
       if (taskKey) seenTasks.add(taskKey);
       needsAll.push(n);
     } else {

@@ -30,7 +30,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * export.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const db = getDb();
   const runId = new URL(request.url).searchParams.get("run");
   if (!runId) {
@@ -43,8 +43,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Ruling 99: a controller turn has no project scope — its session export is
   // gated on conversation ownership (or org-admin supervision), same as its log.
   if (run.kind === "controller") {
-    const { requireUser } = await import("~/server/auth/require-user.server");
-    const user = await requireUser(request);
     const { canReadControllerRunLog } = await import(
       "~/server/controller/controller-conversations.server"
     );
@@ -52,7 +50,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       return new Response("Run not found.", { status: 404 });
     }
   } else {
-    // Membership gate for the run's project (throws a 403 Response for non-members).
+    // Membership gate for the run's project (a non-member gets a bare 404, as for a missing run).
     await requireProjectMember(request, run.project_slug, "export the provider session");
   }
   if (!run.session_id) {

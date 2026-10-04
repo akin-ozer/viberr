@@ -153,8 +153,6 @@ const CLAUDE: RunAnalytics = {
       rows: [
         {
           label: "login",
-          backend: "claude",
-          credentialKind: "login",
           assumedTtlMs: 60 * 60_000,
           cells: [
             { firstCalls: 3, warmStarts: 3, warmRate: 1 },
@@ -296,8 +294,6 @@ const CODEX: RunAnalytics = {
       rows: [
         {
           label: "login",
-          backend: "codex",
-          credentialKind: "login",
           assumedTtlMs: 10 * 60_000,
           cells: [
             { firstCalls: 2, warmStarts: 2, warmRate: 1 },

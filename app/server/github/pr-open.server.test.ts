@@ -79,6 +79,16 @@ function setupWithBranch(
   return store;
 }
 
+/** Open VIB-201's PR as Arda, over `gh`. */
+function openPr(store: TestStore, gh: FakeGithub) {
+  return openTaskPr(
+    store.db,
+    { projectSlug: store.slug, taskKey: "VIB-201" },
+    { ...ACTOR, userId: store.users.arda.id },
+    { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+  );
+}
+
 describe("composePrBody", () => {
   it("carries the absolute Viberr task back-link, goal, and change summary", () => {
     const body = composePrBody({
@@ -238,12 +248,7 @@ describe("openTaskPr", () => {
         body: { number: 77, html_url: null, state: 3, title: "[VIB-201] x" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", created: true, prNumber: 77 });
     if (res.status !== "ok") throw new Error("expected ok");
     // A browse link that works, derived from the repo instead of guessed.
@@ -269,12 +274,7 @@ describe("openTaskPr", () => {
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { ok: true } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("network_unavailable");
     const fm = readTaskFile({
       projectSlug: store.slug,
@@ -423,12 +423,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("ok");
     if (res.status !== "ok") throw new Error("expected ok");
     expect(res.created).toBe(false);
@@ -455,12 +450,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("branch_collision");
     if (res.status !== "branch_collision") throw new Error("expected branch_collision");
     expect(res.prNumber).toBe(7);
@@ -482,12 +472,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("branch_collision");
     if (res.status !== "branch_collision") throw new Error("expected branch_collision");
     expect(res.message).toContain("delivered no revision");
@@ -509,12 +494,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("ok");
     if (res.status !== "ok") throw new Error("expected ok");
     expect(res.prNumber).toBe(7);
@@ -527,12 +507,7 @@ describe("openTaskPr", () => {
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/pulls`]: { status: 403, body: { message: "Resource not accessible by personal access token" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("scope_violation");
     // No fabricated PR on the task.
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -549,12 +524,7 @@ describe("openTaskPr", () => {
         body: { message: "Validation Failed: No commits between main and vib-201" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("nothing_to_review");
     // No fabricated PR, and the reason is honest (was mislabeled network before).
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -576,12 +546,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "base_branch_missing", base: "main" });
     expect(res.status === "base_branch_missing" ? res.message : "").toContain("`main` does not exist");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -601,12 +566,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("refused");
     expect(res.status === "refused" ? res.message : "").toContain("A pull request title is required");
   });
@@ -625,12 +585,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("network_unavailable");
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -655,12 +610,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("nothing_to_review");
     if (res.status !== "nothing_to_review") throw new Error("expected nothing_to_review");
     expect(res.message).toContain("No commits between");
@@ -691,12 +641,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("branch_collision");
     if (res.status !== "branch_collision") throw new Error("expected branch_collision");
     expect(res.prNumber).toBe(91);
@@ -726,12 +671,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res.status).toBe("ok");
     if (res.status !== "ok") throw new Error("expected ok");
     expect(res.prNumber).toBe(92);
@@ -764,12 +704,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     // Ruling 128: GitHub ANSWERED, so an unmapped 422 is `refused` (quoting
     // GitHub), never `network_unavailable`.
     expect(res.status).toBe("refused");
@@ -806,12 +741,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 7, created: false });
     // Never opened a duplicate PR.
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
@@ -845,12 +775,7 @@ describe("openTaskPr", () => {
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 7, created: false });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 7, state: "accepted" });
@@ -897,12 +822,7 @@ describe("openTaskPr", () => {
         body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
     // The refusal is decided from the record: GitHub was not asked at all.
@@ -935,12 +855,7 @@ describe("openTaskPr", () => {
         body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
     const read = () =>
@@ -964,12 +879,7 @@ describe("openTaskPr", () => {
     // Repaired once: the next call refuses from the record with no GitHub call
     // and announces nothing again.
     const before = gh.calls.length;
-    const again = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const again = await openPr(store, gh);
     expect(again).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
     expect(gh.calls).toHaveLength(before);
     expect(divergence()).toHaveLength(1);
@@ -988,12 +898,7 @@ describe("openTaskPr", () => {
         body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     // A different PR never inherits the old one's closure.
@@ -1044,12 +949,7 @@ describe("openTaskPr", () => {
         body: { number: 26, html_url: "https://github.com/akin-ozer/viberr/pull/26", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toEqual({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
 
@@ -1077,12 +977,7 @@ describe("openTaskPr", () => {
     // A second delivery over the recorded closure refuses from the record
     // (no GitHub call) and surfaces nothing twice: a transition, not a repeat.
     const before = gh.calls.length;
-    const again = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const again = await openPr(store, gh);
     expect(again).toEqual({ status: "closed_by_human", prNumber: 10, closedBy: "akin-ozer" });
     expect(gh.calls).toHaveLength(before);
     expect(divergence(read().timeline)).toHaveLength(1);
@@ -1119,12 +1014,7 @@ describe("openTaskPr", () => {
         body: { number: 44, html_url: "https://github.com/akin-ozer/viberr/pull/44", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 44, created: true });
     // The merged PR was never fetched for reuse.
     expect(gh.callsTo(`GET ${REPO_PATH}/pulls/7`)).toHaveLength(0);
@@ -1164,12 +1054,7 @@ describe("openTaskPr", () => {
         body: { number: 45, html_url: "https://github.com/akin-ozer/viberr/pull/45", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 45, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 45, state: "review" });
@@ -1205,12 +1090,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    const res = await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 42, created: false });
     const fm = readTaskFile({
       projectSlug: store.slug,
@@ -1255,12 +1135,7 @@ describe("openTaskPr", () => {
         },
       },
     });
-    await openTaskPr(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-201" },
-      { ...ACTOR, userId: store.users.arda.id },
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    await openPr(store, gh);
     const fm = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-201",
@@ -1316,7 +1191,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
         body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "new title", state: "open", merged: false, head: { sha: "9".repeat(40) } },
       },
     });
-    const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 42, created: false });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toEqual({ number: 42, state: "review", title: "new title", headSha: "9".repeat(40) });
@@ -1348,7 +1223,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
         body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] t", state: "open" },
       },
     });
-    const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+    const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     // Ruling 474: it records the body it was opened with (no revision: the

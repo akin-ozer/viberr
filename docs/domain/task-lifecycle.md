@@ -35,7 +35,7 @@ Rules that follow from it:
 - **Archived projects are read-only** for every governed mutation
   (`requireProjectMutable`, 409 `conflict`).
 - **Membership is the outer gate.** A non-member gets the unknown-slug 404 on reads
-  (layout and board loaders, `readWorkspace`) and on actions (`requireVisibleProject`, called outside the try
+  (layout and board loaders, `readWorkspace`) and on actions (`requireVisibleProject` through `requireProjectFormAction`, called outside the try
   block so it never turns into a 403 that would confirm the project exists).
 - **In-lock re-checks, not pre-checks.** The state checks outside the lock are fast
   paths; `transitionStage`, `resolvePacket` and the acceptance writers re-run the

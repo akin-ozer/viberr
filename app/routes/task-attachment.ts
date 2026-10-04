@@ -1,6 +1,5 @@
 import type { Route } from "./+types/task-attachment";
 import { requireProjectMember } from "~/server/auth/require-project.server";
-import { requireUser } from "~/server/auth/require-user.server";
 import {
   attachmentContentType,
   readAttachmentBytes,
@@ -29,7 +28,6 @@ import {
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
   await requireProjectMember(request, params.slug, "view task attachments");
 
   let abs: string;

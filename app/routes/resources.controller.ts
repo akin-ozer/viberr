@@ -1,5 +1,4 @@
 import { data } from "react-router";
-import { z } from "zod";
 import type { Route } from "./+types/resources.controller";
 import { authenticate } from "~/server/auth/require-user.server";
 import { appErrorResponse } from "~/server/auth/form-action.server";
@@ -19,16 +18,17 @@ import { userBackendHealth } from "~/server/runtimes/backend-credentials.server"
 import { NEW_CONVERSATION_PARAM } from "~/features/controller/conversation-param";
 import {
   sendModeOf,
+  textField,
   waitingMessageAction,
 } from "~/features/controller/waiting-actions.server";
 import {
   conversationMatchesScope,
-  dockTaskExists,
   getControllerDock,
   signedOutDockView,
   unavailableDockView,
 } from "~/features/controller/controller-dock-query.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { taskExists } from "~/server/projections/task-query.server";
 import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
 
 /** Ruling 457: the dock loads its view itself; a page revalidation never
@@ -79,10 +79,6 @@ interface DockScopeParams {
   taskKey: string | null;
 }
 
-/** A text field at the request boundary: a string, trimmed; anything else
- *  (absent, a File part) reads as empty. */
-const textField = z.string().catch("");
-
 function scopeParams(params: URLSearchParams | FormData): DockScopeParams {
   const read = (key: string) => textField.parse(params.get(key)).trim() || null;
   const projectSlug = read("project");
@@ -112,7 +108,7 @@ function scopeIsReachable(
   } catch {
     return false;
   }
-  return scope.taskKey ? dockTaskExists(db, scope.projectSlug, scope.taskKey) : true;
+  return scope.taskKey ? taskExists(db, scope.projectSlug, scope.taskKey) : true;
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -130,7 +126,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const c = url.searchParams.get("c")?.trim() || null;
   const view = getControllerDock(
     db,
-    { id: auth.user.id, email: auth.user.email },
+    { id: auth.user.id },
     // O39-d: only an OPEN panel reads the transcript it loads.
     { ...scope, conversationId: c, markSeen: url.searchParams.get("seen") === "1" },
   );

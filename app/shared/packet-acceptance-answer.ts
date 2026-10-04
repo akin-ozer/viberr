@@ -41,10 +41,10 @@ const KINDS_BY_DOOR = {
 } as const satisfies Record<AcceptanceDoor, readonly PacketOptionKind[]>;
 
 export function acceptanceAnswerOf(
-  packet: { options: readonly PacketOption[]; awaiting?: string | undefined } | null,
+  packet: { options: readonly PacketOption[]; awaiting?: string | undefined },
   door: AcceptanceDoor,
 ): AcceptanceAnswer | null {
-  if (!packet || packet.awaiting) return null;
+  if (packet.awaiting) return null;
   for (const kind of KINDS_BY_DOOR[door]) {
     let first: AcceptanceAnswer | null = null;
     for (const [index, option] of packet.options.entries()) {

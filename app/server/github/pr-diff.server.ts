@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   getProjectGithubContext,
+  githubContextFailureReason,
   type GithubContextOptions,
 } from "./github-context.server";
 import { githubFailureMessage } from "./github-client.server";
@@ -147,15 +148,7 @@ export async function readPullRequestDiff(
     return { ok: false, reason: "a pull request number is a positive integer" };
   }
   const ctx = getProjectGithubContext(db, projectSlug, opts);
-  if (ctx.status === "no_repo_configured") {
-    return { ok: false, reason: "no repository is configured for this project" };
-  }
-  if (ctx.status === "no_pat_configured") {
-    return {
-      ok: false,
-      reason: "no GitHub credential is configured for this project",
-    };
-  }
+  if (ctx.status !== "ok") return { ok: false, reason: githubContextFailureReason(ctx) };
 
   if (opts.headSha) {
     const detail = await ctx.client.request(

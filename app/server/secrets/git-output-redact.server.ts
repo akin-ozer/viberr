@@ -143,12 +143,11 @@ export function redactGitOutput(
  * ruling 69) want one sentence, not eight lines.
  */
 export const PROVIDER_TEXT_CHARS = 240;
-export function redactProviderText(
-  cause: unknown,
-  token?: string | null,
-): string {
-  // Walk `cause` the same three levels `classifyCodexFailure` does — the SDK
-  // wraps the real message a couple of layers down.
+
+/** A provider failure's messages, outermost first, down three levels of
+ *  `cause`: the SDKs wrap the real message a couple of layers down. Shared by
+ *  this scrub and `classifyCodexFailure`, which must read the same text. */
+export function causeMessages(cause: unknown): string[] {
   const parts: string[] = [];
   let current: unknown = cause;
   for (let depth = 0; depth < 3 && current != null; depth += 1) {
@@ -160,7 +159,14 @@ export function redactProviderText(
       break;
     }
   }
-  const scrubbed = redactGitOutput(parts.join("\n"), { token });
+  return parts;
+}
+
+export function redactProviderText(
+  cause: unknown,
+  token?: string | null,
+): string {
+  const scrubbed = redactGitOutput(causeMessages(cause).join("\n"), { token });
   if (!scrubbed) return "";
   const lines = scrubbed.split("\n").filter((l) => l.trim() !== "");
   const last = (lines.length ? lines[lines.length - 1]! : "").trim();

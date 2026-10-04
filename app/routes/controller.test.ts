@@ -126,8 +126,8 @@ describe.each<Surface>(["instance", "project"])("POST intent=send on the %s surf
 
 describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s surface", (surface) => {
   it("the owner stops the working turn and is told so", async () => {
-    // Canary: drop the `interrupt` branch from the route and this answers the
-    // "Unknown action." refusal.
+    // Canary: drop the `interrupt` branch from `controllerPageAction` and this
+    // answers the "Unknown action." refusal.
     const { getRun } = await import("~/server/runtimes/run-store.server");
     const { conversationId, runId } = await workingTurn(surface);
     const reply = okResult.parse(

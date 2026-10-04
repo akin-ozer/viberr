@@ -77,7 +77,6 @@ function spec(runId: string): RunSpec {
     projectSlug: store.slug,
     taskKey: "VIB-1",
     threadId: "primary",
-    role: "developer",
     kind: "primary",
     backend: "claude",
     model: "sonnet",

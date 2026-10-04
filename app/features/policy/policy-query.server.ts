@@ -122,13 +122,12 @@ function latestPolicyChange(
 export function getPolicyViewData(
   db: DatabaseSync,
   projectSlug: string,
-  ctx: { dataRoot?: string } = {},
 ): PolicyViewData | null {
   const project = getProject(db, projectSlug);
   if (!project) return null;
   return {
     projectName: project.name,
-    members: listMembershipViews(db, projectSlug, ctx),
+    members: listMembershipViews(db, projectSlug),
     stages: project.stages.map((s) => ({
       id: s.id,
       name: s.name,
@@ -141,22 +140,17 @@ export function getPolicyViewData(
       boundary: w.boundary,
       locked: w.locked,
     })),
-    profiles: assembleAgentRoster(db, projectSlug, ctx),
-    guardrails: listGuardrailViews(projectSlug, ctx),
-    requiredReviewers: readRequiredReviewers(projectSlug, ctx),
+    profiles: assembleAgentRoster(db, projectSlug),
+    guardrails: listGuardrailViews(projectSlug),
+    requiredReviewers: readRequiredReviewers(projectSlug),
     edited: latestPolicyChange(db, projectSlug),
   };
 }
 
 /** Every default guardrail (present or not) in shipped order, then whatever
  *  else project.md carries, in file order. */
-function listGuardrailViews(
-  projectSlug: string,
-  ctx: { dataRoot?: string } = {},
-): GuardrailView[] {
-  const stored =
-    readProjectFile({ projectSlug, dataRoot: ctx.dataRoot })?.parsed.frontmatter
-      .guardrails ?? [];
+function listGuardrailViews(projectSlug: string): GuardrailView[] {
+  const stored = readProjectFile({ projectSlug })?.parsed.frontmatter.guardrails ?? [];
   // Review F13 (pass 32): FIRST occurrence wins, the same row `setGuardrail`'s
   // `findIndex` mutates — a hand-edited file carrying an id twice must not show
   // one row's state while the toggle writes the other.

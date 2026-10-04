@@ -22,9 +22,11 @@ import { rebuildAll, type RescanSummary } from "./rebuilder.server";
  * or a projection-schema bug.
  *
  * What is dropped: projects, project_members (cascade), task_projections,
- * task_events, diagnostics — all fully file-derived. NOT dropped: users,
- * sessions, notifications, audit_events, provenance, PATs/violations,
- * agent_runs/run_log_lines, org resources (app-owned or historical truth).
+ * task_events, diagnostics — all fully file-derived. Epic rows (ruling 503)
+ * stay: `rebuildAll` re-projects every epic file with force and prunes the
+ * rows whose file is gone. NOT dropped: users, sessions, notifications,
+ * audit_events, provenance, PATs/violations, agent_runs/run_log_lines, org
+ * resources (app-owned or historical truth).
  *
  * Atomic: the drop + rebuild run inside one transaction, so readers never
  * observe a half-empty projection. Projection events (per-file updates + the

@@ -27,9 +27,6 @@ export function imageResult(text: string, image: { data: string; mimeType: strin
   };
 }
 
-/** What a tool may answer with: text, or text and a picture. */
-export type ToolResult = ReturnType<typeof textResult> | ReturnType<typeof imageResult>;
-
 /**
  * The SDK's `tool()` at the signature its MCP server actually honours.
  *

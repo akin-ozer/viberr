@@ -7,14 +7,12 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { plainText } from "~/features/notifications/notification-meta";
 import { DatePicker } from "~/ui/date-picker";
-import { formatClock, formatClockUTC } from "~/shared/dates/format";
+import { formatClock, formatClockUTC, formatDayBucketUTC } from "~/shared/dates/format";
+import { daySections } from "~/shared/dates/day-sections";
 import { TIMELINE_EVENT_TYPES } from "~/schemas/task-file.schema";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 import {
   auditTimeLabel,
-  auditTimeLabelUTC,
-  groupStreamByDay,
-  groupStreamByDayUTC,
   matchesActorFilter,
   type ActivityStreamRowView,
   type ActorFilter,
@@ -36,7 +34,7 @@ const ACTIVITY_TEXT_PREVIEW_LIMIT = 160;
 function ActivityText({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   if (text.length <= ACTIVITY_TEXT_PREVIEW_LIMIT) {
-    return <RichText text={text} mentions={false} />;
+    return <RichText text={text} />;
   }
   if (!expanded) {
     // The collapsed line is plain text, so markdown marks must not leak into
@@ -62,7 +60,7 @@ function ActivityText({ text }: { text: string }) {
   }
   return (
     <span className="act-collapsible">
-      <RichText text={text} mentions={false} />{" "}
+      <RichText text={text} />{" "}
       <button
         type="button"
         className="keybtn act-toggle"
@@ -388,7 +386,7 @@ function AuditLogs({
   taskHref: (key: string) => string;
   onShowOlder: () => void;
 }) {
-  const timeLabel = utc ? auditTimeLabelUTC : auditTimeLabel;
+  const timeLabel = utc ? formatDayBucketUTC : auditTimeLabel;
   // UI-47: bound "remaining" by the ceiling `onShowOlder` can actually reach —
   // at AUDIT_MAX the button was a no-op that still promised N more.
   const remaining = Math.max(
@@ -711,9 +709,9 @@ export function ActivityPage({
     );
 
   const filtered = stream.filter((r) => matchesActorFilter(r, f));
-  const shown = local
-    ? groupStreamByDay(filtered)
-    : groupStreamByDayUTC(filtered);
+  // Ruling 652(c): sections by the absolute day, so two days a year apart
+  // never merge under one yearless "Mar 30".
+  const shown = daySections(filtered, (r) => r.occurredAt, local);
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
   // UI-47: "Show older" submits `min(loaded + STEP, STREAM_MAX)`, so once the
   // loaded slice hits the ceiling the click is a NO-OP — while the button still
@@ -787,7 +785,7 @@ export function ActivityPage({
               }))}
             />
             {shown.map((g) => (
-              <div key={g.day}>
+              <div key={g.key}>
                 <div className="act-day">{g.day}</div>
                 {g.rows.map((r) => (
                   <div className="pol-ev" key={r.id}>

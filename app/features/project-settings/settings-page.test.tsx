@@ -2,7 +2,7 @@
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, data, Outlet } from "react-router";
 import type { MembershipView } from "./membership.server";
 import type { SettingsViewData } from "./settings-query.server";
 import {
@@ -20,6 +20,7 @@ import {
 } from "./settings-page";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
+import { ToastProvider } from "~/ui/toast";
 
 afterEach(cleanup);
 
@@ -1870,5 +1871,42 @@ describe("ProjectGatesPanel (ruling 482)", () => {
     fireEvent.click(getByRole("button", { name: "Remove gate 1 (install)" }));
     fireEvent.click(getByRole("button", { name: "Save" }));
     expect(saved[1]).toEqual([{ name: "build", command: "pnpm build", timeoutSeconds: 900 }]);
+  });
+});
+
+/**
+ * Ruling 652(b): the File leases panel's save answers like every other panel's.
+ * Its fetcher was the one of nine on the page without `useActionToast`, so a
+ * saved table said nothing and a refusal vanished. Canary: drop
+ * `useActionToast(leaseFetcher)` from SettingsPage and the refusal is never read.
+ */
+describe("ruling 652(b): a file-lease save answers on the page", () => {
+  it("toasts what the action answers, a refusal included", async () => {
+    const spent = { paths: ["Makefile"], taskKey: "AX-1", taskTitle: "Repo skeleton", reason: "", spent: true };
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "csrf-token" }),
+        Component: () => (
+          <ToastProvider>
+            <Outlet />
+          </ToastProvider>
+        ),
+        children: [
+          {
+            index: true,
+            action: () =>
+              data({ ok: false, error: "AX-1 is not a task in this project." }, { status: 400 }),
+            Component: () => (
+              <SettingsPage data={{ ...PAGE_DATA, fileLeases: [spent] }} meId="u_arda" myRole="admin" />
+            ),
+          },
+        ],
+      },
+    ]);
+    const { findByText } = render(<Stub initialEntries={["/"]} />);
+    fireEvent.click(await findByText("Clear finished"));
+    expect(await findByText("AX-1 is not a task in this project.")).toBeTruthy();
   });
 });

@@ -114,7 +114,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       );
     }
   } else {
-    // Membership gate for the run's project (throws a 403 Response for non-members).
+    // Membership gate for the run's project (a non-member gets a bare 404, as for a missing run).
     await requireProjectMember(request, run.project_slug, "view raw run logs");
   }
 

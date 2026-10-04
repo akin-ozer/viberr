@@ -129,7 +129,7 @@ describe("the runtimes that build a run's knowledge call it", () => {
         : createConversation(store.db, base);
     };
     const promptFor = (projectSlug: string | null) =>
-      buildControllerSystemPrompt(store.db, {
+      buildControllerSystemPrompt({
         conversation: newConversation(projectSlug),
         user,
         config: resolveControllerConfig(store.dataRoot),

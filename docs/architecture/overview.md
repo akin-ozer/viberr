@@ -105,7 +105,7 @@ with the viewer's decisions and live runs (ruling 457). Child routes read the la
 with `useRouteLoaderData`; only the board reads the columns, and the bell loads its own
 list (`/resources/notifications`).
 
-**Write path** (`intent=create-task`): route action → `requireFormAction` (session,
+**Write path** (`intent=create-task`): route action → `requireProjectFormAction`: `requireFormAction` (session,
 `assertCsrf`: the request must *prove* same-origin through Origin / Sec-Fetch-Site /
 Referer **and** carry the HMAC double-submit `_csrf` token; returns the intent) →
 `requireVisibleProject` (404 parity) → `server/tasks/task-actions.createTask` →

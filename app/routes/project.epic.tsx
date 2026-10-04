@@ -4,7 +4,7 @@ import type { Route } from "./+types/project.epic";
 import type { loader as projectLoader } from "./project";
 import { pageTitle } from "~/shared/page-title";
 import { requireUser } from "~/server/auth/require-user.server";
-import { appErrorResponse, requireFormAction } from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { setTasksEpic, updateEpic } from "~/server/tasks/epic-actions.server";
 import { archiveEpicTasks } from "~/server/tasks/epic-archive.server";
@@ -13,7 +13,7 @@ import { roleCan } from "~/shared/rbac";
 import { EpicPage } from "~/features/epics/epic-page";
 import { getEpicPage } from "~/features/epics/epics-query.server";
 import { epicFormFields } from "~/features/epics/epic-form.server";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 
 /**
@@ -39,9 +39,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
-  requireVisibleProject(db, params.slug, actor, "act on this project");
   try {
     switch (intent) {
       case "update-epic": {

@@ -273,40 +273,6 @@ function latestSessionRun(
 }
 
 /**
- * Resolve the agent an @mention targets on a task. Returns null when no agent
- * handle is present. When an agent IS mentioned but has no prior session on
- * the task, returns the identity with `session: null` (fresh-run fallback).
- *
- * Resolution precedence (first hit wins):
- *   1. `@operator` → the OPERATOR (a governed operator run, not a specialist).
- *   2. `@agent`    → the task's PRIMARY specialist (frontmatter).
- *   3. a deployed specialist by name / profile id / backend.
- */
-/**
- * Ruling 252 (pass 37, F37-81): what a comment says when it tagged an agent
- * that no comment can reach.
- *
- * Ruling 214 wrote this for the OPERATOR, because live on SHOP-10 the operator
- * put a completeness question to "@Code Reviewer" in a comment, no reviewer
- * ever read it, and the stranded backstop then paused a task five others were
- * waiting behind. The reasoning was never operator-specific: a comment writes a
- * timeline line and starts nothing, whoever writes it.
- *
- * The CONTROLLER had the same hazard and none of the disclosure, and it is the
- * surface a person drives a board from. Live on SHOP-26 it wrote "@operator
- * @platform-architect The funded amendment now exists as a task", followed by
- * "Two standing facts for the implementation run", and closed with nothing but
- * "Posted by the controller for Arda" - while its own tool text promises
- * "@mentions notify people", which is true of people and silent for agents. The
- * same words typed by a person on the task page DO reach the agent
- * (`commentToAgent` starts a run); typed by the controller on that person's
- * behalf they reach nobody.
- *
- * `writer` decides only the wording. The `run_agent_on_task` name is the
- * controller's own tool, so the sentence is actionable by the reader it is
- * addressed to.
- */
-/**
  * Ruling 262 (pass 37, F37-92): every agent handle a comment cannot reach, not
  * just the one a RUN would have gone to.
  *
@@ -410,6 +376,30 @@ export function unreachedAgents(
   };
 }
 
+/**
+ * Ruling 252 (pass 37, F37-81): what a comment says when it tagged an agent
+ * that no comment can reach.
+ *
+ * Ruling 214 wrote this for the OPERATOR, because live on SHOP-10 the operator
+ * put a completeness question to "@Code Reviewer" in a comment, no reviewer
+ * ever read it, and the stranded backstop then paused a task five others were
+ * waiting behind. The reasoning was never operator-specific: a comment writes a
+ * timeline line and starts nothing, whoever writes it.
+ *
+ * The CONTROLLER had the same hazard and none of the disclosure, and it is the
+ * surface a person drives a board from. Live on SHOP-26 it wrote "@operator
+ * @platform-architect The funded amendment now exists as a task", followed by
+ * "Two standing facts for the implementation run", and closed with nothing but
+ * "Posted by the controller for Arda" - while its own tool text promises
+ * "@mentions notify people", which is true of people and silent for agents. The
+ * same words typed by a person on the task page DO reach the agent
+ * (`commentToAgent` starts a run); typed by the controller on that person's
+ * behalf they reach nobody.
+ *
+ * `writer` decides only the wording. The `run_agent_on_task` name is the
+ * controller's own tool, so the sentence is actionable by the reader it is
+ * addressed to.
+ */
 export function unreachedAgentNote(
   report: UnreachedAgents,
   writer: "operator" | "controller" | "agent",
@@ -459,6 +449,16 @@ export function unreachedAgentNote(
   return `_${sentences.join(" ")}_`;
 }
 
+/**
+ * Resolve the agent an @mention targets on a task. Returns null when no agent
+ * handle is present. When an agent IS mentioned but has no prior session on
+ * the task, returns the identity with `session: null` (fresh-run fallback).
+ *
+ * Resolution precedence (first hit wins):
+ *   1. `@operator` → the OPERATOR (a governed operator run, not a specialist).
+ *   2. `@agent`    → the task's PRIMARY specialist (frontmatter).
+ *   3. a deployed specialist by name / profile id / backend.
+ */
 export function resolveMentionedAgent(
   db: DatabaseSync,
   ctx: TaskMutationContext,

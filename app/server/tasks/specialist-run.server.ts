@@ -154,6 +154,7 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
+  missingResourcesSection,
   unavailableMcpSection,
   gatewayMcpSection,
   type McpRunGrant,
@@ -186,6 +187,7 @@ import {
 // Values come from the leaf substrate, never task-actions: task-actions
 // imports THIS module (see task-mutation.server.ts).
 import {
+  appendPolicyNote,
   reprojectTask,
   stageDisplayName,
   taskRef,
@@ -1351,29 +1353,12 @@ async function dispatchAgentRun(
       // rather than starting a delivering run that can ship nothing.
       throw AppError.validation(cannotOwnDeliverySentence(view.name));
     }
-    if (wantsDelivery) {
-      await assignSpecialist(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: input.profileId,
-        },
-        actor,
-        ctx,
-      );
-    } else {
-      await assignReviewer(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: input.profileId,
-        },
-        actor,
-        ctx,
-      );
-    }
+    await (wantsDelivery ? assignSpecialist : assignReviewer)(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
+      actor,
+      ctx,
+    );
     existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
     engagement =
@@ -2115,31 +2100,19 @@ async function dispatchAgentRun(
   // PAT that was never at fault. Same rule as F15-15: a mechanical failure must
   // never reach a human wearing a credential's clothes.
   if (cloneFailure) {
-    await updateTaskFile(
-      taskRef(ctx, input.projectSlug, input.taskKey),
-      (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `**Workspace checkout failed:** ${cloneFailure.sentence} ` +
-            `The agent is running against an EMPTY workspace, so it cannot read or change ${repo}. ` +
-            (cloneFailure.reason === "clone_terminated"
-              ? "Raise `VIBERR_GIT_CLONE_TIMEOUT_MS` if this repository simply needs longer, then re-run."
-              : "Re-run once the cause above is addressed.") +
-            // F19-6: the classification alone ("git exit 128") sent humans
-            // hunting; git's own redacted words are what makes this actionable.
-            (cloneFailure.stderrExcerpt
-              ? `\n\nWhat the checkout reported:\n\n\`\`\`\n${cloneFailure.stderrExcerpt}\n\`\`\``
-              : ""),
-          toAgent: false,
-          evidence: null,
-        });
-      },
-    );
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      text:
+        `**Workspace checkout failed:** ${cloneFailure.sentence} ` +
+        `The agent is running against an EMPTY workspace, so it cannot read or change ${repo}. ` +
+        (cloneFailure.reason === "clone_terminated"
+          ? "Raise `VIBERR_GIT_CLONE_TIMEOUT_MS` if this repository simply needs longer, then re-run."
+          : "Re-run once the cause above is addressed.") +
+        // F19-6: the classification alone ("git exit 128") sent humans
+        // hunting; git's own redacted words are what makes this actionable.
+        (cloneFailure.stderrExcerpt
+          ? `\n\nWhat the checkout reported:\n\n\`\`\`\n${cloneFailure.stderrExcerpt}\n\`\`\``
+          : ""),
+    });
   }
 
   // Collaboration guidance (G3/G4): tell the agent about its channel so the
@@ -2895,7 +2868,6 @@ export function directiveDeferredNote(agentName: string): string {
 
 // ----------------------------------------------------------------- persona
 
-/** Everything a run's persona is assembled from. */
 /**
  * F4: whether the `github_read` tool AND its persona section should be present
  * for this run — the ONE predicate both the fresh and resume paths use, so the
@@ -2918,6 +2890,7 @@ export function githubReadForRun(input: {
     : null;
 }
 
+/** Everything a run's persona is assembled from. */
 export interface SpecialistPersonaInput {
   profileId: string;
   /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
@@ -3241,19 +3214,8 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
       input.unresolvedOut.push({ name: m.name, reason: m.reason });
     }
   }
-  if (missing.length > 0) {
-    dynamic.push(
-      // Ruling 253: "did NOT reach" was true of every row when only a total
-      // miss could appear here. A partial now appears too, so the heading and
-      // the instruction have to cover both or they misdescribe half the list.
-      "\n\n---\n# Attached resources that did NOT fully reach this run\n\n" +
-        "Your profile grants these, and what is in your context is incomplete or absent:\n" +
-        missing.map((m) => `- **${m.name}**: ${m.reason}`).join("\n") +
-        "\n\nDo not claim knowledge or craft you did not receive, and do not treat " +
-        "the gap as your own failure; say plainly in your reply what arrived " +
-        "empty or incomplete so a human can fix the configuration.",
-    );
-  }
+  const missingSection = missingResourcesSection(missing);
+  if (missingSection) dynamic.push(missingSection);
   return { static: parts, dynamic };
 }
 

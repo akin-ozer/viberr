@@ -189,17 +189,13 @@ function flattenHistoryText(text: string): string {
 
 export interface EpicFileRead {
   parsed: ParsedEpicFile;
-  raw: string;
-  path: string;
 }
 
 export function readEpicFile(ref: EpicFileRef): EpicFileRead | null {
   const abs = epicFilePath(ref.projectSlug, ref.epicId, ref.dataRoot);
   if (!existsSync(abs)) return null;
-  const raw = readFileSync(abs, "utf8");
-  const parsed = parseEpicFileContent(raw);
-  if (!parsed) return null;
-  return { parsed, raw, path: abs };
+  const parsed = parseEpicFileContent(readFileSync(abs, "utf8"));
+  return parsed ? { parsed } : null;
 }
 
 /** Every epic id in a project's epics/ dir (file basenames, by number). */

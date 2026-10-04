@@ -195,7 +195,6 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 // exactly this so the toggle can't be mistaken for a content freeze.
 export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
-export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
 
 export interface KbView {
   id: string;

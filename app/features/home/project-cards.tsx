@@ -175,7 +175,7 @@ function RepoLine({
   access,
 }: {
   repo: string | null;
-  access?: RepoAccessResult;
+  access: RepoAccessResult | null;
 }) {
   const pill = access ? connectionPill(access) : null;
   const degraded = pill && (pill.kind === "risk" || pill.kind === "blocked");
@@ -212,16 +212,11 @@ export function ProjectCard({
   starred,
   onStar,
   showDesc,
-  repoAccess,
 }: {
   p: HomeProjectCard;
   starred: boolean;
   onStar: (slug: string) => void;
   showDesc?: boolean;
-  /** U33-2: GitHub's answer for `p.repo`, when a caller has one. Optional and
-   *  absent by default — the home query does not carry this fact yet, and Home
-   *  must never probe GitHub once per card to get it. */
-  repoAccess?: RepoAccessResult;
 }) {
   return (
     <article className="pj-card" data-screen-label={"Project card · " + p.name}>
@@ -243,7 +238,7 @@ export function ProjectCard({
               {p.name}
               <span className="key">{p.key}</span>
             </span>
-            <RepoLine repo={p.repo} access={repoAccess} />
+            <RepoLine repo={p.repo} access={p.repoAccess} />
           </span>
         </div>
         {/* U39-20: a description is written with `code` and **bold**, as the
@@ -251,7 +246,7 @@ export function ProjectCard({
             printed the backticks. */}
         {showDesc && (
           <p className="pj-desc">
-            <RichText text={p.desc} mentions={false} />
+            <RichText text={p.desc} />
           </p>
         )}
         <StageMeter stages={p.stages} dist={p.dist} />
@@ -278,13 +273,10 @@ export function ProjectRow({
   p,
   starred,
   onStar,
-  repoAccess,
 }: {
   p: HomeProjectCard;
   starred: boolean;
   onStar: (slug: string) => void;
-  /** U33-2: see `ProjectCard` — the list form carries the same fact. */
-  repoAccess?: RepoAccessResult;
 }) {
   return (
     <article className="pj-row" data-screen-label={"Project row · " + p.name}>
@@ -302,7 +294,7 @@ export function ProjectRow({
             {p.name}
             <span className="key">{p.key}</span>
           </span>
-          <RepoLine repo={p.repo} access={repoAccess} />
+          <RepoLine repo={p.repo} access={p.repoAccess} />
         </span>
         <StageMeter stages={p.stages} dist={p.dist} />
         <ProjectStats p={p} />

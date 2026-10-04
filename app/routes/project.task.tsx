@@ -19,10 +19,7 @@ import { countLabel } from "~/shared/text/plural";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -60,7 +57,6 @@ import {
   setTaskMetadata,
   transitionStage,
   updateTaskGoal,
-  userName,
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { setTasksEpic } from "~/server/tasks/epic-actions.server";
@@ -88,6 +84,7 @@ import {
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import {
   createReconcileBehindByLookup,
@@ -122,7 +119,10 @@ import {
   listProjectLabels,
   listProjectMembers,
 } from "~/server/projections/board-query.server";
-import { requireVisibleProject } from "./project-visibility.server";
+import {
+  requireProjectFormAction,
+  requireVisibleProject,
+} from "./project-visibility.server";
 import {
   requireRunAgents,
   type AuthorityProject,
@@ -273,10 +273,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // One policy now: members (and org admins, via the audited D2 override) get
   // the full projection; everyone else keeps the honest run SUMMARY strip —
   // who ran, on what backend, when, and how it ended — with no log content.
-  const runsMembership = new Set(
-    listProjectMembers(db, params.slug).map((m) => m.userId),
-  );
-  const runsVisible = runsMembership.has(user.id) || user.role === "admin";
+  const members = listProjectMembers(db, params.slug);
+  const runsVisible = members.some((m) => m.userId === user.id) || user.role === "admin";
   //
   // P13-D-11: the member projection carries a BOUNDED window of each agent
   // group's console (newest lines within `RUN_LOG_WINDOW_*`), not the whole
@@ -323,7 +321,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // @-mention autocomplete directory for the comment composer: deployed
   // specialists, registered users, and the reserved backend/role handles —
   // the same targets the server resolves an @mention to when a comment posts.
-  const mentionables = getMentionables(db, params.slug, params.key);
+  const mentionables = getMentionables(db, params.slug);
   // U39-31: the other tasks this page's goal and timeline slice name, as the
   // pages this viewer can open. The task itself is never linked to itself.
   const taskLinks = taskKeyLinks(
@@ -453,9 +451,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
-  const myProjectRole =
-    listProjectMembers(db, params.slug).find((m) => m.userId === user.id)
-      ?.role ?? null;
+  const myProjectRole = members.find((m) => m.userId === user.id)?.role ?? null;
   const canDeliver =
     roleCan(myProjectRole, "run-agents") ||
     user.role === "admin" ||
@@ -626,23 +622,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 88 (F21-2) — the acceptance disclosure this POST carries, or `null`
- * when it carries none.
- *
- * `null` is deliberately passed THROUGH to the server rather than swallowed
- * here: it is the difference between "an HTTP caller sent no acknowledgment"
- * (refused — the bare POST F21-2 found accepting silently) and "an in-process
- * caller carries its own disclosure contract" (omitted). This route is the one
- * HTTP door onto the human acceptance paths, so every one of them passes an
- * explicit value.
- */
-function acceptanceAck(formData: FormData) {
-  // Same field read as every other intent in this action: an absent field
-  // becomes "", which the parser reads as "no disclosure" rather than a value.
-  return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
-}
-
-/**
  * The toast a comment's result earns, for the `comment` intent and ruling
  * 484's `review-notes` (whose `posted` names the notes). Name the agent when one
  * is picking the comment up; note when a mention was recorded but the run was
@@ -725,15 +704,10 @@ export async function action({ request, params }: Route.ActionArgs) {
     formData,
     actor,
     intent,
-  } = await requireFormAction(request);
+  } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
   const projectSlug = params.slug;
   const taskKey = params.key;
-  // R15-4: the layout loader's membership refusal does NOT cover this action —
-  // React Router runs a child action without its parent's loader. Outside the
-  // try so the refusal stays a thrown 404 Response (the unknown-slug body),
-  // never an `appErrorResponse` 403 that would confirm the project exists.
-  requireVisibleProject(db, projectSlug, actor, "act on this project");
 
   try {
     switch (intent) {
@@ -902,7 +876,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // packet); `resolvePacket` consults it on the accepting arm alone, so
           // an ordinary decision stays ack-free. Absent fields ⇒ `null` ⇒ an
           // accepting resolution that skipped the dialog is refused.
-          ack: acceptanceAck(formData),
+          ack: parseAcceptanceDisclosure(formData),
         };
         if (note.trim()) resolveInput.note = note;
         if (custom.trim()) resolveInput.custom = custom;
@@ -1026,7 +1000,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             manual: true,
             // Ruling 88: the ceremony's echo of what it displayed. Absent ⇒
             // `null` ⇒ the server refuses this accept.
-            ack: acceptanceAck(formData),
+            ack: parseAcceptanceDisclosure(formData),
           },
           actor,
         );
@@ -1143,7 +1117,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // ceremony states more, not less, so it echoes on the same terms.
         await forceAcceptCompletion(
           db,
-          { projectSlug, taskKey, ack: acceptanceAck(formData) },
+          { projectSlug, taskKey, ack: parseAcceptanceDisclosure(formData) },
           actor,
         );
         return {
@@ -1221,7 +1195,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // the server decides (it is the side that knows the stage order).
         const moveReason = String(formData.get("reason") ?? "").trim();
         if (moveReason) move.reason = moveReason;
-        if (acceptsCompletion) move.ack = acceptanceAck(formData);
+        if (acceptsCompletion) move.ack = parseAcceptanceDisclosure(formData);
         // F32-10 (pass 32): a no-op move must not be narrated as a move. The
         // server's idempotent short-circuit now pays the same gate as a real
         // move, so a refusal never reaches here; a permitted same-stage post
@@ -1276,7 +1250,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // The DISPLAY name, exactly as the @operator steer path resolves it —
         // the run's report tags "@<name>", and only a known display name chips
         // and notifies (R21-9's live catch: `actor.label` is the email).
-        const dispatcherName = userName(db, actor.userId);
+        const dispatcherName = userDisplayName(db, actor.userId);
         const dispatch: Parameters<typeof startAgentRun>[1] = {
           projectSlug,
           taskKey,
@@ -1414,7 +1388,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             projectSlug,
             taskKey,
             recId: String(formData.get("recId") ?? ""),
-            ack: acceptanceAck(formData),
+            ack: parseAcceptanceDisclosure(formData),
           },
           actor,
         );
@@ -1482,7 +1456,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // the operator tags "@<name>" in its reply, and only a known display
           // name chips and notifies (NEW-4; live-caught: `actor.label` is the
           // email, and "@arda@viberr.dev" notified nobody).
-          operatorInput.humanCommentBy = userName(db, actor.userId);
+          operatorInput.humanCommentBy = userDisplayName(db, actor.userId);
         }
         const started = await runOperator(db, operatorInput);
         // Record the steer as an @operator timeline comment ONLY once the run is
@@ -1566,7 +1540,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // label becomes the fired run's triggerer tag and the "by <name>" row.
         const sched = await scheduleTaskAction(db, schedInput, {
           userId: actor.userId,
-          label: userName(db, actor.userId),
+          label: userDisplayName(db, actor.userId),
         });
         return {
           ok: true as const,

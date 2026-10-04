@@ -4,6 +4,7 @@ import type { RunView } from "~/features/runtime/runtime-types";
 import { Icon } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
 import { Pill, type PillKind } from "~/ui/pill";
+import { backendLabelOf } from "./run-principal-view";
 
 /**
  * Continuity Recovery Panel — D18, the fifth and last of the UX spec's custom
@@ -111,11 +112,6 @@ export interface ContinuityLoss {
   agents: ContinuityAgent[];
 }
 
-/** Spelled here, not `BACKEND_LABEL`: ruling 457 (shared/text/backend-label.ts). */
-function backendLabel(backend: "claude" | "codex"): string {
-  return backend === "claude" ? "Claude" : "Codex";
-}
-
 function roleLabelOf(run: RunView): string {
   if (run.op || run.kind === "operator") return "Operator";
   return run.kind === "reviewer" ? "Reviewer" : "Delivering agent";
@@ -146,7 +142,7 @@ export function deriveContinuityLoss(input: {
       threadId: run.id,
       name: run.who.name,
       roleLabel: roleLabelOf(run),
-      backendLabel: backendLabel(run.backend),
+      backendLabel: backendLabelOf(run.backend),
       sessionId: run.sessionMissing.sessionId,
       progress: progressOf(run),
     });

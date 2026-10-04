@@ -35,7 +35,7 @@ describe("NumberTicker", () => {
   });
 
   it("counts from the start figure to the end over the duration, easing out", () => {
-    const { container } = render(<NumberTicker end={100} duration={2} />);
+    const { container } = render(<NumberTicker end={100} />);
     const el = figure(container);
     // The first paint is the start; the target is readable at once.
     expect(el.textContent).toBe("0");
@@ -54,13 +54,13 @@ describe("NumberTicker", () => {
   });
 
   it("a retarget counts on from the figure drawn, never back from the start", () => {
-    const { container, rerender } = render(<NumberTicker end={100} duration={2} />);
+    const { container, rerender } = render(<NumberTicker end={100} />);
     const el = figure(container);
     act(() => {
       vi.advanceTimersByTime(2100);
     });
     expect(el.textContent).toBe("100");
-    rerender(<NumberTicker end={140} duration={2} />);
+    rerender(<NumberTicker end={140} />);
     expect(el.getAttribute("data-count")).toBe("140");
     act(() => {
       vi.advanceTimersByTime(100);
@@ -75,14 +75,14 @@ describe("NumberTicker", () => {
   });
 
   it("a retarget mid-count carries on from the figure the count had reached", () => {
-    const { container, rerender } = render(<NumberTicker end={100} duration={2} />);
+    const { container, rerender } = render(<NumberTicker end={100} />);
     const el = figure(container);
     act(() => {
       vi.advanceTimersByTime(500);
     });
     const reached = Number(el.textContent);
     expect(reached).toBeGreaterThan(30);
-    rerender(<NumberTicker end={200} duration={2} />);
+    rerender(<NumberTicker end={200} />);
     act(() => {
       vi.advanceTimersByTime(50);
     });
@@ -94,12 +94,12 @@ describe("NumberTicker", () => {
   });
 
   it("counts down when the figure falls", () => {
-    const { container, rerender } = render(<NumberTicker end={140} duration={2} />);
+    const { container, rerender } = render(<NumberTicker end={140} />);
     const el = figure(container);
     act(() => {
       vi.advanceTimersByTime(2100);
     });
-    rerender(<NumberTicker end={60} duration={2} />);
+    rerender(<NumberTicker end={60} />);
     act(() => {
       vi.advanceTimersByTime(100);
     });
@@ -112,23 +112,9 @@ describe("NumberTicker", () => {
     expect(el.textContent).toBe("60");
   });
 
-  it("prefix, suffix and decimals dress the figure, on the target too", () => {
-    const { container } = render(
-      <NumberTicker end={12.5} decimals={1} prefix="~" suffix="k" duration={1} className="mono" />,
-    );
-    const el = figure(container);
-    expect(el.textContent).toBe("~0.0k");
-    expect(el.getAttribute("data-count")).toBe("12.5");
-    expect(el.className).toBe("mono");
-    act(() => {
-      vi.advanceTimersByTime(1100);
-    });
-    expect(el.textContent).toBe("~12.5k");
-  });
-
   it("a child writes the copy around the figure drawn, right at every frame", () => {
     const { container } = render(
-      <NumberTicker end={3} duration={2}>
+      <NumberTicker end={3}>
         {(n, text) => `${text} event${n === 1 ? "" : "s"}`}
       </NumberTicker>,
     );
@@ -150,14 +136,14 @@ describe("NumberTicker", () => {
       configurable: true,
       value: (query: string) => ({ matches: query.includes("reduce") }),
     });
-    const { container } = render(<NumberTicker end={100} duration={2} />);
+    const { container } = render(<NumberTicker end={100} />);
     // The mount effect already put the target on screen: no frame was asked for.
     expect(figure(container).textContent).toBe("100");
   });
 
   it("unmounting cancels the frame it was waiting on", () => {
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
-    const { unmount } = render(<NumberTicker end={100} duration={2} />);
+    const { unmount } = render(<NumberTicker end={100} />);
     act(() => {
       vi.advanceTimersByTime(100);
     });

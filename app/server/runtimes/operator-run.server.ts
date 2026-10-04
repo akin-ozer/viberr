@@ -57,6 +57,7 @@ import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
+  appendTimelineEvent,
   readTaskFile,
   updateTaskFile,
   type TaskFileRef,
@@ -115,6 +116,7 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
+  missingResourcesSection,
   unavailableMcpSection,
   gatewayMcpSection,
   type McpRunGrant,
@@ -131,13 +133,19 @@ import { getProject } from "~/server/projections/board-query.server";
 import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { splitKbSource } from "~/server/tasks/kb-correction-actions.server";
-import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
+import { fullReplyTextForRun, runFailureReason } from "~/server/tasks/agent-reply.server";
 import {
   DEFAULT_GOAL,
+  OPERATOR_TRANSITION_CHAIN_CAP,
+  clearWaitingToHuman,
+  liftHoldForRun,
+  liftStageHoldForPerson,
+  markWaitingAgent,
   reprojectTask,
   taskRef,
   type TaskMutationContext,
 } from "~/server/tasks/task-actions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { RUN_PHASE } from "./adapter.server";
 import type { RealBackend } from "./runtime-registry.server";
 import {
@@ -148,6 +156,7 @@ import {
 // F21-3: the ONE operator confinement list, defined in claude-runtime.
 import { OPERATOR_READ_ONLY_DENIED_TOOLS } from "./claude-runtime.server";
 import {
+  chainRunCompletion,
   registerRunCompletion,
   reserveRun,
   startRun,
@@ -160,6 +169,7 @@ import {
   shellInventoryPrompt,
 } from "~/server/ops/toolchain.server";
 import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
+import { resolveDependencies } from "~/server/projections/dependencies.server";
 import {
   describeRunFailure,
   type DescribeRunFailureInput,
@@ -665,15 +675,7 @@ async function noteDroppedOperatorTurn(
         evidence: null,
       });
     });
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    rebuildPath(
-      db,
-      resolveTaskFilePath(ref),
-      dropped.dataRoot ? { dataRoot: dropped.dataRoot } : {},
-    );
+    reprojectTask(db, { dataRoot: dropped.dataRoot }, dropped.projectSlug, dropped.taskKey);
   } catch (error) {
     logger.error("could not note a dropped @operator turn", {
       taskKey: dropped.taskKey,
@@ -829,15 +831,6 @@ function leaseRefFromKey(key: string) {
 }
 
 /**
- * C2 (pass-24 fix): a queued @operator turn that FAILS at fire time must not
- * vanish into the log. The pass-23 C2 work surfaced only the cap-overflow drop
- * (`MAX_PENDING_HUMAN_TRIGGERS`); a fired trigger that THROWS left the comment
- * recorded but never coordinated, and — because a queued trigger existed —
- * `settleWaitingAfterOperator` was skipped, so the task stayed "waiting for agent"
- * with nothing live. Note it on the timeline and settle the waiting flag so the
- * board stops lying and the human can run the operator manually.
- */
-/**
  * Ruling 141 (pass 34, F34-8): a queued trigger that is REFUSED when it reaches
  * the front of the lease queue says so on the task — the refusal used to exist
  * only in the server log while the timeline still said "Scheduled action
@@ -893,12 +886,6 @@ async function noteQueuedTriggerRefused(
         ? "skipped-done"
         : "skipped-held";
   try {
-    const { updateTaskFile, resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { recordAudit } = await import("~/server/audit/audit-recorder.server");
-    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
     await updateTaskFile(ref, (parsed) => {
       const packetTitle = parsed.packet?.title ?? null;
       const cause =
@@ -941,11 +928,7 @@ async function noteQueuedTriggerRefused(
         }
       }
     });
-    rebuildPath(
-      db,
-      resolveTaskFilePath(ref),
-      ref.dataRoot ? { dataRoot: ref.dataRoot } : {},
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     if (queued.scheduleId) {
       recordAudit(db, {
         action: "task.schedule.fired",
@@ -965,6 +948,15 @@ async function noteQueuedTriggerRefused(
   }
 }
 
+/**
+ * C2 (pass-24 fix): a queued @operator turn that FAILS at fire time must not
+ * vanish into the log. The pass-23 C2 work surfaced only the cap-overflow drop
+ * (`MAX_PENDING_CARRIED_TRIGGERS`); a fired trigger that THROWS left the comment
+ * recorded but never coordinated, and — because a queued trigger existed —
+ * `settleWaitingAfterOperator` was skipped, so the task stayed "waiting for agent"
+ * with nothing live. Note it on the timeline and settle the waiting flag so the
+ * board stops lying and the human can run the operator manually.
+ */
 async function noteQueuedTriggerFireFailed(
   db: DatabaseSync,
   queued: RunOperatorInput,
@@ -980,10 +972,6 @@ async function noteQueuedTriggerFireFailed(
     dataRoot: queued.dataRoot,
   };
   try {
-    const { appendTimelineEvent, resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     await appendTimelineEvent(ref, {
       occurredAt: new Date().toISOString(),
       type: "note",
@@ -993,11 +981,7 @@ async function noteQueuedTriggerFireFailed(
       toAgent: false,
       evidence: null,
     });
-    rebuildPath(
-      db,
-      resolveTaskFilePath(ref),
-      ref.dataRoot ? { dataRoot: ref.dataRoot } : {},
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
   } catch (noteErr) {
     logger.error("could not note queued operator trigger failure", {
       key: `${queued.projectSlug}/${queued.taskKey}`,
@@ -1138,7 +1122,6 @@ export async function maybeResumeStrandedOperator(
     .get(ref.runId) as { state: string } | undefined;
   if (stateRow?.state !== "finished") return false;
 
-  const { readProjectFile } = await import("~/server/files/project-writer.server");
   const file = readTaskFile({
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
@@ -1240,10 +1223,6 @@ export async function maybeResumeStrandedOperator(
   if (ref.strandedResume && !nudgeMadeProgress) {
     // Ruling 399: the same fact the stranded predicate already consulted.
     const planRefused = ref.ownRun?.planWhollyRefused === true;
-    const { updateTaskFile, resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     await updateTaskFile(
       { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
       (parsed) => {
@@ -1281,15 +1260,7 @@ export async function maybeResumeStrandedOperator(
         });
       },
     );
-    rebuildPath(
-      db,
-      resolveTaskFilePath({
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        dataRoot: ref.dataRoot,
-      }),
-      { dataRoot: ref.dataRoot },
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     logger.info("stranded-operator resume withheld: the nudged drive held the stage again", {
       taskKey: ref.taskKey,
       stage: file.parsed.frontmatter.stage,
@@ -1297,9 +1268,6 @@ export async function maybeResumeStrandedOperator(
     return false;
   }
 
-  const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
-    "~/server/tasks/task-actions.server"
-  );
   const depth = (ref.transitionDepth ?? 0) + 1;
   // B4: the SAME comparison the transition re-trigger makes
   // (`chainDepth >= OPERATOR_TRANSITION_CHAIN_CAP`, task-actions). Both sides
@@ -1312,13 +1280,6 @@ export async function maybeResumeStrandedOperator(
   if (depth >= OPERATOR_TRANSITION_CHAIN_CAP) {
     // The model refused to advance CAP times in a row — surface the dead end
     // honestly instead of resuming forever or stamping a silent wait.
-    const { appendTimelineEvent } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
     await appendTimelineEvent(
       { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
       {
@@ -1333,15 +1294,7 @@ export async function maybeResumeStrandedOperator(
         evidence: null,
       },
     );
-    rebuildPath(
-      db,
-      resolveTaskFilePath({
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        dataRoot: ref.dataRoot,
-      }),
-      { dataRoot: ref.dataRoot },
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     logger.warn("stranded-operator resume hit the chain cap; leaving a note", {
       taskKey: ref.taskKey,
       depth,
@@ -1407,9 +1360,6 @@ function settleWaitingAfterOperator(
       const live = inFlightAgentRun(db, ref.projectSlug, ref.taskKey);
       if (live) return;
       if (await maybeResumeStrandedOperator(db, ref)) return;
-      const { clearWaitingToHuman } = await import(
-        "~/server/tasks/task-actions.server"
-      );
       const ctx: TaskMutationContext =
         { dataRoot: ref.dataRoot };
       await clearWaitingToHuman(db, ctx, ref.projectSlug, ref.taskKey);
@@ -1992,7 +1942,6 @@ export async function runOperator(
     for (const drop of queueOperatorTrigger(leaseKey, input)) {
       void noteDroppedOperatorTurn(db, drop);
     }
-    const { chainRunCompletion } = await import("./run-service.server");
     chainRunCompletion(inflight.id, () => drainPendingAfterInFlight(db, leaseKey));
     logger.info("operator run queued: DB row already in flight", {
       taskKey: input.taskKey,
@@ -2044,12 +1993,6 @@ export async function runOperator(
   // Ruling 152(a): the settle reads this drive's own moves off the same object.
   leaseToken.ownRun = ctx.operatorRun;
 
-  // The operator is itself an agent working the task: the board should read
-  // "working" for the duration of the drive, not "waiting on you" (the
-  // specialist starters do the same). Settled back to human on lease release
-  // once nothing is live (settleWaitingAfterOperator).
-  const { liftHoldForRun, liftStageHoldForPerson, markWaitingAgent, userName } =
-    await import("~/server/tasks/task-actions.server");
   // Ruling 157 (pass 35, F35-8): a person starting the operator (Run operator,
   // an `@operator` comment, the controller; every one of them carries `actor`)
   // or a schedule they set lifts a packet-less hold on the record. A bare
@@ -2066,7 +2009,7 @@ export async function runOperator(
   } else if ((input.trigger ?? "manual") === "manual" && input.actor) {
     const byName =
       input.humanCommentBy ??
-      (input.actor.userId ? userName(db, input.actor.userId) : null);
+      (input.actor.userId ? userDisplayName(db, input.actor.userId) : null);
     await liftHoldForRun(db, ctx, input.projectSlug, input.taskKey, {
       kind: "operator-run",
       trigger: "manual",
@@ -2082,6 +2025,10 @@ export async function runOperator(
       by: input.actor,
     });
   }
+  // The operator is itself an agent working the task: the board should read
+  // "working" for the duration of the drive, not "waiting on you" (the
+  // specialist starters do the same). Settled back to human on lease release
+  // once nothing is live (settleWaitingAfterOperator).
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
   // Claude uses in-process governance tools. Codex emits a structured plan
@@ -2687,12 +2634,6 @@ const operatorPlanRuntimeSchema = z.strictObject({
 
 type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
 
-/**
- * The Codex plan schema is flat, so it can't author rich per-option packets the
- * way Claude's `open_decision_packet` tool does. We give the Codex operator a
- * usable default option set keyed to the packet type instead — the human still
- * gets a real, resolvable FR26 packet rather than a comment wall.
- */
 /**
  * Normalize the Codex operator's AUTHORED packet options (P11-27) into the shape
  * `operatorOpenPacket` expects, or null when it supplied nothing usable (empty,
@@ -3561,28 +3502,11 @@ async function executeCodexPlan(
       // discarded, leaving an engaged-but-never-run agent (board "waiting on
       // you") with nothing but a server log to explain it. A coordination stall
       // is a `note`, not a governance signal.
-      try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "operator" },
-              title: null,
-              text: `**Coordination stopped:** the \`${a.tool}\` step failed (${errorMessage(error)}). The remaining plan was not executed.`,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      } catch (writeError) {
-        logger.error("codex operator plan-abort narration failed", {
-          taskKey: input.taskKey,
-          err: toError(writeError),
-        });
-      }
+      await narrateOperatorNote(db, ctx, input, "codex operator plan-abort narration failed", {
+        type: "note",
+        title: null,
+        text: `**Coordination stopped:** the \`${a.tool}\` step failed (${errorMessage(error)}). The remaining plan was not executed.`,
+      });
       break;
     }
     if (!pausedBy) {
@@ -3620,10 +3544,44 @@ async function executeCodexPlan(
 }
 
 /**
+ * An operator note written straight onto the timeline, then re-projected.
+ * Never through the gated `operatorPostComment`: a report about what the
+ * operator's plan did must not depend on the gates of the operator it reports
+ * on. Never throws; a write that fails is logged as `failure`.
+ */
+async function narrateOperatorNote(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  failure: string,
+  note: { type: "note" | "policy"; title: string | null; text: string },
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: note.type,
+        actor: { kind: "operator" },
+        title: note.title,
+        text: note.text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.error(failure, {
+      taskKey: input.taskKey,
+      err: toError(error),
+    });
+  }
+}
+
+/**
  * Ruling 430: say which steps a new decision packet stopped, and why.
  *
- * Written directly, like `narrateRefusedActions`: the report must not depend on
- * the gates of the operator it reports on. Never throws; the plan already ran.
+ * Written directly, like `narrateRefusedActions`. Never throws; the plan
+ * already ran.
  */
 async function narratePausedPlan(
   db: DatabaseSync,
@@ -3633,28 +3591,14 @@ async function narratePausedPlan(
   steps: string[],
 ): Promise<void> {
   const list = steps.map((s) => `\`${s}\``).join(", ");
-  try {
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "operator" },
-        title: "Coordination paused",
-        text:
-          `**Coordination paused:** the \`${pausedBy.tool}\` step left a decision for a person ` +
-          `(“${pausedBy.title}”), so the rest of this plan was not carried out: ${list}. ` +
-          "It was written before that decision existed. The operator picks the task up again once it is answered.",
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  } catch (error) {
-    logger.error("codex operator plan-pause narration failed", {
-      taskKey: input.taskKey,
-      err: toError(error),
-    });
-  }
+  await narrateOperatorNote(db, ctx, input, "codex operator plan-pause narration failed", {
+    type: "note",
+    title: "Coordination paused",
+    text:
+      `**Coordination paused:** the \`${pausedBy.tool}\` step left a decision for a person ` +
+      `(“${pausedBy.title}”), so the rest of this plan was not carried out: ${list}. ` +
+      "It was written before that decision existed. The operator picks the task up again once it is answered.",
+  });
 }
 
 /** A plan step that did not run, and WHY it did not (see OperatorActionResult):
@@ -3760,32 +3704,18 @@ async function narrateRefusedActions(
     (reasoning.trim()
       ? `\n\nWhat it intended:\n\n> ${reasoning.trim().replace(/\n/g, "\n> ")}`
       : "");
-  try {
-    logger.warn("codex operator plan actions did not run", {
-      taskKey: input.taskKey,
-      refusedByPolicy: byAuthority.map((r) => r.tool),
-      refusedByState: byState.map((r) => r.tool),
-    });
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        // LV-03: `policy` is a governance signal. Only an authority refusal is
-        // one; a state conflict is a plain note.
-        type: byAuthority.length > 0 ? "policy" : "note",
-        actor: { kind: "operator" },
-        title: null,
-        text,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  } catch (error) {
-    logger.error("codex operator refusal narration failed", {
-      taskKey: input.taskKey,
-      err: toError(error),
-    });
-  }
+  logger.warn("codex operator plan actions did not run", {
+    taskKey: input.taskKey,
+    refusedByPolicy: byAuthority.map((r) => r.tool),
+    refusedByState: byState.map((r) => r.tool),
+  });
+  await narrateOperatorNote(db, ctx, input, "codex operator refusal narration failed", {
+    // LV-03: `policy` is a governance signal. Only an authority refusal is
+    // one; a state conflict is a plain note.
+    type: byAuthority.length > 0 ? "policy" : "note",
+    title: null,
+    text,
+  });
 }
 
 /**
@@ -3808,25 +3738,11 @@ async function writeOperatorNoPlanNote(
       ? "Its run replied, but the output was not a valid decision plan. "
       : "Its run finished without producing any output. ") +
     "Coordination is paused: re-engage the operator or redirect the task.";
-  try {
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "operator" },
-        title: null,
-        text,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  } catch (error) {
-    logger.error("codex no-plan note fallback failed", {
-      taskKey: input.taskKey,
-      err: toError(error),
-    });
-  }
+  await narrateOperatorNote(db, ctx, input, "codex no-plan note fallback failed", {
+    type: "note",
+    title: null,
+    text,
+  });
 }
 
 // ------------------------------------------------------- real (tool-driven)
@@ -3969,7 +3885,6 @@ async function startRealOperatorRun(
   // registered) so nothing can clobber it.
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
-  const { chainRunCompletion } = await import("./run-service.server");
   chainRunCompletion(runId, (finished) => {
     // A real Claude operator run that ERRORS (crash / quota / auth / idle
     // timeout) was previously silent — the completion hook only released the
@@ -4025,7 +3940,6 @@ async function escalateFailedOperatorRun(
   runId: string,
 ): Promise<void> {
   try {
-    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
     const failure = runFailureReason(db, runId);
     // Pass 34 review: the run was launched on the RESOLVED deployment backend
   // (`runOperator` reads `authority.backend`); `input.backend` is set only when
@@ -4637,19 +4551,8 @@ export function buildOperatorSystemPrompt(
   // attached, and the coordinator had no way to know its granted facts never
   // arrived. Same honesty rule, same shape, same wording as the specialist.
   const missing = sortedBy([...skillSet.unresolved, ...kbSet.unresolved], (m) => m.name);
-  if (missing.length > 0) {
-    dynamic.push(
-      // Ruling 253: "did NOT reach" was true of every row when only a total
-      // miss could appear here. A partial now appears too, so the heading and
-      // the instruction have to cover both or they misdescribe half the list.
-      "\n\n---\n# Attached resources that did NOT fully reach this run\n\n" +
-        "Your profile grants these, and what is in your context is incomplete or absent:\n" +
-        missing.map((m) => `- **${m.name}**: ${m.reason}`).join("\n") +
-        "\n\nDo not claim knowledge or craft you did not receive, and do not treat " +
-        "the gap as your own failure; say plainly in your reply what arrived " +
-        "empty or incomplete so a human can fix the configuration.",
-    );
-  }
+  const missingSection = missingResourcesSection(missing);
+  if (missingSection) dynamic.push(missingSection);
   const prefix: PromptPrefix = { static: parts, dynamic };
   const prompt = joinedPrompt(prefix);
   return {
@@ -5712,25 +5615,28 @@ function unfinishedReportInstruction(snapshot: OperatorTaskSnapshot): string {
   );
 }
 
-/** Codex cannot call the in-process tools, so it returns a constrained plan. */
+/**
+ * The turn context after the person's comment, as `operatorTurnDoctrine`
+ * declares it: both prompt builders take it after the agent's report and hand
+ * it on unchanged.
+ */
+type OperatorTurnTail =
+  Parameters<typeof operatorTurnDoctrine> extends [
+    OperatorTaskSnapshot,
+    OperatorTrigger,
+    (string | undefined)?,
+    ...infer Tail,
+  ]
+    ? Tail
+    : never;
 
+/** Codex cannot call the in-process tools, so it returns a constrained plan. */
 export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
   trigger: OperatorTrigger,
   humanComment?: string,
   agentReply?: string,
-  humanCommentBy?: string,
-  transition?: TransitionContext,
-  scheduleNote?: string,
-  resolvedOption?: ResolvedPacketOption,
-  strandedResume?: StrandedNudge,
-  dependencyRelease?: DependencyReleasePayload,
-  /** Ruling 400: quoted into a plan-refused retry's instruction. */
-  refusedSteps?: { tool: string; message: string }[],
-  /** Ruling 487: a `scheduled` re-run the operator set itself. */
-  scheduledByOperator?: boolean,
-  /** Ruling 488: what another task relayed here. */
-  relay?: RelayPayload,
+  ...turn: OperatorTurnTail
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -5740,20 +5646,7 @@ export function buildCodexOperatorPrompt(
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     CODEX_PLAN_WHOLE_TURN +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
-    operatorTurnInstruction(
-      snapshot,
-      trigger,
-      humanComment,
-      humanCommentBy,
-      transition,
-      scheduleNote,
-      resolvedOption,
-      strandedResume,
-      dependencyRelease,
-      refusedSteps,
-      scheduledByOperator,
-      relay,
-    ) +
+    operatorTurnInstruction(snapshot, trigger, humanComment, ...turn) +
     "\n\nWhen you `open_packet`, author 2 to 4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision, e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal, the deliverable plus its acceptance criteria, because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one; the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits): the human's confirm executes the deletion, nothing on the remote changes; `question_reviewer` to put ONE question to a reviewer with no rework behind it (REQUIRED: its `profileId`, from `reviewers[].profileId`; an option that names no reviewer is refused), which is the move when a reviewer has blocked twice and you want its complete blocking set rather than another round of one finding at a time, `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name: the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). A `redirect` or `request_edit` that asks the person what to change or what to tell the agent sets `reply: true`, so the card requires their words (ruling 650). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
@@ -5766,37 +5659,13 @@ export function buildOperatorTurnPrompt(
   trigger: OperatorTrigger,
   humanComment?: string,
   agentReply?: string,
-  humanCommentBy?: string,
-  transition?: TransitionContext,
-  scheduleNote?: string,
-  resolvedOption?: ResolvedPacketOption,
-  strandedResume?: StrandedNudge,
-  dependencyRelease?: DependencyReleasePayload,
-  /** Ruling 400: quoted into a plan-refused retry's instruction. */
-  refusedSteps?: { tool: string; message: string }[],
-  /** Ruling 487: a `scheduled` re-run the operator set itself. */
-  scheduledByOperator?: boolean,
-  /** Ruling 488: what another task relayed here. */
-  relay?: RelayPayload,
+  ...turn: OperatorTurnTail
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
     `Goal: ${snapshot.goal}\n\nCall \`get_task\` first; its live state and offered tools are authoritative.` +
     agentReportBlock(trigger, agentReply) +
     "\n\n" +
-    operatorTurnInstruction(
-      snapshot,
-      trigger,
-      humanComment,
-      humanCommentBy,
-      transition,
-      scheduleNote,
-      resolvedOption,
-      strandedResume,
-      dependencyRelease,
-      refusedSteps,
-      scheduledByOperator,
-      relay,
-    )
+    operatorTurnInstruction(snapshot, trigger, humanComment, ...turn)
   );
 }

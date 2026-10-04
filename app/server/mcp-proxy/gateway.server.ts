@@ -154,7 +154,6 @@ const SEP = "\u0000";
 interface GatewayTimeouts {
   connectMs: number;
   callMs: number;
-  listMs: number;
 }
 
 /** What a run's token opens. */
@@ -260,7 +259,6 @@ function getState(): GatewayState {
       timeouts: {
         connectMs: UPSTREAM_CONNECT_TIMEOUT_MS,
         callMs: GATEWAY_CALL_TIMEOUT_MS,
-        listMs: GATEWAY_LIST_TIMEOUT_MS,
       },
       grants: new Map(),
       byRun: new Map(),
@@ -283,7 +281,6 @@ export interface StartMcpGatewayOptions {
   port?: number;
   connectTimeoutMs?: number;
   callTimeoutMs?: number;
-  listTimeoutMs?: number;
 }
 
 /**
@@ -295,7 +292,6 @@ export async function startMcpGateway(options: StartMcpGatewayOptions = {}): Pro
   state.timeouts = {
     connectMs: options.connectTimeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS,
     callMs: options.callTimeoutMs ?? GATEWAY_CALL_TIMEOUT_MS,
-    listMs: options.listTimeoutMs ?? GATEWAY_LIST_TIMEOUT_MS,
   };
   if (state.http && state.port !== null) return { port: state.port };
   const http = createServer((req, res) => {
@@ -1074,7 +1070,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
     { name: info?.name ?? server, version: info?.version ?? "0.0.0" },
     instructions ? { capabilities, instructions } : { capabilities },
   );
-  const { listMs, callMs } = state.timeouts;
+  const { callMs } = state.timeouts;
 
   if (capabilities.tools) {
     mcp.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
@@ -1082,7 +1078,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         ? await forward(grant, upstream, (client) =>
             client.request({ method: "tools/list", params: request.params }, ListToolsResultSchema, {
               signal: extra.signal,
-              timeout: listMs,
+              timeout: GATEWAY_LIST_TIMEOUT_MS,
             }),
           )
         : { tools: [] };
@@ -1191,7 +1187,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
       forward(grant, upstream, (client) =>
         client.request({ method: "resources/list", params: request.params }, ListResourcesResultSchema, {
           signal: extra.signal,
-          timeout: listMs,
+          timeout: GATEWAY_LIST_TIMEOUT_MS,
         }),
       ),
     );
@@ -1200,7 +1196,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         client.request(
           { method: "resources/templates/list", params: request.params },
           ListResourceTemplatesResultSchema,
-          { signal: extra.signal, timeout: listMs },
+          { signal: extra.signal, timeout: GATEWAY_LIST_TIMEOUT_MS },
         ),
       ),
     );
@@ -1219,7 +1215,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
       forward(grant, upstream, (client) =>
         client.request({ method: "prompts/list", params: request.params }, ListPromptsResultSchema, {
           signal: extra.signal,
-          timeout: listMs,
+          timeout: GATEWAY_LIST_TIMEOUT_MS,
         }),
       ),
     );
@@ -1228,7 +1224,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
       return forward(grant, upstream, (client) =>
         client.request({ method: "prompts/get", params: request.params }, GetPromptResultSchema, {
           signal: extra.signal,
-          timeout: listMs,
+          timeout: GATEWAY_LIST_TIMEOUT_MS,
         }),
       );
     });

@@ -88,7 +88,7 @@ export function buildResourceCatalog(
       group: "Skills",
       key: "skills",
       mono: true,
-      items: [...skillIds].sort().map((id) => ({ id, def: false })),
+      items: [...skillIds].sort().map((id) => ({ id })),
     },
     {
       group: "MCP servers",
@@ -96,8 +96,8 @@ export function buildResourceCatalog(
       mono: true,
       items: [...mcpIds].sort().map((id) => {
         const warning = mcpWarnings.get(id);
-        if (warning) return { id, def: false, warning };
-        return { id, def: false };
+        if (warning) return { id, warning };
+        return { id };
       }),
     },
     {
@@ -107,8 +107,8 @@ export function buildResourceCatalog(
       items: [...kbIds].sort().map((id) => {
         const label = kbNames.get(id);
         // Statements, not a conditional spread — the anti-slop rule.
-        if (label && label !== id) return { id, def: false, label };
-        return { id, def: false };
+        if (label && label !== id) return { id, label };
+        return { id };
       }),
     },
   ];

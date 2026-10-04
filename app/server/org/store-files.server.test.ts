@@ -61,6 +61,27 @@ async function setupKb() {
   return { db, dataRoot, ctx, kb, target };
 }
 
+/** `setupKb`, with an org admin whose GitHub connection (as `owner`) is the
+ *  default one an import reads through. */
+async function setupConnectedKb() {
+  const kb = await setupKb();
+  insertUser(kb.db, { id: "u_admin", email: "admin@test.dev", name: "Admin Test", role: "admin" });
+  const connectTransport = fakeGithubFetch({
+    "GET /user": { body: { login: "owner" }, headers: { "x-oauth-scopes": "repo, workflow" } },
+    "GET /users/owner": { body: { public_repos: 1 } },
+  });
+  await createConnection(
+    kb.db,
+    { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
+    ACTOR,
+    { fetchImpl: connectTransport.fetchImpl },
+  );
+  return kb;
+}
+
+/** A blob's content as GitHub's blob API sends it. */
+const b64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
+
 describe("uploads", () => {
   it("writes real files, preserves structure, skips dotfiles", async () => {
     const { db, target } = await setupKb();
@@ -233,7 +254,6 @@ describe("github import", () => {
   // now an EXPLANATION for a refusal, not a precondition.
   it("imports a PUBLIC repo with NO connection at all, sending no Authorization", async () => {
     const { db, target } = await setupKb();
-    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
     const transport = fakeGithubFetch({
       "GET /repos/blader/humanizer/git/trees/main": {
         body: {
@@ -316,28 +336,8 @@ describe("github import", () => {
   });
 
   it("fetches a real snapshot through the default connection (canned)", async () => {
-    const { db, target } = await setupKb();
-    insertUser(db, {
-      id: "u_admin",
-      email: "admin@test.dev",
-      name: "Admin Test",
-      role: "admin",
-    });
-    const connectTransport = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "owner" },
-        headers: { "x-oauth-scopes": "repo, workflow" },
-      },
-      "GET /users/owner": { body: { public_repos: 1 } },
-    });
-    await createConnection(
-      db,
-      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: connectTransport.fetchImpl },
-    );
+    const { db, target } = await setupConnectedKb();
 
-    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
     const importTransport = fakeGithubFetch({
       "GET /repos/owner/repo/git/trees/main": {
         body: {
@@ -389,28 +389,8 @@ describe("github import", () => {
     // sliced the relative path to "" and imported nothing behind a misleading
     // "GitHub refused the file contents". The skill flow depends on this shape:
     // SKILL.md must land at the skill ROOT, not as SKILL.md/SKILL.md.
-    const { db, target } = await setupKb();
-    insertUser(db, {
-      id: "u_admin",
-      email: "admin@test.dev",
-      name: "Admin Test",
-      role: "admin",
-    });
-    const connectTransport = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "owner" },
-        headers: { "x-oauth-scopes": "repo, workflow" },
-      },
-      "GET /users/owner": { body: { public_repos: 1 } },
-    });
-    await createConnection(
-      db,
-      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: connectTransport.fetchImpl },
-    );
+    const { db, target } = await setupConnectedKb();
 
-    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
     const importTransport = fakeGithubFetch({
       "GET /repos/owner/repo/git/trees/main": {
         body: {
@@ -473,28 +453,8 @@ describe("github import", () => {
   });
 
   it("surfaces per-blob failures instead of a clean success (E5)", async () => {
-    const { db, target } = await setupKb();
-    insertUser(db, {
-      id: "u_admin",
-      email: "admin@test.dev",
-      name: "Admin Test",
-      role: "admin",
-    });
-    const connectTransport = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "owner" },
-        headers: { "x-oauth-scopes": "repo, workflow" },
-      },
-      "GET /users/owner": { body: { public_repos: 1 } },
-    });
-    await createConnection(
-      db,
-      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: connectTransport.fetchImpl },
-    );
+    const { db, target } = await setupConnectedKb();
 
-    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
     // Blob s2 has NO route → its fetch 404s; the import must not pretend it
     // was a full snapshot.
     const importTransport = fakeGithubFetch({
@@ -530,27 +490,7 @@ describe("github import", () => {
   });
 
   it("F20-1: the collision scan is bounded — a mount that never yields a free name fails the import, it does not spin", async () => {
-    const { db, target } = await setupKb();
-    insertUser(db, {
-      id: "u_admin",
-      email: "admin@test.dev",
-      name: "Admin Test",
-      role: "admin",
-    });
-    const connectTransport = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "owner" },
-        headers: { "x-oauth-scopes": "repo, workflow" },
-      },
-      "GET /users/owner": { body: { public_repos: 1 } },
-    });
-    await createConnection(
-      db,
-      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin" },
-      ACTOR,
-      { fetchImpl: connectTransport.fetchImpl },
-    );
-    const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+    const { db, target } = await setupConnectedKb();
     const importTransport = fakeGithubFetch({
       "GET /repos/owner/repo/git/trees/main": {
         body: {
@@ -977,29 +917,8 @@ describe("writeStoreDoc", () => {
 /* --------------------------- re-import refreshes in place (P13-KM-13) */
 
 describe("importGithubSnapshot re-import", () => {
-  const b64 = (t: string) => Buffer.from(t, "utf8").toString("base64");
-
   it("refreshes the same source's folder instead of creating a second copy", async () => {
-    const { db, target } = await setupKb();
-    insertUser(db, {
-      id: "u_admin2",
-      email: "admin2@test.dev",
-      name: "Admin Two",
-      role: "admin",
-    });
-    const connectTransport = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "owner" },
-        headers: { "x-oauth-scopes": "repo, workflow" },
-      },
-      "GET /users/owner": { body: { public_repos: 1 } },
-    });
-    await createConnection(
-      db,
-      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin2" },
-      ACTOR,
-      { fetchImpl: connectTransport.fetchImpl },
-    );
+    const { db, target } = await setupConnectedKb();
 
     const snapshot = (text: string) =>
       fakeGithubFetch({
@@ -1036,26 +955,7 @@ describe("importGithubSnapshot re-import", () => {
   });
 
   it("P14-KM-08: lands under the browsed folder, and refreshes in place there", async () => {
-    const { db, target } = await setupKb();
-    insertUser(db, {
-      id: "u_admin3",
-      email: "admin3@test.dev",
-      name: "Admin Three",
-      role: "admin",
-    });
-    const connectTransport = fakeGithubFetch({
-      "GET /user": {
-        body: { login: "owner" },
-        headers: { "x-oauth-scopes": "repo, workflow" },
-      },
-      "GET /users/owner": { body: { public_repos: 1 } },
-    });
-    await createConnection(
-      db,
-      { owner: "owner", token: "ghp_valid_token_1234", userId: "u_admin3" },
-      ACTOR,
-      { fetchImpl: connectTransport.fetchImpl },
-    );
+    const { db, target } = await setupConnectedKb();
     const snapshot = fakeGithubFetch({
       "GET /repos/owner/repo/git/trees/main": {
         body: {

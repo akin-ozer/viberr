@@ -129,6 +129,20 @@ function startTestRun(
   return startRun(db, { ...input, agentProfileId, credentialUserId });
 }
 
+/** The plain Claude delivering run on VIB-1 most cases start. */
+function primaryRun(): TestRunInput {
+  return {
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    role: "Primary specialist",
+    kind: "primary",
+    backend: "claude",
+    model: "claude-sonnet-4-5",
+    prompt: "go",
+    dataRoot: store.dataRoot,
+  };
+}
+
 /** One capture adapter on both slots: the RunSpec of every run launched from
  *  here on, each finishing at once with `sessionId`. */
 function captureSpecs(sessionId: string | null = null): RunSpec[] {
@@ -163,16 +177,7 @@ describe("run-service lifecycle", () => {
       { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 0.1, in: 5, cached: 2, out: 3 } },
     ]);
     queueFakeRun(script);
-    const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      prompt: "go",
-      dataRoot: store.dataRoot,
-    });
+    const { runId } = await startTestRun(store.db, primaryRun());
     await settle();
 
     const run = getRun(store.db, runId)!;
@@ -304,16 +309,7 @@ describe("run-service lifecycle", () => {
       { t: "3", ev: "result", tag: "result", text: "done" },
     ]);
     queueFakeRun(script);
-    const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      prompt: "go",
-      dataRoot: store.dataRoot,
-    });
+    const { runId } = await startTestRun(store.db, primaryRun());
     // The CI teardown race: a test's DB closes while the adapter's timers are
     // still driving lines + the exit. Every sink write inside an adapter
     // callback must be caught-and-logged — an uncaught throw on a timer is an
@@ -390,21 +386,11 @@ describe("a run with no credential principal (ruling 127)", () => {
   /** The owner has not connected the backend — the ordinary refusal. */
   async function startWithoutCredential() {
     await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
-    return startTestRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      prompt: "go",
-      dataRoot: store.dataRoot,
-    });
+    return startTestRun(store.db, primaryRun());
   }
-  const startUnavailable = startWithoutCredential;
 
   it("startRun finalizes a principal with no credential as a classified error", async () => {
-    const { runId } = await startUnavailable();
+    const { runId } = await startWithoutCredential();
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("error"); // fail-fast: terminal synchronously
     expect(run.backend).toBe("claude");
@@ -452,16 +438,7 @@ describe("a run with no credential principal (ruling 127)", () => {
         { t: "1", ev: "result", tag: "result", text: "done" },
       ]),
     );
-    const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      prompt: "go",
-      dataRoot: store.dataRoot,
-    });
+    const { runId } = await startTestRun(store.db, primaryRun());
     await settle();
     expect(getRun(store.db, runId)!.credential_user_id).toBe(
       store.users.arda.id,
@@ -477,14 +454,7 @@ describe("a run with no credential principal (ruling 127)", () => {
     // person's key. The second half is the test below.
     queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
     await startTestRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      prompt: "go",
-      dataRoot: store.dataRoot,
+      ...primaryRun(),
       env: { GIT_CEILING_DIRECTORIES: "/tmp/ceiling" },
     });
     await settle();
@@ -548,14 +518,7 @@ describe("a run with no credential principal (ruling 127)", () => {
     // the credential and the workspace overlay still land beside it.
     queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
     const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "claude-sonnet-4-5",
-      prompt: "go",
-      dataRoot: store.dataRoot,
+      ...primaryRun(),
       env: { GIT_CEILING_DIRECTORIES: "/tmp/ceiling", VIBERR_RUN_ID: "run_someone-else" },
     });
     await settle();
@@ -577,14 +540,7 @@ describe("a run with no credential principal (ruling 127)", () => {
     try {
       queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
       const { runId } = await startTestRun(store.db, {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        role: "Primary specialist",
-        kind: "primary",
-        backend: "claude",
-        model: "claude-sonnet-4-5",
-        prompt: "go",
-        dataRoot: store.dataRoot,
+        ...primaryRun(),
         env: { TMPDIR: "/tmp" },
       });
       await settle();
@@ -603,28 +559,21 @@ describe("a run with no credential principal (ruling 127)", () => {
     // let a workspace overlay swap the credential of the person being billed.
     await expect(
       startTestRun(store.db, {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        role: "Primary specialist",
-        kind: "primary",
-        backend: "claude",
-        model: "claude-sonnet-4-5",
-        prompt: "go",
-        dataRoot: store.dataRoot,
+        ...primaryRun(),
         env: { ANTHROPIC_API_KEY: "someone-elses-key" },
       }),
     ).rejects.toThrow(/collides with the credential env/);
   });
 
   it("a completion callback registered after the fail-fast still fires (F8 escalation path)", async () => {
-    const { runId } = await startUnavailable();
+    const { runId } = await startWithoutCredential();
     let fired: string | null = null;
     registerRunCompletion(runId, (finished) => { fired = finished.state; }, store.db);
     expect(fired).toBe("error");
   });
 
   it("audits runtime.run.started with the failedUnavailable marker", async () => {
-    await startUnavailable();
+    await startWithoutCredential();
     const audits = listAuditEvents(store.db, { action: "runtime.run.started" });
     expect(audits.length).toBe(1);
     expect(audits[0]!.details).toMatchObject({
@@ -658,7 +607,8 @@ describe("ruling 185: no Codex run is refused for a sandbox", () => {
       model: defaultModelFor("codex"),
       prompt: "go",
       dataRoot: store.dataRoot,
-      repoWriteWithheld: true,
+      // The denylist a withheld `execute-code-or-write-repo` grant produces.
+      disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
     });
     await settle();
     expect(getRun(store.db, runId)!.state).toBe("finished");
@@ -1712,17 +1662,6 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     });
     await settle();
     expect(specs[1]?.costStateRestored).toBe(false);
-  });
-
-  it("an explicit caller value wins over the derivation", async () => {
-    const specs = captureSpecs();
-    await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
-      repoWriteWithheld: true,
-    });
-    await settle();
-    expect(specs[0]?.repoWriteWithheld).toBe(true);
   });
 
   it("normalizes a stored effort from the OTHER backend's tier scale", async () => {

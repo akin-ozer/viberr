@@ -122,7 +122,7 @@ export async function runGrantScope(
   db: DatabaseSync,
   projectSlug: string,
   actor: AuditActor,
-  ctx: { dataRoot?: string; fetchImpl?: typeof fetch } = {},
+  ctx: CredentialCallContext = {},
 ): Promise<GithubActionOutcome> {
   const result = await revalidateProjectCredential(db, projectSlug, actor, ctx);
   // LV-05, ruling 540: a re-validation can change the credential's health, so
@@ -327,9 +327,7 @@ export async function runSetCredential(
   // credential" after a full reload, and the board kept its verdict about the
   // credential this one replaced.
   await refreshRepoAccess(db, projectSlug, ctx);
-  const proveCtx: CredentialCallContext = { dataRoot: ctx.dataRoot };
-  if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
-  await proveAttachedCredential(db, projectSlug, actor, proveCtx);
+  await proveAttachedCredential(db, projectSlug, actor, ctx);
   const result =
     previousPatId === null
       ? "attached"

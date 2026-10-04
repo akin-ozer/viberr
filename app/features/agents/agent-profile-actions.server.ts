@@ -211,11 +211,6 @@ function carryCouplingNotices(
 
 const modeSchema = z.enum(["direct", "recommend", "human", "off"]);
 
-// Per-backend fallbacks when the form omits a picked model/effort (older
-// client, or a create before the catalog loads) come from the model catalog —
-// the FIRST available model + the default effort — so we never hardcode a
-// specific id that could drift out of the list.
-
 /**
  * B5 (pass 34, U34-3): the identity of the deployment record the editor read,
  * over exactly the fields a profile save may overwrite — the governed grants

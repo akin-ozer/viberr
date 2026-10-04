@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import { AUTH_BASE_PATH, type ViberrAuth } from "~/lib/auth.server";
+import type { ViberrAuth } from "~/lib/auth.server";
+import { AUTH_BASE_PATH } from "~/shared/auth/auth-paths";
 import type { UserRecord } from "~/shared/mapping/user.server";
 import { recordAudit } from "../audit/audit-recorder.server";
 import { AppError } from "../errors/app-error.server";

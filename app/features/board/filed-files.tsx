@@ -1,6 +1,4 @@
 import { prettySize } from "~/shared/text/byte-size";
-import { FILING_BATCH } from "~/shared/attachment-kinds";
-import { addPickedFiles, type PickedFiles } from "~/ui/picked-files";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -13,11 +11,6 @@ import { Icon } from "~/ui/icon";
  * refuse a pick are the composers' own (`~/ui/picked-files`, ruling 573); a
  * filing only words its limits for the dialog.
  */
-
-/** The filing's picks, kept or refused by the upload's own rules. */
-export function addFiledFiles(current: readonly File[], incoming: readonly File[]): PickedFiles {
-  return addPickedFiles(current, incoming, FILING_BATCH);
-}
 
 export function FiledFiles({
   files,

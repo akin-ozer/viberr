@@ -3,7 +3,7 @@ import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
 import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { formFiles } from "~/server/files/form-files.server";
@@ -15,10 +15,7 @@ import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
 import type { TaskActivitySummary } from "~/server/projections/board-query.server";
 import { toBoardCard } from "~/features/board/board-card";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
@@ -42,22 +39,6 @@ import { BoardPage } from "~/features/board/board-page";
  * ↔ projections). No optimistic UI for governed state — revalidation shows the
  * new card.
  */
-
-/**
- * Ruling 88 (F21-2) — the acceptance disclosure a board POST carries, or `null`
- * when it carries none.
- *
- * `null` reaches the server rather than being swallowed here: it is the
- * difference between "an HTTP caller sent no acknowledgment" (refused — the
- * bare POST F21-2 found accepting silently) and "an in-process caller carries
- * its own contract" (omitted). The parsing itself — the field names, and the
- * strictness that reads a half-filled echo as no echo — is the ONE shared
- * definition in `~/shared/acceptance-disclosure`, which the ceremony writes
- * with; only the FormData read is local (as in routes/project.task).
- */
-function acceptanceAck(formData: FormData) {
-  return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
-}
 
 /** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
  *  project title from the workspace layout. */
@@ -125,15 +106,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
-  // R15-4 / E2: React Router runs this action WITHOUT the layout loader, so the
-  // membership gate has to be repeated here. Without it `create-task` answered a
-  // signed-in non-member with the inner guard's 403 ("Only project members can
-  // create tasks") while every other route and intent in the app answered 404 —
-  // one reply that confirmed the project exists (WI-13). Outside the try so the
-  // refusal stays a thrown 404 Response, byte-identical to the unknown-slug one.
-  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   try {
     if (intent === "create-task") {
@@ -193,7 +167,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // alone, so a rank write or an ordinary column move stays ack-free.
           // Absent fields ⇒ `null` ⇒ a drop on Done that skipped the dialog is
           // refused.
-          ack: acceptanceAck(formData),
+          ack: parseAcceptanceDisclosure(formData),
           // Ruling 381: why the card went BACK. The server requires it for a
           // backward manual move, whichever door the move came through.
           reason: String(formData.get("reason") ?? ""),
@@ -262,7 +236,7 @@ export default function Board({ loaderData }: Route.ComponentProps) {
       // U33-2: the remembered repository probe, so a project pointed at a
       // repository GitHub will not serve says so where the work happens instead
       // of only on its GitHub page.
-      repoAccess={loaderData.repoAccess ?? undefined}
+      repoAccess={loaderData.repoAccess}
       epics={loaderData.epics}
     />
   );

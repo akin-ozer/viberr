@@ -38,8 +38,8 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     controllerName: "Controller",
     projectName: "Viberr Core",
     conversations: [
-      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false, readable: true, canDelete: true, working: false },
-      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false, readable: true, canDelete: true, working: false },
+      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", taskKey: null, unread: false, readable: true, canDelete: true, working: false },
+      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", taskKey: "VIB-142", unread: false, readable: true, canDelete: true, working: false },
     ],
     conversation: null,
     messages: [],
@@ -56,6 +56,19 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     ...over,
   };
 }
+
+/** The rail's "Board thread" (`view()` lists it first), open and the viewer's own. */
+const BOARD_THREAD: NonNullable<ControllerSurfaceView["conversation"]> = {
+  id: "cnv_b",
+  userId: "u1",
+  userLabel: "arda@viberr.dev",
+  projectSlug: "viberr-core",
+  taskKey: null,
+  title: "Board thread",
+  createdAt: "2026-09-01T10:00:00.000Z",
+  updatedAt: "2026-09-01T10:00:00.000Z",
+  lastMessageAt: "2026-09-01T10:00:00.000Z",
+};
 
 /**
  * O39-d: the rail and the phone's picker mark a thread holding a controller
@@ -198,17 +211,7 @@ describe("the conversation rail (U33-8)", () => {
   it("marks the thread the transcript is showing, even with no ?c= in the URL", async () => {
     const { container } = renderPage(
       view({
-        conversation: {
-          id: "cnv_b",
-          userId: "u1",
-          userLabel: "arda@viberr.dev",
-          projectSlug: "viberr-core",
-          taskKey: null,
-          title: "Board thread",
-          createdAt: "2026-09-01T10:00:00.000Z",
-          updatedAt: "2026-09-01T10:00:00.000Z",
-          lastMessageAt: "2026-09-01T10:00:00.000Z",
-        },
+        conversation: BOARD_THREAD,
         viewerOwnsActive: true,
       }),
     );
@@ -394,17 +397,6 @@ describe("ruling 259: the box is compared with what went out, trimmed", () => {
  * console with the turn's own lines.
  */
 describe("the open conversation's execution", () => {
-  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
-    id: "cnv_b",
-    userId: "u1",
-    userLabel: "arda@viberr.dev",
-    projectSlug: "viberr-core",
-    taskKey: null,
-    title: "Board thread",
-    createdAt: "2026-09-01T10:00:00.000Z",
-    updatedAt: "2026-09-01T10:00:00.000Z",
-    lastMessageAt: "2026-09-01T10:00:00.000Z",
-  };
   const run: RunView = {
     id: "controller",
     serverRunId: "run_ctl",
@@ -435,7 +427,7 @@ describe("the open conversation's execution", () => {
   };
   const working = (over: Partial<ControllerSurfaceView> = {}) =>
     view({
-      conversation,
+      conversation: BOARD_THREAD,
       viewerOwnsActive: true,
       turn: { working: true, runId: "run_ctl", phase: null, step: null, answering: null, queued: [], steering: [] },
       runtime: [run],
@@ -513,17 +505,7 @@ describe("the open conversation's execution", () => {
     // from the transcript's Markdown.
     renderPage(
       view({
-        conversation: {
-          id: "cnv_b",
-          userId: "u1",
-          userLabel: "arda@viberr.dev",
-          projectSlug: "viberr-core",
-          taskKey: null,
-          title: "Board thread",
-          createdAt: "2026-09-01T10:00:00.000Z",
-          updatedAt: "2026-09-01T10:00:00.000Z",
-          lastMessageAt: "2026-09-01T10:00:05.000Z",
-        },
+        conversation: { ...BOARD_THREAD, lastMessageAt: "2026-09-01T10:00:05.000Z" },
         messages: [
           { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:05.000Z" },
         ],
@@ -638,7 +620,7 @@ describe("the open conversation's execution", () => {
     // pane is gone.
     const { container } = renderPage(
       view({
-        conversation,
+        conversation: BOARD_THREAD,
         viewerOwnsActive: true,
         runtime: [{ ...run, state: "done", lifecycle: "finished", finished: "10:03:20" }],
         canInterruptTurn: true,
@@ -691,7 +673,7 @@ describe("the open conversation's execution", () => {
 
   it("renders neither panel for a thread that has not run yet", async () => {
     const { container } = renderPage(
-      view({ conversation, viewerOwnsActive: true, runtime: [], canInterruptTurn: true }),
+      view({ conversation: BOARD_THREAD, viewerOwnsActive: true, runtime: [], canInterruptTurn: true }),
       "?c=cnv_b",
     );
     await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
@@ -743,17 +725,6 @@ describe("ruling 419(a): the page's navigation is at its top", () => {
       search = useLocation().search;
       return null;
     }
-    const open = {
-      id: "cnv_b",
-      userId: "u1",
-      userLabel: "arda@viberr.dev",
-      projectSlug: "viberr-core",
-      taskKey: null,
-      title: "Board thread",
-      createdAt: "2026-09-01T10:00:00.000Z",
-      updatedAt: "2026-09-01T10:00:00.000Z",
-      lastMessageAt: "2026-09-01T10:00:00.000Z",
-    };
     const Stub = createRoutesStub([
       {
         id: "root",
@@ -765,7 +736,7 @@ describe("ruling 419(a): the page's navigation is at its top", () => {
             Component: () => (
               <ToastProvider>
                 <ControllerPage
-                  view={view({ conversation: open, viewerOwnsActive: true })}
+                  view={view({ conversation: BOARD_THREAD, viewerOwnsActive: true })}
                   projectSlug="viberr-core"
                  
                 />
@@ -801,17 +772,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
   /** A thread of one message, the viewer's own. */
   const thread = () =>
     view({
-      conversation: {
-        id: "cnv_b",
-        userId: "u1",
-        userLabel: "arda@viberr.dev",
-        projectSlug: "viberr-core",
-        taskKey: null,
-        title: "Board thread",
-        createdAt: "2026-09-01T10:00:00.000Z",
-        updatedAt: "2026-09-01T10:00:00.000Z",
-        lastMessageAt: "2026-09-01T10:00:00.000Z",
-      },
+      conversation: BOARD_THREAD,
       messages: [
         { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, replyTo: null, steeredInto: null, createdAt: "2026-09-01T10:00:00.000Z" },
       ],
@@ -916,17 +877,6 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
  * under a sentence that carries its own words for the shimmer band.
  */
 describe("ruling 451: the page's conversation motion", () => {
-  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
-    id: "cnv_b",
-    userId: "u1",
-    userLabel: "arda@viberr.dev",
-    projectSlug: "viberr-core",
-    taskKey: null,
-    title: "Board thread",
-    createdAt: "2026-09-01T10:00:00.000Z",
-    updatedAt: "2026-09-01T10:00:00.000Z",
-    lastMessageAt: "2026-09-01T10:00:00.000Z",
-  };
   const message = (id: string, text: string, author: "user" | "controller") => ({
     id,
     conversationId: "cnv_b",
@@ -970,10 +920,10 @@ describe("ruling 451: the page's conversation motion", () => {
     // ends a minutes-long wait appears in one frame, as it did before.
     const first = message("m1", "Status?", "user");
     const reply = message("m2", "Two tasks are waiting on you.", "controller");
-    const { update } = renderLive(view({ conversation, messages: [first], viewerOwnsActive: true }));
+    const { update } = renderLive(view({ conversation: BOARD_THREAD, messages: [first], viewerOwnsActive: true }));
     await screen.findByText("Status?");
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
-    update(view({ conversation, messages: [first, reply], viewerOwnsActive: true }));
+    update(view({ conversation: BOARD_THREAD, messages: [first, reply], viewerOwnsActive: true }));
     await screen.findByText("Two tasks are waiting on you.");
     const fresh = [...document.querySelectorAll(".ctl-msg[data-fresh]")].map((el) => el.textContent ?? "");
     expect(fresh).toHaveLength(1);
@@ -983,7 +933,7 @@ describe("ruling 451: the page's conversation motion", () => {
   it("(a) the working sentence carries its own words, and a new step is a new line", async () => {
     const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [], steering: [] });
     const { update } = renderLive(
-      view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }),
+      view({ conversation: BOARD_THREAD, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }),
     );
     const row = await findWorkingRow();
     // CANARY: let `data-text` drift from the words and the band sweeps a
@@ -993,9 +943,9 @@ describe("ruling 451: the page's conversation motion", () => {
     expect(sentence.getAttribute("data-text")).toBe(sentence.textContent);
     const step = row.querySelector(".ctl-working-step")!;
     // CANARY: drop TurnStep's `key` and the step's words change in place.
-    update(view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }));
+    update(view({ conversation: BOARD_THREAD, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }));
     expect(row.querySelector(".ctl-working-step")).toBe(step);
-    update(view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Read · app/app.css") }));
+    update(view({ conversation: BOARD_THREAD, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Read · app/app.css") }));
     expect(row.querySelector(".ctl-working-step")).not.toBe(step);
     expect(row.querySelector(".ctl-working-step")!.textContent).toBe("Read · app/app.css");
   });
@@ -1005,7 +955,7 @@ describe("ruling 451: the page's conversation motion", () => {
     // person finds on opening the page mid-turn rises as if it had just changed.
     const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [], steering: [] });
     const at = (step: string) =>
-      view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn(step) });
+      view({ conversation: BOARD_THREAD, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn(step) });
     const { update } = renderLive(at("Bash · npm test"));
     const row = await findWorkingRow();
     expect(row.querySelector(".ctl-working-step")!.hasAttribute("data-fresh")).toBe(false);
@@ -1811,7 +1761,6 @@ describe("ruling 525: deleting a conversation from the rail", () => {
     ownerLabel: "Selin Aksoy",
     own: false,
     lastMessageAt: "2026-09-01T09:00:00.000Z",
-    projectSlug: "viberr-core",
     taskKey: "VIB-150",
     unread: false,
     readable: false,

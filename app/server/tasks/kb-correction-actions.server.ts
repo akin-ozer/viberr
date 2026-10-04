@@ -5,7 +5,7 @@ import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
 import { kbDirPath } from "~/server/files/file-store-root.server";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
-import { updateTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   listKbCorrections,
@@ -319,9 +319,7 @@ export async function correctKnowledgeDoc(
     toAgent: false,
     evidence: null,
   };
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(event);
-  });
+  await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), event);
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   return {
     outcome: "done",
@@ -388,9 +386,7 @@ export async function undoKbCorrectionOnTask(
     evidence: null,
   };
   try {
-    await updateTaskFile(taskRef(ctx, c.projectSlug, c.taskKey), (parsed) => {
-      parsed.timeline.unshift(event);
-    });
+    await appendTimelineEvent(taskRef(ctx, c.projectSlug, c.taskKey), event);
     reprojectTask(db, ctx, c.projectSlug, c.taskKey);
   } catch (error) {
     // The document is restored and the undo recorded; a task that can no

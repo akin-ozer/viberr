@@ -31,7 +31,6 @@ export function RadioSeg({
   onChange,
   label,
   className,
-  disabled,
   title,
   children,
 }: {
@@ -42,7 +41,6 @@ export function RadioSeg({
   /** The group's accessible name. */
   label?: string;
   className?: string;
-  disabled?: boolean;
   title?: string;
   children: ReactNode;
 }) {
@@ -66,7 +64,6 @@ export function RadioSeg({
       onValueChange={(next) => {
         if (next) onChange(next);
       }}
-      disabled={disabled}
     >
       {children}
     </ToggleGroup.Root>

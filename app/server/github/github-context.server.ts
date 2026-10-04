@@ -39,6 +39,13 @@ export type GithubContextFailure =
 
 export type GithubContextResult = GithubContext | GithubContextFailure;
 
+/** Why a read for the project cannot start, as a read's refusal names it. */
+export function githubContextFailureReason(failure: GithubContextFailure): string {
+  return failure.status === "no_repo_configured"
+    ? "no repository is configured for this project"
+    : "no GitHub credential is configured for this project";
+}
+
 export interface GithubContextOptions {
   /** Mock-transport hook for tests. */
   fetchImpl?: typeof fetch;
@@ -59,7 +66,6 @@ export function getProjectGithubContext(
     | { repo: string | null; default_branch: string | null }
     | undefined;
 
-  // P13-D-5: was `options.repoOverride ?? projectRow?.repo` — the override is gone.
   const repo = projectRow?.repo ?? null;
   if (!repo) return { status: "no_repo_configured" };
 

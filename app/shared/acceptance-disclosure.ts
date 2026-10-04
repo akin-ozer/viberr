@@ -81,10 +81,15 @@ const VERDICT_VALUES: readonly Validation[] = [
  * which is exactly the "bare POST" case the server refuses. Deliberately
  * strict: a half-filled or unrecognised echo is NOT a disclosure, and coercing
  * one into a default would re-open the hole this exists to close.
+ *
+ * Ruling 88 (F21-2): the route actions pass `null` THROUGH to the server rather
+ * than swallowing it: it is the difference between "an HTTP caller sent no
+ * acknowledgment" (refused — the bare POST F21-2 found accepting silently) and
+ * "an in-process caller carries its own disclosure contract" (omitted).
  */
-export function parseAcceptanceDisclosure(
-  read: (field: string) => string | null,
-): AcceptanceDisclosure | null {
+export function parseAcceptanceDisclosure(formData: FormData): AcceptanceDisclosure | null {
+  // An absent field reads "", which is "no disclosure" rather than a value.
+  const read = (field: string) => String(formData.get(field) ?? "");
   const revision = read(ACCEPT_DISCLOSURE_FIELDS.revision);
   // Matched against the declared vocabularies rather than cast into them: an
   // unrecognised word is not a disclosure, it is noise, and it must not become

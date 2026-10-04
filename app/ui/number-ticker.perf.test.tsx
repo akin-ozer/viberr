@@ -42,15 +42,19 @@ function retarget(to: number) {
   };
   const view = render(
     <Profiler id="ticker" onRender={onRender}>
-      <NumberTicker end={200} duration={2} start={200} />
+      <NumberTicker end={200} />
     </Profiler>,
   );
   const el = view.container.querySelector("[data-count]")!;
+  // Settle the mount's count up from zero; only the retarget is measured.
+  act(() => {
+    vi.advanceTimersByTime(2100);
+  });
   commits = 0;
   const texts = new Set<string>();
   view.rerender(
     <Profiler id="ticker" onRender={onRender}>
-      <NumberTicker end={to} duration={2} start={200} />
+      <NumberTicker end={to} />
     </Profiler>,
   );
   for (let frame = 0; frame < 160; frame += 1) {

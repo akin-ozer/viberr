@@ -585,7 +585,7 @@ function DockShell({ context }: { context: DockContext }) {
       selectedId !== null && selectedId !== current.conversation?.id
         ? selectedId
         : (current.conversation?.id ?? "");
-    body.set("conversationId", target === NEW_THREAD ? NEW_THREAD : target);
+    body.set("conversationId", target);
     sentUnder.current = context.key;
     // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
     // takes them. `setText("")` used to run here, optimistically, and nothing

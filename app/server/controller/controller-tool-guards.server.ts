@@ -85,7 +85,6 @@ export function controllerToolGuards(
   dataRoot?: string,
 ): ControllerToolGuards {
   const actor = { userId: user.id, label: encodeControllerInstrument(user.email) };
-  const auditActor: AuditActor = actor;
 
   const orgAdmin = () => isOrgAdmin(db, user.id);
 
@@ -93,7 +92,7 @@ export function controllerToolGuards(
     if (orgAdmin()) return;
     recordAudit(db, {
       action: "controller.authority.denied",
-      actor: auditActor,
+      actor,
       details: { scope: "instance", what },
     });
     throw AppError.forbidden(

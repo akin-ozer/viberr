@@ -104,16 +104,15 @@ async function isInitialCommit(gh: GithubContext, sha: string, message: string):
   return commit.ok && commit.data.parents.length === 0 && commit.data.message.trim() === message;
 }
 
-/** Follow `Link: <…>; rel="next"` for at most `maxPages` pages and return the
- *  OLDEST commit sha of `branch`, or null when GitHub could not be read. */
+/** Page through `branch`'s commits, 100 a page and at most 10 pages, and return
+ *  its OLDEST commit sha, or the failure when GitHub could not be read. */
 async function rootCommitOf(
   gh: GithubContext,
   branch: string,
-  maxPages = 10,
 ): Promise<{ sha: string } | { failure: GithubResponse<unknown> }> {
   let page = 1;
   let oldest: string | null = null;
-  for (; page <= maxPages; page += 1) {
+  for (; page <= 10; page += 1) {
     const result = await gh.client.request("GET", `/repos/${gh.repo}/commits`, ghCommitsSchema, {
       searchParams: { sha: branch, per_page: 100, page },
     });

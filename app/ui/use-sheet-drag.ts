@@ -58,7 +58,6 @@ const OWN_TAP = "button, a[href], input, textarea, select, [role='button']";
 
 type Drag = {
   pointerId: number;
-  handle: HTMLElement;
   startY: number;
   base: number;
   raw: number;
@@ -273,7 +272,6 @@ export function useSheetDrag({
       };
       drag.current = {
         pointerId: event.pointerId,
-        handle,
         startY: event.clientY,
         base: pull,
         raw: pull,

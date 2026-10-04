@@ -21,6 +21,7 @@ import {
   postTurnTransportLine,
   RUN_PHASE,
   stepUpdateForLine,
+  viberrLine,
   type RunCallbacks,
   type CompactCallbacks,
   type CompactOutcome,
@@ -45,7 +46,7 @@ import {
 } from "./user-homes.server";
 import { removeAgentTreeSync } from "./agent-trees.server";
 import { projectEnvelope } from "./wire-format.server";
-import { redactProviderText } from "~/server/secrets/git-output-redact.server";
+import { causeMessages, redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
   reapRunProcesses,
   RUN_MARKER_ENV,
@@ -646,18 +647,8 @@ function classifyCodexFailure(
   // When present, this text drives BOTH the class regexes and the provider text.
   streamText?: string | null,
 ): CodexFailure {
-  const parts: string[] = [];
-  if (streamText) parts.push(streamText);
-  let current: unknown = cause;
-  for (let depth = 0; depth < 3 && current != null; depth += 1) {
-    if (current instanceof Error) {
-      parts.push(current.message);
-      current = current.cause;
-    } else {
-      parts.push(String(current));
-      break;
-    }
-  }
+  const parts = causeMessages(cause);
+  if (streamText) parts.unshift(streamText);
   const raw = parts.join("\n");
   // R20-3 (F20-4): the provider's OWN words, scrubbed. The canonical `message`
   // stays generic (and the class rides the tag), but the redacted sentence is
@@ -935,18 +926,13 @@ export function createCodexAdapter(
         if (compactHome) finishCodexRunHome(compactHome, agentOwner(spec.agent));
       }
       if (!outcome.compacted) {
-        const occurredAt = new Date().toISOString();
-        cb.onLine({
-          raw: "",
-          display: {
-            t: occurredAt.slice(11, 19),
+        cb.onLine(
+          viberrLine({
             ev: "meta",
             tag: "run·compaction·failed",
             text: `compaction at the end of the run did not happen: ${redactProviderText(outcome.reason)}`,
-          },
-          facts: {},
-          occurredAt,
-        });
+          }),
+        );
       }
       return outcome;
     },

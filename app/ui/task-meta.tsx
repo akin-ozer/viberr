@@ -20,21 +20,15 @@ const PRIORITY_DISPLAY = {
   urgent: { kind: "risk", label: "urgent" },
 } satisfies Record<Exclude<TaskPriority, "normal">, { kind: PillKind; label: string }>;
 
-/** A priority flag pill. `normal` renders nothing (it is the default). */
-export function PriorityFlag({
-  priority,
-  sm,
-}: {
-  priority: TaskPriority;
-  sm?: boolean;
-}) {
+/** A priority flag pill, small. `normal` renders nothing (it is the default). */
+export function PriorityFlag({ priority }: { priority: TaskPriority }) {
   if (priority === "normal") return null;
   const d = PRIORITY_DISPLAY[priority];
   return (
     // `low` is a description of the task; `high` and `urgent` are a claim on the
     // reader's attention. Only the latter two earn a fill (design pass
     // 2026-09-08) — a low-priority card used to shout as loudly as an urgent one.
-    <Pill kind={d.kind} sm={sm} quiet={priority === "low"}>
+    <Pill kind={d.kind} sm quiet={priority === "low"}>
       <Icon name="flag" />
       {d.label}
     </Pill>
@@ -130,11 +124,9 @@ function isOverdue(dueDate: string | null, today: string): boolean {
 export function DueDatePill({
   dueDate,
   today,
-  sm,
 }: {
   dueDate: string | null;
   today?: string;
-  sm?: boolean;
 }) {
   const hydrated = useHydrated();
   if (!dueDate) return null;
@@ -143,7 +135,7 @@ export function DueDatePill({
   return (
     // A date that has not passed is a fact about the task; an overdue one is a
     // problem. Only the problem gets a fill (design pass 2026-09-08).
-    <Pill kind={overdue ? "blocked" : "neutral"} sm={sm} quiet={!overdue}>
+    <Pill kind={overdue ? "blocked" : "neutral"} sm quiet={!overdue}>
       <Icon name="clock" />
       {overdue ? `overdue · ${formatDueDate(dueDate)}` : `due ${formatDueDate(dueDate)}`}
     </Pill>
