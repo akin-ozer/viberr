@@ -3,8 +3,6 @@ import { useFetcher, useNavigate } from "react-router";
 import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
 import {
   DragDropProvider,
-  KeyboardSensor,
-  PointerSensor,
   type DragEndEvent,
   type DragMoveEvent,
   type DragOverEvent,
@@ -16,10 +14,10 @@ import {
   Accessibility,
   defaultPreset,
   Feedback,
-  PointerActivationConstraints,
 } from "@dnd-kit/dom";
 import { z } from "zod";
 import { Avatar } from "~/ui/avatar";
+import { DRAG_SENSORS } from "~/ui/drag-sensors";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { GlyphSwap } from "~/ui/copy-glyph";
@@ -373,35 +371,12 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
 
 /* ------------------------------------------------------------ stage reorder
  *
- * ONE drag language (pass 16). The board migrated to dnd-kit on 2026-08-03
- * under a deliberate affordance ruling: the whole card is the drag surface and
- * there is NO grip handle. This list shipped the opposite — a hand-rolled
- * HTML5 `draggable` row with a visible `.stg-handle` grip — so the product
- * taught two contradictory gestures for the same verb. It is now the same
- * foundation, the same sensors, the same "nothing reorders client-side" rule,
- * and the same carve-out that keeps real controls inside the row clickable.
+ * ONE drag language (pass 16): the board's foundation, its sensors
+ * (`DRAG_SENSORS`), its "nothing reorders client-side" rule and its carve-out
+ * that keeps real controls inside the row clickable. The hand-rolled HTML5
+ * `draggable` row with a `.stg-handle` grip it replaced taught the opposite
+ * gesture for the same verb.
  */
-const STAGE_SENSORS = [
-  PointerSensor.configure({
-    // The row contains a rename button, a Move menu and a remove ✕. Only those
-    // opt out of dragging — everything else in the row lifts it, which is what
-    // makes a grip unnecessary.
-    preventActivation: (event: PointerEvent) => {
-      const target = event.target;
-      return (
-        target instanceof Element &&
-        Boolean(target.closest("button, input, select, textarea"))
-      );
-    },
-    // Mouse: distance only, so a slow press on the row's name still clicks.
-    // Touch: a short press, so scrolling the settings column is never hijacked.
-    activationConstraints: (event: PointerEvent) =>
-      event.pointerType === "touch"
-        ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
-        : [new PointerActivationConstraints.Distance({ value: 5 })],
-  }),
-  KeyboardSensor,
-];
 
 /* Same call as the board: the Accessibility plugin's role="button" wrapper
  * would nest the rename/move/remove controls inside an interactive element
@@ -974,7 +949,7 @@ export function StagesPanel({
         </span>
       </div>
       <DragDropProvider
-        sensors={STAGE_SENSORS}
+        sensors={DRAG_SENSORS}
         plugins={STAGE_PLUGINS}
         onDragStart={onDragStart}
         onDragOver={onDragOver}

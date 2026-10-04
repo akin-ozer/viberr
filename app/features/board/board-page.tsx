@@ -18,8 +18,6 @@ import {
 } from "react-router";
 import {
   DragDropProvider,
-  KeyboardSensor,
-  PointerSensor,
   useDroppable,
   type DragEndEvent,
   type DragMoveEvent,
@@ -32,10 +30,10 @@ import {
   Accessibility,
   defaultPreset,
   Feedback,
-  PointerActivationConstraints,
   type DragDropManager,
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
+import { DRAG_SENSORS } from "~/ui/drag-sensors";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
 import { FiledFiles } from "./filed-files";
 import { FILING_BATCH } from "~/shared/attachment-kinds";
@@ -143,34 +141,6 @@ export interface BoardColumnData {
   stage: BoardStage;
   tasks: BoardTask[];
 }
-
-/* Drag-and-drop configuration (dnd-kit).
- *
- * The whole card stays the drag surface — no grip handle. A small pointer
- * distance keeps plain clicks navigating to the task; touch requires a short
- * press so column scrolling is not hijacked. Escape cancels a lifted drag. */
-const BOARD_SENSORS = [
-  PointerSensor.configure({
-    // The card face is a Link, and the sensor's default refuses to lift from
-    // inside interactive elements — which would demand a grip handle. Only
-    // real controls (the StageMenu button) opt out of dragging.
-    preventActivation: (event: PointerEvent) => {
-      const target = event.target;
-      return (
-        target instanceof Element &&
-        Boolean(target.closest("button, input, select, textarea"))
-      );
-    },
-    // Mouse is distance-only (the default's hold-to-lift delay would swallow
-    // a slow press-and-release on the link, which must stay a navigation);
-    // touch keeps the long-press so column scrolling is never hijacked.
-    activationConstraints: (event: PointerEvent) =>
-      event.pointerType === "touch"
-        ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
-        : [new PointerActivationConstraints.Distance({ value: 5 })],
-  }),
-  KeyboardSensor,
-];
 
 /* No ARIA decoration on the cards: the plugin's role="button" on the card
  * wrapper nests the task link and StageMenu inside an interactive control
@@ -2853,7 +2823,7 @@ export function BoardPage({
 
       {group === "stage" ? (
         <DragDropProvider
-          sensors={BOARD_SENSORS}
+          sensors={DRAG_SENSORS}
           plugins={BOARD_PLUGINS}
           onDragStart={onDragStart}
           onDragOver={onDragOver}
