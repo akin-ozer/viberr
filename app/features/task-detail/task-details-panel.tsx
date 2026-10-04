@@ -368,6 +368,25 @@ const PriorityRow = memo(function PriorityRow({
   );
 });
 
+/** A property menu's keys: roving arrows (wrapping), Home and End. */
+function onMenuKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+  const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+  const at = items.findIndex((el) => el === document.activeElement);
+  const to =
+    e.key === "ArrowDown"
+      ? (at + 1) % items.length
+      : e.key === "ArrowUp"
+        ? (at - 1 + items.length) % items.length
+        : e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? items.length - 1
+            : null;
+  if (to === null) return;
+  e.preventDefault();
+  items[to]?.focus();
+}
+
 /** The priorities as an ARIA menu: roving arrows, Home and End, the current
  *  one checked. */
 function PriorityMenu({
@@ -377,25 +396,8 @@ function PriorityMenu({
   current: TaskPriority;
   onPick: (priority: TaskPriority) => void;
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    const at = items.findIndex((el) => el === document.activeElement);
-    const to =
-      e.key === "ArrowDown"
-        ? (at + 1) % items.length
-        : e.key === "ArrowUp"
-          ? (at - 1 + items.length) % items.length
-          : e.key === "Home"
-            ? 0
-            : e.key === "End"
-              ? items.length - 1
-              : null;
-    if (to === null) return;
-    e.preventDefault();
-    items[to]?.focus();
-  };
   return (
-    <div className="prop-menu-list" onKeyDown={onKeyDown}>
+    <div className="prop-menu-list" onKeyDown={onMenuKeyDown}>
       {PRIORITY_MENU.map((p) => (
         <button
           key={p}
@@ -562,25 +564,8 @@ function EpicMenu({
   current: string | null;
   onPick: (epicId: string | null) => void;
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    const at = items.findIndex((el) => el === document.activeElement);
-    const to =
-      e.key === "ArrowDown"
-        ? (at + 1) % items.length
-        : e.key === "ArrowUp"
-          ? (at - 1 + items.length) % items.length
-          : e.key === "Home"
-            ? 0
-            : e.key === "End"
-              ? items.length - 1
-              : null;
-    if (to === null) return;
-    e.preventDefault();
-    items[to]?.focus();
-  };
   return (
-    <div className="prop-menu-list epic-menu" onKeyDown={onKeyDown}>
+    <div className="prop-menu-list epic-menu" onKeyDown={onMenuKeyDown}>
       <button
         type="button"
         role="menuitemradio"
