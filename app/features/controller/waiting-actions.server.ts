@@ -16,9 +16,9 @@ import {
 import { formFiles } from "~/server/files/form-files.server";
 import type { WaitingActionResult } from "./waiting-actions";
 
-/** A text field at the request boundary: a string, trimmed; anything else
- *  (absent, a File part) reads as empty. */
-const textField = z.string().catch("");
+/** A text field at the controller doors' request boundary: a string as
+ *  posted; anything else (absent, a File part) reads as empty. */
+export const textField = z.string().catch("");
 
 /** Ruling 527: the send mode a form posts. Only an explicit `queue` queues:
  *  steering is what a message sent while a turn works does by default. */

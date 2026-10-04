@@ -1,5 +1,4 @@
 import { data } from "react-router";
-import { z } from "zod";
 import type { Route } from "./+types/resources.controller";
 import { authenticate } from "~/server/auth/require-user.server";
 import { appErrorResponse } from "~/server/auth/form-action.server";
@@ -19,6 +18,7 @@ import { userBackendHealth } from "~/server/runtimes/backend-credentials.server"
 import { NEW_CONVERSATION_PARAM } from "~/features/controller/conversation-param";
 import {
   sendModeOf,
+  textField,
   waitingMessageAction,
 } from "~/features/controller/waiting-actions.server";
 import {
@@ -78,10 +78,6 @@ interface DockScopeParams {
   projectSlug: string | null;
   taskKey: string | null;
 }
-
-/** A text field at the request boundary: a string, trimmed; anything else
- *  (absent, a File part) reads as empty. */
-const textField = z.string().catch("");
 
 function scopeParams(params: URLSearchParams | FormData): DockScopeParams {
   const read = (key: string) => textField.parse(params.get(key)).trim() || null;
