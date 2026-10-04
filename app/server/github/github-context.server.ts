@@ -66,7 +66,6 @@ export function getProjectGithubContext(
     | { repo: string | null; default_branch: string | null }
     | undefined;
 
-  // P13-D-5: was `options.repoOverride ?? projectRow?.repo` — the override is gone.
   const repo = projectRow?.repo ?? null;
   if (!repo) return { status: "no_repo_configured" };
 
