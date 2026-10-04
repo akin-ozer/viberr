@@ -15,7 +15,7 @@ import { Icon } from "~/ui/icon";
 import { DocViewToggle, MarkdownDoc, type DocView } from "~/ui/markdown-doc";
 import { useDialog } from "~/ui/use-dialog";
 import { useRemoveFromRecord } from "./remove-from-record";
-import { attachmentKind, IMAGE_RE, looksBinary } from "./attachment-kind";
+import { attachmentKind, looksBinary } from "./attachment-kind";
 
 /**
  * Attachment lightbox (owner request 2026-08-21): clicking a piece of image
@@ -56,9 +56,6 @@ export interface AttachmentDocLinks {
   names: ReadonlySet<string>;
   base: string;
 }
-
-/** Re-exported for the panel and the timeline, which split images from files. */
-export { IMAGE_RE };
 
 export interface LightboxImage {
   /** Filename, for the caption and the accessible name. */

@@ -8,7 +8,8 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AttachmentThumb } from "./attachment-image";
-import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
+import { IMAGE_RE } from "./attachment-kind";
+import { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
  * R19-19 — the task's attachments: files an agent's browser saved
