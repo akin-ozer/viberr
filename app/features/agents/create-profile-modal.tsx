@@ -20,6 +20,7 @@ import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { useDialog } from "~/ui/use-dialog";
 import type { AgentProfileView } from "./agent-types";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
+import type { CatalogModel, ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import {
   CAP_MODAL_CATALOG,
   CAP_MODAL_DEFAULTS,
@@ -93,26 +94,6 @@ const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
   { id: "codex", label: BACKEND_LABEL.codex },
   { id: "claude", label: BACKEND_LABEL.claude },
 ];
-
-/** Client mirror of the /resources/model-catalog payload shape. Exported for
- *  the controller settings panel, which picks its model/effort with the same
- *  machinery (ruling 106). */
-export interface CatalogModel {
-  value: string;
-  displayName: string;
-  description: string;
-  supportsEffort: boolean;
-  efforts?: string[];
-  /** R20-3 / F20-4: set when a real run proved the provider refuses this model
-   *  for this account — the option is disabled and the reason explained. */
-  unavailable?: { reason: string; markedAt: string };
-}
-export interface ModelCatalog {
-  models: CatalogModel[];
-  efforts: string[];
-  defaultModel: string;
-  defaultEffort: string;
-}
 
 const EFFORT_LABEL = new Map<string, string>([
   ["minimal", "Minimal"],
