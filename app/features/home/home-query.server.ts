@@ -28,8 +28,8 @@ import { indexDecisionInbox } from "~/server/projections/notifications.server";
  * (home spec §3). Aggregates derive from the store projections, except the
  * live-run count which reads the runtime registry:
  *
- * - `running`: distinct tasks with an `agent_runs` row in
- *   `state = 'running'` — the live run registry, not a `waiting`-field proxy.
+ * - `running`: the `agent_runs` rows in `state = 'running'` — the live run
+ *   registry, not a `waiting`-field proxy.
  * - `waiting`: LIVE pending decisions this viewer can act on, and
  *   `overrideWaiting` the ones only their org-admin override reaches. Both come
  *   from `indexDecisionInbox` (notifications.server.ts) — the SAME call the
