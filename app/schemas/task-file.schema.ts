@@ -113,7 +113,7 @@ export function isValidDueDate(due: string): boolean {
   );
 }
 
-/** The 12 timeline event types (cross-cutting contracts §1.3). Parsers keep
+/** The timeline event types (cross-cutting contracts §1.3). Parsers keep
  * unknown strings as-is (renderer falls back to comment meta).
  *
  * P13-LV-03: `policy` used to be a grab-bag — a real PAT-scope violation, a

@@ -70,15 +70,14 @@ const ALLOWED_AUTH_PATHS = new Set<string>([
   "/sign-out", // logout route
 ]);
 
-/** The concrete better-auth instance type (with our plugins). */
+/** The concrete better-auth instance type. */
 export type ViberrAuth = ReturnType<typeof betterAuth>;
 
 /**
  * The slice of a Better Auth endpoint context the provider resolution reads.
  * Narrow on purpose: the database hooks hand over a full
  * `GenericEndpointContext`, but the provider id is readable from the declared
- * path and its route params alone, and a two-field contract is what lets the
- * unit test drive it with a literal instead of a whole auth context.
+ * path and its route params alone.
  */
 export interface AuthEndpointContext {
   path?: string;

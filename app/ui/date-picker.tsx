@@ -13,7 +13,7 @@ import { useDismiss } from "./use-dismiss";
  * centered with `overflow: hidden` — a `position: fixed` popover anchors to the
  * transformed card (wrong coords) and an absolute one is clipped. An in-flow
  * block lives in the scrollable modal body, so it is never clipped or
- * mis-anchored, and works identically in the (non-dialog) Details panel.
+ * mis-anchored.
  * `useDismiss` still closes it on an outside press or Escape.
  */
 

@@ -177,8 +177,8 @@ export function validationLabel(value: string): string {
 }
 
 /** Whether a validation value belongs to the quiet tier — a description of
- *  where the evidence stands, not a problem. The board card and list row draw
- *  only the fills (ruling 168, `StateSignals`); the task hero draws every value.
+ *  where the evidence stands, not a problem. The board card draws only the
+ *  fills (ruling 168, `cardProblems`), and so does the task hero.
  *  Read from the vocabulary so the tier is decided in one place. */
 export function validationQuiet(value: string): boolean {
   return (VALIDATION_BY_VALUE.get(value) ?? VALIDATION_DISPLAY.none).quiet === true;

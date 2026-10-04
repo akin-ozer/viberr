@@ -40,7 +40,7 @@ export interface EvidenceRowRender {
 
 export interface TimelineEventRender {
   id: number;
-  /** One of the 9 contract types, or an unknown string (renderer falls
+  /** One of `TIMELINE_EVENT_TYPES`, or an unknown string (renderer falls
    * back to comment meta — keep tolerant). */
   type: string;
   occurredAt: string;

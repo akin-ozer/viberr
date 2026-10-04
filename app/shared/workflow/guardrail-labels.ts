@@ -19,7 +19,7 @@ export function guardrailLabel(id: string): string {
   return LABELS.get(id) ?? id;
 }
 
-/** The ids the runtime enforces (comment-guardrails.server.ts reads them). */
+/** The ids the runtime enforces. */
 export const DEFAULT_GUARDRAIL_IDS: readonly string[] = DEFAULT_GUARDRAILS.map(
   (g) => g.id,
 );

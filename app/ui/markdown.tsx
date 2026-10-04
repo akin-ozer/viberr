@@ -215,7 +215,7 @@ function rehypeTaskLinks(links: TaskLinks = {}) {
  * relative prefix, or the bare filename), it is rewritten to the member-only
  * serving route. Anything else — absolute URLs, other paths, names the task
  * does not have — passes through untouched: no guessing, same contract as the
- * evidence linkify (timeline.tsx `EvidenceLabel`).
+ * evidence linkify (evidence-list.tsx `EvidenceLabel`).
  */
 function repairAttachmentHref(
   href: string | undefined,

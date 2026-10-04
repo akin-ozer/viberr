@@ -5,7 +5,6 @@ import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-fi
  *
  * Stages are per-project (stored in project.md); this template feeds org
  * surfaces (the AgentModal instance stage list) and the create-project action.
- * Colors accept both hex and var(--*) strings.
  *
  * `workflow` is a CHAIN over `stages`: one rule per consecutive pair, so every
  * stage has an in-edge (bar the entry) and an out-edge (bar the terminal) and

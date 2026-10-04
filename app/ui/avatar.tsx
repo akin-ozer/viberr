@@ -45,8 +45,7 @@ export function Avatar({
  * The group carries ONE accessible name listing everyone, so the overlap (and
  * the `+N` fold) is presentation only: nobody is hidden from a screen reader by
  * a visual cap. `role="img"` is what makes the label count — ARIA prohibits
- * `aria-label` on a role-less span and readers drop it, the same reason
- * MemberStack and ReviewerStack already carry the role.
+ * `aria-label` on a role-less span and readers drop it.
  */
 export function AvatarGroup({
   people,
