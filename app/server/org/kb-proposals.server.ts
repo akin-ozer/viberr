@@ -67,8 +67,6 @@ interface EntrySpan {
 interface ProposalSection {
   /** Offset of the heading line, or -1 when the document has no section. */
   headingStart: number;
-  /** Offset just past the heading line (its newline included). */
-  headingEnd: number;
   /** Offset where the section stops: the next `#`/`##` heading, or the end. */
   sectionEnd: number;
   entries: EntrySpan[];
@@ -105,7 +103,7 @@ function findSection(raw: string): ProposalSection {
     }
   }
   if (heading === -1) {
-    return { headingStart: -1, headingEnd: -1, sectionEnd: raw.length, entries: [] };
+    return { headingStart: -1, sectionEnd: raw.length, entries: [] };
   }
   let sectionEnd = raw.length;
   const entries: EntrySpan[] = [];
@@ -133,12 +131,7 @@ function findSection(raw: string): ProposalSection {
     }
   }
   close();
-  return {
-    headingStart: lines[heading]!.start,
-    headingEnd: lines[heading]!.end,
-    sectionEnd,
-    entries,
-  };
+  return { headingStart: lines[heading]!.start, sectionEnd, entries };
 }
 
 /** The id an entry has where it stands. */
