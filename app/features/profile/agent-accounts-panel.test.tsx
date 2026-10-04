@@ -50,14 +50,31 @@ function backend(
   name: "claude" | "codex",
   overrides: Partial<ProfileBackend> = {},
 ): ProfileBackend {
+  const health = overrides.health ?? { ...HEALTH_NONE, backend: name, userId: "u_arda" };
   return {
     backend: name,
-    health: { ...HEALTH_NONE, backend: name, userId: "u_arda" },
+    health,
     login: null,
     methods:
       name === "claude"
         ? { signIn: ["claudeai", "console"], paste: ["api_key"] }
         : { signIn: ["device"], paste: ["api_key", "access_token"] },
+    // What the loader sends (ruling 507): the connected account, active.
+    accounts:
+      health.kind === null
+        ? []
+        : [
+            {
+              id: health.accountId ?? "",
+              name: health.accountName ?? (name === "claude" ? "Claude" : "Codex"),
+              label: null,
+              active: true,
+              health,
+            },
+          ],
+    limits: { maxAccounts: 10, maxLabelLength: 60 },
+    lastRefusal: null,
+    usage: null,
     ...overrides,
   };
 }

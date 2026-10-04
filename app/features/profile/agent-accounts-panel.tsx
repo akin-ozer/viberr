@@ -599,24 +599,6 @@ function accountKindWord(health: UserBackendHealth): string {
   return health.kind === "access_token" ? "Workspace access token" : "API key";
 }
 
-/**
- * The accounts a card lists. The loader always sends them (ruling 507); a
- * fixture from before the ruling carries only the active account's `health`,
- * which stands for the one account it describes.
- */
-function cardAccounts(data: ProfileBackend): ProfileBackendAccount[] {
-  if (data.accounts) return data.accounts;
-  if (data.health.kind === null) return [];
-  return [
-    {
-      id: data.health.accountId ?? "",
-      name: data.health.accountName ?? BACKEND_LABEL[data.backend],
-      label: null,
-      active: true,
-      health: data.health,
-    },
-  ];
-}
 
 /**
  * Ruling 507: give an account the person's own name, or clear it. The same
@@ -1042,17 +1024,15 @@ function AgentAccountCard({
   const { backend, health, methods } = data;
   const label = BACKEND_LABEL[backend];
   // Ruling 507: every account the person holds here, the active one first.
-  const accounts = cardAccounts(data);
+  const accounts = data.accounts;
   const active = accounts.find((account) => account.active) ?? null;
   const others = accounts.filter((account) => !account.active);
-  const limits = data.limits ?? { maxAccounts: Number.POSITIVE_INFINITY, maxLabelLength: 60 };
+  const limits = data.limits;
   // Ruling 130(d) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
   // person's own account. The card used to say "connected · verified" while
   // every run on the account was refused with a 403.
-  const lastRefusal = data.lastRefusal ?? null;
-  // Ruling 294: optional on the interface so fixtures predating it stay valid;
-  // the loader always sets it.
-  const usage = data.usage ?? null;
+  const lastRefusal = data.lastRefusal;
+  const usage = data.usage;
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
