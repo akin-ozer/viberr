@@ -1314,7 +1314,6 @@ export function conversationTurnState(
  * unanswered like a queued one.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
-  const note = RESTART_NOTE;
   let recovered = 0;
 
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
@@ -1373,13 +1372,13 @@ export function recoverControllerConversations(db: DatabaseSync): number {
         conversationId,
         author: "controller",
         runId,
-        text: note,
+        text: RESTART_NOTE,
         replyTo: messages.shift() ?? null,
       });
       recovered += 1;
     }
     for (const messageId of messages) {
-      appendMessage(db, { conversationId, author: "controller", text: note, replyTo: messageId });
+      appendMessage(db, { conversationId, author: "controller", text: RESTART_NOTE, replyTo: messageId });
       recovered += 1;
     }
   }
