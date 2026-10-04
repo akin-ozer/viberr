@@ -246,7 +246,7 @@ export function ProjectCard({
             printed the backticks. */}
         {showDesc && (
           <p className="pj-desc">
-            <RichText text={p.desc} mentions={false} />
+            <RichText text={p.desc} />
           </p>
         )}
         <StageMeter stages={p.stages} dist={p.dist} />

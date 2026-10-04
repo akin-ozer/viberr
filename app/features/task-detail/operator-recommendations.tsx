@@ -179,7 +179,7 @@ export function OperatorRecommendations({
                   micro-format renderer, not markdown: a card is one line. */}
               {r.detail && (
                 <div className="op-rec-detail">
-                  <RichText text={r.detail} mentions={false} />
+                  <RichText text={r.detail} />
                 </div>
               )}
               {/* Hunt 2026-08-29: `prompt` is the DIRECTIVE Apply hands the
@@ -189,7 +189,7 @@ export function OperatorRecommendations({
                   line does not already carry verbatim. */}
               {r.kind === "run_agent" && r.prompt && r.prompt !== r.detail && (
                 <div className="op-rec-prompt">
-                  Directive: &ldquo;<RichText text={r.prompt} mentions={false} />&rdquo;
+                  Directive: &ldquo;<RichText text={r.prompt} />&rdquo;
                 </div>
               )}
               {acceptanceRefusal && reachesAcceptance(r, terminalStageId) && (

@@ -35,7 +35,7 @@ const ACTIVITY_TEXT_PREVIEW_LIMIT = 160;
 function ActivityText({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   if (text.length <= ACTIVITY_TEXT_PREVIEW_LIMIT) {
-    return <RichText text={text} mentions={false} />;
+    return <RichText text={text} />;
   }
   if (!expanded) {
     // The collapsed line is plain text, so markdown marks must not leak into
@@ -61,7 +61,7 @@ function ActivityText({ text }: { text: string }) {
   }
   return (
     <span className="act-collapsible">
-      <RichText text={text} mentions={false} />{" "}
+      <RichText text={text} />{" "}
       <button
         type="button"
         className="keybtn act-toggle"

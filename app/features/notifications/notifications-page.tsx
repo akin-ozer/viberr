@@ -115,7 +115,7 @@ function NtfNeedsYou({
                       <span className="ntf-where">{where}</span> ·{" "}
                     </>
                   )}
-                  <RichText text={n.text} mentions={false} />
+                  <RichText text={n.text} />
                 </div>
               </span>
               {/* Ruling 625: the unread dot sits in the trailing cluster beside
@@ -211,11 +211,11 @@ function NtfStream({
                   {n.title ? (
                     <strong className="ntf-ev-title">{n.title}</strong>
                   ) : (
-                    <RichText text={n.text} mentions={false} />
+                    <RichText text={n.text} />
                   )}
                   {n.title && (
                     <span className="ntf-ev-text" data-clamped>
-                      <RichText text={n.text} mentions={false} />
+                      <RichText text={n.text} />
                     </span>
                   )}
                   {/* B-FD6: the link NAVIGATES, so it renders only when the row

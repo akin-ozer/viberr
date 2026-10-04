@@ -444,7 +444,7 @@ function EpicHistory({
             {day.rows.map((entry, i) => (
               <li key={`${entry.occurredAt}-${i}`}>
                 <span className="epic-history-text">
-                  <RichText text={entry.text} mentions={false} taskLinks={taskLinks} />
+                  <RichText text={entry.text} taskLinks={taskLinks} />
                 </span>
                 <time className="epic-history-at" dateTime={entry.occurredAt}>
                   {(local ? formatClock : formatClockUTC)(entry.occurredAt)}
