@@ -21,7 +21,8 @@ import {
   type OperatorActionResult,
   type OperatorAuthority,
 } from "~/server/tasks/operator-authority.server";
-import { operatorDispatchAgent, operatorOpenPacket } from "~/server/tasks/operator-actions.server";
+import { operatorDispatchAgent } from "~/server/tasks/operator-actions.server";
+import { operatorOpenPacket } from "~/server/tasks/operator-packets.server";
 import {
   recordAcceptancePacketWithdrawal,
   recordRecommendationWithdrawal,

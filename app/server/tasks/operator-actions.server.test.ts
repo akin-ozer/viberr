@@ -61,20 +61,22 @@ import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
   operatorDispatchAgent,
-  operatorOpenPacket,
   operatorPostComment,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
   operatorSetGoal,
-  operatorResolvePacket,
   operatorSnapshot,
   OPERATOR_TIMELINE_DEFAULT,
   operatorTransitionStage,
   operatorWriteCompletionPacket,
+} from "./operator-actions.server";
+import {
+  operatorOpenPacket,
+  operatorResolvePacket,
   type OperatorPacketOptionInput,
   GOAL_DRAFT_MAX_CHARS,
-} from "./operator-actions.server";
+} from "./operator-packets.server";
 import {
   deliverGate,
   gate,

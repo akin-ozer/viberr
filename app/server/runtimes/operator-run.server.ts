@@ -45,10 +45,12 @@ import {
 } from "~/server/files/task-writer.server";
 import {
   OPERATOR_TIMELINE_DEFAULT,
-  operatorOpenPacket,
-  type OperatorOpenPacketInput,
   operatorSnapshot,
 } from "~/server/tasks/operator-actions.server";
+import {
+  operatorOpenPacket,
+  type OperatorOpenPacketInput,
+} from "~/server/tasks/operator-packets.server";
 import {
   type OperatorAuthority,
   type OperatorAuthorityOverrides,

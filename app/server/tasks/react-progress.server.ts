@@ -6,7 +6,7 @@ import {
 } from "~/schemas/task-file.schema";
 import type { ProjectGate } from "~/schemas/project-file.schema";
 import { projectGatesView } from "~/shared/project-gates";
-import type { OperatorPacketOptionInput } from "./operator-actions.server";
+import type { OperatorPacketOptionInput } from "./operator-packets.server";
 
 /**
  * Ruling 489 (pass 40, F40-68): where a react chain's work stands, read from

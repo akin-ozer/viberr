@@ -33,11 +33,8 @@ import {
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
-  CREATE_TASK_BASE_NOTE,
   OPERATOR_TIMELINE_DEFAULT,
   OPERATOR_TIMELINE_MAX,
-  operatorOpenPacket,
-  operatorResolvePacket,
   operatorCancelSchedule,
   operatorScheduleRun,
   operatorPostComment,
@@ -49,9 +46,14 @@ import {
   operatorSnapshot,
   operatorTransitionStage,
   operatorWriteCompletionPacket,
+} from "./operator-actions.server";
+import {
+  CREATE_TASK_BASE_NOTE,
+  operatorOpenPacket,
+  operatorResolvePacket,
   type OperatorOpenPacketInput,
   type OperatorPacketOptionInput,
-} from "./operator-actions.server";
+} from "./operator-packets.server";
 import { COMPLETION_SCREENSHOTS_MAX } from "~/shared/completion-packet";
 import {
   operatorUpdateBranchFromBase,

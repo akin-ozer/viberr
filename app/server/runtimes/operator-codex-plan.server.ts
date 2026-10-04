@@ -16,6 +16,12 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  operatorOpenPacket,
+  type OperatorOpenPacketInput,
+  type OperatorPacketOptionInput,
+  operatorResolvePacket,
+} from "~/server/tasks/operator-packets.server";
+import {
   operatorAcceptCompletion,
   operatorCancelSchedule,
   operatorCorrectKnowledgeDoc,
@@ -24,12 +30,8 @@ import {
   operatorEditComment,
   operatorFlagContextConflict,
   operatorLeaseFiles,
-  operatorOpenPacket,
-  type OperatorOpenPacketInput,
-  type OperatorPacketOptionInput,
   operatorPostComment,
   operatorRelayToTask,
-  operatorResolvePacket,
   operatorScheduleRun,
   operatorSetDependencies,
   operatorSetEpic,
