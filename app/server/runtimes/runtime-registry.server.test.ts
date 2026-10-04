@@ -16,7 +16,7 @@ import type { CodexClient, CodexFactory } from "./codex-runtime.server";
 import type { ClaudeQueryOptions } from "./claude-runtime.server";
 import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
 import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-policy";
-import { agentGitIdentity } from "../tasks/specialist-run.server";
+import { agentGitIdentity } from "../tasks/specialist-workspace.server";
 import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";

@@ -87,10 +87,10 @@ import {
   buildSpecialistPromptPrefix,
   githubReadForRun,
   isDispatchHeld,
-  pinSupportCheckout,
   resolveResumeConfinement,
   type DispatchHeldError,
 } from "./specialist-run.server";
+import { pinSupportCheckout } from "./specialist-workspace.server";
 import {
   listDeployedSpecialists,
   resolveDeployedSpecialist,
