@@ -760,7 +760,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             kind: args.kind,
             name,
             reason: args.reason,
-            askedByUserId: actor.userId ?? "",
+            askedByUserId: actor.userId,
             askedByLabel: actor.label,
           },
           dataRoot,
@@ -1681,7 +1681,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // is what the controller had to do.
           const unfiltered = { ...filters };
           delete unfiltered.actionPrefix;
-          delete unfiltered.action;
           const counts = new Map<string, number>();
           for (const r of queryAuditEventsForExport(db, unfiltered)) {
             counts.set(r.action, (counts.get(r.action) ?? 0) + 1);
@@ -2179,7 +2178,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .map((e) => ({
             at: e.occurredAt,
             type: e.type,
-            by: e.actor.kind === "human" ? e.actor.name : e.actor.kind === "system" ? e.actor.name : `${e.actor.name} (agent)`,
+            by: e.actor.kind === "agent" ? `${e.actor.name} (agent)` : e.actor.name,
             title: e.title,
             // Ruling 292: the cut says it is a cut and names the way out. This
             // is ruling 285 for the CONTROLLER, which that ruling gave only to
@@ -3007,7 +3006,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // this arm does. Written only when the run was NOT refused, like
             // the task page: a refused run would strand a comment with nothing
             // to address it.
-            if (args.prompt && !result.refused) {
+            if (args.prompt) {
               const { appendComment } = await import("~/server/tasks/task-actions.server");
               await appendComment(
                 db,
@@ -4098,7 +4097,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       runWith((args: { projectSlug?: string; taskKey?: string }) => {
         // Scope, in the order a person means it: an explicit argument, then the
         // conversation's own anchor, then everything they can see.
-        const explicit = args.projectSlug ?? boundSlug ?? null;
+        const explicit = args.projectSlug ?? boundSlug;
         if (explicit) requireVisible(explicit, "read this project's decisions");
         // Ruling 256: the anchor belongs to the project it was anchored IN. A
         // conversation anchored to VIB-1 in one project, asked about another,
