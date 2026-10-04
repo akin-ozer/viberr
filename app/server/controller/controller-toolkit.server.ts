@@ -69,7 +69,7 @@ import {
 } from "~/server/tasks/operator-repo-read.server";
 import { EPIC_COLORS, EPIC_STATUS_VALUES, type EpicStatus } from "~/schemas/epic-file.schema";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
-import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
+import { recordAudit } from "~/server/audit/audit-recorder.server";
 import {
   queryAuditEventsForExport,
   type AuditExportFilters,
@@ -406,7 +406,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   // one definition, so a reworded refusal cannot drift between them.
   const { actor, orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
     controllerToolGuards(db, user, dataRoot);
-  const auditActor: AuditActor = actor;
 
   const boundSlug = deps.projectSlug ?? null;
   /** Resolve the tool's project argument against the conversation binding. */
@@ -587,7 +586,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const result = await createLocalAccount(
           db,
           { name: personName(args.name), email: args.email, role: args.role },
-          auditActor,
+          actor,
         );
         return (
           `[done] ${result.user.email} created (org ${result.user.role}). ` +
@@ -638,19 +637,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 email: args.email ?? current.email,
                 role: args.role ?? current.role,
               },
-              auditActor,
+              actor,
             );
             done.push(`profile updated (${updated.email}, org ${updated.role})`);
           }
           if (args.access === "disable") {
-            await disableUser(db, args.userId, auditActor);
+            await disableUser(db, args.userId, actor);
             done.push("account disabled");
           } else if (args.access === "enable") {
-            await enableUser(db, args.userId, auditActor);
+            await enableUser(db, args.userId, actor);
             done.push("account enabled");
           }
           if (args.resetPassword) {
-            const reset = await resetLocalPassword(db, args.userId, auditActor);
+            const reset = await resetLocalPassword(db, args.userId, actor);
             done.push(
               `password reset. Temporary password (single use): ${reset.tempPassword}`,
             );
@@ -676,7 +675,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const updated = setOrgUserRole(
           db,
           { userId: args.userId, role: args.role },
-          auditActor,
+          actor,
         );
         return `[done] ${updated.email} is now an org ${updated.role}.`;
       }),
@@ -939,7 +938,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const saved = await saveKnowledgeBase(
             db,
             { id: args.id ?? null, name: args.name, refresh: args.refresh ?? "on change" },
-            auditActor,
+            actor,
             { dataRoot },
           );
           // U36-4 (pass 36): the reply carries what the next call needs — the
@@ -949,7 +948,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const privacy =
             args.private === undefined
               ? ""
-              : setKnowledgeBasePrivacy(db, { id: saved.kb.id, private: args.private }, auditActor, { dataRoot }).changed
+              : setKnowledgeBasePrivacy(db, { id: saved.kb.id, private: args.private }, actor, { dataRoot }).changed
                 ? args.private
                   ? " It is now private: no agent's shell can open its folder, and the runs it is granted to read it through read_knowledge_doc."
                   : " It is open again: every agent can read its folder."
@@ -1000,7 +999,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 [],
                 args.doc.path,
                 args.doc.content,
-                auditActor,
+                actor,
                 { append: true },
               );
               return (
@@ -1043,7 +1042,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               [],
               args.doc.path,
               args.doc.content,
-              auditActor,
+              actor,
               { overwrite: args.doc.replace === true },
             );
             docNote = written.replaced
@@ -1076,7 +1075,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!target) return `[denied] No knowledge base with id ${args.id}.`;
         const edited = await editKbPassage(
           db,
-          { kb: path.basename(target.rootAbs), doc: args.path, was: args.was, now: args.now, actor: auditActor },
+          { kb: path.basename(target.rootAbs), doc: args.path, was: args.was, now: args.now, actor },
           { dataRoot },
         );
         if (!edited.ok) return `[denied] ${edited.message}`;
@@ -1241,7 +1240,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             summary: args.summary,
             body: args.body ?? "",
           },
-          auditActor,
+          actor,
           { dataRoot },
         );
         // U36-4: the same re-enterable reply as save_knowledge_base.
@@ -1377,7 +1376,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           };
           if (args.writeTools !== undefined) input.writeTools = args.writeTools;
           if (args.requestedScopes !== undefined) input.requestedScopes = args.requestedScopes;
-          const saved = await saveMcpServer(db, input, auditActor, {}, { dataRoot });
+          const saved = await saveMcpServer(db, input, actor, {}, { dataRoot });
           // `saveMcpServer` answers with the row it wrote, so the reply states
           // the marking that actually landed rather than the one we asked for.
           const policy = saved.mcp.writeTools;
@@ -1570,7 +1569,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.model !== undefined) input.model = args.model;
           if (args.effort !== undefined) input.effort = args.effort;
           if (args.propagate) input.propagate = true;
-          const saved = await saveGlobalAgentProfile(db, input, auditActor, {
+          const saved = await saveGlobalAgentProfile(db, input, actor, {
             dataRoot,
           });
           // Ruling 153: the reply states the defaults a deploy will take.
@@ -2962,7 +2961,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               projectSlug: slug,
               taskKey: key,
               trigger: "manual",
-              actor: auditActor,
+              actor,
             };
             if (args.prompt) {
               operatorInput.humanComment = prose(args.prompt);
@@ -3224,7 +3223,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // The actor is the audit actor (`<email> · via controller`): the
           // entry's `createdByLabel` discloses the instrument, as every other
           // controller write does.
-          const sched = await scheduleTaskAction(db, schedInput, auditActor, {
+          const sched = await scheduleTaskAction(db, schedInput, actor, {
             dataRoot,
           });
           let what = "an operator re-run";
@@ -3264,7 +3263,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const result = await cancelScheduledAction(
             db,
             { projectSlug: slug, taskKey: key, scheduleId },
-            auditActor,
+            actor,
             { dataRoot },
           );
           return result.cancelled
@@ -3411,7 +3410,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // through the controller" has to be answerable from the trail.
           recordAudit(db, {
             action: "controller.github.read",
-            actor: auditActor,
+            actor,
             subjectKind: "project",
             subjectId: slug,
             projectSlug: slug,
