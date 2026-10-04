@@ -3,8 +3,8 @@
 > Credentials, repository attachment, the delivery pipeline, PR adoption and branch
 > collisions, the revision and verdict model, base refreshes, reconciliation, and scope
 > violations. Source of truth: `app/server/github/*`, `app/server/secrets/*`,
-> `app/server/org/connections.server.ts`, `app/server/tasks/task-actions.server.ts`
-> (delivery and acceptance), `app/schemas/task-file.schema.ts` (revisions, `pr`,
+> `app/server/org/connections.server.ts`, `app/server/tasks/task-delivery.server.ts`
+> (delivery), `app/server/tasks/task-acceptance.server.ts` (acceptance), `app/schemas/task-file.schema.ts` (revisions, `pr`,
 > `github`), `app/shared/revision-drift.ts`, `app/shared/credential-scopes.ts`,
 > `app/features/github/*`, `app/features/task-detail/changes-*.tsx` (ruling 484).
 > Verified against `main` @ `7d9fbf72` (2026-09-23).

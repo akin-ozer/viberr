@@ -73,7 +73,9 @@ Rules that hold in the tree (verified by grep, restated from
    DB row → camelCase only in `shared/mapping/*`.
 5. `logger.server.ts` imports only `request-context.server.ts`;
    `tasks/task-mutation.server.ts` exists to break the `specialist-run → agent-toolkit
-   → task-actions` cycle.
+   → task-actions` cycle; since ruling 654 the task actions are thirteen family modules
+   that import only downward from `task-action-core`, and a call that must reach upward
+   loads its module when it runs (ruling 207(e)).
 6. Runtime adapters (`claude-runtime`, `codex-runtime`) never touch the DB, the canonical
    files or the SSE broker; they emit lines and an exit, and `run-service` + `run-sink`
    persist and publish.
@@ -108,7 +110,7 @@ list (`/resources/notifications`).
 **Write path** (`intent=create-task`): route action → `requireProjectFormAction`: `requireFormAction` (session,
 `assertCsrf`: the request must *prove* same-origin through Origin / Sec-Fetch-Site /
 Referer **and** carry the HMAC double-submit `_csrf` token; returns the intent) →
-`requireVisibleProject` (404 parity) → `server/tasks/task-actions.createTask` →
+`requireVisibleProject` (404 parity) → `server/tasks/task-edits.createTask` →
 `requireAction` consults `shared/rbac.ts` through `resolveProjectAuthority` (audits
 `project.org_admin.override` or `project.authority.denied`) → `allocateTaskKey` (a locked
 `project.md` counter bump) → `createTaskFile`: per-file mutex → serialize → atomic write

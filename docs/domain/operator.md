@@ -6,7 +6,7 @@
 > Source of truth: `app/server/runtimes/operator-run.server.ts`,
 > `app/server/tasks/operator-actions.server.ts`, `app/server/tasks/operator-toolkit.server.ts`,
 > `app/server/tasks/operator-repo-read.server.ts`,
-> `app/server/github/update-branch-operator.server.ts`, `app/server/tasks/task-actions.server.ts`,
+> `app/server/github/update-branch-operator.server.ts`, `app/server/tasks/packet-resolution.server.ts`,
 > `app/server/tasks/stranded-sweep.server.ts`, `app/server/tasks/review-deadlock.server.ts`,
 > `app/schemas/task-file.schema.ts` (`PACKET_OPTION_KINDS`).
 > Line numbers are omitted on purpose; function names are stable, line numbers are not.
@@ -849,8 +849,10 @@ ruling 502).
 - The branch update: `app/server/github/update-branch-operator.server.ts`.
 - The stranded-task sweep: `app/server/tasks/stranded-sweep.server.ts`.
 - The review-deadlock packet: `app/server/tasks/review-deadlock.server.ts`.
-- Packet resolution, acceptance, transitions, delivery, `autoInvokeOperator`:
-  `app/server/tasks/task-actions.server.ts`.
+- Packet resolution: `app/server/tasks/packet-resolution.server.ts`; acceptance:
+  `task-acceptance.server.ts`; transitions: `task-transitions.server.ts`; delivery:
+  `task-delivery.server.ts`; `autoInvokeOperator`: `task-action-core.server.ts`; the react
+  after an agent's run: `agent-completion.server.ts` (all in `app/server/tasks/`).
 - The operator's shipped doctrine: `app/server/seed/assets/operator.definition.md`.
 - The writing guide: `app/server/runtimes/humanizer.server.ts` and the vendored
   `app/server/runtimes/humanizer/SKILL.md` (ruling 502).

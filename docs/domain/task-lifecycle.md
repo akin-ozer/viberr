@@ -2,7 +2,8 @@
 
 > How a task is born, moves, waits, gets reviewed, is delivered and is closed, and which
 > server invariants hold at each step. Source of truth:
-> `app/server/tasks/task-actions.server.ts`, `app/server/tasks/task-mutation.server.ts`,
+> the task-action modules (`app/server/tasks/task-action-core.server.ts` and the families
+> beside it, ruling 654), `app/server/tasks/task-mutation.server.ts`,
 > `app/server/tasks/dependencies.server.ts`, `app/server/tasks/schedule.server.ts`,
 > `app/server/tasks/required-reviewers.server.ts`, `app/server/tasks/task-closure.server.ts`,
 > `app/server/tasks/file-leases.server.ts`, `app/server/projections/review-queue.server.ts`,
@@ -25,8 +26,8 @@ recordAudit(db, { action, actor, ... })            # secret-free details
 ```
 
 `loadProjectContext`, `reprojectTask` and `notifyTaskWatchers` live in
-`task-mutation.server.ts` (re-exported by `task-actions.server.ts`); `requireAction` and the
-owner exception live in `task-actions.server.ts`; `requireProjectMutable` and the authority
+`task-mutation.server.ts`; `requireAction` and the owner exception live in
+`task-action-core.server.ts`; `requireProjectMutable` and the authority
 resolution live in `app/server/auth/project-authority.server.ts`.
 
 Rules that follow from it:
