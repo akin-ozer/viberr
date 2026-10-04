@@ -58,6 +58,10 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
+  operatorSnapshot,
+  OPERATOR_TIMELINE_DEFAULT,
+} from "./operator-snapshot.server";
+import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
   operatorDispatchAgent,
@@ -66,8 +70,6 @@ import {
   operatorEditComment,
   operatorLeaseFiles,
   operatorSetGoal,
-  operatorSnapshot,
-  OPERATOR_TIMELINE_DEFAULT,
   operatorTransitionStage,
   operatorWriteCompletionPacket,
 } from "./operator-actions.server";

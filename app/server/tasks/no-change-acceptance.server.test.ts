@@ -27,7 +27,8 @@ import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.ser
 import { recordAgentCompletion } from "./agent-completion.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
-import { operatorAcceptCompletion, operatorSnapshot } from "./operator-actions.server";
+import { operatorAcceptCompletion } from "./operator-actions.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
 import { resolveOperatorAuthority } from "./operator-authority.server";
 
 /**

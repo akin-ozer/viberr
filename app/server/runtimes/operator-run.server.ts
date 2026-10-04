@@ -46,7 +46,7 @@ import {
 import {
   OPERATOR_TIMELINE_DEFAULT,
   operatorSnapshot,
-} from "~/server/tasks/operator-actions.server";
+} from "~/server/tasks/operator-snapshot.server";
 import {
   operatorOpenPacket,
   type OperatorOpenPacketInput,

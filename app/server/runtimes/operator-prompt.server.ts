@@ -29,7 +29,7 @@ import {
   AGENT_REPORT_CAP_TOOLLESS,
   OPERATOR_POLICY_SCOPE_NOTE,
   type OperatorTaskSnapshot,
-} from "~/server/tasks/operator-actions.server";
+} from "~/server/tasks/operator-snapshot.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import { RESULT_DELIVERY_RULE, RESULT_GOAL_RULE } from "~/server/tasks/result-delivery.server";
 import type { RelayPayload } from "~/server/tasks/task-relay.server";

@@ -32,7 +32,8 @@ import {
 } from "~/server/runtimes/operator-codex-plan.server";
 import { createEpic, type CreateEpicInput } from "./epic-actions.server";
 import { operatorOpenPacket } from "./operator-packets.server";
-import { operatorSetEpic, operatorSnapshot } from "./operator-actions.server";
+import { operatorSetEpic } from "./operator-actions.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
 import { resolveOperatorAuthority } from "./operator-authority.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { resolvePacket } from "./packet-resolution.server";

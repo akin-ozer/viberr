@@ -33,8 +33,6 @@ import {
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
-  OPERATOR_TIMELINE_DEFAULT,
-  OPERATOR_TIMELINE_MAX,
   operatorCancelSchedule,
   operatorScheduleRun,
   operatorPostComment,
@@ -43,10 +41,14 @@ import {
   operatorSetDependencies,
   operatorSetEpic,
   operatorSetGoal,
-  operatorSnapshot,
   operatorTransitionStage,
   operatorWriteCompletionPacket,
 } from "./operator-actions.server";
+import {
+  OPERATOR_TIMELINE_DEFAULT,
+  OPERATOR_TIMELINE_MAX,
+  operatorSnapshot,
+} from "./operator-snapshot.server";
 import {
   CREATE_TASK_BASE_NOTE,
   operatorOpenPacket,
