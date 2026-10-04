@@ -385,7 +385,7 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
 });
 
 /**
- * A6 — the two safety sections `buildSpecialistPersona` emits and the operator
+ * A6 — the two safety sections `buildSpecialistPromptPrefix` emits and the operator
  * did not, on the profile holding the highest-authority toolkit in the product.
  * Both are conditional exactly as they are for a specialist: the banner only
  * when attached content actually resolved, the MCP rule only when servers
