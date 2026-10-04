@@ -3507,28 +3507,11 @@ async function executeCodexPlan(
       // discarded, leaving an engaged-but-never-run agent (board "waiting on
       // you") with nothing but a server log to explain it. A coordination stall
       // is a `note`, not a governance signal.
-      try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "operator" },
-              title: null,
-              text: `**Coordination stopped:** the \`${a.tool}\` step failed (${errorMessage(error)}). The remaining plan was not executed.`,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      } catch (writeError) {
-        logger.error("codex operator plan-abort narration failed", {
-          taskKey: input.taskKey,
-          err: toError(writeError),
-        });
-      }
+      await narrateOperatorNote(db, ctx, input, "codex operator plan-abort narration failed", {
+        type: "note",
+        title: null,
+        text: `**Coordination stopped:** the \`${a.tool}\` step failed (${errorMessage(error)}). The remaining plan was not executed.`,
+      });
       break;
     }
     if (!pausedBy) {
@@ -3566,10 +3549,44 @@ async function executeCodexPlan(
 }
 
 /**
+ * An operator note written straight onto the timeline, then re-projected.
+ * Never through the gated `operatorPostComment`: a report about what the
+ * operator's plan did must not depend on the gates of the operator it reports
+ * on. Never throws; a write that fails is logged as `failure`.
+ */
+async function narrateOperatorNote(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  failure: string,
+  note: { type: "note" | "policy"; title: string | null; text: string },
+): Promise<void> {
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: note.type,
+        actor: { kind: "operator" },
+        title: note.title,
+        text: note.text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.error(failure, {
+      taskKey: input.taskKey,
+      err: toError(error),
+    });
+  }
+}
+
+/**
  * Ruling 430: say which steps a new decision packet stopped, and why.
  *
- * Written directly, like `narrateRefusedActions`: the report must not depend on
- * the gates of the operator it reports on. Never throws; the plan already ran.
+ * Written directly, like `narrateRefusedActions`. Never throws; the plan
+ * already ran.
  */
 async function narratePausedPlan(
   db: DatabaseSync,
@@ -3579,28 +3596,14 @@ async function narratePausedPlan(
   steps: string[],
 ): Promise<void> {
   const list = steps.map((s) => `\`${s}\``).join(", ");
-  try {
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "operator" },
-        title: "Coordination paused",
-        text:
-          `**Coordination paused:** the \`${pausedBy.tool}\` step left a decision for a person ` +
-          `(“${pausedBy.title}”), so the rest of this plan was not carried out: ${list}. ` +
-          "It was written before that decision existed. The operator picks the task up again once it is answered.",
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  } catch (error) {
-    logger.error("codex operator plan-pause narration failed", {
-      taskKey: input.taskKey,
-      err: toError(error),
-    });
-  }
+  await narrateOperatorNote(db, ctx, input, "codex operator plan-pause narration failed", {
+    type: "note",
+    title: "Coordination paused",
+    text:
+      `**Coordination paused:** the \`${pausedBy.tool}\` step left a decision for a person ` +
+      `(“${pausedBy.title}”), so the rest of this plan was not carried out: ${list}. ` +
+      "It was written before that decision existed. The operator picks the task up again once it is answered.",
+  });
 }
 
 /** A plan step that did not run, and WHY it did not (see OperatorActionResult):
@@ -3706,32 +3709,18 @@ async function narrateRefusedActions(
     (reasoning.trim()
       ? `\n\nWhat it intended:\n\n> ${reasoning.trim().replace(/\n/g, "\n> ")}`
       : "");
-  try {
-    logger.warn("codex operator plan actions did not run", {
-      taskKey: input.taskKey,
-      refusedByPolicy: byAuthority.map((r) => r.tool),
-      refusedByState: byState.map((r) => r.tool),
-    });
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        // LV-03: `policy` is a governance signal. Only an authority refusal is
-        // one; a state conflict is a plain note.
-        type: byAuthority.length > 0 ? "policy" : "note",
-        actor: { kind: "operator" },
-        title: null,
-        text,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  } catch (error) {
-    logger.error("codex operator refusal narration failed", {
-      taskKey: input.taskKey,
-      err: toError(error),
-    });
-  }
+  logger.warn("codex operator plan actions did not run", {
+    taskKey: input.taskKey,
+    refusedByPolicy: byAuthority.map((r) => r.tool),
+    refusedByState: byState.map((r) => r.tool),
+  });
+  await narrateOperatorNote(db, ctx, input, "codex operator refusal narration failed", {
+    // LV-03: `policy` is a governance signal. Only an authority refusal is
+    // one; a state conflict is a plain note.
+    type: byAuthority.length > 0 ? "policy" : "note",
+    title: null,
+    text,
+  });
 }
 
 /**
@@ -3754,25 +3743,11 @@ async function writeOperatorNoPlanNote(
       ? "Its run replied, but the output was not a valid decision plan. "
       : "Its run finished without producing any output. ") +
     "Coordination is paused: re-engage the operator or redirect the task.";
-  try {
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "operator" },
-        title: null,
-        text,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  } catch (error) {
-    logger.error("codex no-plan note fallback failed", {
-      taskKey: input.taskKey,
-      err: toError(error),
-    });
-  }
+  await narrateOperatorNote(db, ctx, input, "codex no-plan note fallback failed", {
+    type: "note",
+    title: null,
+    text,
+  });
 }
 
 // ------------------------------------------------------- real (tool-driven)
