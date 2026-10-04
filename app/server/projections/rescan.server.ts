@@ -38,12 +38,9 @@ export function rescanProjections(
 export function rescanProject(
   db: DatabaseSync,
   slug: string,
-  options: { dataRoot?: string; force?: boolean; actor?: AuditActor } = {},
+  options: { actor?: AuditActor } = {},
 ): RescanSummary {
-  // Same as above: an unset `force` stays absent so the rebuilder decides.
-  const rebuildOptions: RebuildOptions = { dataRoot: options.dataRoot };
-  if (options.force !== undefined) rebuildOptions.force = options.force;
-  const summary = rebuildProject(db, slug, rebuildOptions);
+  const summary = rebuildProject(db, slug);
   recordAudit(db, {
     action: "projection.rescan",
     actor: options.actor ?? SYSTEM_ACTOR,
