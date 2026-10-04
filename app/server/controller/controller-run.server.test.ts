@@ -212,12 +212,19 @@ describe("controller mounts (ruling 107)", () => {
    * `list_capabilities` (the agent capability catalogue, a different axis).
    * So the tier-to-action mapping came from the model's own prose memory.
    */
-  it("ruling 649: the controller reads the people rule on every turn", async () => {
+  it("ruling 649: the controller reads the people rule on every turn, a resumed conversation included", async () => {
     // Live, it wrote "her comment" about the board's owner into AWSC-98's goal.
-    // CANARY: drop the line from the runtime block and it never reads one.
+    // The system prompt is recorded when a conversation starts and kept until
+    // it compacts (ruling 373), so the rule rides in the turn, where ruling 444
+    // put the model. CANARY: drop it from `buildTurnPrompt` and no turn of a
+    // conversation started before the deploy reads it.
     const { PEOPLE_RULE } = await import("~/server/runtimes/people-rule.server");
-    const { prompt } = await build({});
+    const { buildTurnPrompt } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+    const prompt = buildTurnPrompt(app.db, conversation, { id: "cmsg_none", seq: 1, text: "now this" }, null, "opus[1m]");
     expect(prompt).toContain(PEOPLE_RULE);
+    expect(prompt.indexOf(PEOPLE_RULE)).toBeLessThan(prompt.indexOf(`${user.email} says:`));
   });
 
   it("ruling 309: the authorization map rides in the per-turn prompt, advisory and generated", async () => {

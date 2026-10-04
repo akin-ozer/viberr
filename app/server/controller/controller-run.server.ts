@@ -1451,7 +1451,11 @@ export function buildTurnPrompt(
   const runtime = model
     ? `You run on model \`${model}\` this turn. Where your system prompt or earlier turns name another model, this line is current.\n\n---\n\n`
     : "";
-  return `${lead}${runtime}${head}${queue}${conversation.userLabel} says:\n\n${message.text}`;
+  // Ruling 649: here for ruling 444's reason. In the recorded system prompt it
+  // reached only a conversation started after the deploy, not the instance
+  // controller that had written "her comment" into AWSC-98's goal.
+  const people = `${PEOPLE_RULE}\n\n---\n\n`;
+  return `${lead}${runtime}${head}${queue}${people}${conversation.userLabel} says:\n\n${message.text}`;
 }
 
 /** Bounded transcript digest, oldest first. */
@@ -1592,8 +1596,6 @@ export function buildControllerSystemPrompt(
       "instructions list its tools. Use them to answer how this instance and its runs are really " +
       "doing instead of guessing.\n" +
       "You have no filesystem or shell: the viberr_controller tools are how you read and change anything.\n" +
-      // Ruling 649: the goals and comments you write name people too.
-      `${PEOPLE_RULE}\n` +
       // Ruling 312: two numbering systems, one word. The note is shared with
       // the operator, which reads both namespaces at once.
       RULING_NAMESPACE_NOTE +
