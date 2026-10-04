@@ -373,12 +373,12 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
 });
 
 /**
- * Ruling 371/373: the context window rides the child env of a Claude
- * specialist and controller run and nothing else, and the set of keys Viberr
- * ADDS to a child env is pinned by name — the credential (ruling 127), the
- * home and the run marker (ruling 174), and since ruling 376 no window. A key
- * added anywhere on the run path without a line here fails this test. Ruling
- * 577 adds one to every Claude run: the switch that keeps auto-memory off.
+ * Ruling 371/373, as amended by ruling 376: no context window rides a child
+ * env any more, and the set of keys Viberr ADDS to a child env is pinned by
+ * name — the credential (ruling 127), the home and the run marker (ruling
+ * 174). A key added anywhere on the run path without a line here fails this
+ * test. Ruling 577 adds one to every Claude run: the switch that keeps
+ * auto-memory off.
  */
 describe("the keys Viberr adds to a run's child env are named (ruling 371)", () => {
   const ctx = createTestDbContext();

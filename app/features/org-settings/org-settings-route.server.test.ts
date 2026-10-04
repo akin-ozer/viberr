@@ -398,9 +398,8 @@ describe("controller-save (ruling 106)", () => {
  * Ruling 108 — the controller's grant sections and instructions are locked by
  * default, ORG ADMINS INCLUDED: only a deployment environment variable unlocks
  * a section. The test app sets none of them, so this suite runs against the
- * product default; the unlock paths are exercised through the server module's
- * test-only `ctx.locks` seam, the same object `controllerSectionLocks` derives
- * from the env.
+ * product default; the unlock paths set the `VIBERR_UNLOCK_CONTROLLER_*` env the
+ * way a deployment does (`withEnv`, test-support/env.ts).
  */
 describe("controller config locks (ruling 108)", () => {
   async function stored() {
