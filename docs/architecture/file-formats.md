@@ -676,7 +676,7 @@ Packet notes:
   | `blockedBy` | `block_on_dependencies` | what this task will wait on, in `blockedBy` spellings (ruling 230) |
   | `newTask` | `create_task` | `{ title, goal, blockedBy?, blocks?, labels? }`: the task the resolution creates; `blocks` names existing tasks that must wait on it (rulings 269, 287) |
   | `rework` | `redirect` | set by the branch-conflict packet: the resolution returns a task standing at or past the review stage to it in the same write (ruling 163) |
-  | `reply` | `custom` (an agent's question) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope; the options-less fallback always carries it |
+  | `reply` | `custom` (an agent's question); `redirect`, `request_edit` (an operator's) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope, whose options-less fallback always carries it, and by an operator on a send-back that asks what to change (ruling 650; dropped on its other kinds) |
 
   The schema is `.loose()`, so an unknown option key round-trips and is read by nothing. There
   is no `accept:` field: acceptance is gated **solely** on `kind === "accept_completion"`, plus

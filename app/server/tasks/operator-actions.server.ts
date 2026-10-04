@@ -1144,6 +1144,9 @@ export interface OperatorPacketOptionInput {
   kind: PacketOptionKind;
   title: string;
   detail?: string;
+  /** redirect and request_edit only — ruling 650: the person's own words are
+   *  the choice, so the card requires them (ruling 478(e)'s `reply`). */
+  reply?: boolean;
   recommended?: boolean;
   /** Pre-authored timeline text written when a human chooses this option. */
   ev?: string;
@@ -1846,6 +1849,11 @@ export async function operatorOpenPacket(
     if (o.deleteBranch && existing.parsed.frontmatter.branch) option.deleteBranch = true;
     // Ruling 163: only a redirect returns the task to the review stage.
     if (o.rework && o.kind === "redirect") option.rework = true;
+    // Ruling 650: an option that hands the person's words to the next run
+    // requires them. Live on AWSC-100 "Ask the Estimate Judge to revise the
+    // inputs first: write what to change" sat over a box marked optional, so
+    // an empty confirm would have re-run the Judge with nothing to change.
+    if (o.reply && (o.kind === "redirect" || o.kind === "request_edit")) option.reply = true;
     // Ruling 164: the stage a move_stage resolution moves to, validated above.
     if (o.kind === "move_stage" && o.toStage) option.toStage = o.toStage.trim();
     // Ruling 224: only a wait_for_window carries the reset instant, and it is

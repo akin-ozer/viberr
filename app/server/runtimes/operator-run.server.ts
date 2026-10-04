@@ -2489,6 +2489,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                 title: { type: "string" },
                 detail: { type: ["string", "null"], description: "One concise line of extra context for this option; null if none." },
                 recommended: { type: "boolean" },
+                reply: {
+                  type: ["boolean", "null"],
+                  description: "redirect and request_edit only (ruling 650): true when choosing this option means nothing without the person's own words, what to change or what to tell the agent. The card then requires them and an empty confirm is refused. Dropped on every other kind. Null otherwise.",
+                },
                 // B1: the retry target used to be unexpressible here, so every
                 // Codex-authored retry resolved to Claude — a re-run of the
                 // backend that had just failed. Null keeps the server default
@@ -2581,7 +2585,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   required: ["title", "goal", "blockedBy", "blocks", "labels"],
                 },
               },
-              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "toStage", "goalDraft", "blockedBy", "dueAt", "newTask"],
+              required: ["kind", "title", "detail", "recommended", "reply", "backend", "profileId", "deleteBranch", "toStage", "goalDraft", "blockedBy", "dueAt", "newTask"],
             },
           },
         },
@@ -2652,6 +2656,7 @@ const operatorPlanActionSchema = z.strictObject({
         recommended: z.boolean(),
         // Tolerated as ABSENT too (not just null): plans persisted before these
         // fields existed must stay executable across a restart-resume.
+        reply: z.boolean().nullable().optional(),
         backend: z.enum(["claude", "codex"]).nullable().optional(),
         profileId: z.string().nullable().optional(),
         deleteBranch: z.boolean().nullable().optional(),
@@ -2702,6 +2707,7 @@ export function authoredPacketOptions(
         title: string;
         detail?: string | null;
         recommended: boolean;
+        reply?: boolean | null;
         backend?: RealBackend | null;
         profileId?: string | null;
         deleteBranch?: boolean | null;
@@ -2733,6 +2739,8 @@ export function authoredPacketOptions(
     // Carry the per-option detail line so a Codex-authored packet renders with
     // the same context a Claude-authored one does (AO-5 #12).
     if (detail) option.detail = detail;
+    // Ruling 650: `operatorOpenPacket` keeps it on redirect and request_edit.
+    if (o.reply) option.reply = true;
     // Ruling 138: the proposed goal rides with the option; `operatorOpenPacket`
     // caps it and refuses it on any kind but edit_goal.
     const goalDraft = o.goalDraft?.trim();
@@ -5746,7 +5754,7 @@ export function buildCodexOperatorPrompt(
       scheduledByOperator,
       relay,
     ) +
-    "\n\nWhen you `open_packet`, author 2 to 4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision, e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal, the deliverable plus its acceptance criteria, because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one; the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits): the human's confirm executes the deletion, nothing on the remote changes; `question_reviewer` to put ONE question to a reviewer with no rework behind it (REQUIRED: its `profileId`, from `reviewers[].profileId`; an option that names no reviewer is refused), which is the move when a reviewer has blocked twice and you want its complete blocking set rather than another round of one finding at a time, `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name: the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2 to 4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision, e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal, the deliverable plus its acceptance criteria, because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one; the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits): the human's confirm executes the deletion, nothing on the remote changes; `question_reviewer` to put ONE question to a reviewer with no rework behind it (REQUIRED: its `profileId`, from `reviewers[].profileId`; an option that names no reviewer is refused), which is the move when a reviewer has blocked twice and you want its complete blocking set rather than another round of one finding at a time, `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name: the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). A `redirect` or `request_edit` that asks the person what to change or what to tell the agent sets `reply: true`, so the card requires their words (ruling 650). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );

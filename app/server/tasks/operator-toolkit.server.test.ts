@@ -1297,6 +1297,9 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     // Ruling 269's payload rides the same door, and was written with it.
     expect(declared).toContain('"newTask"');
     expect(declared).toContain("create_task only");
+    // Ruling 650: and the flag that makes a send-back take the person's words.
+    expect(declared).toContain('"reply"');
+    expect(declared).toContain("redirect and request_edit only");
   });
 
   /**

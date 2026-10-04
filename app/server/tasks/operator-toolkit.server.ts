@@ -859,6 +859,12 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                 title: z.string().describe("Button label, e.g. 'Reassign to a different developer'."),
                 detail: z.string().optional().describe("Short explanation under the option."),
                 recommended: z.boolean().optional().describe("Mark exactly ONE option recommended."),
+                reply: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    "redirect and request_edit only (ruling 650): true when choosing this option means nothing without the person's own words, what to change or what to tell the agent. The card then requires them and an empty confirm is refused. Dropped on every other kind.",
+                  ),
                 backend: z
                   .enum(["claude", "codex"])
                   .optional()
@@ -945,6 +951,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               };
               if (o.detail) option.detail = prose(o.detail);
               if (o.recommended !== undefined) option.recommended = o.recommended;
+              if (o.reply) option.reply = true;
               if (o.backend) option.backend = o.backend;
               if (o.profileId) option.profileId = o.profileId;
               if (o.deleteBranch) option.deleteBranch = true;
