@@ -187,11 +187,13 @@ async function waitForGone(target: string, what: string): Promise<void> {
   }
 }
 
-/** Wait for a file one of the fake children writes. Same reason as
- *  `waitForLogin`: a real process settles when it settles. */
-async function waitForFile(file: string, what: string): Promise<void> {
+/** Wait for a fake child's termination record: the LINE, not the file. The
+ *  child creates `terminated.jsonl` a moment before it writes to it, so a
+ *  loaded host could read it empty. Same reason as `waitForLogin`: a real
+ *  process settles when it settles. */
+async function waitForTermination(evidence: string, what: string): Promise<void> {
   const deadline = Date.now() + 10_000;
-  while (!existsSync(file)) {
+  while (fakeVendorTerminations(evidence).length === 0) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -549,7 +551,7 @@ describe("session lifetime", () => {
     // so this record can only have been written by the process that was
     // replaced: without the kill it would keep running, holding this person's
     // runtime home and stdin until the container restarted.
-    await waitForFile(path.join(evidence, "terminated.jsonl"), "the replaced child to die");
+    await waitForTermination(evidence, "the replaced child to die");
     expect(fakeVendorTerminations(evidence)).toEqual([firstHome]);
     // Ruling 507: the replacement signs in to a NEW home of its own, and the
     // replaced attempt's half-made home goes once its process has exited.
@@ -568,7 +570,7 @@ describe("session lifetime", () => {
     const started = start("codex", "device");
     await waitForLogin("codex", (view) => view.url !== null, "the URL");
     cancelBackendLogin(db, ACTOR, "codex");
-    await waitForFile(path.join(evidence, "terminated.jsonl"), "the cancelled child to die");
+    await waitForTermination(evidence, "the cancelled child to die");
     expect(fakeVendorTerminations(evidence)).toEqual([homeOf(started)]);
     await waitForGone(homeOf(started), "the abandoned account home to be removed");
     expect(listBackendAccounts(db, ACTOR.userId, "codex")).toEqual([]);
