@@ -196,7 +196,6 @@ describe("loader", () => {
       number: 318,
       state: "review",
       checks: null, // P13-D-28: carried, not narrowed away
-      checksUnread: null, // Ruling 360: nothing refused in the seed
       review: null,
       mergeable: null, // F17-L6: carried, not narrowed away
     });
