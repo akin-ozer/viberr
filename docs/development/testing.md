@@ -199,7 +199,7 @@ the only gates. Jobs run again since 2026-10-01.
   and `VIBERR_RUN_ID` (ruling 371); on a Codex run with a pasted Platform key
   `CODEX_API_KEY`, `CODEX_HOME`, `CODEX_SQLITE_HOME`, `GIT_CEILING_DIRECTORIES` and
   `VIBERR_RUN_ID`. No
-  kind carries a context-window key (ruling 376: `CONTEXT_ENV_KEYS` is empty). A key added
+  kind carries a context-window key (ruling 376). A key added
   anywhere on the run path without a line there fails the suite.
 
 ### Harnesses

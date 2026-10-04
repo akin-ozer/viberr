@@ -376,7 +376,7 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
  * Ruling 371/373: the context window rides the child env of a Claude
  * specialist and controller run and nothing else, and the set of keys Viberr
  * ADDS to a child env is pinned by name — the credential (ruling 127), the
- * home, the run marker (ruling 174) and the window (`CONTEXT_ENV_KEYS`). A key
+ * home and the run marker (ruling 174), and since ruling 376 no window. A key
  * added anywhere on the run path without a line here fails this test. Ruling
  * 577 adds one to every Claude run: the switch that keeps auto-memory off.
  */
@@ -458,10 +458,5 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
       "GIT_CEILING_DIRECTORIES",
       "VIBERR_RUN_ID",
     ]);
-  });
-
-  it("the policy's own key list is exactly what the two tests above name: nothing", async () => {
-    const { CONTEXT_ENV_KEYS } = await import("./context-policy.server");
-    expect([...CONTEXT_ENV_KEYS]).toEqual([]);
   });
 });
