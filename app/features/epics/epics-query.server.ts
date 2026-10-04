@@ -131,10 +131,9 @@ export function getEpicPage(
   input: {
     workspace: WorkspaceRead;
     viewer: Pick<SessionUser, "id" | "role">;
-    dataRoot?: string;
   },
 ): EpicPageView {
-  const epic = getEpicDetail(db, slug, epicId, input.dataRoot ? { dataRoot: input.dataRoot } : {});
+  const epic = getEpicDetail(db, slug, epicId);
   if (!epic) throw data(`No epic ${epicId} in projects/${slug}.`, { status: 404 });
   const { workspace, viewer } = input;
   const inEpic = workspace.tasks.filter((t) => t.epicId === epicId);
