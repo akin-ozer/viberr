@@ -3760,13 +3760,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const run = await startAgentRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await runAndStop("dev");
   }
 
   /**
@@ -4392,13 +4386,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const run = await startAgentRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      const runId = await runAndStop("critic");
 
       const spec = lastRunSpec()!;
       // R18-1: the deliverer's KB crosses to the reviewer…
@@ -4417,7 +4405,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         path.basename(ws),
       );
       expect(spec.skillPlugin).toEqual({
-        path: path.join(path.dirname(criticWs), ".viberr-plugins", run.runId),
+        path: path.join(path.dirname(criticWs), ".viberr-plugins", runId),
         name: "viberr",
       });
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
@@ -4520,13 +4508,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const run = await startAgentRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      await runAndStop("critic");
 
       const criticWs = path.join(
         path.dirname(ws), "support", "critic", path.basename(ws),
@@ -4566,33 +4548,11 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // and unusable, so `git clone --local` fails the way it did live.
       rmSync(path.join(ws, ".git"), { recursive: true, force: true });
       writeFileSync(path.join(ws, ".git"), "not a git directory\n");
-      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-        .parsed.frontmatter;
-      writeProject(store.dataRoot, {
-        ...fm,
-        repo: "acme/widgets",
-        agents: [
-          {
-            profileId: "critic", capabilities: [], extras: [],
-            definition: {
-              kind: "specialist", name: "critic", role: "reviewer",
-              backends: ["claude"], model: "sonnet",
-              resources: { skills: [], mcps: [], kb: [] },
-            },
-          },
-        ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      deployCritic();
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const run = await startAgentRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      const runId = await runAndStop("critic");
 
       const prompt = lastRunSpec()?.prompt ?? "";
       // The run really did lose its checkout.
@@ -4613,7 +4573,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // completion contract and this is 0 — the verdict path stays open for a
       // run that read nothing.
       const { getRun } = await import("~/server/runtimes/run-store.server");
-      expect(getRun(store.db, run.runId)!.no_checkout).toBe(1);
+      expect(getRun(store.db, runId)!.no_checkout).toBe(1);
     });
 
     /**
@@ -4636,62 +4596,24 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       const stash = path.join(path.dirname(ws), "object-stash");
       renameSync(loose[0]!, stash);
       symlinkSync(stash, loose[0]!);
-      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-        .parsed.frontmatter;
-      writeProject(store.dataRoot, {
-        ...fm,
-        repo: "acme/widgets",
-        agents: [
-          {
-            profileId: "critic", capabilities: [], extras: [],
-            definition: {
-              kind: "specialist", name: "critic", role: "reviewer",
-              backends: ["claude"], model: "sonnet",
-              resources: { skills: [], mcps: [], kb: [] },
-            },
-          },
-        ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      deployCritic();
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const run = await startAgentRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      const runId = await runAndStop("critic");
       const criticWs = path.join(path.dirname(ws), "support", "critic", path.basename(ws));
       // CANARY: put `--local` back on the supporting clone and this checkout is
       // gone and the run is marked checkout-less.
       expect(existsSync(path.join(criticWs, "README.md"))).toBe(true);
       const { getRun } = await import("~/server/runtimes/run-store.server");
-      expect(getRun(store.db, run.runId)!.no_checkout).toBe(0);
+      expect(getRun(store.db, runId)!.no_checkout).toBe(0);
     });
 
     it("refuses a second run of the SAME supporting engagement while one is in flight (its isolated dir is re-cloned fresh)", async () => {
       // Finding-2: the support checkout is deleted + re-cloned FRESH per dispatch,
       // so two overlapping runs of the same reviewer would share (and destroy) one
       // dir. Serialize same-engagement runs; different engagements still run free.
-      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
-        .parsed.frontmatter;
-      writeProject(store.dataRoot, {
-        ...fm,
-        repo: "acme/widgets",
-        agents: [
-          {
-            profileId: "critic", capabilities: [], extras: [],
-            definition: {
-              kind: "specialist", name: "critic", role: "reviewer",
-              backends: ["claude"], model: "sonnet",
-              resources: { skills: [], mcps: [], kb: [] },
-            },
-          },
-        ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      deployCritic();
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
