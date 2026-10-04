@@ -321,7 +321,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // @-mention autocomplete directory for the comment composer: deployed
   // specialists, registered users, and the reserved backend/role handles —
   // the same targets the server resolves an @mention to when a comment posts.
-  const mentionables = getMentionables(db, params.slug, params.key);
+  const mentionables = getMentionables(db, params.slug);
   // U39-31: the other tasks this page's goal and timeline slice name, as the
   // pages this viewer can open. The task itself is never linked to itself.
   const taskLinks = taskKeyLinks(

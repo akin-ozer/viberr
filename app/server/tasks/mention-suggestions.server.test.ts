@@ -77,7 +77,7 @@ beforeEach(() => {
 afterEach(() => ctx.cleanup());
 
 const call = () =>
-  getMentionables(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot });
+  getMentionables(store.db, store.slug, { dataRoot: store.dataRoot });
 
 /** The handle the composer offers (and the fan-out resolves) for a user. */
 const handleOf = (u: TestStoreUser) => u.email.split("@")[0]!.toLowerCase();

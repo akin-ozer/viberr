@@ -117,18 +117,15 @@ function emailLocalPart(email: string): string {
 }
 
 /**
- * Build the mentionable directory for a task's composer.
- *
- * `taskKey` is accepted for parity with the other task-scoped queries and to
- * leave room for per-task narrowing later; today the mentionable agents/users
- * are project-scoped (a comment can @mention any deployed specialist and any
- * project MEMBER, matching the server-side resolver's scope — see
- * mention-notify.server.ts, which refuses to notify across the same boundary).
+ * Build the mentionable directory for a task's composer. The mentionable
+ * agents and users are project-scoped (a comment can @mention any deployed
+ * specialist and any project MEMBER, matching the server-side resolver's
+ * scope — see mention-notify.server.ts, which refuses to notify across the
+ * same boundary).
  */
 export function getMentionables(
   db: DatabaseSync,
   projectSlug: string,
-  _taskKey: string,
   opts: { dataRoot?: string } = {},
 ): Mentionables {
   const ctx = { dataRoot: opts.dataRoot };
