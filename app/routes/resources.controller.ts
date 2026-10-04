@@ -23,12 +23,12 @@ import {
 } from "~/features/controller/waiting-actions.server";
 import {
   conversationMatchesScope,
-  dockTaskExists,
   getControllerDock,
   signedOutDockView,
   unavailableDockView,
 } from "~/features/controller/controller-dock-query.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { taskExists } from "~/server/projections/task-query.server";
 import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
 
 /** Ruling 457: the dock loads its view itself; a page revalidation never
@@ -112,7 +112,7 @@ function scopeIsReachable(
   } catch {
     return false;
   }
-  return scope.taskKey ? dockTaskExists(db, scope.projectSlug, scope.taskKey) : true;
+  return scope.taskKey ? taskExists(db, scope.projectSlug, scope.taskKey) : true;
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

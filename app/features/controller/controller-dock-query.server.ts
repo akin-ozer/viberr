@@ -4,7 +4,6 @@ import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { getProject } from "~/server/projections/board-query.server";
-import { taskExists } from "~/server/projections/task-query.server";
 import {
   canAccessConversation,
   conversationScopeOf,
@@ -237,16 +236,6 @@ export function getControllerDock(
     })),
     viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
   };
-}
-
-/** Does this task exist in this project? (The dock asks before binding a
- *  thread to it; the answer is the same for "gone" and "never was".) */
-export function dockTaskExists(
-  db: DatabaseSync,
-  projectSlug: string,
-  taskKey: string,
-): boolean {
-  return taskExists(db, projectSlug, taskKey);
 }
 
 /** What the two refusal views below share: no thread, no composer, and a
