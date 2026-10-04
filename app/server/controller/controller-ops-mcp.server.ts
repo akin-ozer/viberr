@@ -408,6 +408,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           Math.max(args.limit ?? DEFAULT_RUN_ROWS, 1),
           MAX_RUN_ROWS,
         );
+        let scope = "live";
+        let visible: AgentRunRow[];
         if (args.taskKey) {
           const slug = (args.projectSlug ?? "").trim();
           if (!slug) {
@@ -422,25 +424,17 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // asked FOR a project, so "you cannot see this project" is the true
           // and useful refusal, not an empty list.
           requireVisible(slug, "read this task's runs");
-          const visible = listRunsForTaskRows(db, slug, args.taskKey)
-            .filter(runVisible)
-            .reverse();
-          const rows = visible.slice(0, limit);
-          auditRead("list_runs", `${slug}/${args.taskKey}`);
-          return json({
-            scope: `${slug}/${args.taskKey}`,
-            total: visible.length,
-            ...windowNote(visible.length, rows.length),
-            runs: rows.map(runRow),
-          });
+          scope = `${slug}/${args.taskKey}`;
+          visible = listRunsForTaskRows(db, slug, args.taskKey).filter(runVisible).reverse();
+        } else {
+          // The LIVE listing spans every project, so an invisible row is
+          // dropped rather than refused.
+          visible = listLiveRunRows(db).filter(runVisible);
         }
-        // The LIVE listing spans every project, so an invisible row is dropped
-        // rather than refused — the same posture `list_projects` takes.
-        const visible = listLiveRunRows(db).filter(runVisible);
         const rows = visible.slice(0, limit);
-        auditRead("list_runs", "live");
+        auditRead("list_runs", scope);
         return json({
-          scope: "live",
+          scope,
           total: visible.length,
           ...windowNote(visible.length, rows.length),
           runs: rows.map(runRow),
