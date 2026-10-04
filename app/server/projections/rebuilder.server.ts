@@ -59,6 +59,7 @@ import {
 import { deriveReadiness } from "~/server/interpretation/readiness-policy.server";
 import { logger } from "~/server/logging/logger.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
+import type { TaskEventRow } from "~/shared/mapping/task-event.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
 import { toError } from "~/shared/errors";
@@ -1016,21 +1017,9 @@ function rebuildTaskFileNow(
   return { action: "projected", kind: "task", projectSlug: slug, taskKey: fm.key };
 }
 
-/** One `task_events` row's columns, as the rebuilder writes them. A type alias,
- *  not an interface, so the SELECT-row assertion in `syncTaskEvents` is checked
- *  against SQLite's own output types (see `TaskEventRow`). */
-type TaskEventColumns = {
-  occurred_at: string;
-  type: string;
-  actor_kind: "human" | "agent" | "operator" | "controller" | "system";
-  actor_ref: string;
-  actor_json: string;
-  title: string | null;
-  text: string;
-  to_agent: 0 | 1;
-  evidence_json: string | null;
-  attachments_json: string | null;
-};
+/** One `task_events` row's columns, as the rebuilder writes them: the stored
+ *  row (`TaskEventRow`) less its identity and place. */
+type TaskEventColumns = Omit<TaskEventRow, "id" | "project_slug" | "task_key" | "position">;
 
 /** A stored row: the columns plus its identity and place. */
 type StoredTaskEventRow = TaskEventColumns & { id: number; position: number };
