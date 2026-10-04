@@ -516,7 +516,9 @@ export function checkAttachmentBatch(
 const claimsInFlight = new Map<string, Map<string, number>>();
 
 /** Puts one file on the task inside {@link withAttachmentClaims}: the store's
- *  own write, with {@link writeTaskAttachment}'s refusals. */
+ *  own write, with {@link writeTaskAttachment}'s refusals. `refuseReplace` is
+ *  the sentence that refuses overwriting a file already there, or null to
+ *  allow it. The caller knows whose file it is; the store does not. */
 export type PutAttachment = (name: string, data: Uint8Array, refuseReplace?: string | null) => WrittenAttachment;
 
 /**
@@ -587,11 +589,8 @@ export function writeTaskAttachment(
   name: string,
   data: Uint8Array,
   dataRoot?: string,
-  /** The sentence that refuses overwriting a file already there, or null to
-   *  allow it. The caller knows whose file it is; the store does not. */
-  refuseReplace: string | null = null,
 ): WrittenAttachment {
-  const file = landTaskAttachment(slug, key, name, data, dataRoot, refuseReplace);
+  const file = landTaskAttachment(slug, key, name, data, dataRoot, null);
   file.keep();
   return file.written;
 }
