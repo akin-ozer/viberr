@@ -194,9 +194,9 @@ function RQRow({
             labels and due date — so the acceptance boundary is not blind to an
             urgent or overdue task. Shared `task-meta.tsx` pills (one vocabulary);
             only non-default values render, so a plain task adds nothing. */}
-        <PriorityFlag priority={t.priority} sm />
+        <PriorityFlag priority={t.priority} />
         {t.labels.length > 0 && <LabelChips labels={t.labels} max={3} />}
-        <DueDatePill dueDate={t.dueDate} sm />
+        <DueDatePill dueDate={t.dueDate} />
         {/* Gap-10: the acceptance boundary is where a forgotten task costs the
             most — a completion report nobody answered blocks the merge and the
             branch behind it. The queue carried no time at all, so a row that

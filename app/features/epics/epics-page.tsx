@@ -218,7 +218,7 @@ function EpicRow({
             {epic.leadName}
           </span>
         )}
-        {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} sm />}
+        {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} />}
         {archivable > 0 && <ArchiveEpicTasksButton busy={archiving} onClick={onArchive} />}
       </span>
       <Icon name="chevron" className="epic-row-go" />

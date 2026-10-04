@@ -349,7 +349,7 @@ const PriorityRow = memo(function PriorityRow({
       value={
         // `normal` is the default: the shared flag draws nothing for it, and
         // the row says it quietly rather than in bold.
-        current === "normal" ? <Quiet icon="flag">Normal</Quiet> : <PriorityFlag priority={current} sm />
+        current === "normal" ? <Quiet icon="flag">Normal</Quiet> : <PriorityFlag priority={current} />
       }
       editor={(done) => (
         <PriorityMenu
@@ -630,7 +630,7 @@ const DueRow = memo(function DueRow({ due, ...control }: { due: string | null } 
       popup="calendar"
       value={
         due ? (
-          <DueDatePill dueDate={due} sm />
+          <DueDatePill dueDate={due} />
         ) : edit ? (
           <Quiet icon="clock">Set due date</Quiet>
         ) : (

@@ -186,7 +186,7 @@ export function EpicPage({
                 ? `${epicDonePercent(epic.progress)}% done · ${countLabel(epic.progress.total, "task")}`
                 : "No tasks yet"}
             </span>
-            {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} sm />}
+            {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} />}
           </div>
         </div>
 
