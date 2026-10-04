@@ -3664,6 +3664,54 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet!.options[0]!.kind).toBe("redirect");
   });
 
+  it("ruling 650: a send-back option can require the person's words, and an empty confirm is refused", async () => {
+    // Live on AWSC-100 "Ask the Estimate Judge to revise the inputs first:
+    // write what to change" sat over a box marked optional, so an empty
+    // confirm would have re-run the Judge with nothing to change. CANARIES:
+    // drop `reply` from `operatorOpenPacket` and the empty confirm goes
+    // through; keep it on every kind and the stray flag below survives.
+    deployRoster([
+      { capabilityId: "generate-packets", mode: "direct" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("impl");
+    const opened = await operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType: "input",
+        title: "Hold-outs designed: accept, or send back?",
+        options: [
+          { kind: "redirect", title: "Ask the Judge to revise the inputs first", recommended: true, reply: true },
+          { kind: "block_on_policy", title: "Hold it", reply: true },
+        ],
+      },
+      authority("supervised"),
+    );
+    expect(opened.outcome).toBe("done");
+    const [redirect, hold] = task().packet!.options;
+    expect(redirect!.reply).toBe(true);
+    expect(hold!.reply).toBeUndefined();
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, note: "   " },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow("needs your answer");
+    expect(task().packet).not.toBeNull();
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, note: "Drop the words that name each trap." },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(task().packet).toBeNull();
+  });
+
   it("ruling 164: a move_stage option names a stage the resolution can move to, and only that kind carries one", async () => {
     deployRoster([
       { capabilityId: "generate-packets", mode: "direct" },

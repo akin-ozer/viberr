@@ -1677,6 +1677,27 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
   });
 
   // Ruling 138 (pass 34, U34-10): goalDraft rides the plan and its schema requires the key.
+  it("ruling 650: authoredPacketOptions carries reply, and the plan schema requires the key", () => {
+    // CANARY: drop the carry in `authoredPacketOptions`, or "reply" from the
+    // option item's `required`, and a Codex operator's send-back takes no words.
+    const carried = authoredPacketOptions([
+      { kind: "redirect", title: "Send it back", detail: null, recommended: true, reply: true },
+      { kind: "hold_runtime_debug", title: "Hold", detail: null, recommended: false, reply: null },
+    ]);
+    expect(carried?.[0]?.reply).toBe(true);
+    expect(carried?.[1]?.reply).toBeUndefined();
+    const schema = operatorPlanSchemaFor(
+      authority({
+        "append-typed-events": "direct",
+        "generate-packets": "direct",
+        "stage-transitions": "direct",
+        "dispatch-agents": "direct",
+        "completion-for-acceptance": "human",
+      }),
+    );
+    expect(schema.properties.actions.items.properties.packetOptions.items.required).toContain("reply");
+  });
+
   it("authoredPacketOptions carries a trimmed goalDraft, and the plan schema requires the key", () => {
     // Canary: remove the carry in `authoredPacketOptions`, or drop "goalDraft"
     // from the option item's `required`.
