@@ -45,9 +45,6 @@ import {
   operatorPromptAgent,
   packetIdentity,
   recordAgentCompletion,
-  releaseOwner,
-  releaseTasksOwnedBy,
-  setOwner,
   clearWaitingToHuman,
   manualDeliverForReview,
   performDelivery,
@@ -63,6 +60,7 @@ import {
   reorderTask,
   resolvePacket,
 } from "./task-actions.server";
+import { releaseOwner, releaseTasksOwnedBy, setOwner } from "./task-ownership.server";
 import { createTask, DEFAULT_GOAL, updateTaskGoal } from "./task-edits.server";
 import { postAgentReplyComment, specialistReplyDirective } from "./task-replies.server";
 import type { TaskActionDeps } from "./task-action-core.server";

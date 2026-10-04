@@ -36,7 +36,7 @@ import {
 } from "~/server/files/project-writer.server";
 import { listProjects } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
-import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
+import { releaseTasksOwnedBy } from "~/server/tasks/task-ownership.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOf } from "~/ui/initials";

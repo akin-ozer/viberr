@@ -16,8 +16,6 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   appendComment,
   completeTaskMerge,
-  releaseOwner,
-  setOwner,
   transitionStage,
   reorderTask,
   dismissRecommendation,
@@ -29,6 +27,7 @@ import {
   refreshAndReview,
   runProjectGatesByHand,
 } from "~/server/tasks/task-actions.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
   createTask,
   attachTaskFile,

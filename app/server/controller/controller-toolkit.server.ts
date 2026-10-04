@@ -204,10 +204,9 @@ import {
 import {
   acceptanceRefusalFor,
   appendComment,
-  releaseOwner,
-  setOwner,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
   createTask,
   setTaskMetadata,

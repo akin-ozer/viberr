@@ -46,14 +46,13 @@ import {
   manualDeliverForReview,
   runProjectGatesByHand,
   refreshAndReview,
-  releaseOwner,
   requestPacketMaintainerDecision,
   acceptanceStanding,
   resolvePacket,
-  setOwner,
   setTaskArchived,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
   attachTaskFile,
   removeTaskAttachment,

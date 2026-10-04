@@ -22,13 +22,8 @@ import {
   resolveScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
-import {
-  appendComment,
-  releaseOwner,
-  resolvePacket,
-  setOwner,
-  transitionStage,
-} from "~/server/tasks/task-actions.server";
+import { appendComment, resolvePacket, transitionStage } from "~/server/tasks/task-actions.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import { createTask } from "~/server/tasks/task-edits.server";
 import {
   interruptRun,
