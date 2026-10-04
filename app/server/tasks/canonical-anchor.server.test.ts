@@ -32,7 +32,7 @@ import {
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
-import { commentToAgent } from "./task-actions.server";
+import { commentToAgent } from "./task-comments.server";
 import { updateTaskGoal } from "./task-edits.server";
 
 /**

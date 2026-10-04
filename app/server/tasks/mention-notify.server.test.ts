@@ -28,7 +28,7 @@ import {
   operatorPostComment,
   resolveOperatorAuthority,
 } from "./operator-actions.server";
-import { appendComment } from "./task-actions.server";
+import { appendComment } from "./task-comments.server";
 import { operatorPromptAgent, recordAgentCompletion } from "./agent-completion.server";
 import { postAgentReplyComment } from "./task-replies.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
@@ -988,7 +988,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * `SITES_WITHOUT_MENTIONS`).
    */
   const COMMENT_WRITER_SITES = {
-    "server/tasks/task-actions.server.ts": 1,
+    "server/tasks/task-comments.server.ts": 1,
     "server/tasks/agent-completion.server.ts": 2,
     "server/tasks/task-replies.server.ts": 1,
     "server/tasks/operator-actions.server.ts": 2,

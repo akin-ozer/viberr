@@ -5009,7 +5009,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     // the task. Canary: same as the fresh-run canary above — this test fails
     // with it, because it IS the fresh-run path.
     taskWithHistory();
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev what is left here?" },

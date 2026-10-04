@@ -39,12 +39,8 @@ import {
   getTaskDetail,
 } from "~/server/projections/task-query.server";
 import { runOutcomeClause, OPERATOR_TASK_ACTOR } from "./task-action-core.server";
-import {
-  appendComment,
-  packetIdentity,
-  commentToAgent,
-  resolvePacket,
-} from "./task-actions.server";
+import { appendComment, commentToAgent } from "./task-comments.server";
+import { packetIdentity, resolvePacket } from "./task-actions.server";
 import {
   classifyReviewerVerdict,
   operatorPromptAgent,

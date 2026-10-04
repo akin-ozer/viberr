@@ -1320,7 +1320,7 @@ export async function deliverDeferredMention(
     comments: mine.length,
     oldestAt: oldest.at,
   });
-  const { commentToAgent } = await import("./task-actions.server");
+  const { commentToAgent } = await import("./task-comments.server");
   const result = await commentToAgent(
     db,
     {

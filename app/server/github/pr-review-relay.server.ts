@@ -251,7 +251,7 @@ export async function relayPrReviews(
   }
 
   const result: ReviewRelayResult = { relayed: 0, recorded: 0 };
-  const { commentToAgent } = await import("~/server/tasks/task-actions.server");
+  const { commentToAgent } = await import("~/server/tasks/task-comments.server");
   for (const batch of batches.values()) {
     try {
       if (batch.notes.length === 0) {

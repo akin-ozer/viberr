@@ -40,12 +40,8 @@ import {
   applyRecommendation,
   dismissRecommendation,
 } from "~/server/tasks/task-recommendations.server";
-import {
-  appendComment,
-  commentToAgent,
-  requestPacketMaintainerDecision,
-  resolvePacket,
-} from "~/server/tasks/task-actions.server";
+import { appendComment, commentToAgent } from "~/server/tasks/task-comments.server";
+import { requestPacketMaintainerDecision, resolvePacket } from "~/server/tasks/task-actions.server";
 import { transitionStage } from "~/server/tasks/task-transitions.server";
 import { manualDeliverForReview, runProjectGatesByHand } from "~/server/tasks/task-delivery.server";
 import {

@@ -55,7 +55,7 @@ import {
   runFailureReason,
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
-import { commentToAgent } from "./task-actions.server";
+import { commentToAgent } from "./task-comments.server";
 import { deliverDeferredMention } from "./agent-completion.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -2170,7 +2170,7 @@ describe("commentToAgent", () => {
    * for them (AX-20, AX-27).
    */
   it("ruling 447: an answer names another actor exactly when it routes the work", async () => {
-    const { answerNamesAnotherActor } = await import("./task-actions.server");
+    const { answerNamesAnotherActor } = await import("./task-comments.server");
     const agents = [
       { id: "developer", name: "Developer", handle: "developer" },
       { id: "surface-developer", name: "Surface Developer", handle: "surface-developer" },

@@ -32,7 +32,7 @@ afterAll(() => {
 
 describe("comment write cost (ruling 457)", () => {
   it("CS-5: a comment with no @ skips the mention machinery", async () => {
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const sql = countSql(app.db);
     const reads = countFileReads(app.dataRoot);
     await commentToAgent(
@@ -47,7 +47,7 @@ describe("comment write cost (ruling 457)", () => {
   });
 
   it("CS-4: a comment that @mentions a member leaves the watcher nothing to re-project", async () => {
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     const { taskFilePath } = await import("~/server/files/file-store-root.server");
     await commentToAgent(

@@ -1827,7 +1827,7 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
       dataRoot: store.dataRoot,
     });
 
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const res = await commentToAgent(
       store.db,
       {
@@ -1889,7 +1889,7 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
     );
     resetOperatorLeasesForTests();
 
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const res = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator can you summarize?" },
