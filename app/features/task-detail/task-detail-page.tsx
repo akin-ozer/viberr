@@ -93,6 +93,22 @@ type PendingAccept =
   | { mode: "packet"; option: number; note: string; label: string; force?: true }
   | { mode: "stage-move"; toStageId: string; label: string };
 
+/** A bare intent posted on a fetcher of its own: whether it is in flight, and
+ *  the press, which does nothing while the last one runs. Its answer toasts. */
+function useIntentPost(intent: string, csrf: string): [busy: boolean, post: () => void] {
+  const fetcher = useFetcher<ActionResult>();
+  useActionToast(fetcher);
+  const busy = fetcher.state !== "idle";
+  const post = () => {
+    if (busy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", intent);
+    fetcher.submit(fd, { method: "post" });
+  };
+  return [busy, post];
+}
+
 /** A run group's identity in the projection (`useStableRows`' key). */
 function runThreadKey(run: RunView): string {
   return run.id;
@@ -465,29 +481,11 @@ export function TaskDetailPage({
   };
 
   // R15-2 safety net (b): manual delivery from the GitHub panel.
-  const deliverFetcher = useFetcher<ActionResult>();
-  useActionToast(deliverFetcher);
-  const deliverBusy = deliverFetcher.state !== "idle";
-  const onDeliver = () => {
-    if (deliverBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "deliver-review");
-    deliverFetcher.submit(fd, { method: "post" });
-  };
+  const [deliverBusy, onDeliver] = useIntentPost("deliver-review", csrf);
 
   // Ruling 482: run the project's gates on the revision under review again,
   // from the PR card. Same tier as the manual delivery above.
-  const gatesFetcher = useFetcher<ActionResult>();
-  useActionToast(gatesFetcher);
-  const gatesBusy = gatesFetcher.state !== "idle";
-  const onRunGates = () => {
-    if (gatesBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "run-gates");
-    gatesFetcher.submit(fd, { method: "post" });
-  };
+  const [gatesBusy, onRunGates] = useIntentPost("run-gates", csrf);
 
   // The run-log console's store (ruling 457): it follows the task's runs
   // line by line on the layout's live stream, fills a thread the payload did
@@ -662,17 +660,8 @@ export function TaskDetailPage({
   // instead of stranding them. The server (requestPacketMaintainerDecision)
   // refuses when the caller already holds `resolve-packet`, so this is wired
   // only for the owner-who-cannot-resolve-directly case.
-  const escalateFetcher = useFetcher<ActionResult>();
-  useActionToast(escalateFetcher);
-  const escalateBusy = escalateFetcher.state !== "idle";
+  const [escalateBusy, onRequestMaintainer] = useIntentPost("request-maintainer-decision", csrf);
   const canEscalatePacket = isOwner && !canRunAgents;
-  const onRequestMaintainer = () => {
-    if (escalateBusy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "request-maintainer-decision");
-    escalateFetcher.submit(fd, { method: "post" });
-  };
 
   // Apply / dismiss an operator recommendation (apply is admin|maintainer; the
   // server re-checks). Lifted onto the page — with F19-3 an Apply can BE an
