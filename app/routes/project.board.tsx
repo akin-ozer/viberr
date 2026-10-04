@@ -40,22 +40,6 @@ import { BoardPage } from "~/features/board/board-page";
  * new card.
  */
 
-/**
- * Ruling 88 (F21-2) — the acceptance disclosure a board POST carries, or `null`
- * when it carries none.
- *
- * `null` reaches the server rather than being swallowed here: it is the
- * difference between "an HTTP caller sent no acknowledgment" (refused — the
- * bare POST F21-2 found accepting silently) and "an in-process caller carries
- * its own contract" (omitted). The parsing itself — the field names, and the
- * strictness that reads a half-filled echo as no echo — is the ONE shared
- * definition in `~/shared/acceptance-disclosure`, which the ceremony writes
- * with; only the FormData read is local (as in routes/project.task).
- */
-function acceptanceAck(formData: FormData) {
-  return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
-}
-
 /** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
  *  project title from the workspace layout. */
 export function meta({ params }: Route.MetaArgs) {
@@ -183,7 +167,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // alone, so a rank write or an ordinary column move stays ack-free.
           // Absent fields ⇒ `null` ⇒ a drop on Done that skipped the dialog is
           // refused.
-          ack: acceptanceAck(formData),
+          ack: parseAcceptanceDisclosure(formData),
           // Ruling 381: why the card went BACK. The server requires it for a
           // backward manual move, whichever door the move came through.
           reason: String(formData.get("reason") ?? ""),

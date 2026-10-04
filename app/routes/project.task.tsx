@@ -622,23 +622,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 88 (F21-2) — the acceptance disclosure this POST carries, or `null`
- * when it carries none.
- *
- * `null` is deliberately passed THROUGH to the server rather than swallowed
- * here: it is the difference between "an HTTP caller sent no acknowledgment"
- * (refused — the bare POST F21-2 found accepting silently) and "an in-process
- * caller carries its own disclosure contract" (omitted). This route is the one
- * HTTP door onto the human acceptance paths, so every one of them passes an
- * explicit value.
- */
-function acceptanceAck(formData: FormData) {
-  // Same field read as every other intent in this action: an absent field
-  // becomes "", which the parser reads as "no disclosure" rather than a value.
-  return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
-}
-
-/**
  * The toast a comment's result earns, for the `comment` intent and ruling
  * 484's `review-notes` (whose `posted` names the notes). Name the agent when one
  * is picking the comment up; note when a mention was recorded but the run was
@@ -893,7 +876,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // packet); `resolvePacket` consults it on the accepting arm alone, so
           // an ordinary decision stays ack-free. Absent fields ⇒ `null` ⇒ an
           // accepting resolution that skipped the dialog is refused.
-          ack: acceptanceAck(formData),
+          ack: parseAcceptanceDisclosure(formData),
         };
         if (note.trim()) resolveInput.note = note;
         if (custom.trim()) resolveInput.custom = custom;
@@ -1017,7 +1000,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             manual: true,
             // Ruling 88: the ceremony's echo of what it displayed. Absent ⇒
             // `null` ⇒ the server refuses this accept.
-            ack: acceptanceAck(formData),
+            ack: parseAcceptanceDisclosure(formData),
           },
           actor,
         );
@@ -1134,7 +1117,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // ceremony states more, not less, so it echoes on the same terms.
         await forceAcceptCompletion(
           db,
-          { projectSlug, taskKey, ack: acceptanceAck(formData) },
+          { projectSlug, taskKey, ack: parseAcceptanceDisclosure(formData) },
           actor,
         );
         return {
@@ -1212,7 +1195,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // the server decides (it is the side that knows the stage order).
         const moveReason = String(formData.get("reason") ?? "").trim();
         if (moveReason) move.reason = moveReason;
-        if (acceptsCompletion) move.ack = acceptanceAck(formData);
+        if (acceptsCompletion) move.ack = parseAcceptanceDisclosure(formData);
         // F32-10 (pass 32): a no-op move must not be narrated as a move. The
         // server's idempotent short-circuit now pays the same gate as a real
         // move, so a refusal never reaches here; a permitted same-stage post
@@ -1405,7 +1388,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             projectSlug,
             taskKey,
             recId: String(formData.get("recId") ?? ""),
-            ack: acceptanceAck(formData),
+            ack: parseAcceptanceDisclosure(formData),
           },
           actor,
         );
