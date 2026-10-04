@@ -348,28 +348,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * Canary: restore `reactBackend = input.operatorRun.backend`.
    */
   it("ruling 231: a react uses the DEPLOYED backend, not the one its chain started on", async () => {
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            // The live deployment the owner just set.
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
+    // The live deployment the owner just set: the operator on Claude.
+    deployOperator();
     writeReviewTask({ stage: "impl", waiting: "agent" });
     const runId = await finishedRunWith("Done with the slice. @operator");
 
@@ -416,27 +396,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * `applyAgentCompletionEffects` (the operator run row appears again).
    */
   it("ruling 177: a run finishing after the task closed leaves a note and wakes no operator", async () => {
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
+    deployOperator();
     // Shipped (terminal) while the run was live — the F36-5 shape.
     writeReviewTask({ stage: "done", waiting: "agent" });
     const runId = await finishedRunWith("Implemented the harness; branch hlc-9, HEAD 16c6e2e. @operator");
@@ -1985,27 +1945,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      *
      * CANARY: delete the fallback retry in `openStuckLoopPacket`.
      */
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
+    deployOperator();
     // The owner has BOTH backends, and the other one is out of quota — the
     // exact live shape. `describeRunFailure` no longer composes the retry
     // (ruling 326's first half), so force the refusal directly: an option set
@@ -2112,27 +2052,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   it("ruling 258: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
     // An operator that CAN open packets, so the absence below is a decision
     // rather than a missing grant.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
+    deployOperator();
     // A task at the review boundary with its required verdict already in.
     writeReviewTask({
       validation: "healthy",
@@ -4253,28 +4173,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // blocked event naming the reason and open a recovery packet.
     // Deploy an operator (with generate-packets) alongside the dev — every active
     // task has one, and it's what opens the recovery packet on a failed run.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     // Build the errored run synchronously so the
     // test is deterministic — a real async run's lifecycle raced CI's slower
     // SQLite (the "database connection is not open" flood) and intermittently
@@ -4397,28 +4296,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
     setNotifRoutingPref(store.db, store.users.murat.id, "packets", false);
 
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     const runId = "run_v2_prefsplit";
     upsertRun(store.db, {
       id: runId,
@@ -4560,28 +4438,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // credential and re-run." sentence in the error arm (the event text
     // fails), or drop the `stuck.options` override so the stock set with
     // `redirect` recommended returns (the option assertions fail).
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     const runId = "run_130b_quota";
     upsertRun(store.db, {
       id: runId,
@@ -4673,28 +4530,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   it("ruling 175: a specialist the spending cap cut off names the cap and the spend, is not a task failure, and names who raises the cap", async () => {
     // Canary: drop the `max_budget` arm and the event reads "Claude run failed:
     // …" followed by "No changes were delivered." — a cap reads as a failure.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     const runId = "run_175_budget";
     upsertRun(store.db, {
       id: runId,
@@ -4750,28 +4586,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   it("ruling 595: a specialist run the idle guard stopped opens a stall packet that recommends running it again, in the leaf's words", async () => {
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     const runId = "run_595_hung";
     upsertRun(store.db, {
       id: runId,
@@ -4838,23 +4653,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // recommendation is guidance. CANARIES: leave tool_loop out of the leaf's
     // kinds and the packet says only that the run failed; recommend the
     // re-run and the loop comes back.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: { kind: "operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     const runId = "run_598_loop";
     upsertRun(store.db, {
       id: runId,
@@ -4980,28 +4779,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 describe("unavailable backend through the specialist start path", () => {
   it("startSpecialistRun on an unavailable backend errors fast → blocked event with 'unavailable' copy + recovery packet", async () => {
     // Deploy an operator with generate-packets (opens the recovery packet).
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
@@ -5073,28 +4851,7 @@ describe("unavailable backend through the specialist start path", () => {
     // Ruling 127: the retry run would bill the same owner. Offering it when
     // they cannot run it promises a one-click fix that fails identically —
     // the worst kind of packet option, because it looks like the way out.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      agents: [
-        ...pf.parsed.frontmatter.agents,
-        {
-          profileId: "operator",
-          capabilities: [
-            { capabilityId: "generate-packets", mode: "direct" },
-            { capabilityId: "append-typed-events", mode: "direct" },
-          ],
-          extras: [],
-          definition: {
-            kind: "operator",
-            backends: ["claude"],
-            model: "sonnet",
-            autonomy: "supervised",
-          },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    deployOperator();
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
