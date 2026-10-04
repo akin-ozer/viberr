@@ -2301,7 +2301,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .int()
           .min(0)
           .optional()
-          .describe("Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start."),
+          .describe(READ_TASK_ATTACHMENT_FIELDS.offset),
         delivery: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.delivery),
       },
       runWith((args: { projectSlug?: string; taskKey?: string; name: string; offset?: number; delivery?: string }) => {
