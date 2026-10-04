@@ -29,6 +29,15 @@ export type ActionResult =
     }
   | { ok: false; error: string };
 
+/** Ruling 88 (F21-2): the acceptance ceremony's echo of what it displayed, on
+ *  the form an acceptance intent posts; nothing for an intent that has none. */
+export function setDisclosure(fd: FormData, disclosure: AcceptanceDisclosure | undefined): void {
+  if (!disclosure) return;
+  for (const [field, value] of Object.entries(acceptanceDisclosureFields(disclosure))) {
+    fd.set(field, value);
+  }
+}
+
 /**
  * Run-control mutations (interrupt / retry-on-other-backend / complete the
  * real merge). One fetcher backs all three, so a single in-flight run action
@@ -193,11 +202,7 @@ export function useRunControls({
         const fd = new FormData();
         fd.set("_csrf", csrf);
         fd.set("intent", "force-accept");
-        for (const [field, value] of Object.entries(
-          acceptanceDisclosureFields(disclosure),
-        )) {
-          fd.set(field, value);
-        }
+        setDisclosure(fd, disclosure);
         runFetcher.submit(fd, { method: "post" });
       }
     : undefined;

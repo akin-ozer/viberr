@@ -48,12 +48,14 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { useStableRows } from "~/ui/use-stable-rows";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageName } from "~/shared/workflow/stage-roles";
-import {
-  acceptanceDisclosureFields,
-  type AcceptanceDisclosure,
-} from "~/shared/acceptance-disclosure";
+import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
-import { useLogSelection, useRunControls, type ActionResult } from "./task-detail-hooks";
+import {
+  setDisclosure,
+  useLogSelection,
+  useRunControls,
+  type ActionResult,
+} from "./task-detail-hooks";
 import { useActionToast } from "~/ui/use-action-toast";
 import { CurrentStatePanel, GithubTrace } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
@@ -461,11 +463,7 @@ export function TaskDetailPage({
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "accept-completion");
-    for (const [field, value] of Object.entries(
-      acceptanceDisclosureFields(disclosure),
-    )) {
-      fd.set(field, value);
-    }
+    setDisclosure(fd, disclosure);
     acceptFetcher.submit(fd, { method: "post" });
   };
 
@@ -597,13 +595,7 @@ export function TaskDetailPage({
     fd.set("intent", "resolve-packet");
     fd.set("option", String(optionIndex));
     if (note.trim()) fd.set("note", note);
-    if (disclosure) {
-      for (const [field, value] of Object.entries(
-        acceptanceDisclosureFields(disclosure),
-      )) {
-        fd.set(field, value);
-      }
-    }
+    setDisclosure(fd, disclosure);
     resolveFetcher.submit(fd, { method: "post" });
   };
   // Questionnaire packets (owner request 2026-08-20): resolve with the human's
@@ -696,13 +688,7 @@ export function TaskDetailPage({
     fd.set("_csrf", csrf);
     fd.set("intent", "apply-recommendation");
     fd.set("recId", recId);
-    if (disclosure) {
-      for (const [field, value] of Object.entries(
-        acceptanceDisclosureFields(disclosure),
-      )) {
-        fd.set(field, value);
-      }
-    }
+    setDisclosure(fd, disclosure);
     recFetcher.submit(fd, { method: "post" });
   };
   // F19-3 (live-proven: one Apply click merged an unreviewed head into main).
@@ -755,13 +741,7 @@ export function TaskDetailPage({
     fd.set("intent", "transition");
     fd.set("to", toStageId);
     if (reason) fd.set("reason", reason);
-    if (disclosure) {
-      for (const [field, value] of Object.entries(
-        acceptanceDisclosureFields(disclosure),
-      )) {
-        fd.set(field, value);
-      }
-    }
+    setDisclosure(fd, disclosure);
     transitionFetcher.submit(fd, { method: "post" });
   };
   // F19-37 — the SIXTH acceptance writer. The server treats a human move into
