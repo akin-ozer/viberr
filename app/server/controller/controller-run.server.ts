@@ -781,7 +781,7 @@ async function startTurnRun(
   // produces this turn's input disclosure and both lists belong in it.
   const disallowedTools = ["Read", "Grep", "Glob", "WebFetch", "WebSearch"];
 
-  const promptBuild = buildControllerSystemPrompt(db, {
+  const promptBuild = buildControllerSystemPrompt({
     conversation,
     user: input.user,
     config,
@@ -1508,10 +1508,7 @@ export interface ControllerPromptBuild {
  *  the conversation contract (whose authority this turn runs under) — and,
  *  ruling 344, the resource half of this turn's own input disclosure, off the
  *  same resolution rather than a second reading of the grants. */
-export function buildControllerSystemPrompt(
-  _db: DatabaseSync,
-  input: SystemPromptInput,
-): ControllerPromptBuild {
+export function buildControllerSystemPrompt(input: SystemPromptInput): ControllerPromptBuild {
   const parts: string[] = [readControllerDefinition(input.dataRoot)];
 
   // C03-OC3: `resolveControllerConfig` already applied the one rule (an empty

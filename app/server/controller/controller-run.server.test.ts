@@ -37,7 +37,7 @@ afterAll(() => app.cleanup());
  *  replaces any of those inputs. */
 async function build(
   scope: { projectSlug?: string; taskKey?: string },
-  extra: Partial<Parameters<typeof import("./controller-run.server").buildControllerSystemPrompt>[1]> = {},
+  extra: Partial<Parameters<typeof import("./controller-run.server").buildControllerSystemPrompt>[0]> = {},
 ) {
   const { buildControllerSystemPrompt } = await import("./controller-run.server");
   const { resolveControllerConfig } = await import("./controller-profile.server");
@@ -47,7 +47,7 @@ async function build(
     userLabel: user.email,
     ...scope,
   });
-  return buildControllerSystemPrompt(app.db, {
+  return buildControllerSystemPrompt({
     conversation,
     user: { ...user, orgRole: "admin" },
     config: resolveControllerConfig(app.dataRoot),
