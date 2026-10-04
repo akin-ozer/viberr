@@ -25,7 +25,7 @@ import {
   probeTools,
   type ProbedTool,
 } from "~/server/ops/toolchain.server";
-import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
+import { runConcurrencySnapshot, runLogPage } from "~/server/runtimes/run-service.server";
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
 import {
   getRun,
@@ -510,28 +510,21 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           if (args.since === undefined) {
             // Backward: the newest page, or the page older than `before`. An
             // absent cursor must leave its key OFF rather than carry undefined,
-            // which is how `getRunLog` selects its mode.
+            // which is how `runLogPage` selects its mode.
             const query: RunLogQuery = { limit };
             if (args.before !== undefined) query.before = args.before;
-            const log = getRunLog(db, args.runId, query);
-            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
-            page = log.lines;
+            page = runLogPage(db, row, query).lines;
           } else {
-            // Forward. `getRunLog` ignores `limit` in this mode BY DESIGN (the
+            // Forward. `runLogPage` ignores `limit` in this mode BY DESIGN (the
             // console's live tail is bounded by its own cursor), so the bound
             // travels as `forwardLimit` — pushed into the SELECT (C02-R12,
             // pass 32) rather than applied on lines already materialized. What
             // this tool must keep bounded is the REPLY it puts in a model's
             // context; the SQL bound keeps the read proportional to it too.
-            const log = getRunLog(db, args.runId, {
-              since: args.since,
-              forwardLimit: limit,
-            });
-            if (!log) throw new NotVisibleError(notVisibleRun(args.runId));
-            page = log.lines;
+            page = runLogPage(db, row, { since: args.since, forwardLimit: limit }).lines;
           }
 
-          // Page position, computed against the RUN's real bounds. `getRunLog`'s
+          // Page position, computed against the RUN's real bounds. `runLogPage`'s
           // own headSeq/oldestSeq/hasMore are page-local cursors for a stateful
           // console (headSeq is this page's last line, hasMore means "older
           // lines exist"), and a model with no second source reads them as facts
