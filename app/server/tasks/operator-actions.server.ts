@@ -90,18 +90,15 @@ import {
   type RevisionDeparture,
   unpushedRevisionBlockedReason,
 } from "~/schemas/task-file.schema";
-import {
-  compactTimelineEvents,
-  DEFAULT_COMPACTION,
-} from "./timeline-compaction.server";
+import { compactTimelineEvents } from "./timeline-compaction.server";
 import {
   applyCommentGuardrails,
   repairDoubledNewlines,
   COMMENT_DROPPED_AUDIT_ACTION,
   commentOutcomeMessage,
   type CommentGuardrailResult,
+  guardrailCompaction,
   guardrailOn,
-  guardrailValue,
 } from "./comment-guardrails.server";
 import { absentDeliverReviewPrMode } from "~/shared/capabilities";
 import {
@@ -852,8 +849,7 @@ async function writeOperatorComment(
     evidence: null,
   };
   const dedupeOn = guardrailOn(ctx, projectSlug, "no-duplicate-summary");
-  const compactOn = guardrailOn(ctx, projectSlug, "compression-threshold");
-  const compactAt = guardrailValue(ctx, projectSlug, "compression-threshold");
+  const compaction = guardrailCompaction(ctx, projectSlug);
   let suppressed = false;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     if (dedupeOn) {
@@ -872,20 +868,7 @@ async function writeOperatorComment(
     // re-anchor on stays readable. The guardrail's CONFIGURED value drives the
     // threshold (it used to be ignored — the settings row advertised 40 while
     // the code hardcoded 60).
-    if (compactOn) {
-      parsed.timeline = compactTimelineEvents(
-        parsed.timeline,
-        compactAt != null
-          ? {
-              threshold: compactAt,
-              keepRecent: Math.min(
-                DEFAULT_COMPACTION.keepRecent,
-                Math.max(4, Math.floor(compactAt / 2)),
-              ),
-            }
-          : DEFAULT_COMPACTION,
-      );
-    }
+    if (compaction) parsed.timeline = compactTimelineEvents(parsed.timeline, compaction);
   });
   if (suppressed) {
     recordCommentDrop(db, projectSlug, taskKey, variant, "duplicate");

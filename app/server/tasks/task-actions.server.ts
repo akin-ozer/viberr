@@ -141,10 +141,7 @@ import {
   joinDependencyEntries,
   type DependencyReleasePayload,
 } from "~/shared/dependencies";
-import {
-  compactTimelineEvents,
-  DEFAULT_COMPACTION,
-} from "./timeline-compaction.server";
+import { compactTimelineEvents } from "./timeline-compaction.server";
 import {
   canAcceptFromStage,
   resolveStageRoles,
@@ -1903,11 +1900,8 @@ export async function appendComment(
 
   // Timeline compaction fires on HUMAN comments too — a comment flood used to
   // never compact because compaction only ran inside operator writes.
-  const { guardrailOn, guardrailValue } = await import(
-    "./comment-guardrails.server"
-  );
-  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
-  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  const { guardrailCompaction } = await import("./comment-guardrails.server");
+  const compaction = guardrailCompaction(ctx, input.projectSlug);
   // B-FD2 (H3): a handle that matched several people notifies NOBODY. The
   // author is the only one who can retag and is still on the page, so the
   // non-delivery lands next to their comment in the same write — resolved
@@ -1935,20 +1929,7 @@ export async function appendComment(
         evidence: null,
       });
     }
-    if (compactOn) {
-      parsed.timeline = compactTimelineEvents(
-        parsed.timeline,
-        compactAt != null
-          ? {
-              threshold: compactAt,
-              keepRecent: Math.min(
-                DEFAULT_COMPACTION.keepRecent,
-                Math.max(4, Math.floor(compactAt / 2)),
-              ),
-            }
-          : DEFAULT_COMPACTION,
-      );
-    }
+    if (compaction) parsed.timeline = compactTimelineEvents(parsed.timeline, compaction);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -3540,29 +3521,13 @@ export async function postAgentReplyComment(
   // for. It ran only on operator and human comment writes, so a run of agent
   // replies accreted with no compaction pass even though B-FD9 made those
   // replies foldable. Same threshold/keepRecent shape as the other two paths.
-  const { guardrailOn, guardrailValue } = await import(
-    "./comment-guardrails.server"
-  );
-  const compactOn = guardrailOn(ctx, input.projectSlug, "compression-threshold");
-  const compactAt = guardrailValue(ctx, input.projectSlug, "compression-threshold");
+  const { guardrailCompaction } = await import("./comment-guardrails.server");
+  const compaction = guardrailCompaction(ctx, input.projectSlug);
   // The reply write, on its own so it can be RETRIED (C3).
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift(event);
-      if (compactOn) {
-        parsed.timeline = compactTimelineEvents(
-          parsed.timeline,
-          compactAt != null
-            ? {
-                threshold: compactAt,
-                keepRecent: Math.min(
-                  DEFAULT_COMPACTION.keepRecent,
-                  Math.max(4, Math.floor(compactAt / 2)),
-                ),
-              }
-            : DEFAULT_COMPACTION,
-        );
-      }
+      if (compaction) parsed.timeline = compactTimelineEvents(parsed.timeline, compaction);
     });
   const finalizeReply = async () => {
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);

@@ -1,5 +1,6 @@
 import { readProjectFile } from "~/server/files/project-writer.server";
 import type { TaskMutationContext } from "./task-actions.server";
+import { DEFAULT_COMPACTION, type CompactionOptions } from "./timeline-compaction.server";
 
 /**
  * REAL enforcement for the anti-noise guardrails (owner ruling Q3, 2026-07-11).
@@ -216,4 +217,24 @@ export function guardrailValue(
   // `value` is already a parsed number-or-absent (guardrailSchema) — the only
   // thing left to decide is whether the project configured a usable one.
   return g?.value != null && g.value > 0 ? g.value : null;
+}
+
+/**
+ * The compaction the `compression-threshold` guardrail asks of a timeline
+ * write (operator, human and agent comments alike), or null while it is off.
+ * A configured threshold keeps half of it verbatim (at least 4, at most the
+ * default's 24); no usable value means the default.
+ */
+export function guardrailCompaction(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+): CompactionOptions | null {
+  const on = guardrailOn(ctx, projectSlug, "compression-threshold");
+  const threshold = guardrailValue(ctx, projectSlug, "compression-threshold");
+  if (!on) return null;
+  if (threshold == null) return DEFAULT_COMPACTION;
+  return {
+    threshold,
+    keepRecent: Math.min(DEFAULT_COMPACTION.keepRecent, Math.max(4, Math.floor(threshold / 2))),
+  };
 }
