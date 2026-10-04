@@ -8,7 +8,7 @@ import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-prompt.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
-import { buildOperatorSystemPrompt } from "./operator-run.server";
+import { buildOperatorSystemPrompt } from "./operator-prompt.server";
 
 /**
  * The attached-resources block, byte for byte: the trusted banner, the skill

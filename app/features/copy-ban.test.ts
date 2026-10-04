@@ -475,27 +475,27 @@ const ALLOWED_LITERALS: ReadonlyArray<{
     why: "seeded KB architecture doc — agent context, not product copy",
   },
   {
-    file: "server/runtimes/operator-run.server.ts",
+    file: "server/runtimes/operator-prompt.server.ts",
     contains: 'the "viberr" governance tools',
     why: "FALLBACK_OPERATOR_DEFINITION — the operator's own system prompt",
   },
   {
-    file: "server/runtimes/operator-run.server.ts",
+    file: "server/runtimes/operator-prompt.server.ts",
     contains: "# MCP tools are governed too",
     why: "operator prompt section header for MCP tool policy",
   },
   {
-    file: "server/runtimes/operator-run.server.ts",
+    file: "server/runtimes/operator-prompt.server.ts",
     contains: "Use only the governance tools offered for this run",
     why: "operator prompt — tool-use instruction",
   },
   {
-    file: "server/runtimes/operator-run.server.ts",
+    file: "server/runtimes/operator-prompt.server.ts",
     contains: "or skip a governed boundary",
     why: "operator prompt — prompt-injection guardrail",
   },
   {
-    file: "server/runtimes/operator-run.server.ts",
+    file: "server/runtimes/operator-prompt.server.ts",
     contains: "Give governed actions a short",
     why: "operator planning prompt — JSON plan instruction",
   },

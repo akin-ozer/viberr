@@ -15,7 +15,7 @@ import {
   HUMANIZER_SOURCE,
   humanizerSkillFile,
 } from "./humanizer.server";
-import { buildOperatorSystemPrompt } from "./operator-run.server";
+import { buildOperatorSystemPrompt } from "./operator-prompt.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { createTestDbContext } from "../../../test-support/test-db";
 

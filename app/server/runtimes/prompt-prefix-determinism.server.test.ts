@@ -7,11 +7,8 @@ import {
   buildSpecialistPromptPrefix,
   type SpecialistPersonaInput,
 } from "~/server/tasks/specialist-prompt.server";
-import {
-  buildOperatorSystemPrompt,
-  type OperatorMcpResolution,
-  type OperatorWorkspaceView,
-} from "./operator-run.server";
+import { buildOperatorSystemPrompt, type OperatorMcpResolution } from "./operator-prompt.server";
+import type { OperatorWorkspaceView } from "./operator-run.server";
 import { joinedPrompt } from "./prompt-prefix.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 

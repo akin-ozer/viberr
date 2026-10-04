@@ -56,7 +56,8 @@ import {
   authoredPacketOptions,
   operatorPlanSchemaFor,
 } from "./operator-run.server";
-import * as operatorPrompts from "./operator-run.server";
+import * as operatorPrompts from "./operator-prompt.server";
+import * as operatorRunModule from "./operator-run.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   CREATE_TASK_BASE_NOTE,
@@ -552,7 +553,7 @@ describe("Codex structured operator completion", () => {
     const handoff = task().timeline.find((e) => e.type === "comment" && e.text.includes(directive));
     expect(handoff?.text).toContain("- `transition_stage`: ");
     // A plan with nothing refused before the dispatch passes the directive as written.
-    expect(operatorPrompts.withEarlierRefusals(directive, [])).toBe(directive);
+    expect(operatorRunModule.withEarlierRefusals(directive, [])).toBe(directive);
   });
 
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
@@ -1991,7 +1992,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   it("ruling 443: a step whose outcome is the packet it opened is not a refusal", () => {
-    const { planRefusalOf } = operatorPrompts;
+    const { planRefusalOf } = operatorRunModule;
     const conflict = "`ax-5` CONFLICTS with `main`. Opened a blocking decision packet for a human to resolve.";
     // CANARY: drop the `openedPacket` check and AX-5's refresh is narrated
     // "This step did not apply" beside the packet it opened.
@@ -2304,7 +2305,7 @@ describe("stranded auto-stage resume", () => {
       recommendations: [],
       blockedBy: [],
     };
-    const { operatorLeftTaskStranded } = operatorPrompts;
+    const { operatorLeftTaskStranded } = operatorRunModule;
     expect(operatorLeftTaskStranded(base, wf)).toBe(true);
     expect(operatorLeftTaskStranded({ ...base, stage: "ready" }, wf)).toBe(true);
     expect(operatorLeftTaskStranded({ ...base, stage: "impl" }, wf)).toBe(false); // approval gate
@@ -2327,7 +2328,7 @@ describe("stranded auto-stage resume", () => {
     // Canary: delete the pending-schedule early return.
     const wf = [{ from: "triage", to: "ready", boundary: "auto" }];
     const base = { archived: false, stage: "triage", packet: null, recommendations: [], blockedBy: [] };
-    const { operatorLeftTaskStranded } = operatorPrompts;
+    const { operatorLeftTaskStranded } = operatorRunModule;
     expect(operatorLeftTaskStranded({ ...base, schedules: [{ status: "pending" }] }, wf)).toBe(false);
     expect(operatorLeftTaskStranded({ ...base, schedules: [{ status: "pending" }] }, wf, true)).toBe(false);
     // Only a PENDING one: a fired or cancelled entry will move nothing.
@@ -6219,14 +6220,14 @@ describe("R19-1 — the operator's read-only repository view", () => {
       // and the last two expectations fail.
       deploy("acme/widgets");
       const ref = { projectSlug: store7.slug, taskKey: "VIB-1", dataRoot: store7.dataRoot };
-      expect(operatorPrompts.pendingOperatorClone(ref)).toBe("acme/widgets");
+      expect(operatorRunModule.pendingOperatorClone(ref)).toBe("acme/widgets");
 
       mkdirSync(path.join(checkoutDir(), ".git"), { recursive: true });
       writeFileSync(path.join(checkoutDir(), ".git", "HEAD"), "ref: refs/heads/main\n");
-      expect(operatorPrompts.pendingOperatorClone(ref)).toBeNull();
+      expect(operatorRunModule.pendingOperatorClone(ref)).toBeNull();
 
       deploy(null);
-      expect(operatorPrompts.pendingOperatorClone(ref)).toBeNull();
+      expect(operatorRunModule.pendingOperatorClone(ref)).toBeNull();
     });
   });
 
