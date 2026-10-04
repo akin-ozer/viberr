@@ -13,6 +13,7 @@ import { getEnv } from "~/server/config/env.server";
 import { bellCounts } from "~/server/projections/notifications.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
 import { rebuildProjections } from "~/server/projections/rebuild.server";
+import type { RescanSummary } from "~/server/projections/rebuilder.server";
 import {
   REBUILD_MIN_INTERVAL_MS,
   RESCAN_MIN_INTERVAL_MS,
@@ -90,6 +91,33 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
+/**
+ * A whole-store maintenance sweep: org-admin only (D7), and single-flighted
+ * with a cooldown (P13-D-33) because it re-parses every project and task file.
+ * A skipped sweep is always safe — the file watcher and the boot rescan
+ * converge anyway.
+ */
+function adminSweep(
+  isAdmin: boolean,
+  refusal: string,
+  key: string,
+  label: string,
+  minIntervalMs: number,
+  sweep: () => RescanSummary,
+) {
+  if (!isAdmin) {
+    return data({ ok: false as const, error: refusal }, { status: 403 });
+  }
+  const flight = runSingleFlight(key, sweep, { minIntervalMs });
+  if (flight.status === "throttled") {
+    return data(
+      { ok: false as const, error: throttledMessage(label, flight.retryAfterMs) },
+      { status: 429 },
+    );
+  }
+  return { ok: true as const, ...flight.result };
+}
+
 export async function action({ request }: Route.ActionArgs) {
   const {
     refused,
@@ -129,71 +157,29 @@ export async function action({ request }: Route.ActionArgs) {
       );
     }
     if (intent === "rescan") {
-      // A global re-scan reprojects EVERY project from files — an
-      // instance-maintenance action, so it is org-admin only (D7; consistent
-      // with the board rescan's admin|maintainer project gate and with
-      // rebuild-projections below). It used to be ungated for any signed-in user.
-      if (ctx.user.role !== "admin") {
-        return data(
-          {
-            ok: false as const,
-            error: "Re-scanning the store requires the org admin role.",
-          },
-          { status: 403 },
-        );
-      }
-      // P13-D-33: a whole-store re-scan re-parses every project and task file.
-      // It had no limiter of any kind, so holding the button burned one full
-      // sweep per click. A skipped sweep is always safe here — the file watcher
-      // and the boot rescan converge anyway.
-      const flight = runSingleFlight(
+      // A global re-scan reprojects EVERY project from files. It used to be
+      // ungated for any signed-in user, and had no limiter, so holding the
+      // button burned one full sweep per click.
+      return adminSweep(
+        ctx.user.role === "admin",
+        "Re-scanning the store requires the org admin role.",
         "projections:rescan",
+        "The store re-scan",
+        RESCAN_MIN_INTERVAL_MS,
         () => rescanProjections(db, { actor }),
-        { minIntervalMs: RESCAN_MIN_INTERVAL_MS },
       );
-      if (flight.status === "throttled") {
-        return data(
-          {
-            ok: false as const,
-            error: throttledMessage("The store re-scan", flight.retryAfterMs),
-          },
-          { status: 429 },
-        );
-      }
-      return { ok: true as const, ...flight.result };
     }
     if (intent === "rebuild-projections") {
-      // Phase 10 recovery: drop + re-project everything from files.
-      // Admin-only (instance maintenance beyond the everyday re-scan).
-      if (ctx.user.role !== "admin") {
-        return data(
-          {
-            ok: false as const,
-            error: "Rebuilding projections requires the org admin role.",
-          },
-          { status: 403 },
-        );
-      }
-      // P13-D-33: heavier than the re-scan (drop + re-project everything), so a
-      // longer cooldown. Same reasoning: a refused rebuild costs nothing.
-      const flight = runSingleFlight(
+      // Phase 10 recovery: drop + re-project everything from files. Heavier
+      // than the re-scan, so a longer cooldown.
+      return adminSweep(
+        ctx.user.role === "admin",
+        "Rebuilding projections requires the org admin role.",
         "projections:rebuild",
+        "The projection rebuild",
+        REBUILD_MIN_INTERVAL_MS,
         () => rebuildProjections(db, { actor }),
-        { minIntervalMs: REBUILD_MIN_INTERVAL_MS },
       );
-      if (flight.status === "throttled") {
-        return data(
-          {
-            ok: false as const,
-            error: throttledMessage(
-              "The projection rebuild",
-              flight.retryAfterMs,
-            ),
-          },
-          { status: 429 },
-        );
-      }
-      return { ok: true as const, ...flight.result };
     }
     if (intent === "create-project") {
       // RBAC decision (deliberate, pinned by test): project creation is
