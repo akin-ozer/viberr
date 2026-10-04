@@ -1352,29 +1352,12 @@ async function dispatchAgentRun(
       // rather than starting a delivering run that can ship nothing.
       throw AppError.validation(cannotOwnDeliverySentence(view.name));
     }
-    if (wantsDelivery) {
-      await assignSpecialist(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: input.profileId,
-        },
-        actor,
-        ctx,
-      );
-    } else {
-      await assignReviewer(
-        db,
-        {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: input.profileId,
-        },
-        actor,
-        ctx,
-      );
-    }
+    await (wantsDelivery ? assignSpecialist : assignReviewer)(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, profileId: input.profileId },
+      actor,
+      ctx,
+    );
     existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
     engagement =
