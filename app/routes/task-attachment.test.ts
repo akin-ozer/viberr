@@ -56,7 +56,7 @@ async function get(
     return { status: res.status, headers: res.headers, body: () => res.arrayBuffer() };
   } catch (thrown) {
     if (thrown instanceof Response) {
-      // requireUser's login redirect.
+      // The login redirect: requireProjectMember signs the request in first.
       return { status: thrown.status, headers: thrown.headers, body: () => thrown.arrayBuffer() };
     }
     // SAFETY: the only other thrower on this loader is requireProjectMember,
