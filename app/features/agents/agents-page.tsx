@@ -2049,27 +2049,9 @@ export function AgentsPage({
         />
       )}
 
-      {creating && (
+      {(creating || editing) && (
         <CreateProfileModal
-          initial={null}
-          stages={stages}
-          projectName={projectName}
-          busy={fetcher.state !== "idle"}
-          done={modalDone}
-          error={formError}
-          {...(resourceCatalog ? { resourceCatalog } : {})}
-          {...(viewerConnected ? { viewerConnected } : {})}
-          onClose={() => {
-            setCreating(false);
-            setModalDone(false);
-            setFormError(null);
-          }}
-          onSubmit={submitProfile}
-        />
-      )}
-      {editing && (
-        <CreateProfileModal
-          key={editing.id}
+          key={editing?.id}
           initial={editing}
           stages={stages}
           projectName={projectName}
@@ -2079,6 +2061,7 @@ export function AgentsPage({
           {...(resourceCatalog ? { resourceCatalog } : {})}
           {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
+            setCreating(false);
             setEditing(null);
             setModalDone(false);
             setFormError(null);
