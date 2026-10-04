@@ -18,7 +18,10 @@ import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
-import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
+import {
+  operatorPlanSchemaFor,
+  operatorPlanToolsFor,
+} from "~/server/runtimes/operator-codex-plan.server";
 
 const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());

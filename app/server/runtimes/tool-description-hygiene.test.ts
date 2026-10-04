@@ -36,6 +36,7 @@ const SURFACES = [
   "app/server/tasks/agent-toolkit.server.ts",
   "app/server/runtimes/operator-run.server.ts",
   "app/server/runtimes/operator-prompt.server.ts",
+  "app/server/runtimes/operator-codex-plan.server.ts",
 ];
 
 /**

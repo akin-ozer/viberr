@@ -49,15 +49,18 @@ import {
   deliveredFollowUpFor,
   executeStrandedCodexPlan,
   maybeResumeStrandedOperator,
-  operatorPlanToolsFor,
   ownOperatorRunForTests,
   resetOperatorLeasesForTests,
   runOperator,
+} from "./operator-run.server";
+import {
+  operatorPlanToolsFor,
   authoredPacketOptions,
   operatorPlanSchemaFor,
-} from "./operator-run.server";
+} from "./operator-codex-plan.server";
 import * as operatorPrompts from "./operator-prompt.server";
 import * as operatorRunModule from "./operator-run.server";
+import * as operatorCodexPlan from "./operator-codex-plan.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   CREATE_TASK_BASE_NOTE,
@@ -553,7 +556,7 @@ describe("Codex structured operator completion", () => {
     const handoff = task().timeline.find((e) => e.type === "comment" && e.text.includes(directive));
     expect(handoff?.text).toContain("- `transition_stage`: ");
     // A plan with nothing refused before the dispatch passes the directive as written.
-    expect(operatorRunModule.withEarlierRefusals(directive, [])).toBe(directive);
+    expect(operatorCodexPlan.withEarlierRefusals(directive, [])).toBe(directive);
   });
 
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
@@ -1992,7 +1995,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   it("ruling 443: a step whose outcome is the packet it opened is not a refusal", () => {
-    const { planRefusalOf } = operatorRunModule;
+    const { planRefusalOf } = operatorCodexPlan;
     const conflict = "`ax-5` CONFLICTS with `main`. Opened a blocking decision packet for a human to resolve.";
     // CANARY: drop the `openedPacket` check and AX-5's refresh is narrated
     // "This step did not apply" beside the packet it opened.

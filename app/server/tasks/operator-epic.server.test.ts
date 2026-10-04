@@ -23,11 +23,13 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
 import {
   executeStrandedCodexPlan,
-  operatorPlanSchemaFor,
-  operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   type runOperator,
 } from "~/server/runtimes/operator-run.server";
+import {
+  operatorPlanSchemaFor,
+  operatorPlanToolsFor,
+} from "~/server/runtimes/operator-codex-plan.server";
 import { createEpic, type CreateEpicInput } from "./epic-actions.server";
 import {
   operatorOpenPacket,
