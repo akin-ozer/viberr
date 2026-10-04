@@ -13,6 +13,7 @@ import { TaskDetailPage } from "./task-detail-page";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { createRenderCounter, observeMutations } from "../../../test-support/render-counter";
 import { taskDetail } from "../../../test-support/task-detail";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 
 /**
  * Ruling 457, journey `live-run`: what the browser does per console line, per
@@ -38,32 +39,6 @@ const SLUG = "viberr-core";
 const KEY = "VIB-151";
 const TASK_SCOPE = encodeURIComponent(sseScopes.task(SLUG, KEY));
 
-class FakeEventSource {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
-  static instances: FakeEventSource[] = [];
-  readonly url: string;
-  readyState = FakeEventSource.OPEN;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  readonly listeners = new Map<string, ((event: MessageEvent<string>) => void)[]>();
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-  }
-  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-  }
-  removeEventListener(): void {}
-  close(): void {
-    this.readyState = FakeEventSource.CLOSED;
-  }
-  static open(): FakeEventSource[] {
-    return FakeEventSource.instances.filter((es) => es.readyState !== FakeEventSource.CLOSED);
-  }
-}
-
 /** A `run.log-appended` frame body, as the broker puts it on the wire. */
 interface RunLineFrame {
   projectSlug: string;
@@ -80,9 +55,7 @@ function deliver(type: string, data: RunLineFrame): void {
   const id = String(nextEventId++);
   for (const es of FakeEventSource.open()) {
     if (!es.url.includes(TASK_SCOPE)) continue;
-    for (const listener of es.listeners.get(type) ?? []) {
-      listener(new MessageEvent(type, { data: JSON.stringify({ data }), lastEventId: id }));
-    }
+    es.emit(type, id, JSON.stringify({ data }));
   }
 }
 

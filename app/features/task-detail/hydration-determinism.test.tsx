@@ -11,6 +11,7 @@ import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { taskDetail } from "../../../test-support/task-detail";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
@@ -541,44 +542,11 @@ describe.each([
     freezeClock();
     const html = await serverHtml(sighting);
 
-    /** The frame the run sink publishes per console line (`sse-event.schema.ts`). */
-    interface RunLogAppendedFrame {
-      projectSlug: string;
-      taskKey: string;
-      runId: string;
-      threadId: string;
-      seq: number;
-    }
     // The page's own live-tail plumbing, so the update takes the real path:
     // The layout's `useLiveUpdates` opens THIS EventSource in its effect, and
     // the console answers a `run.log-appended` frame on it with a
     // `/resources/run-log` tail fetch.
-    class FakeEventSource {
-      static readonly CONNECTING = 0;
-      static readonly OPEN = 1;
-      static readonly CLOSED = 2;
-      static instances: FakeEventSource[] = [];
-      readonly url: string;
-      readyState = FakeEventSource.OPEN;
-      onopen: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      private readonly listeners = new Map<string, ((event: MessageEvent) => void)[]>();
-      constructor(url: string) {
-        this.url = url;
-        FakeEventSource.instances.push(this);
-      }
-      addEventListener(type: string, listener: (event: MessageEvent) => void): void {
-        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-      }
-      close(): void {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-      emit(type: string, data: RunLogAppendedFrame): void {
-        for (const listener of this.listeners.get(type) ?? []) {
-          listener(new MessageEvent(type, { data: JSON.stringify({ data }) }));
-        }
-      }
-    }
+    FakeEventSource.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource);
     const tailRequests: string[] = [];
     const APPENDED = "Sweep finished: 12 passed. Delivering the branch.";
@@ -629,13 +597,14 @@ describe.each([
     expect(source).toBeDefined();
     expect(source!.url).toContain("task");
     await act(async () => {
-      source!.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-151",
-        runId: "run_1",
-        threadId: "primary",
-        seq: CONSOLE.length,
-      });
+      // The frame the run sink publishes per console line (`sse-event.schema.ts`).
+      source!.emit(
+        "run.log-appended",
+        "",
+        JSON.stringify({
+          data: { projectSlug: "viberr-core", taskKey: "VIB-151", runId: "run_1", threadId: "primary", seq: CONSOLE.length },
+        }),
+      );
     });
     expect(tailRequests).toHaveLength(1);
     expect(tailRequests[0]).toContain(`runId=run_1&since=${CONSOLE.length - 1}`);

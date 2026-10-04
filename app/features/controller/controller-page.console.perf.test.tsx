@@ -6,6 +6,7 @@ import { ToastProvider } from "~/ui/toast";
 import { ControllerPage } from "./controller-page";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import { controllerRun, NO_RUN_CACHE } from "../../../test-support/run-view";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 
 /**
@@ -22,24 +23,6 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
  * with a one-line console, fake timers and a fake EventSource that delivers
  * nothing. Thirty seconds of a steady turn pass.
  */
-
-class FakeEventSource {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSED = 2;
-  readonly url: string;
-  readyState = FakeEventSource.OPEN;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(url: string) {
-    this.url = url;
-  }
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {
-    this.readyState = FakeEventSource.CLOSED;
-  }
-}
 
 const run = controllerRun();
 

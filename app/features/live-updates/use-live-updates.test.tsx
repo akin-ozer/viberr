@@ -10,58 +10,20 @@ import {
 } from "./use-live-updates";
 import { CONTROLLER_UPDATED_EVENT } from "./event-types";
 import { DataRouter, loaderRunCount, resetDataRouter } from "../../../test-support/data-router";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 
-class FakeEventSource {
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSED = 2;
-  static instances: FakeEventSource[] = [];
-  url: string;
-  closed = false;
-  readyState = 1;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  listeners = new Map<string, ((e: MessageEvent<string>) => void)[]>();
-
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-  }
-  /** Simulate the browser FAILING the connection (a non-200 response — an
-   *  expired session 401s — never retries per spec). */
-  fail() {
-    this.readyState = FakeEventSource.CLOSED;
-    this.onerror?.();
-  }
-  addEventListener(name: string, fn: (e: MessageEvent<string>) => void) {
-    const list = this.listeners.get(name) ?? [];
-    list.push(fn);
-    this.listeners.set(name, list);
-  }
-  close() {
-    this.closed = true;
-  }
-  emit(name: string, lastEventId = "", data = "{}") {
-    for (const fn of this.listeners.get(name) ?? []) {
-      fn(new MessageEvent<string>(name, { data, lastEventId }));
-    }
-  }
-  /** One console line of a task run, as the broker frames it. */
-  emitRunLine(projectSlug: string, taskKey: string, seq: number) {
-    this.emit(
-      "run.log-appended",
-      String(seq),
-      JSON.stringify({
-        type: "run.log-appended",
-        entityId: `${projectSlug}/${taskKey}`,
-        occurredAt: "2026-09-23T12:00:00.000Z",
-        data: { projectSlug, taskKey, runId: "run_1", threadId: "thr_1", seq },
-      }),
-    );
-  }
-  static last(): FakeEventSource {
-    return FakeEventSource.instances.at(-1)!;
-  }
+/** One console line of a task run, as the broker frames it. */
+function emitRunLine(source: FakeEventSource, projectSlug: string, taskKey: string, seq: number): void {
+  source.emit(
+    "run.log-appended",
+    String(seq),
+    JSON.stringify({
+      type: "run.log-appended",
+      entityId: `${projectSlug}/${taskKey}`,
+      occurredAt: "2026-09-23T12:00:00.000Z",
+      data: { projectSlug, taskKey, runId: "run_1", threadId: "thr_1", seq },
+    }),
+  );
 }
 
 let lastPaused = false;
@@ -371,7 +333,7 @@ describe("useLiveUpdates", () => {
     render(<Probe scopes={["project:viberr-core", "user"]} />, { wrapper: DataRouter });
     act(() => {
       for (let seq = 1; seq <= 20; seq += 1) {
-        FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", seq);
+        emitRunLine(FakeEventSource.last(), "viberr-core", "VIB-42", seq);
         vi.advanceTimersByTime(100);
       }
       vi.advanceTimersByTime(4_000);
@@ -387,7 +349,7 @@ describe("useLiveUpdates", () => {
       { wrapper: DataRouter },
     );
     act(() => {
-      FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 21);
+      emitRunLine(FakeEventSource.last(), "viberr-core", "VIB-42", 21);
       vi.advanceTimersByTime(4_000);
     });
     expect(loaderRunCount(), "a sibling task page refetched per line").toBe(0);
@@ -416,7 +378,7 @@ describe("useLiveUpdates", () => {
     // CANARY: route `run.log-appended` to `scheduleRevalidate` again.
     act(() => {
       for (let seq = 1; seq <= 42; seq += 1) {
-        es.emitRunLine("viberr-core", "VIB-42", seq);
+        emitRunLine(es, "viberr-core", "VIB-42", seq);
         vi.advanceTimersByTime(100);
       }
       vi.advanceTimersByTime(4_000);
@@ -450,9 +412,9 @@ describe("useLiveUpdates", () => {
       );
       const [a, b] = FakeEventSource.instances;
       act(() => {
-        a!.emitRunLine("viberr-core", "VIB-42", 1);
-        b!.emitRunLine("viberr-core", "VIB-42", 1);
-        b!.emitRunLine("viberr-core", "VIB-42", 2);
+        emitRunLine(a!, "viberr-core", "VIB-42", 1);
+        emitRunLine(b!, "viberr-core", "VIB-42", 1);
+        emitRunLine(b!, "viberr-core", "VIB-42", 2);
       });
       // CANARY: drop the id-and-body check in `dispatchFrame`.
       expect(seen).toEqual(["1", "2"]);
@@ -460,7 +422,7 @@ describe("useLiveUpdates", () => {
       off();
     }
     // Unsubscribed: nothing more reaches the handler.
-    act(() => FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 3));
+    act(() => emitRunLine(FakeEventSource.last(), "viberr-core", "VIB-42", 3));
     expect(seen).toEqual(["1", "2"]);
   });
 
