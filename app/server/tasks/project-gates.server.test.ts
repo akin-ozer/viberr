@@ -42,7 +42,7 @@ import {
 import {
   forceAcceptCompletion,
   performDelivery,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   runProjectGatesByHand,
   transitionStage,
 } from "./task-actions.server";
@@ -412,10 +412,10 @@ describe("what the gate record does to acceptance (ruling 482)", () => {
     writeDeliveredTask();
     await gateOnce();
 
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     // CANARY: remove `projectGatesRefusal` from acceptanceRefusalReasons.
     expect(affordance.blockedReason).toContain("The project's gates failed on VIB-1's revision");
     expect(affordance.canAccept).toBe(false);
@@ -470,10 +470,10 @@ describe("what the gate record does to acceptance (ruling 482)", () => {
     setGates([{ name: "build", command: "true" }]);
     writeDeliveredTask();
     const refusal = () =>
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
         { dataRoot: store.dataRoot },
-      ).blockedReason;
+      ).affordance.blockedReason;
     expect(refusal()).toContain("have not run on VIB-1's revision");
     await gateOnce();
     expect(refusal()).toBeNull();

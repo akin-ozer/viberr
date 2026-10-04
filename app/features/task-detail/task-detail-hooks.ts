@@ -61,7 +61,7 @@ export function useRunControls({
    *  a gone/disabled account), which no backend switch fixes. */
   runPrincipal: TaskRunPrincipalView | null;
   /** F19-10: `acceptance.hasAuthority` — the server's OWN answer to "may this
-   *  viewer accept/merge THIS task", resolved by `resolveAcceptanceAffordance`
+   *  viewer accept/merge THIS task", resolved by `acceptanceStanding`
    *  with the same predicate `requireAcceptCompletion` enforces: the
    *  `accept-completion` role grant OR the live task-owner exception. */
   acceptanceHasAuthority: boolean;

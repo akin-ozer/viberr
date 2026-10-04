@@ -1146,7 +1146,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
  * the server would have merged it on their click.
  *
  * The fix reads the server's OWN answer — `acceptance.hasAuthority` from
- * `resolveAcceptanceAffordance`, which computes the identical predicate
+ * `acceptanceStanding`, which computes the identical predicate
  * (`roleCan(role, "accept-completion") || (owner && roleCan(role, "own-task"))`)
  * and keeps it across the terminal-stage early return that every merge-pending
  * task lands in (acceptance stamps `stage = doneStageId` + `pr.state:
@@ -1301,7 +1301,7 @@ describe("R19-5: the force-accept confirm enumerates what the jump skips", () =>
     // Off-boundary WITHOUT force is a server refusal, not a jump — the dialog
     // says "Blocked", and promising a skip would promise a power nobody has.
     // The `complete-merge` mode is the sharpest case and the reason this went
-    // wrong: `resolveAcceptanceAffordance` returns the `denied` shape (which
+    // wrong: `acceptanceStanding` returns the `denied` shape (which
     // carries `atBoundary: false`) for a task ALREADY at the terminal stage,
     // and a merge-pending task is exactly that — so a bare `!atBoundary` made
     // every "Complete merge" confirm announce that a task already at Done

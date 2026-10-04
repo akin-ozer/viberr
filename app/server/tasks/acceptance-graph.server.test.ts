@@ -22,7 +22,7 @@ import {
   forceAcceptCompletion,
   OPERATOR_TASK_ACTOR,
   reorderTask,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   resolvePacket,
   setTaskArchived,
   transitionStage,
@@ -850,10 +850,10 @@ describe("P14-LV-06: the acceptance affordance the queue promises", () => {
       waiting: "human",
       ownerUserId: store.users.selin.id,
     });
-    const forOwner = resolveAcceptanceAffordance(
+    const forOwner = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.selin.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(forOwner).toMatchObject({
       hasAuthority: true,
       atBoundary: true,
@@ -861,17 +861,17 @@ describe("P14-LV-06: the acceptance affordance the queue promises", () => {
       canAccept: true,
     });
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.murat.id },
         { dataRoot: store.dataRoot },
-      ).canAccept,
+      ).affordance.canAccept,
     ).toBe(true);
     // A viewer never holds acceptance.
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.elif.id },
         { dataRoot: store.dataRoot },
-      ),
+      ).affordance,
     ).toMatchObject({ hasAuthority: false, canAccept: false });
   });
 
@@ -883,20 +883,20 @@ describe("P14-LV-06: the acceptance affordance the queue promises", () => {
       branch: "vib-1-work",
       pr: { number: 103, state: "review", title: "PR", mergeable: "conflicting" },
     });
-    const conflicted = resolveAcceptanceAffordance(
+    const conflicted = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(conflicted.canAccept).toBe(false);
     expect(conflicted.atBoundary).toBe(true);
     expect(conflicted.blockedReason).toContain("conflicts with the base branch");
 
     // Off-boundary: authority intact, but this is not where acceptance happens.
     seed(store, { stage: "triage" });
-    const offBoundary = resolveAcceptanceAffordance(
+    const offBoundary = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(offBoundary).toMatchObject({
       hasAuthority: true,
       atBoundary: false,
