@@ -597,15 +597,17 @@ const ALLOWED_ASSET_LINES: ReadonlyArray<{
 /**
  * Files whose copy the literal scan MUST demonstrably reach. "Zero offenders"
  * and "the lexer quietly stopped producing literals here" are the same green,
- * and every escape in this finding's history was a silent green. These two are
- * the surfaces the verifier actually broke: the accept-dialog refusal sentences
- * (`task-file.schema.ts`) and the stage/archive refusals and toasts
- * (`task-actions.server.ts`). The assertion is on SHAPE, not on wording, so it
- * proves reach without pinning copy another pass is free to rewrite.
+ * and every escape in this finding's history was a silent green. These are the
+ * surfaces the verifier actually broke: the accept-dialog refusal sentences
+ * (`task-file.schema.ts`) and the stage and archive refusals and toasts (in
+ * `task-actions.server.ts` then, split into its families by ruling 654). The
+ * assertion is on SHAPE, not on wording, so it proves reach without pinning
+ * copy another pass is free to rewrite.
  */
 const MUST_SEE_COPY = [
   "schemas/task-file.schema.ts",
   "server/tasks/task-actions.server.ts",
+  "server/tasks/task-archive.server.ts",
 ];
 
 /** Sentence-shaped: two real words, long enough to be prose rather than a key. */

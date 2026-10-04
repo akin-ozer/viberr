@@ -48,9 +48,9 @@ import {
   applyRecommendation,
   dismissRecommendation,
   resolvePacket,
-  setTaskArchived,
   transitionStage,
 } from "./task-actions.server";
+import { setTaskArchived } from "./task-archive.server";
 import { createTask, updateTaskGoal } from "./task-edits.server";
 import type { TaskActionContext } from "./task-action-core.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";

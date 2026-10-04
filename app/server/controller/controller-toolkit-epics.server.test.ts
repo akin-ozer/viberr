@@ -355,7 +355,7 @@ describe("ruling 503(f): list_epics and get_epic", () => {
       { userId: ids.orgAdmin, label: "arda@viberr.dev" },
       { dataRoot: app.dataRoot },
     );
-    const { setTaskArchived } = await import("~/server/tasks/task-actions.server");
+    const { setTaskArchived } = await import("~/server/tasks/task-archive.server");
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: "VIB-168", archived: true },
@@ -528,7 +528,7 @@ describe("ruling 503(f): update_epic", () => {
     const key = createdTaskKey(
       await call(ids.contributor, "create_task", { title: "Archived inside an epic", epic: removing }),
     );
-    const { setTaskArchived } = await import("~/server/tasks/task-actions.server");
+    const { setTaskArchived } = await import("~/server/tasks/task-archive.server");
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: key, archived: true },

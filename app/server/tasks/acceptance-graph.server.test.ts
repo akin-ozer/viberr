@@ -23,9 +23,9 @@ import {
   reorderTask,
   acceptanceStanding,
   resolvePacket,
-  setTaskArchived,
   transitionStage,
 } from "./task-actions.server";
+import { setTaskArchived } from "./task-archive.server";
 import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 /**

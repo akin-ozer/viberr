@@ -44,6 +44,7 @@ let epicActions: typeof import("./epic-actions.server");
 let taskActions: typeof import("./task-actions.server");
 let taskCore: typeof import("./task-action-core.server");
 let taskEdits: typeof import("./task-edits.server");
+let taskArchive: typeof import("./task-archive.server");
 let epicWriter: typeof import("~/server/files/epic-writer.server");
 let taskWriter: typeof import("~/server/files/task-writer.server");
 let projectWriter: typeof import("~/server/files/project-writer.server");
@@ -67,6 +68,7 @@ beforeAll(async () => {
   taskActions = await import("./task-actions.server");
   taskCore = await import("./task-action-core.server");
   taskEdits = await import("./task-edits.server");
+  taskArchive = await import("./task-archive.server");
   epicWriter = await import("~/server/files/epic-writer.server");
   taskWriter = await import("~/server/files/task-writer.server");
   projectWriter = await import("~/server/files/project-writer.server");
@@ -353,7 +355,7 @@ describe("ruling 503(a): createEpic", () => {
     // `withEpicsLock` (the refused epic's file stays behind).
     const member = await newTask("Would-be member");
     const archived = await newTask("Archived would-be member");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: archived, archived: true },
       actor("arda"),
@@ -625,7 +627,7 @@ describe("ruling 503(b): setTasksEpic, the one writer of a task's epic", () => {
     // write loop (the batch's first task moves before the bad key is met).
     const live = await newTask("Live candidate");
     const archived = await newTask("Archived candidate");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: archived, archived: true },
       actor("arda"),
@@ -991,7 +993,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
     const { id, done, open } = await epicWithOneTaskLeft("Tidied up");
     await accept(open);
     await waitFor(() => allDoneNotices(id).length === 1, "the lead's all-done notice");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: done, archived: true },
       actor("arda"),
@@ -1038,7 +1040,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
   it("says it when the only open task is archived", async () => {
     // CANARY: drop the `maybeNoteEpicComplete` call from setTaskArchived.
     const { id, open } = await epicWithOneTaskLeft("Abandoned tail");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: open, archived: true },
       actor("arda"),

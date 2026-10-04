@@ -49,9 +49,9 @@ import {
   requestPacketMaintainerDecision,
   acceptanceStanding,
   resolvePacket,
-  setTaskArchived,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { setTaskArchived } from "~/server/tasks/task-archive.server";
 import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
   attachTaskFile,

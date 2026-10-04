@@ -39,9 +39,9 @@ import {
   recordAgentCompletion,
   reorderTask,
   resolvePacket,
-  setTaskArchived,
   transitionStage,
 } from "./task-actions.server";
+import { setTaskArchived } from "./task-archive.server";
 import { updateTaskGoal } from "./task-edits.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { resolveRemoteBranchCollision } from "~/server/github/github-reconciler.server";
