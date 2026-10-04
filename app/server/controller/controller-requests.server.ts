@@ -272,13 +272,12 @@ export function declineResourceRequest(
   db: DatabaseSync,
   id: string,
   actor: AuditActor,
-  dataRoot?: string,
 ): ResourceRequest {
-  const closed = closeResourceRequest(id, "declined", actor.label, dataRoot);
+  const closed = closeResourceRequest(id, "declined", actor.label);
   if (!closed) {
     // Say which: the stored answer, or that there is no such request. A
     // blanket "already answered" would be wrong for an id nobody raised.
-    const onFile = readResourceRequests(dataRoot).find((r) => r.id === id);
+    const onFile = readResourceRequests().find((r) => r.id === id);
     throw onFile
       ? AppError.conflict(
           `That grant request was already ${onFile.status}${onFile.closedByLabel ? ` by ${onFile.closedByLabel}` : ""}. Reload to see the current list.`,
