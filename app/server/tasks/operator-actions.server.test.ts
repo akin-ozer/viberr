@@ -1959,6 +1959,47 @@ describe("operatorTransitionStage", () => {
     });
   });
 
+  it("ruling 655: a move to the stage the task already stands at moves nothing and files no card", async () => {
+    // CANARY: drop the same-stage return in operatorTransitionStage and the
+    // supervised operator files "Move the task to Review" on a task at Review.
+    deployRoster(DEFAULT_POLICY); // supervised, `stage-transitions: recommend`
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", reason: "PR #22 is ready." },
+      authority("supervised"),
+    );
+    expect(r).toEqual({ outcome: "noop", message: "VIB-1 is already at Review; there is nothing to move." });
+    expect(task().frontmatter.recommendations).toEqual([]);
+    expect(task().timeline).toEqual([]);
+  });
+
+  it("ruling 655: a jump whose every step is automatic files no card, and the reply names the first step", async () => {
+    // CANARY: drop the `automaticStepsTo` return and the supervised operator
+    // files "Move the task to Review" from Ready; drop its `auto` check and the
+    // jump over the approval below is refused too, where it still files a card.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("ready");
+    const jump = { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" };
+    const r = await operatorTransitionStage(store.db, { dataRoot: store.dataRoot }, jump, authority("supervised"));
+    expect(r).toEqual({
+      outcome: "noop",
+      message:
+        "Ready to Review is not one move on this board: the way goes through In Progress, and every " +
+        "step on it is automatic. Move VIB-1 to In Progress first; each move's reply names the next.",
+    });
+    expect(task().frontmatter.stage).toBe("ready");
+    expect(task().frontmatter.recommendations).toEqual([]);
+
+    // Where a person approves the move into Review, the jump is theirs: the card stands.
+    approveReviewEntry(store);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const approved = await operatorTransitionStage(store.db, { dataRoot: store.dataRoot }, jump, authority("supervised"));
+    expect(approved.outcome).toBe("recommended");
+    expect(task().frontmatter.recommendations.map((x) => x.label)).toEqual(["Move the task to Review"]);
+  });
+
   it("ruling 151: full autonomy RECOMMENDS an approval boundary instead of crossing it", async () => {
     // Pass 35, F35-2 (owner Q35-1): the boundary always wins. This case used to
     // assert the opposite ("full autonomy moves the task across an approval
