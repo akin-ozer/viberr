@@ -112,7 +112,7 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     expect(warning("legacy-cred")?.note).toBe("credential unreadable");
     expect(warning("down-mcp")?.note).toBe("unreachable");
     // Healthy rows claim nothing, and carry no key at all.
-    expect(items.find((i) => i.id === "cloudflare-docs")).toEqual({ id: "cloudflare-docs", def: false });
+    expect(items.find((i) => i.id === "cloudflare-docs")).toEqual({ id: "cloudflare-docs" });
     expect(warning("signed-in")).toBeUndefined();
   });
 

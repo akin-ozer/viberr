@@ -183,7 +183,7 @@ export interface ResCatalogGroup {
    *  template editor ("KBs displayed by name and stored by dir"); pass 33's
    *  U33-7 found the PROJECT editor was never brought along, so one concept had
    *  two vocabularies depending on which editor you opened. */
-  items: { id: string; def: boolean; label?: string; warning?: ResItemWarning }[];
+  items: { id: string; label?: string; warning?: ResItemWarning }[];
 }
 
 /**

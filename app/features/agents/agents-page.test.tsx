@@ -781,8 +781,8 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     const { container, getByText } = render(
       detail(withGrants(), {
         resourceCatalog: [
-          { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill", def: false }] },
-          { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http", def: false }] },
+          { group: "Skills", key: "skills", mono: true, items: [{ id: "writer-skill" }] },
+          { group: "MCP servers", key: "mcps", mono: true, items: [{ id: "everything-http" }] },
           { group: "Knowledge bases", key: "kb", mono: true, items: [] },
         ],
         projectName: "P",
@@ -1187,7 +1187,7 @@ describe("CreateProfileModal", () => {
           group: "Skills",
           key: "skills",
           mono: true,
-          items: [{ id: "developer-expertise", def: false }],
+          items: [{ id: "developer-expertise" }],
         },
         { group: "MCP servers", key: "mcps", mono: true, items: [] },
         // The store has ZERO knowledge bases — both grants dangle.
@@ -1517,8 +1517,8 @@ describe("CreateProfileModal", () => {
           key: "skills",
           mono: true,
           items: [
-            { id: "repo-write", def: false },
-            { id: "release-notes", def: false },
+            { id: "repo-write" },
+            { id: "release-notes" },
           ],
         },
         { group: "MCP servers", key: "mcps", mono: true, items: [] },
@@ -1565,8 +1565,8 @@ describe("CreateProfileModal", () => {
           key: "skills",
           mono: true,
           items: [
-            { id: "repo-write", def: false },
-            { id: "release-notes", def: false },
+            { id: "repo-write" },
+            { id: "release-notes" },
           ],
         },
       ],
@@ -1599,7 +1599,7 @@ describe("CreateProfileModal", () => {
           group: "Skills",
           key: "skills",
           mono: true,
-          items: [{ id: "repo-write", def: false }],
+          items: [{ id: "repo-write" }],
         },
       ],
     });
@@ -3270,14 +3270,13 @@ describe("ruling 479: the Agents page says what the runtime does", () => {
             items: [
               {
                 id: "cloudflare-api",
-                def: false,
                 warning: {
                   note: "needs sign-in",
                   title:
                     "Runs do not mount cloudflare-api until an org admin signs it in (Instance settings → Agent resources).",
                 },
               },
-              { id: "cloudflare-docs", def: false },
+              { id: "cloudflare-docs" },
             ],
           },
           { group: "Knowledge bases", key: "kb", mono: true, items: [] },
