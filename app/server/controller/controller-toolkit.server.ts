@@ -2025,7 +2025,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           fileLeases: activeFileLeases(slug, dataRoot ? { dataRoot } : {}),
           // Named, not dropped: the declaration was made and is now spent, and
           // somebody may want to clear the row.
-          spentFileLeases: staleFileLeases(db, slug, dataRoot ? { dataRoot } : {}),
+          spentFileLeases: staleFileLeases(slug, dataRoot ? { dataRoot } : {}),
           // Ruling 482: the commands Viberr itself runs on every delivered
           // revision; set with set_project_gates.
           gates: fm.gates ?? [],

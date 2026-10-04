@@ -143,7 +143,7 @@ export function getSettingsViewData(
     reviewerCandidates: listDeployedSpecialists(projectSlug, ctx)
       .filter((s) => s.capabilities.verdict)
       .map((s) => ({ id: s.id, name: s.name })),
-    fileLeases: fileLeaseViews(db, projectSlug, tasks, ctx),
+    fileLeases: fileLeaseViews(projectSlug, tasks, ctx),
     leaseCandidates: tasks.map((t) => ({ key: t.key, title: t.title })),
   };
   if (project.gates.length > 0) view.gates = project.gates;
@@ -159,7 +159,6 @@ export function getSettingsViewData(
  * and somebody has to be able to clear it. `staleFileLeases` decides which.
  */
 function fileLeaseViews(
-  db: DatabaseSync,
   projectSlug: string,
   tasks: { key: string; title: string }[],
   ctx: { dataRoot?: string },
@@ -170,7 +169,7 @@ function fileLeaseViews(
   const declared = project?.parsed.frontmatter.fileLeases ?? [];
   if (declared.length === 0) return [];
   const spent = new Set(
-    staleFileLeases(db, projectSlug, ctx).map((l) => `${l.taskKey} ${l.paths.join(" ")}`),
+    staleFileLeases(projectSlug, ctx).map((l) => `${l.taskKey} ${l.paths.join(" ")}`),
   );
   const titles = new Map(tasks.map((t) => [t.key, t.title]));
   return declared.map((lease) => ({
