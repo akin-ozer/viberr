@@ -7031,9 +7031,7 @@ export async function operatorPromptAgent(
     toAgent: true,
     evidence: null,
   };
-  await updateTaskFile(taskRef(opCtx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.timeline.unshift(comment);
-  });
+  await appendTimelineEvent(taskRef(opCtx, input.projectSlug, input.taskKey), comment);
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
   // P14-GV-06 added this fan-out so a human @tagged inside an operator directive
   // ("…coordinate with @Arda") was not silently dropped. Ruling 232 (owner,
@@ -7228,9 +7226,8 @@ export async function setOwner(
 
   const event = ownerAssignEvent(db, actor, text);
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.ownerUserId = input.targetUserId;
-    parsed.timeline.unshift(event);
+  await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), event, {
+    ownerUserId: input.targetUserId,
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
@@ -7347,10 +7344,7 @@ export async function releaseOwner(
     evidence: null,
   };
 
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-    parsed.frontmatter.ownerUserId = null;
-    parsed.timeline.unshift(event);
-  });
+  await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), event, { ownerUserId: null });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   // Ruling 140(b): an ADMIN release takes the seat away from someone; they are

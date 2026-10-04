@@ -2,7 +2,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FileActorRef, TaskFileEvent } from "~/schemas/task-file.schema";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
-import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent, readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   checkAttachmentUpload,
   listTaskAttachmentNames,
@@ -482,9 +482,7 @@ async function landCarriedFiles(
     names,
     async (put) => {
       for (const f of files) if (!f.reused) put(f.as, f.data);
-      await updateTaskFile(taskRef(ctx, projectSlug, to), (parsed) => {
-        parsed.timeline.unshift(comment);
-      });
+      await appendTimelineEvent(taskRef(ctx, projectSlug, to), comment);
     },
     ctx.dataRoot,
   );
