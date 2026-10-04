@@ -292,23 +292,6 @@ import { errorMessage, toError } from "~/shared/errors";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
-// The mutation substrate lives in its own leaf module to break a real import
-// cycle (see task-mutation.server.ts). Re-exported here so the many existing
-// importers of these names keep working unchanged.
-export {
-  taskRef,
-  reprojectTask,
-  notifyTaskWatchers,
-  loadProjectContext,
-  OPERATOR_NOTIFY_FROM,
-} from "./task-mutation.server";
-export type {
-  TaskActor,
-  TaskMutationContext,
-  TaskWatcherNotice,
-  ProjectContext,
-} from "./task-mutation.server";
-
 /** Hard cap on the operator's react re-invocation chain (runaway backstop). */
 const OPERATOR_REACT_DEPTH_CAP = 4;
 
@@ -357,11 +340,6 @@ export function operatorShouldReactToReply(
   return true;
 }
 
-// Audit actor for operator-performed mutations — single-sourced in the audit
-// leaf module, imported above for local use and re-exported for the many
-// existing importers of task-actions.
-export { OPERATOR_AUDIT_ACTOR };
-
 /** Placeholder TaskActor the operator toolkit threads through the shared
  *  mutations; its user id is never read once `operatorAuthorized` is set (the
  *  RBAC check is skipped and audit uses {@link OPERATOR_AUDIT_ACTOR}). */
@@ -409,10 +387,6 @@ export type TaskActionContext = TaskMutationContext & {
 // ---------------------------------------------------------------- helpers
 
 
-
-// The archived read-only gate (R6-3) — ONE implementation, shared with the
-// config-surface guard. Re-exported so existing importers keep working.
-export { requireProjectMutable };
 
 function stageName(project: ProjectContext, stageId: string): string {
   return resolveStageName(project.stages, stageId);

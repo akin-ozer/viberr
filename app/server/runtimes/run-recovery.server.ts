@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification, taskEventLink } from "~/server/projections/notifications.server";
-import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import type { runOperator } from "./operator-run.server";
 import { reapRunProcesses, type ReapRunProcesses, compactionRunId } from "./run-processes.server";
 import {

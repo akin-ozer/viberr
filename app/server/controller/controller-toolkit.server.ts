@@ -205,9 +205,7 @@ import {
   acceptanceRefusalFor,
   appendComment,
   createTask,
-  loadProjectContext,
   releaseOwner,
-  requireProjectMutable,
   setOwner,
   setTaskMetadata,
   transitionStage,
@@ -215,6 +213,8 @@ import {
   updateTaskTitle,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import { loadProjectContext } from "~/server/tasks/task-mutation.server";
+import { requireProjectMutable } from "~/server/auth/project-authority.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";

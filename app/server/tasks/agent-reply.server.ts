@@ -23,7 +23,7 @@ import {
   type DeployedSpecialistView,
 } from "./specialist-run.server";
 import { resolveOperatorAuthority } from "./operator-actions.server";
-import type { TaskMutationContext } from "./task-actions.server";
+import type { TaskMutationContext } from "./task-mutation.server";
 import { extractMentions, RESERVED_MENTION_HANDLES } from "~/ui/mention-spans";
 import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 

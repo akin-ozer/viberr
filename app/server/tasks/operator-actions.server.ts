@@ -152,20 +152,19 @@ import {
 } from "~/server/runtimes/model-catalog.server";
 import {
   DEFAULT_GOAL,
-  OPERATOR_AUDIT_ACTOR,
   OPERATOR_TASK_ACTOR,
   RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
   acceptanceTerminallyBlocked,
   mergeReadinessRefusal,
   applyAcceptanceWrite,
-  notifyTaskWatchers,
   operatorPromptAgent,
   performDelivery,
   revisionDriftNote,
   transitionStage,
-  type TaskMutationContext,
 } from "./task-actions.server";
+import { OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
+import { notifyTaskWatchers, type TaskMutationContext } from "./task-mutation.server";
 import {
   acceptanceNoChangeCheck,
   kbCorrectionsOutcome,

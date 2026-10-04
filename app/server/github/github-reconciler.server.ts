@@ -1256,9 +1256,7 @@ async function reconcileTaskUnlocked(
       // re-notifies; suppressed on the branch-cleanup re-confirm pass (ruling
       // 136(c)) like the divergence notices.
       if (!ctx.suppressDivergenceNotice) {
-        const { notifyTaskWatchers } = await import(
-          "~/server/tasks/task-actions.server"
-        );
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
           db,
           {
@@ -1367,7 +1365,7 @@ async function reconcileTaskUnlocked(
       // The person the packet asked is told why the question went away, in
       // the inbox the packet reached, before any click can be refused.
       if (!ctx.suppressDivergenceNotice && conflictText) {
-        const { notifyTaskWatchers } = await import("~/server/tasks/task-actions.server");
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
           db,
           {
@@ -1389,9 +1387,8 @@ async function reconcileTaskUnlocked(
       // The task returns to the stage where a verdict can be given (ruling
       // 163's rework route, the authored-drift door), notifies the watchers
       // and wakes the operator below.
-      const { returnChangedRevisionToReview, notifyTaskWatchers } = await import(
-        "~/server/tasks/task-actions.server"
-      );
+      const { returnChangedRevisionToReview } = await import("~/server/tasks/task-actions.server");
+      const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
       await returnChangedRevisionToReview(
         db,
         { dataRoot: ctx.dataRoot },
@@ -1430,9 +1427,7 @@ async function reconcileTaskUnlocked(
     if (adoptionInput) {
       const adoptedAt = await recordPrAdoption(db, ref, adoptionInput, actor);
       if (!prJustReopened) {
-        const { notifyTaskWatchers } = await import(
-          "~/server/tasks/task-actions.server"
-        );
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
           db,
           {
@@ -1464,9 +1459,7 @@ async function reconcileTaskUnlocked(
     // The note that says the same thing, in the same order of precedence.
     const noticeAt = divergenceText ? divergenceAt : acceptedClosedText ? acceptedClosedAt : reopenedAt;
     if (noticeText && !ctx.suppressDivergenceNotice) {
-      const { notifyTaskWatchers } = await import(
-        "~/server/tasks/task-actions.server"
-      );
+      const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
       notifyTaskWatchers(
         db,
         {

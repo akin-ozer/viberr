@@ -18,7 +18,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { currentCompletionPacket } from "./completion-packet.server";
 import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-actions.server";
-import type { TaskMutationContext } from "./task-actions.server";
+import type { TaskMutationContext } from "./task-mutation.server";
 
 /**
  * Ruling 281 (pass 37, F37-114) and ruling 282 (F37-115): the board read an

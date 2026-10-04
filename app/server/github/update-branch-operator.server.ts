@@ -33,10 +33,8 @@ import {
   type OfferWithdrawal,
 } from "~/server/tasks/task-mutation.server";
 import { listLiveRunRows } from "~/server/runtimes/run-store.server";
-import {
-  OPERATOR_AUDIT_ACTOR,
-  type TaskActionContext,
-} from "~/server/tasks/task-actions.server";
+import { OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
+import type { TaskActionContext } from "~/server/tasks/task-actions.server";
 import {
   updateWorkspaceBranchFromBase,
   type RemoteBranchState,

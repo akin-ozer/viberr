@@ -17,7 +17,7 @@ import {
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { imageResult, strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
-import type { TaskMutationContext } from "./task-actions.server";
+import type { TaskMutationContext } from "./task-mutation.server";
 import {
   deliverGate,
   dispatchGate,
