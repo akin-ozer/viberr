@@ -17,6 +17,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import { AppError, isAppError } from "~/server/errors/app-error.server";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { getProfileView } from "~/features/profile/profile-query.server";
+import { submitBackendLoginCode } from "~/server/runtimes/backend-login.server";
 import {
   cancelBackendSignIn,
   changeOwnPassword,
@@ -24,11 +25,9 @@ import {
   disconnectAgentAccount,
   disconnectGithubIdentity,
   renameAgentAccount,
-
   setNotifRoutingPref,
   setTimelineDefaultPref,
   startBackendSignIn,
-  submitBackendSignInCode,
   switchAgentAccount,
   updateProfileIdentity,
 } from "~/features/profile/profile-actions.server";
@@ -185,7 +184,7 @@ export async function action({ request }: Route.ActionArgs) {
         return { ok: true as const, intent, toast };
       }
       case "backend-login-code": {
-        submitBackendSignInCode(
+        submitBackendLoginCode(
           db,
           actor,
           decodeOr(

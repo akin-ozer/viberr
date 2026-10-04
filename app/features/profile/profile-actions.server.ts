@@ -28,7 +28,6 @@ import {
   backendBinaryIfPresent,
   cancelBackendLogin,
   startBackendLogin,
-  submitBackendLoginCode,
   type LoginSessionView,
 } from "~/server/runtimes/backend-login.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
@@ -210,10 +209,10 @@ export function disconnectGithubIdentity(
  * provider account, so connecting Claude and Codex is a personal action taken
  * here, not a deployment setting (ruling 127).
  *
- * These wrappers exist for one reason each function states: the store and the
- * sign-in driver both need the absolute path of the UNMODIFIED vendor binary,
- * and resolving it is `backend-login.server.ts`'s job. Routes stay thin, so the
- * route never reaches for a binary itself.
+ * These wrappers turn the account store's and the sign-in driver's answers into
+ * the sentence a person reads, and `disconnectAgentAccount` resolves the vendor
+ * binary its logout needs (`backend-login.server.ts`'s job), so the route never
+ * reaches for a binary itself.
  */
 
 /**
@@ -233,18 +232,6 @@ export function startBackendSignIn(
   accountId?: string,
 ): LoginSessionView {
   return startBackendLogin(db, actor, backend, method, accountId ? { accountId } : {});
-}
-
-/** Hand Anthropic's one-time code to the waiting child (Claude only). The value
- *  passes straight through to the child's stdin: nothing here stores or logs
- *  it. */
-export function submitBackendSignInCode(
-  db: DatabaseSync,
-  actor: ProfileActor,
-  backend: RealBackend,
-  code: string,
-): LoginSessionView {
-  return submitBackendLoginCode(db, actor, backend, code);
 }
 
 /** Cancel a running sign-in. A person who has nothing running is told so rather
