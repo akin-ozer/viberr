@@ -161,10 +161,7 @@ export function mcpSignInPhrase(
  * `save_mcp_server`): what it means for runs, and that signing in is an org
  * admin's act in Instance settings, which the controller cannot perform.
  */
-export function mcpSignInNote(
-  view: McpOAuthView | null | undefined,
-  now: number = Date.now(),
-): string | null {
+export function mcpSignInNote(view: McpOAuthView | null | undefined): string | null {
   if (!view) return null;
   if (view.status === "needs_sign_in") {
     return "It asks for an OAuth sign-in and nobody has signed it in, so runs do not mount it. An org admin signs it in from its editor in Instance settings → Agent resources (Sign in); the controller cannot.";
@@ -172,7 +169,7 @@ export function mcpSignInNote(
   if (view.status === "expired") {
     return `Its OAuth sign-in expired${view.reason ? ` (${view.reason})` : ""}, so runs do not mount it. An org admin must sign it in again in Instance settings → Agent resources; the controller cannot.`;
   }
-  return `${sentence(mcpSignInPhrase(view, now) ?? "signed in")} with OAuth${view.issuer ? ` at ${view.issuer}` : ""}. Viberr holds the tokens; runs reach the server through Viberr's MCP gateway and never see them. ${grantSentence(view.scope)}`;
+  return `${sentence(mcpSignInPhrase(view) ?? "signed in")} with OAuth${view.issuer ? ` at ${view.issuer}` : ""}. Viberr holds the tokens; runs reach the server through Viberr's MCP gateway and never see them. ${grantSentence(view.scope)}`;
 }
 
 /** Ruling 486: what the sign-in may do, as the controller relays it. */

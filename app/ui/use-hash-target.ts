@@ -6,14 +6,14 @@ import { useHydrated } from "./local-time";
 /**
  * Ruling 419(h), shared by ruling 497: bring `target` to the top of the nearest
  * box that scrolls it (the rail on a desktop, the page column on a phone), and
- * focus `focusable` without scrolling again. `scrollIntoView` would move every
+ * focus it without scrolling again. `scrollIntoView` would move every
  * scrolling ancestor, the document included, which the shell never lets a
  * person scroll back.
  */
-export function revealTarget(target: HTMLElement, focusable: HTMLElement | null = target): void {
+export function revealTarget(target: HTMLElement): void {
   const box = scrollingBox(target);
   if (box) box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
-  focusable?.focus({ preventScroll: true });
+  target.focus({ preventScroll: true });
 }
 
 /** The nearest box that scrolls `el`: the rail on a desktop, the page column
