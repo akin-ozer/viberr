@@ -43,8 +43,10 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // Raised 49 to 50 by ruling 503: the task loader's one read of the
   // project's epics, which the hero's Epic field and the Details panel's Epic
   // menu draw from.
+  // Lowered 50 to 49 by the 2026-10-04 simplifier run: the task loader reads
+  // the project's members once, not once per question it asks of them.
   "server-read:task-revalidation.sql": {
-    ceiling: 50,
+    ceiling: 49,
     unit: "count",
     journey: "server",
     fixture: TASK_REVALIDATION,
