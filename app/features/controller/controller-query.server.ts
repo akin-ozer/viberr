@@ -143,7 +143,6 @@ export interface ConversationListItem {
   ownerLabel: string;
   own: boolean;
   lastMessageAt: string | null;
-  projectSlug: string | null;
   /** Ruling 121: the task this thread is anchored to, when it is. */
   taskKey: string | null;
   /** O39-d: the viewer's own thread holds a controller reply they have not
@@ -368,7 +367,6 @@ export function getControllerSurface(
         ownerLabel,
         own: c.userId === viewer.id,
         lastMessageAt: c.lastMessageAt,
-        projectSlug: c.projectSlug,
         taskKey: c.taskKey,
         unread: c.userId === viewer.id && unseen.has(c.id),
         readable,

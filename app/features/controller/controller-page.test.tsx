@@ -38,8 +38,8 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     controllerName: "Controller",
     projectName: "Viberr Core",
     conversations: [
-      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false, readable: true, canDelete: true, working: false },
-      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false, readable: true, canDelete: true, working: false },
+      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", taskKey: null, unread: false, readable: true, canDelete: true, working: false },
+      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", taskKey: "VIB-142", unread: false, readable: true, canDelete: true, working: false },
     ],
     conversation: null,
     messages: [],
@@ -1761,7 +1761,6 @@ describe("ruling 525: deleting a conversation from the rail", () => {
     ownerLabel: "Selin Aksoy",
     own: false,
     lastMessageAt: "2026-09-01T09:00:00.000Z",
-    projectSlug: "viberr-core",
     taskKey: "VIB-150",
     unread: false,
     readable: false,
