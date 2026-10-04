@@ -22,7 +22,8 @@ import {
   type TaskMemberView,
 } from "./execution-profile";
 import type { TaskRunPrincipalView } from "./run-principal-view";
-import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
+import type { ActionResult } from "./task-detail-hooks";
+import { useActionToast } from "~/ui/use-action-toast";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 
@@ -147,7 +148,7 @@ export function TaskHero({
   const goalBusy = goalFetcher.state !== "idle";
   // Surface a failed save as a toast instead of silently leaving the editor
   // open with no explanation (WI-11); on success the effect below closes it.
-  useActionFeedback(goalFetcher);
+  useActionToast(goalFetcher);
   // Close the editor once a save round-trips successfully. Once per result
   // (`useFetcherResult`): `goalFetcher.data` persists after idle, so without
   // the dedupe the stale `ok` would instantly close every later re-open.
@@ -470,10 +471,10 @@ export function ExecutionSection({
   const operatorFetcher = useFetcher<ActionResult>();
   const releaseFetcher = useFetcher<ActionResult>();
   const cancelFetcher = useFetcher<ActionResult>();
-  useActionFeedback(agentFetcher);
-  useActionFeedback(operatorFetcher);
-  useActionFeedback(releaseFetcher);
-  useActionFeedback(cancelFetcher);
+  useActionToast(agentFetcher);
+  useActionToast(operatorFetcher);
+  useActionToast(releaseFetcher);
+  useActionToast(cancelFetcher);
   const agentBusy = agentFetcher.state !== "idle";
   const operatorBusy = operatorFetcher.state !== "idle";
   // Ruling 368: a run control shows which request it sent — a run now or a

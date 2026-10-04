@@ -52,12 +52,8 @@ import {
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
-import {
-  useActionFeedback,
-  useLogSelection,
-  useRunControls,
-  type ActionResult,
-} from "./task-detail-hooks";
+import { useLogSelection, useRunControls, type ActionResult } from "./task-detail-hooks";
+import { useActionToast } from "~/ui/use-action-toast";
 import { CurrentStatePanel, GithubTrace } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
@@ -355,9 +351,9 @@ export function TaskDetailPage({
   // R14-3: its own fetcher — an archive/restore must not be able to strand or be
   // stranded by an ownership submission sharing one fetcher (UI-56's lesson).
   const archiveFetcher = useFetcher<ActionResult>();
-  useActionFeedback(ownerFetcher);
-  useActionFeedback(resolveFetcher);
-  useActionFeedback(archiveFetcher);
+  useActionToast(ownerFetcher);
+  useActionToast(resolveFetcher);
+  useActionToast(archiveFetcher);
   const ownerBusy = ownerFetcher.state !== "idle";
   const resolveBusy = resolveFetcher.state !== "idle";
   const archiveBusy = archiveFetcher.state !== "idle";
@@ -459,7 +455,7 @@ export function TaskDetailPage({
     { recId: string; label: string } | null
   >(null);
   const acceptFetcher = useFetcher<ActionResult>();
-  useActionFeedback(acceptFetcher);
+  useActionToast(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
   // Ruling 88 (F21-2): the acceptance intents carry the ceremony's own echo of
   // what it displayed. The server refuses this POST without it — that refusal
@@ -490,7 +486,7 @@ export function TaskDetailPage({
 
   // R15-2 safety net (b): manual delivery from the GitHub panel.
   const deliverFetcher = useFetcher<ActionResult>();
-  useActionFeedback(deliverFetcher);
+  useActionToast(deliverFetcher);
   const deliverBusy = deliverFetcher.state !== "idle";
   const onDeliver = () => {
     if (deliverBusy) return;
@@ -503,7 +499,7 @@ export function TaskDetailPage({
   // Ruling 482: run the project's gates on the revision under review again,
   // from the PR card. Same tier as the manual delivery above.
   const gatesFetcher = useFetcher<ActionResult>();
-  useActionFeedback(gatesFetcher);
+  useActionToast(gatesFetcher);
   const gatesBusy = gatesFetcher.state !== "idle";
   const onRunGates = () => {
     if (gatesBusy) return;
@@ -687,7 +683,7 @@ export function TaskDetailPage({
   // refuses when the caller already holds `resolve-packet`, so this is wired
   // only for the owner-who-cannot-resolve-directly case.
   const escalateFetcher = useFetcher<ActionResult>();
-  useActionFeedback(escalateFetcher);
+  useActionToast(escalateFetcher);
   const escalateBusy = escalateFetcher.state !== "idle";
   const canEscalatePacket = isOwner && !canRunAgents;
   const onRequestMaintainer = () => {
@@ -703,7 +699,7 @@ export function TaskDetailPage({
   // acceptance, so the click has to reach the page's confirm state rather than
   // submit from inside the card.
   const recFetcher = useFetcher<ActionResult>();
-  useActionFeedback(recFetcher);
+  useActionToast(recFetcher);
   const recBusy = recFetcher.state !== "idle";
   // Ruling 368: the card whose request this fetcher carries shows it in
   // flight. The fetcher keeps its form data through `submitting` and the
@@ -773,7 +769,7 @@ export function TaskDetailPage({
   // Manual stage change from the Current-state menu. Page-owned since F19-37 —
   // see below.
   const transitionFetcher = useFetcher<ActionResult>();
-  useActionFeedback(transitionFetcher);
+  useActionToast(transitionFetcher);
   const transitionBusy = transitionFetcher.state !== "idle";
   const submitTransition = (
     toStageId: string,

@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
-import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
+import { useFetcher } from "react-router";
 import { inFlightIntent } from "~/ui/in-flight";
-import { useToast } from "~/ui/toast";
-import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { useActionToast } from "~/ui/use-action-toast";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import {
   acceptanceDisclosureFields,
@@ -12,42 +11,23 @@ import type { RunView } from "~/features/runtime/runtime-types";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 
 /**
- * Task-detail behaviour that is not markup: the once-per-settled-result toast
- * wiring every one of the page's 13 fetchers routes through, the run controls,
- * and the log-panel selection. Split out of `task-detail-page.tsx` (pass 16 —
- * the file was 1811 lines and the most conflict-prone in the tree); a pure
- * structural refactor, no behaviour or copy change.
+ * Task-detail behaviour that is not markup: the result every one of the page's
+ * fetchers reads (each toasts it through the shared `useActionToast`), the run
+ * controls, and the log-panel selection. Split out of `task-detail-page.tsx`
+ * (pass 16 — the file was 1811 lines and the most conflict-prone in the tree);
+ * a pure structural refactor, no behaviour or copy change.
  */
 
 export type ActionResult =
   | {
       ok: true;
       toast?: string;
-      navigateTo?: string;
       kind?: string;
       /** R17-2/F17-L3: a suggested new goal from a resolved scoping (edit_goal)
        *  packet option — the editor prefills with THIS instead of the old goal. */
       goalDraft?: string;
     }
   | { ok: false; error: string };
-
-/** Toast + optional redirect once per completed fetcher submission. */
-export function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
-  const push = useToast();
-  const navigate = useNavigate();
-  useFetcherResult(fetcher, (d) => {
-    if (d.ok) {
-      if (d.toast) push(d.toast);
-      if (d.navigateTo) navigate(d.navigateTo);
-    } else if (d.error) {
-      // E.g. "This packet was already resolved." — revalidation has already
-      // refreshed the panel; surface the reason, never crash (spec §7).
-      // P13-D-10: `push` defaults to the "success" kind, so every failure on
-      // this page rendered under a green tick.
-      push(d.error, "error");
-    }
-  });
-}
 
 /**
  * Run-control mutations (interrupt / retry-on-other-backend / complete the
@@ -80,7 +60,7 @@ export function useRunControls({
   acceptanceTerminallyBlocked: boolean;
 }) {
   const runFetcher = useFetcher<ActionResult>();
-  useActionFeedback(runFetcher);
+  useActionToast(runFetcher);
   const runBusy = runFetcher.state !== "idle";
   // Ruling 368: this one fetcher carries four requests (interrupt, the backend
   // retry, complete-merge, force-accept), so the page reads which one — and

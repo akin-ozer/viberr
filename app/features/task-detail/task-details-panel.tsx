@@ -27,11 +27,12 @@ import { EpicChip, type EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
+import { useActionToast } from "~/ui/use-action-toast";
 import { useDismiss } from "~/ui/use-dismiss";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableValue } from "~/ui/use-stable-rows";
 import type { DependencyCandidatesView } from "~/routes/task-dependency-candidates";
-import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
+import type { ActionResult } from "./task-detail-hooks";
 import { WaitChip } from "./wait-chip";
 
 /**
@@ -179,7 +180,7 @@ function editState(prop: DetailProp, { open, setOpen }: RowControl): EditState {
 /** A property's own fetcher, with its toast or refusal. */
 function usePropFetcher(): Fetcher {
   const fetcher = useFetcher<ActionResult>();
-  useActionFeedback(fetcher);
+  useActionToast(fetcher);
   return fetcher;
 }
 
