@@ -46,8 +46,8 @@ import {
   RECOMMENDATION_DECLINED_TITLE,
   applyRecommendation,
   dismissRecommendation,
-  resolvePacket,
-} from "./task-actions.server";
+} from "./task-recommendations.server";
+import { resolvePacket } from "./task-actions.server";
 import { transitionStage } from "./task-transitions.server";
 import { applyAcceptanceWrite } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";

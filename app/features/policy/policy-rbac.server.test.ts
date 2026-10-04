@@ -15,11 +15,13 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   appendComment,
-  dismissRecommendation,
-  applyRecommendation,
   resolvePacket,
   requestPacketMaintainerDecision,
 } from "~/server/tasks/task-actions.server";
+import {
+  dismissRecommendation,
+  applyRecommendation,
+} from "~/server/tasks/task-recommendations.server";
 import { transitionStage, reorderTask } from "~/server/tasks/task-transitions.server";
 import { manualDeliverForReview, runProjectGatesByHand } from "~/server/tasks/task-delivery.server";
 import {

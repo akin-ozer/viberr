@@ -38,9 +38,11 @@ import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
+  dismissRecommendation,
+} from "~/server/tasks/task-recommendations.server";
+import {
   appendComment,
   commentToAgent,
-  dismissRecommendation,
   requestPacketMaintainerDecision,
   resolvePacket,
 } from "~/server/tasks/task-actions.server";

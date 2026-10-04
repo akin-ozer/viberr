@@ -46,12 +46,12 @@ import {
   packetIdentity,
   recordAgentCompletion,
   clearWaitingToHuman,
-  applyRecommendation,
   commentToAgent,
   liftHoldForRun,
   liftStageHoldForPerson,
   resolvePacket,
 } from "./task-actions.server";
+import { applyRecommendation } from "./task-recommendations.server";
 import { transitionStage, reorderTask } from "./task-transitions.server";
 import { manualDeliverForReview, performDelivery } from "./task-delivery.server";
 import {
