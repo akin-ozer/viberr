@@ -6,8 +6,10 @@ import { compactTimelineEvents } from "~/server/tasks/timeline-compaction.server
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { startTemperature } from "~/server/runtimes/context-policy.server";
 import {
+  backendRuns,
   INSIGHTS_NAMED_EXCEPTIONS,
   getInsightsSummary,
+  oversightSummary,
   runAnalytics,
   type InsightsFilter,
 } from "./insights-query.server";
@@ -148,8 +150,9 @@ describe("ruling 635: run figures are one backend's", () => {
       ["claude", 1],
       ["codex", 2],
     ]);
-    // Scoped to a project, the counts are that project's.
-    expect(getInsightsSummary(db, NOW, { projectSlug: "p2" }).backends).toEqual([
+    // Scoped to a project (the controller's inspect_run_analytics), the counts
+    // are that project's.
+    expect(backendRuns(db, { projectSlug: "p2" })).toEqual([
       { backend: "claude", runs: 0 },
       { backend: "codex", runs: 1 },
     ]);
@@ -984,7 +987,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     // Ruling 635: named longest first. CANARY: drop the sort and the card
     // names table order (here gp/VIB-2 first; live, AWSC-1 to AWSC-8 of 70).
     expect(all.longTimelineKeys).toEqual(["other/OT-1", "gp/VIB-2"]);
-    const scoped = getInsightsSummary(db, NOW, { projectSlug: "gp" }).oversight;
+    const scoped = oversightSummary(db, { projectSlug: "gp" });
     expect(scoped.longTimelines).toBe(1);
     expect(scoped.clarity.activeTasks).toBe(2);
   });
@@ -1012,10 +1015,10 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
 
     expect(getInsightsSummary(db, NOW).oversight.longTimelines).toBe(1);
     expect(
-      getInsightsSummary(db, NOW, { projectSlug: "tight" }).oversight.longTimelines,
+      oversightSummary(db, { projectSlug: "tight" }).longTimelines,
     ).toBe(1);
     expect(
-      getInsightsSummary(db, NOW, { projectSlug: "off" }).oversight.longTimelines,
+      oversightSummary(db, { projectSlug: "off" }).longTimelines,
     ).toBe(0);
   });
 });
