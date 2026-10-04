@@ -476,17 +476,6 @@ export interface StartRunInput {
   /** Ruling 180: the plugin directory carrying `skills`; removed when the run
    *  settles. See RunSpec.skillPlugin. */
   skillPlugin?: SkillPlugin;
-  /** The run's `execute-code-or-write-repo` grant is withheld. Claude's tool
-   *  denylist binds it; on Codex it is ADVISORY since ruling 185 removed the
-   *  OS sandbox — the prompt omits the delivery steps and the server-owned
-   *  delivery gate refuses them (`codexRepoWriteAdvisory` renders that
-   *  wherever the enforcement is shown). Omit to let `startRun` derive it from
-   *  `disallowedTools` (see `repoWriteWithheldFromDenylist`). */
-  repoWriteWithheld?: boolean;
-  /** The run's `use-web-search-fetch` grant is withheld — Codex enforces it by
-   *  disabling its web search (P14-RT-06). Omit to let `startRun` derive it from
-   *  `disallowedTools` (see `webSearchWithheldFromDenylist`). */
-  webSearchWithheld?: boolean;
   /** JSON schema constraining the run's final output. Codex only — used by the
    *  structured-output operator AND every generic specialist/reviewer run's
    *  report_outcome envelope; the caller parses + executes/records it. */
@@ -774,8 +763,7 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * longer drives a sandbox: ruling 101 bound it through Codex's read-only mode,
  * and ruling 185 removed the OS sandbox, so on Codex the withholding is
  * advisory. What it still decides is the admin-marked MCP write tools a run
- * loses (ruling 176) and the `repoWriteWithheld` the spec records. Callers
- * that know the grant directly may still pass `repoWriteWithheld` explicitly.
+ * loses (ruling 176) and the `repoWriteWithheld` the spec records.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],
@@ -1090,21 +1078,11 @@ export async function startRun(
   if (input.skillPlugin) spec.skillPlugin = input.skillPlugin;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
   // it; on Codex it is advisory (ruling 185 removed the OS sandbox) and the
-  // delivery gate is the boundary. Explicit caller value wins.
-  if (
-    input.repoWriteWithheld ??
-    repoWriteWithheldFromDenylist(input.disallowedTools)
-  ) {
-    spec.repoWriteWithheld = true;
-  }
+  // delivery gate is the boundary.
+  if (repoWriteWithheldFromDenylist(input.disallowedTools)) spec.repoWriteWithheld = true;
   // Same for web egress: withheld ⇒ Codex runs with its web search disabled,
   // the channel the operator already uses (P14-RT-06).
-  if (
-    input.webSearchWithheld ??
-    webSearchWithheldFromDenylist(input.disallowedTools)
-  ) {
-    spec.webSearchWithheld = true;
-  }
+  if (webSearchWithheldFromDenylist(input.disallowedTools)) spec.webSearchWithheld = true;
   if (input.outputSchema) spec.outputSchema = input.outputSchema;
   // Ruling 175: the instance's spending cap rides every run from here, the one
   // funnel every builder goes through (specialist, operator, controller,

@@ -658,7 +658,8 @@ describe("ruling 185: no Codex run is refused for a sandbox", () => {
       model: defaultModelFor("codex"),
       prompt: "go",
       dataRoot: store.dataRoot,
-      repoWriteWithheld: true,
+      // The denylist a withheld `execute-code-or-write-repo` grant produces.
+      disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
     });
     await settle();
     expect(getRun(store.db, runId)!.state).toBe("finished");
@@ -1712,17 +1713,6 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     });
     await settle();
     expect(specs[1]?.costStateRestored).toBe(false);
-  });
-
-  it("an explicit caller value wins over the derivation", async () => {
-    const specs = captureSpecs();
-    await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "codex", model: "gpt-5.6-sol", prompt: "go", dataRoot: store.dataRoot,
-      repoWriteWithheld: true,
-    });
-    await settle();
-    expect(specs[0]?.repoWriteWithheld).toBe(true);
   });
 
   it("normalizes a stored effort from the OTHER backend's tier scale", async () => {
