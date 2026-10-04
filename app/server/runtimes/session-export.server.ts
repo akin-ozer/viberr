@@ -160,9 +160,12 @@ function codexTranscriptByFilename(
   return rolloutByFilename(codexSessionDirs(userId, dataRoot), sessionId);
 }
 
-/** The walk behind {@link codexTranscriptByFilename}, over the given
- *  `sessions` roots (a missing root is skipped). */
-function rolloutByFilename(roots: readonly string[], sessionId: string): string | null {
+/** The walk behind both Codex locators: the first `.jsonl` under the given
+ *  `sessions` roots (a missing root is skipped) that `matches` accepts. */
+function findRollout(
+  roots: readonly string[],
+  matches: (name: string, file: string) => boolean,
+): string | null {
   const stack = [...roots];
   while (stack.length) {
     const dir = stack.pop()!;
@@ -178,12 +181,15 @@ function rolloutByFilename(roots: readonly string[], sessionId: string): string 
         stack.push(full);
         continue;
       }
-      if (entry.name.endsWith(".jsonl") && entry.name.includes(sessionId)) {
-        return full; // filename embeds the id
-      }
+      if (entry.name.endsWith(".jsonl") && matches(entry.name, full)) return full;
     }
   }
   return null;
+}
+
+/** {@link findRollout} by filename, which embeds the session id. */
+function rolloutByFilename(roots: readonly string[], sessionId: string): string | null {
+  return findRollout(roots, (name) => name.includes(sessionId));
 }
 
 /** Content fallback: the id appears in the session-meta (first line). Reads
@@ -193,32 +199,13 @@ function codexTranscriptByContent(
   sessionId: string,
   dataRoot?: string,
 ): string | null {
-  const stack: string[] = codexSessionDirs(userId, dataRoot);
-  if (stack.length === 0) return null;
-  while (stack.length) {
-    const dir = stack.pop()!;
-    let entries: Dirent[];
+  return findRollout(codexSessionDirs(userId, dataRoot), (_name, file) => {
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      return (readFileSync(file, "utf8").split("\n", 1)[0] ?? "").includes(sessionId);
     } catch {
-      continue;
+      return false;
     }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-        continue;
-      }
-      if (!entry.name.endsWith(".jsonl")) continue;
-      try {
-        const head = readFileSync(full, "utf8").split("\n", 1)[0] ?? "";
-        if (head.includes(sessionId)) return full;
-      } catch {
-        // ignore
-      }
-    }
-  }
-  return null;
+  });
 }
 
 function locateCodex(
