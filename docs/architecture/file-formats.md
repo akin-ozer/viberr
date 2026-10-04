@@ -2,13 +2,15 @@
 
 The markdown files under `${VIBERR_DATA_ROOT}` that Viberr treats as canonical business truth,
 field by field: `project.md`, `task.md` (frontmatter, packet and timeline grammar), epic
-files, agent profile templates and the smaller files beside them. SQLite holds projections of
+files, agent profile templates and the smaller files beside them, and the board file that
+carries a board's workflow between instances (§9). SQLite holds projections of
 them; [data-model.md](data-model.md) has the tables and the full data-root layout.
 Source of truth: `app/schemas/project-file.schema.ts`, `app/schemas/task-file.schema.ts`,
 `app/schemas/epic-file.schema.ts`, `app/server/files/agent-profile-file.server.ts` (schemas);
 `app/shared/task-refs.ts` (the `blockedBy` and epic id spellings the schemas validate);
 `app/server/files/task-file.server.ts`, `frontmatter.server.ts`, `project-writer.server.ts`,
-`task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers).
+`task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers);
+`app/server/org/board-file.server.ts` and `app/server/files/zip.server.ts` (the board file, §9).
 Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 503
 (2026-09-26).
 
@@ -1017,3 +1019,89 @@ corrected, or as it did before. The record is the audit row (below).
   characters, `filedBy`, `actorRef`, `bytes`) and `task.kb_correction.undone` (`id`, `kb`,
   `doc`, `reason`, `byName`), beside the `org.store.doc_written` row every store write makes.
   Audit retention (90 days) bounds how long a correction is listed and undoable.
+
+## 9. A board file (ruling 653)
+
+A board's workflow without its work, for starting the same board again here or on another
+instance: Instance settings → Import & export writes one for any project and imports one
+as a new project. It is a zip, `<slug>.viberr-board.zip`, in which every part is a plain
+file a person can read, edit and keep in git. It never lives in the data root.
+
+```
+release-train/board.md                 the board (below)
+release-train/README.md                what the folder is, what it leaves out, how to import it
+release-train/agents/<id>.md           the templates its agents are deployed from (§4's format)
+release-train/skills/<name>/…          each skill folder: SKILL.md and its other files
+release-train/kb/<dir>/…               each knowledge base's documents, binary ones included
+```
+
+`board.md` is a project.md (§1) without the keys that belong to one instance's project,
+plus what the board brings with it:
+
+```markdown
+---
+format: viberr-board/1            # the file's kind and the version of its keys
+name: Release Train
+taskPrefix: REL                   # the import form's default key
+stages: […]                       # §1, verbatim
+workflow: […]
+agents: […]                       # the deployments, verbatim: capabilities, extras, definition
+guardrails: […]
+requiredReviewers: […]
+rulingsKb: release-rulings        # absent when the board names none
+gates: […]                        # absent when the board declares none
+knowledgeBases:                   # each kb/<dir>/ folder, with its settings
+  - dir: release-rulings
+    name: Release rulings
+    refresh: manual               # on change | manual
+    private: false                # ruling 578
+skills:                           # each skills/<name>/ folder, with its summary
+  - name: release-notes
+    summary: Drafts release notes from merged pull requests.
+mcpServers:                       # registry rows, NEVER a credential or a sign-in
+  - name: linear
+    transport: HTTP               # HTTP | stdio
+    target: https://mcp.linear.app/mcp
+    writeTools: [create_issue]    # ruling 176; absent when never reviewed
+exportedAt: 2026-10-04T12:00:00.000Z
+exportedFrom: release-train       # the slug it was exported from
+viberrVersion: 0.19.0
+---
+
+The board's description (project.md's body).
+```
+
+What an export carries: the deployments verbatim; the specialist templates they are
+deployed from (never the operator's or the controller's, which are the instance's own); and
+every skill, knowledge base and MCP server a deployment or one of those templates grants,
+plus the rulings knowledge base. A grant naming a resource the instance does not have is
+carried as written and named in the README. What it leaves: `slug`, `archived`, `repo`,
+`defaultBranch`, `nextTaskNumber`, `members`, `credentialPolicy`, `fileLeases`, tasks, epics,
+and every credential. An export refuses a board an import would refuse: at most 2,000 files,
+100 MB unpacked and 25 MB zipped (`BOARD_FILE_LIMITS`, `BOARD_FILE_MAX_BYTES`).
+
+How an import reads one (`readBoardFile`, `parseBoardFile`):
+
+- The zip may hold the folder at its top or the folder's contents at its root (a person
+  re-zips the extracted folder either way). `__MACOSX/` and every dot-name are left out,
+  as the store leaves them; a file the layout has no place for is left out and named.
+- The reader trusts the zip's central directory, never a local header's sizes (Finder
+  writes data descriptors), and refuses a path that leaves its folder, an absolute path, a
+  symbolic link, an encrypted entry, a method other than STORE and DEFLATE, ZIP64, a file
+  named twice, more than the limits (judged on the declared sizes before anything is
+  inflated, and again while inflating), and a checksum that does not match.
+- `format` must be `viberr-board/1`; another version is refused as one written by a newer
+  Viberr. A key board.md does not use is refused by name; a project.md-only key is left out
+  with a note.
+- The workflow keys go through project.md's own parser, and every diagnostic it raises is a
+  problem that refuses the import. Then the board is checked whole: at least two stages,
+  unique stage ids, the move into the final stage `human`, unique agents and none of them the
+  controller, every required
+  reviewer at a non-final stage of the board on an agent it deploys, gates by
+  `validateProjectGates`, and a rulings knowledge base the file or the instance has. A
+  workflow that does not step through the stages one at a time is rewired as a stage edit
+  would (`realignChainToStages`), with a note, and a board with no operator gets the base
+  one. Every problem is listed at once.
+- A knowledge base or skill is the SAME as the instance's of that name when every file has
+  the same path and bytes; an MCP server when its transport and target are; a template when
+  its parsed frontmatter and body are. A different one is never overwritten.

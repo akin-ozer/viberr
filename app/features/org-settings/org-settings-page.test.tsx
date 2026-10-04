@@ -1589,6 +1589,7 @@ function orgPage(overrides: Partial<ComponentProps<typeof OrgSettingsPage>> = {}
       controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
+      boards={[]}
       {...overrides}
     />
   );

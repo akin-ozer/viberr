@@ -67,6 +67,8 @@ const SURFACES: { name: string; path: string; ready: string }[] = [
     ready: ".policy-cols",
   },
   { name: "org settings", path: "/org/settings", ready: ".set-layout" },
+  // Ruling 653: the board file's drop and the Export list.
+  { name: "org settings · import & export", path: "/org/settings?tab=boards", ready: ".board-drop" },
   // Page-as-popup routes: both render their whole page inside a modal
   // <dialog>, so they are also the only two places the sweep sees the
   // top-layer/inert interaction between the overlay and the toast host.

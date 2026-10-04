@@ -3568,8 +3568,9 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     expect(problems).toEqual([]);
     // Nineteen boxes keyed on a refusal counter, and the login page's two.
     // Ruling 478(e) added the packet's "Choose an answer" and "Write your
-    // answer" refusals; ruling 507 the agent account's over-long name.
-    expect(carriers).toHaveLength(21);
+    // answer" refusals; ruling 507 the agent account's over-long name; ruling
+    // 653 the board import dialog's blocker, the New project footer's twin.
+    expect(carriers).toHaveLength(22);
   });
 
   it("every motion this ruling adds has a reduced-motion answer that does not move", () => {
@@ -5732,6 +5733,11 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/epics/epic-page.tsx: x → loader (spins)",
         // Ruling 638: a library row's Add while its deploy is in flight.
         "features/agents/agents-page.tsx: plus → loader (spins)",
+        // Ruling 653: the board file's drop while the server reads it, a
+        // board's Export while its zip downloads, and Import board.
+        "features/org-settings/boards-panel.tsx: upload → loader (spins)",
+        "features/org-settings/boards-panel.tsx: download → loader (spins)",
+        "features/org-settings/board-import-dialog.tsx: board → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box, in one grid area: drop

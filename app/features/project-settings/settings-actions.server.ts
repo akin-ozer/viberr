@@ -673,8 +673,9 @@ export function parseProjectGatesField(raw: string): ProjectGateInput[] {
 }
 
 /** Check a submitted gate list and return it cleaned, or refuse by name with
- *  nothing written. */
-function validateProjectGates(gates: readonly ProjectGateInput[]): ProjectGate[] {
+ *  nothing written. A board import (ruling 653) holds a board file's gates to
+ *  the same rules. */
+export function validateProjectGates(gates: readonly ProjectGateInput[]): ProjectGate[] {
   if (gates.length > PROJECT_GATES_MAX) {
     throw AppError.validation(
       `A project declares at most ${PROJECT_GATES_MAX} gates; this list has ${gates.length}. Nothing was written.`,

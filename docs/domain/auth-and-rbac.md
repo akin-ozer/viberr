@@ -100,7 +100,8 @@ the provider onto `users.github_handle` with `auth.github_handle.recorded`.
 ### Org roles
 
 `users.role` is `admin | member` (CHECK-constrained). Org admins alone reach
-`/org/settings` (every tab and intent), `/org/settings/audit-export`, `/insights`,
+`/org/settings` (every tab and intent), `/org/settings/audit-export`,
+`/org/settings/board-export` (ruling 653), `/insights`,
 the Home store re-scan and rebuild-projections actions, and everyone's controller
 transcripts (read, interrupt a live turn, and delete, ruling 525). Any signed-in user may **create a
 project** and becomes its project admin (FR5). The last active org admin cannot be
@@ -180,7 +181,8 @@ The page is headed "Instance settings", and everything that points at it uses th
 name: the header crumb, the user menu, and the server and agent sentences (the
 spending-cap refusals and remedies, the controller's credential and grant-request
 replies, the unlinked GitHub approval note). Tabs ride `?tab=`, in this order:
-`connections` (the default), `users`, `sso`, `resources`, `controller`. Below the
+`connections` (the default), `users`, `sso`, `resources`, `boards` (Import & export),
+`controller`. Below the
 tabs sit the run-concurrency and spending-cap rows, then the Audit log card. Home's
 setup checklist (ruling 532) links into two dialogs here: `?tab=connections&add` opens
 the New GitHub connection dialog, and `?tab=users&add=admin` opens Allow access with
@@ -287,6 +289,33 @@ their own.
   one `project.agent_profile.resources_synced` row per project a propagation rewrote,
   and one `project.agent_profile.updated` row with `personaChanged` per copy whose
   persona it rewrote (ruling 467).
+- **Import & export** (ruling 653): a board's workflow without its work, as a board
+  file (`<slug>.viberr-board.zip`, format in
+  [file-formats.md §9](../architecture/file-formats.md#9-a-board-file-ruling-653)).
+  **Export a board** lists every project, archived ones last, each with what its file
+  would carry (stages, agents, skills, knowledge bases, MCP servers) and any grant it
+  cannot carry because the instance has no such resource; **Export** fetches
+  `GET /org/settings/board-export?project=<slug>` and saves the zip, and a refusal (a
+  project file the store cannot read, a board larger than an import accepts) is a toast.
+  The export changes nothing and records nothing, as the audit download does. **Import
+  a board** takes a dropped or chosen zip: `board-import-preview` reads it and plans the
+  import without writing anything, and the dialog shows the new project's name, task key
+  and repository (the New project dialog's own fields and refusals, plus "a project at
+  projects/<slug> already exists"), the stages with the rule into each, the agents, and
+  every knowledge base, skill, MCP server and agent template the file carries as New,
+  Already here (the same content, reused) or one this instance holds differently, which
+  offers "Import a copy" (the default, under a free name) or "Use this instance's"; a
+  different template stays in the library and the board's agent carries the file's
+  settings as its own definition. Every problem in the file is listed at once and refuses
+  the import. `board-import` plans again from the uploaded bytes, checks the identity and
+  reaches the repository as project creation does, writes the resources through their own
+  writers (an MCP server comes in UNCHECKED and without a credential: nothing in a file
+  runs or is contacted until an admin tests it), then project.md, with the importer as
+  its admin. Audit: the writers' own rows (`org.kb.*`, `org.skill.*`, `org.store.files_added`,
+  `org.mcp.added` with `unchecked`, `org.agent_profile.created` with `importedFrom`) and
+  `project.created` with `template: "imported"`, the `file`, `exportedFrom`, and what was
+  `created` and `reused`; the project's Activity reads "created the project from the board
+  file …".
 - **Controller**: model and effort are always editable; the grant lists and the
   doctrine body are deployment-locked (ruling 108); a note lists the grants the
   controller asked for and cannot make (`request_resource_grant`, ruling 390), each

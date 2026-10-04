@@ -106,6 +106,15 @@ import {
   type UploadFileInput,
 } from "~/server/org/store-files.server";
 import { errorMessage } from "~/shared/errors";
+import { listBoardExports } from "~/server/org/board-export.server";
+import { BOARD_FILE_MAX_BYTES } from "~/server/org/board-file.server";
+import {
+  importBoard,
+  previewBoardImport,
+  type BoardFileUpload,
+  type BoardImportInput,
+  type BoardImportPreview,
+} from "~/server/org/board-import.server";
 import {
   mcpOAuthRedirectUri,
   signOutMcpOAuth,
@@ -160,6 +169,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Ruling 390: grants the controller asked for and cannot make itself. The
     // remedy sentence is computed HERE so the panel and the controller's own
     // turn context print the identical words.
+    // Ruling 653: every board, for the Import & export tab's Export list.
+    boards: listBoardExports(getDb()),
     controllerRequests: openResourceRequests().map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -197,6 +208,13 @@ type SettingsOk = {
    *  the authorization server's host the editor names. */
   authorizeUrl?: string;
   issuer?: string;
+  /** `board-import-preview` (ruling 653): what importing the file would do. */
+  boardImport?: BoardImportPreview;
+  /** `board-import` (ruling 653): the new project, and what its repository
+   *  probe found, as the New project dialog reports them. */
+  slug?: string;
+  repoWarning?: string;
+  repoNote?: string;
 };
 
 /** The per-intent half of `SettingsOk` — what a case hands `ok()` beyond copy. */
@@ -246,6 +264,35 @@ function parseWriteTools(raw: FormDataEntryValue | null): string[] | undefined {
     // Not JSON: refused below with the same sentence.
   }
   throw AppError.validation("The write-tool list did not arrive as a list of tool names.");
+}
+
+/** Ruling 653: the board file a form carries under `file`. */
+async function boardFileFrom(formData: FormData): Promise<BoardFileUpload> {
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    throw AppError.validation("Choose a board file (.zip) to import.");
+  }
+  if (file.size > BOARD_FILE_MAX_BYTES) {
+    throw AppError.validation(
+      `${file.name} is larger than ${BOARD_FILE_MAX_BYTES / 1024 / 1024} MB, the most a board file may be.`,
+    );
+  }
+  return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+}
+
+/** Ruling 653: the import dialog's choice per resource this instance holds
+ *  differently, a JSON object of `<kind>:<key>` → `copy` | `existing`. */
+const boardImportChoices = z.record(z.string(), z.enum(["copy", "existing"]));
+
+function parseBoardImportChoices(raw: FormDataEntryValue | null): BoardImportInput["choices"] {
+  if (raw === null || raw === "") return new Map();
+  try {
+    const parsed = boardImportChoices.safeParse(JSON.parse(String(raw)));
+    if (parsed.success) return new Map(Object.entries(parsed.data));
+  } catch {
+    // Not JSON: refused below with the same sentence.
+  }
+  throw AppError.validation("The import's choices did not arrive as expected. Reload the page and import again.");
 }
 
 function parseJsonStringArray(raw: string): string[] {
@@ -848,6 +895,32 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast, { folder: result.folder });
       }
 
+      // ------------------------------------------------- boards (ruling 653)
+      case "board-import-preview": {
+        const file = await boardFileFrom(formData);
+        return ok(undefined, { boardImport: previewBoardImport(db, file) });
+      }
+      case "board-import": {
+        const file = await boardFileFrom(formData);
+        const input: BoardImportInput = {
+          name: field("name"),
+          key: field("key"),
+          owner: field("owner"),
+          repoName: field("repoName"),
+          choices: parseBoardImportChoices(formData.get("choices")),
+        };
+        // Ruling 462, as the New project dialog posts it.
+        const createRepository = formData.get("createRepository");
+        if (createRepository === "private" || createRepository === "public") {
+          input.createRepository = { private: createRepository === "private" };
+        }
+        const result = await importBoard(db, file, input, actor);
+        const imported: SettingsOkPayload = { slug: result.slug };
+        if (result.repoWarning) imported.repoWarning = result.repoWarning;
+        if (result.repoNote) imported.repoNote = result.repoNote;
+        return ok(result.toast, imported);
+      }
+
       default:
         return fail("Unknown action.");
     }
@@ -865,6 +938,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       runConcurrency={loaderData.runConcurrency}
       runSpendCapUsd={loaderData.runSpendCapUsd}
       controllerRequests={loaderData.controllerRequests}
+      boards={loaderData.boards}
       s3Audit={loaderData.s3Audit}
       auditEvents={loaderData.auditEvents}
       auditEventsOrgScoped={loaderData.auditEventsOrgScoped}

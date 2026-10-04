@@ -13,6 +13,8 @@ import { ConnectionsPanel } from "./connections-panel";
 import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
 import { ResourcesPanel } from "./resources-panel";
+import { BoardsPanel } from "./boards-panel";
+import type { BoardExportSummary } from "~/server/org/board-export.server";
 import { SsoPanel } from "./sso-panel";
 import { useOrgAction } from "./use-org-action";
 import { UsersPanel } from "./users-panel";
@@ -36,6 +38,7 @@ export type OrgSettingsTab =
   | "users"
   | "sso"
   | "resources"
+  | "boards"
   | "controller";
 
 const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
@@ -45,6 +48,9 @@ const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   // in, this decides HOW they can.
   { id: "sso", label: "Sign-in & SSO", icon: "lock" },
   { id: "resources", label: "Agent resources", icon: "memory" },
+  // Ruling 653: a board's workflow out as a file, and a file in as a new
+  // board. Beside Agent resources: an import brings some in.
+  { id: "boards", label: "Import & export", icon: "board" },
   // Ruling 99: only org admins modify the controller itself (profile,
   // resources, prompt) — this is that surface.
   { id: "controller", label: "Controller", icon: "cpu" },
@@ -53,6 +59,7 @@ const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
 function resolveOrgTab(raw: string | null): OrgSettingsTab {
   return raw === "users" ||
     raw === "resources" ||
+    raw === "boards" ||
     raw === "sso" ||
     raw === "controller"
     ? raw
@@ -84,6 +91,7 @@ export function OrgSettingsPage({
   controllerConfig,
   controllerLocks,
   controllerRequests,
+  boards,
 }: {
   view: OrgSettingsView;
   meId: string;
@@ -103,6 +111,8 @@ export function OrgSettingsPage({
   controllerLocks: ControllerSectionLocks;
   /** Ruling 390: open grant requests the controller raised for itself. */
   controllerRequests: ControllerGrantRequestView[];
+  /** Ruling 653: every board, for the Import & export tab. */
+  boards: BoardExportSummary[];
 }) {
   // F32-2 (pass 32): a `user`-scoped stream also receives broadcasts — the
   // `resource.updated` fact a KB re-index (watcher or manual), a skill/MCP
@@ -125,6 +135,7 @@ export function OrgSettingsPage({
     // opposite of the card underneath.
     sso: view.authProviders.filter((p) => p.active).length,
     resources: resourceCount,
+    boards: boards.length,
     // One controller per instance, definitionally.
     controller: 1,
   } satisfies Record<OrgSettingsTab, number>;
@@ -144,6 +155,7 @@ export function OrgSettingsPage({
       countLabel(view.skills.length, "skill"),
     ].join(" · ") +
       `, plus ${countLabel(view.gagents.length, "agent profile")}`,
+    boards: `${countLabel(boards.length, "board")} to export`,
     controller: "the instance controller",
   } satisfies Record<OrgSettingsTab, string>;
 
@@ -221,6 +233,9 @@ export function OrgSettingsPage({
               stages={view.stages}
               projectStages={view.projectStages}
             />
+          )}
+          {tab === "boards" && (
+            <BoardsPanel boards={boards} connections={view.connections} />
           )}
           {tab === "controller" && (
             <ControllerAdminPanel
