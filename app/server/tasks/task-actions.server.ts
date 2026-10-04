@@ -5306,50 +5306,58 @@ async function appendUndeliveredMentionNote(
   }
 }
 
+/** The finished run a completion acts on: what the live callback registers and
+ *  boot recovery replays. */
+interface AgentCompletionInput {
+  projectSlug: string;
+  taskKey: string;
+  backend: RealBackend;
+  /** The engaged profile's stable identity. */
+  profileId: string;
+  role: string;
+  /** The engagement owns the workspace/branch/PR (G1) — gates delivery
+   *  reconcile + the single-flight semantics; NEVER a behavior kind. */
+  delivers: boolean;
+  /** Staging key for a Claude toolkit report_outcome envelope (absent for
+   *  Codex/recovered runs — their envelope re-parses from the stored reply). */
+  outcomeKey?: string;
+  workdir: string | null;
+  /** The agent's @mention handle, for the stuck-loop packet copy. */
+  agentHandle: string;
+  /** C5 (pass 25): this run was started to answer a human's @mention/directive
+   *  (`directiveFrom` was set), not as a bare review invocation. A reviewer
+   *  answering a conversational @mention produces no verdict BY DESIGN, so the
+   *  "reviewer finished without a readable verdict" note must NOT fire for it —
+   *  even while the task sits at the review stage. Only a run started FOR review
+   *  (Run button / operator review, no human directive quoted) expects a verdict. */
+  fromHumanDirective?: boolean;
+  /** F-P11 (pass 25): this Codex run was actually given the outcome-envelope
+   *  outputSchema (verdict/ask/evidence-capable). When explicitly `false`, its
+   *  reply is plain prose and must NOT be re-parsed as an envelope (a plain
+   *  developer's reply that happens to be a bare JSON object would otherwise be
+   *  silently truncated to its `summary` field). Undefined → unknown (recovery),
+   *  which keeps the legacy re-parse so a recovered envelope still resolves. */
+  envelopeRequested?: boolean;
+  /** Dispatch-completion contract (2026-08-29): display name of the human
+   *  whose manual/scheduled dispatch started this run. Presence makes the
+   *  final report always tag them + @operator (appended when the model forgot)
+   *  and always re-invokes the operator. PERSISTED on the run row (pass 32,
+   *  C02-R11) so a run recovered after a restart keeps the contract — it used
+   *  to be closure-only and degrade to the react heuristic with no cc line. */
+  dispatchedByName?: string;
+  /** The dispatcher's user id — what the cc-append verifies notification
+   *  against (the mention ladder resolves people, not substrings). */
+  dispatchedByUserId?: string;
+  /** Present when started inside an operator react loop (continue the chain). */
+  operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
+}
+
 /** Register the single completion pipeline: record, reconcile, and continue coordination. */
 export async function registerAgentCompletion(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
+  input: AgentCompletionInput & {
     runId: string;
-    backend: RealBackend;
-    /** The engaged profile's stable identity. */
-    profileId: string;
-    role: string;
-    /** The engagement owns the workspace/branch/PR (G1) — gates delivery
-     *  reconcile + the single-flight semantics; NEVER a behavior kind. */
-    delivers: boolean;
-    /** Staging key for a Claude toolkit report_outcome envelope (absent for
-     *  Codex/recovered runs — their envelope re-parses from the stored reply). */
-    outcomeKey?: string;
-    workdir: string | null;
-    /** The agent's @mention handle, for the stuck-loop packet copy. */
-    agentHandle: string;
-    /** C5 (pass 25): this run answers a human's @mention/directive, not a bare
-     *  review invocation — gates the reviewer no-verdict note (see
-     *  applyAgentCompletionEffects). */
-    fromHumanDirective?: boolean;
-    /** F-P11 (pass 25): this Codex run was actually given the outcome-envelope
-     *  outputSchema (verdict/ask/evidence-capable). When explicitly `false`, its
-     *  reply is plain prose and must NOT be re-parsed as an envelope (a plain
-     *  developer's reply that happens to be a bare JSON object would otherwise be
-     *  silently truncated to its `summary` field). Undefined → unknown (recovery),
-     *  which keeps the legacy re-parse so a recovered envelope still resolves. */
-    envelopeRequested?: boolean;
-    /** Dispatch-completion contract (2026-08-29): display name of the human
-     *  whose manual/scheduled dispatch started this run. Presence makes the
-     *  final report always tag them + @operator (appended when the model forgot)
-     *  and always re-invokes the operator. PERSISTED on the run row (pass 32,
-     *  C02-R11) so a run recovered after a restart keeps the contract — it used
-     *  to be closure-only and degrade to the react heuristic with no cc line. */
-    dispatchedByName?: string;
-    /** The dispatcher's user id — what the cc-append verifies notification
-     *  against (the mention ladder resolves people, not substrings). */
-    dispatchedByUserId?: string;
-    /** Present when started inside an operator react loop (continue the chain). */
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
     /** Ruling 248 (F37-77): the workspace checkout could not be provisioned, so
      *  this run executed with NO working tree. PERSISTED on the run row for the
      *  same reason as `outcomeKey` — the closure that would otherwise carry it
@@ -5473,33 +5481,7 @@ export async function applyAgentCompletionEffects(
   /** `deps.runOperator` (tests) replaces the react's operator run, as it does
    *  every other operator hand-off. */
   ctx: TaskActionContext,
-  input: {
-    projectSlug: string;
-    taskKey: string;
-    backend: RealBackend;
-    profileId: string;
-    role: string;
-    delivers: boolean;
-    outcomeKey?: string;
-    workdir: string | null;
-    agentHandle: string;
-    /** C5 (pass 25): this run was started to answer a human's @mention/directive
-     *  (`directiveFrom` was set), not as a bare review invocation. A reviewer
-     *  answering a conversational @mention produces no verdict BY DESIGN, so the
-     *  "reviewer finished without a readable verdict" note must NOT fire for it —
-     *  even while the task sits at the review stage. Only a run started FOR review
-     *  (Run button / operator review, no human directive quoted) expects a verdict. */
-    fromHumanDirective?: boolean;
-    /** F-P11 (pass 25): this Codex run was given the outcome-envelope outputSchema
-     *  (verdict/ask/evidence-capable). Explicit `false` skips the Codex reply-JSON
-     *  re-parse so a plain developer's prose reply that happens to be a bare JSON
-     *  object is never silently truncated to its `summary`. Undefined (recovery)
-     *  keeps the legacy re-parse so a recovered envelope still resolves. */
-    envelopeRequested?: boolean;
-    /** Dispatch-completion contract (2026-08-29) — see registerAgentCompletion. */
-    dispatchedByName?: string;
-    dispatchedByUserId?: string;
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
+  input: AgentCompletionInput & {
     /** Ruling 211(c): set by boot recovery, which replays a run's lost effects
      *  possibly days later. The deferred-@mention redelivery is a promise made
      *  by the LIVE refusal and belongs to the live completion; replaying it from
