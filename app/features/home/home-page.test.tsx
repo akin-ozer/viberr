@@ -711,11 +711,10 @@ describe("F12: counts and their nouns agree", () => {
 
 describe("U33-2: an unreachable repository has a home on the project card", () => {
   /**
-   * The card and the row are rendered DIRECTLY rather than through `renderHome`:
-   * `HomeProjectCard` carries no repo-reachability fact yet, so `HomePage` has
-   * nothing to hand down. These pin the presentation the loader will feed once
-   * the fact is persisted (see the pass report) — and pin, today, that an
-   * absent fact renders as silence rather than as health.
+   * The card and the row are rendered DIRECTLY rather than through `renderHome`,
+   * each with the remembered probe its `HomeProjectCard` carries
+   * (`repoAccess`), and pin that an absent fact renders as silence rather than
+   * as health.
    */
   function renderPiece(node: ReactNode) {
     const Stub = createRoutesStub([{ path: "/", Component: () => <>{node}</> }]);
@@ -743,7 +742,7 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
     expect(desc.textContent).not.toContain("`");
   });
 
-  it("leaves the repo line alone when no caller carries the fact", () => {
+  it("leaves the repo line alone when nothing has probed the repository", () => {
     const { container } = renderPiece(
       <ProjectCard p={card()} starred={false} onStar={noop} />,
     );
@@ -754,10 +753,12 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
   it("marks the repository GitHub cannot find, in the GitHub page's words", () => {
     const { container } = renderPiece(
       <ProjectCard
-        p={card({ repo: "akin-ozer/sandbox" })}
+        p={card({
+          repo: "akin-ozer/sandbox",
+          repoAccess: { status: "repo_not_found", repo: "akin-ozer/sandbox" },
+        })}
         starred={false}
         onStar={noop}
-        repoAccess={{ status: "repo_not_found", repo: "akin-ozer/sandbox" }}
       />,
     );
     const line = repoLine(container);
@@ -779,10 +780,12 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
   it("carries the same fact in the list row", () => {
     const { container } = renderPiece(
       <ProjectRow
-        p={card({ repo: "akin-ozer/sandbox" })}
+        p={card({
+          repo: "akin-ozer/sandbox",
+          repoAccess: { status: "repo_not_found", repo: "akin-ozer/sandbox" },
+        })}
         starred={false}
         onStar={noop}
-        repoAccess={{ status: "repo_not_found", repo: "akin-ozer/sandbox" }}
       />,
     );
     expect(repoLine(container).querySelector(".pill")!.textContent).toBe(
@@ -793,15 +796,16 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
   it("stays quiet when GitHub serves the repository", () => {
     const { container } = renderPiece(
       <ProjectCard
-        p={card()}
+        p={card({
+          repoAccess: {
+            status: "connected",
+            repo: "akin-ozer/viberr",
+            remoteDefaultBranch: "main",
+            private: true,
+          },
+        })}
         starred={false}
         onStar={noop}
-        repoAccess={{
-          status: "connected",
-          repo: "akin-ozer/viberr",
-          remoteDefaultBranch: "main",
-          private: true,
-        }}
       />,
     );
     expect(repoLine(container).querySelector(".pill")).toBeNull();
@@ -812,20 +816,18 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
     // repository already says so on this very line.
     const offline = renderPiece(
       <ProjectCard
-        p={card()}
+        p={card({ repoAccess: { status: "network_unavailable", repo: "akin-ozer/viberr" } })}
         starred={false}
         onStar={noop}
-        repoAccess={{ status: "network_unavailable", repo: "akin-ozer/viberr" }}
       />,
     );
     expect(repoLine(offline.container).querySelector(".pill")).toBeNull();
     cleanup();
     const none = renderPiece(
       <ProjectCard
-        p={card({ repo: null })}
+        p={card({ repo: null, repoAccess: { status: "no_repo_configured" } })}
         starred={false}
         onStar={noop}
-        repoAccess={{ status: "no_repo_configured" }}
       />,
     );
     expect(repoLine(none.container).textContent).toBe("no repository");
