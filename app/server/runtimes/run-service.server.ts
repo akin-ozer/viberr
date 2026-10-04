@@ -88,6 +88,7 @@ import {
   type TaskFileRef,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import type { TaskFileEvent, TaskFrontmatter } from "~/schemas/task-file.schema";
 import {
   createAdapters,
   selectAdapter,
@@ -1615,6 +1616,41 @@ function lastReportOf(db: DatabaseSync, runId: string): string | null {
 }
 
 /**
+ * One event on the run's task timeline, then re-projected. Best-effort: a task
+ * file that cannot be written is logged as `failure` and never thrown, so a
+ * note never blocks or masks the run event it records.
+ */
+async function noteOnRunTask(
+  db: DatabaseSync,
+  run: AgentRunRow,
+  dataRoot: string | undefined,
+  failure: string,
+  event: Pick<TaskFileEvent, "type" | "actor" | "title" | "text">,
+  frontmatter: Partial<TaskFrontmatter> = {},
+): Promise<void> {
+  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
+  if (dataRoot) ref.dataRoot = dataRoot;
+  try {
+    await updateTaskFile(ref, (parsed) => {
+      Object.assign(parsed.frontmatter, frontmatter);
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        ...event,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
+  } catch (error) {
+    logger.error(failure, {
+      runId: run.id,
+      taskKey: run.task_key,
+      err: toError(error),
+    });
+  }
+}
+
+/**
  * Note the continuity break on the task timeline. G8: a `continuity` typed
  * event (amber warning tone), NOT a neutral `note` — nothing was violated (not
  * `policy`) and nothing is stuck (not `blocked`), but context WAS lost and a
@@ -1634,47 +1670,28 @@ async function noteContinuityReset(
   // per-turn digest is the recovery, and the run row's session_missing stamp
   // remains the durable record.
   if (run.kind === "controller") return;
-  const ref: TaskFileRef = {
-    projectSlug: run.project_slug,
-    taskKey: run.task_key,
-  };
-  if (dataRoot) ref.dataRoot = dataRoot;
   const label = BACKEND_LABEL[run.backend];
-  try {
-    await updateTaskFile(ref, (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "continuity",
-        actor: { kind: "system", systemId: "runtime-continuity" },
-        title: null,
-        // Ruling 207(j): the owner-change branch decides continuity BEFORE any
-        // filesystem is consulted (see resumeRun), so the transcript is intact
-        // in the previous owner's home. Reporting that as "no provider
-        // transcript … retention sweep or a wiped runtime volume" sent an admin
-        // hunting a storage fault that does not exist, and hid the one fact
-        // that explains it.
-        text:
-          reason === "stale_large_session" && stale
-            ? // Ruling 372: a decision, said as one — the session is intact.
-              `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${wholeThousands(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
-            : reason === "owner_changed"
-            ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands, so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
-            : reason === "transcript_damaged"
-            ? // Ruling 434: there, and refused. Not a sweep, and not the credential.
-              `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread has a damaged provider transcript. Its rollout does not start with the session's metadata, which the CLI needs to resume it. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`
-            : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
-  } catch (error) {
-    logger.error("continuity-reset timeline note failed", {
-      runId: run.id,
-      taskKey: run.task_key,
-      err: toError(error),
-    });
-  }
+  await noteOnRunTask(db, run, dataRoot, "continuity-reset timeline note failed", {
+    type: "continuity",
+    actor: { kind: "system", systemId: "runtime-continuity" },
+    title: null,
+    // Ruling 207(j): the owner-change branch decides continuity BEFORE any
+    // filesystem is consulted (see resumeRun), so the transcript is intact
+    // in the previous owner's home. Reporting that as "no provider
+    // transcript … retention sweep or a wiped runtime volume" sent an admin
+    // hunting a storage fault that does not exist, and hid the one fact
+    // that explains it.
+    text:
+      reason === "stale_large_session" && stale
+        ? // Ruling 372: a decision, said as one — the session is intact.
+          `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${wholeThousands(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
+        : reason === "owner_changed"
+        ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands, so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+        : reason === "transcript_damaged"
+        ? // Ruling 434: there, and refused. Not a sweep, and not the credential.
+          `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread has a damaged provider transcript. Its rollout does not start with the session's metadata, which the CLI needs to resume it. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`
+        : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
+  });
 }
 
 /**
@@ -1693,11 +1710,6 @@ export async function noteCompletionEffectsLost(
   run: AgentRunRow,
   dataRoot?: string,
 ): Promise<void> {
-  const ref: TaskFileRef = {
-    projectSlug: run.project_slug,
-    taskKey: run.task_key,
-  };
-  if (dataRoot) ref.dataRoot = dataRoot;
   // Ruling 207(a): the marker that makes the sentence below TRUE. The same
   // write flips `waiting` to "human" — honest, nothing is running — and boot
   // recovery selects on `t.waiting = 'agent'`, so the note promised a replay
@@ -1740,27 +1752,14 @@ export async function noteCompletionEffectsLost(
   const text = willReplay
     ? `The ${agent} run finished, but applying its completion effects (its reply, any verdict, the delivery reconcile, and re-engaging the operator) failed, so none of them landed. This task is not being worked right now. Run recovery replays the effects on the next restart; you can also re-run the agent. The run log it already produced is unchanged.`
     : `The ${agent} run finished, but applying its completion effects failed partway. Anything already written above stands; what did not run is the delivery reconcile and re-engaging the operator. This task is not being worked right now, and boot recovery will not pick this run up, so nothing changes on its own: re-run the agent to carry on. The run log it already produced is unchanged.`;
-  try {
-    await updateTaskFile(ref, (parsed) => {
-      parsed.frontmatter.waiting = "human";
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "continuity",
-        actor: { kind: "system", systemId: "runtime-continuity" },
-        title: null,
-        text,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
-  } catch (error) {
-    logger.error("completion-effects-lost timeline note failed", {
-      runId: run.id,
-      taskKey: run.task_key,
-      err: toError(error),
-    });
-  }
+  await noteOnRunTask(
+    db,
+    run,
+    dataRoot,
+    "completion-effects-lost timeline note failed",
+    { type: "continuity", actor: { kind: "system", systemId: "runtime-continuity" }, title: null, text },
+    { waiting: "human" },
+  );
 }
 
 /** The follow-up turn `resumeRun` starts on an existing run's session. */
@@ -2874,39 +2873,23 @@ async function noteInterrupt(
   dataRoot?: string,
 ): Promise<void> {
   if (run.kind === "controller") return;
-  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
-  if (dataRoot) ref.dataRoot = dataRoot;
   const backend = BACKEND_LABEL[run.backend];
-  try {
-    await updateTaskFile(ref, (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
-        title: null,
-        // Ruling 207(g): "the thread stays resumable" is true only when a
-        // provider session was ever reported. `reserveRun` writes a `running`
-        // row minutes before any provider process exists, and that row is what
-        // the Live-run strip's Stop button acts on — the deliberate
-        // minutes-long window a person actually presses Stop in. A run with no
-        // `session_id` is skipped by `latestSessionRun` (agent-reply.server.ts),
-        // so "re-run the agent to continue" hands back a fresh agent with no
-        // memory of the turn it stopped, silently re-spending the budget.
-        text: run.session_id
-          ? `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`
-          : `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}) before ${backend} reported a session, so there is no thread to resume. Re-running the agent starts a fresh one, re-anchored on \`task.md\`.`,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
-  } catch (error) {
-    logger.error("interrupt timeline note failed", {
-      runId: run.id,
-      taskKey: run.task_key,
-      err: toError(error),
-    });
-  }
+  await noteOnRunTask(db, run, dataRoot, "interrupt timeline note failed", {
+    type: "note",
+    actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
+    title: null,
+    // Ruling 207(g): "the thread stays resumable" is true only when a
+    // provider session was ever reported. `reserveRun` writes a `running`
+    // row minutes before any provider process exists, and that row is what
+    // the Live-run strip's Stop button acts on — the deliberate
+    // minutes-long window a person actually presses Stop in. A run with no
+    // `session_id` is skipped by `latestSessionRun` (agent-reply.server.ts),
+    // so "re-run the agent to continue" hands back a fresh agent with no
+    // memory of the turn it stopped, silently re-spending the budget.
+    text: run.session_id
+      ? `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}). The thread stays resumable; re-run the agent to continue.`
+      : `Interrupted the ${backend} run \`${run.id}\` (${run.agent_name ?? run.role}) before ${backend} reported a session, so there is no thread to resume. Re-running the agent starts a fresh one, re-anchored on \`task.md\`.`,
+  });
 }
 
 /**
@@ -2930,29 +2913,13 @@ async function noteRunStarted(
   dataRoot?: string,
 ): Promise<void> {
   if (run.kind === "controller") return;
-  const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
-  if (dataRoot) ref.dataRoot = dataRoot;
   const backend = BACKEND_LABEL[run.backend];
-  try {
-    await updateTaskFile(ref, (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "run-queue" },
-        title: "Run started",
-        text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started. It is streaming to the agent logs.`,
-        toAgent: false,
-        evidence: null,
-      });
-    });
-    rebuildPath(db, resolveTaskFilePath(ref), dataRoot ? { dataRoot } : {});
-  } catch (error) {
-    logger.error("run-started timeline note failed", {
-      runId: run.id,
-      taskKey: run.task_key,
-      err: toError(error),
-    });
-  }
+  await noteOnRunTask(db, run, dataRoot, "run-started timeline note failed", {
+    type: "note",
+    actor: { kind: "system", systemId: "run-queue" },
+    title: "Run started",
+    text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started. It is streaming to the agent logs.`,
+  });
 }
 
 // ---------------------------------------------- reads
