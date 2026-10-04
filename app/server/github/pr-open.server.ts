@@ -230,11 +230,8 @@ export function prBodySha256(body: string): string {
  * operator runs. `null` means the link is omitted (a relative link 404s on
  * github.com); logged once at debug so the deployment fix is discoverable.
  */
-function prBodyOrigin(
-  ctx: OpenTaskPrContext,
-  input: { projectSlug: string; taskKey: string },
-): string | null {
-  const origin = ctx.appOrigin ?? appOrigin();
+function prBodyOrigin(input: { projectSlug: string; taskKey: string }): string | null {
+  const origin = appOrigin();
   if (!origin) {
     logger.debug(
       "PR body omits the task back-link: no absolute app origin; set BETTER_AUTH_URL",
@@ -290,13 +287,6 @@ function composeTaskPrBody(
 export interface OpenTaskPrContext {
   dataRoot?: string;
   fetchImpl?: typeof fetch;
-  /**
-   * N20-4 (§5a): optional app-origin OVERRIDE. Production never sets it (the
-   * delivery path has no request to derive one from), so the origin comes from
-   * `appOrigin()` — this exists only so a test can inject one without touching
-   * the process env cache.
-   */
-  appOrigin?: string;
 }
 
 export type OpenTaskPrResult =
@@ -665,7 +655,7 @@ export async function openTaskPr(
     input,
     bodyFile,
     branch,
-    prBodyOrigin(ctx, input),
+    prBodyOrigin(input),
     await deliveredDiffStats(gh, gh.defaultBranch, branch),
   );
   // Ruling 474: what this body is, recorded with the PR so a later delivery
@@ -1054,7 +1044,7 @@ async function refreshReusedPrBody(
       input,
       file,
       branch,
-      prBodyOrigin(ctx, input),
+      prBodyOrigin(input),
       await deliveredDiffStats(gh, gh.defaultBranch, branch),
     );
     const patched = await gh.client.request(
