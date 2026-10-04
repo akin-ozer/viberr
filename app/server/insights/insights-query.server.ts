@@ -306,10 +306,6 @@ export interface ResumeRow {
   /** The credential kind (`login`): the backend is the page's switch
    *  (ruling 635). */
   label: string;
-  backend: string;
-  /** The kind the PRIOR run billed (the one whose writes the resume reads),
-   *  `unknown` for a row written before the kind was stored. */
-  credentialKind: string;
   /** The TTL ruling 372's verdict assumes for this pair (`cacheTtlMs`). */
   assumedTtlMs: number;
   /** One cell per bucket of `ResumeSummary.edgesMs`, plus the open last one. */
@@ -1098,16 +1094,13 @@ function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
   const edgesMs = RESUME_IDLE_EDGES_MS;
   const rows = new Map<string, ResumeRow>();
   const rowFor = (backend: RunBackend, kind: CredentialKind | null): ResumeRow => {
-    const credentialKind = kind ?? "unknown";
     // Ruling 635: the backend is the page's switch, so a row is named by the
-    // credential kind alone.
-    const label = credentialKind;
+    // credential kind alone (`unknown` for a run written before it was stored).
+    const label = kind ?? "unknown";
     const known = rows.get(label);
     if (known) return known;
     const row: ResumeRow = {
       label,
-      backend,
-      credentialKind,
       assumedTtlMs: cacheTtlMs(backend, kind),
       cells: Array.from({ length: edgesMs.length + 1 }, () => ({
         firstCalls: 0,

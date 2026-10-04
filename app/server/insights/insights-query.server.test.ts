@@ -1372,7 +1372,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     expect(resumes.rows.map((r) => r.label)).toEqual(["login"]);
     const claude = resumes.rows[0];
     const codex = runsOf(db, { backend: "codex" }).cache.resumes.rows[0];
-    expect(codex).toMatchObject({ label: "login", backend: "codex" });
+    expect(codex).toMatchObject({ label: "login" });
     // The TTL each row's verdict assumes, from the one table.
     expect(claude!.assumedTtlMs).toBe(60 * 60_000);
     expect(codex!.assumedTtlMs).toBe(10 * 60_000);
