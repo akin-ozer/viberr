@@ -16,6 +16,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   reconcileWorkspaceDelivery,
   type CommandExec,
+  type ReconcileWorkspaceDeliveryInput,
 } from "./workspace-delivery.server";
 
 /**
@@ -134,18 +135,29 @@ function readFm(store: ReturnType<typeof setupTask>, taskKey = "ATL-3") {
   })!.parsed;
 }
 
+/** Reconcile ATL-3's delivery as the developer profile: the run's workdir,
+ *  backend, role and command runner are the caller's. */
+function deliver(
+  store: ReturnType<typeof setupTask>,
+  run: Omit<ReconcileWorkspaceDeliveryInput, "db" | "projectSlug" | "taskKey" | "profileId" | "dataRoot">,
+) {
+  return reconcileWorkspaceDelivery({
+    db: store.db,
+    projectSlug: store.slug,
+    taskKey: "ATL-3",
+    profileId: "developer",
+    dataRoot: store.dataRoot,
+    ...run,
+  });
+}
+
 describe("reconcileWorkspaceDelivery", () => {
   it("writes the real branch + commit cache from the workspace, with a github event + audit", async () => {
     const store = setupTask();
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       backend: "codex",
       role: "Developer",
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
@@ -199,13 +211,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       backend: "codex",
       role: "Developer",
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
@@ -276,13 +283,8 @@ describe("reconcileWorkspaceDelivery", () => {
         { mergeSha: HEAD_SHA, baseSha: "b".repeat(40), base: "main", commits: 2, at: "2026-09-23T02:44:06.000Z", onto: delivered },
       ],
     });
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir: makeWorkspaceRepo(),
-      dataRoot: store.dataRoot,
       backend: "codex",
       role: "Developer",
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
@@ -302,14 +304,7 @@ describe("reconcileWorkspaceDelivery", () => {
       { recursive: true },
     );
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      dataRoot: store.dataRoot,
-      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
-    });
+    const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
 
     expect(res.status).toBe("reconciled");
     expect(res.branchLinked).toBe(true);
@@ -323,14 +318,7 @@ describe("reconcileWorkspaceDelivery", () => {
       { recursive: true },
     );
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      dataRoot: store.dataRoot,
-      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
-    });
+    const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
 
     expect(res.status).toBe("reconciled");
     expect(res.branchLinked).toBe(true);
@@ -344,14 +332,7 @@ describe("reconcileWorkspaceDelivery", () => {
       { recursive: true },
     );
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      dataRoot: store.dataRoot,
-      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
-    });
+    const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
 
     expect(res.status).toBe("reconciled");
     expect(res.branchLinked).toBe(true);
@@ -367,15 +348,7 @@ describe("reconcileWorkspaceDelivery", () => {
       return inner(file, args, opts);
     };
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      workdir,
-      dataRoot: store.dataRoot,
-      exec: spyExec,
-    });
+    const res = await deliver(store, { workdir, exec: spyExec });
 
     expect(res.commits).toBe(2);
     // The deepen fetch ran BEFORE the log over origin/<default>..HEAD.
@@ -395,13 +368,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: "aaa1111 bogus\nbbb2222 bogus\nccc3333 bogus",
@@ -423,13 +391,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: "abc1234 [ATL-3] Add feature" }),
     });
 
@@ -447,13 +410,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask();
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       backend: "codex",
       role: "Developer",
       // On the task branch, but the run produced NO commits ahead of base.
@@ -471,13 +429,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask();
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       // On "main" (the default branch) — nothing to link.
       exec: fakeExec({ branch: "main", commits: "" }),
     });
@@ -497,15 +450,7 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      workdir,
-      dataRoot: store.dataRoot,
-      exec: fakeExec({ branch: "main", commits: "" }),
-    });
+    await deliver(store, { workdir, exec: fakeExec({ branch: "main", commits: "" }) });
 
     expect(readFm(store).frontmatter.github?.commits).toEqual([
       { sha: "abc1234", msg: "[ATL-3] real work" },
@@ -516,13 +461,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask("ATL-3", { branch: BRANCH });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -557,13 +497,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask("ATL-3", { branch: BRANCH });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -598,13 +533,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask("ATL-3", { branch: BRANCH });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -638,13 +568,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -663,13 +588,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask("ATL-3", { branch: BRANCH });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS, ghMissing: true }),
     });
 
@@ -690,13 +610,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -719,13 +634,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -748,13 +658,8 @@ describe("reconcileWorkspaceDelivery", () => {
     });
     const workdir = makeWorkspaceRepo();
 
-    await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({
         branch: BRANCH,
         commits: COMMITS,
@@ -775,15 +680,7 @@ describe("reconcileWorkspaceDelivery", () => {
     const store = setupTask();
     const empty = ctx.makeTempDir(); // no .git marker
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      workdir: empty,
-      dataRoot: store.dataRoot,
-      exec: fakeExec({ branch: BRANCH }),
-    });
+    const res = await deliver(store, { workdir: empty, exec: fakeExec({ branch: BRANCH }) });
 
     expect(res.status).toBe("no_workspace");
     expect(readFm(store).frontmatter.branch).toBeNull();
@@ -806,13 +703,8 @@ describe("reconcileWorkspaceDelivery", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const workdir = makeWorkspaceRepo();
 
-    const res = await reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
+    const res = await deliver(store, {
       workdir,
-      dataRoot: store.dataRoot,
       exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
     });
 
@@ -831,15 +723,7 @@ describe("reconcileWorkspaceDelivery", () => {
 describe("ruling 135: the workspace reconcile records the unpushed revision", () => {
   const PR_HEAD = "0".repeat(40);
   async function reconcile(store: ReturnType<typeof setupTask>, exec: CommandExec) {
-    return reconcileWorkspaceDelivery({
-      db: store.db,
-      projectSlug: store.slug,
-      taskKey: "ATL-3",
-      profileId: "developer",
-      workdir: makeWorkspaceRepo(),
-      dataRoot: store.dataRoot,
-      exec,
-    });
+    return deliver(store, { workdir: makeWorkspaceRepo(), exec });
   }
   const owned = () =>
     setupTask("ATL-3", { branch: BRANCH, pr: { number: 9, state: "review", title: "[ATL-3] Add feature" } });
