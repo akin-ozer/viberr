@@ -24,13 +24,12 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   applyRecommendation,
-  completeTaskMerge,
-  forceAcceptCompletion,
   manualDeliverForReview,
   performDelivery,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
+import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import {
   deliverGate,
@@ -1835,7 +1834,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
 
 describe("F15-11: no acceptance affordance on a task already at the terminal stage", () => {
   it("the acceptance affordance denies on Done (the button used to render live)", async () => {
-    const { acceptanceStanding } = await import("./task-actions.server");
+    const { acceptanceStanding } = await import("./task-acceptance.server");
     seed({ stage: "done" });
     const affordance = acceptanceStanding(
       {

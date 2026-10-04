@@ -11,7 +11,7 @@ import { StageMenu } from "~/ui/stage-menu";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
-import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import {
   checksPill,
   gatesPill,

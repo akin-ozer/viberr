@@ -41,7 +41,7 @@ interface People {
 let ids: People;
 
 let epicActions: typeof import("./epic-actions.server");
-let taskActions: typeof import("./task-actions.server");
+let taskAcceptance: typeof import("./task-acceptance.server");
 let taskCore: typeof import("./task-action-core.server");
 let taskEdits: typeof import("./task-edits.server");
 let taskArchive: typeof import("./task-archive.server");
@@ -65,7 +65,7 @@ beforeAll(async () => {
     role: "member",
   });
   epicActions = await import("./epic-actions.server");
-  taskActions = await import("./task-actions.server");
+  taskAcceptance = await import("./task-acceptance.server");
   taskCore = await import("./task-action-core.server");
   taskEdits = await import("./task-edits.server");
   taskArchive = await import("./task-archive.server");
@@ -945,7 +945,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
 
   /** The last open task reaches the terminal stage: an admin's acceptance. */
   async function accept(taskKey: string): Promise<void> {
-    await taskActions.forceAcceptCompletion(app.db, { projectSlug: SLUG, taskKey }, actor("arda"), ctx());
+    await taskAcceptance.forceAcceptCompletion(app.db, { projectSlug: SLUG, taskKey }, actor("arda"), ctx());
   }
 
   function allDoneLines(epicId: string): string[] {

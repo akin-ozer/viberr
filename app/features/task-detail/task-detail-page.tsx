@@ -15,7 +15,7 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
-import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import { AcceptConfirm, type AcceptCeremonyMode } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
 import { ContinuityRecoveryPanel } from "./continuity-recovery";

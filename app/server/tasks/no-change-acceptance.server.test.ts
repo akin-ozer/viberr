@@ -23,13 +23,8 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { NO_REVIEW_SUBJECT, upsertRun } from "~/server/runtimes/run-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  forceAcceptCompletion,
-  recordAgentCompletion,
-  acceptanceStanding,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
+import { recordAgentCompletion, resolvePacket, transitionStage } from "./task-actions.server";
 import {
   operatorAcceptCompletion,
   operatorSnapshot,

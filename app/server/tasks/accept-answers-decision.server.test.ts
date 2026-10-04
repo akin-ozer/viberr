@@ -22,12 +22,8 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
 // Loaded up front so a hand-off, were one made, reaches the stub within the
 // settle below instead of waiting on a cold dynamic import.
 import "./operator-actions.server";
-import {
-  applyAcceptanceWrite,
-  forceAcceptCompletion,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { applyAcceptanceWrite, forceAcceptCompletion } from "./task-acceptance.server";
+import { resolvePacket, transitionStage } from "./task-actions.server";
 
 /**
  * Ruling 471: a direct acceptance answers the open decision that offers it.

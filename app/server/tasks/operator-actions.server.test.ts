@@ -44,12 +44,12 @@ import {
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   RECOMMENDATION_DECLINED_TITLE,
-  applyAcceptanceWrite,
   applyRecommendation,
   dismissRecommendation,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
+import { applyAcceptanceWrite } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
 import { createTask, updateTaskGoal } from "./task-edits.server";
 import type { TaskActionContext } from "./task-action-core.server";

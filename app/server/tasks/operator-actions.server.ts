@@ -153,15 +153,17 @@ import {
 import { DEFAULT_GOAL } from "./task-edits.server";
 import {
   RECOMMENDATION_DISMISSED_AUDIT_ACTION,
+  operatorPromptAgent,
+  performDelivery,
+  transitionStage,
+} from "./task-actions.server";
+import {
   acceptanceRefusalFor,
   acceptanceTerminallyBlocked,
   mergeReadinessRefusal,
   applyAcceptanceWrite,
-  operatorPromptAgent,
-  performDelivery,
   revisionDriftNote,
-  transitionStage,
-} from "./task-actions.server";
+} from "./task-acceptance.server";
 import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 import { OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
 import { notifyTaskWatchers, type TaskMutationContext } from "./task-mutation.server";

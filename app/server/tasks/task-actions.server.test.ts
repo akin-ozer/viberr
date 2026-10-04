@@ -48,18 +48,20 @@ import {
   clearWaitingToHuman,
   manualDeliverForReview,
   performDelivery,
-  revisionDriftNote,
   transitionStage,
-  refreshAndReview,
-  acceptanceDisclosureOf,
   applyRecommendation,
   commentToAgent,
-  forceAcceptCompletion,
   liftHoldForRun,
   liftStageHoldForPerson,
   reorderTask,
   resolvePacket,
 } from "./task-actions.server";
+import {
+  revisionDriftNote,
+  refreshAndReview,
+  acceptanceDisclosureOf,
+  forceAcceptCompletion,
+} from "./task-acceptance.server";
 import { releaseOwner, releaseTasksOwnedBy, setOwner } from "./task-ownership.server";
 import { createTask, DEFAULT_GOAL, updateTaskGoal } from "./task-edits.server";
 import { postAgentReplyComment, specialistReplyDirective } from "./task-replies.server";

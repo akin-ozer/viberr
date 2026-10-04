@@ -34,13 +34,12 @@ import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
 import {
   classifyReviewerVerdict,
-  completeTaskMerge,
-  forceAcceptCompletion,
   recordAgentCompletion,
   reorderTask,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
+import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
 import { updateTaskGoal } from "./task-edits.server";
 import { listAuditEvents } from "../../../test-support/audit-log";

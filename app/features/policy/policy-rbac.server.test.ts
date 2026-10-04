@@ -15,18 +15,20 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   appendComment,
-  completeTaskMerge,
   transitionStage,
   reorderTask,
   dismissRecommendation,
   applyRecommendation,
-  forceAcceptCompletion,
   resolvePacket,
   requestPacketMaintainerDecision,
   manualDeliverForReview,
-  refreshAndReview,
   runProjectGatesByHand,
 } from "~/server/tasks/task-actions.server";
+import {
+  completeTaskMerge,
+  forceAcceptCompletion,
+  refreshAndReview,
+} from "~/server/tasks/task-acceptance.server";
 import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
   createTask,

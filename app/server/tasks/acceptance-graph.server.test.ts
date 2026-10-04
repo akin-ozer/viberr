@@ -19,12 +19,11 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   applyRecommendation,
   dismissRecommendation,
-  forceAcceptCompletion,
   reorderTask,
-  acceptanceStanding,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
+import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
 import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 

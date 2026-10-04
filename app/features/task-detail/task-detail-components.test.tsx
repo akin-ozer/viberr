@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState, type ComponentProps, type ReactNode } from "react";
-import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { PacketRender, TaskSummary } from "~/shared/mapping/task.server";

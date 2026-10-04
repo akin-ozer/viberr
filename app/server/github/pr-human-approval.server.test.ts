@@ -9,10 +9,7 @@ import {
 import { updateUserFields } from "~/server/auth/user-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
-import {
-  acceptanceRefusalFor,
-  acceptanceStanding,
-} from "~/server/tasks/task-actions.server";
+import { acceptanceRefusalFor, acceptanceStanding } from "~/server/tasks/task-acceptance.server";
 import {
   derivePrHumanApproval,
   humanVerdictApproval,

@@ -40,17 +40,19 @@ import {
   applyRecommendation,
   appendComment,
   commentToAgent,
-  completeTaskMerge,
   dismissRecommendation,
-  forceAcceptCompletion,
   manualDeliverForReview,
   runProjectGatesByHand,
-  refreshAndReview,
   requestPacketMaintainerDecision,
-  acceptanceStanding,
   resolvePacket,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import {
+  completeTaskMerge,
+  forceAcceptCompletion,
+  refreshAndReview,
+  acceptanceStanding,
+} from "~/server/tasks/task-acceptance.server";
 import { setTaskArchived } from "~/server/tasks/task-archive.server";
 import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
