@@ -161,6 +161,27 @@ export function unavailableMcpSection(grants: readonly UnresolvedMcpGrant[]): st
   );
 }
 
+/**
+ * C1: the skill and knowledge-base grants that resolved to nothing, or to less
+ * than they name, said in the run's own prompt, for the operator and the
+ * specialist alike, in one wording. Ruling 253: "did NOT reach" was true of
+ * every row when only a total miss could appear here. A partial now appears
+ * too, so the heading and the instruction cover both.
+ */
+export function missingResourcesSection(
+  missing: readonly { name: string; reason: string }[],
+): string {
+  if (missing.length === 0) return "";
+  return (
+    "\n\n---\n# Attached resources that did NOT fully reach this run\n\n" +
+    "Your profile grants these, and what is in your context is incomplete or absent:\n" +
+    missing.map((m) => `- **${m.name}**: ${m.reason}`).join("\n") +
+    "\n\nDo not claim knowledge or craft you did not receive, and do not treat " +
+    "the gap as your own failure; say plainly in your reply what arrived " +
+    "empty or incomplete so a human can fix the configuration."
+  );
+}
+
 export interface SpecialistMcpResolution {
   /** Portable `mcpServers` configs, keyed by server name. */
   servers: Record<string, SpecialistMcpServerConfig>;

@@ -154,6 +154,7 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
+  missingResourcesSection,
   unavailableMcpSection,
   gatewayMcpSection,
   type McpRunGrant,
@@ -3213,19 +3214,8 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
       input.unresolvedOut.push({ name: m.name, reason: m.reason });
     }
   }
-  if (missing.length > 0) {
-    dynamic.push(
-      // Ruling 253: "did NOT reach" was true of every row when only a total
-      // miss could appear here. A partial now appears too, so the heading and
-      // the instruction have to cover both or they misdescribe half the list.
-      "\n\n---\n# Attached resources that did NOT fully reach this run\n\n" +
-        "Your profile grants these, and what is in your context is incomplete or absent:\n" +
-        missing.map((m) => `- **${m.name}**: ${m.reason}`).join("\n") +
-        "\n\nDo not claim knowledge or craft you did not receive, and do not treat " +
-        "the gap as your own failure; say plainly in your reply what arrived " +
-        "empty or incomplete so a human can fix the configuration.",
-    );
-  }
+  const missingSection = missingResourcesSection(missing);
+  if (missingSection) dynamic.push(missingSection);
   return { static: parts, dynamic };
 }
 
