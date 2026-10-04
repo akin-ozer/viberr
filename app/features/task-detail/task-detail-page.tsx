@@ -29,6 +29,7 @@ import type {
 import { ReleaseConfirm } from "./release-confirm";
 import {
   OperatorRecommendations,
+  reachesAcceptance,
   type RecommendationInFlight,
   type RecommendationView,
 } from "./operator-recommendations";
@@ -91,27 +92,6 @@ type PendingAccept =
    *  while the click still travels as a packet resolution. */
   | { mode: "packet"; option: number; note: string; label: string; force?: true }
   | { mode: "stage-move"; toStageId: string; label: string };
-
-/**
- * F19-3 + F19-26 — does APPLYING this recommendation reach acceptance?
- *
- * Gate on the recommendation's TARGET, never on its `kind`. A supervised
- * operator can recommend a plain `transition` to the terminal stage; applying it
- * runs the identical full acceptance contract (transitionStage → acceptCompletion
- * → the real PR merge) under a label that says only "Move the task to Done".
- * A kind-only test would let that one through the ceremony it needs most.
- */
-function recReachesAcceptance(
-  rec: RecommendationView,
-  terminalStageId: string | null,
-): boolean {
-  if (rec.kind === "accept_completion") return true;
-  return (
-    rec.kind === "transition" &&
-    terminalStageId !== null &&
-    rec.toStageId === terminalStageId
-  );
-}
 
 /** A run group's identity in the projection (`useStableRows`' key). */
 function runThreadKey(run: RunView): string {
@@ -718,7 +698,7 @@ export function TaskDetailPage({
   const submitApplyRec = (
     recId: string,
     // Ruling 88: set ONLY when the card REACHES acceptance
-    // (`recReachesAcceptance` — kind or terminal target), which is the same
+    // (`reachesAcceptance` — kind or terminal target), which is the same
     // predicate the server consults its own copy of before demanding the echo.
     disclosure?: AcceptanceDisclosure,
   ) => {
@@ -743,7 +723,7 @@ export function TaskDetailPage({
   const onApplyRec = (recId: string) => {
     if (recBusy) return;
     const rec = recommendations.find((r) => r.id === recId);
-    if (rec && recReachesAcceptance(rec, terminalStageId)) {
+    if (rec && reachesAcceptance(rec, terminalStageId)) {
       setConfirmAccept({ mode: "apply-recommendation", recId, label: rec.label });
       return;
     }
@@ -838,7 +818,7 @@ export function TaskDetailPage({
     completion !== null &&
     !taskClosed &&
     (acceptanceDecision ||
-      recommendations.some((r) => recReachesAcceptance(r, terminalStageId)) ||
+      recommendations.some((r) => reachesAcceptance(r, terminalStageId)) ||
       (acceptance.atBoundary && completion.packet !== null));
   // The Changes panel's reader rides inside the packet while it shows, so the
   // page carries one reader (and one set of unsent notes), not two.

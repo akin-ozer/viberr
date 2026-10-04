@@ -63,9 +63,18 @@ const KIND_LABEL = {
   delivery: "Delivery",
 } as const satisfies Record<RecommendationView["kind"], string>;
 
-/** Ruling 162: a card whose Apply IS an acceptance (the same test the page
- *  routes through the accept confirm, `recReachesAcceptance`). */
-function reachesAcceptance(r: RecommendationView, terminalStageId: string | null): boolean {
+/**
+ * F19-3 + F19-26 — does APPLYING this recommendation reach acceptance? The
+ * page routes such an Apply through the accept confirm, and ruling 162 has the
+ * card print the gate's refusal on it.
+ *
+ * Gate on the recommendation's TARGET, never on its `kind`. A supervised
+ * operator can recommend a plain `transition` to the terminal stage; applying it
+ * runs the identical full acceptance contract (transitionStage → acceptCompletion
+ * → the real PR merge) under a label that says only "Move the task to Done".
+ * A kind-only test would let that one through the ceremony it needs most.
+ */
+export function reachesAcceptance(r: RecommendationView, terminalStageId: string | null): boolean {
   return (
     r.kind === "accept_completion" ||
     (r.kind === "transition" && terminalStageId !== null && r.toStageId === terminalStageId)
