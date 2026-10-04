@@ -57,6 +57,7 @@ import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
+  appendTimelineEvent,
   readTaskFile,
   updateTaskFile,
   type TaskFileRef,
@@ -131,11 +132,17 @@ import { getProject } from "~/server/projections/board-query.server";
 import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { splitKbSource } from "~/server/tasks/kb-correction-actions.server";
-import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
+import { fullReplyTextForRun, runFailureReason } from "~/server/tasks/agent-reply.server";
 import {
   DEFAULT_GOAL,
+  OPERATOR_TRANSITION_CHAIN_CAP,
+  clearWaitingToHuman,
+  liftHoldForRun,
+  liftStageHoldForPerson,
+  markWaitingAgent,
   reprojectTask,
   taskRef,
+  userName,
   type TaskMutationContext,
 } from "~/server/tasks/task-actions.server";
 import { RUN_PHASE } from "./adapter.server";
@@ -148,6 +155,7 @@ import {
 // F21-3: the ONE operator confinement list, defined in claude-runtime.
 import { OPERATOR_READ_ONLY_DENIED_TOOLS } from "./claude-runtime.server";
 import {
+  chainRunCompletion,
   registerRunCompletion,
   reserveRun,
   startRun,
@@ -160,6 +168,7 @@ import {
   shellInventoryPrompt,
 } from "~/server/ops/toolchain.server";
 import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
+import { resolveDependencies } from "~/server/projections/dependencies.server";
 import {
   describeRunFailure,
   type DescribeRunFailureInput,
@@ -665,15 +674,7 @@ async function noteDroppedOperatorTurn(
         evidence: null,
       });
     });
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    rebuildPath(
-      db,
-      resolveTaskFilePath(ref),
-      dropped.dataRoot ? { dataRoot: dropped.dataRoot } : {},
-    );
+    reprojectTask(db, { dataRoot: dropped.dataRoot }, dropped.projectSlug, dropped.taskKey);
   } catch (error) {
     logger.error("could not note a dropped @operator turn", {
       taskKey: dropped.taskKey,
@@ -893,12 +894,6 @@ async function noteQueuedTriggerRefused(
         ? "skipped-done"
         : "skipped-held";
   try {
-    const { updateTaskFile, resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { recordAudit } = await import("~/server/audit/audit-recorder.server");
-    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
     await updateTaskFile(ref, (parsed) => {
       const packetTitle = parsed.packet?.title ?? null;
       const cause =
@@ -941,11 +936,7 @@ async function noteQueuedTriggerRefused(
         }
       }
     });
-    rebuildPath(
-      db,
-      resolveTaskFilePath(ref),
-      ref.dataRoot ? { dataRoot: ref.dataRoot } : {},
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     if (queued.scheduleId) {
       recordAudit(db, {
         action: "task.schedule.fired",
@@ -980,10 +971,6 @@ async function noteQueuedTriggerFireFailed(
     dataRoot: queued.dataRoot,
   };
   try {
-    const { appendTimelineEvent, resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     await appendTimelineEvent(ref, {
       occurredAt: new Date().toISOString(),
       type: "note",
@@ -993,11 +980,7 @@ async function noteQueuedTriggerFireFailed(
       toAgent: false,
       evidence: null,
     });
-    rebuildPath(
-      db,
-      resolveTaskFilePath(ref),
-      ref.dataRoot ? { dataRoot: ref.dataRoot } : {},
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
   } catch (noteErr) {
     logger.error("could not note queued operator trigger failure", {
       key: `${queued.projectSlug}/${queued.taskKey}`,
@@ -1138,7 +1121,6 @@ export async function maybeResumeStrandedOperator(
     .get(ref.runId) as { state: string } | undefined;
   if (stateRow?.state !== "finished") return false;
 
-  const { readProjectFile } = await import("~/server/files/project-writer.server");
   const file = readTaskFile({
     projectSlug: ref.projectSlug,
     taskKey: ref.taskKey,
@@ -1240,10 +1222,6 @@ export async function maybeResumeStrandedOperator(
   if (ref.strandedResume && !nudgeMadeProgress) {
     // Ruling 399: the same fact the stranded predicate already consulted.
     const planRefused = ref.ownRun?.planWhollyRefused === true;
-    const { updateTaskFile, resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     await updateTaskFile(
       { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
       (parsed) => {
@@ -1281,15 +1259,7 @@ export async function maybeResumeStrandedOperator(
         });
       },
     );
-    rebuildPath(
-      db,
-      resolveTaskFilePath({
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        dataRoot: ref.dataRoot,
-      }),
-      { dataRoot: ref.dataRoot },
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     logger.info("stranded-operator resume withheld: the nudged drive held the stage again", {
       taskKey: ref.taskKey,
       stage: file.parsed.frontmatter.stage,
@@ -1297,9 +1267,6 @@ export async function maybeResumeStrandedOperator(
     return false;
   }
 
-  const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
-    "~/server/tasks/task-actions.server"
-  );
   const depth = (ref.transitionDepth ?? 0) + 1;
   // B4: the SAME comparison the transition re-trigger makes
   // (`chainDepth >= OPERATOR_TRANSITION_CHAIN_CAP`, task-actions). Both sides
@@ -1312,13 +1279,6 @@ export async function maybeResumeStrandedOperator(
   if (depth >= OPERATOR_TRANSITION_CHAIN_CAP) {
     // The model refused to advance CAP times in a row — surface the dead end
     // honestly instead of resuming forever or stamping a silent wait.
-    const { appendTimelineEvent } = await import(
-      "~/server/files/task-writer.server"
-    );
-    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
-    const { resolveTaskFilePath } = await import(
-      "~/server/files/task-writer.server"
-    );
     await appendTimelineEvent(
       { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
       {
@@ -1333,15 +1293,7 @@ export async function maybeResumeStrandedOperator(
         evidence: null,
       },
     );
-    rebuildPath(
-      db,
-      resolveTaskFilePath({
-        projectSlug: ref.projectSlug,
-        taskKey: ref.taskKey,
-        dataRoot: ref.dataRoot,
-      }),
-      { dataRoot: ref.dataRoot },
-    );
+    reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     logger.warn("stranded-operator resume hit the chain cap; leaving a note", {
       taskKey: ref.taskKey,
       depth,
@@ -1407,9 +1359,6 @@ function settleWaitingAfterOperator(
       const live = inFlightAgentRun(db, ref.projectSlug, ref.taskKey);
       if (live) return;
       if (await maybeResumeStrandedOperator(db, ref)) return;
-      const { clearWaitingToHuman } = await import(
-        "~/server/tasks/task-actions.server"
-      );
       const ctx: TaskMutationContext =
         { dataRoot: ref.dataRoot };
       await clearWaitingToHuman(db, ctx, ref.projectSlug, ref.taskKey);
@@ -1992,7 +1941,6 @@ export async function runOperator(
     for (const drop of queueOperatorTrigger(leaseKey, input)) {
       void noteDroppedOperatorTurn(db, drop);
     }
-    const { chainRunCompletion } = await import("./run-service.server");
     chainRunCompletion(inflight.id, () => drainPendingAfterInFlight(db, leaseKey));
     logger.info("operator run queued: DB row already in flight", {
       taskKey: input.taskKey,
@@ -2044,12 +1992,6 @@ export async function runOperator(
   // Ruling 152(a): the settle reads this drive's own moves off the same object.
   leaseToken.ownRun = ctx.operatorRun;
 
-  // The operator is itself an agent working the task: the board should read
-  // "working" for the duration of the drive, not "waiting on you" (the
-  // specialist starters do the same). Settled back to human on lease release
-  // once nothing is live (settleWaitingAfterOperator).
-  const { liftHoldForRun, liftStageHoldForPerson, markWaitingAgent, userName } =
-    await import("~/server/tasks/task-actions.server");
   // Ruling 157 (pass 35, F35-8): a person starting the operator (Run operator,
   // an `@operator` comment, the controller; every one of them carries `actor`)
   // or a schedule they set lifts a packet-less hold on the record. A bare
@@ -2082,6 +2024,10 @@ export async function runOperator(
       by: input.actor,
     });
   }
+  // The operator is itself an agent working the task: the board should read
+  // "working" for the duration of the drive, not "waiting on you" (the
+  // specialist starters do the same). Settled back to human on lease release
+  // once nothing is live (settleWaitingAfterOperator).
   await markWaitingAgent(db, ctx, input.projectSlug, input.taskKey);
 
   // Claude uses in-process governance tools. Codex emits a structured plan
@@ -3969,7 +3915,6 @@ async function startRealOperatorRun(
   // registered) so nothing can clobber it.
   const held = leaseState().held.get(leaseKey);
   if (held) held.runId = runId;
-  const { chainRunCompletion } = await import("./run-service.server");
   chainRunCompletion(runId, (finished) => {
     // A real Claude operator run that ERRORS (crash / quota / auth / idle
     // timeout) was previously silent — the completion hook only released the
@@ -4025,7 +3970,6 @@ async function escalateFailedOperatorRun(
   runId: string,
 ): Promise<void> {
   try {
-    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
     const failure = runFailureReason(db, runId);
     // Pass 34 review: the run was launched on the RESOLVED deployment backend
   // (`runOperator` reads `authority.backend`); `input.backend` is set only when
