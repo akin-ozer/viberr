@@ -2916,6 +2916,21 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "update_task",
   );
 
+  /** The `run-agents` tier on this project for the asking person, as the task
+   *  page decides it (`canRunAgents`); a project that is gone is not visible. */
+  function mayRunAgents(slug: string, what: string): boolean {
+    const file = readProjectFile({ projectSlug: slug, dataRoot });
+    if (!file) throw new NotVisibleError(notVisible(slug));
+    const authority = {
+      slug,
+      memberRoles: new Map(
+        file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
+      ),
+      archived: file.parsed.frontmatter.archived === true,
+    };
+    return canRunAgents(db, authority, actor, what);
+  }
+
   add(
     tool(
       "run_agent_on_task",
@@ -2939,16 +2954,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "run agents");
-          const file = readProjectFile({ projectSlug: slug, dataRoot });
-          if (!file) throw new NotVisibleError(notVisible(slug));
-          const authority = {
-            slug,
-            memberRoles: new Map(
-              file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
-            ),
-            archived: file.parsed.frontmatter.archived === true,
-          };
-          if (!canRunAgents(db, authority, actor, "run agents through the controller")) {
+          if (!mayRunAgents(slug, "run agents through the controller")) {
             return "[denied] Running agents needs the maintainer role (or project admin) in this project.";
           }
           const display = userName(db, user.id);
@@ -3146,16 +3152,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   /** Ruling 153: the `run-agents` tier the task page's schedule form needs. */
   function requireScheduleTier(slug: string, what: string): string | null {
-    const file = readProjectFile({ projectSlug: slug, dataRoot });
-    if (!file) throw new NotVisibleError(notVisible(slug));
-    const authority = {
-      slug,
-      memberRoles: new Map(
-        file.parsed.frontmatter.members.map((m) => [m.userId, m.role] as const),
-      ),
-      archived: file.parsed.frontmatter.archived === true,
-    };
-    return canRunAgents(db, authority, actor, what)
+    return mayRunAgents(slug, what)
       ? null
       : "[denied] Scheduling a run needs the maintainer role (or project admin) in this project.";
   }
