@@ -38,15 +38,11 @@ export function LabelInput({
   value,
   onChange,
   suggestions = [],
-  max = MAX_TASK_LABELS,
-  maxLen = MAX_LABEL_LENGTH,
 }: {
   value: string[];
   onChange: (labels: string[]) => void;
   /** Labels already used in this project, offered as autocomplete. */
   suggestions?: readonly string[];
-  max?: number;
-  maxLen?: number;
 }) {
   const [buffer, setBuffer] = useState("");
   const [status, setStatus] = useState("");
@@ -56,7 +52,7 @@ export function LabelInput({
   const listRef = useRef<HTMLUListElement>(null);
   const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
-  const normalize = (raw: string) => raw.trim().replace(/\s+/g, " ").slice(0, maxLen);
+  const normalize = (raw: string) => raw.trim().replace(/\s+/g, " ").slice(0, MAX_LABEL_LENGTH);
   const has = (label: string) =>
     value.some((l) => l.toLowerCase() === label.toLowerCase());
 
@@ -66,13 +62,13 @@ export function LabelInput({
   // ADDED once the set is full, but the chosen rows stay so labels can be removed.
   const query = normalize(buffer);
   const q = query.toLowerCase();
-  const room = value.length < max;
+  const room = value.length < MAX_TASK_LABELS;
   // Interface review 2026-09-24 (writ-8): at the cap the refusal was a
   // screen-reader-only status and the typed label was cleared anyway, so a
   // sighted person saw it vanish as if saved. The same sentence is now shown
   // under the field before anything is refused, and a refused label stays in
   // the field.
-  const capNote = `A task can have at most ${max} labels. Remove one to add another.`;
+  const capNote = `A task can have at most ${MAX_TASK_LABELS} labels. Remove one to add another.`;
   const capNoteId = useId();
   const suggestRows: Row[] = room
     ? suggestions
@@ -133,7 +129,7 @@ export function LabelInput({
   }, [shifts, wrapRef]);
 
   const announce = (next: string[], verb: "Added" | "Removed", label: string) => {
-    setStatus(`${verb} label ${label}, ${next.length} of ${max}`);
+    setStatus(`${verb} label ${label}, ${next.length} of ${MAX_TASK_LABELS}`);
   };
 
   /** False only when the cap refused the label — the caller then keeps the
@@ -145,7 +141,7 @@ export function LabelInput({
       setStatus("That label is already added");
       return true;
     }
-    if (value.length >= max) {
+    if (value.length >= MAX_TASK_LABELS) {
       setStatus(capNote);
       return false;
     }
@@ -166,7 +162,7 @@ export function LabelInput({
     for (const [i, raw] of raws.entries()) {
       const label = normalize(raw);
       if (!label) continue;
-      if (next.length >= max) {
+      if (next.length >= MAX_TASK_LABELS) {
         refused = raws.slice(i);
         break;
       }
@@ -180,7 +176,7 @@ export function LabelInput({
     if (added > 0) {
       onChange(next);
       // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
-      setStatus(`Added ${added} label${added > 1 ? "s" : ""}, ${next.length} of ${max}`);
+      setStatus(`Added ${added} label${added > 1 ? "s" : ""}, ${next.length} of ${MAX_TASK_LABELS}`);
     } else if (refused.length > 0) {
       setStatus(capNote);
     } else if (dup) {

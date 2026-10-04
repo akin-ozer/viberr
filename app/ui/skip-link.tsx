@@ -41,12 +41,8 @@ const VISIBLE: CSSProperties = {
 };
 
 export function SkipLink({
-  targetId = "main-content",
-  label = "Skip to main content",
   inert = false,
 }: {
-  targetId?: string;
-  label?: string;
   /** The target is inside an inert region (the workspace's <main> while the
    *  mobile drawer is open): a link that cannot land is not a tab stop. */
   inert?: boolean;
@@ -54,13 +50,13 @@ export function SkipLink({
   const [focused, setFocused] = useState(false);
   return (
     <a
-      href={`#${targetId}`}
+      href="#main-content"
       inert={inert}
       style={focused ? VISIBLE : HIDDEN}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
     >
-      {label}
+      Skip to main content
     </a>
   );
 }

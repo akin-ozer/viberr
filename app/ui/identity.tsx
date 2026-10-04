@@ -79,12 +79,10 @@ export function IconTile({
 
 export function AgentGlyph({
   backend,
-  lg,
   op,
   decorative,
 }: {
   backend?: string;
-  lg?: boolean;
   op?: boolean;
   /** The name is visible text beside this glyph: hide it from AT. */
   decorative?: boolean;
@@ -95,7 +93,6 @@ export function AgentGlyph({
     <IconTile
       tone={op ? "op" : claude ? "claude" : "codex"}
       icon={op ? "shield" : claude ? "sparkle" : "cpu"}
-      lg={lg}
       label={decorative ? undefined : name}
     />
   );

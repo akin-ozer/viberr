@@ -51,12 +51,10 @@ export function Avatar({
 export function AvatarGroup({
   people,
   max,
-  size = "sm",
 }: {
   people: readonly AvatarGroupPerson[];
   /** Fold everyone past this many into a `+N` chip. Omit for no cap. */
   max?: number;
-  size?: AvatarSize;
 }) {
   // An image with an empty name is an axe violation, and there is nothing to
   // show: a project can lose every member only by hand-editing.
@@ -70,28 +68,15 @@ export function AvatarGroup({
       aria-label={people.map((p) => p.name).join(", ")}
     >
       {shown.map((p) => (
-        <Avatar key={p.name} person={p} size={size} />
+        <Avatar key={p.name} person={p} size="sm" />
       ))}
-      {folded > 0 && <AvatarGroupCount n={folded} size={size} />}
-    </span>
-  );
-}
-
-/** The `+N` chip closing an AvatarGroup. Hidden from assistive tech: the
- *  group's own label already names every person, folded ones included. */
-function AvatarGroupCount({
-  n,
-  size = "sm",
-}: {
-  n: number;
-  size?: AvatarSize;
-}) {
-  return (
-    <span
-      className={"avatar count" + (size === "md" ? "" : " " + size)}
-      aria-hidden="true"
-    >
-      +{n}
+      {/* The `+N` chip, hidden from assistive tech: the group's own label
+          already names every person, folded ones included. */}
+      {folded > 0 && (
+        <span className="avatar count sm" aria-hidden="true">
+          +{folded}
+        </span>
+      )}
     </span>
   );
 }
