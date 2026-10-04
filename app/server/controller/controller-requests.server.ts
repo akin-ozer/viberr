@@ -139,7 +139,6 @@ export interface RaiseResourceRequestInput {
   reason: string;
   askedByUserId: string;
   askedByLabel: string;
-  now?: string;
 }
 
 /** What {@link raiseResourceRequest} answers: the row that now carries the ask,
@@ -170,7 +169,7 @@ export function raiseResourceRequest(
     kind: input.kind,
     name: input.name,
     reason: input.reason.trim(),
-    askedAt: input.now ?? new Date().toISOString(),
+    askedAt: new Date().toISOString(),
     askedByUserId: input.askedByUserId,
     askedByLabel: input.askedByLabel,
     status: "open",
@@ -187,7 +186,6 @@ export function closeResourceRequest(
   status: Exclude<ResourceRequestStatus, "open">,
   closedByLabel: string,
   dataRoot?: string,
-  now?: string,
 ): ResourceRequest | null {
   const rows = readResourceRequests(dataRoot);
   const at = rows.findIndex((r) => r.id === id && r.status === "open");
@@ -195,7 +193,7 @@ export function closeResourceRequest(
   const closed: ResourceRequest = {
     ...rows[at]!,
     status,
-    closedAt: now ?? new Date().toISOString(),
+    closedAt: new Date().toISOString(),
     closedByLabel,
   };
   const next = [...rows];
