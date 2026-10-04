@@ -23,6 +23,7 @@ import {
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectGate } from "~/schemas/project-file.schema";
+// Ruling 482: the gates' view and refusal, one pure home for every surface.
 import {
   gateOutcomeText,
   gateWallTime,

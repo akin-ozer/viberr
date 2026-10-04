@@ -26,7 +26,11 @@ import {
   unpushedRevisionBlockedReason,
   type Validation,
 } from "~/schemas/task-file.schema";
+// Ruling 482: the gates' view and refusal, one pure home for every surface.
 import { type GatesView, projectGatesRefusal, projectGatesView } from "~/shared/project-gates";
+// R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
+// consult the human GitHub approval synchronously without the dynamic-import
+// dance the rest of the github/ surface needs to stay cycle-free.
 import {
   humanVerdictApproval,
   humanVerdictNote,
@@ -50,11 +54,17 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
+// OBS-11: R15-6's post-merge branch-cleanup switch. A leaf module (one
+// projection read + the guardrail schema), so no dynamic import is needed.
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
+// Ruling 88 (F21-2): the acceptance disclosure contract — one definition the
+// ceremony writes and the server reads (see the module's docblock).
 import {
   type AcceptanceDisclosure,
   acceptanceDisclosureDrift,
 } from "~/shared/acceptance-disclosure";
+// Ruling 471: which open-decision option a direct acceptance answers — the one
+// predicate the write below and the accept dialog's loader both read.
 import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 import {
   appendPolicyNote,

@@ -25,7 +25,7 @@ import { NO_REVIEW_SUBJECT, upsertRun } from "~/server/runtimes/run-store.server
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { recordAgentCompletion } from "./agent-completion.server";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
 import {
   operatorAcceptCompletion,

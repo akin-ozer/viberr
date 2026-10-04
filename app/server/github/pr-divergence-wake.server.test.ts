@@ -14,7 +14,7 @@ import {
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { resolvePacket } from "~/server/tasks/task-actions.server";
+import { resolvePacket } from "~/server/tasks/packet-resolution.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";

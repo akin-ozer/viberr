@@ -47,7 +47,7 @@ import {
   applyRecommendation,
   dismissRecommendation,
 } from "./task-recommendations.server";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
 import { applyAcceptanceWrite } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
@@ -2973,7 +2973,7 @@ describe("operatorAcceptCompletion", () => {
         title: "Rewrite the goal instead",
         goalDraft: "Ship the cron job. Done when its gates pass on the branch.",
       });
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
@@ -3025,7 +3025,7 @@ describe("operatorAcceptCompletion", () => {
       await offerRead(["VIB-1"], "full");
       expect((await accept("full", callCtx)).outcome).toBe("noop");
 
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -6279,7 +6279,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       },
       authority("full"),
     );
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     const before = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(before.packet?.awaiting).toBeNull();
     await resolvePacket(

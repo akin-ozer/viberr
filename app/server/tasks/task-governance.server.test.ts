@@ -33,7 +33,7 @@ import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
 import { classifyReviewerVerdict, recordAgentCompletion } from "./agent-completion.server";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 import { reorderTask, transitionStage } from "./task-transitions.server";
 import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
@@ -2579,7 +2579,7 @@ describe("resolvePacket kind matrix", () => {
       { stage: "review", waiting: "human", ownerUserId: store.users.selin.id },
       STRANDED_PACKET,
     );
-    const { requestPacketMaintainerDecision } = await import("./task-actions.server");
+    const { requestPacketMaintainerDecision } = await import("./packet-resolution.server");
     const res = await requestPacketMaintainerDecision(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", note: "please archive this" },
@@ -2612,7 +2612,7 @@ describe("resolvePacket kind matrix", () => {
       { stage: "review", waiting: "human", ownerUserId: store.users.murat.id },
       STRANDED_PACKET,
     );
-    const { requestPacketMaintainerDecision } = await import("./task-actions.server");
+    const { requestPacketMaintainerDecision } = await import("./packet-resolution.server");
     await expect(
       requestPacketMaintainerDecision(
         store.db,

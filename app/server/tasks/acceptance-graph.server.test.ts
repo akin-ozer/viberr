@@ -17,7 +17,7 @@ import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { applyRecommendation, dismissRecommendation } from "./task-recommendations.server";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 import { reorderTask, transitionStage } from "./task-transitions.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";

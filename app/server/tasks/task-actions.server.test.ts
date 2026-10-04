@@ -40,7 +40,7 @@ import {
 } from "~/server/projections/task-query.server";
 import { runOutcomeClause, OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 import { appendComment, commentToAgent } from "./task-comments.server";
-import { packetIdentity, resolvePacket } from "./task-actions.server";
+import { packetIdentity, resolvePacket } from "./packet-resolution.server";
 import {
   classifyReviewerVerdict,
   operatorPromptAgent,

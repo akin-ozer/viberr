@@ -1177,7 +1177,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     sessionRow("run_rev_562", "rev", "reviewer");
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -1259,7 +1259,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
       backend: "claude" as const,
       autonomy: "supervised" as const,
     }));
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -2116,7 +2116,7 @@ describe("commentToAgent", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       {
@@ -2238,7 +2238,7 @@ describe("commentToAgent", () => {
       },
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       {
@@ -2310,7 +2310,7 @@ describe("commentToAgent", () => {
       },
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -2881,7 +2881,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       {

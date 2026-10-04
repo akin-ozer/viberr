@@ -14,7 +14,10 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { appendComment } from "~/server/tasks/task-comments.server";
-import { resolvePacket, requestPacketMaintainerDecision } from "~/server/tasks/task-actions.server";
+import {
+  resolvePacket,
+  requestPacketMaintainerDecision,
+} from "~/server/tasks/packet-resolution.server";
 import {
   dismissRecommendation,
   applyRecommendation,

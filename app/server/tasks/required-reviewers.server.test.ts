@@ -28,7 +28,7 @@ import {
   forceAcceptCompletion,
   acceptanceStanding,
 } from "./task-acceptance.server";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 
 /**
  * Ruling 178 (pass 36, G36-3): a project declares REQUIRED reviewers per review

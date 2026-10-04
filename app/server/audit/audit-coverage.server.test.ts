@@ -23,7 +23,7 @@ import {
 } from "~/server/projections/policy-violations.server";
 import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
 import { appendComment } from "~/server/tasks/task-comments.server";
-import { resolvePacket } from "~/server/tasks/task-actions.server";
+import { resolvePacket } from "~/server/tasks/packet-resolution.server";
 import { transitionStage } from "~/server/tasks/task-transitions.server";
 import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import { createTask } from "~/server/tasks/task-edits.server";

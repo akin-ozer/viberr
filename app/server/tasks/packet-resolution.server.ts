@@ -1,3 +1,12 @@
+/**
+ * Resolving a decision packet (ruling 654): `resolvePacket` carries out the
+ * option a person or the operator chose (an acceptance, a stage move, a
+ * delivery, an archive, a new task, an answer to the agent that asked), and
+ * fans one decision out to the sibling packets it answers. Also here: the
+ * answer to a packet a person already decided (ruling 602), the process-only
+ * option kinds, and a packet owner's request for a maintainer's decision.
+ */
+
 import { holdRefusalFor } from "~/server/projections/dependencies.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { escapeRegExp } from "~/shared/text/regexp";
@@ -7,7 +16,6 @@ import type {
   DeliveryServerOutcome,
   ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
-// Ruling 489: where a react chain's work stands, read from the server's record.
 import type { DatabaseSync } from "node:sqlite";
 import {
   activeWorkRevision,
@@ -21,10 +29,6 @@ import {
   type TaskPacket,
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
-// Ruling 482: the gates' view and refusal, one pure home for every surface.
-// R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
-// consult the human GitHub approval synchronously without the dynamic-import
-// dance the rest of the github/ surface needs to stay cycle-free.
 import { roleCan } from "~/shared/rbac";
 import { REVIEW_DEADLOCK_QUESTION } from "./review-deadlock.server";
 import type { FanOutOutcome } from "./packet-fanout.server";
@@ -39,13 +43,7 @@ import {
 } from "./no-change-completion.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
-// OBS-11: R15-6's post-merge branch-cleanup switch. A leaf module (one
-// projection read + the guardrail schema), so no dynamic import is needed.
-// Ruling 88 (F21-2): the acceptance disclosure contract — one definition the
-// ceremony writes and the server reads (see the module's docblock).
-import { type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
-// Ruling 471: which open-decision option a direct acceptance answers — the one
-// predicate the write below and the accept dialog's loader both read.
+import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import {
   appendPolicyNote,
   loadProjectContext,
@@ -113,26 +111,6 @@ import {
 import { manualDeliverForReview, recordDeliveredNextStep } from "./task-delivery.server";
 import { transitionStage } from "./task-transitions.server";
 import { answerAskingAgent, answerNamesAnotherActor } from "./task-comments.server";
-
-// ---------------------------------------------------------------- helpers
-
-// -------------------------------------------------------------- createTask
-
-// ------------------------------------------------------------ appendComment
-
-// ----------------------------------------------------------- commentToAgent
-
-// ------------------------------------------------- canonical re-anchor (D-3)
-
-// ------------------------------------------------------------ operatorPromptAgent
-
-// --------------------------------------------------------------- ownership
-
-// -------------------------------------------------------------- transition
-
-// ------------------------------------------------------------ reorderTask
-
-// ----------------------------------------------------------- task archive
 
 /**
  * Ruling 322 — does this `create_task` option also make the DECIDING task wait
@@ -212,8 +190,6 @@ export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
   // work that already exists; it changes nothing about what the work is.
   "deliver_for_review",
 ]);
-
-// ------------------------------------------------------------ resolvePacket
 
 /** Identify a packet across an awaited resolution so replacements cannot be cleared. */
 export function packetIdentity(p: TaskPacket): string {
@@ -2977,5 +2953,3 @@ export async function requestPacketMaintainerDecision(
 
   return { notified: notified.length };
 }
-
-// ---------------------------------------------------- operator recommendations

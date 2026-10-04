@@ -17,6 +17,7 @@ import { endSentence } from "~/shared/text/sentence";
 import { countLabel } from "~/shared/text/plural";
 import { VERDICT_NOTE_TITLE, verdictNoteText } from "~/shared/verdict-note";
 import { isRelayComment } from "./task-relay.server";
+// Ruling 489: where a react chain's work stands, read from the server's record.
 import {
   deliverHeadOption,
   filesDeliveredSince,
@@ -2330,7 +2331,7 @@ export async function applyAgentCompletionEffects(
     );
     // Ruling 602: a refusal in a window someone already decided.
     if (accountCause && escalation.status === "opened") {
-      const { answerFromStandingDecision } = await import("./task-actions.server");
+      const { answerFromStandingDecision } = await import("./packet-resolution.server");
       await answerFromStandingDecision(db, ctx, {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
