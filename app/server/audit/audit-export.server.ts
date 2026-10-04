@@ -50,7 +50,8 @@ export interface AuditExportRow {
   detailsJson: string | null;
 }
 
-const rowSchema = z.object({
+/** The `audit_events` row as stored; the retention purge reads it `.loose()`. */
+export const auditEventRowSchema = z.object({
   id: z.string(),
   occurred_at: z.string(),
   actor_user_id: z.string().nullable(),
@@ -105,7 +106,7 @@ export function queryAuditEventsForExport(
     Math.min(AUDIT_EXPORT_MAX_ROWS, Math.floor(filters.limit ?? AUDIT_EXPORT_MAX_ROWS)),
   );
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const rows = z.array(rowSchema).parse(
+  const rows = z.array(auditEventRowSchema).parse(
     db
       .prepare(
         `SELECT * FROM audit_events ${clause}

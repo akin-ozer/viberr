@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { auditEventRowSchema } from "~/server/audit/audit-export.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
@@ -42,10 +43,11 @@ import { toError } from "~/shared/errors";
  * disk the next pass reclaims while a purge without a record is irreversible.
  *
  * The rows go out exactly as the table stores them, one JSON object per line.
- * `audit/audit-export.server.ts` is deliberately NOT reused: it serializes a
- * camelCased projection into a single JSON ARRAY (or CSV) under a 100k row cap
- * with `details` re-parsed, which is the right shape for an admin download and
- * the wrong one for an append-only machine record of deleted rows.
+ * `audit/audit-export.server.ts` is deliberately NOT reused beyond its row
+ * schema: it serializes a camelCased projection into a single JSON ARRAY (or
+ * CSV) under a 100k row cap with `details` re-parsed, which is the right shape
+ * for an admin download and the wrong one for an append-only machine record of
+ * deleted rows.
  */
 
 /** Raw run log lines: high-volume, low durability value — kept 30 days. */
@@ -117,23 +119,12 @@ function auditPurgeExportPath(now: Date, dataRoot: string | undefined): string {
  * `details_json` string, nothing renamed or reshaped, so the export line and the
  * deleted row are the same object.
  *
- * `looseObject`, not `object`: a column added by a later migration rides through
- * to the export rather than being silently stripped by a schema nobody
+ * `.loose()`, not the export's strip: a column added by a later migration rides
+ * through to the export rather than being silently stripped by a schema nobody
  * remembered to widen. The test pins the declared keys against the live table so
  * the addition is still noticed.
  */
-const auditRowSchema = z.looseObject({
-  id: z.string(),
-  occurred_at: z.string(),
-  actor_user_id: z.string().nullable(),
-  actor_label: z.string(),
-  action: z.string(),
-  subject_kind: z.string().nullable(),
-  subject_id: z.string().nullable(),
-  project_slug: z.string().nullable(),
-  task_key: z.string().nullable(),
-  details_json: z.string().nullable(),
-});
+const auditRowSchema = auditEventRowSchema.loose();
 
 /** The purge predicate, built once so the export and the DELETE cannot disagree
  *  about which rows are expiring. Values are bound through placeholders. */
