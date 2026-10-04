@@ -410,7 +410,7 @@ function boardContext(
     `## Board ${project.name} (slug ${slug})${project.archived ? " · ARCHIVED (read-only)" : ""}\n` +
     // Ruling 292: the excerpt names its reader, exactly as the epics line
     // above already does ("list_epics reads them"). `get_project`
-    // carries the description whole (line ~1342); without the pointer this
+    // carries the description whole; without the pointer this
     // ellipsis was a cut with nowhere to go, on the one text a board's owner
     // writes to explain what the board IS.
     (description

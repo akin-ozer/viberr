@@ -324,23 +324,6 @@ export interface ControllerMounts {
 }
 
 /**
- * Everything one controller turn mounts, assembled in one place.
- *
- * The two IN-PROCESS servers are machinery, not grants: `viberr_controller`
- * (ruling 99) is how the controller reads and changes the product, and
- * `viberr_ops` (ruling 107) is how it reads this instance's ops layer. Both go
- * on EVERY turn with no config consulted, which is the whole of "not removable
- * by anyone" — there is no grant row to clear and no toggle to flip, so no
- * surface can offer one that does nothing (P14-KM-14).
- *
- * Org grants land last and cannot shadow either, because the RESOLVER refuses
- * to resolve a reserved name (`~/shared/mcp-reserved`, applied in
- * `resolveSpecialistMcpServersDetailed`). The save-time refusal only ever
- * governed new rows; a row written straight into SQLite or restored from a
- * backup reaches this spread, so the layer that decides what a run mounts is
- * the one that has to hold.
- */
-/**
  * The knowledge bases ONE controller turn holds (ruling 239 + ruling 283).
  *
  * Read in two places that must not disagree: the system prompt indexes these,
@@ -358,6 +341,23 @@ function controllerKbNames(
     : [...kb];
 }
 
+/**
+ * Everything one controller turn mounts, assembled in one place.
+ *
+ * The two IN-PROCESS servers are machinery, not grants: `viberr_controller`
+ * (ruling 99) is how the controller reads and changes the product, and
+ * `viberr_ops` (ruling 107) is how it reads this instance's ops layer. Both go
+ * on EVERY turn with no config consulted, which is the whole of "not removable
+ * by anyone" — there is no grant row to clear and no toggle to flip, so no
+ * surface can offer one that does nothing (P14-KM-14).
+ *
+ * Org grants land last and cannot shadow either, because the RESOLVER refuses
+ * to resolve a reserved name (`~/shared/mcp-reserved`, applied in
+ * `resolveSpecialistMcpServersDetailed`). The save-time refusal only ever
+ * governed new rows; a row written straight into SQLite or restored from a
+ * backup reaches this spread, so the layer that decides what a run mounts is
+ * the one that has to hold.
+ */
 export function buildControllerMounts(
   db: DatabaseSync,
   input: ControllerMountInput,
@@ -684,15 +684,6 @@ export function retractWaitingMessage(db: DatabaseSync, input: WaitingMessageRef
   throw AppError.conflict("That message has already been read, so it can't be taken back.");
 }
 
-/**
- * The controller's OWN refusal sentence.
- *
- * `principalRefusalMessage` is written for a TASK run — it says "the task
- * owner", which is not who this refusal is about — so the controller writes
- * its own first line and appends the specific half (a missing sign-in file)
- * from the health detail, which is person-agnostic. The one thing both must
- * say, and do: nothing was started.
- */
 /**
  * The refusal a person with no Claude connected reads: in the transcript
  * (this engine) and, U35-4 (pass 35), from the HTTP send door itself, which

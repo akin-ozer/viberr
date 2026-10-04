@@ -75,11 +75,6 @@ async function restored(expected: "0" | "1" = "0") {
   );
 }
 
-/**
- * O39-d. A controller turn runs one to five minutes. Its answer reached the
- * surfaces still open on it, and a person who moved to another page had no
- * signal anywhere that it had landed.
- */
 /** A reply waiting in a board conversation, not the task's (O39-d). */
 const BOARD_REPLY: UnseenReplyView = {
   id: "cnv_board",
@@ -89,6 +84,11 @@ const BOARD_REPLY: UnseenReplyView = {
   href: "/projects/viberr/controller?c=cnv_board",
 };
 
+/**
+ * O39-d. A controller turn runs one to five minutes. Its answer reached the
+ * surfaces still open on it, and a person who moved to another page had no
+ * signal anywhere that it had landed.
+ */
 describe("the dock tells a person a reply is waiting (O39-d)", () => {
   it("marks the button, says so to a screen reader, and links to the reply from the panel", async () => {
     mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView(), unseen: () => [BOARD_REPLY] });

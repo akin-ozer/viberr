@@ -57,7 +57,7 @@ import { countLabel } from "~/shared/text/plural";
  * `viberr_ops` — the controller's built-in diagnostics server (ruling 107).
  *
  * The `viberr_controller` toolkit reads and changes the PRODUCT: projects,
- * tasks, agents, goals, org resources. It has no reach at all into the ops
+ * tasks, agents, epics, org resources. It has no reach at all into the ops
  * layer that already sits behind routes — per-run logs, subsystem health,
  * backend credential state, the run concurrency queue, store documents — so
  * asked "why did that run fail" or "is the instance healthy" the controller

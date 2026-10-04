@@ -380,8 +380,6 @@ function grantOf(scope: string | null) {
   };
 }
 
-
-/** Build the toolkit for one controller turn. */
 /**
  * Ruling 302: the controller's own timeline window, and the most it will widen
  * to. The operator's twins are OPERATOR_TIMELINE_DEFAULT / _MAX; this window
@@ -397,6 +395,7 @@ interface TimelineWindowNote {
   timelineOlder?: string;
 }
 
+/** Build the toolkit for one controller turn. */
 export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerToolkit {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;

@@ -978,6 +978,13 @@ describe("ruling 370: the controller prefix", () => {
   });
 });
 
+/** A run's mount that is an in-process SDK server, which a client can call. */
+function inProcess(
+  server: RunMcpServerDeclaration | undefined,
+): server is McpSdkServerConfigWithInstance {
+  return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
+}
+
 /**
  * Ruling 476(h) (F40-61): a chain records the conversation that planned it.
  * Live, goal-1 was planned in a 16-message instance thread, and the project's
@@ -986,13 +993,6 @@ describe("ruling 370: the controller prefix", () => {
  * the rule for the epic that replaced the chain: its file names the thread,
  * and its page links to it.
  */
-/** A run's mount that is an in-process SDK server, which a client can call. */
-function inProcess(
-  server: RunMcpServerDeclaration | undefined,
-): server is McpSdkServerConfigWithInstance {
-  return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
-}
-
 describe("ruling 476(h): an epic a turn creates records the conversation it was planned in", () => {
   it("the turn's own create_epic writes its conversation into the epic's file", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(

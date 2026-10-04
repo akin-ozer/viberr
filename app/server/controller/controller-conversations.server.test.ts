@@ -365,23 +365,6 @@ describe("conversation access", () => {
 });
 
 /**
- * A queued-start failure kills the lease and the whole FIFO with it. Those
- * messages are ALREADY in the transcript and no other scheduler will ever reach
- * them, so without a note they read back as questions the controller ignored —
- * and boot recovery cannot see them either, since the newest message is now the
- * controller's own note rather than a user's.
- */
-/**
- * Stopping a turn from the controller page.
- *
- * `interruptControllerTurn` hands the engine the ruling-99 scope of a
- * controller run so neither page has to know it, and the engine's interrupt
- * asks `canInterruptControllerRun` instead of a project membership the run
- * has none of. A stopped turn settles like a finished one: the transcript
- * records that it was stopped, and the lease is released so the next message
- * starts a fresh turn instead of queueing behind a run that is gone.
- */
-/**
  * O39-d. A controller turn runs one to five minutes, and its answer reached
  * only the surfaces still open on it: a person who moved to another page had
  * no signal anywhere that it had landed.
@@ -427,6 +410,16 @@ describe("O39-d: a reply its owner has not seen", () => {
   });
 });
 
+/**
+ * Stopping a turn from the controller page.
+ *
+ * `interruptControllerTurn` hands the engine the ruling-99 scope of a
+ * controller run so neither page has to know it, and the engine's interrupt
+ * asks `canInterruptControllerRun` instead of a project membership the run
+ * has none of. A stopped turn settles like a finished one: the transcript
+ * records that it was stopped, and the lease is released so the next message
+ * starts a fresh turn instead of queueing behind a run that is gone.
+ */
 describe("stopping a turn", () => {
   async function startWorkingTurn() {
     const { createConversation } = await import("./controller-conversations.server");
@@ -666,6 +659,13 @@ describe("a working turn streams to its owner", () => {
   });
 });
 
+/**
+ * A queued-start failure kills the lease and the whole FIFO with it. Those
+ * messages are ALREADY in the transcript and no other scheduler will ever reach
+ * them, so without a note they read back as questions the controller ignored —
+ * and boot recovery cannot see them either, since the newest message is now the
+ * controller's own note rather than a user's.
+ */
 describe("a failed queued start accounts for the messages behind it", () => {
   it("names how many follow-ups were dropped, under the message it tried, and notes each dropped one", async () => {
     const { createConversation, listMessages } = await import("./controller-conversations.server");
