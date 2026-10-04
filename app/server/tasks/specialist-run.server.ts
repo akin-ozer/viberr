@@ -642,7 +642,7 @@ async function freshRunAnchor(
   boardReader: boolean,
 ): Promise<string | null> {
   try {
-    const { canonicalTaskAnchor } = await import("./task-actions.server");
+    const { canonicalTaskAnchor } = await import("./task-replies.server");
     return canonicalTaskAnchor({
       parsed,
       stageName: stageDisplayName(ctx, projectSlug, parsed.frontmatter.stage),

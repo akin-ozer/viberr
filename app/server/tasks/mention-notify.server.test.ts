@@ -28,12 +28,8 @@ import {
   operatorPostComment,
   resolveOperatorAuthority,
 } from "./operator-actions.server";
-import {
-  appendComment,
-  operatorPromptAgent,
-  postAgentReplyComment,
-  recordAgentCompletion,
-} from "./task-actions.server";
+import { appendComment, operatorPromptAgent, recordAgentCompletion } from "./task-actions.server";
+import { postAgentReplyComment } from "./task-replies.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 
@@ -989,7 +985,8 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * deadlock packet (see `SITES_WITHOUT_MENTIONS`).
    */
   const COMMENT_WRITER_SITES = {
-    "server/tasks/task-actions.server.ts": 4,
+    "server/tasks/task-actions.server.ts": 3,
+    "server/tasks/task-replies.server.ts": 1,
     "server/tasks/operator-actions.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
     // Ruling 488: the relay's comment on the target task; ruling 557: the

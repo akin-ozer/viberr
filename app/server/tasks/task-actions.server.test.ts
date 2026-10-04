@@ -46,7 +46,6 @@ import {
   DEFAULT_GOAL,
   operatorPromptAgent,
   packetIdentity,
-  postAgentReplyComment,
   recordAgentCompletion,
   releaseOwner,
   releaseTasksOwnedBy,
@@ -55,7 +54,6 @@ import {
   manualDeliverForReview,
   performDelivery,
   revisionDriftNote,
-  specialistReplyDirective,
   transitionStage,
   refreshAndReview,
   acceptanceDisclosureOf,
@@ -68,6 +66,7 @@ import {
   resolvePacket,
   updateTaskGoal,
 } from "./task-actions.server";
+import { postAgentReplyComment, specialistReplyDirective } from "./task-replies.server";
 import type { TaskActionDeps } from "./task-action-core.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -6263,9 +6262,9 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
  * is the "read this before you act" block, so the lease belongs in it.
  */
 describe("ruling 245: the canonical anchor names the files another task owns", () => {
-  let canonicalTaskAnchorFn: typeof import("./task-actions.server").canonicalTaskAnchor;
+  let canonicalTaskAnchorFn: typeof import("./task-replies.server").canonicalTaskAnchor;
   beforeEach(async () => {
-    canonicalTaskAnchorFn = (await import("./task-actions.server")).canonicalTaskAnchor;
+    canonicalTaskAnchorFn = (await import("./task-replies.server")).canonicalTaskAnchor;
   });
   const anchorFor = (key: string, leases: { paths: string[]; taskKey: string; reason: string }[]) =>
     canonicalTaskAnchorFn({
