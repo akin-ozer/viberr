@@ -203,6 +203,7 @@ import {
 } from "~/server/projections/epic-query.server";
 import {
   acceptanceRefusalFor,
+  appendComment,
   createTask,
   loadProjectContext,
   releaseOwner,
@@ -3007,7 +3008,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // the task page: a refused run would strand a comment with nothing
             // to address it.
             if (args.prompt) {
-              const { appendComment } = await import("~/server/tasks/task-actions.server");
               await appendComment(
                 db,
                 {
@@ -3066,7 +3066,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const handle =
             listDeployedSpecialists(slug, { dataRoot }).find((s) => s.id === profileId)
               ?.name ?? profileId;
-          const { appendComment } = await import("~/server/tasks/task-actions.server");
           if (args.prompt) {
             await appendComment(
               db,
