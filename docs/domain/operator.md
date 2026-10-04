@@ -559,7 +559,13 @@ Details that matter:
   update_branch_from_base, which routes the conflict (ruling 475), or deliver the revision
   instead of moving the task.", ruling 162); a move into the terminal stage is rerouted to
   `operatorAcceptCompletion` under either gate so the acceptance capability, not
-  `stage-transitions`, answers for it. The done reply names the next boundary, and a move
+  `stage-transitions`, answers for it. A move nobody confirms is never put to a person
+  (ruling 655): a move to the stage the task already stands at answers `noop` ("... is
+  already at Review; there is nothing to move."), and so does a forward jump the board
+  does not declare when every step on the way is `auto`, with the way ("Ready to Review
+  is not one move on this board: the way goes through In Progress, ..."), under either
+  grant; a backward jump, or one over an `approval` or `human` step, is recommended under
+  `recommend` as before. The done reply names the next boundary, and a move
   onto the acceptance boundary files the acceptance recommendation in the same call
   (ruling 152(a) and the fold, §3).
 - **Acceptance.** `completionCapabilityRefusal` runs first (`off` and `human` refuse
