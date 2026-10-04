@@ -574,11 +574,6 @@ const TaskCard = memo(function TaskCard({
     transition: null,
     plugins: cardPlugins,
   });
-  // Pass 30: the wait-human/urgent class pushes are gone — ruling 16 removed
-  // the card-level accent layer and no rule has styled either class since
-  // (the P16-UI-04 comment in app.css records the removal). The facts render
-  // as the wait tag and the priority flag.
-  const cls = ["card"];
   const wrapCls = ["card-wrap"];
   if (canTransition && !archived) wrapCls.push("draggable");
   if (inFlight) wrapCls.push("in-flight");
@@ -597,7 +592,7 @@ const TaskCard = memo(function TaskCard({
       data-card-key={task.key}
     >
       <Link
-        className={cls.join(" ")}
+        className="card"
         to={`/projects/${task.projectSlug}/tasks/${task.key}`}
         // The wrapper carries the drag; the anchor must not start its own
         // (URL) drag, but a plain click still navigates.
@@ -1491,8 +1486,6 @@ function NewTaskModal({
 /** Visible label filter chips before the "+N more" overflow chip. */
 const LABEL_CHIP_CAP = 6;
 
-/** Full-strength state pills on one card before the "+N" fold (pass 30). */
-
 const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "all", label: "All tasks", icon: "board" },
   { id: "human", label: "Waiting on me", icon: "hand" },
@@ -2127,9 +2120,8 @@ export function BoardPage({
    *  ceremony always names a real target even before the loader wires it. */
   defaultBranch?: string;
   /**
-   * U33-2: GitHub's own answer for this project's repository, as the GitHub
-   * view already computes it (`checkRepoAccess`). Optional and absent by
-   * default: no loader carries this fact yet, and the board must NOT reach for
+   * U33-2: GitHub's own answer for this project's repository, the last one
+   * recorded (`readRepoHealth`, ruling 517). The board must NOT reach for
    * GitHub itself — the check is a live `GET /repos/:repo`, and project-scope
    * SSE revalidates this view on every task event. `undefined` means "nobody
    * has established it", which the banner reads as silence, never as health.
@@ -2186,7 +2178,6 @@ export function BoardPage({
   /** D19: the card the roving tab stop sits on. Null until an arrow moves it —
    *  the resting stop is then the first card the layout draws (`rovingKey`). */
   const [focusKey, setFocusKey] = useState<string | null>(null);
-  /** B1: a move into the final stage waits here for an explicit confirmation. */
   /** Ruling 381: a backward drag waiting on its reason. */
   const [pendingMoveBack, setPendingMoveBack] = useState<{
     taskKey: string;
@@ -2194,6 +2185,7 @@ export function BoardPage({
     to: string;
     beforeKey: string;
   } | null>(null);
+  /** B1: a move into the final stage waits here for an explicit confirmation. */
   const [pendingAccept, setPendingAccept] = useState<{
     taskKey: string;
     to: string;
@@ -2326,7 +2318,6 @@ export function BoardPage({
     submitReorder(active.key, resolution.to, resolution.beforeKey ?? "");
   };
 
-  /** Commit a confirmed board acceptance (B1). */
   const submitReorder = (
     taskKey: string,
     to: string,
@@ -2922,12 +2913,6 @@ export function BoardPage({
         />
       )}
 
-      {/* B1 / D3: the acceptance a board move really performs, confirmed
-          through the ONE shared ceremony. F19-27: the card's own summary is what
-          the dialog discloses from — looked up fresh so a revalidation between
-          the gesture and the confirmation shows the CURRENT PR head, not the one
-          the drag started on. A lookup that MISSES is handled by the effect
-          above (clear + toast), never by this silent `&&`. */}
       {pendingMoveBack && (
         <MoveBackConfirm
           taskKey={pendingMoveBack.taskKey}
@@ -2955,6 +2940,12 @@ export function BoardPage({
           }
         />
       )}
+      {/* B1 / D3: the acceptance a board move really performs, confirmed
+          through the ONE shared ceremony. F19-27: the card's own summary is what
+          the dialog discloses from — looked up fresh so a revalidation between
+          the gesture and the confirmation shows the CURRENT PR head, not the one
+          the drag started on. A lookup that MISSES is handled by the effect
+          above (clear + toast), never by this silent `&&`. */}
       {pendingAccept && pendingAcceptTask && (
         <AcceptOnBoardConfirm
           task={pendingAcceptTask}
