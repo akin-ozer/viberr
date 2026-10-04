@@ -25,8 +25,9 @@ import {
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { appendPolicyNote, loadProjectContext, reprojectTask, taskRef } from "./task-mutation.server";
 // Type-only: the wake goes through `autoInvokeOperator`, imported at call time
-// because task-actions reaches this module from its completion pipeline.
-import type { TaskActionContext } from "./task-actions.server";
+// because task-action-core reaches this module at load time (through
+// task-mutation and the rebuilder).
+import type { TaskActionContext } from "./task-action-core.server";
 
 /**
  * Ruling 488 (F40-67): work on one task reaches another task in the same
@@ -285,7 +286,7 @@ export async function relayToTask(
   if (ctx.dataRoot) wakeCtx.dataRoot = ctx.dataRoot;
   if (ctx.deps) wakeCtx.deps = ctx.deps;
   const relay: RelayPayload = { fromTaskKey: from, by: req.author.name, text, occurredAt };
-  void import("./task-actions.server")
+  void import("./task-action-core.server")
     .then(({ autoInvokeOperator }) =>
       autoInvokeOperator(db, wakeCtx, req.projectSlug, to, "relayed", { relay }),
     )

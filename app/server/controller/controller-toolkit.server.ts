@@ -201,20 +201,19 @@ import {
   listEpics,
   type EpicSummary,
 } from "~/server/projections/epic-query.server";
+import { acceptanceRefusalFor } from "~/server/tasks/task-acceptance.server";
+import { appendComment } from "~/server/tasks/task-comments.server";
+import { transitionStage } from "~/server/tasks/task-transitions.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
 import {
-  acceptanceRefusalFor,
-  appendComment,
   createTask,
-  loadProjectContext,
-  releaseOwner,
-  requireProjectMutable,
-  setOwner,
   setTaskMetadata,
-  transitionStage,
   updateTaskGoal,
   updateTaskTitle,
   type CreateTaskInput,
-} from "~/server/tasks/task-actions.server";
+} from "~/server/tasks/task-edits.server";
+import { loadProjectContext } from "~/server/tasks/task-mutation.server";
+import { requireProjectMutable } from "~/server/auth/project-authority.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";

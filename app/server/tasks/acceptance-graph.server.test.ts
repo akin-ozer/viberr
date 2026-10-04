@@ -16,17 +16,12 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import {
-  applyRecommendation,
-  dismissRecommendation,
-  forceAcceptCompletion,
-  OPERATOR_TASK_ACTOR,
-  reorderTask,
-  acceptanceStanding,
-  resolvePacket,
-  setTaskArchived,
-  transitionStage,
-} from "./task-actions.server";
+import { applyRecommendation, dismissRecommendation } from "./task-recommendations.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { reorderTask, transitionStage } from "./task-transitions.server";
+import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
+import { setTaskArchived } from "./task-archive.server";
+import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 /**
  * Pass-14 acceptance contract (P14-LV-02 / LV-06 / LV-07, R14-2, R14-3).

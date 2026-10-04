@@ -12,7 +12,7 @@ import type { FileActorRef } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { recordAgentCompletion } from "./task-actions.server";
+import { recordAgentCompletion } from "./agent-completion.server";
 
 /**
  * The FINISHED-run completion path (`recordAgentCompletion`), which is the one

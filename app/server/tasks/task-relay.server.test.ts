@@ -33,7 +33,8 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { stageOutcome } from "./agent-outcome.server";
 import { operatorSnapshot, resolveOperatorAuthority } from "./operator-actions.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
-import { applyAgentCompletionEffects, type TaskActionContext } from "./task-actions.server";
+import { applyAgentCompletionEffects } from "./agent-completion.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 /**
  * Ruling 488 (F40-67): work on one task reaches another task in the same

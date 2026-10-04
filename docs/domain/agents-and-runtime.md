@@ -1058,7 +1058,7 @@ updated" (ruling 130(c)). A reason clause is terminated exactly once.
 ### 3.6 Resume, continuity, export
 
 - `resumeRun` (the @mention resume and a person's answer to an agent's question, via
-  `task-actions.server.ts`, and every controller turn after the first) mints `thread_id =
+  `task-comments.server.ts`, and every controller turn after the first) mints `thread_id =
   prev + "-r" + 6 chars` and probes the provider session with `probeSessionContinuity`
   (`present | missing | damaged | unknown`; `SESSION_MISSING_RE` reads "no conversation
   found", "rollout not found" …). A located Codex rollout whose first line is not

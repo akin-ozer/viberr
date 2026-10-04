@@ -30,7 +30,7 @@ import {
   applyAgentCompletionEffects,
   deliveredWorkEvidence,
   recordAgentCompletion,
-} from "./task-actions.server";
+} from "./agent-completion.server";
 import { resolveAgentCollab, stageOutcome } from "./agent-outcome.server";
 
 /**

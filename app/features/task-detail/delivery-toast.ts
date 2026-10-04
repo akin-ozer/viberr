@@ -1,4 +1,4 @@
-import type { DeliveryOutcome } from "~/server/tasks/task-actions.server";
+import type { DeliveryOutcome } from "~/server/tasks/task-delivery.server";
 
 /**
  * Ruling 134(a): every human door that performs a delivery says what moved

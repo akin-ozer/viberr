@@ -55,7 +55,8 @@ import {
   runFailureReason,
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
-import { commentToAgent, deliverDeferredMention } from "./task-actions.server";
+import { commentToAgent } from "./task-comments.server";
+import { deliverDeferredMention } from "./agent-completion.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
@@ -1176,7 +1177,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     sessionRow("run_rev_562", "rev", "reviewer");
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -1258,7 +1259,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
       backend: "claude" as const,
       autonomy: "supervised" as const,
     }));
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -2115,7 +2116,7 @@ describe("commentToAgent", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       {
@@ -2169,7 +2170,7 @@ describe("commentToAgent", () => {
    * for them (AX-20, AX-27).
    */
   it("ruling 447: an answer names another actor exactly when it routes the work", async () => {
-    const { answerNamesAnotherActor } = await import("./task-actions.server");
+    const { answerNamesAnotherActor } = await import("./task-comments.server");
     const agents = [
       { id: "developer", name: "Developer", handle: "developer" },
       { id: "surface-developer", name: "Surface Developer", handle: "surface-developer" },
@@ -2237,7 +2238,7 @@ describe("commentToAgent", () => {
       },
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       {
@@ -2309,7 +2310,7 @@ describe("commentToAgent", () => {
       },
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -2560,7 +2561,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     // for native delivery, so its granted craft vanishes mid-thread.
     //
     // Canary: drop the `skills: confinement.skills` spread from
-    // `commentToAgent`'s resume branch (task-actions.server) and this fails.
+    // `commentToAgent`'s resume branch (task-comments.server) and this fails.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     writeProject(store.dataRoot, {
@@ -2880,7 +2881,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       {

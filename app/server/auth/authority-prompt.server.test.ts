@@ -147,7 +147,7 @@ describe("projectAuthorityPrompt", () => {
 
   it("names BOTH gates the owner exception short-circuits", () => {
     // `requireAcceptCompletion` and `requireDecisionAuthority` return on the
-    // same `ownerException` before their role gate (task-actions.server.ts,
+    // same `ownerException` before their role gate (task-action-core.server.ts,
     // R14-2). A line naming only acceptance would have the controller tell a
     // contributor owner "maintainer or admin; ask one" about a packet the task
     // page is showing them live — the false tier explanation this block's

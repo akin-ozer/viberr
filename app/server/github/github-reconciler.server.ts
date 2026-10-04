@@ -134,7 +134,7 @@ import { countLabel } from "~/shared/text/plural";
  * The operator wake a divergence fires: `autoInvokeOperator` narrowed to the
  * triggers this module passes (ruling 475 added `pr-conflicting`, the flip of
  * an open PR to conflicting). Typed here rather than imported so the
- * task-actions dependency stays the runtime-only dynamic import it already is.
+ * task-action-core dependency stays the runtime-only dynamic import it already is.
  */
 export type OperatorWake = (
   db: DatabaseSync,
@@ -1256,9 +1256,7 @@ async function reconcileTaskUnlocked(
       // re-notifies; suppressed on the branch-cleanup re-confirm pass (ruling
       // 136(c)) like the divergence notices.
       if (!ctx.suppressDivergenceNotice) {
-        const { notifyTaskWatchers } = await import(
-          "~/server/tasks/task-actions.server"
-        );
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
           db,
           {
@@ -1367,7 +1365,7 @@ async function reconcileTaskUnlocked(
       // The person the packet asked is told why the question went away, in
       // the inbox the packet reached, before any click can be refused.
       if (!ctx.suppressDivergenceNotice && conflictText) {
-        const { notifyTaskWatchers } = await import("~/server/tasks/task-actions.server");
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
           db,
           {
@@ -1389,9 +1387,8 @@ async function reconcileTaskUnlocked(
       // The task returns to the stage where a verdict can be given (ruling
       // 163's rework route, the authored-drift door), notifies the watchers
       // and wakes the operator below.
-      const { returnChangedRevisionToReview, notifyTaskWatchers } = await import(
-        "~/server/tasks/task-actions.server"
-      );
+      const { returnChangedRevisionToReview } = await import("~/server/tasks/task-delivery.server");
+      const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
       await returnChangedRevisionToReview(
         db,
         { dataRoot: ctx.dataRoot },
@@ -1430,9 +1427,7 @@ async function reconcileTaskUnlocked(
     if (adoptionInput) {
       const adoptedAt = await recordPrAdoption(db, ref, adoptionInput, actor);
       if (!prJustReopened) {
-        const { notifyTaskWatchers } = await import(
-          "~/server/tasks/task-actions.server"
-        );
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
           db,
           {
@@ -1452,8 +1447,9 @@ async function reconcileTaskUnlocked(
       }
     }
     // Notify the task's supervisors (owner + admins/maintainers) so the
-    // divergence reaches an inbox, not just the timeline. Dynamic import keeps
-    // the reconciler free of a static task-actions cycle (mirrors mergeTaskPr).
+    // divergence reaches an inbox, not just the timeline. The import below is
+    // dynamic, but this module already imports task-mutation statically, so it
+    // guards no cycle.
     //
     // P14-GV-09: the accepted-then-closed-externally case is a divergence too —
     // it silently REMOVES the "Complete merge" affordance from an accepted task
@@ -1464,9 +1460,7 @@ async function reconcileTaskUnlocked(
     // The note that says the same thing, in the same order of precedence.
     const noticeAt = divergenceText ? divergenceAt : acceptedClosedText ? acceptedClosedAt : reopenedAt;
     if (noticeText && !ctx.suppressDivergenceNotice) {
-      const { notifyTaskWatchers } = await import(
-        "~/server/tasks/task-actions.server"
-      );
+      const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
       notifyTaskWatchers(
         db,
         {
@@ -1510,7 +1504,7 @@ async function reconcileTaskUnlocked(
     ) {
       const wake =
         ctx.wakeOperator ??
-        (await import("~/server/tasks/task-actions.server")).autoInvokeOperator;
+        (await import("~/server/tasks/task-action-core.server")).autoInvokeOperator;
       void wake(
         db,
         { dataRoot: ctx.dataRoot },
@@ -1526,7 +1520,7 @@ async function reconcileTaskUnlocked(
       // `update_branch_from_base` then hands the conflict to the deliverer.
       const wake =
         ctx.wakeOperator ??
-        (await import("~/server/tasks/task-actions.server")).autoInvokeOperator;
+        (await import("~/server/tasks/task-action-core.server")).autoInvokeOperator;
       void wake(
         db,
         { dataRoot: ctx.dataRoot },

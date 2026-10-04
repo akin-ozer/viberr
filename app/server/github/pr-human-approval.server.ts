@@ -291,7 +291,7 @@ function humanApprovalRefusalNote(fm: {
  * healthy verdict on the delivered revision before a human may accept it.
  *
  * ONE definition, two readers: the runtime acceptance path
- * (`acceptanceRefusalReason`, task-actions.server) and the projection
+ * (`acceptanceRefusalReason`, task-acceptance.server) and the projection
  * (`acceptanceBlockReason`, rebuilder.server) both call this, so the review
  * queue and decisions inbox can never disagree with what the task page will
  * accept. `validation` is passed in — the caller already holds the FRESH

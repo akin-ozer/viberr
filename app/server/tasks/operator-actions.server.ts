@@ -150,22 +150,21 @@ import {
   defaultModelFor,
   resolveRunModel,
 } from "~/server/runtimes/model-catalog.server";
+import { DEFAULT_GOAL } from "./task-edits.server";
+import { RECOMMENDATION_DISMISSED_AUDIT_ACTION } from "./task-recommendations.server";
+import { operatorPromptAgent } from "./agent-completion.server";
+import { transitionStage } from "./task-transitions.server";
+import { performDelivery } from "./task-delivery.server";
 import {
-  DEFAULT_GOAL,
-  OPERATOR_AUDIT_ACTOR,
-  OPERATOR_TASK_ACTOR,
-  RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
   acceptanceTerminallyBlocked,
   mergeReadinessRefusal,
   applyAcceptanceWrite,
-  notifyTaskWatchers,
-  operatorPromptAgent,
-  performDelivery,
   revisionDriftNote,
-  transitionStage,
-  type TaskMutationContext,
-} from "./task-actions.server";
+} from "./task-acceptance.server";
+import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
+import { OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
+import { notifyTaskWatchers, type TaskMutationContext } from "./task-mutation.server";
 import {
   acceptanceNoChangeCheck,
   kbCorrectionsOutcome,

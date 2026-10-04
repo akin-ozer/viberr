@@ -1596,7 +1596,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
    * engagement's posture, not about ownership.
    */
   async function ownFor(key: string): Promise<void> {
-    const { setOwner } = await import("~/server/tasks/task-actions.server");
+    const { setOwner } = await import("~/server/tasks/task-ownership.server");
     await setOwner(
       app.db,
       { projectSlug: "viberr-core", taskKey: key, targetUserId: ids.arda },

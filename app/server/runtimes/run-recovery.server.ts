@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification, taskEventLink } from "~/server/projections/notifications.server";
-import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
+import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import type { runOperator } from "./operator-run.server";
 import { reapRunProcesses, type ReapRunProcesses, compactionRunId } from "./run-processes.server";
 import {
@@ -466,7 +466,7 @@ export function finalizeOrphanedRuns(
           // agent is on it. `clearWaitingToHuman` is a no-op unless the flag is
           // `agent`, and with no packet and a live stage it settles to
           // `human` — which is the truth: nobody is coming until a person acts.
-          const { clearWaitingToHuman } = await import("~/server/tasks/task-actions.server");
+          const { clearWaitingToHuman } = await import("~/server/tasks/agent-completion.server");
           await clearWaitingToHuman(
             db,
             deps.dataRoot ? { dataRoot: deps.dataRoot } : {},
@@ -548,7 +548,7 @@ async function replayInterruptedAgentRun(
   if (!r.profileId) return;
   try {
     const [{ applyAgentCompletionEffects }, { agentMentionHandle }] = await Promise.all([
-      import("~/server/tasks/task-actions.server"),
+      import("~/server/tasks/agent-completion.server"),
       import("~/server/tasks/agent-reply.server"),
     ]);
     await applyAgentCompletionEffects(
@@ -745,7 +745,7 @@ export async function settleAbandonedWaits(
     await Promise.all([
       import("~/server/files/task-writer.server"),
       import("./operator-run.server"),
-      import("~/server/tasks/task-actions.server"),
+      import("~/server/tasks/agent-completion.server"),
     ]);
   const { readTaskFile } = await import("~/server/files/task-writer.server");
   /**
@@ -965,7 +965,7 @@ export async function recoverUnreactedAgentRuns(
 
   const [{ applyAgentCompletionEffects }, { agentMentionHandle, replyTextForRun }] =
     await Promise.all([
-      import("~/server/tasks/task-actions.server"),
+      import("~/server/tasks/agent-completion.server"),
       import("~/server/tasks/agent-reply.server"),
     ]);
 

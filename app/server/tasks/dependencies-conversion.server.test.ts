@@ -19,7 +19,7 @@ import { configureRunServiceForTests } from "~/server/runtimes/run-service.serve
 import { insertRunLine, nextSeq } from "~/server/runtimes/run-store.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.server";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 import { releaseDependents, setTaskDependencies } from "./dependencies.server";
 
 /**

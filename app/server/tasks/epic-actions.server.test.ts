@@ -6,7 +6,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { waitFor } from "../../../test-support/polling";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import type { CreateEpicInput, UpdateEpicInput } from "./epic-actions.server";
-import type { TaskActionContext, TaskActionDeps } from "./task-actions.server";
+import type { TaskActionContext, TaskActionDeps } from "./task-action-core.server";
 import type { TaskActor } from "./task-mutation.server";
 
 /**
@@ -41,7 +41,10 @@ interface People {
 let ids: People;
 
 let epicActions: typeof import("./epic-actions.server");
-let taskActions: typeof import("./task-actions.server");
+let taskAcceptance: typeof import("./task-acceptance.server");
+let taskCore: typeof import("./task-action-core.server");
+let taskEdits: typeof import("./task-edits.server");
+let taskArchive: typeof import("./task-archive.server");
 let epicWriter: typeof import("~/server/files/epic-writer.server");
 let taskWriter: typeof import("~/server/files/task-writer.server");
 let projectWriter: typeof import("~/server/files/project-writer.server");
@@ -62,7 +65,10 @@ beforeAll(async () => {
     role: "member",
   });
   epicActions = await import("./epic-actions.server");
-  taskActions = await import("./task-actions.server");
+  taskAcceptance = await import("./task-acceptance.server");
+  taskCore = await import("./task-action-core.server");
+  taskEdits = await import("./task-edits.server");
+  taskArchive = await import("./task-archive.server");
   epicWriter = await import("~/server/files/epic-writer.server");
   taskWriter = await import("~/server/files/task-writer.server");
   projectWriter = await import("~/server/files/project-writer.server");
@@ -123,7 +129,7 @@ function move(
 }
 
 async function newTask(title: string): Promise<string> {
-  const { key } = await taskActions.createTask(app.db, { projectSlug: SLUG, title }, actor("arda"), ctx());
+  const { key } = await taskEdits.createTask(app.db, { projectSlug: SLUG, title }, actor("arda"), ctx());
   return key;
 }
 
@@ -349,7 +355,7 @@ describe("ruling 503(a): createEpic", () => {
     // `withEpicsLock` (the refused epic's file stays behind).
     const member = await newTask("Would-be member");
     const archived = await newTask("Archived would-be member");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: archived, archived: true },
       actor("arda"),
@@ -621,7 +627,7 @@ describe("ruling 503(b): setTasksEpic, the one writer of a task's epic", () => {
     // write loop (the batch's first task moves before the bad key is met).
     const live = await newTask("Live candidate");
     const archived = await newTask("Archived candidate");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: archived, archived: true },
       actor("arda"),
@@ -752,7 +758,7 @@ describe("ruling 503(b): setTasksEpic, the one writer of a task's epic", () => {
     // account instead of "The operator").
     const task = await newTask("Operator's task");
     const id = await newEpic("selin", { title: "Operator home" });
-    const result = await move([task], id, taskActions.OPERATOR_TASK_ACTOR, { operator: true });
+    const result = await move([task], id, taskCore.OPERATOR_TASK_ACTOR, { operator: true });
     expect(result.changed).toEqual([{ taskKey: task, from: null, to: id }]);
     expect(history(id)[0]).toBe(`The operator added ${task}.`);
     expect(epicNotes(task)[0]).toMatchObject({
@@ -837,7 +843,7 @@ describe("ruling 503(c): who may", () => {
       frozen("put tasks in an epic"),
     );
     await expect(
-      move(["DEP-31"], epic.id, taskActions.OPERATOR_TASK_ACTOR, { slug: DEPLOY, operator: true }),
+      move(["DEP-31"], epic.id, taskCore.OPERATOR_TASK_ACTOR, { slug: DEPLOY, operator: true }),
     ).rejects.toMatchObject(frozen("put tasks in an epic"));
     expect(epicWriter.listEpicIds(DEPLOY, app.dataRoot)).toEqual([epic.id]);
     expect(
@@ -856,7 +862,7 @@ describe("ruling 503(b): a task born in an epic", () => {
     // CANARY: leave `epic` out of the frontmatter createTask writes (the note
     // says it joined; the task is in none).
     const id = await newEpic("selin", { title: "Nursery" });
-    const { key } = await taskActions.createTask(
+    const { key } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "Born in an epic", epic: ` ${id} ` },
       actor("selin"),
@@ -878,7 +884,7 @@ describe("ruling 503(b): a task born in an epic", () => {
   it("the epic's history and its lead hear of a task made in it, as of one added later", async () => {
     // CANARY: drop the `noteTaskMadeInEpic` call from createTask.
     const id = await newEpic("selin", { title: "Nursery wing", leadUserId: ids.murat });
-    const { key } = await taskActions.createTask(
+    const { key } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "Made in the wing", epic: id },
       actor("selin"),
@@ -889,7 +895,7 @@ describe("ruling 503(b): a task born in an epic", () => {
     // The person who made it is not told of their own act.
     expect(notices("selin", id)).toEqual([]);
     // Made by the lead: the history still says so, and nobody is told.
-    const { key: own } = await taskActions.createTask(
+    const { key: own } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "The lead's own", epic: id },
       actor("murat"),
@@ -912,11 +918,11 @@ describe("ruling 503(b): a task born in an epic", () => {
     const before = nextNumber();
     for (const epic of ["epic-99999", "goal-2"]) {
       await expect(
-        taskActions.createTask(app.db, { projectSlug: SLUG, title: "Orphan", epic }, actor("selin"), ctx()),
+        taskEdits.createTask(app.db, { projectSlug: SLUG, title: "Orphan", epic }, actor("selin"), ctx()),
       ).rejects.toMatchObject({ status: 404, userMessage: NOT_AN_EPIC(epic) });
     }
     expect(nextNumber()).toBe(before);
-    const { key } = await taskActions.createTask(
+    const { key } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "Next in line" },
       actor("selin"),
@@ -939,7 +945,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
 
   /** The last open task reaches the terminal stage: an admin's acceptance. */
   async function accept(taskKey: string): Promise<void> {
-    await taskActions.forceAcceptCompletion(app.db, { projectSlug: SLUG, taskKey }, actor("arda"), ctx());
+    await taskAcceptance.forceAcceptCompletion(app.db, { projectSlug: SLUG, taskKey }, actor("arda"), ctx());
   }
 
   function allDoneLines(epicId: string): string[] {
@@ -987,7 +993,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
     const { id, done, open } = await epicWithOneTaskLeft("Tidied up");
     await accept(open);
     await waitFor(() => allDoneNotices(id).length === 1, "the lead's all-done notice");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: done, archived: true },
       actor("arda"),
@@ -1034,7 +1040,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
   it("says it when the only open task is archived", async () => {
     // CANARY: drop the `maybeNoteEpicComplete` call from setTaskArchived.
     const { id, open } = await epicWithOneTaskLeft("Abandoned tail");
-    await taskActions.setTaskArchived(
+    await taskArchive.setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: open, archived: true },
       actor("arda"),

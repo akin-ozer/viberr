@@ -28,12 +28,9 @@ import {
   operatorPostComment,
   resolveOperatorAuthority,
 } from "./operator-actions.server";
-import {
-  appendComment,
-  operatorPromptAgent,
-  postAgentReplyComment,
-  recordAgentCompletion,
-} from "./task-actions.server";
+import { appendComment } from "./task-comments.server";
+import { operatorPromptAgent, recordAgentCompletion } from "./agent-completion.server";
+import { postAgentReplyComment } from "./task-replies.server";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 
@@ -982,14 +979,18 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * `comment` timeline event: a new one fails here until its author both wires
    * the fan-out and adds a row above.
    *
-   * `task-actions.server.ts` has 4 sites serving 4 writers — `postAgentReplyComment`
-   * and `recordAgentCompletion` share `prepareAgentReplyEvent`'s single
-   * construction and fan out separately, which is exactly why site count and
-   * writer count are pinned apart, and its fourth site announces ruling 237's
-   * deadlock packet (see `SITES_WITHOUT_MENTIONS`).
+   * The task actions (split into families by ruling 654) have 4 sites serving
+   * 4 writers: `postAgentReplyComment` and `recordAgentCompletion` share
+   * `prepareAgentReplyEvent`'s single construction (task-replies) and fan out
+   * separately, which is exactly why site count and writer count are pinned
+   * apart; `appendComment` and `operatorPromptAgent` write their own; and agent
+   * completion's other site announces ruling 237's deadlock packet (see
+   * `SITES_WITHOUT_MENTIONS`).
    */
   const COMMENT_WRITER_SITES = {
-    "server/tasks/task-actions.server.ts": 4,
+    "server/tasks/task-comments.server.ts": 1,
+    "server/tasks/agent-completion.server.ts": 2,
+    "server/tasks/task-replies.server.ts": 1,
     "server/tasks/operator-actions.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
     // Ruling 488: the relay's comment on the target task; ruling 557: the
@@ -1011,8 +1012,8 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * Ruling 237's deadlock announcement is the only one: the text is built from
    * a constant and the packet title, and the packet is announced to people
    * through `notifyTaskWatchers` in the same breath. Per FILE is the wrong
-   * granularity for it — `task-actions.server.ts` fans out on three other
-   * sites, and exempting the file would stop checking them.
+   * granularity for it — `agent-completion.server.ts` fans out on its other
+   * site, and exempting the file would stop checking it.
    */
   const SITES_WITHOUT_MENTIONS = 1;
 

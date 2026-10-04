@@ -77,7 +77,7 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
   (`reprojectTask`, `rebuildPath`); never write a projection row without file backing.
 - **Every governed action** records audit (`recordAudit`) and, when user-visible, a
   typed timeline event. Add the action to the table in `audit-coverage.server.test.ts`.
-- **Authorization** is `requireAction(...)` (`app/server/tasks/task-actions.server.ts`,
+- **Authorization** is `requireAction(...)` (`app/server/tasks/task-action-core.server.ts`,
   through `requireProjectAuthority`) against `app/shared/rbac.ts` for humans, and the
   operator/specialist gates against `app/shared/capabilities.ts` for agents. Never
   duplicate a role check inline.

@@ -307,7 +307,7 @@ export function HumanAccess({
               contributor who owns a task{" "}
               <strong>may accept its completion</strong>, and{" "}
               {/* N20-7: the owner exception covered acceptance but not the
-                  operator's other packet options — task-actions.server.ts lets
+                  operator's other packet options — packet-resolution.server.ts lets
                   an owner resolve the non-acceptance options too, an authority
                   no surface stated. */}
               <strong>

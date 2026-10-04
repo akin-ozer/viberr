@@ -62,7 +62,7 @@ import {
   spliceStageIntoChain,
 } from "~/shared/workflow/transitions";
 import { countLiveAdmins, removedAccountLabel } from "./membership.server";
-import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
+import { releaseTasksOwnedBy } from "~/server/tasks/task-ownership.server";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
 import {
   resolveRequiredReviewers,

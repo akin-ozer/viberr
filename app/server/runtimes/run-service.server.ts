@@ -170,9 +170,9 @@ interface ServiceState {
   /**
    * In-process run-completion callbacks keyed by run id. `launch()`'s onExit
    * invokes the callback (after `sink.finalize`) with the finished run row,
-   * then deletes it. This is how task-actions posts an agent's reply back as
-   * a comment when a resumed/started reply run finishes — run-service stays
-   * decoupled (it invokes an OPAQUE callback and never imports task-actions).
+   * then deletes it. This is how agent-completion posts an agent's reply back
+   * as a comment when a resumed/started reply run finishes — run-service stays
+   * decoupled (it invokes an OPAQUE callback and never imports agent-completion).
    *
    * CAVEAT: callbacks live only in this process. A server restart mid-run
    * loses the pending callback, so the reply comment is not posted for a run
@@ -2553,7 +2553,7 @@ function launch(
         });
       }
       // Fire a one-shot completion callback (opaque to run-service — the
-      // reply-comment wiring lives in task-actions). Reads the finalized row
+      // reply-comment wiring lives in agent-completion). Reads the finalized row
       // so the callback sees the terminal state + folded session/usage facts.
       const cb = state.completions.get(spec.runId);
       if (cb) {

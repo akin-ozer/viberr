@@ -60,11 +60,11 @@ describe("notification routing — the pass-34 kinds", () => {
 describe("each toggle names what its writers send (ruling 481)", () => {
   const WRITERS: { writer: string; kind: NotificationKind; names: RegExp[] }[] = [
     // agent-toolkit.server.ts `openAgentQuestionPacket` (Claude `ask_human`)
-    // and task-actions.server.ts's Codex outcome-envelope question.
+    // and agent-completion.server.ts's Codex outcome-envelope question.
     { writer: "an agent's question", kind: "question", names: [/agent/i, /question/i] },
     // operator-actions.server.ts: `Operator recommends: <label>`.
     { writer: "the operator's recommendation", kind: "approval", names: [/recommendations/i] },
-    // task-actions.server.ts: `Next step recorded: <label>` after a delivery.
+    // task-delivery.server.ts: `Next step recorded: <label>` after a delivery.
     { writer: "the delivery's next step", kind: "approval", names: [/next step/i, /delivery/i] },
     // operator-actions.server.ts `operatorOpenPacket`, blocked and input.
     { writer: "a blocked operator packet", kind: "packet", names: [/blocked/i] },

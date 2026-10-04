@@ -182,7 +182,7 @@ export type PushWorkspaceResult =
        *  evidence of the former. Absent means "not verified" here too. */
       defaultBranchEvidence?: DefaultBranchEvidence;
       /** F19-18: declared here too so a caller narrowed to the combined
-       *  `push_failed | no_pat` failure block (task-actions `performDelivery`)
+       *  `push_failed | no_pat` failure block (task-delivery `performDelivery`)
        *  can read git's excerpt across the union. Only `push_failed` ever
        *  populates it; on this family it is always absent. */
       stderrExcerpt?: string;

@@ -48,15 +48,15 @@ import { relayToTask, takeFromTask, type RelayAuthor } from "./task-relay.server
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
+import { acceptanceRefusalFor } from "./task-acceptance.server";
 import {
-  acceptanceRefusalFor,
   applyAgentCompletionEffects,
-  attachTaskFile,
   classifyReviewerVerdict,
   markWaitingAgent,
-  OPERATOR_REACT_HOP_CEILING,
-  resolvePacket,
-} from "./task-actions.server";
+} from "./agent-completion.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { attachTaskFile } from "./task-edits.server";
+import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
 import {
   assignReviewer,
   startAgentRun,
@@ -1953,8 +1953,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // an authoring guard the same way.
     writeReviewTask({ validation: "changed" });
     const runId = await finishedRunWith("The credential was rejected again.");
-    const { openStuckLoopPacketForTest } = await import("./task-actions.server");
-    await openStuckLoopPacketForTest(
+    const { openStuckLoopPacket } = await import("./task-escalations.server");
+    await openStuckLoopPacket(
       store.db,
       { dataRoot: store.dataRoot, operatorAuthorized: true },
       {
@@ -3303,7 +3303,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await review(blocks(3));
       expect(taskFile().parsed.packet?.title).toBe("Which of the two contracts wins?");
 
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         {
@@ -3443,7 +3443,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             .get(store.slug) as { n: number }
         ).n;
       const before = runCount();
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -3580,7 +3580,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         "No verdict recorded - the directive said not to return one. " +
         "The five prettier-failing markdown files fail identically on the base commit, " +
         "so that is not a blocker I would raise.";
-      const { classifyReviewerVerdict } = await import("./task-actions.server");
+      const { classifyReviewerVerdict } = await import("./agent-completion.server");
       // The classifier really does read this as an objection; the guard is what
       // stops it, not a kinder regex.
       expect(classifyReviewerVerdict(answer)).toBe("request_changes");
@@ -3643,7 +3643,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await review(blocks(1));
       await review(blocks(2));
       await review(blocks(3));
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       // Longer than the old silent cap, shorter than the refusal — the exact
       // band SHOP-76's decision fell into.
       const long = `HEAD ${"x".repeat(2600)} TAIL`;
@@ -3669,7 +3669,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await review(blocks(1));
       await review(blocks(2));
       await review(blocks(3));
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
       const before = taskFile().parsed.timeline.length;
       await expect(
@@ -3720,7 +3720,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             .get(store.slug) as { n: number }
         ).n;
       const before = runCount();
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },

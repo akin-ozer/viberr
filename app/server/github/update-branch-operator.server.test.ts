@@ -28,7 +28,8 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { MERGE_STAGE_BOARD, REVIEW_STAGE_REVIEWER, writeProject } from "../../../test-support/test-store";
 import { operatorSnapshot, type OperatorAuthority } from "~/server/tasks/operator-actions.server";
-import { performDelivery, type TaskActionDeps } from "~/server/tasks/task-actions.server";
+import { performDelivery } from "~/server/tasks/task-delivery.server";
+import type { TaskActionDeps } from "~/server/tasks/task-action-core.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
   operatorUpdateBranchFromBase,

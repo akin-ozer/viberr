@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";

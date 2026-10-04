@@ -22,14 +22,11 @@ import {
   resolveScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
-import {
-  appendComment,
-  createTask,
-  releaseOwner,
-  resolvePacket,
-  setOwner,
-  transitionStage,
-} from "~/server/tasks/task-actions.server";
+import { appendComment } from "~/server/tasks/task-comments.server";
+import { resolvePacket } from "~/server/tasks/packet-resolution.server";
+import { transitionStage } from "~/server/tasks/task-transitions.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
+import { createTask } from "~/server/tasks/task-edits.server";
 import {
   interruptRun,
   startRun,
@@ -385,7 +382,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         action: "task.hold.lifted",
         taskKey: "VIB-1",
         run: async () => {
-          const { liftHoldForRun } = await import("~/server/tasks/task-actions.server");
+          const { liftHoldForRun } = await import("~/server/tasks/agent-completion.server");
           const { updateTaskFile } = await import("~/server/files/task-writer.server");
           await updateTaskFile(
             { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
@@ -1171,7 +1168,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         action: "task.gates.requested",
         taskKey: "VIB-2",
         run: async () => {
-          const { runProjectGatesByHand } = await import("~/server/tasks/task-actions.server");
+          const { runProjectGatesByHand } = await import("~/server/tasks/task-delivery.server");
           await runProjectGatesByHand(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-2" },

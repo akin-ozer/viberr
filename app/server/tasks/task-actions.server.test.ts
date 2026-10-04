@@ -38,38 +38,30 @@ import {
   attachmentProducers,
   getTaskDetail,
 } from "~/server/projections/task-query.server";
+import { runOutcomeClause, OPERATOR_TASK_ACTOR } from "./task-action-core.server";
+import { appendComment, commentToAgent } from "./task-comments.server";
+import { packetIdentity, resolvePacket } from "./packet-resolution.server";
 import {
-  runOutcomeClause,
-  appendComment,
   classifyReviewerVerdict,
-  createTask,
-  DEFAULT_GOAL,
   operatorPromptAgent,
-  packetIdentity,
-  postAgentReplyComment,
   recordAgentCompletion,
-  releaseOwner,
-  releaseTasksOwnedBy,
-  setOwner,
   clearWaitingToHuman,
-  manualDeliverForReview,
-  performDelivery,
-  revisionDriftNote,
-  specialistReplyDirective,
-  transitionStage,
-  refreshAndReview,
-  acceptanceDisclosureOf,
-  applyRecommendation,
-  commentToAgent,
-  forceAcceptCompletion,
   liftHoldForRun,
   liftStageHoldForPerson,
-  OPERATOR_TASK_ACTOR,
-  reorderTask,
-  resolvePacket,
-  updateTaskGoal,
-} from "./task-actions.server";
-import type { TaskActionDeps } from "./task-actions.server";
+} from "./agent-completion.server";
+import { applyRecommendation } from "./task-recommendations.server";
+import { transitionStage, reorderTask } from "./task-transitions.server";
+import { manualDeliverForReview, performDelivery } from "./task-delivery.server";
+import {
+  revisionDriftNote,
+  refreshAndReview,
+  acceptanceDisclosureOf,
+  forceAcceptCompletion,
+} from "./task-acceptance.server";
+import { releaseOwner, releaseTasksOwnedBy, setOwner } from "./task-ownership.server";
+import { createTask, DEFAULT_GOAL, updateTaskGoal } from "./task-edits.server";
+import { postAgentReplyComment, specialistReplyDirective } from "./task-replies.server";
+import type { TaskActionDeps } from "./task-action-core.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
@@ -93,7 +85,7 @@ import {
   type FakeGithub,
 } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 let github: FakeGithub | null = null;
@@ -6264,9 +6256,9 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
  * is the "read this before you act" block, so the lease belongs in it.
  */
 describe("ruling 245: the canonical anchor names the files another task owns", () => {
-  let canonicalTaskAnchorFn: typeof import("./task-actions.server").canonicalTaskAnchor;
+  let canonicalTaskAnchorFn: typeof import("./task-replies.server").canonicalTaskAnchor;
   beforeEach(async () => {
-    canonicalTaskAnchorFn = (await import("./task-actions.server")).canonicalTaskAnchor;
+    canonicalTaskAnchorFn = (await import("./task-replies.server")).canonicalTaskAnchor;
   });
   const anchorFor = (key: string, leases: { paths: string[]; taskKey: string; reason: string }[]) =>
     canonicalTaskAnchorFn({

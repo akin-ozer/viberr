@@ -5123,7 +5123,7 @@ describe("runOperator — authority, ordering, orphans", () => {
       });
       writeTask(store5.dataRoot, store5.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl" }) });
       rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
-      const { resolvePacket } = await import("~/server/tasks/task-actions.server");
+      const { resolvePacket } = await import("~/server/tasks/packet-resolution.server");
       await resolvePacket(
         store5.db,
         { projectSlug: store5.slug, taskKey: "VIB-1", optionIndex: 0, ack: null },
@@ -5838,9 +5838,9 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
   };
 
   it("refuses the link that would REACH the cap — the same comparison the transition side makes", async () => {
-    const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
-      "~/server/tasks/task-actions.server"
-    );
+    const {
+      OPERATOR_TRANSITION_CHAIN_CAP,
+    } = await import("~/server/tasks/task-action-core.server");
     // depth + 1 === CAP. `transitionStage` stops here (`chainDepth >= CAP`);
     // this side used `>`, so it granted a 9th consecutive link.
     await driveAtDepth(OPERATOR_TRANSITION_CHAIN_CAP - 1);
@@ -5859,9 +5859,9 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
   });
 
   it("still resumes one link below the cap", async () => {
-    const { OPERATOR_TRANSITION_CHAIN_CAP } = await import(
-      "~/server/tasks/task-actions.server"
-    );
+    const {
+      OPERATOR_TRANSITION_CHAIN_CAP,
+    } = await import("~/server/tasks/task-action-core.server");
     await driveAtDepth(OPERATOR_TRANSITION_CHAIN_CAP - 2);
     await eventually(() => {
       expect(runs()).toHaveLength(2);

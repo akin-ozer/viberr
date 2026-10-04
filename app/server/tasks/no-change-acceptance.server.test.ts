@@ -23,13 +23,10 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { NO_REVIEW_SUBJECT, upsertRun } from "~/server/runtimes/run-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  forceAcceptCompletion,
-  recordAgentCompletion,
-  acceptanceStanding,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
+import { recordAgentCompletion } from "./agent-completion.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { transitionStage } from "./task-transitions.server";
 import {
   operatorAcceptCompletion,
   operatorSnapshot,
@@ -281,7 +278,7 @@ beforeEach(() => {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
   vi.clearAllMocks();
   // SAFETY: every consumer of a merge result switches on `status` and reads
-  // only the fields of the arm it lands in (task-actions.server.ts) — the
+  // only the fields of the arm it lands in (task-acceptance.server.ts) — the
   // `no_pr` arm's `taskKey` is never read, so it is left off deliberately: the
   // no-merge case below compares this whole recorded value.
   mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);

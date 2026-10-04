@@ -17,7 +17,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { getBoardWithTasks, listProjects } from "~/server/projections/board-query.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
-import { createTask } from "~/server/tasks/task-actions.server";
+import { createTask } from "~/server/tasks/task-edits.server";
 import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
 /**

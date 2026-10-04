@@ -39,13 +39,9 @@ import {
   requestProjectGates,
   whenProjectGatesIdle,
 } from "./project-gates.server";
-import {
-  forceAcceptCompletion,
-  performDelivery,
-  acceptanceStanding,
-  runProjectGatesByHand,
-  transitionStage,
-} from "./task-actions.server";
+import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
+import { performDelivery, runProjectGatesByHand } from "./task-delivery.server";
+import { transitionStage } from "./task-transitions.server";
 
 /**
  * Ruling 482 (pass 40, F40-52): Viberr runs the project's gates itself.

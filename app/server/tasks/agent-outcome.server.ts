@@ -24,7 +24,7 @@ import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
  *            (the codex SDK has no tool-deny/MCP-credential channel — same
  *            pattern as the operator's plan schema).
  *
- * The completion pipeline (task-actions applyAgentCompletionEffects) resolves
+ * The completion pipeline (agent-completion applyAgentCompletionEffects) resolves
  * ONE envelope per finished run — staged tool call first, then a parsed Codex
  * reply — and applies it atomically with the agent's reply comment. A
  * verdict-GRANTED agent that emitted no envelope verdict falls back to the
@@ -602,7 +602,7 @@ export function resolveAgentCollab(
  * `TaskPacket.kind` is free text (a display label), but THIS value is
  * load-bearing: packet resolution reads `packet.askedBy` and routes the human's
  * answer back to the asking agent only when the kind matches exactly
- * (`resolvePacket`, task-actions.server.ts). It was an untyped English literal
+ * (`resolvePacket`, packet-resolution.server.ts). It was an untyped English literal
  * duplicated at the writer and the reader, so renaming the label here would
  * have silently re-routed every agent answer to the operator instead. Written
  * once, next to the writer that stamps it.

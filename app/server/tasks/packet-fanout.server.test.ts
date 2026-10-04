@@ -10,7 +10,7 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import type { PacketOption, TaskPacket } from "~/schemas/task-file.schema";
-import { resolvePacket } from "./task-actions.server";
+import { resolvePacket } from "./packet-resolution.server";
 import {
   causeFanOutDisclosure,
   fanOutOutcomeText,

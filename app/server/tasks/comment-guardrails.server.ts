@@ -1,5 +1,5 @@
 import { readProjectFile } from "~/server/files/project-writer.server";
-import type { TaskMutationContext } from "./task-actions.server";
+import type { TaskMutationContext } from "./task-mutation.server";
 import { DEFAULT_COMPACTION, type CompactionOptions } from "./timeline-compaction.server";
 
 /**

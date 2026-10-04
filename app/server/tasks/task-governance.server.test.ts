@@ -32,17 +32,12 @@ import { setupProjectedStore } from "../../../test-support/projected-store";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
-import {
-  classifyReviewerVerdict,
-  completeTaskMerge,
-  forceAcceptCompletion,
-  recordAgentCompletion,
-  reorderTask,
-  resolvePacket,
-  setTaskArchived,
-  transitionStage,
-  updateTaskGoal,
-} from "./task-actions.server";
+import { classifyReviewerVerdict, recordAgentCompletion } from "./agent-completion.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { reorderTask, transitionStage } from "./task-transitions.server";
+import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
+import { setTaskArchived } from "./task-archive.server";
+import { updateTaskGoal } from "./task-edits.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { resolveRemoteBranchCollision } from "~/server/github/github-reconciler.server";
 
@@ -2584,7 +2579,7 @@ describe("resolvePacket kind matrix", () => {
       { stage: "review", waiting: "human", ownerUserId: store.users.selin.id },
       STRANDED_PACKET,
     );
-    const { requestPacketMaintainerDecision } = await import("./task-actions.server");
+    const { requestPacketMaintainerDecision } = await import("./packet-resolution.server");
     const res = await requestPacketMaintainerDecision(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", note: "please archive this" },
@@ -2617,7 +2612,7 @@ describe("resolvePacket kind matrix", () => {
       { stage: "review", waiting: "human", ownerUserId: store.users.murat.id },
       STRANDED_PACKET,
     );
-    const { requestPacketMaintainerDecision } = await import("./task-actions.server");
+    const { requestPacketMaintainerDecision } = await import("./packet-resolution.server");
     await expect(
       requestPacketMaintainerDecision(
         store.db,
@@ -3875,7 +3870,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   it("ruling 295: a rename writes the title and records BOTH, so old references still join", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
-    const { updateTaskTitle } = await import("./task-actions.server");
+    const { updateTaskTitle } = await import("./task-edits.server");
     // CANARY: drop the writer and the board keeps a title its own goal disproved.
     const { changed } = await updateTaskTitle(
       store.db,
@@ -3911,7 +3906,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
-    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-actions.server");
+    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-edits.server");
     const current = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",

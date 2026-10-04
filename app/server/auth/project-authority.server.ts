@@ -130,7 +130,7 @@ function shouldRecordOnce(db: DatabaseSync, key: string, now: number): boolean {
  * audit stay readable. Throws a 409 with actionable copy. The ONE exemption is
  * the restore action itself (setProjectArchived passes `allowArchived`), so an
  * archived project can be brought back. Reads never call this. This is the
- * SINGLE implementation — `requireAction` (task-actions), `assertProjectAction`
+ * SINGLE implementation — `requireAction` (task-action-core), `assertProjectAction`
  * (config surfaces) and the explicit comment-path call all share it.
  */
 export function requireProjectMutable(
@@ -249,7 +249,7 @@ export function resolveProjectAuthority(
 /**
  * Throwing wrapper over {@link resolveProjectAuthority} with the canonical
  * task-guard 403 copy ("Only project members can …" / "Your project role (x)
- * cannot …"). Used by the task-actions guards and every inline runtime check.
+ * cannot …"). Used by the task-action-core guards and every inline runtime check.
  */
 export function requireProjectAuthority(
   db: DatabaseSync,
@@ -273,7 +273,7 @@ export function requireProjectAuthority(
 /**
  * The `run-agents` authority check (start/interrupt runs, @mention triggers),
  * centralized so the action id + audit copy live in ONE place. The runtime call
- * sites — @mention trigger (task-actions), specialist/reviewer dispatch
+ * sites — @mention trigger (task-comments), specialist/reviewer dispatch
  * (specialist-run), interrupt (run-service), run-operator (route) — each build
  * the `memberRoles` map from wherever they have it (file store or DB projection)
  * and delegate the tier + audit here (pass-8 rbac-audit §4g dedup). Throws on

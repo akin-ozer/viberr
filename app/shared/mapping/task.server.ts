@@ -311,7 +311,7 @@ export interface TaskSummary {
    * F19-27 — does this task stand where a completion may be accepted FROM?
    *
    * The STAGE gate, and only that: `acceptanceStageBlockedReason`
-   * (task-actions.server.ts) is the one acceptance refusal `blockReason` above
+   * (task-acceptance.server.ts) is the one acceptance refusal `blockReason` above
    * deliberately leaves out (see `acceptanceBlockReason`, rebuilder.server.ts),
    * because it turns on the PROJECT's workflow graph rather than anything in the
    * task file. So a board drag from the entry stage straight into the terminal
@@ -527,7 +527,7 @@ export function mapPrMergeable(pr: PrRef | null): PrMergeable | null {
 
 /**
  * F19-27 — the client-answerable half of `acceptanceStageBlockedReason`
- * (task-actions.server.ts): may a completion be accepted FROM `stageId`? It is
+ * (task-acceptance.server.ts): may a completion be accepted FROM `stageId`? It is
  * the server's own predicate (`canAcceptFromStage`), projected so the board
  * can answer it without the graph, so the two cannot drift.
  */
@@ -626,7 +626,7 @@ function mapOperatorRef(
  *    stored fact that an agent — not a human — is the task's next actor, and
  *    the same task actions that hand work to an agent write the pair together
  *    (`fm.waiting = "agent"; fm.readiness = "ready"` — retry-on-other-backend,
- *    re-engage-specialist, unblock-on-policy in task-actions.server.ts). So the
+ *    re-engage-specialist, unblock-on-policy in packet-resolution.server.ts). So the
  *    readiness slot claimed a state the run contradicted:
  *      · `input_required` claimed a human was needed RIGHT NOW — the case the
  *        owner reported, fixed by R21-8;

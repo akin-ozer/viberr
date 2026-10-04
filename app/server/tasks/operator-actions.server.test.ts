@@ -44,16 +44,15 @@ import {
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   RECOMMENDATION_DECLINED_TITLE,
-  applyAcceptanceWrite,
   applyRecommendation,
-  createTask,
   dismissRecommendation,
-  resolvePacket,
-  setTaskArchived,
-  transitionStage,
-  updateTaskGoal,
-  type TaskActionContext,
-} from "./task-actions.server";
+} from "./task-recommendations.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { transitionStage } from "./task-transitions.server";
+import { applyAcceptanceWrite } from "./task-acceptance.server";
+import { setTaskArchived } from "./task-archive.server";
+import { createTask, updateTaskGoal } from "./task-edits.server";
+import type { TaskActionContext } from "./task-action-core.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
@@ -1665,7 +1664,7 @@ describe("operatorDispatchAgent — the prompt hand-off", () => {
 
 describe("operatorShouldReactToReply (no-progress guard)", () => {
   it("reacts only to a finished run with a NEW, non-empty report within the depth cap", async () => {
-    const { operatorShouldReactToReply } = await import("./task-actions.server");
+    const { operatorShouldReactToReply } = await import("./task-action-core.server");
     // Happy path: finished, a fresh report, first-time reply, depth 0.
     expect(operatorShouldReactToReply("finished", "implemented X, tests pass", null, 0)).toBe(true);
     expect(operatorShouldReactToReply("finished", "round two — different result", "round one", 1)).toBe(true);
@@ -1687,9 +1686,10 @@ describe("operatorShouldReactToReply (no-progress guard)", () => {
 
 describe("operator transition chain (P11-70 runaway backstop)", () => {
   it("human transitions restart the chain at 0; operator ones extend the drive's depth", async () => {
-    const { nextTransitionChainDepth, OPERATOR_TRANSITION_CHAIN_CAP } = await import(
-      "./task-actions.server"
-    );
+    const {
+      nextTransitionChainDepth,
+      OPERATOR_TRANSITION_CHAIN_CAP,
+    } = await import("./task-action-core.server");
     expect(nextTransitionChainDepth({})).toBe(0); // human-authored
     expect(nextTransitionChainDepth({ operatorAuthorized: true })).toBe(1); // first link
     const drive = (transitionDepth: number) => ({
@@ -1711,9 +1711,10 @@ describe("operator transition chain (P11-70 runaway backstop)", () => {
   it("at the cap, the transition lands but coordination pauses on a stuck-loop packet", async () => {
     deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("triage");
-    const { OPERATOR_TASK_ACTOR, OPERATOR_TRANSITION_CHAIN_CAP } = await import(
-      "./task-actions.server"
-    );
+    const {
+      OPERATOR_TASK_ACTOR,
+      OPERATOR_TRANSITION_CHAIN_CAP,
+    } = await import("./task-action-core.server");
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
@@ -1741,7 +1742,7 @@ describe("operator transition chain (P11-70 runaway backstop)", () => {
   it("below the cap, the transition opens no stuck-loop packet", async () => {
     deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("triage");
-    const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
+    const { OPERATOR_TASK_ACTOR } = await import("./task-action-core.server");
     await transitionStage(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready" },
@@ -1826,7 +1827,7 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
       dataRoot: store.dataRoot,
     });
 
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const res = await commentToAgent(
       store.db,
       {
@@ -1888,7 +1889,7 @@ describe("operator single-flight lease + coalesce-queue (A5/A6)", () => {
     );
     resetOperatorLeasesForTests();
 
-    const { commentToAgent } = await import("./task-actions.server");
+    const { commentToAgent } = await import("./task-comments.server");
     const res = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@operator can you summarize?" },
@@ -2972,7 +2973,7 @@ describe("operatorAcceptCompletion", () => {
         title: "Rewrite the goal instead",
         goalDraft: "Ship the cron job. Done when its gates pass on the branch.",
       });
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
@@ -3024,7 +3025,7 @@ describe("operatorAcceptCompletion", () => {
       await offerRead(["VIB-1"], "full");
       expect((await accept("full", callCtx)).outcome).toBe("noop");
 
-      const { resolvePacket } = await import("./task-actions.server");
+      const { resolvePacket } = await import("./packet-resolution.server");
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -6278,7 +6279,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       },
       authority("full"),
     );
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     const before = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(before.packet?.awaiting).toBeNull();
     await resolvePacket(

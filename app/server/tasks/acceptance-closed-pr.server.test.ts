@@ -18,12 +18,9 @@ import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  forceAcceptCompletion,
-  acceptanceStanding,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { transitionStage } from "./task-transitions.server";
 import {
   operatorAcceptCompletion,
   operatorSnapshot,

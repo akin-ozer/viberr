@@ -38,7 +38,7 @@ describe("ruling 329: what a deadlock option writes into the goal", () => {
   });
 
   it("holds every goal-amending option to contract language, not dialog language", async () => {
-    const { PROCESS_ONLY_OPTION_KINDS } = await import("./task-actions.server");
+    const { PROCESS_ONLY_OPTION_KINDS } = await import("./packet-resolution.server");
     // The kinds that END the task never amend either (`acceptsInto`, force_accept).
     const amends = packet.options.filter(
       (o) => !PROCESS_ONLY_OPTION_KINDS.has(o.kind) && o.kind !== "force_accept",

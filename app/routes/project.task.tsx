@@ -38,26 +38,29 @@ import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
-  appendComment,
-  commentToAgent,
-  completeTaskMerge,
   dismissRecommendation,
-  forceAcceptCompletion,
-  manualDeliverForReview,
-  runProjectGatesByHand,
-  refreshAndReview,
-  releaseOwner,
+} from "~/server/tasks/task-recommendations.server";
+import { appendComment, commentToAgent } from "~/server/tasks/task-comments.server";
+import {
   requestPacketMaintainerDecision,
-  acceptanceStanding,
   resolvePacket,
-  setOwner,
+} from "~/server/tasks/packet-resolution.server";
+import { transitionStage } from "~/server/tasks/task-transitions.server";
+import { manualDeliverForReview, runProjectGatesByHand } from "~/server/tasks/task-delivery.server";
+import {
+  completeTaskMerge,
+  forceAcceptCompletion,
+  refreshAndReview,
+  acceptanceStanding,
+} from "~/server/tasks/task-acceptance.server";
+import { setTaskArchived } from "~/server/tasks/task-archive.server";
+import { releaseOwner, setOwner } from "~/server/tasks/task-ownership.server";
+import {
   attachTaskFile,
   removeTaskAttachment,
-  setTaskArchived,
   setTaskMetadata,
-  transitionStage,
   updateTaskGoal,
-} from "~/server/tasks/task-actions.server";
+} from "~/server/tasks/task-edits.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { setTasksEpic } from "~/server/tasks/epic-actions.server";
 import { listEpicChips } from "~/server/projections/epic-query.server";

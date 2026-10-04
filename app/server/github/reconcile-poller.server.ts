@@ -93,9 +93,7 @@ async function nudgeMergePendingTasks(
       )
       .get(row.slug, row.key, title);
     if (exists) continue;
-    const { notifyTaskWatchers } = await import(
-      "~/server/tasks/task-actions.server"
-    );
+    const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
     notifyTaskWatchers(
       db,
       {

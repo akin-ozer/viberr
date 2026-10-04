@@ -18,11 +18,8 @@ import { toBoardCard } from "~/features/board/board-card";
 import { appErrorResponse } from "~/server/auth/form-action.server";
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import {
-  createTask,
-  reorderTask,
-  type CreateTaskInput,
-} from "~/server/tasks/task-actions.server";
+import { createTask, type CreateTaskInput } from "~/server/tasks/task-edits.server";
+import { reorderTask } from "~/server/tasks/task-transitions.server";
 import { coercePriority } from "~/schemas/task-file.schema";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { roleCan } from "~/shared/rbac";

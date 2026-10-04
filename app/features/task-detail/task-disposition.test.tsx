@@ -15,7 +15,7 @@ import type {
   TaskSchedule,
 } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
-import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";

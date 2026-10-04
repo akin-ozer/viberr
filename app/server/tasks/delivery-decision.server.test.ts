@@ -22,15 +22,11 @@ import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  applyRecommendation,
-  completeTaskMerge,
-  forceAcceptCompletion,
-  manualDeliverForReview,
-  performDelivery,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { applyRecommendation } from "./task-recommendations.server";
+import { resolvePacket } from "./packet-resolution.server";
+import { transitionStage } from "./task-transitions.server";
+import { manualDeliverForReview, performDelivery } from "./task-delivery.server";
+import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import {
   deliverGate,
@@ -62,7 +58,7 @@ import {
   type FakeGithub,
 } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 const openPrMock = vi.fn<typeof openTaskPr>();
@@ -1835,7 +1831,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
 
 describe("F15-11: no acceptance affordance on a task already at the terminal stage", () => {
   it("the acceptance affordance denies on Done (the button used to render live)", async () => {
-    const { acceptanceStanding } = await import("./task-actions.server");
+    const { acceptanceStanding } = await import("./task-acceptance.server");
     seed({ stage: "done" });
     const affordance = acceptanceStanding(
       {

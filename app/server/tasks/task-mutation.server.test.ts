@@ -52,10 +52,10 @@ const TEST_FROM = { kind: "system" as const, name: "Test" };
  * The task-mutation SUBSTRATE (`task-mutation.server.ts`) — the three helpers
  * every governed write path threads. It was carved out of
  * `task-actions.server.ts` to break a real import cycle, and
- * `task-actions.server.ts` re-exports all of it, so until this file existed
- * NOTHING imported the module by name: its guards could be deleted and every
- * gate would stay green (ruling 65 — "an owner ruling whose guard cannot go red
- * is a ruling that gets reverted in silence").
+ * `task-actions.server.ts` re-exported all of it until ruling 654 split it, so
+ * until this file existed NOTHING imported the module by name: its guards could
+ * be deleted and every gate would stay green (ruling 65 — "an owner ruling
+ * whose guard cannot go red is a ruling that gets reverted in silence").
  *
  * The two things worth guarding here:
  *
@@ -679,7 +679,7 @@ describe("reprojectTask", () => {
   }
 
   it("makes the board see the write that just happened", () => {
-    // Every write path in `task-actions.server.ts` writes task.md and then
+    // Every write path in the task-action modules writes task.md and then
     // calls this. SQLite is a projection of the files, never a second source of
     // truth — so a reproject that no-ops leaves the board, the queues and the
     // inbox serving the PRE-write row while the file says otherwise, and

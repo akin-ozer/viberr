@@ -144,7 +144,7 @@ async function makeEpic(userId: string, input: Omit<CreateEpicInput, "projectSlu
 
 /** A fresh task at the entry stage, in no epic. */
 async function makeTask(title: string) {
-  const { createTask } = await import("~/server/tasks/task-actions.server");
+  const { createTask } = await import("~/server/tasks/task-edits.server");
   return (await createTask(app.db, { projectSlug: SLUG, title }, actorOf(ids.arda))).key;
 }
 
@@ -238,7 +238,7 @@ describe("ruling 503(e): the Epics pages' loaders", () => {
     const kept = await makeTask("Archived in an epic");
     const live = await makeTask("Live in an epic");
     const epicId = await makeEpic(ids.arda, { title: "Holds an archived task", taskKeys: [kept, live] });
-    const { setTaskArchived } = await import("~/server/tasks/task-actions.server");
+    const { setTaskArchived } = await import("~/server/tasks/task-archive.server");
     await setTaskArchived(app.db, { projectSlug: SLUG, taskKey: kept, archived: true }, actorOf(ids.arda));
 
     const view = await epicPage(ids.arda, epicId);

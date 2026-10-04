@@ -86,7 +86,8 @@ const DEPS = {
   runOperator: runOp,
 };
 
-import { performDelivery, OPERATOR_TASK_ACTOR } from "./task-actions.server";
+import { performDelivery } from "./task-delivery.server";
+import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -199,7 +200,7 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
     const { createPat, setProjectCredential } = await import(
       "~/server/secrets/pat-store.server"
     );
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
     const pat = createPat(
       store.db,
@@ -724,7 +725,7 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
   });
 
   async function resolve(github: { fetchImpl: typeof fetch }): Promise<void> {
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },

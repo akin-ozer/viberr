@@ -60,9 +60,9 @@ import { toError } from "~/shared/errors";
  *
  * These three helpers depend only on leaf modules (files/, projections/,
  * errors/, logging/), so hosting them here severs the cycle at its root rather
- * than deferring it. `task-actions.server.ts` re-exports all of them, so the
- * many existing importers are unaffected; modules that would otherwise close
- * the cycle (`agent-toolkit`) import from HERE.
+ * than deferring it. `task-actions.server.ts` re-exported all of them until
+ * ruling 654 split it, so the many existing importers were unaffected; modules
+ * that would otherwise close the cycle (`agent-toolkit`) import from HERE.
  *
  * Beside them sit the small reads the write paths share — a stage's display
  * name, the post-write summary — on the same leaf-only footing, so any writer
@@ -547,7 +547,7 @@ export interface OfferWithdrawal {
  * writers that withdraw acceptance offers, and the operator's transition
  * routing. Resolved from the workflow graph like every other role lookup
  * (B-WF4); `resolveStageRoles` already does the positional-last fallback.
- * Named apart from task-actions' `terminalStageIdOf(project)`, which takes a
+ * Named apart from task-action-core's `terminalStageIdOf(project)`, which takes a
  * loaded `ProjectContext`. Null when the project file is unreadable: the
  * withdrawal then removes `accept_completion` cards alone.
  */
@@ -587,9 +587,9 @@ function withdrawalCauseText(cause: OfferWithdrawalCause): string {
  * names each card and the cause. The audit row and the bell live in
  * {@link recordRecommendationWithdrawal}, which needs the database and runs
  * after the lock. Lives HERE (the leaf) so the delivery reconcile, the packet
- * writers and the stage move can all call it without closing the
- * `specialist-run → agent-toolkit → task-actions` cycle this module exists to
- * break.
+ * writers and the stage move can all call it without closing the cycle this
+ * module exists to break (`specialist-run` → `agent-toolkit` → a task-action
+ * module).
  */
 export function withdrawAcceptanceOffers(
   parsed: ParsedTaskFile,

@@ -509,7 +509,7 @@ function listTaskDirs(slug: string, dataRoot?: string): string[] {
  * decision listed anyway). An inbox that promises a decision the server declines
  * is the dead end R14-2/P14-LV-06 exist to abolish.
  *
- * Mirrors `acceptanceRefusalReason` (task-actions.server.ts) in the same order,
+ * Mirrors `acceptanceRefusalReason` (task-acceptance.server.ts) in the same order,
  * and must move with it. THREE of its gates stay out: `archived`, the STAGE
  * boundary, and the no-change WORK refusal (R20-2/F20-6). The first two are
  * per-reader state — every consumer filters rows on `archived = 0` and on the
@@ -664,7 +664,7 @@ function rebuildTaskFileNow(
   // queue card and the task hero pill at the same instant the gate underneath read
   // "no approving verdict yet". A projection row must not contradict itself.
   const derivedValidation = deriveValidation(fm);
-  // The writers' `blockedPacket` predicate, verbatim (task-actions.server.ts):
+  // The writers' `blockedPacket` predicate, verbatim (task-acceptance.server.ts):
   // the file's STORED readiness plus a packet whose type is `blocked`.
   const blockedPacket = fm.readiness === "blocked" && parsed.packet?.type === "blocked";
 
@@ -944,7 +944,7 @@ function rebuildTaskFileNow(
     // Ruling 53/88: the delivered revision the board's acceptance ceremony
     // discloses and then echoes back for the server to verify. Written from the
     // SAME expression the server's own `acceptanceDisclosureOf` reads
-    // (`fm.workRevision?.headSha ?? "none"`, task-actions.server.ts), so a board
+    // (`fm.workRevision?.headSha ?? "none"`, task-acceptance.server.ts), so a board
     // echo built from this column can only differ from the live task when the
     // task really moved under the dialog — which is the refusal the echo exists
     // to produce. Ruling 161: a discarded revision projects as none.

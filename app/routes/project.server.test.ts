@@ -188,7 +188,7 @@ describe("ruling 349: the board annotates each task with its live run", () => {
     const target = liveTasks(await railCounts()).find(
       (t) => !t.archived && t.readiness === "ready",
     )!;
-    const { markWaitingAgent } = await import("~/server/tasks/task-actions.server");
+    const { markWaitingAgent } = await import("~/server/tasks/agent-completion.server");
     await markWaitingAgent(app.db, { dataRoot: app.dataRoot }, "viberr-core", target.key);
     const { upsertRun, patchRun } = await import("~/server/runtimes/run-store.server");
     upsertRun(app.db, {

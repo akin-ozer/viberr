@@ -10,10 +10,11 @@ const userNameRowSchema = z.object({ name: z.string() });
  * first name, never a whole address). NEW-4: an email tag chips nothing and
  * notifies nobody.
  *
- * It lives in its own module because both `task-actions.server.ts` and
+ * It lives in its own module because both the task-action modules and
  * `specialist-run.server.ts` need it, and specialist-run takes values only
- * from the task-mutation substrate, never statically from task-actions (which
- * imports it), so the two stay out of a module cycle (ruling 207(e)).
+ * from the task-mutation substrate, never statically from a task-action module
+ * (those load specialist-run when they run), so the two stay out of a module
+ * cycle (ruling 207(e)).
  *
  * Returns the id when no such user exists, so a caller can tell "resolved" from
  * "unknown" by comparing against the id it passed. `users.name` is NOT NULL, so

@@ -21,7 +21,7 @@ import {
   operatorSnapshot,
   type OperatorAuthority,
 } from "./operator-actions.server";
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 /**
  * Ruling 494 (pass 40, F40-70): a push that moves a task's branch re-compares

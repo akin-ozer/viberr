@@ -134,17 +134,19 @@ import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server"
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { splitKbSource } from "~/server/tasks/kb-correction-actions.server";
 import { fullReplyTextForRun, runFailureReason } from "~/server/tasks/agent-reply.server";
+import { DEFAULT_GOAL } from "~/server/tasks/task-edits.server";
 import {
-  DEFAULT_GOAL,
-  OPERATOR_TRANSITION_CHAIN_CAP,
   clearWaitingToHuman,
   liftHoldForRun,
   liftStageHoldForPerson,
   markWaitingAgent,
+} from "~/server/tasks/agent-completion.server";
+import { OPERATOR_TRANSITION_CHAIN_CAP } from "~/server/tasks/task-action-core.server";
+import {
   reprojectTask,
   taskRef,
   type TaskMutationContext,
-} from "~/server/tasks/task-actions.server";
+} from "~/server/tasks/task-mutation.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { RUN_PHASE } from "./adapter.server";
 import type { RealBackend } from "./runtime-registry.server";
@@ -288,14 +290,14 @@ export interface RunOperatorInput {
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
   /** Ruling 489(d): react hops since a person last acted (bounded by
-   *  OPERATOR_REACT_HOP_CEILING in task-actions). Set by the agent-reply react
+   *  OPERATOR_REACT_HOP_CEILING in task-action-core). Set by the agent-reply react
    *  and carried by the drive's own follow-ups (the `delivered` follow-up, the
    *  stranded resume); every trigger a person causes omits it, which is what
    *  restarts the count. */
   reactHops?: number;
   /** Depth of the CONSECUTIVE operator-authored transition chain (bounds the
    *  transition→re-trigger loop, the same idiom as reactDepth — see
-   *  OPERATOR_TRANSITION_CHAIN_CAP in task-actions). Omitted by every human /
+   *  OPERATOR_TRANSITION_CHAIN_CAP in task-action-core). Omitted by every human /
    *  agent-reply trigger, which is what resets the chain. */
   transitionDepth?: number;
   /** True when THIS drive was fired by the stranded-coordination resume
@@ -1270,7 +1272,7 @@ export async function maybeResumeStrandedOperator(
 
   const depth = (ref.transitionDepth ?? 0) + 1;
   // B4: the SAME comparison the transition re-trigger makes
-  // (`chainDepth >= OPERATOR_TRANSITION_CHAIN_CAP`, task-actions). Both sides
+  // (`chainDepth >= OPERATOR_TRANSITION_CHAIN_CAP`, task-transitions). Both sides
   // compute the depth they would THREAD into the next drive, so the shared
   // meaning is "a threaded depth may never reach the cap" — i.e. at most
   // OPERATOR_TRANSITION_CHAIN_CAP consecutive operator-authored links. This

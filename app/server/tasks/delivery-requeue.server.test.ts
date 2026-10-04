@@ -33,10 +33,8 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
-import {
-  performDelivery,
-  OPERATOR_TASK_ACTOR,
-} from "./task-actions.server";
+import { performDelivery } from "./task-delivery.server";
+import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 const runOp = vi.fn<typeof runOperator>(async () => ({
   runId: null,
@@ -396,7 +394,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   it("block_on_policy re-queues runOperator with trigger 'packet-resolved'", async () => {
     deployDeliveryOperator(store, "supervised");
     seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -438,7 +436,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
         ],
       },
     );
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -509,7 +507,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -561,7 +559,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
         ],
       },
     );
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
@@ -592,7 +590,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   it("hold_runtime_debug does NOT re-queue (the human asked for no run)", async () => {
     deployDeliveryOperator(store, "supervised");
     seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);
-    const { resolvePacket } = await import("./task-actions.server");
+    const { resolvePacket } = await import("./packet-resolution.server");
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },

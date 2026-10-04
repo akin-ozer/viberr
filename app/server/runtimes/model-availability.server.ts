@@ -99,7 +99,7 @@ export function unavailableModels(
 
 /**
  * Called from the two run-failure choke points (specialist/reviewer in
- * task-actions, operator in operator-run). A no-op unless the provider text
+ * agent-completion, operator in operator-run). A no-op unless the provider text
  * matches MODEL_UNSUPPORTED_RE and the run actually named a model — a quota or
  * auth failure must never mark a model as unusable.
  */

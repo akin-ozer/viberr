@@ -4,7 +4,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskClosure } from "./task-closure.server";
 import { logger } from "~/server/logging/logger.server";
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -191,7 +191,7 @@ export async function sweepStrandedTasks(
     return 0;
   }
   if (found.length === 0) return 0;
-  const { autoInvokeOperator, noteStranded } = await import("./task-actions.server");
+  const { autoInvokeOperator, noteStranded } = await import("./task-action-core.server");
   for (const task of found) {
     try {
       // The NOTE first, and unconditionally: it is the record that the state

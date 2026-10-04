@@ -987,7 +987,7 @@ function ListView({
 
 /**
  * D3 (rulings 14 + 53) — as much of `acceptanceRefusalReason`
- * (task-actions.server.ts) as a board SUMMARY can answer, composed into the one
+ * (task-acceptance.server.ts) as a board SUMMARY can answer, composed into the one
  * `blockedReason` the shared ceremony renders.
  *
  * `blockReason` alone is not "the" refusal: it is the projected revision gate
@@ -1039,12 +1039,12 @@ function boardAcceptRefusal(
  *
  * A human moving a card into the FINAL stage is not a bare move: the server
  * routes it through the full acceptance contract, which attempts a real PR
- * merge (`reorderTask` → `acceptCompletion`, task-actions.server.ts). Ruling 53
- * (R18-7) required this confirmation to "match the task-detail dialog"; ruling
- * 14 forbids forking a shared surface per screen. The board nonetheless carried
- * `AcceptOnBoardConfirm`, its OWN dialog, disclosing LESS than the task page:
- * no merge target, no delivered-revision row, no verdict attribution, no
- * no-change disposition.
+ * merge (`reorderTask` → `acceptCompletion`, task-transitions.server.ts and
+ * task-acceptance.server.ts). Ruling 53 (R18-7) required this confirmation to
+ * "match the task-detail dialog"; ruling 14 forbids forking a shared surface
+ * per screen. The board nonetheless carried `AcceptOnBoardConfirm`, its OWN
+ * dialog, disclosing LESS than the task page: no merge target, no
+ * delivered-revision row, no verdict attribution, no no-change disposition.
  *
  * This renders the ONE shared `AcceptConfirm` (task-detail/accept-confirm), in
  * its `stage-move` ceremony mode — the mode written for exactly this path (a

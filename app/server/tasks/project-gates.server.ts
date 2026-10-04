@@ -58,7 +58,7 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { githubRemoteSanitizationArgs } from "./git-clone-auth.server";
 import { workspaceGitAs, type WorkspaceGit } from "./workspace-git.server";
 import { refreshWorkspaceFromMirror } from "./workspace-refresh.server";
-import type { TaskActionDeps } from "./task-actions.server";
+import type { TaskActionDeps } from "./task-action-core.server";
 
 /**
  * Ruling 482 (pass 40, F40-52): **Viberr runs the project's gates itself.**
@@ -898,7 +898,7 @@ async function runGateJob(job: GateJob): Promise<void> {
   if (done.status === "finished" && failedGates.length > 0) {
     // Ruling 482: a failing gate is the operator's to act on — it dispatches
     // the rework — so the result is handed to it rather than left on a card.
-    const { autoInvokeOperator } = await import("./task-actions.server");
+    const { autoInvokeOperator } = await import("./task-action-core.server");
     const operatorCtx: Parameters<typeof autoInvokeOperator>[1] = {};
     if (job.dataRoot) operatorCtx.dataRoot = job.dataRoot;
     if (job.runOperator) operatorCtx.deps = { runOperator: job.runOperator };

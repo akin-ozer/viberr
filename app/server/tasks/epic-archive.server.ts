@@ -9,7 +9,8 @@ import { toError } from "~/shared/errors";
 import { countLabel } from "~/shared/text/plural";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { joinClauses, requireEpicFile } from "./epic-actions.server";
-import { requireAction, setTaskArchived } from "./task-actions.server";
+import { requireAction } from "./task-action-core.server";
+import { setTaskArchived } from "./task-archive.server";
 import { loadProjectContext, type TaskActor, type TaskMutationContext } from "./task-mutation.server";
 import { actorProseName } from "./user-display-name.server";
 

@@ -1287,7 +1287,7 @@ describe("setProjectFileLeases (ruling 245)", () => {
       .fileLeases;
   beforeEach(async () => {
     store = setupTestStore(ctx);
-    const { createTask } = await import("~/server/tasks/task-actions.server");
+    const { createTask } = await import("~/server/tasks/task-edits.server");
     // The real keys, not assumed ones: the project's own prefix and counter
     // decide them, and a lease is validated against the board.
     holderA = (
