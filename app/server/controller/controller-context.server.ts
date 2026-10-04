@@ -27,6 +27,7 @@ import { notVisible } from "./controller-tool-guards.server";
 import { openRequestsContextLine } from "./controller-requests.server";
 import { countLabel } from "~/shared/text/plural";
 import { fenceFor } from "~/shared/text/fence";
+import { isEpicOpen } from "~/shared/task-refs";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import {
   kbProposalCountsByProject,
@@ -395,7 +396,7 @@ function boardContext(
   }
   // Ruling 503: the open epics, with how far each has got. A closed one
   // (done, cancelled) is history the board no longer works in.
-  const allEpics = listEpics(db, slug).filter((e) => e.status !== "done" && e.status !== "cancelled");
+  const allEpics = listEpics(db, slug).filter((e) => isEpicOpen(e.status));
   const epics = allEpics
     .slice(0, BOARD_CONTEXT_EPICS)
     .map(
