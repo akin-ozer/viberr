@@ -1382,7 +1382,6 @@ const baseRefreshSchema = z
     onto: z.string().min(1).optional(),
   })
   .loose();
-export type BaseRefresh = z.infer<typeof baseRefreshSchema>;
 
 /** The field schemas, named so the tolerant parser below can reach them
  *  directly: it validates ONE field at a time (a bad field falls back with a
