@@ -424,17 +424,6 @@ export interface OperatorAuthorityOverrides {
 }
 
 /**
- * Resolve the operator's authority for a project from its `agents:`
- * deployment. `overrides` lets a run pick the backend / autonomy for THIS run
- * (the task-detail operator panel) without rewriting the deployment.
- */
-/**
- * The operator deployment's configured backend for a project (P11-76) — a cheap
- * read for the UI so the "Run operator" backend picker defaults to what the
- * operator actually runs on, not a hardcoded "claude". Falls back to "claude"
- * when no operator is deployed (the same default the run path uses).
- */
-/**
  * The ONE rule for "which backend does a deployment run on" (B-OP5): the first
  * declared real backend, Claude when nothing declares one. Both the standalone
  * lookup below and the authority resolver read it, so a change to the picking
@@ -446,6 +435,12 @@ function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
     : "claude";
 }
 
+/**
+ * The operator deployment's configured backend for a project (P11-76) — a cheap
+ * read for the UI so the "Run operator" backend picker defaults to what the
+ * operator actually runs on, not a hardcoded "claude". Falls back to "claude"
+ * when no operator is deployed (the same default the run path uses).
+ */
 export function operatorBackendFor(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -529,6 +524,11 @@ export function operatorAutonomyFor(
   }
 }
 
+/**
+ * Resolve the operator's authority for a project from its `agents:`
+ * deployment. `overrides` lets a run pick the backend / autonomy for THIS run
+ * (the task-detail operator panel) without rewriting the deployment.
+ */
 export function resolveOperatorAuthority(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -1119,10 +1119,10 @@ export const CREATE_TASK_BASE_NOTE =
   "when another owner's package holds them: hand delivery to that owner here instead. Never make " +
   "this task wait on a task that needs this task's code.";
 
-/** One option the operator offers on a decision/blocking packet. */
 /** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
 export const GOAL_DRAFT_MAX_CHARS = 4000;
 
+/** One option the operator offers on a decision/blocking packet. */
 export interface OperatorPacketOptionInput {
   kind: PacketOptionKind;
   title: string;
@@ -1262,7 +1262,6 @@ function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolea
   return packet.from === "operator" && !packet.askedBy;
 }
 
-/** Open a typed human-decision packet and notify the task's supervisors. */
 /** A title as a sentence: its own closing mark, or a full stop. */
 function sentence(title: string): string {
   return /[.?!]$/.test(title) ? title : `${title}.`;
@@ -1292,6 +1291,7 @@ function revisionDepartureSentence(
   }
 }
 
+/** Open a typed human-decision packet and notify the task's supervisors. */
 export async function operatorOpenPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3134,7 +3134,6 @@ const liveRunRowsSchema = z.array(
   }),
 );
 
-/** Read-only task snapshot for the operator's `get_task` tool. */
 /**
  * Ruling 302: how many timeline entries `get_task` returns by default, and the
  * most it will return when asked. The controller's own `get_task` has taken an
@@ -3395,6 +3394,7 @@ function baseBehindBySentence(
   );
 }
 
+/** Read-only task snapshot for the operator's `get_task` tool. */
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -4244,7 +4244,6 @@ function supportingRoleWord(
 
 // --------------------------------------------------- dispatch helpers
 
-/** Resolve a deployed specialist's role + backend for a prompt/run. */
 /** Org MCP names compared loosely: `qa_echo`, `qa-echo` and `QA-Echo` are
  *  one server (the tool prefix a model sees is `mcp__<name>__…`). */
 function mcpNameKey(name: string): string {

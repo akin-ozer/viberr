@@ -2884,7 +2884,6 @@ export function directiveDeferredNote(agentName: string): string {
 
 // ----------------------------------------------------------------- persona
 
-/** Everything a run's persona is assembled from. */
 /**
  * F4: whether the `github_read` tool AND its persona section should be present
  * for this run — the ONE predicate both the fresh and resume paths use, so the
@@ -2907,6 +2906,7 @@ export function githubReadForRun(input: {
     : null;
 }
 
+/** Everything a run's persona is assembled from. */
 export interface SpecialistPersonaInput {
   profileId: string;
   /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling

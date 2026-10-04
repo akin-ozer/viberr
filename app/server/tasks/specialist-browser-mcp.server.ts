@@ -242,12 +242,6 @@ export function resolveBrowserMcp(input: {
 }
 
 /**
- * The run-prompt section for a mounted browser (owner decision b: prompt-level
- * guardrails, the same posture MCP governance takes). Appended by
- * `buildSpecialistPersona` when — and only when — the server actually mounted,
- * so prompt and tool surface tell the same story (XS-4).
- */
-/**
  * The run-prompt section for POSTING FILES to the humans on the task (owner
  * ask 2026-08-20, from a live task where the agent committed its screenshot
  * into the PR because nothing told it the thread could carry files). Emitted
@@ -307,6 +301,12 @@ export function attachmentsDropSection(attachmentsDir: string): string {
   );
 }
 
+/**
+ * The run-prompt section for a mounted browser (owner decision b: prompt-level
+ * guardrails, the same posture MCP governance takes). Appended by
+ * `buildSpecialistPersona` when — and only when — the server actually mounted,
+ * so prompt and tool surface tell the same story (XS-4).
+ */
 export function browserPersonaSection(
   attachmentsDir: string,
   backend?: RealBackend,

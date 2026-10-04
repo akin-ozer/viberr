@@ -293,6 +293,7 @@ export function stageDisplayName(
   return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
 }
 
+/** The operator's canonical notification actor. */
 export const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operator" };
 
 /** The policy engine as a notification sender: the `ActorRender` of the
@@ -351,7 +352,6 @@ export interface TaskWatcherNotice {
   exceptUserIds?: readonly string[];
 }
 
-/** Notify the owner and project supervisors, respecting routing preferences. */
 /** Ruling 140(b): why the owner seat changed hands, in the words the row uses. */
 export type OwnerSeatChange =
   | { kind: "handed_off"; taskKey: string }
@@ -457,6 +457,7 @@ export function notifyOwnerSeatChange(
   }
 }
 
+/** Notify the owner and project supervisors, respecting routing preferences. */
 export function notifyTaskWatchers(
   db: DatabaseSync,
   notice: TaskWatcherNotice,

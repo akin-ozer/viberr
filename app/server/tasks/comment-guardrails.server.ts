@@ -38,7 +38,6 @@ export function isMeaninglessComment(text: string | null | undefined): boolean {
   return CHATTER_RE.test(t);
 }
 
-/** A fenced block longer than this many lines is an evidence dump, not prose. */
 /**
  * Ruling 383 (F39-11): repair a body whose line breaks arrived DOUBLE-ESCAPED.
  *
@@ -66,6 +65,7 @@ export function repairDoubledNewlines(text: string): string {
   return text.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
 }
 
+/** A fenced block longer than this many lines is an evidence dump, not prose. */
 export const EVIDENCE_MAX_FENCE_LINES = 12;
 
 /**

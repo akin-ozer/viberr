@@ -450,9 +450,6 @@ function terminalStageIdOf(project: ProjectContext): string | null {
   return stageRolesOf(project).terminalId;
 }
 
-/** The operator's canonical notification actor. */
-
-
 /** The loosest membership gate: ANY live member (idempotent/no-op paths).
  *  Routes through the single authority resolution, so an org admin passes as
  *  the audited D2 override. */
@@ -673,12 +670,6 @@ function attachmentKb(bytes: number): string {
 }
 
 /**
- * Board "New task" flow: allocates the next `<PREFIX>-<n>` key atomically
- * from the per-project counter in project.md, writes the task file with the
- * mock create defaults, reprojects, audits.
- * RBAC: any project member except viewers (board spec §5.1).
- */
-/**
  * Ruling 140(a): the ONE rule for who may hold the owner seat, shared by a
  * hand-off through `setOwner` and a named owner at creation, so the pinned
  * sentence never forks. The ACTOR-side guard of `setOwner` (who may hand off)
@@ -693,6 +684,12 @@ function requireOwnable(project: ProjectContext, targetUserId: string): void {
   }
 }
 
+/**
+ * Board "New task" flow: allocates the next `<PREFIX>-<n>` key atomically
+ * from the per-project counter in project.md, writes the task file with the
+ * mock create defaults, reprojects, audits.
+ * RBAC: any project member except viewers (board spec §5.1).
+ */
 export async function createTask(
   db: DatabaseSync,
   input: CreateTaskInput,
@@ -1619,11 +1616,6 @@ export interface AutoInvokeOptions {
   relay?: RelayPayload;
 }
 
-/** Best-effort operator handoff; dynamically imported to avoid a module cycle.
- *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
- *  change (`pr-diverged`) is a coordination event like any other, so the
- *  reconciler wakes the operator through the same seam instead of leaving the
- *  divergence as prose only a human ever acts on. */
 /**
  * Ruling 330: the record that a task had stopped.
  *
@@ -1712,6 +1704,11 @@ function oneLineDetail(excerpt: string): string {
   return flat.length > 200 ? `${flat.slice(0, 199)}…` : flat;
 }
 
+/** Best-effort operator handoff; dynamically imported to avoid a module cycle.
+ *  Exported for the GitHub reconciler (P14 follow-up): an out-of-band PR state
+ *  change (`pr-diverged`) is a coordination event like any other, so the
+ *  reconciler wakes the operator through the same seam instead of leaving the
+ *  divergence as prose only a human ever acts on. */
 export async function autoInvokeOperator(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -2288,7 +2285,6 @@ export function specialistReplyDirective(input: {
   );
 }
 
-/** Append a comment and, when authorized, resume or start its mentioned agent. */
 /**
  * F35-5 (pass 35): the durable trace of an @mention whose run did not start.
  * Best-effort, like the ambiguous-handle note beside it: the comment is
@@ -2403,6 +2399,7 @@ function commentFiles(
   };
 }
 
+/** Append a comment and, when authorized, resume or start its mentioned agent. */
 export async function commentToAgent(
   db: DatabaseSync,
   input: {
@@ -4223,7 +4220,6 @@ export function deliveredWorkEvidence(fm: {
   return rows;
 }
 
-/** Atomically record a finished run's reply, verdict, and human question. */
 /**
  * Ruling 237 (F37-57): display names for the escalation card, read from the
  * project file so a handle is a NAME even on a project whose run history was
@@ -4266,6 +4262,7 @@ function clipVerdictReason(text: string): string {
   );
 }
 
+/** Atomically record a finished run's reply, verdict, and human question. */
 export async function recordAgentCompletion(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -8115,6 +8112,21 @@ async function resolveDeliveryPushGrant(
   }
 }
 
+/** GitHub's commit JSON, decoded rather than asserted. The head sha and the
+ *  tree sha carry SEPARATE tolerance so a commit whose `tree` is missing or
+ *  junk still yields the revision — the tree is an extra (`null` when it can't
+ *  be read), the head is the subject (the whole read is `null` without it). */
+const commitRevisionSchema = z
+  .object({
+    sha: z.string().min(1),
+    commit: z
+      .object({ tree: z.object({ sha: z.string().min(1) }) })
+      .nullable()
+      .catch(null),
+  })
+  .nullable()
+  .catch(null);
+
 /**
  * F19-21 — the review SUBJECT for a verified no-change completion: the default
  * branch exactly as it stands, as a real (sha, tree) pair read from GitHub.
@@ -8132,21 +8144,6 @@ async function resolveDeliveryPushGrant(
  * branch cannot be read, this returns null and the delivery says so — an
  * unverifiable base is not a verified no-change.
  */
-/** GitHub's commit JSON, decoded rather than asserted. The head sha and the
- *  tree sha carry SEPARATE tolerance so a commit whose `tree` is missing or
- *  junk still yields the revision — the tree is an extra (`null` when it can't
- *  be read), the head is the subject (the whole read is `null` without it). */
-const commitRevisionSchema = z
-  .object({
-    sha: z.string().min(1),
-    commit: z
-      .object({ tree: z.object({ sha: z.string().min(1) }) })
-      .nullable()
-      .catch(null),
-  })
-  .nullable()
-  .catch(null);
-
 async function resolveNoChangeBaseRevision(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -9341,12 +9338,6 @@ export async function runProjectGatesByHand(
 }
 
 /**
- * Surface a delivery-stage signal as a timeline event + watcher notification
- * (P11-11/P11-12): a policy refusal, a push failure, or an empty-diff review is
- * something a human must see, not just a log line. Best-effort — a failure to
- * surface only logs.
- */
-/**
  * Ruling 128: make sure the project's default branch exists before the push.
  * Reads the GitHub context the same way the PR open does; a project with no
  * repository or credential is `skipped` (the push path reports those itself).
@@ -9506,6 +9497,12 @@ export async function returnChangedRevisionToReview(
   reprojectTask(db, ctx, projectSlug, taskKey);
 }
 
+/**
+ * Surface a delivery-stage signal as a timeline event + watcher notification
+ * (P11-11/P11-12): a policy refusal, a push failure, or an empty-diff review is
+ * something a human must see, not just a log line. Best-effort — a failure to
+ * surface only logs.
+ */
 async function surfaceDeliveryEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -10742,7 +10739,6 @@ export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
 
 // ------------------------------------------------------------ resolvePacket
 
-/** Resolve the active packet by stable option kind and mark its notifications read. */
 /** Identify a packet across an awaited resolution so replacements cannot be cleared. */
 export function packetIdentity(p: TaskPacket): string {
   if (p.id) return `id:${p.id}`;
@@ -10794,6 +10790,7 @@ function contractHoldsDecision(goal: string, question: string, answer: string): 
   return false;
 }
 
+/** Resolve the active packet by stable option kind and mark its notifications read. */
 export async function resolvePacket(
   db: DatabaseSync,
   input: {
@@ -13884,33 +13881,6 @@ export interface AcceptancePrHeadCheck {
   liveHeadSha: string | null;
 }
 
-/**
- * R15-1 gate 2 (F15-15): the PR head must CONTAIN the delivered revision, or
- * the acceptance would merge content the delivery never produced (the live
- * failure: a PR opened over stale remote junk, approved from the local tree).
- * A live GitHub read; `refusal: null` when it cannot be verified (offline / no
- * PR / no revision / PR already merged) — the merge attempt's own honesty
- * covers those.
- *
- * This is the ONE acceptance gate force-accept can never bypass — and, since
- * A2, the one every Done writer runs: it used to be called by two of the four,
- * so a full-autonomy operator accept followed by a human "Complete merge"
- * merged a stale-head PR through the two doors that skipped it.
- */
-/**
- * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
- *
- * A refusal with no exit is its own defect, and this one could otherwise strand
- * a task permanently — the cause is GitHub declining a comparison, which no
- * amount of re-delivering necessarily fixes. So the gate does not just throw a
- * sentence into a toast: it records the question on the task, with both shas in
- * it, and the three real answers.
- *
- * Written from the ONE gate all four Done writers share, so the packet appears
- * whichever door was tried. Never clobbers an open decision (one packet slot per
- * task), and never re-writes itself while its own packet is standing — a human
- * pressing Accept twice gets one question, not two.
- */
 /** The timeline title ruling 235's record carries, and the idempotence key. */
 const UNPUSHED_HEAD_TITLE = "Acceptance refused: the reviewed revision is not on the pull request";
 
@@ -13994,6 +13964,20 @@ async function recordUnpushedHeadRefusal(
   }
 }
 
+/**
+ * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
+ *
+ * A refusal with no exit is its own defect, and this one could otherwise strand
+ * a task permanently — the cause is GitHub declining a comparison, which no
+ * amount of re-delivering necessarily fixes. So the gate does not just throw a
+ * sentence into a toast: it records the question on the task, with both shas in
+ * it, and the three real answers.
+ *
+ * Written from the ONE gate all four Done writers share, so the packet appears
+ * whichever door was tried. Never clobbers an open decision (one packet slot per
+ * task), and never re-writes itself while its own packet is standing — a human
+ * pressing Accept twice gets one question, not two.
+ */
 async function refuseUnverifiedHead(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -14102,6 +14086,19 @@ async function refuseUnverifiedHead(
   throw AppError.conflict(refusal);
 }
 
+/**
+ * R15-1 gate 2 (F15-15): the PR head must CONTAIN the delivered revision, or
+ * the acceptance would merge content the delivery never produced (the live
+ * failure: a PR opened over stale remote junk, approved from the local tree).
+ * A live GitHub read; `refusal: null` when it cannot be verified (offline / no
+ * PR / no revision / PR already merged) — the merge attempt's own honesty
+ * covers those.
+ *
+ * This is the ONE acceptance gate force-accept can never bypass — and, since
+ * A2, the one every Done writer runs: it used to be called by two of the four,
+ * so a full-autonomy operator accept followed by a human "Complete merge"
+ * merged a stale-head PR through the two doors that skipped it.
+ */
 export async function acceptancePrHeadCheck(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -14729,23 +14726,6 @@ function assertAcceptanceDisclosure(
   });
 }
 
-/**
- * The ONE Done write every acceptance path shares (B-WF6). Exported for
- * `operatorAcceptCompletion`, whose full-autonomy branch historically
- * re-implemented this block inline and drifted gate by gate.
- *
- * Unless `skipInLockRecheck` (the audited force override), the acceptance
- * refusal gates are re-evaluated INSIDE the write lock against the freshly
- * parsed state (B-WF1): the direct human path awaits a real GitHub merge
- * between its gate check and this write, and a verdict/revision/packet change
- * in that window used to be accepted anyway.
- *
- * A2: the PR-head gate runs HERE, for every caller, and `skipInLockRecheck`
- * does not relax it. `operatorAcceptCompletion` reached this write without ever
- * checking the head — so a full-autonomy operator could stamp "merge pending"
- * on a PR carrying content its task never delivered. Callers that already
- * verified pass their `headCheck` through rather than paying a second read.
- */
 /** F32-11: the open decision an acceptance closed unanswered, captured inside
  *  the file lock (a ref, because the capture happens in the write callback). */
 interface WithdrawnPacket {
@@ -14767,6 +14747,23 @@ interface ClosedDecisionRef {
   current: ClosedDecision | null;
 }
 
+/**
+ * The ONE Done write every acceptance path shares (B-WF6). Exported for
+ * `operatorAcceptCompletion`, whose full-autonomy branch historically
+ * re-implemented this block inline and drifted gate by gate.
+ *
+ * Unless `skipInLockRecheck` (the audited force override), the acceptance
+ * refusal gates are re-evaluated INSIDE the write lock against the freshly
+ * parsed state (B-WF1): the direct human path awaits a real GitHub merge
+ * between its gate check and this write, and a verdict/revision/packet change
+ * in that window used to be accepted anyway.
+ *
+ * A2: the PR-head gate runs HERE, for every caller, and `skipInLockRecheck`
+ * does not relax it. `operatorAcceptCompletion` reached this write without ever
+ * checking the head — so a full-autonomy operator could stamp "merge pending"
+ * on a PR carrying content its task never delivered. Callers that already
+ * verified pass their `headCheck` through rather than paying a second read.
+ */
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
   ctx: TaskActionContext,
@@ -16063,6 +16060,16 @@ export async function dismissRecommendation(
 }
 
 /**
+ * Ruling 295: the longest task title, and the length a refusal names.
+ *
+ * 200 characters is well past any title a person writes and short of the point
+ * where a board card stops being scannable. There is no cap on creation today,
+ * so this bounds only what a RENAME may set: a task that arrived with a longer
+ * title keeps it until someone edits it, and is then held to this.
+ */
+export const TASK_TITLE_MAX_CHARS = 200;
+
+/**
  * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
  *
  * It could not be, by anyone. `updateTaskGoal` writes the goal — the contract
@@ -16091,16 +16098,6 @@ export async function dismissRecommendation(
  * existing reference to the old words look like a reference to something else.
  * The note carries both, which is what lets a reader join them.
  */
-/**
- * Ruling 295: the longest task title, and the length a refusal names.
- *
- * 200 characters is well past any title a person writes and short of the point
- * where a board card stops being scannable. There is no cap on creation today,
- * so this bounds only what a RENAME may set: a task that arrived with a longer
- * title keeps it until someone edits it, and is then held to this.
- */
-export const TASK_TITLE_MAX_CHARS = 200;
-
 export async function updateTaskTitle(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string; title: string },
