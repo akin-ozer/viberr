@@ -6,7 +6,15 @@ import { epicHref } from "~/shared/epic-href";
 import { countLabel } from "~/shared/text/plural";
 import { Icon } from "~/ui/icon";
 import { DueDatePill } from "~/ui/task-meta";
-import { EpicDialog, EpicProgressBar, EpicStatusPill } from "./epic-parts";
+import {
+  ArchiveEpicTasksButton,
+  ArchiveEpicTasksConfirm,
+  EpicDialog,
+  EpicProgressBar,
+  EpicStatusPill,
+  archivableTasks,
+  useArchiveEpicTasks,
+} from "./epic-parts";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
 /**
@@ -14,7 +22,8 @@ import type { EpicMemberView, EpicStageView } from "./epics-query.server";
  * Jira an epics panel. Each row is its epic's page: its colour and name, its
  * status, its progress in the project's own stage colours, who leads it and
  * when it is meant to land. Open epics first (the default view); the closed
- * ones are one click away and never deleted.
+ * ones are one click away and never deleted. A Done epic whose tasks are all
+ * done offers Archive tasks, to someone who may archive them (ruling 651).
  */
 
 type Show = "open" | "closed" | "all";
@@ -33,6 +42,7 @@ export function EpicsPage({
   stages,
   members,
   canManage,
+  canArchive,
 }: {
   projectSlug: string;
   epics: EpicSummary[];
@@ -41,12 +51,15 @@ export function EpicsPage({
   /** `manage-epics` (server-checked again on submit; this only hides a dead
    *  button). */
   canManage: boolean;
+  /** `approve-transition`, the grant archiving a task takes (ruling 651). */
+  canArchive: boolean;
 }) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const raw = params.get("show");
   const show: Show = isShow(raw) ? raw : "open";
   const [creating, setCreating] = useState(false);
+  const archive = useArchiveEpicTasks();
   const open = epics.filter((e) => isEpicOpen(e.status));
   const shown = show === "all" ? epics : show === "open" ? open : epics.filter((e) => !isEpicOpen(e.status));
   const setShow = (next: Show) => {
@@ -127,17 +140,29 @@ export function EpicsPage({
               </p>
             ) : (
               <ul className="epic-list" aria-label={`${SHOW_LABEL[show]} epics`}>
-                {shown.map((epic) => (
-                  <li key={epic.id}>
-                    <EpicRow epic={epic} stages={stages} href={epicHref(projectSlug, epic.id)} />
-                  </li>
-                ))}
+                {shown.map((epic) => {
+                  const archivable = canArchive ? archivableTasks(epic) : 0;
+                  return (
+                    <EpicRow
+                      key={epic.id}
+                      epic={epic}
+                      stages={stages}
+                      href={epicHref(projectSlug, epic.id)}
+                      archivable={archivable}
+                      archiving={archive.busyEpicId === epic.id}
+                      onArchive={() => archive.ask(epic.id, archivable)}
+                    />
+                  );
+                })}
               </ul>
             )}
           </div>
         )}
       </div>
 
+      {archive.asking && (
+        <ArchiveEpicTasksConfirm {...archive.asking} onCancel={archive.cancel} onConfirm={archive.confirm} />
+      )}
       {creating && (
         <EpicDialog
           epic={null}
@@ -150,14 +175,35 @@ export function EpicsPage({
   );
 }
 
-/** One epic, as a link to its page. */
-function EpicRow({ epic, stages, href }: { epic: EpicSummary; stages: EpicStageView[]; href: string }) {
+/**
+ * One epic. Its name is the link to its page, and the link's box covers the
+ * row, so the whole row still opens it; Archive tasks sits above that box,
+ * since a button may not sit inside a link (ruling 651).
+ */
+function EpicRow({
+  epic,
+  stages,
+  href,
+  archivable,
+  archiving,
+  onArchive,
+}: {
+  epic: EpicSummary;
+  stages: EpicStageView[];
+  href: string;
+  /** Tasks Archive tasks would file away; 0 offers no button. */
+  archivable: number;
+  archiving: boolean;
+  onArchive: () => void;
+}) {
   return (
-    <Link className="epic-row" to={href} data-epic={epic.id}>
+    <li className="epic-row" data-epic={epic.id}>
       <span className="epic-row-name">
         <span className="epic-dot" data-stage-color={epic.color} aria-hidden="true" />
-        <span className="epic-row-id">{epic.id}</span>
-        <span className="epic-row-title">{epic.title}</span>
+        <Link className="epic-row-link" to={href}>
+          <span className="epic-row-id">{epic.id}</span>
+          <span className="epic-row-title">{epic.title}</span>
+        </Link>
       </span>
       <span className="epic-row-status">
         <EpicStatusPill status={epic.status} sm />
@@ -173,8 +219,9 @@ function EpicRow({ epic, stages, href }: { epic: EpicSummary; stages: EpicStageV
           </span>
         )}
         {epic.targetDate && isEpicOpen(epic.status) && <DueDatePill dueDate={epic.targetDate} sm />}
+        {archivable > 0 && <ArchiveEpicTasksButton busy={archiving} onClick={onArchive} />}
       </span>
       <Icon name="chevron" className="epic-row-go" />
-    </Link>
+    </li>
   );
 }

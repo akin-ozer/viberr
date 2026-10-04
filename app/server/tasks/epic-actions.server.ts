@@ -109,7 +109,7 @@ function notifyFromOf(db: DatabaseSync, actor: TaskActor, ctx: TaskMutationConte
 }
 
 /** The epic, read from its file, or a not-found naming it. */
-function requireEpicFile(ctx: TaskMutationContext, projectSlug: string, epicId: string, forOperator = false) {
+export function requireEpicFile(ctx: TaskMutationContext, projectSlug: string, epicId: string, forOperator = false) {
   const file = isEpicId(epicId) ? readEpicFile(epicRef(ctx, projectSlug, epicId)) : null;
   if (!file) {
     // The operator has no `list_epics`: its snapshot's `openEpics` is its list.
@@ -473,7 +473,7 @@ export async function updateEpic(
 }
 
 /** "a", "a and b", "a, b and c". */
-function joinClauses(clauses: readonly string[]): string {
+export function joinClauses(clauses: readonly string[]): string {
   if (clauses.length <= 1) return clauses.join("");
   return `${clauses.slice(0, -1).join(", ")} and ${clauses[clauses.length - 1]!}`;
 }

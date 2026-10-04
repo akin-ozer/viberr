@@ -384,8 +384,8 @@ off, since an added done entry is refused. Its "Dependencies updated" note says 
 entry is done, the controller's `update_task` reply says the task is released, and the
 task page toasts "Released: … is done". The operator's own edit leaves that release to
 the minute sweep, because the release re-invokes the operator, and its reply says so.
-A wait that can NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
-reference to nothing): ONE "Waiting on work that cannot complete" note, one
+A wait that can NEVER complete is noticed by the same sweep, whatever killed it (a task archived
+before it was done, a reference to nothing; one archived at the terminal stage is done, ruling 651): ONE "Waiting on work that cannot complete" note, one
 notification, `waiting: human`, and the list left for a person to edit. A task that
 already reached the terminal stage has its list cleared quietly — no note, no operator
 turn. An epic holds nothing (ruling 503): a task's epic never enters its wait, and the
@@ -1099,13 +1099,17 @@ withdrawn and named in the "Archived:" note; pending and claimed schedules are
 cancelled; live runs are interrupted (ruling 177, §11); `waiting` becomes `none`; the
 audit row is `task.archived`. `restore-task` brings it back waiting on a human
 (`task.unarchived`). Archiving through a `pr-diverged` recovery packet may also delete
-the remote branch. An archived task cannot be moved. Archiving a task another task waits
-on does not release the dependent (ruling 131(e)): before the archive returns,
+the remote branch. An archived task cannot be moved. Archiving an unfinished task another
+task waits on does not release the dependent (ruling 131(e)): before the archive returns,
 `noteDeadDependency` writes one "Waiting on work that cannot complete" note on each
 dependent, notifies its owner and supervisors once (`dependency`, titled "<KEY> waits on
 archived work"), and sets it `waiting: human`, because a person owes the list an edit;
 the entry renders as archived until they make it. A restore sweeps the dependents again.
-An archived task keeps its `epic` (it is counted apart from the epic's progress) and
+A task archived at the terminal stage was done and still is (ruling 651): it satisfies
+what waits on it and counts as done in its epic's progress, so filing finished work away
+strands nothing. A Done epic's finished tasks are archived together from the Epics list
+or the epic's page, and a row there archives or restores one. An archived task keeps
+its `epic` (one archived unfinished is counted apart from the epic's progress) and
 cannot change epics until it is restored; archiving the last open task of an epic is one
 of the ways every task in it becomes done (ruling 503).
 

@@ -1122,9 +1122,12 @@ An epic's **progress** is counted from those task rows at read time
 (`progressByEpic` in `app/server/projections/epic-query.server.ts`, one grouped read per
 project), never stored: `total`, `done` (at the terminal stage), `started` (past the
 entry stage and not done), `notStarted`, `held` (waiting on other work, counted in the
-three above too), `archived` (counted apart and left out of the total, as Linear leaves a
-cancelled issue out of a project's progress) and `byStage`, the bar's segments in the
-project's stage order.
+three above too), `archived` (every archived task, counted apart), `archivedDone` (of
+those, the ones archived at the terminal stage) and `byStage`, the bar's segments in the
+project's stage order. A task archived before it was done is left out of the total, as
+Linear leaves a cancelled issue out of a project's progress; one archived at the terminal
+stage still counts in `total`, `done` and its band (ruling 651), so a Done epic whose
+tasks were filed away still reads "8 of 8 done · 8 archived".
 
 `setTasksEpic` (`app/server/tasks/epic-actions.server.ts`) is THE writer of a task's
 `epic` after creation, and every door lands there: the task page's Epic menu
@@ -1200,17 +1203,24 @@ minute.
   without `manage-epics` reads the status pill, so the head says the status once. About
   renders the description; Tasks has the bar and one row per task with its stage, the
   board card's status word (the same `cardStatus` the board computes, fed the review
-  queue and live-run state, ruling 476(g)), "waits on N" when it waits, its owner, and
-  Remove (under 36rem of list, the title takes the row's first line and the rest go under
-  it); Add tasks offers every live
+  queue and live-run state, ruling 476(g)), "waits on N" when it waits, its owner, then
+  Archive and Remove (under 36rem of list, the title takes the row's first line and the
+  rest go under it); Add tasks offers every live
   task not in it and says which will move from another epic; New task makes one in it;
-  archived tasks fold under the list. History is the file's timeline as a feed (ruling
+  archived tasks fold under the list, each with Restore. Ruling 651: a done task archives
+  from its row in one click and an open one asks first; a Done epic whose every live task
+  is done offers Archive tasks here and on its Epics row, which asks once how many and
+  then `archiveEpicTasks` (`app/server/tasks/epic-archive.server.ts`) archives each
+  through `setTaskArchived` and writes one history line naming them. It refuses an epic
+  that is not Done and one with a task still open. The row actions are the page's
+  requests, so their toasts outlive the rows they move. History is the file's timeline as a feed (ruling
   560): the newest eight under their days ("Today", "Yesterday", "Sep 25"), each entry a
   dot on one rail with its clock at the right and the tasks it names as key chips, and
   "Show N more" / "Show less" for the rest. Details: status, lead, dates, creator, and "Planned in
   <conversation>" for a viewer who may open that thread (its owner or an org admin,
   `canAccessConversation`). Intents: `update-epic`, `add-tasks`, `remove-task`,
-  `create-task`, each gated inside its writer.
+  `create-task`, `archive-task`, `restore-task` and `archive-epic-tasks` (ruling 651), each
+  gated inside its writer.
 - **The task page** names the epic in its hero, a chip linking to the epic page
   (`EpicChip`), and in the Details panel's Epic row, a menu of the open epics with "No
   epic" first.

@@ -19,10 +19,12 @@ import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
  * hand-moved or archived task cannot leave a dependent lying.
  *
  * Terminality is derived through `isTerminalStage` over the project's stage
- * list, never a positional "last stage id" guess. An archived task is
- * `failed`: a wait that can never complete without a person editing the list
- * (ruling 131(e)). Every entry names a task (ruling 503 retired the goal-link
- * spelling with the goal chains).
+ * list, never a positional "last stage id" guess. A task archived before it
+ * was done is `failed`: a wait that can never complete without a person
+ * editing the list (ruling 131(e)). One archived at the terminal stage is
+ * `done`: archiving filed finished work away, and what waited on it got what
+ * it waited for (ruling 651). Every entry names a task (ruling 503 retired the
+ * goal-link spelling with the goal chains).
  */
 
 interface TaskStateRow {
@@ -58,8 +60,8 @@ function taskState(
     .prepare(`SELECT stage, archived FROM task_projections WHERE project_slug = ? AND task_key = ?`)
     .get(slug, taskKey) as TaskStateRow | undefined;
   if (!row) return "missing";
-  if (row.archived) return "failed";
-  return isTerminalStage(row.stage, stages) ? "done" : "open";
+  if (isTerminalStage(row.stage, stages)) return "done";
+  return row.archived ? "failed" : "open";
 }
 
 /** A resolver for one project with its stage list read ONCE: the board query

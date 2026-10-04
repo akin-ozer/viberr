@@ -1147,12 +1147,12 @@ export function CurrentStatePanel({
             aria-busy={dispositionBusy || undefined}
             onClick={onArchive}
           >
-            {/* Ruling 459 over ruling 368: the lock trades for the restore mark
-                with the task's state, and that resting cell trades for the
-                spinning loader while the disposition is in flight (GlyphSwap's
-                `busy`), so neither change is a hard swap and there is only
-                ever one loader. */}
-            <GlyphSwap rest="lock" alt="refresh" on={archived} busy={dispositionBusy} />
+            {/* Ruling 459 over ruling 368: the archive mark (ruling 651) trades
+                for the restore mark with the task's state, and that resting
+                cell trades for the spinning loader while the disposition is in
+                flight (GlyphSwap's `busy`), so neither change is a hard swap
+                and there is only ever one loader. */}
+            <GlyphSwap rest="archive" alt="refresh" on={archived} busy={dispositionBusy} />
             {archived
               ? dispositionBusy
                 ? "Restoring…"

@@ -4263,6 +4263,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         notStarted: e.progress.notStarted,
         held: e.progress.held,
         archived: e.progress.archived,
+        archivedDone: e.progress.archivedDone,
       },
     };
   }
@@ -4292,7 +4293,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_epics",
-      "The project's epics (ruling 503). An epic is a named body of work that tasks join and leave one at a time, like a Jira epic or a Linear project. Each with its status, lead, dates and progress counted from its tasks at read time: done of total, started, not started and held (archived tasks are counted apart and left out of the total). Membership gated.",
+      "The project's epics (ruling 503). An epic is a named body of work that tasks join and leave one at a time, like a Jira epic or a Linear project. Each with its status, lead, dates and progress counted from its tasks at read time: done of total, started, not started and held. Archived tasks are counted apart: one archived when it was done stays in done and total (`archivedDone` counts those, ruling 651), and one archived unfinished is left out. Membership gated.",
       { projectSlug: z.string().optional() },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);

@@ -191,6 +191,7 @@ describe("ruling 503(e): the Epics pages' loaders", () => {
       notStarted: 1,
       held: 0,
       archived: 0,
+      archivedDone: 0,
       byStage: [
         { stageId: "triage", count: 1 },
         { stageId: "done", count: 1 },
@@ -508,5 +509,94 @@ describe("ruling 503(e): the board's epic filter", () => {
     expect(none).not.toContain(second);
     expect(none.length).toBeGreaterThan(0);
     expect(none.length).toBeLessThan(byNone.cards.length);
+  });
+});
+
+describe("ruling 651: archiving from the Epics pages", () => {
+  /** Put a task at the terminal stage through its file, the way a hand edit
+   *  would: no hook fires. */
+  async function closeToDone(taskKey: string): Promise<void> {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildTaskFile } = await import("~/server/projections/rebuilder.server");
+    await updateTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.previousStageId = parsed.frontmatter.stage;
+      parsed.frontmatter.stage = "done";
+      parsed.frontmatter.waiting = "none";
+    });
+    rebuildTaskFile(app.db, SLUG, taskKey, { dataRoot: app.dataRoot });
+  }
+
+  async function fileArchived(taskKey: string) {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    return readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })?.parsed.frontmatter.archived;
+  }
+
+  it("archive-epic-tasks (Epics list) files a Done epic's tasks away: each archived, one history line, still counted done", async () => {
+    const first = await makeTask("Finished, one");
+    const second = await makeTask("Finished, two");
+    const epicId = await makeEpic(ids.arda, { title: "Shipped body of work", taskKeys: [first, second] });
+    await closeToDone(first);
+    await closeToDone(second);
+    acceptedSchema.parse(await postEpic(ids.arda, epicId, { intent: "update-epic", status: "done" }));
+
+    const done = acceptedSchema.parse(await postEpics(ids.murat, { intent: "archive-epic-tasks", epicId }));
+    expect(done.toast).toBe(`2 tasks in ${epicId} archived. Find them under Archived on the board.`);
+    expect(await fileArchived(first)).toBe(true);
+    expect(await fileArchived(second)).toBe(true);
+    expect((await epicFile(epicId))?.timeline[0]?.text).toBe(`Murat Yıldız archived ${first} and ${second}.`);
+    // The board's card is archived: the board draws it under Archived only.
+    expect((await board(ids.arda)).cards.find((c) => c.key === first)?.archived).toBe(true);
+    // CANARY: leave every archived row out of `progressByEpic` (the `continue`
+    // before ruling 651) and the Done epic counts nothing done.
+    const listed = (await epicsPage(ids.arda)).epics.find((e) => e.id === epicId);
+    expect(listed?.progress).toMatchObject({ total: 2, done: 2, archived: 2, archivedDone: 2 });
+    // Again: nothing left to archive.
+    const again = acceptedSchema.parse(await postEpics(ids.murat, { intent: "archive-epic-tasks", epicId }));
+    expect(again.toast).toBe(`Every task in ${epicId} is archived already.`);
+  });
+
+  it("archive-epic-tasks refuses an epic that is not Done, one with a task still open, and anyone who may not archive", async () => {
+    const finished = await makeTask("Finished, epic still open");
+    const open = await makeTask("Still open in its epic");
+    const epicId = await makeEpic(ids.arda, { title: "Not finished yet", taskKeys: [finished, open] });
+    await closeToDone(finished);
+
+    const notDone = refusedSchema.parse(await postEpics(ids.arda, { intent: "archive-epic-tasks", epicId }));
+    expect(notDone.data.error).toBe(
+      `${epicId} is Planned, not Done. Its tasks are archived together once it is Done; until then, archive one at a time from its page.`,
+    );
+    acceptedSchema.parse(await postEpic(ids.arda, epicId, { intent: "update-epic", status: "done" }));
+    // CANARY: drop the open-task check in `archiveEpicTasks` and the open
+    // task is archived along with the finished one.
+    const stillOpen = refusedSchema.parse(await postEpic(ids.arda, epicId, { intent: "archive-epic-tasks" }));
+    expect(stillOpen.data.error).toBe(
+      `${open} is still open in ${epicId}, so nothing was archived. Finish it, or archive it one at a time from the epic's page.`,
+    );
+    expect(await fileArchived(finished)).toBe(false);
+    expect(await fileArchived(open)).toBe(false);
+
+    await closeToDone(open);
+    const contributor = refusedSchema.parse(await postEpics(ids.selin, { intent: "archive-epic-tasks", epicId }));
+    expect(contributor.data.error).toBe("Your project role (contributor) cannot archive this epic's tasks.");
+    expect(await fileArchived(finished)).toBe(false);
+  });
+
+  it("archive-task and restore-task (epic page) archive one task from its row and bring it back", async () => {
+    const key = await makeTask("Archived from its row");
+    const epicId = await makeEpic(ids.arda, { title: "Row actions", taskKeys: [key] });
+
+    const archived = acceptedSchema.parse(await postEpic(ids.murat, epicId, { intent: "archive-task", taskKey: key }));
+    expect(archived.toast).toBe(`${key} archived. Find it under Archived on the board.`);
+    expect(await fileArchived(key)).toBe(true);
+    expect((await epicPage(ids.murat, epicId)).tasks.find((t) => t.key === key)).toMatchObject({ archived: true });
+    // CANARY: post `archived: true` for both intents in project.epic.tsx and
+    // Restore archives the task again.
+    const restored = acceptedSchema.parse(await postEpic(ids.murat, epicId, { intent: "restore-task", taskKey: key }));
+    expect(restored.toast).toBe(`${key} restored to Triage.`);
+    expect(await fileArchived(key)).toBe(false);
+
+    const refused = refusedSchema.parse(await postEpic(ids.selin, epicId, { intent: "archive-task", taskKey: key }));
+    expect(refused.data.error).toBe("Your project role (contributor) cannot archive this task.");
+    expect(await fileArchived(key)).toBe(false);
   });
 });

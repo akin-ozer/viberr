@@ -235,9 +235,11 @@ recommendation is open. Nothing is owed by anyone while it waits.
   `heldAtStage`, notifies the owner and supervisors (kind `dependency`, its own
   toggle) and re-invokes the operator with `dependencies-released`. A person emptying
   the list is the same release.
-- **It never releases** when an entry is archived: the dependent gets one "Waiting on
-  archived work" note, its watchers one notification, and it is left `waiting: human`
-  until someone edits the list; the entry renders as "archived".
+- **It never releases** when an entry was archived before it was done: the dependent
+  gets one "Waiting on archived work" note, its watchers one notification, and it is left
+  `waiting: human` until someone edits the list; the entry renders as "archived". An
+  entry archived at the terminal stage is done (ruling 651): archiving finished work,
+  one task or a Done epic's all at once, releases or holds nothing.
 - **Converting an old hold** (the live JC-7 / JC-9 shapes): set the list on the task
   page first (setting a wait never touches a packet), then resolve any standing packet
   with its recommended option; that one reactive turn reads the wait and stops. The

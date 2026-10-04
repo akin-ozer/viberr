@@ -167,7 +167,8 @@ an unparseable epic file counts as one.
 - `dependencies.server.ts` (ruling 131) is the READ model beside the rebuilder:
   `resolveDependencies` / `dependencyResolver` map each stored entry to
   `open | done | failed | missing` from the live projections (a task at the
-  terminal stage is `done`, an archived one `failed`; every entry is a task key since
+  terminal stage is `done`, archived there or not (ruling 651), and one archived before it
+  `failed`; every entry is a task key since
   ruling 503 retired the goal-link spelling). The board
   query resolves every row through ONE resolver; the task query resolves on read;
   nothing caches a resolved state. `listHeldTasks` feeds the release engine.

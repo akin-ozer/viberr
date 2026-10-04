@@ -180,6 +180,7 @@ const progressSchema = z.object({
   notStarted: z.number(),
   held: z.number(),
   archived: z.number(),
+  archivedDone: z.number(),
 });
 const epicRowSchema = z.object({
   id: z.string(),
@@ -373,7 +374,7 @@ describe("ruling 503(f): list_epics and get_epic", () => {
       lead: null,
       startDate: null,
       targetDate: null,
-      progress: { done: 1, total: 3, started: 1, notStarted: 1, held: 1, archived: 1 },
+      progress: { done: 1, total: 3, started: 1, notStarted: 1, held: 1, archived: 1, archivedDone: 0 },
     });
     // Epics are numbered: the list reads in that order.
     const numbers = listed.map((e) => Number(e.id.slice("epic-".length)));
@@ -384,7 +385,7 @@ describe("ruling 503(f): list_epics and get_epic", () => {
   it("get_epic reads one epic whole: its tasks with stage, readiness, owner and waits, progress by stage, and its history", async () => {
     // CANARY: read the epic's tasks without `includeArchived: true`.
     const epic = parsed(epicDetailSchema, await call(ids.viewer, "get_epic", { epicId }));
-    expect(epic.progress).toEqual({ done: 1, total: 3, started: 1, notStarted: 1, held: 1, archived: 1 });
+    expect(epic.progress).toEqual({ done: 1, total: 3, started: 1, notStarted: 1, held: 1, archived: 1, archivedDone: 0 });
     // The bar's segments, in the board's stage order; the archived task is not one.
     expect(epic.byStage).toEqual([
       { stageId: "triage", count: 1 },

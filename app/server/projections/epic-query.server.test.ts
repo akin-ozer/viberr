@@ -56,6 +56,7 @@ const EMPTY: EpicProgress = {
   notStarted: 0,
   held: 0,
   archived: 0,
+  archivedDone: 0,
   byStage: [],
 };
 
@@ -174,8 +175,9 @@ describe("ruling 503(b): listEpics", () => {
 
 describe("ruling 503(b): getEpic", () => {
   it("counts progress from the task rows: archived apart and out of the total, held inside the others, an unknown stage its own segment last", async () => {
-    // CANARY: drop the `continue` after `progress.archived += row.n` in
-    // progressByEpic (the archived task joins the total and its stage).
+    // CANARY: drop the `if (!terminal) continue` after `progress.archived +=
+    // row.n` in progressByEpic (the unfinished archived task joins the total
+    // and its stage).
     const store = await seeded();
     expect(getEpic(store.db, store.slug, "epic-1")?.progress).toEqual({
       total: 7,
@@ -184,6 +186,7 @@ describe("ruling 503(b): getEpic", () => {
       notStarted: 2,
       held: 2,
       archived: 1,
+      archivedDone: 0,
       byStage: [
         { stageId: "triage", count: 2 },
         { stageId: "ready", count: 1 },
@@ -191,6 +194,29 @@ describe("ruling 503(b): getEpic", () => {
         { stageId: "done", count: 2 },
         { stageId: "qa", count: 1 },
       ],
+    });
+  });
+
+  it("ruling 651: a task archived at the terminal stage still counts as done, in the total and its band; one archived unfinished stays out", async () => {
+    // CANARY: put back the `continue` for every archived row in
+    // progressByEpic and VIB-11 drops out of the total, done and its band.
+    const store = await seeded();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", { stage: "done", epic: "epic-1", archived: true, waiting: "none" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(getEpic(store.db, store.slug, "epic-1")?.progress).toMatchObject({
+      total: 8,
+      done: 3,
+      started: 3,
+      notStarted: 2,
+      held: 2,
+      archived: 2,
+      archivedDone: 1,
+    });
+    expect(getEpic(store.db, store.slug, "epic-1")?.progress.byStage.find((b) => b.stageId === "done")).toEqual({
+      stageId: "done",
+      count: 3,
     });
   });
 

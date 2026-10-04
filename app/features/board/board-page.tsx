@@ -1519,7 +1519,7 @@ const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
   { id: "continuity", label: "Degraded continuity", icon: "refresh" },
   // R14-3: archived tasks are out of every other view; this is the way back to
   // them. The chip only renders when the project has any (see FilterBar).
-  { id: "archived", label: "Archived", icon: "lock" },
+  { id: "archived", label: "Archived", icon: "archive" },
 ];
 
 function BoardHeader({
@@ -2848,11 +2848,11 @@ export function BoardPage({
 
       {filter === "archived" && (
         <div className="board-orphans notice" role="status">
-          <Icon name="lock" />
+          <Icon name="archive" />
           <span className="board-orphans-label">
-            Archived tasks: abandoned work kept for the record. Their timelines
-            and audit are intact, they are out of the review queue, and a
-            maintainer can restore one from its task page.
+            Archived tasks: finished or abandoned work, kept for the record.
+            Their timelines and audit are intact, they are out of the review
+            queue, and a maintainer can restore one from its task page.
           </span>
         </div>
       )}
