@@ -35,10 +35,9 @@ import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-
 import {
   classifyReviewerVerdict,
   recordAgentCompletion,
-  reorderTask,
   resolvePacket,
-  transitionStage,
 } from "./task-actions.server";
+import { reorderTask, transitionStage } from "./task-transitions.server";
 import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
 import { updateTaskGoal } from "./task-edits.server";

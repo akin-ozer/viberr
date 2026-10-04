@@ -43,8 +43,8 @@ import {
   dismissRecommendation,
   requestPacketMaintainerDecision,
   resolvePacket,
-  transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { transitionStage } from "~/server/tasks/task-transitions.server";
 import { manualDeliverForReview, runProjectGatesByHand } from "~/server/tasks/task-delivery.server";
 import {
   completeTaskMerge,

@@ -18,7 +18,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
 import { createTask } from "./task-edits.server";
 import { setTaskArchived } from "./task-archive.server";
-import { transitionStage } from "./task-actions.server";
+import { transitionStage } from "./task-transitions.server";
 import type { StartAgentRunInput, StartAgentRunResult } from "./specialist-run.server";
 import {
   announceRelease,

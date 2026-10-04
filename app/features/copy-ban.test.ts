@@ -599,15 +599,16 @@ const ALLOWED_ASSET_LINES: ReadonlyArray<{
  * and "the lexer quietly stopped producing literals here" are the same green,
  * and every escape in this finding's history was a silent green. These are the
  * surfaces the verifier actually broke: the accept-dialog refusal sentences
- * (`task-file.schema.ts`) and the stage and archive refusals and toasts (in
- * `task-actions.server.ts` then, split into its families by ruling 654). The
- * assertion is on SHAPE, not on wording, so it proves reach without pinning
- * copy another pass is free to rewrite.
+ * (`task-file.schema.ts`) and the stage and archive refusals and toasts
+ * (`task-transitions.server.ts` and `task-archive.server.ts`, which ruling 654
+ * split out of `task-actions.server.ts`). The assertion is on SHAPE, not on
+ * wording, so it proves reach without pinning copy another pass is free to
+ * rewrite.
  */
 const MUST_SEE_COPY = [
   "schemas/task-file.schema.ts",
-  "server/tasks/task-actions.server.ts",
   "server/tasks/task-archive.server.ts",
+  "server/tasks/task-transitions.server.ts",
 ];
 
 /** Sentence-shaped: two real words, long enough to be prose rather than a key. */

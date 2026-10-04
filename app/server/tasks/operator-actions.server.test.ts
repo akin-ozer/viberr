@@ -47,8 +47,8 @@ import {
   applyRecommendation,
   dismissRecommendation,
   resolvePacket,
-  transitionStage,
 } from "./task-actions.server";
+import { transitionStage } from "./task-transitions.server";
 import { applyAcceptanceWrite } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
 import { createTask, updateTaskGoal } from "./task-edits.server";

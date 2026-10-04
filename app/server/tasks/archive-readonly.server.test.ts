@@ -9,7 +9,8 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { readProjectFile, updateProjectFile } from "~/server/files/project-writer.server";
-import { appendComment, transitionStage } from "./task-actions.server";
+import { appendComment } from "./task-actions.server";
+import { transitionStage } from "./task-transitions.server";
 import { createTask, updateTaskGoal } from "./task-edits.server";
 import { setProjectArchived } from "~/features/project-settings/settings-actions.server";
 

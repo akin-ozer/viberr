@@ -16,13 +16,8 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import {
-  applyRecommendation,
-  dismissRecommendation,
-  reorderTask,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { applyRecommendation, dismissRecommendation, resolvePacket } from "./task-actions.server";
+import { reorderTask, transitionStage } from "./task-transitions.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";
 import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";

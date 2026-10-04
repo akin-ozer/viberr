@@ -23,7 +23,8 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
 // settle below instead of waiting on a cold dynamic import.
 import "./operator-actions.server";
 import { applyAcceptanceWrite, forceAcceptCompletion } from "./task-acceptance.server";
-import { resolvePacket, transitionStage } from "./task-actions.server";
+import { resolvePacket } from "./task-actions.server";
+import { transitionStage } from "./task-transitions.server";
 
 /**
  * Ruling 471: a direct acceptance answers the open decision that offers it.
