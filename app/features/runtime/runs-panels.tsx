@@ -869,8 +869,8 @@ interface FoldRowProps {
   /** The row's key, handed back to `onToggle`. */
   rowKey: string;
   lines: readonly StreamedLine[];
-  /** Wait rows only: the call is still open. */
-  live?: boolean;
+  /** The run is going and nothing has landed after this fold. */
+  live: boolean;
   startedAt: string | null;
   hydrated: boolean;
   open: boolean;
@@ -889,7 +889,7 @@ interface FoldRowProps {
 function WaitRow({
   rowKey,
   lines,
-  live = false,
+  live,
   startedAt,
   hydrated,
   open,
@@ -1069,7 +1069,7 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
  * reads "Thought for Ns", the verb above the figure, with the chevron that
  * opens the steps.
  */
-function ThoughtRow({ rowKey, lines, live = false, startedAt, hydrated, open, onToggle }: FoldRowProps) {
+function ThoughtRow({ rowKey, lines, live, startedAt, hydrated, open, onToggle }: FoldRowProps) {
   const head = lines[0]!.display;
   const clock = (t: string) => (hydrated ? localLogClock(t, startedAt) : t);
   const label = thoughtLabel(lines);
