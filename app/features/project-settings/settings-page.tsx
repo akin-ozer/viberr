@@ -2544,6 +2544,8 @@ export function SettingsPage({
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
   useActionToast(reviewerFetcher);
+  // Ruling 652(b): a lease save answers like every other panel's.
+  useActionToast(leaseFetcher);
   useActionToast(gateFetcher);
 
   // E3: every panel gate names the RbacAction its OWN server mutation checks,

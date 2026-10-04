@@ -8,12 +8,11 @@ import { RichText } from "~/ui/rich-text";
 import { plainText } from "~/features/notifications/notification-meta";
 import { DatePicker } from "~/ui/date-picker";
 import { formatClock, formatClockUTC, formatDayBucketUTC } from "~/shared/dates/format";
+import { daySections } from "~/shared/dates/day-sections";
 import { TIMELINE_EVENT_TYPES } from "~/schemas/task-file.schema";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 import {
   auditTimeLabel,
-  groupStreamByDay,
-  groupStreamByDayUTC,
   matchesActorFilter,
   type ActivityStreamRowView,
   type ActorFilter,
@@ -710,9 +709,9 @@ export function ActivityPage({
     );
 
   const filtered = stream.filter((r) => matchesActorFilter(r, f));
-  const shown = local
-    ? groupStreamByDay(filtered)
-    : groupStreamByDayUTC(filtered);
+  // Ruling 652(c): sections by the absolute day, so two days a year apart
+  // never merge under one yearless "Mar 30".
+  const shown = daySections(filtered, (r) => r.occurredAt, local);
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
   // UI-47: "Show older" submits `min(loaded + STEP, STREAM_MAX)`, so once the
   // loaded slice hits the ceiling the click is a NO-OP — while the button still
@@ -786,7 +785,7 @@ export function ActivityPage({
               }))}
             />
             {shown.map((g) => (
-              <div key={g.day}>
+              <div key={g.key}>
                 <div className="act-day">{g.day}</div>
                 {g.rows.map((r) => (
                   <div className="pol-ev" key={r.id}>

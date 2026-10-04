@@ -81,8 +81,9 @@ export interface AuthEndpointContext {
 /**
  * P13-D-22: which provider's callback is running, read off the endpoint the
  * database hook fires under. The social callback endpoint is declared
- * `/callback/:id` (and `/oauth2/callback/:id`), so `params.id` IS the provider
- * id — the same resolution better-auth's own `lastLoginMethod` plugin uses.
+ * `/callback/:id`, so `params.id` IS the provider id — the same resolution
+ * better-auth's own `lastLoginMethod` plugin uses. (Ruling 652(d): the generic
+ * OAuth plugin's `/oauth2/callback/:id` is not installed, so it is not read.)
  *
  * This has to be threaded explicitly: `databaseHooks.user.create` receives only
  * the user record, and the whitelist previously had to GUESS the provider from
@@ -96,9 +97,7 @@ function oauthProviderOf(
   context: AuthEndpointContext | null | undefined,
 ): OAuthProvider | null {
   const path = context?.path ?? "";
-  if (!path.startsWith("/callback/") && !path.startsWith("/oauth2/callback/")) {
-    return null;
-  }
+  if (!path.startsWith("/callback/")) return null;
   const id = context?.params?.id ?? path.split("/").pop();
   return id === "github" || id === "google" ? id : null;
 }
