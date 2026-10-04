@@ -1953,8 +1953,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // an authoring guard the same way.
     writeReviewTask({ validation: "changed" });
     const runId = await finishedRunWith("The credential was rejected again.");
-    const { openStuckLoopPacketForTest } = await import("./task-actions.server");
-    await openStuckLoopPacketForTest(
+    const { openStuckLoopPacket } = await import("./task-escalations.server");
+    await openStuckLoopPacket(
       store.db,
       { dataRoot: store.dataRoot, operatorAuthorized: true },
       {
