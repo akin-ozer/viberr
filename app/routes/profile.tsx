@@ -11,8 +11,8 @@ import {
 import { z } from "zod";
 import type { Route } from "./+types/profile";
 import type { loader as rootLoader } from "../root";
-import { requireAuth, requireUser } from "~/server/auth/require-user.server";
-import { csrfError } from "~/features/shell/csrf-result.server";
+import { requireFormAction } from "~/server/auth/form-action.server";
+import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { AppError, isAppError } from "~/server/errors/app-error.server";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
@@ -101,18 +101,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const ctx = await requireAuth(request);
-  const db = getDb();
-  const formData = await request.formData();
-  // UI-32: `assertCsrf` used to throw here, OUTSIDE the try below — a thrown
-  // Response renders the nearest boundary, so an expired token replaced the
-  // profile overlay (and everything else) with root's 403 page instead of the
-  // `{ok:false,error}` toast this action's own catch produces for every other
-  // failure.
-  const csrfFailure = await csrfError(request, ctx.sessionId, formData);
-  if (csrfFailure) return csrfFailure;
-  const intent = String(formData.get("intent") ?? "");
-  const actor = { userId: ctx.user.id, label: ctx.user.email };
+  const { refused, auth: ctx, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
 
   try {
     switch (intent) {
