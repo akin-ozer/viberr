@@ -138,7 +138,6 @@ const SPEC: RunSpec = {
   projectSlug: "viberr-core",
   taskKey: "VIB-1",
   threadId: "primary",
-  role: "Primary specialist",
   kind: "primary",
   backend: "claude",
   model: "claude-sonnet-4-5",

@@ -54,7 +54,6 @@ describe("run sink cost per line (ruling 457)", () => {
       projectSlug: "viberr-core",
       taskKey: "VIB-142",
       threadId: "thread_sinkperf",
-      role: "developer",
       kind: "primary",
       backend: "claude",
       model: "claude-opus-4-8",

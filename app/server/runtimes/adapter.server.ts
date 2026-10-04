@@ -62,7 +62,6 @@ export interface RunSpec {
   taskKey: string;
   /** Thread id within the task ("op" | "primary" | "r0"). */
   threadId: string;
-  role: string;
   kind: RunKind;
   /** The requested provider backend. */
   backend: "claude" | "codex";

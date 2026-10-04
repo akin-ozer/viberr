@@ -211,7 +211,6 @@ describe("runtime-registry", () => {
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
       threadId: "primary",
-      role: "Primary specialist",
       kind: "primary",
       model: "sonnet",
       prompt: "hello",
@@ -339,7 +338,6 @@ describe("runtime-registry", () => {
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
       threadId: "primary",
-      role: "Primary specialist",
       kind: "primary",
       model: "sonnet",
       prompt: "hello",
@@ -407,7 +405,6 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     projectSlug: "viberr-core",
     taskKey: "VIB-16",
     threadId: "primary",
-    role: "Primary specialist",
     kind: "primary",
     model: "sonnet",
     prompt: "Implement the marker file.",
@@ -565,7 +562,6 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
       ...PARITY_TASK,
       kind: "operator",
       threadId: "op",
-      role: "Operator",
       workdir: "/data/projects/viberr-core/tasks/VIB-16",
     });
     // Claude: the repo-mutation built-ins are removed from the model's context

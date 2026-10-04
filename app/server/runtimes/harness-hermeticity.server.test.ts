@@ -170,7 +170,6 @@ describe("a run's child env carries exactly its principal's credential", () => {
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
       threadId: "primary",
-      role: "Primary specialist",
       kind: "primary",
       backend: "claude",
       model: "sonnet",
@@ -422,7 +421,7 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
       ...runMarkerEnv("run_window"),
     };
     const spec: RunSpec = {
-      runId: "run_window", projectSlug: "viberr-core", taskKey: "VIB-1", threadId: "t", role: "r",
+      runId: "run_window", projectSlug: "viberr-core", taskKey: "VIB-1", threadId: "t",
       kind, backend, model: "m", prompt: "hello", workdir: "/tmp", autonomous: true, env,
     };
     adapters[backend].start(spec, { onLine: () => {}, onExit: () => {} });

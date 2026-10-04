@@ -1010,7 +1010,6 @@ export async function startRun(
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     threadId,
-    role: input.role,
     kind: input.kind,
     backend: input.backend,
     model,
