@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
-import { createContext, useContext, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
 import {
   onLiveFrame,
   REVALIDATE_DEBOUNCE_MS,
@@ -11,49 +9,7 @@ import {
   useLiveUpdates,
 } from "./use-live-updates";
 import { CONTROLLER_UPDATED_EVENT } from "./event-types";
-
-/**
- * The hook runs under a REAL data router, so `useRevalidator` is React Router's
- * own and a revalidation is observable the way the product sees one: the route
- * loader runs again. `hydrationData` starts the router initialized, so the tree
- * paints synchronously and the initial load is not counted.
- *
- * The subject renders through a context slot rather than as the route's own
- * element, so `rerender` with new props still reaches it.
- */
-const SubjectContext = createContext<ReactNode>(null);
-
-function Subject() {
-  return <>{useContext(SubjectContext)}</>;
-}
-
-let loaderRuns = 0;
-let router = makeRouter();
-
-function makeRouter() {
-  loaderRuns = 0;
-  return createMemoryRouter(
-    [
-      {
-        path: "*",
-        Component: Subject,
-        loader: () => {
-          loaderRuns += 1;
-          return null;
-        },
-      },
-    ],
-    { hydrationData: { loaderData: { "0": null } } },
-  );
-}
-
-function DataRouter({ children }: { children: ReactNode }) {
-  return (
-    <SubjectContext.Provider value={children}>
-      <RouterProvider router={router} />
-    </SubjectContext.Provider>
-  );
-}
+import { DataRouter, loaderRunCount, resetDataRouter } from "../../../test-support/data-router";
 
 class FakeEventSource {
   static CONNECTING = 0;
@@ -126,7 +82,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("EventSource", FakeEventSource);
   FakeEventSource.instances = [];
-  router = makeRouter();
+  resetDataRouter();
 });
 
 afterEach(() => {
@@ -204,7 +160,7 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     // The first stream of a surface's life never revalidates on open.
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     act(() => {
       visibility.current = "hidden";
@@ -224,14 +180,14 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emit("stream.open", "44");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(loaderRuns, "nothing was missed, so nothing reloads").toBe(0);
+    expect(loaderRunCount(), "nothing was missed, so nothing reloads").toBe(0);
 
     // What the tab missed while it was away arrives as the broker's replay.
     act(() => {
       FakeEventSource.last().emit("task.updated", "43");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns, "a returning tab rendered a stale snapshot").toBe(1);
+    expect(loaderRunCount(), "a returning tab rendered a stale snapshot").toBe(1);
   });
 
   it("a reconnect that cannot say where it stood still pulls the loaders once", () => {
@@ -258,7 +214,7 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().onopen?.();
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 
   it("a stream.resync (the broker could not replay that far back) pulls the loaders once", () => {
@@ -267,7 +223,7 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emit("stream.resync", "9");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 
   it("coalesces an event burst into ONE debounced revalidation", async () => {
@@ -279,24 +235,24 @@ describe("useLiveUpdates", () => {
       es.emit("task.updated", "2");
       es.emit("notification.created", "3");
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     act(() => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS - 1);
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     await act(async () => {
       vi.advanceTimersByTime(1);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
 
     // A later, separate event revalidates again.
     await act(async () => {
       es.emit("projection.rebuilt", "4");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(2);
+    expect(loaderRunCount()).toBe(2);
   });
 
   /**
@@ -312,17 +268,17 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
     // The first revalidation is in flight (its loader ran; it has not landed).
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
     act(() => {
       es.emit("task.updated", "2");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
     await act(async () => {
       await Promise.resolve();
     });
     // Received after that load was sent: not in it, so it reloads.
-    expect(loaderRuns).toBe(2);
+    expect(loaderRunCount()).toBe(2);
   });
 
   it("a fresh event inside the window pushes the trailing edge out", () => {
@@ -336,11 +292,11 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(200);
     });
     // 400 ms elapsed but the second event reset the 300 ms window.
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
     act(() => {
       vi.advanceTimersByTime(100);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 
   it("ignores the stream.open control hello (connecting must not revalidate)", () => {
@@ -349,7 +305,7 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emit("stream.open", "9");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 
   it("ignores a stream event: one console line must not refetch every surface", () => {
@@ -363,7 +319,7 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emit("controller.log-appended", "10");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 
   /**
@@ -386,7 +342,7 @@ describe("useLiveUpdates", () => {
         vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
       });
       // CANARY: route `controller.updated` to `scheduleRevalidate` again.
-      expect(loaderRuns).toBe(0);
+      expect(loaderRunCount()).toBe(0);
       expect(notices).toHaveLength(1);
       cleanup();
 
@@ -395,7 +351,7 @@ describe("useLiveUpdates", () => {
         FakeEventSource.last().emit("controller.updated", "11");
         vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
       });
-      expect(loaderRuns).toBe(1);
+      expect(loaderRunCount()).toBe(1);
       expect(notices).toHaveLength(1);
     } finally {
       window.removeEventListener(CONTROLLER_UPDATED_EVENT, listen);
@@ -421,7 +377,7 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(4_000);
     });
     // CANARY: route `run.log-appended` to `scheduleRevalidate`.
-    expect(loaderRuns, "the board refetched per console line").toBe(0);
+    expect(loaderRunCount(), "the board refetched per console line").toBe(0);
     cleanup();
 
     // Another task's page: it subscribes the project for its rail, so the
@@ -434,13 +390,13 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 21);
       vi.advanceTimersByTime(4_000);
     });
-    expect(loaderRuns, "a sibling task page refetched per line").toBe(0);
+    expect(loaderRunCount(), "a sibling task page refetched per line").toBe(0);
     // Its own domain events still revalidate, as before.
     act(() => {
       FakeEventSource.last().emit("run.state-changed", "23");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 
   /**
@@ -465,12 +421,12 @@ describe("useLiveUpdates", () => {
       }
       vi.advanceTimersByTime(4_000);
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
     act(() => {
       es.emit("task.updated", "44");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 
   /**
@@ -534,7 +490,7 @@ describe("useLiveUpdates", () => {
         vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
       });
       expect(seen).toEqual(["7"]);
-      expect(loaderRuns).toBe(1);
+      expect(loaderRunCount()).toBe(1);
     } finally {
       off();
     }
@@ -574,7 +530,7 @@ describe("useLiveUpdates", () => {
     act(() => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 
   /**
@@ -649,7 +605,7 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     // First stream of the surface's life: opening must NOT revalidate.
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     rerender(<Probe scopes={["project:p", "task:p/K-1", "user"]} />);
     expect(FakeEventSource.last().url).toContain("&lastEventId=7");
@@ -658,14 +614,14 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emit("stream.open", "8");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     // The broker replays the gap's notification.read: it reaches the page.
     act(() => {
       FakeEventSource.last().emit("notification.read", "8");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 });
 

@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { createContext, StrictMode, useContext, useEffect, type ReactNode } from "react";
+import { StrictMode, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import {
@@ -18,52 +17,17 @@ import {
   type RunLogWindow,
 } from "./runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
+import { DataRouter, loaderRunCount, resetDataRouter } from "../../../test-support/data-router";
 
 /**
- * The hook calls `useRevalidator`, so it runs under a REAL data router here,
- * whose one route counts its loader runs (a revalidation is observable the way
- * the product sees one). The subject renders through a context slot rather
- * than as the route's own element, so `rerender` with new props reaches it.
+ * The hook calls `useRevalidator`, so it runs under a real data router
+ * (`test-support/data-router.tsx`).
  *
  * Ruling 457: the console opens no connection of its own. Its frames come from
  * the tab's one live stream (`useLiveUpdates`, the layout's on a task page),
  * so every probe here mounts that stream beside the hook, on the scope the
  * page's layout holds.
  */
-const SubjectContext = createContext<ReactNode>(null);
-
-function Subject() {
-  return <>{useContext(SubjectContext)}</>;
-}
-
-let loaderRuns = 0;
-let router = makeRouter();
-
-function makeRouter() {
-  loaderRuns = 0;
-  return createMemoryRouter(
-    [
-      {
-        path: "*",
-        Component: Subject,
-        loader: () => {
-          loaderRuns += 1;
-          return null;
-        },
-      },
-    ],
-    { hydrationData: { loaderData: { "0": null } } },
-  );
-}
-
-function DataRouter({ children }: { children: ReactNode }) {
-  return (
-    <SubjectContext.Provider value={children}>
-      <RouterProvider router={router} />
-    </SubjectContext.Provider>
-  );
-}
-
 /** The `run.log-appended` frame body, as the broker puts it on the wire. */
 interface RunLogAppended {
   projectSlug: string;
@@ -269,7 +233,7 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource);
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
-  router = makeRouter();
+  resetDataRouter();
 });
 
 afterEach(() => {
@@ -374,7 +338,7 @@ describe("UI-35: run-log tail deduplication", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1]![0])).toContain("since=0");
     expect(texts()).toEqual(["a", "b"]);
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 });
 
@@ -698,7 +662,7 @@ describe("the Live run strip's facts (ruling 457, LIVE-1)", () => {
       await flush();
     });
     expect(store.facts("run_1")).toMatchObject({ step: "Edit · app.ts", turns: 2 });
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
   });
 });
 
@@ -979,7 +943,7 @@ describe("the controller channel", () => {
       });
     }
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(loaderRuns).toBe(0);
+    expect(loaderRunCount()).toBe(0);
 
     fetchMock.mockResolvedValue(tailOf([], { state: "finished", headSeq: -1 }));
     for (let i = 0; i < 2; i++) {
@@ -989,6 +953,6 @@ describe("the controller channel", () => {
       });
     }
     // CANARY: revalidate on every poll and this reads 2.
-    expect(loaderRuns).toBe(1);
+    expect(loaderRunCount()).toBe(1);
   });
 });
