@@ -82,9 +82,7 @@ async function resolveDeliveryPushGrant(
   const deliverer = file ? deliveringEngagement(file.parsed.frontmatter) : null;
   if (!deliverer) return true; // no grant to enforce
   try {
-    const { resolveDeployedSpecialist } = await import(
-      "~/server/tasks/specialist-run.server"
-    );
+    const { resolveDeployedSpecialist } = await import("~/server/tasks/specialist-roster.server");
     const { resolveDeliveryPermissions } = await import(
       "~/server/tasks/specialist-tool-policy"
     );
@@ -1626,7 +1624,7 @@ export async function recordDeliveredNextStep(
     // all (a board that never reviews). Withheld cards leave an audit row that
     // says why, so the silence is explainable.
     const validation = deriveValidation(fm);
-    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const { listDeployedSpecialists } = await import("./specialist-roster.server");
     const specialistCtx: TaskMutationContext = {};
     if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
     const reviewsExist = listDeployedSpecialists(projectSlug, specialistCtx).some(

@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listUsers } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { listDeployedSpecialists } from "./specialist-run.server";
+import { listDeployedSpecialists } from "./specialist-roster.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {

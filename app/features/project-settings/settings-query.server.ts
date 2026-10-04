@@ -5,7 +5,7 @@ import {
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
-import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import {
   readRequiredReviewers,
   type RequiredReviewerView,

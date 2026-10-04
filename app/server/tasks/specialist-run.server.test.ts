@@ -82,16 +82,19 @@ import {
   buildAnalyzePrompt,
   directiveRequestsDelivery,
   knowledgeBaseReadDirs,
-  listDeployedSpecialists,
   removeReviewer,
-  resolveDeployedSpecialist,
-  runDispatchLine,
   startAgentRun,
   buildSpecialistPromptPrefix,
   githubReadForRun,
   isDispatchHeld,
   pinSupportCheckout,
   resolveResumeConfinement,
+  type DispatchHeldError,
+} from "./specialist-run.server";
+import {
+  listDeployedSpecialists,
+  resolveDeployedSpecialist,
+  runDispatchLine,
   KB_CORRECTION_NOTE_CLAUDE,
   KB_CORRECTION_NOTE_CODEX,
   RELAY_NOTE_CLAUDE,
@@ -100,8 +103,7 @@ import {
   KB_CONTRACT_CORRECTION_SENTENCE,
   ATTACHMENTS_READ_SENTENCE,
   OTHER_TASK_FILES_SENTENCE,
-  type DispatchHeldError,
-} from "./specialist-run.server";
+} from "./specialist-roster.server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 

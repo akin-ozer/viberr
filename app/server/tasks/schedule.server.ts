@@ -184,7 +184,7 @@ export async function scheduleTaskAction(
     // The profile must be deployed NOW so the picker can't schedule a phantom;
     // the fire-time dispatch re-resolves the LIVE deployment (R22's rule) and
     // skips visibly if it was undeployed in the meantime.
-    const { listDeployedSpecialists } = await import("./specialist-run.server");
+    const { listDeployedSpecialists } = await import("./specialist-roster.server");
     const view = listDeployedSpecialists(input.projectSlug, ctx).find(
       (s) => s.id === input.profileId,
     );

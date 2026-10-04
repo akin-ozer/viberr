@@ -18,10 +18,7 @@ import {
 import { SESSION_MISSING_RE } from "~/server/runtimes/session-export.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
-import {
-  listDeployedSpecialists,
-  type DeployedSpecialistView,
-} from "./specialist-run.server";
+import { listDeployedSpecialists, type DeployedSpecialistView } from "./specialist-roster.server";
 import { resolveOperatorAuthority } from "./operator-actions.server";
 import type { TaskMutationContext } from "./task-mutation.server";
 import { extractMentions, RESERVED_MENTION_HANDLES } from "~/ui/mention-spans";

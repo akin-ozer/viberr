@@ -62,7 +62,7 @@ import {
   resolveSpecialistMcpServers,
   type SpecialistMcpServerConfig,
 } from "./specialist-mcp.server";
-import { listDeployedSpecialists } from "./specialist-run.server";
+import { listDeployedSpecialists } from "./specialist-roster.server";
 import { SCHEDULE_MAX_MINUTES } from "./schedule.server";
 import {
   readDefaultBranchFile,

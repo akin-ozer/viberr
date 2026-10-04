@@ -7,7 +7,7 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { agentMentionHandle } from "./agent-reply.server";
-import { listDeployedSpecialists } from "./specialist-run.server";
+import { listDeployedSpecialists } from "./specialist-roster.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**

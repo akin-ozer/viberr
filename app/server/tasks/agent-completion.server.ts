@@ -1641,7 +1641,7 @@ export async function applyAgentCompletionEffects(
   let deployedName: string | null = null;
   if (input.profileId) {
     try {
-      const { resolveDeployedSpecialist } = await import("./specialist-run.server");
+      const { resolveDeployedSpecialist } = await import("./specialist-roster.server");
       const deployed = resolveDeployedSpecialist(ctx, input.projectSlug, input.profileId);
       grants = deployed.capabilities;
       deployedName = deployed.name;
@@ -2171,7 +2171,7 @@ export async function applyAgentCompletionEffects(
     // started resolves to nothing, and the option names the default alone.
     if (input.profileId) {
       try {
-        const { resolveDeployedSpecialist } = await import("./specialist-run.server");
+        const { resolveDeployedSpecialist } = await import("./specialist-roster.server");
         describeInput.profileModel = resolveDeployedSpecialist(
           ctx,
           input.projectSlug,

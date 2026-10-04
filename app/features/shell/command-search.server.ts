@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import { EPIC_STATUS_LABEL, isEpicOpen, type EpicStatus } from "~/schemas/epic-file.schema";
-import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import { epicHref } from "~/shared/epic-href";
 
 /**

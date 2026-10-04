@@ -3031,9 +3031,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             directiveDeferredNote,
             isAgentBusy,
             isDispatchHeld,
-            listDeployedSpecialists,
             startAgentRun,
           } = await import("~/server/tasks/specialist-run.server");
+          const {
+            listDeployedSpecialists,
+          } = await import("~/server/tasks/specialist-roster.server");
           const profileId = args.agent.trim();
           const runInput: StartAgentRunInput = {
             projectSlug: slug,
@@ -3206,9 +3208,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           });
           let what = "an operator re-run";
           if (!operator) {
-            const { listDeployedSpecialists } = await import(
-              "~/server/tasks/specialist-run.server"
-            );
+            const {
+              listDeployedSpecialists,
+            } = await import("~/server/tasks/specialist-roster.server");
             const name =
               listDeployedSpecialists(slug, { dataRoot }).find((s) => s.id === profileId)
                 ?.name ?? profileId;

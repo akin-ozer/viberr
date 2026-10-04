@@ -365,9 +365,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const { effectiveProfileView } = await import(
       "~/features/agents/agents-query.server"
     );
-    const { specialistEligibleForStage } = await import(
-      "~/server/tasks/specialist-run.server"
-    );
+    const { specialistEligibleForStage } = await import("~/server/tasks/specialist-roster.server");
     const specialists = f.agents
       .map((a) => effectiveProfileView(a, store.dataRoot, "direct"))
       .filter((v) => v.kind === "specialist");

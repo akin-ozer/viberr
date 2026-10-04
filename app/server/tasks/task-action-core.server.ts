@@ -169,7 +169,7 @@ export async function verdictStageOf(
   project: ProjectContext,
   fm: { stage: string; engagements: Engagement[] },
 ): Promise<string | null> {
-  const { listDeployedSpecialists } = await import("./specialist-run.server");
+  const { listDeployedSpecialists } = await import("./specialist-roster.server");
   const specialistCtx: TaskMutationContext = {};
   if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
   return verdictStageFor(project, fm, listDeployedSpecialists(projectSlug, specialistCtx));

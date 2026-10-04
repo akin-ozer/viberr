@@ -1663,7 +1663,7 @@ export async function resolvePacket(
       if (askedBy) {
         // Ruling 447 (O39-a): an answer that names another actor goes to the
         // operator, which routes it; only an answer for the asker goes back.
-        const { listDeployedSpecialists } = await import("./specialist-run.server");
+        const { listDeployedSpecialists } = await import("./specialist-roster.server");
         const { agentMentionHandle } = await import("./agent-reply.server");
         const deployed = listDeployedSpecialists(
           input.projectSlug,
