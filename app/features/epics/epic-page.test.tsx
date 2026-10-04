@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createRoutesStub, type ActionFunction } from "react-router";
+import { createRoutesStub, useLoaderData, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { EpicDetail, EpicProgress } from "~/server/projections/epic-query.server";
 import { EpicPage } from "./epic-page";
@@ -16,6 +16,8 @@ import type { EpicPageView, EpicTaskView } from "./epics-query.server";
  * "waits on N", its owner and Remove (`edit-task-meta`), with Add tasks, New
  * task and the archived ones folded under the list; History; and Details,
  * with "Planned in" when the viewer may open that conversation (476(h)).
+ * Ruling 651: Archive on a live row and Restore on an archived one, and
+ * Archive tasks for a Done epic, to whoever may archive (`approve-transition`).
  */
 
 afterEach(cleanup);
@@ -27,7 +29,7 @@ const STAGES = [
 ];
 
 function progress(patch: Partial<EpicProgress> = {}): EpicProgress {
-  return { total: 0, done: 0, started: 0, notStarted: 0, held: 0, archived: 0, byStage: [], ...patch };
+  return { total: 0, done: 0, started: 0, notStarted: 0, held: 0, archived: 0, archivedDone: 0, byStage: [], ...patch };
 }
 
 function detail(patch: Partial<EpicDetail> = {}): EpicDetail {
@@ -90,6 +92,7 @@ interface Grants {
   canManage?: boolean;
   canEditTasks?: boolean;
   canCreateTask?: boolean;
+  canArchive?: boolean;
 }
 
 function renderEpic(view: EpicPageView, grants: Grants = {}, action?: ActionFunction) {
@@ -103,6 +106,7 @@ function renderEpic(view: EpicPageView, grants: Grants = {}, action?: ActionFunc
           canManage={grants.canManage ?? true}
           canEditTasks={grants.canEditTasks ?? true}
           canCreateTask={grants.canCreateTask ?? true}
+          canArchive={grants.canArchive ?? false}
         />
       </ToastProvider>
     ),
@@ -391,7 +395,7 @@ describe("ruling 503(e): the Tasks section", () => {
     await liveRows();
     fireEvent.click(within(rowOf("VIB-166")).getByRole("button", { name: "Take VIB-166 out of epic-3" }));
     expect(await screen.findByText("VIB-166 is no longer in an epic.")).toBeTruthy();
-    // CANARY: post the row's hidden `taskKey` under another name (the action
+    // CANARY: set the row's key under another name in `rowAct` (the action
     // reads `taskKey`) and Remove is refused as naming no task.
     expect(posted).toEqual([{ _csrf: "tok", intent: "remove-task", taskKey: "VIB-166" }]);
   });
@@ -399,8 +403,8 @@ describe("ruling 503(e): the Tasks section", () => {
   it("offers Remove and Add tasks only to someone who may edit task metadata", async () => {
     renderEpic(pageView({ tasks: TASKS }), { canEditTasks: false, canCreateTask: false });
     expect(await liveRows()).toEqual(["VIB-151", "VIB-166", "VIB-170"]);
-    // CANARY: render Remove whatever `canRemove` says and a viewer is offered
-    // a button the server refuses.
+    // CANARY: render Remove whatever `canEditTasks` says and a viewer is
+    // offered a button the server refuses.
     expect(screen.queryByRole("button", { name: /^Take .* out of epic-3$/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add tasks" })).toBeNull();
     expect(screen.queryByRole("button", { name: "New task" })).toBeNull();
@@ -509,7 +513,7 @@ describe("ruling 503(e): the Tasks section", () => {
             title: "Old checkout",
             stageId: "done",
             archived: true,
-            status: { kind: "archived", label: "archived", icon: "lock" },
+            status: { kind: "archived", label: "archived", icon: "archive" },
           }),
         ],
       }),
@@ -527,20 +531,131 @@ describe("ruling 503(e): the Tasks section", () => {
   });
 
   it("an epic with no live task says so, and how tasks join to someone who can add them", async () => {
-    const onlyArchived = [task({ key: "VIB-139", archived: true, status: { kind: "archived", label: "archived", icon: "lock" } })];
+    const onlyArchived = [task({ key: "VIB-139", archived: true, status: { kind: "archived", label: "archived", icon: "archive" } })];
     renderEpic(pageView({ tasks: onlyArchived }), { canEditTasks: true });
     const tasks = await section("Tasks");
-    // CANARY: drop the `live.length === 0` sentence and an epic whose only
-    // task is archived shows an empty list that explains nothing.
-    expect(tasks.textContent).toContain(
+    // CANARY: say "No tasks in this epic yet" whatever the fold holds and an
+    // epic whose every task is archived claims it has none (ruling 651).
+    expect(tasks.textContent).toContain("Every task in this epic is archived.");
+    expect(tasks.textContent).not.toContain("No tasks in this epic yet");
+    expect(screen.queryByRole("list", { name: "Tasks in epic-3" })).toBeNull();
+    cleanup();
+    renderEpic(pageView({ tasks: [] }), { canEditTasks: true });
+    // CANARY: drop the `live.length === 0` sentence and an epic with no task
+    // shows an empty list that explains nothing.
+    expect((await section("Tasks")).textContent).toContain(
       "No tasks in this epic yet. Add existing tasks or make a new one here; a task can also join from its own page.",
     );
-    expect(screen.queryByRole("list", { name: "Tasks in epic-3" })).toBeNull();
     cleanup();
     renderEpic(pageView({ tasks: [] }), { canEditTasks: false, canCreateTask: false });
     const readOnly = await section("Tasks");
     expect(readOnly.textContent).toContain("No tasks in this epic yet.");
     expect(readOnly.textContent).not.toContain("Add existing tasks");
+  });
+});
+
+describe("ruling 651: archiving from the epic page", () => {
+  const OPEN = task({ key: "VIB-151", title: "Wire the checkout", stageId: "impl" });
+  const DONE = task({ key: "VIB-160", title: "Receipt email", stageId: "done", status: { kind: "done", label: "done", icon: "check" } });
+  const FILED = task({
+    key: "VIB-139",
+    title: "Old checkout",
+    stageId: "done",
+    archived: true,
+    status: { kind: "archived", label: "archived", icon: "archive" },
+  });
+
+  it("archives a done task from its row in one click; an open one asks first, naming where it stands", async () => {
+    const { posted, action } = recorder({ ok: true, toast: "Archived." });
+    renderEpic(pageView({ tasks: [OPEN, DONE] }), { canArchive: true }, action);
+    await liveRows();
+    fireEvent.click(within(rowOf("VIB-160")).getByRole("button", { name: "Archive VIB-160" }));
+    await waitFor(() => expect(posted).toEqual([{ _csrf: "tok", intent: "archive-task", taskKey: "VIB-160" }]));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    fireEvent.click(within(rowOf("VIB-151")).getByRole("button", { name: "Archive VIB-151" }));
+    // CANARY: archive every row in one click (drop the `isTerminalStage`
+    // check in `archiveRow`) and an open task's decision and runs end unasked.
+    const dialog = await screen.findByRole("alertdialog", { name: "Archive VIB-151?" });
+    expect(dialog.textContent).toContain("It is still open, at In Progress.");
+    expect(posted).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive VIB-151" }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toEqual({ _csrf: "tok", intent: "archive-task", taskKey: "VIB-151" });
+  });
+
+  it("restores an archived task from its row in the fold, and offers neither control without the grant", async () => {
+    const { posted, action } = recorder({ ok: true, toast: "VIB-139 restored to Done." });
+    renderEpic(pageView({ tasks: [OPEN, FILED] }), { canArchive: true }, action);
+    await liveRows();
+    const fold = await screen.findByRole("list", { name: "Archived tasks in epic-3" });
+    fireEvent.click(within(fold).getByRole("button", { name: "Restore VIB-139" }));
+    expect(await screen.findByText("VIB-139 restored to Done.")).toBeTruthy();
+    expect(posted).toEqual([{ _csrf: "tok", intent: "restore-task", taskKey: "VIB-139" }]);
+    expect(within(fold).queryByRole("button", { name: "Archive VIB-139" })).toBeNull();
+    cleanup();
+    renderEpic(pageView({ tasks: [OPEN, FILED] }), { canArchive: false });
+    await liveRows();
+    // CANARY: pass the row actions whatever `canArchive` says and a
+    // contributor is offered archives the server refuses.
+    expect(screen.queryByRole("button", { name: /^(Archive|Restore) VIB-/ })).toBeNull();
+  });
+
+  it("offers Archive tasks in the Tasks head of a Done epic whose tasks are all done, and posts it for this epic", async () => {
+    const { posted, action } = recorder({ ok: true, toast: "1 task in epic-3 archived. Find it under Archived on the board." });
+    const shipped = detail({ status: "done", progress: progress({ total: 2, done: 2, archived: 1, archivedDone: 1 }) });
+    renderEpic(pageView({ epic: shipped, tasks: [DONE, FILED] }), { canArchive: true }, action);
+    const tasks = await section("Tasks");
+    fireEvent.click(within(tasks).getByRole("button", { name: "Archive tasks" }));
+    // One live task left on the board: the count the dialog names.
+    const dialog = await screen.findByRole("alertdialog", { name: "Archive the task in epic-3?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive 1 task" }));
+    expect(await screen.findByText("1 task in epic-3 archived. Find it under Archived on the board.")).toBeTruthy();
+    expect(posted).toEqual([{ _csrf: "tok", intent: "archive-epic-tasks", epicId: "epic-3" }]);
+    cleanup();
+    renderEpic(pageView({ epic: detail({ status: "in_progress", progress: progress({ total: 1, done: 1 }) }), tasks: [DONE] }), {
+      canArchive: true,
+    });
+    // CANARY: drop the `status === "done"` check in `archivableTasks` and an
+    // epic still in progress offers its tasks to the archive.
+    expect(within(await section("Tasks")).queryByRole("button", { name: "Archive tasks" })).toBeNull();
+  });
+
+  it("the row's answer is toasted after the row moves into the fold", async () => {
+    // The page reloads after the action, as the route's loader does: the
+    // archived row leaves the live list for the fold, a new element.
+    let view = pageView({ tasks: [DONE] });
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "tok", theme: "system" }),
+        children: [
+          {
+            path: "projects/:slug/epics/:epicId",
+            loader: () => view,
+            action: () => {
+              view = pageView({ tasks: [{ ...DONE, archived: true, status: FILED.status }] });
+              return { ok: true, toast: "VIB-160 archived. Find it under Archived on the board." };
+            },
+            Component: function Loaded() {
+              const data = useLoaderData<EpicPageView>();
+              return (
+                <ToastProvider>
+                  <EpicPage view={data} projectSlug="viberr-core" canManage canEditTasks canCreateTask canArchive />
+                </ToastProvider>
+              );
+            },
+          },
+        ],
+      },
+    ]);
+    render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Archive VIB-160" }));
+    // CANARY: give `EpicTaskRow` its own fetcher again and the toast is lost
+    // when the row unmounts into the fold.
+    expect(await screen.findByText("VIB-160 archived. Find it under Archived on the board.")).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "Archived tasks in epic-3" })).toBeTruthy();
   });
 });
 

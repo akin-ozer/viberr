@@ -112,6 +112,11 @@ const ICON_PATHS = {
     '<path fill="currentColor" d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
   // Ruling 503: an epic — work stacked into one body, on the box's centre.
   epic: '<path d="M12 3.5l8.5 4.5L12 12.5 3.5 8z"/><path d="M3.5 12L12 16.5 20.5 12M3.5 16L12 20.5 20.5 16"/>',
+  // Ruling 651: an archived task — the lidded box the shadcn and lucide sets
+  // draw, in this set's 3.5–20.5 span. The lock stays what is held or not
+  // yours to change; `refresh` stays the restore mark.
+  archive:
+    '<rect x="3.5" y="4" width="17" height="4.5" rx="1.25"/><path d="M5 8.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5M10 12.5h4"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

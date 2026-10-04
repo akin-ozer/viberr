@@ -867,6 +867,16 @@ describe("app.css breakpoints (P16-F8)", () => {
     expect(unused).toEqual([]);
   });
 
+  it("ruling 651: the Epics row's narrow columns outrank its base rule, which comes later in the sheet", () => {
+    // At equal specificity the base rule's five desktop columns won at every
+    // width: at 467px an epic's name was 22px wide beside its status. CANARY:
+    // write the narrow rule as plain `.epic-row` again.
+    const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/);
+    expect(block, "the consolidated block must exist").toBeTruthy();
+    expect(block![1]).toMatch(/\n\s*\.epic-list \.epic-row \{\s*grid-template-columns:\s*minmax\(0, 1fr\) auto;/);
+    expect(CODE.indexOf("\n.epic-row {")).toBeGreaterThan(block!.index!);
+  });
+
   it("the 1100px block still carries all eight collapses", () => {
     // Regression anchor for the consolidation: these are the rules the nine
     // scattered blocks held. `.board { grid-auto-columns }` is deliberately NOT
@@ -5638,7 +5648,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
 
   it("(F39) a glyph that trades with its control's state goes through GlyphSwap, never a ternary on the icon name", () => {
     // CANARY: put the archive button back on
-    // `<Icon name={archived ? "refresh" : "lock"} />`.
+    // `<Icon name={archived ? "refresh" : "archive"} />`.
     const swaps: string[] = [];
     const ternaries: string[] = [];
     for (const file of markupFiles()) {
@@ -5667,10 +5677,15 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/task-detail/execution-profile.tsx: bolt → clock (busy)",
         "features/task-detail/execution-profile.tsx: shield → clock (busy)",
         "features/task-detail/operator-recommendations.tsx: check → loader (spins)",
-        "features/task-detail/task-side-panels.tsx: lock → refresh (busy)",
+        "features/task-detail/task-side-panels.tsx: archive → refresh (busy)",
         "routes/login.tsx: github → loader (spins)",
         "routes/login.tsx: google → loader (spins)",
         "ui/copy-glyph.tsx: copy → check",
+        // Ruling 651: Archive tasks, and an epic task row's Archive and
+        // Restore, trade their mark for the loader while their request runs.
+        "features/epics/epic-parts.tsx: archive → loader (spins)",
+        "features/epics/epic-page.tsx: archive → loader (spins)",
+        "features/epics/epic-page.tsx: refresh → loader (spins)",
         // Ruling 368's 2026-09-24 extension: every in-flight starter's loader
         // takes its icon's place, and through the cell it trades rather than
         // replacing it in one frame. Home's re-scan, Interrupt, Retry, Force

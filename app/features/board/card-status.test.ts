@@ -103,7 +103,7 @@ describe("cardStatus: the wait takes the seat, else the readiness word", () => {
 
   it("an archived card says archived and nothing else (F19-8)", () => {
     const t = task({ archived: true, waiting: "human", waitingOnMe: true, validation: "failing", continuity: "degraded" });
-    expect(cardStatus(t)).toEqual({ kind: "archived", label: "archived", icon: "lock" });
+    expect(cardStatus(t)).toEqual({ kind: "archived", label: "archived", icon: "archive" });
     expect(cardProblems(t)).toEqual([]);
   });
 });

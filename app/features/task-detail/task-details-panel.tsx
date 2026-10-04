@@ -148,7 +148,7 @@ export function TaskDetailsPanel({
       </div>
       {canEdit && task.archived && (
         <p className="meta-archived-note">
-          <Icon name="lock" />
+          <Icon name="archive" />
           Archived. Restore this task to edit its details.
         </p>
       )}

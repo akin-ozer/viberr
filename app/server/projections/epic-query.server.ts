@@ -23,13 +23,15 @@ import { getProject } from "./board-query.server";
  * with nothing to keep in step.
  */
 
-/** How far an epic's tasks have got. Every count leaves archived tasks out,
- *  the way Linear leaves a cancelled issue out of a project's progress: an
- *  archived task is abandoned work, neither done nor still to do. */
+/** How far an epic's tasks have got. A task archived before it was done is
+ *  left out of every count, the way Linear leaves a cancelled issue out of a
+ *  project's progress: it is abandoned work, neither done nor still to do. A
+ *  task archived at the terminal stage still counts as done (ruling 651):
+ *  archiving filed finished work away, it did not undo it. */
 export interface EpicProgress {
-  /** Tasks in the epic. */
+  /** Tasks in the epic: the live ones and the ones archived when done. */
   total: number;
-  /** At the project's terminal stage. */
+  /** At the project's terminal stage, archived or not. */
   done: number;
   /** Past the entry stage and not done. */
   started: number;
@@ -39,6 +41,9 @@ export interface EpicProgress {
   held: number;
   /** Archived tasks that still name this epic, shown apart. */
   archived: number;
+  /** Of those, the ones archived at the terminal stage: counted in `total`
+   *  and `done` as well. */
+  archivedDone: number;
   /** Per stage, in the project's stage order: the segments of the bar. */
   byStage: { stageId: string; count: number }[];
 }
@@ -103,7 +108,7 @@ const epicCountRowSchema = z.object({
 });
 
 function emptyProgress(): EpicProgress {
-  return { total: 0, done: 0, started: 0, notStarted: 0, held: 0, archived: 0, byStage: [] };
+  return { total: 0, done: 0, started: 0, notStarted: 0, held: 0, archived: 0, archivedDone: 0, byStage: [] };
 }
 
 /**
@@ -133,13 +138,15 @@ function progressByEpic(db: DatabaseSync, slug: string): Map<string, EpicProgres
       progress = emptyProgress();
       out.set(row.epic_id, progress);
     }
+    const terminal = stages.length > 0 && isTerminalStage(row.stage, stages);
     if (row.archived) {
       progress.archived += row.n;
-      continue;
+      if (!terminal) continue;
+      progress.archivedDone += row.n;
     }
     progress.total += row.n;
-    if (row.held) progress.held += row.n;
-    if (stages.length > 0 && isTerminalStage(row.stage, stages)) progress.done += row.n;
+    if (row.held && !row.archived) progress.held += row.n;
+    if (terminal) progress.done += row.n;
     else if (row.stage === entryId) progress.notStarted += row.n;
     else progress.started += row.n;
     let byStage = segments.get(row.epic_id);

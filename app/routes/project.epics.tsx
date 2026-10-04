@@ -7,6 +7,7 @@ import { requireUser } from "~/server/auth/require-user.server";
 import { appErrorResponse, requireFormAction } from "~/server/auth/form-action.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { createEpic } from "~/server/tasks/epic-actions.server";
+import { archiveEpicTasks } from "~/server/tasks/epic-archive.server";
 import { roleCan } from "~/shared/rbac";
 import { EpicsPage } from "~/features/epics/epics-page";
 import { getEpicsPage } from "~/features/epics/epics-query.server";
@@ -17,7 +18,9 @@ import { readWorkspace } from "./project-workspace.server";
 /**
  * /projects/:slug/epics — the project's epics (ruling 503): each with its
  * status, progress, lead and target date, and New epic. Actions:
- * create-epic (`createEpic`, `manage-epics` inside).
+ * create-epic (`createEpic`, `manage-epics` inside) · archive-epic-tasks
+ * (`archiveEpicTasks`, ruling 651: a Done epic's tasks, `approve-transition`
+ * inside).
  */
 
 export function meta({ params }: Route.MetaArgs) {
@@ -48,6 +51,14 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       return { ok: true as const, epicId: result.epic.id, toast: result.message };
     }
+    if (intent === "archive-epic-tasks") {
+      const result = await archiveEpicTasks(
+        db,
+        { projectSlug: params.slug, epicId: String(formData.get("epicId") ?? "") },
+        actor,
+      );
+      return { ok: true as const, toast: result.message };
+    }
     return data({ ok: false as const, error: "Unknown action." }, { status: 400 });
   } catch (error) {
     return appErrorResponse(error);
@@ -64,6 +75,7 @@ export default function Epics({ loaderData, params }: Route.ComponentProps) {
       stages={loaderData.stages}
       members={loaderData.members}
       canManage={roleCan(layout.myRole, "manage-epics") && !layout.project.archived}
+      canArchive={roleCan(layout.myRole, "approve-transition") && !layout.project.archived}
     />
   );
 }

@@ -10,6 +10,9 @@ import {
 } from "~/schemas/epic-file.schema";
 import type { EpicProgress, EpicSummary } from "~/server/projections/epic-query.server";
 import { StageMeter } from "~/features/home/project-cards";
+import { countLabel } from "~/shared/text/plural";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon } from "~/ui/icon";
@@ -106,6 +109,89 @@ export function EpicProgressBar({
       <StageMeter stages={[...stages, ...unknown]} dist={dist} />
       <span className="epic-progress-line">{epicProgressLine(progress)}</span>
     </div>
+  );
+}
+
+/** Ruling 651: how many tasks "Archive tasks" files away: the epic's live
+ *  tasks, when it is Done and every one of them is done; otherwise none. */
+export function archivableTasks(epic: Pick<EpicSummary, "status" | "progress">): number {
+  const { total, done, archivedDone } = epic.progress;
+  const live = total - archivedDone;
+  return epic.status === "done" && live > 0 && done === total ? live : 0;
+}
+
+/** Ruling 651: the trigger, on an Epics row and in an epic's Tasks head. */
+export function ArchiveEpicTasksButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="btn sm epic-archive-tasks"
+      disabled={busy}
+      aria-busy={busy || undefined}
+      onClick={onClick}
+    >
+      <GlyphSwap rest="archive" alt="loader" on={busy} spinAlt />
+      Archive tasks
+    </button>
+  );
+}
+
+/**
+ * Ruling 651: "Archive tasks", held by the page rather than its button. The
+ * button leaves with the tasks it archived, and a fetcher that unmounted with
+ * it would never deliver the answer's toast.
+ */
+export function useArchiveEpicTasks() {
+  const [asking, setAsking] = useState<{ epicId: string; count: number } | null>(null);
+  const fetcher = useFetcher<EpicActionResult>();
+  useEpicActionToast(fetcher);
+  const csrf = useCsrfToken();
+  return {
+    /** The epic whose tasks are being archived, while they are. */
+    busyEpicId: fetcher.state === "idle" ? null : String(fetcher.formData?.get("epicId") ?? ""),
+    asking,
+    ask: (epicId: string, count: number) => setAsking({ epicId, count }),
+    cancel: () => setAsking(null),
+    confirm: () => {
+      if (!asking) return;
+      const fd = new FormData();
+      fd.set("_csrf", csrf);
+      fd.set("intent", "archive-epic-tasks");
+      fd.set("epicId", asking.epicId);
+      fetcher.submit(fd, { method: "post" });
+    },
+  };
+}
+
+/** Ruling 651: the one question before a Done epic's tasks are filed away. */
+export function ArchiveEpicTasksConfirm({
+  epicId,
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  epicId: string;
+  count: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const one = count === 1;
+  return (
+    <ConfirmDialog
+      title={one ? `Archive the task in ${epicId}?` : `Archive the ${count} tasks in ${epicId}?`}
+      body={
+        one
+          ? "It is done. It leaves the board and stays in this epic, still counted as done. Restore brings it back."
+          : "They are done. They leave the board and stay in this epic, still counted as done. Restore brings any one back."
+      }
+      confirmLabel={`Archive ${countLabel(count, "task")}`}
+      tone="primary"
+      icon="archive"
+      confirmIcon="archive"
+      screenLabel="Archive epic tasks dialog"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

@@ -7,7 +7,8 @@ import { requireUser } from "~/server/auth/require-user.server";
 import { appErrorResponse, requireFormAction } from "~/server/auth/form-action.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { setTasksEpic, updateEpic } from "~/server/tasks/epic-actions.server";
-import { createTask } from "~/server/tasks/task-actions.server";
+import { archiveEpicTasks } from "~/server/tasks/epic-archive.server";
+import { createTask, setTaskArchived } from "~/server/tasks/task-actions.server";
 import { roleCan } from "~/shared/rbac";
 import { EpicPage } from "~/features/epics/epic-page";
 import { getEpicPage } from "~/features/epics/epics-query.server";
@@ -21,6 +22,8 @@ import { readWorkspace } from "./project-workspace.server";
  * CSRF-checked, the grant checked inside each writer):
  *   update-epic (`manage-epics`) · add-tasks · remove-task (`edit-task-meta`)
  *   · create-task (`create-task`, in this epic from its first line)
+ *   · archive-task · restore-task · archive-epic-tasks (`approve-transition`,
+ *   ruling 651: one task from its row, or every task of a Done epic)
  */
 
 export function meta({ params, loaderData }: Route.MetaArgs) {
@@ -69,6 +72,23 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.message };
       }
+      case "archive-task":
+      case "restore-task": {
+        const result = await setTaskArchived(
+          db,
+          {
+            projectSlug: params.slug,
+            taskKey: String(formData.get("taskKey") ?? ""),
+            archived: intent === "archive-task",
+          },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      case "archive-epic-tasks": {
+        const result = await archiveEpicTasks(db, { projectSlug: params.slug, epicId: params.epicId }, actor);
+        return { ok: true as const, toast: result.message };
+      }
       case "create-task": {
         const result = await createTask(
           db,
@@ -109,6 +129,7 @@ export default function Epic({ loaderData, params }: Route.ComponentProps) {
       canManage={open && roleCan(layout.myRole, "manage-epics")}
       canEditTasks={open && roleCan(layout.myRole, "edit-task-meta")}
       canCreateTask={open && roleCan(layout.myRole, "create-task")}
+      canArchive={open && roleCan(layout.myRole, "approve-transition")}
     />
   );
 }

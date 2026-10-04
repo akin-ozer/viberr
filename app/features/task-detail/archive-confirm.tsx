@@ -64,7 +64,7 @@ export function ArchiveConfirm({
     >
       <div className="modal-head">
         <span className="agent-glyph lg warn">
-          <Icon name="lock" />
+          <Icon name="archive" />
         </span>
         <div className="mh-main">
           <h2>Archive this task?</h2>
@@ -135,7 +135,7 @@ export function ArchiveConfirm({
             disabled={busy}
             onClick={() => commit(onConfirm)}
           >
-            <Icon name="lock" />
+            <Icon name="archive" />
             Archive {task.key}
           </button>
         </div>

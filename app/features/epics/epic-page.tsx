@@ -10,7 +10,9 @@ import { daySections } from "~/shared/dates/day-sections";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { epicsHref } from "~/shared/epic-href";
 import { countLabel } from "~/shared/text/plural";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { Avatar } from "~/ui/avatar";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
@@ -22,11 +24,15 @@ import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
+  ArchiveEpicTasksButton,
+  ArchiveEpicTasksConfirm,
   EPIC_STATUS_PILL,
   EpicDialog,
   EpicProgressBar,
   EpicStatusPill,
+  archivableTasks,
   epicDonePercent,
+  useArchiveEpicTasks,
   useEpicActionToast,
   type EpicActionResult,
 } from "./epic-parts";
@@ -37,7 +43,9 @@ import type { EpicPageView, EpicTaskView } from "./epics-query.server";
  * it is for, its tasks with where each stands and what each waits on, its
  * progress, and its history. The tasks are the epic's: a person adds an
  * existing task, makes a new one in it, or takes one out, and each move lands
- * on the task's own timeline and on this history (`setTasksEpic`).
+ * on the task's own timeline and on this history (`setTasksEpic`). Someone
+ * who may archive a task archives one from its row and restores one from the
+ * fold, and a Done epic's finished tasks all at once (ruling 651).
  *
  * Nothing here starts, orders or holds a task: what a task waits on is its own
  * `blockedBy` (ruling 131), shown as a count beside it. The epic's status is a
@@ -54,6 +62,7 @@ export function EpicPage({
   canManage,
   canEditTasks,
   canCreateTask,
+  canArchive,
 }: {
   view: EpicPageView;
   projectSlug: string;
@@ -63,6 +72,8 @@ export function EpicPage({
   canEditTasks: boolean;
   /** `create-task`: make a new task in the epic. */
   canCreateTask: boolean;
+  /** `approve-transition`: archive a task and restore one (ruling 651). */
+  canArchive: boolean;
 }) {
   const { epic, stages } = view;
   const [editing, setEditing] = useState(false);
@@ -71,10 +82,38 @@ export function EpicPage({
   const [showAllHistory, setShowAllHistory] = useState(false);
   const statusFetcher = useFetcher<EpicActionResult>();
   useEpicActionToast(statusFetcher);
+  // Ruling 651: a row's Remove, Archive and Restore are the page's requests,
+  // not the row's. Each one moves its row (out of the list, into the fold or
+  // back), and a fetcher unmounted with the row never delivered its toast.
+  const rowFetcher = useFetcher<EpicActionResult>();
+  useEpicActionToast(rowFetcher);
+  const archiveAll = useArchiveEpicTasks();
+  const [archivingOpen, setArchivingOpen] = useState<EpicTaskView | null>(null);
   const csrf = useCsrfToken();
   const live = view.tasks.filter((t) => !t.archived);
   const archived = view.tasks.filter((t) => t.archived);
   const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
+  const rowBusy = rowFetcher.state !== "idle";
+  const rowPending = rowBusy
+    ? {
+        taskKey: String(rowFetcher.formData?.get("taskKey") ?? ""),
+        intent: String(rowFetcher.formData?.get("intent") ?? ""),
+      }
+    : null;
+  const rowAct = (intent: "remove-task" | "archive-task" | "restore-task", taskKey: string) => {
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", intent);
+    fd.set("taskKey", taskKey);
+    rowFetcher.submit(fd, { method: "post" });
+  };
+  // A done task's archive is one click, undone by its Restore; an open one's
+  // withdraws its decision and ends its runs, so it asks first.
+  const archiveRow = (task: EpicTaskView) => {
+    if (isTerminalStage(task.stageId, stages)) rowAct("archive-task", task.key);
+    else setArchivingOpen(task);
+  };
+  const archivable = canArchive ? archivableTasks(epic) : 0;
   const statusBusy = statusFetcher.state !== "idle";
   const pendingStatus = statusBusy ? String(statusFetcher.formData?.get("status") ?? "") : null;
   const shownStatus: EpicStatus = EPIC_STATUS_VALUES.find((s) => s === pendingStatus) ?? epic.status;
@@ -183,6 +222,12 @@ export function EpicPage({
                 <Icon name="board" />
                 <h2 id="epic-tasks-head">Tasks</h2>
                 <span className="right epic-task-tools">
+                  {archivable > 0 && (
+                    <ArchiveEpicTasksButton
+                      busy={archiveAll.busyEpicId === epic.id}
+                      onClick={() => archiveAll.ask(epic.id, archivable)}
+                    />
+                  )}
                   {canEditTasks && (
                     <button type="button" className="btn ghost sm" onClick={() => setAdding(true)}>
                       <Icon name="plus" />
@@ -200,10 +245,12 @@ export function EpicPage({
               <EpicProgressBar progress={epic.progress} stages={stages} />
               {live.length === 0 ? (
                 <p className="empty sm">
-                  No tasks in this epic yet.
-                  {canEditTasks || canCreateTask
-                    ? " Add existing tasks or make a new one here; a task can also join from its own page."
-                    : ""}
+                  {archived.length > 0
+                    ? "Every task in this epic is archived."
+                    : "No tasks in this epic yet." +
+                      (canEditTasks || canCreateTask
+                        ? " Add existing tasks or make a new one here; a task can also join from its own page."
+                        : "")}
                 </p>
               ) : (
                 <ul className="epic-task-list" aria-label={`Tasks in ${epic.id}`}>
@@ -214,7 +261,11 @@ export function EpicPage({
                       projectSlug={projectSlug}
                       epicId={epic.id}
                       stage={stageById.get(task.stageId) ?? null}
-                      canRemove={canEditTasks}
+                      pending={rowPending?.taskKey === task.key ? rowPending.intent : null}
+                      locked={rowBusy}
+                      onArchive={canArchive ? () => archiveRow(task) : null}
+                      onRestore={null}
+                      onRemove={canEditTasks ? () => rowAct("remove-task", task.key) : null}
                     />
                   ))}
                 </ul>
@@ -226,10 +277,10 @@ export function EpicPage({
                     <Icon name="chevron" className="disc-chev" />
                   </summary>
                   <p className="fine dim">
-                    Archived tasks still name this epic and are left out of its progress. Restore one
-                    from its own page to count it again.
+                    Archived tasks still name this epic. One archived when done still counts as done;
+                    one archived unfinished is left out of its progress.
                   </p>
-                  <ul className="epic-task-list">
+                  <ul className="epic-task-list" aria-label={`Archived tasks in ${epic.id}`}>
                     {archived.map((task) => (
                       <EpicTaskRow
                         key={task.key}
@@ -237,7 +288,11 @@ export function EpicPage({
                         projectSlug={projectSlug}
                         epicId={epic.id}
                         stage={stageById.get(task.stageId) ?? null}
-                        canRemove={false}
+                        pending={rowPending?.taskKey === task.key ? rowPending.intent : null}
+                        locked={rowBusy}
+                        onArchive={null}
+                        onRestore={canArchive ? () => rowAct("restore-task", task.key) : null}
+                        onRemove={null}
                       />
                     ))}
                   </ul>
@@ -333,6 +388,21 @@ export function EpicPage({
       </div>
 
       {editing && <EpicDialog epic={epic} members={view.members} onClose={() => setEditing(false)} />}
+      {archiveAll.asking && (
+        <ArchiveEpicTasksConfirm {...archiveAll.asking} onCancel={archiveAll.cancel} onConfirm={archiveAll.confirm} />
+      )}
+      {archivingOpen && (
+        <ConfirmDialog
+          title={`Archive ${archivingOpen.key}?`}
+          body={`It is still open, at ${stageById.get(archivingOpen.stageId)?.name ?? archivingOpen.stageId}. Archiving takes it off the board: an open decision and pending recommendations are withdrawn, and a live run ends. Its record is kept, and Restore hands it back to a person.`}
+          confirmLabel={`Archive ${archivingOpen.key}`}
+          icon="archive"
+          confirmIcon="archive"
+          screenLabel="Archive task dialog"
+          onCancel={() => setArchivingOpen(null)}
+          onConfirm={() => rowAct("archive-task", archivingOpen.key)}
+        />
+      )}
       {adding && (
         <AddTasksDialog
           epicId={epic.id}
@@ -389,27 +459,35 @@ function EpicHistory({
 }
 
 /** One task of the epic: its key and title (its page), its stage, the board
- *  card's status word, what it waits on, its owner, and Remove. */
+ *  card's status word, what it waits on, its owner, then what may be done to
+ *  it: Archive and Remove on a live row, Restore on an archived one (ruling
+ *  651). Each action is the page's request; `pending` names the one in flight
+ *  on this row, and `locked` holds every row while one is. */
 function EpicTaskRow({
   task,
   projectSlug,
   epicId,
   stage,
-  canRemove,
+  pending,
+  locked,
+  onArchive,
+  onRestore,
+  onRemove,
 }: {
   task: EpicTaskView;
   projectSlug: string;
   epicId: string;
   stage: { id: string; name: string; color: string } | null;
-  canRemove: boolean;
+  /** The intent in flight on this row, or null. */
+  pending: string | null;
+  locked: boolean;
+  onArchive: (() => void) | null;
+  onRestore: (() => void) | null;
+  onRemove: (() => void) | null;
 }) {
-  const fetcher = useFetcher<EpicActionResult>();
-  useEpicActionToast(fetcher);
-  const csrf = useCsrfToken();
-  const busy = fetcher.state !== "idle";
   const href = `/projects/${projectSlug}/tasks/${task.key}`;
   return (
-    <li className="epic-task" data-task={task.key} aria-busy={busy || undefined}>
+    <li className="epic-task" data-task={task.key} aria-busy={pending !== null || undefined}>
       <Link className="epic-task-link" to={href}>
         <span className="epic-task-key">{task.key}</span>
         <span className="epic-task-title">{task.title}</span>
@@ -447,21 +525,45 @@ function EpicTaskRow({
           </span>
         )}
       </span>
-      {canRemove && (
-        <fetcher.Form method="post" className="epic-task-remove">
-          <input type="hidden" name="_csrf" value={csrf} />
-          <input type="hidden" name="intent" value="remove-task" />
-          <input type="hidden" name="taskKey" value={task.key} />
-          <button
-            type="submit"
-            className="icon-btn"
-            disabled={busy}
-            aria-label={`Take ${task.key} out of ${epicId}`}
-            title={`Take ${task.key} out of ${epicId}`}
-          >
-            <GlyphSwap rest="x" alt="loader" on={busy} spinAlt />
-          </button>
-        </fetcher.Form>
+      {(onArchive || onRestore || onRemove) && (
+        <span className="epic-task-actions">
+          {onArchive && (
+            <button
+              type="button"
+              className="icon-btn"
+              disabled={locked}
+              aria-label={`Archive ${task.key}`}
+              title={`Archive ${task.key}`}
+              onClick={onArchive}
+            >
+              <GlyphSwap rest="archive" alt="loader" on={pending === "archive-task"} spinAlt />
+            </button>
+          )}
+          {onRestore && (
+            <button
+              type="button"
+              className="icon-btn"
+              disabled={locked}
+              aria-label={`Restore ${task.key}`}
+              title={`Restore ${task.key}`}
+              onClick={onRestore}
+            >
+              <GlyphSwap rest="refresh" alt="loader" on={pending === "restore-task"} spinAlt />
+            </button>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              className="icon-btn"
+              disabled={locked}
+              aria-label={`Take ${task.key} out of ${epicId}`}
+              title={`Take ${task.key} out of ${epicId}`}
+              onClick={onRemove}
+            >
+              <GlyphSwap rest="x" alt="loader" on={pending === "remove-task"} spinAlt />
+            </button>
+          )}
+        </span>
       )}
     </li>
   );

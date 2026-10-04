@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { createRoutesStub, useLocation, useParams, type ActionFunction } from "react-router";
+import { createRoutesStub, useLoaderData, useLocation, useParams, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { EpicProgress, EpicSummary } from "~/server/projections/epic-query.server";
 import { EpicsPage } from "./epics-page";
@@ -13,7 +13,8 @@ import type { EpicMemberView, EpicStageView } from "./epics-query.server";
  * its status, its progress in the project's own stage colours, its lead and,
  * while it is open, its target date); open epics come first by default, with
  * Closed and All one click away; New epic is offered to whoever may
- * `manage-epics`.
+ * `manage-epics`. A Done epic whose tasks are all done offers Archive tasks
+ * to whoever may archive them (ruling 651).
  */
 
 afterEach(cleanup);
@@ -30,7 +31,7 @@ const MEMBERS: EpicMemberView[] = [
 ];
 
 function progress(patch: Partial<EpicProgress> = {}): EpicProgress {
-  return { total: 0, done: 0, started: 0, notStarted: 0, held: 0, archived: 0, byStage: [], ...patch };
+  return { total: 0, done: 0, started: 0, notStarted: 0, held: 0, archived: 0, archivedDone: 0, byStage: [], ...patch };
 }
 
 function epic(patch: Partial<EpicSummary> = {}): EpicSummary {
@@ -67,7 +68,13 @@ function SearchProbe() {
 }
 
 function renderEpics(
-  opts: { epics?: EpicSummary[]; canManage?: boolean; search?: string; action?: ActionFunction } = {},
+  opts: {
+    epics?: EpicSummary[];
+    canManage?: boolean;
+    canArchive?: boolean;
+    search?: string;
+    action?: ActionFunction;
+  } = {},
 ) {
   const page: Parameters<typeof createRoutesStub>[0][number] = {
     path: "projects/:slug/epics",
@@ -79,6 +86,7 @@ function renderEpics(
           stages={STAGES}
           members={MEMBERS}
           canManage={opts.canManage ?? true}
+          canArchive={opts.canArchive ?? false}
         />
         <SearchProbe />
       </ToastProvider>
@@ -101,6 +109,13 @@ function renderEpics(
 function headCount(): string | null {
   const head = screen.getByRole("heading", { name: "Epics", level: 1 }).parentElement;
   return head ? within(head).getByRole("status").textContent : null;
+}
+
+/** One epic's row, by id. */
+function rowOf(epicId: string): HTMLElement {
+  const row = document.querySelector<HTMLElement>(`li[data-epic="${epicId}"]`);
+  if (!row) throw new Error(`no row for ${epicId}`);
+  return row;
 }
 
 /** The ids of the rows a list shows, in order. */
@@ -135,8 +150,9 @@ describe("ruling 503(e): each row of the Epics list is its epic", () => {
         }),
       ],
     });
-    const row = await screen.findByRole("link", { name: /Checkout revamp/ });
-    expect(row.getAttribute("href")).toBe("/projects/viberr-core/epics/epic-3");
+    const link = await screen.findByRole("link", { name: /Checkout revamp/ });
+    expect(link.getAttribute("href")).toBe("/projects/viberr-core/epics/epic-3");
+    const row = rowOf("epic-3");
     expect(row.querySelector(".epic-dot")?.getAttribute("data-stage-color")).toBe("teal");
     expect(within(row).getByText("epic-3")).toBeTruthy();
     expect(within(row).getByText("In progress").closest("[data-epic-status]")?.getAttribute("data-epic-status")).toBe(
@@ -164,14 +180,108 @@ describe("ruling 503(e): each row of the Epics list is its epic", () => {
         epic({ id: "epic-3", title: "Nothing yet", status: "planned", leadName: null }),
       ],
     });
-    const shipped = await screen.findByRole("link", { name: /Shipped/ });
+    await screen.findByRole("link", { name: /Shipped/ });
     // CANARY: drop `isEpicOpen(epic.status)` from the row's target date and
     // the done epic still reads "due Oct 15".
-    expect(within(shipped).queryByText(/due/)).toBeNull();
-    expect(within(screen.getByRole("link", { name: /Only archived/ })).getByText("No open tasks · 2 archived")).toBeTruthy();
-    const empty = screen.getByRole("link", { name: /Nothing yet/ });
+    expect(within(rowOf("epic-1")).queryByText(/due/)).toBeNull();
+    expect(within(rowOf("epic-2")).getByText("No open tasks · 2 archived")).toBeTruthy();
+    const empty = rowOf("epic-3");
     expect(within(empty).getByText("No tasks yet")).toBeTruthy();
     expect(within(empty).queryByTitle(/Led by/)).toBeNull();
+  });
+});
+
+describe("ruling 651: Archive tasks on a Done epic", () => {
+  const SHIPPED = epic({
+    id: "epic-1",
+    title: "Shipped",
+    status: "done",
+    progress: progress({ total: 3, done: 3, byStage: [{ stageId: "done", count: 3 }] }),
+  });
+
+  it("is offered on a Done epic whose tasks are all done and still on the board, to someone who may archive", async () => {
+    renderEpics({
+      search: "?show=all",
+      canArchive: true,
+      epics: [
+        SHIPPED,
+        epic({ id: "epic-2", title: "Running", status: "in_progress", progress: progress({ total: 2, done: 2 }) }),
+        epic({ id: "epic-3", title: "Done but one open", status: "done", progress: progress({ total: 2, done: 1, started: 1 }) }),
+        epic({
+          id: "epic-4",
+          title: "Filed away",
+          status: "done",
+          progress: progress({ total: 2, done: 2, archived: 2, archivedDone: 2 }),
+        }),
+      ],
+    });
+    await screen.findByRole("link", { name: /Shipped/ });
+    const button = within(rowOf("epic-1")).getByRole("button", { name: "Archive tasks" });
+    // A button may not sit inside a link: the row's link is its name.
+    expect(button.closest("a")).toBeNull();
+    // CANARY: drop the `done === total` check in `archivableTasks` and the
+    // Done epic with an open task offers it too.
+    for (const id of ["epic-2", "epic-3", "epic-4"]) {
+      expect(within(rowOf(id)).queryByRole("button", { name: "Archive tasks" }), id).toBeNull();
+    }
+    expect(within(rowOf("epic-4")).getByText("2 of 2 done · 2 archived")).toBeTruthy();
+    cleanup();
+    renderEpics({ search: "?show=all", canArchive: false, epics: [SHIPPED] });
+    await screen.findByRole("link", { name: /Shipped/ });
+    expect(screen.queryByRole("button", { name: "Archive tasks" })).toBeNull();
+  });
+
+  it("asks once, naming how many, posts archive-epic-tasks, and toasts the answer after the row stops offering it", async () => {
+    const posted: Record<string, string>[] = [];
+    // The list reloads after the action, as the route's loader does: the
+    // epic's tasks are archived and its row offers the button no more.
+    let epics = [SHIPPED];
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "tok", theme: "system" }),
+        children: [
+          {
+            path: "projects/:slug/epics",
+            loader: () => ({ epics }),
+            action: async ({ request }) => {
+              const fd = await request.formData();
+              const row: Record<string, string> = {};
+              for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+              posted.push(row);
+              epics = [{ ...SHIPPED, progress: progress({ total: 3, done: 3, archived: 3, archivedDone: 3 }) }];
+              return { ok: true, toast: "3 tasks in epic-1 archived. Find them under Archived on the board." };
+            },
+            Component: function Loaded() {
+              const data = useLoaderData<{ epics: EpicSummary[] }>();
+              return (
+                <ToastProvider>
+                  <EpicsPage
+                    projectSlug="viberr-core"
+                    epics={data.epics}
+                    stages={STAGES}
+                    members={MEMBERS}
+                    canManage
+                    canArchive
+                  />
+                </ToastProvider>
+              );
+            },
+          },
+        ],
+      },
+    ]);
+    render(<Stub initialEntries={["/projects/viberr-core/epics?show=closed"]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Archive tasks" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Archive the 3 tasks in epic-1?" });
+    expect(posted).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive 3 tasks" }));
+    // CANARY: hold the fetcher in `ArchiveEpicTasksButton` instead of the page
+    // (`useArchiveEpicTasks`) and the answer's toast is lost with the button.
+    expect(await screen.findByText("3 tasks in epic-1 archived. Find them under Archived on the board.")).toBeTruthy();
+    expect(within(rowOf("epic-1")).queryByRole("button", { name: "Archive tasks" })).toBeNull();
+    expect(posted).toEqual([{ _csrf: "tok", intent: "archive-epic-tasks", epicId: "epic-1" }]);
   });
 });
 

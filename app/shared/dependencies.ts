@@ -30,9 +30,10 @@ export {
   type DependencyRef,
 } from "./task-refs";
 
-/** The state a reference resolves to at read time. `failed` is an archived
- *  task, a wait that can never complete; `missing` is a reference nothing in
- *  the project answers to.
+/** The state a reference resolves to at read time. `failed` is a task
+ *  archived before it was done, a wait that can never complete (one archived
+ *  at the terminal stage is `done`, ruling 651); `missing` is a reference
+ *  nothing in the project answers to.
  *
  *  F37-63's `cancelled` state (a link on a cancelled goal that could never
  *  acquire a task) left with the goal links it described (ruling 503). */

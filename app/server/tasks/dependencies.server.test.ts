@@ -569,6 +569,36 @@ describe("the release engine", () => {
     expect(runOperator.mock.calls.some((c) => c[1].taskKey === "VIB-12")).toBe(false);
   });
 
+  it("ruling 651: a dependency archived when it was done still counts done: never noted dead, and its dependent still releases", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-13", { stage: "impl", waiting: "none", blockedBy: ["VIB-2", "VIB-5"], ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runOperator = runOperatorStub();
+    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
+    expect(await releaseDependents(store.db, ctxWith, store.slug)).toEqual([]);
+
+    // VIB-2 is done: archiving it files finished work away.
+    await setTaskArchived(store.db, { projectSlug: store.slug, taskKey: "VIB-2", archived: true }, actorOf(store.users.arda), ctxWith);
+    // CANARY: answer `failed` for every archived row in `taskState`
+    // (projections/dependencies.server.ts) and VIB-13 is noted as waiting on
+    // work that can never complete, and never released.
+    const held = file(store, "VIB-13");
+    expect(held.timeline.filter((e) => e.title === "Waiting on work that cannot complete")).toEqual([]);
+    expect(getTaskSummary(store.db, store.slug, "VIB-13")!.blockedBy.map((e) => [e.label, e.state])).toEqual([
+      ["VIB-2", "done"],
+      ["VIB-5", "open"],
+    ]);
+
+    // The other wait ends (a hand edit; the runner's sweep is the release).
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-5", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(await releaseDependents(store.db, ctxWith, store.slug)).toContain("VIB-13");
+    expect(file(store, "VIB-13").frontmatter.blockedBy).toEqual([]);
+  });
+
   it("the release is convergent, and the runner's tick releases what the hooks never saw", async () => {
     // Canaries: remove the `blockedBy = []` write in `clearDependencies` (a
     // second `releaseTask` releases again); drop `releaseDueDependents` from

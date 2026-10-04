@@ -6957,9 +6957,12 @@ a.card:active { transform: scale(.99); }
      beside a 340px Details column (the `.ctl-wrap .ctl-layout` trap). */
   .policy-wrap .epic-layout { grid-template-columns: minmax(0, 1fr); }
   .epic-layout .epic-side { position: static; }
-  /* A row of the Epics list wraps: the name keeps line 1, the status,
-     progress and dates share line 2. */
-  .epic-row { grid-template-columns: minmax(0, 1fr) auto; }
+  /* A row of the Epics list wraps: the name and the status keep line 1, the
+     progress and the lead, dates and Archive tasks take the lines under it.
+     Ruling 651: one class more than the base rule, which comes later in the
+     sheet; at equal specificity its five desktop columns won at every width,
+     and at 467px the name was 22px wide (the ruling 560 trap again). */
+  .epic-list .epic-row { grid-template-columns: minmax(0, 1fr) auto; }
   .epic-row-progress, .epic-row-meta { grid-column: 1 / -1; }
   .epic-row-go { display: none; }
   /* Ruling 419(b): the transcript stays a capped scroller here too. Uncapped,
@@ -9246,22 +9249,30 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .board-epic-filter:focus-within { outline: 2px solid var(--blue); outline-offset: 2px; }
 
 /* The Epics list: a page like the review queue's, one row per epic. The row
-   is the link (its page); name, status, progress, lead and target line up in
-   columns so a list of epics reads as a table without being one. */
+   opens its page; name, status, progress, lead and target line up in columns
+   so a list of epics reads as a table without being one. Ruling 651: the
+   link is the name, and its box (`::after`) covers the row, so the whole row
+   still opens the epic while Archive tasks, which a link may not contain,
+   sits above that box. The row draws the link's focus ring. */
 .epics-panel { padding: .375rem; }
 .epic-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .epic-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) 7rem minmax(9rem, 1fr) minmax(0, .9fr) 1rem;
   align-items: center; gap: 1rem;
   padding: .75rem;
   border-radius: var(--radius-box);
-  color: inherit; text-decoration: none;
   transition: background-color .14s ease;
 }
 .epic-row:hover { background: var(--tint-hover); }
-.epic-list > li + li .epic-row { box-shadow: 0 -1px 0 var(--hairline); }
-.epic-list > li + li .epic-row:hover { box-shadow: none; }
+.epic-row + .epic-row { box-shadow: 0 -1px 0 var(--hairline); }
+.epic-row + .epic-row:hover { box-shadow: none; }
+.epic-row:has(.epic-row-link:focus-visible) { outline: 2px solid var(--blue); outline-offset: -2px; }
+.epic-row-link { display: flex; align-items: center; gap: .5rem; min-width: 0; color: inherit; text-decoration: none; }
+.epic-row-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.epic-row-link:focus-visible { outline: none; }
+.epic-row .epic-archive-tasks { position: relative; z-index: 1; }
 .epic-row-name { display: flex; align-items: center; gap: .5rem; min-width: 0; }
 /* Ruling 625: an epic's id is a key (Inter 500, tabular), and its name a row
    title — one step under the page title, as the queue's and the board's. */
@@ -9363,8 +9374,12 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .epic-desc { max-width: 70ch; }
 
 /* The epic's tasks: rows like the review queue's, with the stage, the board
-   card's status word, what the task waits on and its owner, then Remove. */
-.epic-task-tools { display: inline-flex; gap: .5rem; }
+   card's status word, what the task waits on and its owner, then its actions
+   (Archive and Remove, or Restore in the archived fold: ruling 651). */
+/* Ruling 651: three tools on a Done epic (Archive tasks, Add tasks, New
+   task) wrap on a phone instead of running past the panel: `.panel-head
+   .right` keeps its content's width, so the cap is what makes them wrap. */
+.epic-task-tools { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; max-width: 100%; }
 .epic-task-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .epic-task {
   display: flex; align-items: center; gap: .75rem;
@@ -9390,14 +9405,14 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
 .epic-task-link:hover .epic-task-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--faint); }
 .epic-task-props { display: flex; align-items: center; gap: .375rem; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; }
 .epic-task-stage { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; color: var(--muted); white-space: nowrap; }
-.epic-task-remove { display: inline-flex; flex: none; }
+.epic-task-actions { display: inline-flex; gap: .25rem; flex: none; }
 /* Ruling 615: a narrow list gives the title its own line. One line left the
    title what the stage, the status chip, the owner and Remove did not take:
    as few as six characters on a 768px screen, none on a 375px phone, where the
    stage then ran over the key. Under 36rem the facts go to a second line,
-   under the title, and Remove is the row's trailing action, centred on both
-   lines; under 24rem (a phone) the facts take the whole second line, from the
-   key, and Remove stays on the title's. A container query, because the list
+   under the title, and the actions trail the row, centred on both
+   lines; under 24rem (a phone) the facts start the second line from the key
+   and the actions end it. A container query, because the list
    is narrow in the two-column layout too, not only on a narrow screen
    (U39-11's console lines). */
 .epic-task-list { container-type: inline-size; }
@@ -9409,10 +9424,12 @@ a.epic-chip:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-c
   }
   .epic-task-link { grid-area: link; }
   .epic-task-props { grid-area: props; justify-content: flex-start; padding: 0 0 .25rem calc(62px + .75rem); }
-  .epic-task-remove { grid-area: remove; align-self: center; }
+  .epic-task-actions { grid-area: remove; align-self: center; }
 }
 @container (max-width: 24rem) {
-  .epic-task { grid-template-areas: "link remove" "props props"; }
+  /* Ruling 651: two actions beside the title left it a dozen characters on a
+     phone, so the title takes line 1 whole and the actions end line 2. */
+  .epic-task { grid-template-areas: "link link" "props remove"; }
   .epic-task-props { padding-left: 0; }
 }
 .epic-archived { margin-top: .75rem; padding-top: .5rem; border-top: 1px solid var(--hairline); }

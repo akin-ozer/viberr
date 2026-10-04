@@ -368,9 +368,11 @@ baseRefreshes: []                 # ruling 132: every base refresh the operator'
                                   # on, which lets a revision be followed through
                                   # Viberr's own refreshes instead of re-minted
 branch: vib-142-attach-workspace  # task-key branch; null before creation
-archived: false                   # R14-3: abandoned work, kept for the record —
+archived: false                   # R14-3: filed away, kept for the record —
                                   # leaves the board's default view and the review
-                                  # queue, keeps its timeline, restorable
+                                  # queue, keeps its timeline, restorable; archived
+                                  # at the terminal stage it still counts as done
+                                  # (ruling 651), before it as abandoned work
 noChanges: true                   # optional; R17-2/R19-1 — this task completes
                                   # with NOTHING to deliver (see the note below)
 pr:                               # GitHub projection mirrored into the file

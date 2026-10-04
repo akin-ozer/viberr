@@ -56,7 +56,7 @@ export interface CardStatus {
 }
 
 export function cardStatus(task: BoardCard): CardStatus | null {
-  if (task.archived) return { kind: "archived", label: "archived", icon: "lock" };
+  if (task.archived) return { kind: "archived", label: "archived", icon: "archive" };
   if (task.waiting === "agent") {
     // Ruling 349: parked behind the concurrent-run cap — no pulse, nothing streams.
     return task.liveRun === "queued"
