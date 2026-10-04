@@ -273,10 +273,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // One policy now: members (and org admins, via the audited D2 override) get
   // the full projection; everyone else keeps the honest run SUMMARY strip —
   // who ran, on what backend, when, and how it ended — with no log content.
-  const runsMembership = new Set(
-    listProjectMembers(db, params.slug).map((m) => m.userId),
-  );
-  const runsVisible = runsMembership.has(user.id) || user.role === "admin";
+  const members = listProjectMembers(db, params.slug);
+  const runsVisible = members.some((m) => m.userId === user.id) || user.role === "admin";
   //
   // P13-D-11: the member projection carries a BOUNDED window of each agent
   // group's console (newest lines within `RUN_LOG_WINDOW_*`), not the whole
@@ -453,9 +451,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
-  const myProjectRole =
-    listProjectMembers(db, params.slug).find((m) => m.userId === user.id)
-      ?.role ?? null;
+  const myProjectRole = members.find((m) => m.userId === user.id)?.role ?? null;
   const canDeliver =
     roleCan(myProjectRole, "run-agents") ||
     user.role === "admin" ||
