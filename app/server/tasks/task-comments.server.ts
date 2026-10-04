@@ -594,10 +594,11 @@ export async function commentToAgent(
   ctx: TaskMutationContext = {},
 ): Promise<CommentToAgentResult> {
   const withFiles = commentFiles(db, input, actor, ctx);
-  // Resolve the mentioned agent FIRST (dynamic import avoids a module cycle:
-  // agent-reply → specialist-run → task-actions). We need it before appending
-  // so a named mention like `@dev` still flags the comment as routed-to-agent
-  // (AGENT_HANDLE_RE alone only matches the reserved backend/role handles).
+  // Resolve the mentioned agent FIRST (a dynamic import, though agent-reply
+  // does not reach this module statically, so no cycle needs it). We need it
+  // before appending so a named mention like `@dev` still flags the comment as
+  // routed-to-agent (AGENT_HANDLE_RE alone only matches the reserved
+  // backend/role handles).
   const {
     agentMentionHandle,
     ambiguousBackendHandle,

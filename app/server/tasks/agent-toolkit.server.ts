@@ -67,9 +67,10 @@ import {
 } from "./mention-notify.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
-// From the leaf substrate module, NOT task-actions: importing these three from
-// task-actions closed the cycle specialist-run → agent-toolkit → task-actions,
-// which a dynamic import hid rather than fixed (see task-mutation.server.ts).
+// From the leaf substrate module, NOT a task-action module: importing these
+// three from task-actions closed the cycle specialist-run → agent-toolkit →
+// task-actions, which a dynamic import hid rather than fixed (see
+// task-mutation.server.ts).
 import {
   notifyTaskWatchers,
   type TaskWatcherNotice,

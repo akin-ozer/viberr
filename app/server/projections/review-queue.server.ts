@@ -368,7 +368,7 @@ export function getReviewQueue(
   // UX19-3: the projected `blockReason` column carries only PART of the
   // acceptance gate. `acceptanceBlockReason` (rebuilder.server.ts) deliberately
   // omits two refusals `acceptanceRefusalReason` enforces on every writer
-  // (task-actions.server.ts) — an OPEN blocked decision, and a CONFLICTING PR —
+  // (task-acceptance.server.ts) — an OPEN blocked decision, and a CONFLICTING PR —
   // and this filter re-checked neither. Live shape: a row sat under "Waiting on
   // your acceptance" wearing the "your acceptance" tag while the task page one
   // click away read "Acceptance is blocked". Both facts are on the task summary
@@ -381,7 +381,7 @@ export function getReviewQueue(
     inReview.map((t) => [
       t.key,
       // Same predicate the acceptance writers pass as `blockedPacket`
-      // (task-actions.server.ts): an operator-raised blocked decision is still
+      // (task-acceptance.server.ts): an operator-raised blocked decision is still
       // open, and accepting would bury it.
       (t.readiness === "blocked" && t.packet?.type === "blocked") ||
         // Ruling 135: the delivered revision is not on the PR.
@@ -398,7 +398,7 @@ export function getReviewQueue(
   // declined); it needs a rework/reopen/archive decision, so it belongs in
   // "Still in review", not the acceptance panel (NEW-1).
   // U35-5: only a stage acceptance is legal FROM earns the acceptance half
-  // (`acceptanceStageBlockedReason`, task-actions.server.ts, whose predicate
+  // (`acceptanceStageBlockedReason`, task-acceptance.server.ts, whose predicate
   // this is); review work before the boundary is listed, never offered for
   // acceptance.
   // Ruling 236: pairwise path intersection across the OPEN review PRs. Done

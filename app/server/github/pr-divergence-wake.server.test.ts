@@ -44,7 +44,7 @@ interface OperatorWakeCall {
 /**
  * The reconciler's own `wakeOperator` hook, so the exact trigger is observed
  * without spawning a real operator runtime — and without displacing any other
- * task-actions behaviour these tests rely on.
+ * task-action-core behaviour these tests rely on.
  */
 const invoked: OperatorWakeCall[] = [];
 const wakeOperator: OperatorWake = async (

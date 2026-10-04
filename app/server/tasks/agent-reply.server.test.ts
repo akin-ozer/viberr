@@ -2561,7 +2561,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     // for native delivery, so its granted craft vanishes mid-thread.
     //
     // Canary: drop the `skills: confinement.skills` spread from
-    // `commentToAgent`'s resume branch (task-actions.server) and this fails.
+    // `commentToAgent`'s resume branch (task-comments.server) and this fails.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     writeProject(store.dataRoot, {

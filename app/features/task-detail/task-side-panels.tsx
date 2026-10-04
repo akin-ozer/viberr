@@ -789,11 +789,11 @@ export function CurrentStatePanel({
   onAccept: () => void;
   /** F19-37: pick a stage from the menu. Page-owned for the same reason
    *  `onAccept` is — a HUMAN move into the LAST stage IS an acceptance
-   *  (task-actions.server.ts: "A HUMAN manually moving a task INTO the final
-   *  stage IS accepting completion" → acceptCompletion → the real PR merge), so
-   *  the terminal pick has to reach the page's confirm state instead of
-   *  submitting from inside this panel. Every other stage still submits
-   *  straight through. */
+   *  (task-transitions.server.ts: "A HUMAN manually moving a task INTO the
+   *  final stage IS accepting completion" → acceptCompletion in
+   *  task-acceptance.server.ts → the real PR merge), so the terminal pick has
+   *  to reach the page's confirm state instead of submitting from inside this
+   *  panel. Every other stage still submits straight through. */
   onTransition: (toStageId: string) => void;
   /** A stage transition is in flight (page-owned fetcher) — locks the menu. */
   transitionBusy: boolean;

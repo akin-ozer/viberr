@@ -111,7 +111,7 @@ export function useRunControls({
   // identically the moment it is clicked — which is why the blocked packet
   // already asks this same question before it offers `retry_other_backend`
   // (`isBackendAvailableFor(db, ownerUserId, altBackend)` in
-  // task-actions.server.ts). The button was gated on the viewer's grant alone,
+  // run-failure-remedy.server.ts). The button was gated on the viewer's grant alone,
   // so the two surfaces on one task disagreed. An unowned task (null principal)
   // has nobody to bill on either backend.
   //
@@ -158,7 +158,7 @@ export function useRunControls({
   //
   // F19-10: this asked `roleCan(myRole, "accept-completion")` — a hardcoded copy
   // of ONE row of the matrix, and the wrong row. `completeTaskMerge`
-  // (task-actions.server.ts) gates on `requireAcceptCompletion(…, "complete a PR
+  // (task-acceptance.server.ts) gates on `requireAcceptCompletion(…, "complete a PR
   // merge")`, which passes the task's own human owner whatever their project
   // role (R6-2/R14-2 — "completing a merge-pending acceptance is part of the
   // same acceptance authority"). So a contributor-owner who accepted their own

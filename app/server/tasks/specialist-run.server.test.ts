@@ -5522,7 +5522,7 @@ describe("P19-G11 — the run records what it was given", () => {
     // it. So both paths build this record through `resolvedResourceInputs`,
     // from their own resolution.
     //
-    // The caller (task-actions' @mention resume) owns the remaining four
+    // The caller (task-comments' @mention resume) owns the remaining four
     // fields and hands the whole thing to `recordRunInputs`.
     //
     // Ruling 343: for two days it did not, and THIS test is why that lasted —
@@ -5940,7 +5940,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
 
   it("an operator prompt into a held backend leaves the hold note alone: no 'needs to be re-sent' note, one pending schedule", async () => {
     // Canary: drop the `isDispatchHeld(error)` re-throw from
-    // `operatorPromptAgent`'s catch (task-actions.server.ts) — the catch then
+    // `operatorPromptAgent`'s catch (agent-completion.server.ts) — the catch then
     // writes "the prompt above did NOT start a run: Held: … The directive needs
     // to be re-sent once the blocker is resolved.", which contradicts the hold
     // note's "nothing was dispatched and no decision is needed" and asks for a

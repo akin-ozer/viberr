@@ -278,7 +278,7 @@ beforeEach(() => {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
   vi.clearAllMocks();
   // SAFETY: every consumer of a merge result switches on `status` and reads
-  // only the fields of the arm it lands in (task-actions.server.ts) — the
+  // only the fields of the arm it lands in (task-acceptance.server.ts) — the
   // `no_pr` arm's `taskKey` is never read, so it is left off deliberately: the
   // no-merge case below compares this whole recorded value.
   mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);

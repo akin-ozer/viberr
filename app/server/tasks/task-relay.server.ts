@@ -25,7 +25,8 @@ import {
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { appendPolicyNote, loadProjectContext, reprojectTask, taskRef } from "./task-mutation.server";
 // Type-only: the wake goes through `autoInvokeOperator`, imported at call time
-// because task-actions reaches this module from its completion pipeline.
+// because task-action-core reaches this module at load time (through
+// task-mutation and the rebuilder).
 import type { TaskActionContext } from "./task-action-core.server";
 
 /**

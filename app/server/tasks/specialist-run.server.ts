@@ -184,8 +184,8 @@ import {
   mirrorIsCold,
   type WorkspaceCloneInput,
 } from "./repo-mirror.server";
-// Values come from the leaf substrate, never task-actions: task-actions
-// imports THIS module (see task-mutation.server.ts).
+// Values come from the leaf substrate, never the task-action modules, which
+// load THIS module when they run (see task-mutation.server.ts).
 import {
   appendPolicyNote,
   reprojectTask,
@@ -626,10 +626,10 @@ function agentEvent(text: string): TaskFileEvent {
  * the isolated workspace, never the task dir, so `task.md` is not reachable
  * from inside the run. Continuity was whatever the operator retyped.
  *
- * ONE anchor implementation, not two: `canonicalTaskAnchor` (task-actions) is
+ * ONE anchor implementation, not two: `canonicalTaskAnchor` (task-replies) is
  * already the shape ruled correct for the resume path and is prompt-budget
- * clamped on every axis. Imported dynamically because task-actions imports THIS
- * module (the same cycle every other cross-call here avoids that way).
+ * clamped on every axis. Imported dynamically, like every reach from this
+ * module into the task-action modules (ruling 207(e)).
  *
  * Best-effort by design: a task whose project file cannot be read still runs —
  * it falls back to the raw stage id, exactly as the resume path does, and only

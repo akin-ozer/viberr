@@ -1743,7 +1743,7 @@ describe("view + comment are enforced as MEMBERSHIP, not as a role tier", () => 
     );
     expect(isAppError(refusal)).toBe(true);
     expect(refusal?.status).toBe(403); // → the route's unknown-slug 404
-    // The comment path itself carries no authorization (task-actions §7.7) —
+    // The comment path itself carries no authorization (task-comments §7.7) —
     // `requireVisibleProject` IS its access control, so "refused" has to mean
     // the timeline never took the write.
     expect(commentTexts()).not.toContain("Non-member says hello");

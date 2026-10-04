@@ -5,7 +5,7 @@ import { PROJECT_ROLES, type ProjectRole } from "~/schemas/project-file.schema";
  *
  * Every governed project action names a canonical `RbacAction`; this module maps
  * each action to the exact set of roles that hold it. The server guards
- * (`requireAction` in task-actions.server.ts and its callers) consult this map,
+ * (`requireAction` in task-action-core.server.ts and its callers) consult this map,
  * and the Policy page's permission table renders the SAME object — so display and
  * enforcement can never drift. `policy-rbac.server.test.ts` drives each guard per
  * role to keep the two bound.

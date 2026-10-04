@@ -48,7 +48,8 @@ import {
   type TaskActor,
 } from "./task-mutation.server";
 // Type-only: the action context carries the injectable `runOperator` seam the
-// release hands the re-invoke to; no runtime edge back into task-actions.
+// release hands the re-invoke to; no runtime edge back into the task-action
+// modules.
 import type { TaskActionContext } from "./task-action-core.server";
 import { errorMessage, toError } from "~/shared/errors";
 
@@ -510,8 +511,8 @@ async function drainQueuedQuestions(
     parsed.frontmatter.queuedQuestions = [];
   });
   if (taken.length === 0) return;
-  // Dynamic, like every other reach into task-actions from this module: the two
-  // import each other and a static edge here closes the cycle.
+  // Dynamic, like every other reach into the task-action modules from this
+  // module (ruling 207(e)).
   const { OPERATOR_TASK_ACTOR } = await import("./task-action-core.server");
   const { REVIEW_DEADLOCK_QUESTION } = await import("./review-deadlock.server");
   const startAgentRun =
@@ -527,7 +528,7 @@ async function drainQueuedQuestions(
         directiveFrom: question.decidedByLabel,
       };
       // Ruling 316: this is ruling 241's DEFERRED half of the same dispatch
-      // `task-actions` makes when the task is not held, and ruling 313 patched
+      // `packet-resolution` makes when the task is not held, and ruling 313 patched
       // only the immediate one — so a deadlock question put after a hold
       // cleared kept the verdict channel the immediate one had lost. A queued
       // question is the same question; it withholds the same way.

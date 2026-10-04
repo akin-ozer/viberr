@@ -1768,7 +1768,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   // question from why this run failed. The projection withholds `altBackend`
   // when the run had no principal at all (an unowned task), and `retryBackends`
   // is the task owner's live connection set — the same question the blocked
-  // packet asks before offering `retry_other_backend` (task-actions.server.ts),
+  // packet asks before offering `retry_other_backend` (run-failure-remedy.server.ts),
   // so the button and the packet cannot tell two stories about one task.
   const altBackend = cur.altBackend ?? null;
   const retryPossible =

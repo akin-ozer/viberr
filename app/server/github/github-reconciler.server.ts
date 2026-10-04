@@ -134,7 +134,7 @@ import { countLabel } from "~/shared/text/plural";
  * The operator wake a divergence fires: `autoInvokeOperator` narrowed to the
  * triggers this module passes (ruling 475 added `pr-conflicting`, the flip of
  * an open PR to conflicting). Typed here rather than imported so the
- * task-actions dependency stays the runtime-only dynamic import it already is.
+ * task-action-core dependency stays the runtime-only dynamic import it already is.
  */
 export type OperatorWake = (
   db: DatabaseSync,
@@ -1447,8 +1447,9 @@ async function reconcileTaskUnlocked(
       }
     }
     // Notify the task's supervisors (owner + admins/maintainers) so the
-    // divergence reaches an inbox, not just the timeline. Dynamic import keeps
-    // the reconciler free of a static task-actions cycle (mirrors mergeTaskPr).
+    // divergence reaches an inbox, not just the timeline. The import below is
+    // dynamic, but this module already imports task-mutation statically, so it
+    // guards no cycle.
     //
     // P14-GV-09: the accepted-then-closed-externally case is a divergence too —
     // it silently REMOVES the "Complete merge" affordance from an accepted task

@@ -1407,7 +1407,7 @@ describe("task dependencies projection (ruling 131)", () => {
  * Live-proven: a conversational operator turn on a Done+merged task left
  * `waiting: human` in the task file forever (the run start flips it to `agent`,
  * `clearWaitingToHuman` flips it back to `human` when the run ends — see
- * app/server/tasks/task-actions.server.ts). The task detail then reported
+ * app/server/tasks/agent-completion.server.ts). The task detail then reported
  * "Waiting on: Human decision", the board counted it in "N waiting on a human
  * decision", and the review queue (which filters on the review boundary)
  * reported 0 — two surfaces disagreeing about one task.

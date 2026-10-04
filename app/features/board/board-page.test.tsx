@@ -1184,7 +1184,7 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
  * only: `acceptanceBlockReason` (rebuilder.server.ts) names four refusals it
  * deliberately leaves to the reader — archived task, stage boundary, blocked
  * packet, conflicting PR — while the server's `acceptanceRefusalReason`
- * (task-actions.server.ts) enforces all of them on this exact click. Three are
+ * (task-acceptance.server.ts) enforces all of them on this exact click. Three are
  * answerable from the summary the dialog already holds, so a task with an open
  * blocked decision (or a PR GitHub cannot merge) used to open a confident
  * dialog with no blocked row, and the server refused the click afterwards.
@@ -1295,7 +1295,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
 
 /**
  * The Triage → Done drag. The board's own StageMenu offers it, the server
- * refuses it (`acceptanceStageBlockedReason`, task-actions.server.ts) — and the
+ * refuses it (`acceptanceStageBlockedReason`, task-acceptance.server.ts) — and the
  * dialog in between used to show no blocked row at all, because the gate turns
  * on the PROJECT's workflow graph and nothing on the card carried it. The
  * summary carries `atAcceptanceBoundary` now (shared/mapping/task.server.ts),

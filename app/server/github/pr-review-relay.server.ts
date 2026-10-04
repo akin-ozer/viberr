@@ -203,7 +203,9 @@ export async function relayPrReviews(
   const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
   if (!project) return none;
   const members = new Set(project.parsed.frontmatter.members.map((m) => m.userId));
-  // Dynamic: task-actions imports this module's importer (the reconciler).
+  // Dynamic: review-notes reaches task-acceptance and task-delivery (through
+  // agent-reply), and both load this module's importer, the reconciler, when
+  // they run.
   const { noteRecipient, reviewNotesDirective } = await import(
     "~/server/tasks/review-notes.server"
   );
