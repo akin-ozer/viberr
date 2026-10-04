@@ -540,7 +540,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // decision with no control at all. Acceptance is a standing authority at the
     // review boundary; both surfaces now read it from the same predicate.
     acceptance: standing.affordance,
-    timelineTotal: slice.total,
     timelineHasMore: slice.hasMore,
     timelineRemaining: slice.remaining,
     timelineNextLimit: slice.nextLimit,
