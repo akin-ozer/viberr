@@ -35,6 +35,23 @@ function conversationFixture() {
   };
 }
 
+/** A message builder for the open thread `cnv_a`, every message recorded `at`. */
+function messagesAt(at: string) {
+  return (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
+    id,
+    conversationId: "cnv_a",
+    seq,
+    author,
+    userId: author === "user" ? "u1" : null,
+    text,
+    runId: author === "user" ? null : `run_${id}`,
+    surface: null,
+    replyTo,
+    steeredInto: null,
+    createdAt: at,
+  });
+}
+
 function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
   return {
     available: true,
@@ -974,19 +991,7 @@ describe("the controller dock (ruling 121)", () => {
    */
   it("ruling 465: renders reply order and the queue from the server's view", async () => {
     const at = "2026-09-24T20:00:00.000Z";
-    const msg = (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
-      id,
-      conversationId: "cnv_a",
-      seq,
-      author,
-      userId: author === "user" ? "u1" : null,
-      text,
-      runId: author === "user" ? null : `run_${id}`,
-      surface: null,
-      replyTo,
-      steeredInto: null,
-      createdAt: at,
-    });
+    const msg = messagesAt(at);
     mount({
       path: "/projects/viberr/tasks/VIB-1",
       view: () =>
@@ -1038,19 +1043,7 @@ describe("the controller dock (ruling 121)", () => {
 
   it("ruling 527: steering sits in its turn, Retract fills the composer, and Queue waits behind the turn", async () => {
     const at = "2026-09-27T16:00:00.000Z";
-    const msg = (id: string, seq: number, text: string) => ({
-      id,
-      conversationId: "cnv_a",
-      seq,
-      author: "user" as const,
-      userId: "u1",
-      text,
-      runId: null,
-      surface: null,
-      replyTo: null,
-      steeredInto: null,
-      createdAt: at,
-    });
+    const msg = messagesAt(at);
     const { sends } = mount({
       path: "/projects/viberr/tasks/VIB-1",
       view: () =>
@@ -1066,7 +1059,7 @@ describe("the controller dock (ruling 121)", () => {
             updatedAt: at,
             lastMessageAt: at,
           },
-          messages: [msg("p1", 1, "Tidy the agents."), msg("q", 2, "Then list them."), msg("s", 3, "The KB is gone too.")],
+          messages: [msg("p1", 1, "user", "Tidy the agents."), msg("q", 2, "user", "Then list them."), msg("s", 3, "user", "The KB is gone too.")],
           turn: {
             working: true,
             runId: "run_live",
@@ -1549,19 +1542,7 @@ describe("ruling 459: the dock's deferred half", () => {
  */
 describe("ruling 476: the dock meets a reply at its first line, and says it arrived", () => {
   const at = "2026-09-24T23:40:00.000Z";
-  const msg = (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
-    id,
-    conversationId: "cnv_a",
-    seq,
-    author,
-    userId: author === "user" ? "u1" : null,
-    text,
-    runId: author === "user" ? null : `run_${id}`,
-    surface: null,
-    replyTo,
-    steeredInto: null,
-    createdAt: at,
-  });
+  const msg = messagesAt(at);
   const idle = { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] };
 
   function body(messages: ReturnType<typeof msg>[], working: boolean) {
