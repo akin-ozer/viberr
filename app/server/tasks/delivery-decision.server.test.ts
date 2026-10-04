@@ -62,7 +62,7 @@ import {
   type FakeGithub,
 } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 const openPrMock = vi.fn<typeof openTaskPr>();

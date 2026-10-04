@@ -1503,7 +1503,7 @@ async function reconcileTaskUnlocked(
     ) {
       const wake =
         ctx.wakeOperator ??
-        (await import("~/server/tasks/task-actions.server")).autoInvokeOperator;
+        (await import("~/server/tasks/task-action-core.server")).autoInvokeOperator;
       void wake(
         db,
         { dataRoot: ctx.dataRoot },
@@ -1519,7 +1519,7 @@ async function reconcileTaskUnlocked(
       // `update_branch_from_base` then hands the conflict to the deliverer.
       const wake =
         ctx.wakeOperator ??
-        (await import("~/server/tasks/task-actions.server")).autoInvokeOperator;
+        (await import("~/server/tasks/task-action-core.server")).autoInvokeOperator;
       void wake(
         db,
         { dataRoot: ctx.dataRoot },

@@ -136,12 +136,12 @@ import { splitKbSource } from "~/server/tasks/kb-correction-actions.server";
 import { fullReplyTextForRun, runFailureReason } from "~/server/tasks/agent-reply.server";
 import {
   DEFAULT_GOAL,
-  OPERATOR_TRANSITION_CHAIN_CAP,
   clearWaitingToHuman,
   liftHoldForRun,
   liftStageHoldForPerson,
   markWaitingAgent,
 } from "~/server/tasks/task-actions.server";
+import { OPERATOR_TRANSITION_CHAIN_CAP } from "~/server/tasks/task-action-core.server";
 import {
   reprojectTask,
   taskRef,

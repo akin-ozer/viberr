@@ -49,7 +49,7 @@ import {
 } from "./task-mutation.server";
 // Type-only: the action context carries the injectable `runOperator` seam the
 // release hands the re-invoke to; no runtime edge back into task-actions.
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 import { errorMessage, toError } from "~/shared/errors";
 
 /**
@@ -463,7 +463,7 @@ export async function announceRelease(
   // and for the same reason: the person's instruction goes first.
   await drainQueuedQuestions(db, ctx, projectSlug, taskKey);
   try {
-    const { autoInvokeOperator } = await import("./task-actions.server");
+    const { autoInvokeOperator } = await import("./task-action-core.server");
     const dependencyRelease: DependencyReleasePayload = {
       entries: [...input.entries],
       clearedBy: input.clearedBy ?? null,
@@ -512,7 +512,7 @@ async function drainQueuedQuestions(
   if (taken.length === 0) return;
   // Dynamic, like every other reach into task-actions from this module: the two
   // import each other and a static edge here closes the cycle.
-  const { OPERATOR_TASK_ACTOR } = await import("./task-actions.server");
+  const { OPERATOR_TASK_ACTOR } = await import("./task-action-core.server");
   const { REVIEW_DEADLOCK_QUESTION } = await import("./review-deadlock.server");
   const startAgentRun =
     ctx.deps?.startAgentRun ?? (await import("./specialist-run.server")).startAgentRun;

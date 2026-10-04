@@ -38,8 +38,8 @@ import {
   attachmentProducers,
   getTaskDetail,
 } from "~/server/projections/task-query.server";
+import { runOutcomeClause, OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 import {
-  runOutcomeClause,
   appendComment,
   classifyReviewerVerdict,
   createTask,
@@ -64,12 +64,11 @@ import {
   forceAcceptCompletion,
   liftHoldForRun,
   liftStageHoldForPerson,
-  OPERATOR_TASK_ACTOR,
   reorderTask,
   resolvePacket,
   updateTaskGoal,
 } from "./task-actions.server";
-import type { TaskActionDeps } from "./task-actions.server";
+import type { TaskActionDeps } from "./task-action-core.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
@@ -93,7 +92,7 @@ import {
   type FakeGithub,
 } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import type { TaskActionContext } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 let github: FakeGithub | null = null;

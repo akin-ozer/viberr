@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1230,13 +1230,14 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
     //     the regexes miss) is credited to `<module>` and fails the equality
     //     below — the scan reports "I could not attribute this" instead of
     //     silently crediting whichever name it happened to be holding.
-    const source = readFileSync(
-      path.join(
-        path.dirname(fileURLToPath(import.meta.url)),
-        "../../server/tasks/task-actions.server.ts",
-      ),
-      "utf8",
-    ).split("\n");
+    //
+    // Ruling 654 split task-actions.server.ts by action family and exports the
+    // three helpers from task-action-core.server.ts, so any server module can
+    // consult them now: the scan reads every one, not a single file.
+    const serverDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../server");
+    const sources = readdirSync(serverDir, { recursive: true, encoding: "utf8" })
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .map((f) => readFileSync(path.join(serverDir, f), "utf8").split("\n"));
     const fnDecl = /^(?:export )?(?:async )?function ([A-Za-z0-9_]+)/;
     /** `const f = (…) =>` / `= async (…) =>` / `= function` / `= <T,>(…) =>`. */
     const fnConst =
@@ -1247,29 +1248,30 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
       "requireAcceptCompletion",
       "requireDecisionAuthority",
     ]);
-    let current = "<module>";
-    /** Last line index of `current`'s block — prettier closes it at column 0. */
-    let currentEnd = -1;
     const consumers = new Set<string>();
-    for (let i = 0; i < source.length; i++) {
-      const line = source[i]!;
-      const name = fnDecl.exec(line)?.[1] ?? fnConst.exec(line)?.[1];
-      if (name) {
-        current = name;
-        const rel = source.slice(i + 1).findIndex((l) => l.startsWith("}"));
-        currentEnd = rel === -1 ? source.length - 1 : i + 1 + rel;
+    let consults = 0;
+    for (const source of sources) {
+      let current = "<module>";
+      /** Last line index of `current`'s block — prettier closes it at column 0. */
+      let currentEnd = -1;
+      for (let i = 0; i < source.length; i++) {
+        const line = source[i]!;
+        const name = fnDecl.exec(line)?.[1] ?? fnConst.exec(line)?.[1];
+        if (name) {
+          current = name;
+          const rel = source.slice(i + 1).findIndex((l) => l.startsWith("}"));
+          currentEnd = rel === -1 ? source.length - 1 : i + 1 + rel;
+        }
+        if (!consult.test(line)) continue;
+        consults += 1;
+        const owner = i <= currentEnd ? current : "<module>";
+        if (!helpers.has(owner)) consumers.add(owner);
       }
-      if (!consult.test(line)) continue;
-      const owner = i <= currentEnd ? current : "<module>";
-      if (!helpers.has(owner)) consumers.add(owner);
     }
     // Non-vacuity: the file was read and the consult pattern matches real lines.
     // (The set equality below is the completeness assertion — it names the
     // EXPECTED consumers, so a floor on `consumers.size` would add nothing.)
-    expect(
-      source.filter((l) => consult.test(l)).length,
-      "the scan must actually be reading task-actions.server.ts",
-    ).toBeGreaterThan(10);
+    expect(consults, "the scan must actually be reading the task actions").toBeGreaterThan(10);
     expect([...consumers].sort()).toEqual(Object.keys(OWNER_CONSUMERS).sort());
   });
 });

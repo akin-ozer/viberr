@@ -33,10 +33,8 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
-import {
-  performDelivery,
-  OPERATOR_TASK_ACTOR,
-} from "./task-actions.server";
+import { performDelivery } from "./task-actions.server";
+import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 const runOp = vi.fn<typeof runOperator>(async () => ({
   runId: null,

@@ -20,13 +20,13 @@ import {
   applyRecommendation,
   dismissRecommendation,
   forceAcceptCompletion,
-  OPERATOR_TASK_ACTOR,
   reorderTask,
   acceptanceStanding,
   resolvePacket,
   setTaskArchived,
   transitionStage,
 } from "./task-actions.server";
+import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 /**
  * Pass-14 acceptance contract (P14-LV-02 / LV-06 / LV-07, R14-2, R14-3).

@@ -6,7 +6,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { waitFor } from "../../../test-support/polling";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import type { CreateEpicInput, UpdateEpicInput } from "./epic-actions.server";
-import type { TaskActionContext, TaskActionDeps } from "./task-actions.server";
+import type { TaskActionContext, TaskActionDeps } from "./task-action-core.server";
 import type { TaskActor } from "./task-mutation.server";
 
 /**
@@ -42,6 +42,7 @@ let ids: People;
 
 let epicActions: typeof import("./epic-actions.server");
 let taskActions: typeof import("./task-actions.server");
+let taskCore: typeof import("./task-action-core.server");
 let epicWriter: typeof import("~/server/files/epic-writer.server");
 let taskWriter: typeof import("~/server/files/task-writer.server");
 let projectWriter: typeof import("~/server/files/project-writer.server");
@@ -63,6 +64,7 @@ beforeAll(async () => {
   });
   epicActions = await import("./epic-actions.server");
   taskActions = await import("./task-actions.server");
+  taskCore = await import("./task-action-core.server");
   epicWriter = await import("~/server/files/epic-writer.server");
   taskWriter = await import("~/server/files/task-writer.server");
   projectWriter = await import("~/server/files/project-writer.server");
@@ -752,7 +754,7 @@ describe("ruling 503(b): setTasksEpic, the one writer of a task's epic", () => {
     // account instead of "The operator").
     const task = await newTask("Operator's task");
     const id = await newEpic("selin", { title: "Operator home" });
-    const result = await move([task], id, taskActions.OPERATOR_TASK_ACTOR, { operator: true });
+    const result = await move([task], id, taskCore.OPERATOR_TASK_ACTOR, { operator: true });
     expect(result.changed).toEqual([{ taskKey: task, from: null, to: id }]);
     expect(history(id)[0]).toBe(`The operator added ${task}.`);
     expect(epicNotes(task)[0]).toMatchObject({
@@ -837,7 +839,7 @@ describe("ruling 503(c): who may", () => {
       frozen("put tasks in an epic"),
     );
     await expect(
-      move(["DEP-31"], epic.id, taskActions.OPERATOR_TASK_ACTOR, { slug: DEPLOY, operator: true }),
+      move(["DEP-31"], epic.id, taskCore.OPERATOR_TASK_ACTOR, { slug: DEPLOY, operator: true }),
     ).rejects.toMatchObject(frozen("put tasks in an epic"));
     expect(epicWriter.listEpicIds(DEPLOY, app.dataRoot)).toEqual([epic.id]);
     expect(

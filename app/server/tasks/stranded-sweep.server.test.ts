@@ -11,7 +11,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
-import type { TaskActionDeps } from "./task-actions.server";
+import type { TaskActionDeps } from "./task-action-core.server";
 import {
   operatorCancelSchedule,
   operatorScheduleRun,

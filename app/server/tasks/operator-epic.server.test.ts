@@ -36,7 +36,8 @@ import {
   resolveOperatorAuthority,
 } from "./operator-actions.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
-import { resolvePacket, type TaskActionContext } from "./task-actions.server";
+import { resolvePacket } from "./task-actions.server";
+import type { TaskActionContext } from "./task-action-core.server";
 
 /**
  * Ruling 503(g): the operator and epics.
