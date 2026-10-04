@@ -505,7 +505,7 @@ const ALLOWED_LITERALS: ReadonlyArray<{
     why: "MCP tool description read by the operator model",
   },
   {
-    file: "server/tasks/specialist-run.server.ts",
+    file: "server/tasks/specialist-prompt.server.ts",
     contains: "# MCP tools are governed too",
     why: "specialist prompt section header for MCP tool policy",
   },

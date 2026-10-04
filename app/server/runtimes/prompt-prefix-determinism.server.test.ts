@@ -6,7 +6,7 @@ import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import {
   buildSpecialistPromptPrefix,
   type SpecialistPersonaInput,
-} from "~/server/tasks/specialist-run.server";
+} from "~/server/tasks/specialist-prompt.server";
 import {
   buildOperatorSystemPrompt,
   type OperatorMcpResolution,

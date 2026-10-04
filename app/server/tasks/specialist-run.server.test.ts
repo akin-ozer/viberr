@@ -79,17 +79,19 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
   assignReviewer,
   assignSpecialist,
-  buildAnalyzePrompt,
-  directiveRequestsDelivery,
-  knowledgeBaseReadDirs,
   removeReviewer,
   startAgentRun,
-  buildSpecialistPromptPrefix,
-  githubReadForRun,
   isDispatchHeld,
   resolveResumeConfinement,
   type DispatchHeldError,
 } from "./specialist-run.server";
+import {
+  buildAnalyzePrompt,
+  directiveRequestsDelivery,
+  knowledgeBaseReadDirs,
+  buildSpecialistPromptPrefix,
+  githubReadForRun,
+} from "./specialist-prompt.server";
 import { pinSupportCheckout } from "./specialist-workspace.server";
 import {
   listDeployedSpecialists,

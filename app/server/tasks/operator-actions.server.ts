@@ -173,13 +173,8 @@ import {
   noChangeCompletionEvent,
   standingKbCorrections,
 } from "./no-change-completion.server";
-import {
-  canOwnDelivery,
-  cannotOwnDeliverySentence,
-  isDispatchHeld,
-  startAgentRun,
-  type DispatchHeldError,
-} from "./specialist-run.server";
+import { canOwnDelivery, cannotOwnDeliverySentence } from "./specialist-prompt.server";
+import { isDispatchHeld, startAgentRun, type DispatchHeldError } from "./specialist-run.server";
 import {
   listDeployedSpecialists,
   projectBoard,
