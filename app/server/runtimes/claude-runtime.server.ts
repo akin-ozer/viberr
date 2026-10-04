@@ -20,6 +20,7 @@ import {
   postTurnTransportLine,
   RUN_PHASE,
   stepUpdateForLine,
+  viberrLine,
   type CompactCallbacks,
   type CompactOutcome,
   type RunCallbacks,
@@ -1723,18 +1724,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       } catch (error) {
         const reason = errorMessage(error);
         outcome = { compacted: false, reason };
-        const occurredAt = new Date().toISOString();
-        cb.onLine({
-          raw: "",
-          display: {
-            t: clock(occurredAt),
+        cb.onLine(
+          viberrLine({
             ev: "meta",
             tag: "run·compaction·failed",
             text: `compaction at the end of the run did not happen: ${redactProviderText(reason)}`,
-          },
-          facts: {},
-          occurredAt,
-        });
+          }),
+        );
       }
       if (!outcome.compacted && resultText) outcome = { compacted: false, reason: resultText };
       return outcome;
@@ -1913,46 +1909,39 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
        *  this line the log would show the model reacting to words it never
        *  shows arriving. */
       const emitSteered = (count: number) => {
-        const occurredAt = new Date().toISOString();
-        cb.onLine({
-          raw: "",
-          display: {
-            t: occurredAt.slice(11, 19),
+        cb.onLine(
+          viberrLine({
             ev: "meta",
             tag: "run·steered",
             text: `${countLabel(count, "new message")} from the person went into this turn here`,
-          },
-          facts: {},
-          occurredAt,
-        });
+          }),
+        );
+      };
+
+      /** A classified failure's `err` line. R20-3: the provider's redacted
+       *  sentence is appended once (the marker is what runFailureReason splits
+       *  back off). */
+      const emitFailure = (failure: ClaudeFailure) => {
+        cb.onLine(
+          viberrLine({
+            ev: "err",
+            tag: `run·error·${failure.kind}`,
+            text:
+              failure.providerText && !failure.message.includes(failure.providerText)
+                ? withProviderText(failure.message, failure.providerText)
+                : failure.message,
+            failure: failure.facts,
+          }),
+        );
       };
 
       /** Persist a redaction-safe classified reason line, then settle error. */
       const settleError = (cause: unknown) => {
         if (settled) return;
         try {
-          const failure = classifyClaudeError(
-            cause instanceof Error ? withCliStderr(cause) : cause,
-            evidence,
+          emitFailure(
+            classifyClaudeError(cause instanceof Error ? withCliStderr(cause) : cause, evidence),
           );
-          cb.onLine({
-            raw: "",
-            display: {
-              t: new Date().toISOString().slice(11, 19),
-              ev: "err",
-              tag: `run·error·${failure.kind}`,
-              // R20-3: append the provider's redacted sentence once (the marker
-              // is what runFailureReason splits back off).
-              text:
-                failure.providerText &&
-                !failure.message.includes(failure.providerText)
-                  ? withProviderText(failure.message, failure.providerText)
-                  : failure.message,
-              failure: failure.facts,
-            },
-            facts: {},
-            occurredAt: new Date().toISOString(),
-          });
         } catch {
           // Never let the reason line block finalization.
         }
@@ -2009,22 +1998,17 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
        *  react loop / stuck-loop packet fires and a human is notified. */
       const settleIdleTimeout = () => {
         if (settled) return;
-        const now = new Date().toISOString();
         try {
-          cb.onLine({
-            raw: "",
-            display: {
-              t: now.slice(11, 19),
+          cb.onLine(
+            viberrLine({
               ev: "err",
               tag: "run·error·idle_timeout",
               text:
                 `The run produced no output for ${idleMs} ms and was stopped as hung (` +
                 "not a task failure). Re-prompt the agent to continue from its " +
                 "session, or raise VIBERR_CLAUDE_IDLE_TIMEOUT_MS.",
-            },
-            facts: {},
-            occurredAt: now,
-          });
+            }),
+          );
         } catch {
           // Never let the reason line block finalization.
         }
@@ -2104,6 +2088,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         let liveCached = 0;
         const seenMessages = new Set<string>();
 
+        // Ruling 394: the drop that landed after the query's own result.
+        const emitPostTurnTransport = (detail: string) => {
+          cb.onLine(postTurnTransportLine(detail));
+        };
         /**
          * A result that reports a CAP, not a task failure: the turn cap and,
          * since ruling 175, the spending cap. Writes the cut-off's classified
@@ -2112,41 +2100,29 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
          * (observed live: a completed implementation died at turn 51 running
          * `gh --version`).
          */
-        // Ruling 394: the drop that landed after the query's own result.
-        const emitPostTurnTransport = (detail: string) => {
-          cb.onLine(postTurnTransportLine(detail));
-        };
         const emitCutOff = (): boolean => {
           if (resultSubtype === "error_max_turns") {
-            const now = new Date().toISOString();
-            cb.onLine({
-              raw: "",
-              display: {
-                t: now.slice(11, 19),
+            cb.onLine(
+              viberrLine({
                 ev: "err",
                 tag: "run·error·max_turns",
                 text:
                   `The run hit its ${resolveMaxTurns()}-turn cap and was cut off (` +
                   "not a task failure). Re-prompt the agent to continue from its " +
                   "session, or raise VIBERR_CLAUDE_MAX_TURNS.",
-              },
-              facts: {},
-              occurredAt: now,
-            });
+              }),
+            );
             return true;
           }
           if (resultSubtype === "error_max_budget_usd") {
             // Ruling 175: the instance's spending cap cut the run off — like the
             // turn cap, not a task failure. The typed record carries the cap and
             // the spend, so the packet names both without reading this prose.
-            const now = new Date().toISOString();
             const failure = emptyRunFailureFacts("max_budget");
             if (spec.maxSpendUsd) failure.spendCapUsd = spec.maxSpendUsd;
             if (resultCostUsd !== null) failure.spentUsd = resultCostUsd;
-            cb.onLine({
-              raw: "",
-              display: {
-                t: now.slice(11, 19),
+            cb.onLine(
+              viberrLine({
                 ev: "err",
                 tag: "run·error·max_budget",
                 text:
@@ -2155,10 +2131,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                   "not a task failure). Re-prompt the agent to continue from its session, or " +
                   "raise the cap in Instance settings (Max spend per Claude run).",
                 failure,
-              },
-              facts: {},
-              occurredAt: now,
-            });
+              }),
+            );
             return true;
           }
           return false;
@@ -2332,25 +2306,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // prose: the structured evidence classifies, and nothing is quoted.
           const resultProse =
             resultErrorText ?? (resultSubtype && resultSubtype !== "success" ? resultSubtype : "");
-          const failure = classifyClaudeError(new Error(resultProse), evidence);
-          const now = new Date().toISOString();
-          cb.onLine({
-            raw: "",
-            display: {
-              t: now.slice(11, 19),
-              ev: "err",
-              tag: `run·error·${failure.kind}`,
-              // R20-3: same provider-sentence append as settleError.
-              text:
-                failure.providerText &&
-                !failure.message.includes(failure.providerText)
-                  ? withProviderText(failure.message, failure.providerText)
-                  : failure.message,
-              failure: failure.facts,
-            },
-            facts: {},
-            occurredAt: now,
-          });
+          emitFailure(classifyClaudeError(new Error(resultProse), evidence));
         }
         return settle("error");
       };

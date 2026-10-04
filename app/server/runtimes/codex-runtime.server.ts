@@ -21,6 +21,7 @@ import {
   postTurnTransportLine,
   RUN_PHASE,
   stepUpdateForLine,
+  viberrLine,
   type RunCallbacks,
   type CompactCallbacks,
   type CompactOutcome,
@@ -935,18 +936,13 @@ export function createCodexAdapter(
         if (compactHome) finishCodexRunHome(compactHome, agentOwner(spec.agent));
       }
       if (!outcome.compacted) {
-        const occurredAt = new Date().toISOString();
-        cb.onLine({
-          raw: "",
-          display: {
-            t: occurredAt.slice(11, 19),
+        cb.onLine(
+          viberrLine({
             ev: "meta",
             tag: "run·compaction·failed",
             text: `compaction at the end of the run did not happen: ${redactProviderText(outcome.reason)}`,
-          },
-          facts: {},
-          occurredAt,
-        });
+          }),
+        );
       }
       return outcome;
     },
