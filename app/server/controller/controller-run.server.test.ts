@@ -6,6 +6,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { withEnv } from "../../../test-support/env";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
 
 /**
@@ -502,13 +503,20 @@ describe("the turn carries the context read (ruling 121)", () => {
     const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
     // The shipped controller profile, as boot installs it.
     seedDefaultAgentAssets(app.dataRoot);
-    // Every section locked: empty lists keep what is stored, so only the
-    // model changes, and it is put back below.
-    const locks = { skills: true, kb: true, mcps: true, instructions: true };
+    // Every section locked, as an env that unlocks none leaves them: empty lists
+    // keep what is stored, so only the model changes, and it is put back below.
+    const allLocked = {
+      VIBERR_UNLOCK_CONTROLLER_SKILLS: "",
+      VIBERR_UNLOCK_CONTROLLER_KB: "",
+      VIBERR_UNLOCK_CONTROLLER_MCPS: "",
+      VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "",
+    };
     const actor = { userId: user.id, label: user.email };
     const kept = { effort: "", definition: "", skills: [], kb: [], mcps: [] };
     const before = resolveControllerConfig(app.dataRoot).model;
-    saveControllerConfig(app.db, { ...kept, model: "opus[1m]" }, actor, { dataRoot: app.dataRoot, locks });
+    await withEnv(allLocked, () =>
+      saveControllerConfig(app.db, { ...kept, model: "opus[1m]" }, actor, { dataRoot: app.dataRoot }),
+    );
     await connectFakeBackend(app.db, user.id, "claude");
     try {
       const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
@@ -520,7 +528,9 @@ describe("the turn carries the context read (ruling 121)", () => {
       });
     } finally {
       await disconnectFakeBackend(app.db, user.id, "claude");
-      saveControllerConfig(app.db, { ...kept, model: before }, actor, { dataRoot: app.dataRoot, locks });
+      await withEnv(allLocked, () =>
+        saveControllerConfig(app.db, { ...kept, model: before }, actor, { dataRoot: app.dataRoot }),
+      );
     }
     // CANARY: stop passing the model into the turn prompt.
     expect(lastRunSpec()!.prompt).toContain("You run on model `opus[1m]` this turn.");
@@ -612,11 +622,18 @@ describe("the turn carries the context read (ruling 121)", () => {
     const actor = { userId: user.id, label: user.email };
     const stored = resolveControllerConfig(app.dataRoot);
     const section = { effort: "", definition: "", skills: [], kb: [], model: stored.model ?? "" };
-    const unlockMcps = { skills: true, kb: true, mcps: false, instructions: true };
-    saveControllerConfig(app.db, { ...section, mcps: ["cf-controller"] }, actor, {
-      dataRoot: app.dataRoot,
-      locks: unlockMcps,
-    });
+    // The deployment unlocks the MCP section alone, through its env.
+    const unlockMcps = {
+      VIBERR_UNLOCK_CONTROLLER_SKILLS: "",
+      VIBERR_UNLOCK_CONTROLLER_KB: "",
+      VIBERR_UNLOCK_CONTROLLER_MCPS: "enabled",
+      VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "",
+    };
+    await withEnv(unlockMcps, () =>
+      saveControllerConfig(app.db, { ...section, mcps: ["cf-controller"] }, actor, {
+        dataRoot: app.dataRoot,
+      }),
+    );
     await startMcpGateway({ port: 0 });
     await connectFakeBackend(app.db, user.id, "claude");
     try {
@@ -649,10 +666,11 @@ describe("the turn carries the context read (ruling 121)", () => {
     } finally {
       await disconnectFakeBackend(app.db, user.id, "claude");
       await stopMcpGateway();
-      saveControllerConfig(app.db, { ...section, mcps: stored.mcps }, actor, {
-        dataRoot: app.dataRoot,
-        locks: unlockMcps,
-      });
+      await withEnv(unlockMcps, () =>
+        saveControllerConfig(app.db, { ...section, mcps: stored.mcps }, actor, {
+          dataRoot: app.dataRoot,
+        }),
+      );
       app.db.prepare(`DELETE FROM org_mcp_servers WHERE id = 'mcp_cf_ctl'`).run();
     }
   });

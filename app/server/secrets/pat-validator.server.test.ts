@@ -6,7 +6,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
-import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { withEnv } from "../../../test-support/env";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countOpenPolicyViolations,
@@ -33,20 +33,6 @@ const CLASSIC = "ghp_classic0123456789";
 const FINE = "github_pat_11FINE0123456789_finefinefine";
 const REPO = "akin-ozer/viberr";
 const SCOPES = ["repo", "workflow", "read:org", "pull_request:write"];
-
-/** Ruling 458(c): the write dry-run's one opt-in is `VIBERR_GITHUB_WRITE_PROBE`,
- *  read through `getEnv()`, which parses once per process, so a case drops the
- *  cached parse on the way in and out. */
-async function withWriteProbe<T>(run: () => Promise<T>): Promise<T> {
-  process.env.VIBERR_GITHUB_WRITE_PROBE = "1";
-  resetEnvCacheForTests();
-  try {
-    return await run();
-  } finally {
-    delete process.env.VIBERR_GITHUB_WRITE_PROBE;
-    resetEnvCacheForTests();
-  }
-}
 
 describe("pat-validator diagnostic matrix (canned responses)", () => {
   it("classic token with all scopes → valid (header-authoritative)", async () => {
@@ -423,7 +409,7 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
         body: { message: "Validation Failed" },
       },
     });
-    const result = await withWriteProbe(() =>
+    const result = await withEnv({ VIBERR_GITHUB_WRITE_PROBE: "1" }, () =>
       validatePatToken(FINE, {
         repo: REPO,
         requiredScopes: ["repo", "pull_request:write"],
@@ -457,7 +443,7 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
         body: { message: "Resource not accessible by personal access token" },
       },
     });
-    const result = await withWriteProbe(() =>
+    const result = await withEnv({ VIBERR_GITHUB_WRITE_PROBE: "1" }, () =>
       validatePatToken(FINE, {
         repo: REPO,
         requiredScopes: ["pull_request:write"],
@@ -655,7 +641,7 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
         body: { message: "Validation Failed" },
       },
     });
-    const result = await withWriteProbe(() =>
+    const result = await withEnv({ VIBERR_GITHUB_WRITE_PROBE: "1" }, () =>
       revalidateProjectCredential(store.db, store.slug, actor, {
         dataRoot: store.dataRoot,
         fetchImpl: gh.fetchImpl,

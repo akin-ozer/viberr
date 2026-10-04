@@ -7,6 +7,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import type { SeedUserIds } from "../../../test-support/demo-data";
+import { withEnv } from "../../../test-support/env";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import type {
   loader as orgLoader,
@@ -503,30 +504,30 @@ describe("controller config locks (ruling 108)", () => {
       kb: before.kb,
       mcps: before.mcps,
     };
-    const skillsOnly = { skills: false, kb: true, mcps: true, instructions: true };
-    // Unlocked section: the change lands on disk — and the RESOLVED config
-    // reports the controller guide for an empty list (C03-OC3, pass 32: the
-    // one rule the panel and the runtime share; the file itself holds `[]`).
-    saveControllerConfig(
-      getDb(),
-      { ...base, skills: [] },
-      actor,
-      { dataRoot: app.dataRoot, locks: skillsOnly },
-    );
-    expect((await stored()).skills).toEqual(["controller-guide"]);
-    // A sibling section stays locked under the same flags.
-    expect(() =>
-      saveControllerConfig(
-        getDb(),
-        { ...base, skills: [], kb: [...before.kb, "extra-kb"] },
-        actor,
-        { dataRoot: app.dataRoot, locks: skillsOnly },
-      ),
-    ).toThrowError(/VIBERR_UNLOCK_CONTROLLER_KB=enabled/);
-    // Restore.
-    saveControllerConfig(getDb(), base, actor, {
-      dataRoot: app.dataRoot,
-      locks: skillsOnly,
+    // The deployment unlocks skills alone, through its env as production reads it.
+    const skillsOnly = {
+      VIBERR_UNLOCK_CONTROLLER_SKILLS: "enabled",
+      VIBERR_UNLOCK_CONTROLLER_KB: "",
+      VIBERR_UNLOCK_CONTROLLER_MCPS: "",
+      VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "",
+    };
+    await withEnv(skillsOnly, async () => {
+      // Unlocked section: the change lands on disk — and the RESOLVED config
+      // reports the controller guide for an empty list (C03-OC3, pass 32: the
+      // one rule the panel and the runtime share; the file itself holds `[]`).
+      saveControllerConfig(getDb(), { ...base, skills: [] }, actor, { dataRoot: app.dataRoot });
+      expect((await stored()).skills).toEqual(["controller-guide"]);
+      // A sibling section stays locked under the same flags.
+      expect(() =>
+        saveControllerConfig(
+          getDb(),
+          { ...base, skills: [], kb: [...before.kb, "extra-kb"] },
+          actor,
+          { dataRoot: app.dataRoot },
+        ),
+      ).toThrowError(/VIBERR_UNLOCK_CONTROLLER_KB=enabled/);
+      // Restore.
+      saveControllerConfig(getDb(), base, actor, { dataRoot: app.dataRoot });
     });
     expect((await stored()).skills).toEqual(before.skills);
   });
