@@ -21,9 +21,8 @@ import {
   applyRecommendation,
   resolvePacket,
   requestPacketMaintainerDecision,
-  manualDeliverForReview,
-  runProjectGatesByHand,
 } from "~/server/tasks/task-actions.server";
+import { manualDeliverForReview, runProjectGatesByHand } from "~/server/tasks/task-delivery.server";
 import {
   completeTaskMerge,
   forceAcceptCompletion,

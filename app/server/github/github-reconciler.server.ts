@@ -1387,7 +1387,7 @@ async function reconcileTaskUnlocked(
       // The task returns to the stage where a verdict can be given (ruling
       // 163's rework route, the authored-drift door), notifies the watchers
       // and wakes the operator below.
-      const { returnChangedRevisionToReview } = await import("~/server/tasks/task-actions.server");
+      const { returnChangedRevisionToReview } = await import("~/server/tasks/task-delivery.server");
       const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
       await returnChangedRevisionToReview(
         db,

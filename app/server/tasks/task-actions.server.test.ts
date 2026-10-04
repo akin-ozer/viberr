@@ -46,8 +46,6 @@ import {
   packetIdentity,
   recordAgentCompletion,
   clearWaitingToHuman,
-  manualDeliverForReview,
-  performDelivery,
   transitionStage,
   applyRecommendation,
   commentToAgent,
@@ -56,6 +54,7 @@ import {
   reorderTask,
   resolvePacket,
 } from "./task-actions.server";
+import { manualDeliverForReview, performDelivery } from "./task-delivery.server";
 import {
   revisionDriftNote,
   refreshAndReview,

@@ -1166,7 +1166,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         action: "task.gates.requested",
         taskKey: "VIB-2",
         run: async () => {
-          const { runProjectGatesByHand } = await import("~/server/tasks/task-actions.server");
+          const { runProjectGatesByHand } = await import("~/server/tasks/task-delivery.server");
           await runProjectGatesByHand(
             store.db,
             { projectSlug: store.slug, taskKey: "VIB-2" },

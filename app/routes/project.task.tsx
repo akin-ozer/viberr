@@ -41,12 +41,11 @@ import {
   appendComment,
   commentToAgent,
   dismissRecommendation,
-  manualDeliverForReview,
-  runProjectGatesByHand,
   requestPacketMaintainerDecision,
   resolvePacket,
   transitionStage,
 } from "~/server/tasks/task-actions.server";
+import { manualDeliverForReview, runProjectGatesByHand } from "~/server/tasks/task-delivery.server";
 import {
   completeTaskMerge,
   forceAcceptCompletion,

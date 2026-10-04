@@ -86,7 +86,7 @@ const DEPS = {
   runOperator: runOp,
 };
 
-import { performDelivery } from "./task-actions.server";
+import { performDelivery } from "./task-delivery.server";
 import { OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 
 let ctx: TestDbContext;

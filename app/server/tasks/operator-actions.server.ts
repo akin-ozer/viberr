@@ -154,9 +154,9 @@ import { DEFAULT_GOAL } from "./task-edits.server";
 import {
   RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   operatorPromptAgent,
-  performDelivery,
   transitionStage,
 } from "./task-actions.server";
+import { performDelivery } from "./task-delivery.server";
 import {
   acceptanceRefusalFor,
   acceptanceTerminallyBlocked,

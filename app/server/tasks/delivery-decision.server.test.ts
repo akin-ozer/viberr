@@ -22,13 +22,8 @@ import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  applyRecommendation,
-  manualDeliverForReview,
-  performDelivery,
-  resolvePacket,
-  transitionStage,
-} from "./task-actions.server";
+import { applyRecommendation, resolvePacket, transitionStage } from "./task-actions.server";
+import { manualDeliverForReview, performDelivery } from "./task-delivery.server";
 import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import {
