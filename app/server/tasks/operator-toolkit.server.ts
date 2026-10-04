@@ -28,6 +28,10 @@ import {
 import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
+  operatorTransitionStage,
+  operatorWriteCompletionPacket,
+} from "./operator-moves.server";
+import {
   operatorFlagContextConflict,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
@@ -38,8 +42,6 @@ import {
   operatorSetDependencies,
   operatorSetEpic,
   operatorSetGoal,
-  operatorTransitionStage,
-  operatorWriteCompletionPacket,
 } from "./operator-actions.server";
 import {
   operatorDispatchAgent,

@@ -29,7 +29,7 @@ import { manualDeliverForReview, performDelivery } from "./task-delivery.server"
 import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { deliverGate, type OperatorAuthority } from "./operator-authority.server";
-import { operatorAcceptCompletion, operatorDeliverForReview } from "./operator-actions.server";
+import { operatorAcceptCompletion, operatorDeliverForReview } from "./operator-moves.server";
 
 /**
  * R15-2 (owner ruling 2026-07-28): delivery — push the task branch + open the

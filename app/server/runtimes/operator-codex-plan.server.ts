@@ -23,8 +23,12 @@ import {
 } from "~/server/tasks/operator-packets.server";
 import {
   operatorAcceptCompletion,
-  operatorCorrectKnowledgeDoc,
   operatorDeliverForReview,
+  operatorTransitionStage,
+  operatorWriteCompletionPacket,
+} from "~/server/tasks/operator-moves.server";
+import {
+  operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorFlagContextConflict,
   operatorLeaseFiles,
@@ -34,8 +38,6 @@ import {
   operatorSetEpic,
   operatorSetGoal,
   operatorTakeFromTask,
-  operatorTransitionStage,
-  operatorWriteCompletionPacket,
 } from "~/server/tasks/operator-actions.server";
 import {
   operatorCancelSchedule,

@@ -64,13 +64,15 @@ import {
 import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
+  operatorTransitionStage,
+  operatorWriteCompletionPacket,
+} from "./operator-moves.server";
+import {
   operatorPostComment,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
   operatorSetGoal,
-  operatorTransitionStage,
-  operatorWriteCompletionPacket,
 } from "./operator-actions.server";
 import { operatorDispatchAgent } from "./operator-dispatch.server";
 import {
