@@ -5625,25 +5625,28 @@ function unfinishedReportInstruction(snapshot: OperatorTaskSnapshot): string {
   );
 }
 
-/** Codex cannot call the in-process tools, so it returns a constrained plan. */
+/**
+ * The turn context after the person's comment, as `operatorTurnDoctrine`
+ * declares it: both prompt builders take it after the agent's report and hand
+ * it on unchanged.
+ */
+type OperatorTurnTail =
+  Parameters<typeof operatorTurnDoctrine> extends [
+    OperatorTaskSnapshot,
+    OperatorTrigger,
+    (string | undefined)?,
+    ...infer Tail,
+  ]
+    ? Tail
+    : never;
 
+/** Codex cannot call the in-process tools, so it returns a constrained plan. */
 export function buildCodexOperatorPrompt(
   snapshot: OperatorTaskSnapshot,
   trigger: OperatorTrigger,
   humanComment?: string,
   agentReply?: string,
-  humanCommentBy?: string,
-  transition?: TransitionContext,
-  scheduleNote?: string,
-  resolvedOption?: ResolvedPacketOption,
-  strandedResume?: StrandedNudge,
-  dependencyRelease?: DependencyReleasePayload,
-  /** Ruling 400: quoted into a plan-refused retry's instruction. */
-  refusedSteps?: { tool: string; message: string }[],
-  /** Ruling 487: a `scheduled` re-run the operator set itself. */
-  scheduledByOperator?: boolean,
-  /** Ruling 488: what another task relayed here. */
-  relay?: RelayPayload,
+  ...turn: OperatorTurnTail
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
@@ -5653,20 +5656,7 @@ export function buildCodexOperatorPrompt(
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
     CODEX_PLAN_WHOLE_TURN +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
-    operatorTurnInstruction(
-      snapshot,
-      trigger,
-      humanComment,
-      humanCommentBy,
-      transition,
-      scheduleNote,
-      resolvedOption,
-      strandedResume,
-      dependencyRelease,
-      refusedSteps,
-      scheduledByOperator,
-      relay,
-    ) +
+    operatorTurnInstruction(snapshot, trigger, humanComment, ...turn) +
     "\n\nWhen you `open_packet`, author 2 to 4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision, e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal, the deliverable plus its acceptance criteria, because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one; the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits): the human's confirm executes the deletion, nothing on the remote changes; `question_reviewer` to put ONE question to a reviewer with no rework behind it (REQUIRED: its `profileId`, from `reviewers[].profileId`; an option that names no reviewer is refused), which is the move when a reviewer has blocked twice and you want its complete blocking set rather than another round of one finding at a time, `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name: the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). A `redirect` or `request_edit` that asks the person what to change or what to tell the agent sets `reply: true`, so the card requires their words (ruling 650). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
@@ -5679,37 +5669,13 @@ export function buildOperatorTurnPrompt(
   trigger: OperatorTrigger,
   humanComment?: string,
   agentReply?: string,
-  humanCommentBy?: string,
-  transition?: TransitionContext,
-  scheduleNote?: string,
-  resolvedOption?: ResolvedPacketOption,
-  strandedResume?: StrandedNudge,
-  dependencyRelease?: DependencyReleasePayload,
-  /** Ruling 400: quoted into a plan-refused retry's instruction. */
-  refusedSteps?: { tool: string; message: string }[],
-  /** Ruling 487: a `scheduled` re-run the operator set itself. */
-  scheduledByOperator?: boolean,
-  /** Ruling 488: what another task relayed here. */
-  relay?: RelayPayload,
+  ...turn: OperatorTurnTail
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
     `Goal: ${snapshot.goal}\n\nCall \`get_task\` first; its live state and offered tools are authoritative.` +
     agentReportBlock(trigger, agentReply) +
     "\n\n" +
-    operatorTurnInstruction(
-      snapshot,
-      trigger,
-      humanComment,
-      humanCommentBy,
-      transition,
-      scheduleNote,
-      resolvedOption,
-      strandedResume,
-      dependencyRelease,
-      refusedSteps,
-      scheduledByOperator,
-      relay,
-    )
+    operatorTurnInstruction(snapshot, trigger, humanComment, ...turn)
   );
 }
