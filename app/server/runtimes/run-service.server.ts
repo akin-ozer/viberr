@@ -1985,6 +1985,27 @@ export async function resumeRun(
             : null;
         })()
       : null;
+  const resumedTurn: StartRunInput = {
+    projectSlug: prev.project_slug,
+    taskKey: prev.task_key,
+    threadId: resumeThreadId,
+    role: prev.role,
+    kind: prev.kind,
+    backend,
+    credentialUserId: input.credentialUserId,
+    // Prefer the caller's model (the agent's current profile) over the stale
+    // model on the prior run row — editing an agent to a new model must apply
+    // when its session is resumed via a comment.
+    model: input.model ?? prev.model,
+    // Carry the prior run's agent identity so the resume groups under the same
+    // Agent-logs entry (one entry per agent, across every resume). A caller can
+    // override (e.g. a comment-resume that knows the current profile name).
+    agentName: input.agentName ?? prev.agent_name,
+    agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
+    prompt: input.prompt,
+    resumeSessionId: prev.session_id,
+  };
+  carryResumeOptions(resumedTurn, input);
   if (continuity === "missing" || continuity === "damaged" || stale) {
     const lossReason: ContinuityLossReason = stale
       ? "stale_large_session"
@@ -2012,49 +2033,16 @@ export async function resumeRun(
       prev.kind,
       stale ? { facts: stale, lastReport: lastReportOf(db, prev.id) } : undefined,
     );
-    const freshTurn: StartRunInput = {
-      projectSlug: prev.project_slug,
-      taskKey: prev.task_key,
-      threadId: resumeThreadId,
-      role: prev.role,
-      kind: prev.kind,
-      backend,
-      credentialUserId: input.credentialUserId,
-      model: input.model ?? prev.model,
-      agentName: input.agentName ?? prev.agent_name,
-      agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
+    const fresh = await startRun(db, {
+      ...resumedTurn,
       prompt: `${preamble}\n\n${input.prompt}`,
       // The whole point: no resumeSessionId. A fresh provider session.
       resumeSessionId: null,
       // Ruling 372: the fresh row says WHY it is fresh, in its start audit.
       continuityReset: lossReason,
-    };
-    carryResumeOptions(freshTurn, input);
-    const fresh = await startRun(db, freshTurn);
+    });
     return { runId: fresh.runId, continuityReset: true, continuityLossReason: lossReason };
   }
-
-  const resumedTurn: StartRunInput = {
-    projectSlug: prev.project_slug,
-    taskKey: prev.task_key,
-    threadId: resumeThreadId,
-    role: prev.role,
-    kind: prev.kind,
-    backend,
-    credentialUserId: input.credentialUserId,
-    // Prefer the caller's model (the agent's current profile) over the stale
-    // model on the prior run row — editing an agent to a new model must apply
-    // when its session is resumed via a comment.
-    model: input.model ?? prev.model,
-    // Carry the prior run's agent identity so the resume groups under the same
-    // Agent-logs entry (one entry per agent, across every resume). A caller can
-    // override (e.g. a comment-resume that knows the current profile name).
-    agentName: input.agentName ?? prev.agent_name,
-    agentProfileId: input.agentProfileId ?? prev.agent_profile_id,
-    prompt: input.prompt,
-    resumeSessionId: prev.session_id,
-  };
-  carryResumeOptions(resumedTurn, input);
   return startRun(db, resumedTurn);
 }
 
