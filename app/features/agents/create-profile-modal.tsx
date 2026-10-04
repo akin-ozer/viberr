@@ -309,9 +309,6 @@ const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
   { id: "off", word: "Off" },
 ];
 
-// Repo-write grants that mark a profile as a DELIVERING builder (mirrors
-// listDeployedSpecialists' delivery heuristic) — used to seed the verdict
-// toggle from its RUNTIME-effective mode below.
 /** Owner ruling (2026-08-20): a granted browser carries web egress with it —
  * the browser IS egress, and `resolveBrowserMcp` refuses to mount the pair in
  * disagreement, so the editor never lets the disagreement exist. Applied on

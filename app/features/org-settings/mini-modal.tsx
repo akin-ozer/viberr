@@ -5,7 +5,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Shared dialog chrome for every org-settings create/edit modal
- * (org-settings spec §4.5) + the destructive confirm, on a native <dialog>.
+ * (org-settings spec §4.5), on a native <dialog>.
  * Ruling 16 / spec §7.6 behaviors — Escape, focus trap, focus restore,
  * backdrop-click close — come from showModal() + useDialog.
  *

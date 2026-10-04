@@ -83,16 +83,6 @@ function asProjectRole(raw: string | null): ProjectRole | null {
   return PROJECT_ROLES.find((role) => role === raw) ?? null;
 }
 
-/* F19-33: the panel-head counts and the trailing panel notes below used to be
-   styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
-   sheet's `.fine`) and `POL_NOTE_STYLE` (a copy of `.pol-note.after` +
-   `.pol-note.last`). github-view.tsx and policy-page.tsx each kept their own
-   copies, and the note copies had already drifted three ways: .8rem here,
-   .9rem in github-view, .85rem in the sheet.
-   Hoisting the objects out of the JSX also slipped them past app.css.test.ts's
-   `style={{…}}` scan, which is why the drift went unnoticed. Ruling 14: shared
-   single implementations, never fork per surface. */
-
 // ------------------------------------------------------------------ project
 
 export function ProjectPanel({
