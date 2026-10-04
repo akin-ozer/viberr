@@ -197,6 +197,7 @@ import {
 // predicate the write below and the accept dialog's loader both read.
 import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 import {
+  appendPolicyNote,
   taskRef,
   reprojectTask,
   summaryOrThrow,
@@ -1641,18 +1642,10 @@ export async function noteStranded(
   task: { projectSlug: string; taskKey: string; waiting: string | null; quietForMs: number },
 ): Promise<void> {
   const { STRANDED_NOTE_TITLE, strandedNoteText } = await import("./stranded-sweep.server");
-  await updateTaskFile(taskRef(ctx, task.projectSlug, task.taskKey), (parsed) => {
-    parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
-      type: "note",
-      actor: { kind: "system", systemId: "policy-engine" },
-      title: STRANDED_NOTE_TITLE,
-      text: strandedNoteText(task),
-      toAgent: false,
-      evidence: null,
-    });
+  await appendPolicyNote(db, ctx, task.projectSlug, task.taskKey, {
+    title: STRANDED_NOTE_TITLE,
+    text: strandedNoteText(task),
   });
-  reprojectTask(db, ctx, task.projectSlug, task.taskKey);
 }
 
 /**
@@ -2331,20 +2324,12 @@ async function noteMentionNotStarted(
 ): Promise<void> {
   try {
     const detail = reason.trim().replace(/\.?$/, ".");
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: "Mention not started",
-        text:
-          `**Not started:** @${agentName} was mentioned, but its run did not start: ${detail} ` +
-          `The comment stays on the record.`,
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      title: "Mention not started",
+      text:
+        `**Not started:** @${agentName} was mentioned, but its run did not start: ${detail} ` +
+        `The comment stays on the record.`,
     });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     recordAudit(db, {
       action: "task.comment.unrouted",
       actor: { userId: actor.userId, label: actor.label },
@@ -2503,21 +2488,9 @@ export async function commentToAgent(
       ? ambiguousBackendHandle(ctx, input.projectSlug, input.text)
       : null;
     if (ambiguous) {
-      await updateTaskFile(
-        taskRef(ctx, input.projectSlug, input.taskKey),
-        (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "note",
-            actor: { kind: "system", systemId: "policy-engine" },
-            title: null,
-            text: ambiguousBackendHandleNote(ambiguous),
-            toAgent: false,
-            evidence: null,
-          });
-        },
-      );
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text: ambiguousBackendHandleNote(ambiguous),
+      });
       // Its own action id: the comment itself is already audited as
       // `task.comment`, and re-using that id would double-count the comment in
       // every action-keyed projection that reads it.
@@ -2542,25 +2515,13 @@ export async function commentToAgent(
       const fm = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))
         ?.parsed.frontmatter;
       if (fm && deliveringEngagement(fm) === null) {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text:
-                "**Note:** `@agent` addresses the task's delivering agent, and no agent " +
-                "delivers this task yet; the comment reached no agent. Run one from the " +
-                "Execution profile (a repo-write agent's first run makes it the deliverer), " +
-                "or mention a deployed agent by name.",
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text:
+            "**Note:** `@agent` addresses the task's delivering agent, and no agent " +
+            "delivers this task yet; the comment reached no agent. Run one from the " +
+            "Execution profile (a repo-write agent's first run makes it the deliverer), " +
+            "or mention a deployed agent by name.",
+        });
         recordAudit(db, {
           action: "task.comment.unrouted",
           actor: { userId: actor.userId, label: actor.label },
@@ -3984,26 +3945,17 @@ async function noteStuckLoopEscalationFailed(
       : why.kind === "refused"
         ? "Viberr refused it and gave no reason."
         : "Writing it failed and the error carried no message.";
-    await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: null,
-        text:
-          "This task's operator turns stopped making progress, and the recovery packet that " +
-          `would have asked you how to proceed was not opened. ${said} ` +
-          "There is no packet on this task to resolve; it is waiting on a person. " +
-          (why.kind === "refused"
-            ? "Clear what the refusal names and the next operator turn escalates on its own, " +
-              "or run the operator yourself and decide from there."
-            : "Run the operator yourself and decide from there; the next turn will try the " +
-              "escalation again."),
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, projectSlug, taskKey, {
+      text:
+        "This task's operator turns stopped making progress, and the recovery packet that " +
+        `would have asked you how to proceed was not opened. ${said} ` +
+        "There is no packet on this task to resolve; it is waiting on a person. " +
+        (why.kind === "refused"
+          ? "Clear what the refusal names and the next operator turn escalates on its own, " +
+            "or run the operator yourself and decide from there."
+          : "Run the operator yourself and decide from there; the next turn will try the " +
+            "escalation again."),
     });
-    reprojectTask(db, ctx, projectSlug, taskKey);
   } catch {
     // Best-effort: the stuck state is already logged above.
   }
@@ -5372,23 +5324,15 @@ async function appendUndeliveredMentionNote(
   owed: number,
 ): Promise<void> {
   try {
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: "Mention still not delivered",
-        text:
-          `**Not delivered:** ${owed === 1 ? "a comment" : `${owed} comments`} addressed to ` +
-          `@${input.agentHandle} could not be started when its run finished, so the delivery ` +
-          `promised when the comment was refused has not happened. ` +
-          `${owed === 1 ? "It stays" : "They stay"} on the record; mention the agent again once ` +
-          `the task can run one.`,
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      title: "Mention still not delivered",
+      text:
+        `**Not delivered:** ${owed === 1 ? "a comment" : `${owed} comments`} addressed to ` +
+        `@${input.agentHandle} could not be started when its run finished, so the delivery ` +
+        `promised when the comment was refused has not happened. ` +
+        `${owed === 1 ? "It stays" : "They stay"} on the record; mention the agent again once ` +
+        `the task can run one.`,
     });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   } catch (error) {
     logger.warn("undelivered-mention note failed", {
       taskKey: input.taskKey,
@@ -6099,21 +6043,9 @@ export async function applyAgentCompletionEffects(
       !input.fromHumanDirective
     ) {
       try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text: noteText,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text: noteText,
+        });
       } catch (noteError) {
         logger.error("could not write the no-verdict note", {
           taskKey: input.taskKey,
@@ -7215,25 +7147,13 @@ export async function operatorPromptAgent(
     // noop it is.
     if (isDispatchHeld(error)) throw error;
     const message = errorMessage(error);
-    await updateTaskFile(
-      taskRef(opCtx, input.projectSlug, input.taskKey),
-      (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          // Hunt 2026-08-29: this note used to add "@X has not been engaged" —
-          // written before auto-engage existed, and now a lie whenever the
-          // engage half succeeded and only the RUN refused (a single-flight
-          // 409, an unavailable backend). State only what is known true.
-          text: `**Note:** the prompt above did NOT start a run: ${message} The directive needs to be re-sent once the blocker is resolved.`,
-          toAgent: false,
-          evidence: null,
-        });
-      },
-    );
-    reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
+    await appendPolicyNote(db, opCtx, input.projectSlug, input.taskKey, {
+      // Hunt 2026-08-29: this note used to add "@X has not been engaged" —
+      // written before auto-engage existed, and now a lie whenever the
+      // engage half succeeded and only the RUN refused (a single-flight
+      // 409, an unavailable backend). State only what is known true.
+      text: `**Note:** the prompt above did NOT start a run: ${message} The directive needs to be re-sent once the blocker is resolved.`,
+    });
     throw error;
   }
 
@@ -12457,21 +12377,9 @@ export async function resolvePacket(
                 ? `Branch \`${outcome.branch}\` was **not** deleted: ${outcome.message}`
                 : "The branch was **not** deleted: this project has no GitHub repo or credential configured.";
       if (outcomeText) {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text: outcomeText,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text: outcomeText,
+        });
       }
 
       // F20-24: `deleteTaskRemoteBranch` removes only the REMOTE ref — the local
@@ -12560,21 +12468,9 @@ export async function resolvePacket(
   if (option.kind === "discard_branch") {
     const branch = existing.parsed.frontmatter.branch;
     if (!branch) {
-      await updateTaskFile(
-        taskRef(ctx, input.projectSlug, input.taskKey),
-        (parsed) => {
-          parsed.timeline.unshift({
-            occurredAt: new Date().toISOString(),
-            type: "note",
-            actor: { kind: "system", systemId: "policy-engine" },
-            title: null,
-            text: "This task has no workspace branch, so there is nothing to discard.",
-            toAgent: false,
-            evidence: null,
-          });
-        },
-      );
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text: "This task has no workspace branch, so there is nothing to discard.",
+      });
     } else {
       const defaultBranch =
         readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot })
@@ -12985,21 +12881,12 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         err: toError(error),
       });
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
-            `The decision stands and nothing was started, but nothing releases this task either; ` +
-            `set what it waits on from the task page.`,
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text:
+          `${input.taskKey} was **not** recorded as waiting on ${entries.join(", ")}: ${message} ` +
+          `The decision stands and nothing was started, but nothing releases this task either; ` +
+          `set what it waits on from the task page.`,
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 
@@ -13028,25 +12915,17 @@ export async function resolvePacket(
         createInput.epic = deciderEpic;
       }
       const made = await createTask(db, createInput, actor, ctx);
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: "Task created from a decision",
-          // Ruling 322: same correction as the decision event's own sentence.
-          // The wait itself is written by the `blocks` loop below, through the
-          // task's own dependency editor; this note is what a person reads.
-          text:
-            `**${made.key}** (${spec.title}) was created by this decision. ` +
-            (createTaskHoldsDecider(spec, input.taskKey)
-              ? `${input.taskKey} now waits on it and is released when it is done.`
-              : `It carries the work; ${input.taskKey} is unchanged.`),
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        title: "Task created from a decision",
+        // Ruling 322: same correction as the decision event's own sentence.
+        // The wait itself is written by the `blocks` loop below, through the
+        // task's own dependency editor; this note is what a person reads.
+        text:
+          `**${made.key}** (${spec.title}) was created by this decision. ` +
+          (createTaskHoldsDecider(spec, input.taskKey)
+            ? `${input.taskKey} now waits on it and is released when it is done.`
+            : `It carries the work; ${input.taskKey} is unchanged.`),
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
       // Ruling 287 (F37-122): connect it in the direction the work runs. A task
       // is usually created to UNBLOCK something, so the dependency points from
       // the EXISTING work to the new task — and that is the one direction
@@ -13100,22 +12979,14 @@ export async function resolvePacket(
             reprojectTask(db, ctx, input.projectSlug, other);
             continue;
           }
-          await updateTaskFile(taskRef(ctx, input.projectSlug, other), (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: already ? "Already waiting on that task" : "Now waits on a new task",
-              text: already
-                ? `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
-                  `to unblock this task, which already waited on it. Nothing changed here.`
-                : `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
-                  `to unblock this task. This task now waits on it and is released when it is done.`,
-              toAgent: false,
-              evidence: null,
-            });
+          await appendPolicyNote(db, ctx, input.projectSlug, other, {
+            title: already ? "Already waiting on that task" : "Now waits on a new task",
+            text: already
+              ? `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
+                `to unblock this task, which already waited on it. Nothing changed here.`
+              : `A decision on **${input.taskKey}** created **${made.key}** (${spec.title}) ` +
+                `to unblock this task. This task now waits on it and is released when it is done.`,
           });
-          reprojectTask(db, ctx, input.projectSlug, other);
         } catch (error) {
           const why = errorMessage(error);
           logger.warn("create_task resolution could not record the reverse wait", {
@@ -13123,21 +12994,12 @@ export async function resolvePacket(
             blocked: other,
             err: toError(error),
           });
-          await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text:
-                `**${made.key}** was created, but **${other}** was NOT set to wait on it: ${why} ` +
-                `Add the wait on ${other}'s own page, or ${other} may start work the new task ` +
-                `was created to come first.`,
-              toAgent: false,
-              evidence: null,
-            });
+          await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+            text:
+              `**${made.key}** was created, but **${other}** was NOT set to wait on it: ${why} ` +
+              `Add the wait on ${other}'s own page, or ${other} may start work the new task ` +
+              `was created to come first.`,
           });
-          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
         }
       }
     } catch (error) {
@@ -13146,21 +13008,12 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         err: toError(error),
       });
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `The task "${spec.title}" was **not** created: ${message} The decision stands and ` +
-            `${input.taskKey} is unchanged, but the work it named has no task; create it from ` +
-            `the board, or ask the operator to offer the decision again.`,
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text:
+          `The task "${spec.title}" was **not** created: ${message} The decision stands and ` +
+          `${input.taskKey} is unchanged, but the work it named has no task; create it from ` +
+          `the board, or ask the operator to offer the decision again.`,
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 
@@ -13204,20 +13057,11 @@ export async function resolvePacket(
         taskKey: input.taskKey,
         err: toError(error),
       });
-      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `${input.taskKey} was **not** scheduled to resume when the window reopens: ${message} ` +
-            `Nothing is waiting on this task automatically; run it yourself when the window is back.`,
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+        text:
+          `${input.taskKey} was **not** scheduled to resume when the window reopens: ${message} ` +
+          `Nothing is waiting on this task automatically; run it yourself when the window is back.`,
       });
-      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     }
   }
 
@@ -13259,21 +13103,9 @@ export async function resolvePacket(
           taskKey: input.taskKey,
           err: toError(error),
         });
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text: `${input.taskKey} was **not** moved to ${target.stage.name}: ${message}`,
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text: `${input.taskKey} was **not** moved to ${target.stage.name}: ${message}`,
+        });
       }
     }
   }
@@ -13463,18 +13295,9 @@ async function answerFromStandingDecision(
       { userId: decision.byUserId, label: decision.byLabel },
       ctx,
     );
-    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
-      parsed.timeline.unshift({
-        occurredAt: new Date().toISOString(),
-        type: "note",
-        actor: { kind: "system", systemId: "policy-engine" },
-        title: null,
-        text: standingArrivalText(decision),
-        toAgent: false,
-        evidence: null,
-      });
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      text: standingArrivalText(decision),
     });
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   } catch (error) {
     logger.warn("standing decision could not answer the packet", {
       taskKey: input.taskKey,
@@ -13571,22 +13394,13 @@ async function fanOutByCause(
         actor,
         ctx,
       );
-      await updateTaskFile(taskRef(ctx, sibling.projectSlug, sibling.taskKey), (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text: fanOutArrivalText({
-            fromTaskKey: input.taskKey,
-            byName: actor.label,
-            optionTitle: input.option.t,
-          }),
-          toAgent: false,
-          evidence: null,
-        });
+      await appendPolicyNote(db, ctx, sibling.projectSlug, sibling.taskKey, {
+        text: fanOutArrivalText({
+          fromTaskKey: input.taskKey,
+          byName: actor.label,
+          optionTitle: input.option.t,
+        }),
       });
-      reprojectTask(db, ctx, sibling.projectSlug, sibling.taskKey);
       outcomes.push({ taskKey: sibling.taskKey, applied: true });
     } catch (error) {
       const message = errorMessage(error);
@@ -15758,23 +15572,11 @@ async function cleanUpEmptyTaskBranch(
       // quietly standing with no record that the cleanup was attempted and lost.
       // Surface it, guarded so a second failure can never escape this handler.
       try {
-        await updateTaskFile(
-          taskRef(ctx, input.projectSlug, input.taskKey),
-          (parsed) => {
-            parsed.timeline.unshift({
-              occurredAt: new Date().toISOString(),
-              type: "note",
-              actor: { kind: "system", systemId: "policy-engine" },
-              title: null,
-              text:
-                `The empty branch \`${branchDisposition.branch}\` may not have been ` +
-                "deleted: the cleanup step failed. Remove it on GitHub if it is still there.",
-              toAgent: false,
-              evidence: null,
-            });
-          },
-        );
-        reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          text:
+            `The empty branch \`${branchDisposition.branch}\` may not have been ` +
+            "deleted: the cleanup step failed. Remove it on GitHub if it is still there.",
+        });
       } catch {
         // Already logged above; nothing more we can safely do here.
       }

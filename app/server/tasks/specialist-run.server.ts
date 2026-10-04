@@ -186,6 +186,7 @@ import {
 // Values come from the leaf substrate, never task-actions: task-actions
 // imports THIS module (see task-mutation.server.ts).
 import {
+  appendPolicyNote,
   reprojectTask,
   stageDisplayName,
   taskRef,
@@ -2115,31 +2116,19 @@ async function dispatchAgentRun(
   // PAT that was never at fault. Same rule as F15-15: a mechanical failure must
   // never reach a human wearing a credential's clothes.
   if (cloneFailure) {
-    await updateTaskFile(
-      taskRef(ctx, input.projectSlug, input.taskKey),
-      (parsed) => {
-        parsed.timeline.unshift({
-          occurredAt: new Date().toISOString(),
-          type: "note",
-          actor: { kind: "system", systemId: "policy-engine" },
-          title: null,
-          text:
-            `**Workspace checkout failed:** ${cloneFailure.sentence} ` +
-            `The agent is running against an EMPTY workspace, so it cannot read or change ${repo}. ` +
-            (cloneFailure.reason === "clone_terminated"
-              ? "Raise `VIBERR_GIT_CLONE_TIMEOUT_MS` if this repository simply needs longer, then re-run."
-              : "Re-run once the cause above is addressed.") +
-            // F19-6: the classification alone ("git exit 128") sent humans
-            // hunting; git's own redacted words are what makes this actionable.
-            (cloneFailure.stderrExcerpt
-              ? `\n\nWhat the checkout reported:\n\n\`\`\`\n${cloneFailure.stderrExcerpt}\n\`\`\``
-              : ""),
-          toAgent: false,
-          evidence: null,
-        });
-      },
-    );
-    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+    await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+      text:
+        `**Workspace checkout failed:** ${cloneFailure.sentence} ` +
+        `The agent is running against an EMPTY workspace, so it cannot read or change ${repo}. ` +
+        (cloneFailure.reason === "clone_terminated"
+          ? "Raise `VIBERR_GIT_CLONE_TIMEOUT_MS` if this repository simply needs longer, then re-run."
+          : "Re-run once the cause above is addressed.") +
+        // F19-6: the classification alone ("git exit 128") sent humans
+        // hunting; git's own redacted words are what makes this actionable.
+        (cloneFailure.stderrExcerpt
+          ? `\n\nWhat the checkout reported:\n\n\`\`\`\n${cloneFailure.stderrExcerpt}\n\`\`\``
+          : ""),
+    });
   }
 
   // Collaboration guidance (G3/G4): tell the agent about its channel so the
