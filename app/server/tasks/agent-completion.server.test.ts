@@ -235,6 +235,54 @@ afterEach(() => {
   ctx.cleanup();
 });
 
+/** Start a fake provider run whose final assistant text is `text`, wait for
+ *  it to finish, and return its run id. `autonomous` — no default
+ *  completion hook is registered by startRun itself. Session/thread ids are
+ *  unique per call so a test can drive more than one run without colliding on
+ *  the (project, task, thread) uniqueness. */
+let runSeq = 0;
+async function finishedRunWith(text: string, reviewSubject?: string | null): Promise<string> {
+  runSeq += 1;
+  queueFakeRun({
+    lines: [
+      { t: "", ev: "init", tag: "system·init", text: "test session" },
+      { t: "", ev: "text", tag: "assistant", text },
+      { t: "", ev: "result", tag: "result", text: "done" },
+    ],
+    occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
+    sessionId: `t-${runSeq}`,
+  });
+  const input: Parameters<typeof startRun>[1] = {
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    kind: "reviewer",
+    role: "Reviewer",
+    agentProfileId: "reviewer",
+    credentialUserId: store.users.arda.id,
+    backend: "claude",
+    model: "sonnet",
+    prompt: "review",
+    workdir: store.dataRoot,
+    autonomous: true,
+    dataRoot: store.dataRoot,
+    actor: actorOf(store.users.arda),
+    threadId: `th-${runSeq}`,
+  };
+  // Ruling 544: what the run was dispatched on, when the case says.
+  if (reviewSubject !== undefined) input.reviewSubject = reviewSubject;
+  const started = await startRun(store.db, input);
+  await pollUntil(() => {
+    // SAFETY: the SELECT list is the single column `state`, which
+    // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
+    // sqlite's own answer when the id matches no row.
+    const row = store.db
+      .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
+      .get(started.runId) as { state: string } | undefined;
+    return row?.state === "finished";
+  });
+  return started.runId;
+}
+
 describe("waiting-state bookkeeping (A2)", () => {
   it("startSpecialistRun marks waiting=agent while the run is in flight", async () => {
     await assignSpecialist(
@@ -255,54 +303,6 @@ describe("waiting-state bookkeeping (A2)", () => {
 });
 
 describe("applyAgentCompletionEffects (the shared effects)", () => {
-  /** Start a fake provider run whose final assistant text is `text`, wait for
-   *  it to finish, and return its run id. `autonomous` — no default
-   *  completion hook is registered by startRun itself. Session/thread ids are
-   *  unique per call so a test can drive more than one run without colliding on
-   *  the (project, task, thread) uniqueness. */
-  let runSeq = 0;
-  async function finishedRunWith(text: string, reviewSubject?: string | null): Promise<string> {
-    runSeq += 1;
-    queueFakeRun({
-      lines: [
-        { t: "", ev: "init", tag: "system·init", text: "test session" },
-        { t: "", ev: "text", tag: "assistant", text },
-        { t: "", ev: "result", tag: "result", text: "done" },
-      ],
-      occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-      sessionId: `t-${runSeq}`,
-    });
-    const input: Parameters<typeof startRun>[1] = {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      kind: "reviewer",
-      role: "Reviewer",
-      agentProfileId: "reviewer",
-      credentialUserId: store.users.arda.id,
-      backend: "claude",
-      model: "sonnet",
-      prompt: "review",
-      workdir: store.dataRoot,
-      autonomous: true,
-      dataRoot: store.dataRoot,
-      actor: actorOf(store.users.arda),
-      threadId: `th-${runSeq}`,
-    };
-    // Ruling 544: what the run was dispatched on, when the case says.
-    if (reviewSubject !== undefined) input.reviewSubject = reviewSubject;
-    const started = await startRun(store.db, input);
-    await pollUntil(() => {
-      // SAFETY: the SELECT list is the single column `state`, which
-      // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
-      // sqlite's own answer when the id matches no row.
-      const row = store.db
-        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
-        .get(started.runId) as { state: string } | undefined;
-      return row?.state === "finished";
-    });
-    return started.runId;
-  }
-
   /**
    * Save `names` into VIB-1's attachments store inside run `runId`'s window,
    * and return the directory. Completion finds a run's files by mtime: those
@@ -5177,52 +5177,6 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
 });
 
 describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
-  /** A finished fake run whose final assistant text is `text` (local copy
-   *  of the shared-effects describe's helper — that one is block-scoped).
-   *  Session ids are unique so two runs in ONE test don't collide on the
-   *  (project, task, thread) uniqueness. */
-  let runSeq = 0;
-  async function finishedRunWith(text: string): Promise<string> {
-    runSeq += 1;
-    queueFakeRun({
-      lines: [
-        { t: "", ev: "init", tag: "system·init", text: "test session" },
-        { t: "", ev: "text", tag: "assistant", text },
-        { t: "", ev: "result", tag: "result", text: "done" },
-      ],
-      occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-      sessionId: `t-${runSeq}`,
-    });
-    const started = await startRun(store.db, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      kind: "reviewer",
-      role: "Reviewer",
-      agentProfileId: "reviewer",
-      credentialUserId: store.users.arda.id,
-      backend: "claude",
-      model: "sonnet",
-      prompt: "review",
-      workdir: store.dataRoot,
-      autonomous: true,
-      dataRoot: store.dataRoot,
-      actor: actorOf(store.users.arda),
-      // Distinct thread per helper call — two runs in one test otherwise
-      // collide on the (project, task, thread) uniqueness.
-      threadId: `th-${runSeq}`,
-    });
-    await pollUntil(() => {
-      // SAFETY: the SELECT list is the single column `state`, which
-      // `agent_runs` declares TEXT NOT NULL in 0001_baseline; `undefined` is
-      // sqlite's own answer when the id matches no row.
-      const row = store.db
-        .prepare(`SELECT state FROM agent_runs WHERE id = ?`)
-        .get(started.runId) as { state: string } | undefined;
-      return row?.state === "finished";
-    });
-    return started.runId;
-  }
-
   /** Write a `type: "blocked"` work-stalled packet straight into the task file
    *  (the schema shape operatorOpenPacket produces). `stalled` is the ruling 432
    *  marker `openStuckLoopPacket` writes; `false` writes the same blocked shape
