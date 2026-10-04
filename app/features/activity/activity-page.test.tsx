@@ -13,7 +13,6 @@ import {
 } from "./activity-page";
 import {
   auditTimeLabel,
-  auditTimeLabelUTC,
   groupStreamByDay,
   groupStreamByDayUTC,
   matchesActorFilter,
@@ -145,7 +144,6 @@ describe("helpers", () => {
     // viewer disagree on.
     const fresh = { ...STREAM[0]!, occurredAt: new Date().toISOString() };
     expect(groupStreamByDayUTC([fresh])[0]!.day).not.toBe("Today");
-    expect(auditTimeLabelUTC("2026-07-03T23:50:00.000Z")).toBe("Jul 3");
   });
 });
 

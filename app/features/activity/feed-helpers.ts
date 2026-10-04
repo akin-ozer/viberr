@@ -79,8 +79,3 @@ export function auditTimeLabel(iso: string, now: Date = new Date()): string {
   if (bucket === "Yesterday") return "yesterday " + formatClock(iso);
   return bucket;
 }
-
-/** `auditTimeLabel`'s hydration first pass — the absolute UTC day. */
-export function auditTimeLabelUTC(iso: string): string {
-  return formatDayBucketUTC(iso);
-}

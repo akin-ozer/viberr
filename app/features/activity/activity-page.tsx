@@ -7,12 +7,11 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { plainText } from "~/features/notifications/notification-meta";
 import { DatePicker } from "~/ui/date-picker";
-import { formatClock, formatClockUTC } from "~/shared/dates/format";
+import { formatClock, formatClockUTC, formatDayBucketUTC } from "~/shared/dates/format";
 import { TIMELINE_EVENT_TYPES } from "~/schemas/task-file.schema";
 import { AUDIT_MAX, AUDIT_STEP, STREAM_MAX, STREAM_STEP } from "./feed-limits";
 import {
   auditTimeLabel,
-  auditTimeLabelUTC,
   groupStreamByDay,
   groupStreamByDayUTC,
   matchesActorFilter,
@@ -388,7 +387,7 @@ function AuditLogs({
   taskHref: (key: string) => string;
   onShowOlder: () => void;
 }) {
-  const timeLabel = utc ? auditTimeLabelUTC : auditTimeLabel;
+  const timeLabel = utc ? formatDayBucketUTC : auditTimeLabel;
   // UI-47: bound "remaining" by the ceiling `onShowOlder` can actually reach —
   // at AUDIT_MAX the button was a no-op that still promised N more.
   const remaining = Math.max(
