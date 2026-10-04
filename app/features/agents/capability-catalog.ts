@@ -27,7 +27,6 @@ export interface ModalCap {
   /** Shared CAP_CATALOG id. */
   id: string;
   label: string;
-  def: Exclude<CapMode, "off">;
 }
 
 export interface ModalCapGroup {
@@ -41,14 +40,12 @@ function editorCatalog(kind: CapabilityKind): readonly ModalCapGroup[] {
   const groups: ModalCapGroup[] = [];
   for (const entry of UNIFIED_CAP_CATALOG) {
     if (!entry.kinds.includes(kind) || entry.group === null) continue;
-    // `off` defaults still render a toggle; the editor seeds them unchecked.
-    const def = entry.defaultMode === "off" ? "direct" : entry.defaultMode;
     let group = groups.find((g) => g.group === entry.group);
     if (!group) {
       group = { group: entry.group, caps: [] };
       groups.push(group);
     }
-    group.caps.push({ id: entry.id, label: entry.label, def });
+    group.caps.push({ id: entry.id, label: entry.label });
   }
   return groups;
 }
