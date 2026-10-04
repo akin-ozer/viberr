@@ -81,8 +81,9 @@ import {
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
- * ("viberr") whose handlers call the capability-gated operator-actions with the
- * DB + task context closed over. Because operator runs execute in this same
+ * ("viberr") whose handlers call the capability-gated actions in
+ * operator-actions, operator-packets, operator-dispatch and operator-moves with
+ * the DB + task context closed over. Because operator runs execute in this same
  * Node process, the tools reach the real store directly (no network), so the
  * board updates live as the operator acts.
  *
@@ -253,7 +254,7 @@ const OPERATOR_TOOLKIT_INSTRUCTIONS =
  * Band-3 follow-up: the ledger and the writer live HERE, not inside
  * `buildOperatorToolkit`, because the Claude toolkit is only one of the two
  * paths that open packets. The Codex plan executor
- * (`executeCodexPlan`, operator-run.server.ts) opens them itself, so a
+ * (`executeCodexPlan`, operator-codex-plan.server.ts) opens them itself, so a
  * closure-scoped disclosure covered exactly one backend and a Codex plan that
  * prompted an agent and then opened a packet reached the human with nothing
  * said. One ledger + one writer, both backends.

@@ -957,7 +957,7 @@ export async function updateAgentProfile(
   const directAcceptNewlyGranted =
     gov.isOperator && gov.newDirectAccept && !gov.priorDirectAccept;
   // The human-only-Done exception is LIVE after this save iff both hold (the
-  // exact combination `operatorAcceptCompletion` in operator-actions.server.ts
+  // exact combination `operatorAcceptCompletion` in operator-moves.server.ts
   // checks).
   const directDoneLive =
     gov.isOperator && gov.newAutonomy === "full" && gov.newDirectAccept;

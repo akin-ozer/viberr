@@ -97,7 +97,7 @@ export function ntfPill(n: {
   // own title one line to its left ("Decision needed: …") and the same packet's
   // pill on the task page ("Decision required"). Name the packet instead. The
   // two labels below are the lowercased forms of the `kind` string the packet
-  // itself stores (`operatorOpenPacket` in operator-actions.server.ts, written
+  // itself stores (`operatorOpenPacket` in operator-packets.server.ts, written
   // from the SAME `packetType` that becomes this row's `ptype` further down
   // that function) — see the note on NtfPill about threading the stored string
   // through instead.

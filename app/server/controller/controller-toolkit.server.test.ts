@@ -228,8 +228,9 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     // Review (2026-09-26): the rule is true on every acceptance path. A
     // full-autonomy operator's acceptance leaves the PR "accepted, merge
     // pending", and a `blockedBy` wait is done when its task reaches Done,
-    // merged or not (operator-actions "ruling 492" walks that path). So the
-    // read exists before the acceptance and confirms the merge itself.
+    // merged or not (the "ruling 492" suite in operator-actions.server.test.ts
+    // walks that path). So the read exists before the acceptance and confirms
+    // the merge itself.
     // CANARY: restore the first wording ("Acceptance merges the task's PR and
     // moves the task to Done in the same write", "raised before or at this
     // task's acceptance").

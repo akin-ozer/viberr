@@ -67,7 +67,7 @@ import { toError } from "~/shared/errors";
 // built-in profile behaved differently from an equivalent custom one and editing
 // the profile body had no effect. We now fold each specialist's persona into its
 // profile-template body; the definition-file precedence is removed
-// (specialist-run.server.ts). Only the operator keeps a dedicated definition
+// (specialist-prompt.server.ts). Only the operator keeps a dedicated definition
 // (it is a system profile with its own persona path).
 const SPECIALIST_PERSONA_BY_ID = new Map<string, string>([
   ["developer", splitFrontmatter(developerDefinitionMd).body.trim()],

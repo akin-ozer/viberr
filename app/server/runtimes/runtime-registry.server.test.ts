@@ -589,7 +589,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
 
   it("both backends carry the same task identity into the run (NFR15 traceability)", async () => {
     // F24: one delivery identity, whichever backend ran. `agentGitIdentityEnv`
-    // (specialist-run) builds these from the DELIVERING profile id, and the two
+    // (specialist-workspace) builds these from the DELIVERING profile id, and the two
     // adapters have to land them in different places: Claude's SDK replaces the
     // child env with `options.env`, while Codex splits the CLI env (which
     // carries subscription auth) from the model's OWN shell — where

@@ -82,7 +82,7 @@ import { describe, expect, it } from "vitest";
  * is false and a blanket exclusion would be a lie. They are scanned like
  * everything else, with each existing prompt sentence exempted BY NAME in
  * `ALLOWED_ASSET_LINES` — same shape and same rot check as `ALLOWED_LITERALS`,
- * whose `operator-run.server.ts` entries are literally the same category (that
+ * whose `operator-prompt.server.ts` entries are literally the same category (that
  * file's `FALLBACK_OPERATOR_DEFINITION` is a copy of `operator.definition.md`).
  * Prompt text stays legal; a NEW banned sentence in an asset, or a new asset
  * file, fails until someone writes down which category it belongs to.
@@ -967,7 +967,7 @@ describe("P21 and ruling 571: em/en dashes are banned in rendered copy, seed ass
 
   it("no string literal under app/server, app/schemas, app/shared or app/lib carries one (ruling 571)", () => {
     // CANARY: put the dash back in `runDispatchLine`'s started tail
-    // (" — streaming to the agent logs.") and this names specialist-run.server.ts.
+    // (" — streaming to the agent logs.") and this names specialist-roster.server.ts.
     // Same roots, walk and lexer as the govern literal test above, whose
     // residue and must-see checks prove the scan reaches this copy.
     const offenders: string[] = [];

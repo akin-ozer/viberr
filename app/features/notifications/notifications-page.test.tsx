@@ -40,7 +40,7 @@ const ITEMS: NotificationPageItem[] = [
     kind: "packet",
     ptype: "input",
     // F19-24: the shape `operatorOpenPacket` actually writes — EVERY packet row
-    // is titled "Decision needed: …" (operator-actions.server.ts), which is
+    // is titled "Decision needed: …" (operator-packets.server.ts), which is
     // why pilling them "completion report" contradicted the row's own title.
     title: "Decision needed: which scope should we take?",
     text: "Promotion to staging needs your acceptance.",

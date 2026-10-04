@@ -62,11 +62,11 @@ describe("each toggle names what its writers send (ruling 481)", () => {
     // agent-toolkit.server.ts `openAgentQuestionPacket` (Claude `ask_human`)
     // and agent-completion.server.ts's Codex outcome-envelope question.
     { writer: "an agent's question", kind: "question", names: [/agent/i, /question/i] },
-    // operator-actions.server.ts: `Operator recommends: <label>`.
+    // operator-packets.server.ts: `Operator recommends: <label>`.
     { writer: "the operator's recommendation", kind: "approval", names: [/recommendations/i] },
     // task-delivery.server.ts: `Next step recorded: <label>` after a delivery.
     { writer: "the delivery's next step", kind: "approval", names: [/next step/i, /delivery/i] },
-    // operator-actions.server.ts `operatorOpenPacket`, blocked and input.
+    // operator-packets.server.ts `operatorOpenPacket`, blocked and input.
     { writer: "a blocked operator packet", kind: "packet", names: [/blocked/i] },
     { writer: "an operator completion report", kind: "packet", names: [/completion report/i] },
   ];

@@ -127,9 +127,9 @@ import {
  *     board live. This is the path the "operator end to end" proof exercises.
  *   codex + credential present → STRUCTURED-PLAN run: Codex emits a structured
  *     JSON plan (OPERATOR_PLAN_SCHEMA), which `executeCodexPlan` runs through the
- *     same gated operator-actions as the Claude tools — so Codex honors the
- *     identical RBAC + autonomy, it just plans-then-executes instead of
- *     calling tools live.
+ *     same gated actions as the Claude tools (operator-actions, operator-packets,
+ *     operator-dispatch, operator-moves) — so Codex honors the identical RBAC +
+ *     autonomy, it just plans-then-executes instead of calling tools live.
  *   no credential principal (ruling 127) → the drive still opens a RUN ROW, but
  *     `startRun` records it as an honest error and the completion hook
  *     escalates a blocked recovery packet. The operator is a TASK run, so its
@@ -1489,9 +1489,9 @@ export function pendingOperatorClone(input: TaskFileRef): string | null {
  * and report what the run really got.
  *
  * It is the SAME checkout a specialist run uses — `<taskDir>/workspace/<name>`,
- * the derivation `taskCloneDir`/`cloneRepo` share (specialist-run.server) — for
- * one task, so the delivering agent that runs later reuses this clone instead
- * of paying for a second one.
+ * the derivation `taskCloneDir`/`cloneRepo` share (specialist-workspace.server)
+ * — for one task, so the delivering agent that runs later reuses this clone
+ * instead of paying for a second one.
  *
  * An EXISTING checkout is returned untouched: no remote re-sanitization and no
  * re-strip of `.claude`. That directory belongs to whichever engagement is
@@ -2177,7 +2177,8 @@ async function startCodexOperatorRun(
   });
 
   // When the run finishes, parse its decision plan and execute it through the
-  // capability-gated operator-actions (so codex honors the exact same RBAC +
+  // capability-gated actions in operator-actions, operator-packets,
+  // operator-dispatch and operator-moves (so codex honors the exact same RBAC +
   // autonomy as the Claude tool-driven operator). The lease is released only
   // AFTER the plan finished executing — the run row is already `finished`
   // while the plan runs, which is exactly the window the process lease covers.
@@ -2579,5 +2580,3 @@ async function escalateFailedOperatorRun(
     });
   }
 }
-
-// ------------------------------------------------------- system prompt

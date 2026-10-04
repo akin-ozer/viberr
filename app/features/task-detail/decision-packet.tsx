@@ -1043,7 +1043,7 @@ export function DecisionPacket({
    *    fresh review pull request (Viberr never reopens a closed one).
    *  - reopening the pull request on GitHub lifts the block too: the reconciler
    *    drops the closure with the closed state, which is the promise the packet
-   *    body (authored from `operator-run.server.ts`) already makes.
+   *    body (authored from `operator-prompt.server.ts`) already makes.
    *
    * Keyed on the `archive_task` + `deleteBranch` option because that is the
    * closed-PR signature the schema itself names ("the discard-entirely path for

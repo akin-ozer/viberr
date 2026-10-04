@@ -16,7 +16,7 @@ const base: NotificationView = {
   kind: "packet",
   ptype: "input",
   // The literal shape `operatorOpenPacket` writes for a non-blocked packet
-  // (operator-actions.server.ts) — every packet row's title is "Decision
+  // (operator-packets.server.ts) — every packet row's title is "Decision
   // needed: …", which is what made the old "completion" treatment self-contradictory.
   title: "Decision needed: which scope should we take?",
   text: "Workspace attach implemented, **PR #318** open, validation green.",

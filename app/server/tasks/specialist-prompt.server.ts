@@ -397,6 +397,12 @@ export function prAnchor(
   return { number, url: repo ? `https://github.com/${repo}/pull/${number}` : null };
 }
 
+// The KB reader (`readKbIndexes`, `readKbDocForRun`) lives in
+// ~/server/files/kb-injection.server (shared with the operator runtime): it
+// walks the KB tree recursively and matches every text-doc extension, so
+// GitHub-imported / folder-uploaded / non-.md docs actually reach the agent
+// instead of being silently dropped.
+
 /** The checkout failure as the PROMPT carries it — the human-safe subset of
  *  {@link CloneFailure}. */
 export interface PromptCloneFailure {

@@ -249,7 +249,7 @@ export const RECOMMENDATION_DECLINED_TITLE = "Recommendation declined";
 
 /**
  * The audit action a dismissal records. Exported so the snapshot's
- * "already declined" reader (operator-actions.server.ts) cannot drift from the
+ * "already declined" reader (operator-snapshot.server.ts) cannot drift from the
  * writer here.
  */
 export const RECOMMENDATION_DISMISSED_AUDIT_ACTION = "task.recommendation.dismissed";

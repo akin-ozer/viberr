@@ -746,7 +746,7 @@ describe("the audit column discloses the controller instrument (C5)", () => {
     // a RANDOM id (`newId` is 72 random bits), so two events stamped in one
     // millisecond render in either order — the feed says the wrong thing
     // happened last. The tie-break is `rowid DESC` (insertion order), the
-    // shape `operator-actions` and `controller-conversations` already use.
+    // shape `operator-snapshot` and `controller-conversations` already use.
     //
     // Canary: put `a.id DESC` back and this fails EVERY time (not 50% of the
     // time): the two ids below sort against their insertion order on purpose.

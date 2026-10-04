@@ -799,7 +799,7 @@ function withProviderText(failure: RunFailure, providerText: string): RunFailure
 // -------------------------------------------------------- resume workdir
 
 /**
- * The working directory a resumed reply run should use: the specialist-run
+ * The working directory a resumed reply run should use: the specialist-workspace
  * clone at `<taskDir>/workspace/<repo-name>` when it still exists (so the
  * agent keeps its repo context), else the dedicated workspace root. The
  * workspace fallback keeps `GIT_CEILING_DIRECTORIES=<taskDir>` a strict

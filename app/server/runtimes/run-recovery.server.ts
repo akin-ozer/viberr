@@ -44,8 +44,8 @@ const RECOVERY_REINVOKE_ACTION = "run.recovery.reinvoked";
 const RECOVERY_REPLAY_ACTION = "run.recovery.reply_replayed";
 /**
  * The audit fact `executeCodexPlan` writes before it takes up a plan
- * (operator-run). Its absence on a FINISHED codex operator run is what marks
- * that turn as stranded (P14-RT-08).
+ * (operator-codex-plan). Its absence on a FINISHED codex operator run is what
+ * marks that turn as stranded (P14-RT-08).
  */
 const OPERATOR_PLAN_EXECUTED_ACTION = "runtime.operator.plan_executed";
 /**

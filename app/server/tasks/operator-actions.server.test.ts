@@ -753,7 +753,7 @@ describe("operatorDispatchAgent", () => {
     })[0];
     expect(trace).toBeTruthy();
     // SAFETY: `task.operator.agent_selected` has ONE writer
-    // (recordAgentSelectionTrace in operator-actions.server.ts), and it records
+    // (recordAgentSelectionTrace in operator-dispatch.server.ts), and it records
     // exactly these four fields — `candidates` straight off the
     // deployed-specialist map.
     const d = trace!.details as AgentSelectionTrace;

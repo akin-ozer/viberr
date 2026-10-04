@@ -1886,7 +1886,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
  * timeline says continuity was lost. Only that fresh run failing is a failure.
  *
  * `workdir` lets the resumed run keep the ORIGINAL run's working directory
- * (the specialist-run clone at `<taskDir>/workspace/<repo>`) so the agent
+ * (the specialist-workspace clone at `<taskDir>/workspace/<repo>`) so the agent
  * still has its repo context on resume — without it the resumed run would
  * default to the bare task dir and lose the checkout. Returns the new run id.
  */

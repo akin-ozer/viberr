@@ -115,8 +115,6 @@ import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
  * sessions". Mirrors the transition/interrupt project-membership check.
  */
 
-// ----------------------------------------------------------------- helpers
-
 // ------------------------------------------------------- canonical re-anchor
 
 /**
@@ -249,12 +247,6 @@ export {
   resolvedResourceInputs,
   type ResolvedResourceInputs,
 };
-
-// ------------------------------------------------------------- assignSpecialist
-
-// --------------------------------------------------------------- assignReviewer
-
-// --------------------------------------------------------------- removeReviewer
 
 // -------------------------------------------------------------- startAgentRun
 
@@ -1994,16 +1986,6 @@ export function directiveDeferredNote(agentName: string): string {
   );
 }
 
-// ----------------------------------------------------------------- persona
-
-// The KB reader (`readKbIndexes`, `readKbDocForRun`) lives in
-// ~/server/files/kb-injection.server (shared with the operator runtime): it
-// walks the KB tree recursively and matches every text-doc extension, so
-// GitHub-imported / folder-uploaded / non-.md docs actually reach the agent
-// instead of being silently dropped.
-
-// ----------------------------------------------------------------- prompt/script
-
 // ------------------------------------------------------------------- repo clone
 
 /** The whole confinement a RESUMED run inherits — one contract so a resume can
@@ -2372,5 +2354,3 @@ export async function resolveResumeConfinement(
     };
   }
 }
-
-// --------------------------------------------------------------------- shared

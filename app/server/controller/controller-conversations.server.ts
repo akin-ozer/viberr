@@ -417,7 +417,7 @@ export function listConversations(
       // millisecond tie, and the sort index then breaks the tie by insertion
       // order ASCENDING — returning the OLDER one first. `rowid DESC` is the
       // repo's own tie-break (`declinedRecommendations` in
-      // operator-actions.server.ts) and makes the promise a property of the
+      // operator-snapshot.server.ts) and makes the promise a property of the
       // store rather than of the clock.
       `SELECT * FROM controller_conversations
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}

@@ -293,7 +293,8 @@ export async function relayToTask(
     .catch((error) => {
       logger.error("relay wake could not start", { taskKey: to, err: toError(error) });
     });
-  // Called at run time for the same reason: operator-actions reaches here.
+  // Called at run time for the same reason: operator-authority reaches here
+  // (agents-query → board-query → the task mapping → agent-outcome).
   const { resolveOperatorAuthority } = await import("./operator-authority.server");
   const woken = resolveOperatorAuthority(ctx, req.projectSlug).deployed
     ? `${to}'s operator is woken with it`

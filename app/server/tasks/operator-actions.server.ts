@@ -42,10 +42,6 @@ import {
 } from "./operator-authority.server";
 import { writeOperatorComment } from "./operator-packets.server";
 
-// ------------------------------------------------------------- authority
-
-// ------------------------------------------------------------- helpers
-
 // ------------------------------------------------- KB-vs-repository conflict
 
 /** R19-2 — the timeline title a context conflict always carries. */
@@ -450,8 +446,6 @@ export async function operatorLeaseFiles(
   };
 }
 
-// ------------------------------------------------------------- snapshot
-
 // ------------------------------------------------------------- actions
 
 /** Post an operator comment (governed by append-typed-events). */
@@ -812,9 +806,3 @@ export async function operatorSetGoal(
   });
   return { outcome: "done", message: "Task goal drafted." };
 }
-
-// --------------------------------------------------- dispatch helpers
-
-// ------------------------------------------------- generic agent dispatch
-
-// ------------------------------------------------- scheduled runs (487)

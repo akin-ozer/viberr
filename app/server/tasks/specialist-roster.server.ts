@@ -187,10 +187,11 @@ export interface RunMcpMounts {
  * already in flight" and the controller relayed it as fact. A `list_runs` read
  * showed it queued with zero turns.
  *
- * The fact was never missing: `operator-actions` has answered "the instance is
- * at its concurrent-run cap, so the run is queued and starts when a slot frees"
- * since B10. That is a tool reply, read once by one agent; this is the durable
- * record every person, operator and later run reads instead.
+ * The fact was never missing: the operator's dispatch tool (`operator-dispatch`)
+ * has answered "the instance is at its concurrent-run cap, so the run is queued
+ * and starts when a slot frees" since B10. That is a tool reply, read once by
+ * one agent; this is the durable record every person, operator and later run
+ * reads instead.
  *
  * Pure, because the branch is the whole point and the dispatch path around it
  * needs a live cap, two tasks and a runtime that does not finish first.
@@ -463,7 +464,8 @@ export function projectBoard(
 /** Audit actor for the current caller: the operator (no user id) when the
  *  context is operator-authorized, else the human — after enforcing the
  *  human runtime RBAC. Operator authority is gated upstream by its capability
- *  policy (operator-actions.server), so operator callers skip the human check. */
+ *  policy (operator-authority.server), so operator callers skip the human
+ *  check. */
 export function runtimeAuditActor(
   db: DatabaseSync,
   ctx: TaskMutationContext,

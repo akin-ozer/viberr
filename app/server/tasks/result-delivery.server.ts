@@ -11,8 +11,8 @@
  * so accepting the estimate would have merged it into the repository.
  *
  * This is the rules' one home. The operator's turn prompt carries both
- * (`triageQualityGate` and `stageRule` in operator-run.server.ts), the shipped
- * operator doctrine quotes them word for word, and
+ * (`triageQualityGate` and `stageRule` in operator-prompt.server.ts), the
+ * shipped operator doctrine quotes them word for word, and
  * `default-assets.server.test.ts` holds the doctrine to them.
  */
 

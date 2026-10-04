@@ -271,7 +271,7 @@ export function searchWorkspace(
         // (`sel = searchParams.get("profile") ?? "operator"`, agents-page.tsx)
         // and nothing naming what was searched for — deterministically the
         // wrong agent, on every agent hit. `agent.id` is `resolved.profileId`
-        // (`listDeployedSpecialists`, specialist-run.server.ts), the same key
+        // (`listDeployedSpecialists`, specialist-roster.server.ts), the same key
         // the roster resolves against and the same deep link "open this
         // profile" already uses from the Policy page (`PolicyPage`'s
         // `onOpenProfile`, policy-page.tsx). The agent hit was the only hit
