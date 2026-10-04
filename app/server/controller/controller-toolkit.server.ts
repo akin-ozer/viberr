@@ -2958,6 +2958,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             return "[denied] Running agents needs the maintainer role (or project admin) in this project.";
           }
           const display = userName(db, user.id);
+          // Ruling 263 (R21-9's law): the directive goes on the record as the
+          // person's own comment, addressed to the agent it is for.
+          const recordDirective = (handle: string, prompt: string) =>
+            appendComment(
+              db,
+              { projectSlug: slug, taskKey: key, text: `@${handle} ${prose(prompt)}`, forceToAgent: true },
+              actor,
+              { dataRoot },
+            );
           if (args.agent.trim().toLowerCase() === "operator") {
             const { runOperator } = await import(
               "~/server/runtimes/operator-run.server"
@@ -3013,19 +3022,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // this arm does. Written only when the run was NOT refused, like
             // the task page: a refused run would strand a comment with nothing
             // to address it.
-            if (args.prompt) {
-              await appendComment(
-                db,
-                {
-                  projectSlug: slug,
-                  taskKey: key,
-                  text: `@operator ${prose(args.prompt)}`,
-                  forceToAgent: true,
-                },
-                actor,
-                { dataRoot },
-              );
-            }
+            if (args.prompt) await recordDirective("operator", args.prompt);
             if (result.queued) {
               return `[done] The operator is already working ${key}; your directive was queued for it.`;
             }
@@ -3072,19 +3069,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const handle =
             listDeployedSpecialists(slug, { dataRoot }).find((s) => s.id === profileId)
               ?.name ?? profileId;
-          if (args.prompt) {
-            await appendComment(
-              db,
-              {
-                projectSlug: slug,
-                taskKey: key,
-                text: `@${handle} ${prose(args.prompt)}`,
-                forceToAgent: true,
-              },
-              actor,
-              { dataRoot },
-            );
-          }
+          if (args.prompt) await recordDirective(handle, args.prompt);
           let started: Awaited<ReturnType<typeof startAgentRun>>;
           try {
             started = await startAgentRun(db, runInput, actor, { dataRoot });
