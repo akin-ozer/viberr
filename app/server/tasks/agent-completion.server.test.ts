@@ -51,11 +51,11 @@ import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   acceptanceRefusalFor,
   applyAgentCompletionEffects,
-  attachTaskFile,
   classifyReviewerVerdict,
   markWaitingAgent,
   resolvePacket,
 } from "./task-actions.server";
+import { attachTaskFile } from "./task-edits.server";
 import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
 import {
   assignReviewer,

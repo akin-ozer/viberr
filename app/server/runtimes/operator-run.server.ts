@@ -134,8 +134,8 @@ import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server"
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { splitKbSource } from "~/server/tasks/kb-correction-actions.server";
 import { fullReplyTextForRun, runFailureReason } from "~/server/tasks/agent-reply.server";
+import { DEFAULT_GOAL } from "~/server/tasks/task-edits.server";
 import {
-  DEFAULT_GOAL,
   clearWaitingToHuman,
   liftHoldForRun,
   liftStageHoldForPerson,

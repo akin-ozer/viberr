@@ -43,6 +43,7 @@ let ids: People;
 let epicActions: typeof import("./epic-actions.server");
 let taskActions: typeof import("./task-actions.server");
 let taskCore: typeof import("./task-action-core.server");
+let taskEdits: typeof import("./task-edits.server");
 let epicWriter: typeof import("~/server/files/epic-writer.server");
 let taskWriter: typeof import("~/server/files/task-writer.server");
 let projectWriter: typeof import("~/server/files/project-writer.server");
@@ -65,6 +66,7 @@ beforeAll(async () => {
   epicActions = await import("./epic-actions.server");
   taskActions = await import("./task-actions.server");
   taskCore = await import("./task-action-core.server");
+  taskEdits = await import("./task-edits.server");
   epicWriter = await import("~/server/files/epic-writer.server");
   taskWriter = await import("~/server/files/task-writer.server");
   projectWriter = await import("~/server/files/project-writer.server");
@@ -125,7 +127,7 @@ function move(
 }
 
 async function newTask(title: string): Promise<string> {
-  const { key } = await taskActions.createTask(app.db, { projectSlug: SLUG, title }, actor("arda"), ctx());
+  const { key } = await taskEdits.createTask(app.db, { projectSlug: SLUG, title }, actor("arda"), ctx());
   return key;
 }
 
@@ -858,7 +860,7 @@ describe("ruling 503(b): a task born in an epic", () => {
     // CANARY: leave `epic` out of the frontmatter createTask writes (the note
     // says it joined; the task is in none).
     const id = await newEpic("selin", { title: "Nursery" });
-    const { key } = await taskActions.createTask(
+    const { key } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "Born in an epic", epic: ` ${id} ` },
       actor("selin"),
@@ -880,7 +882,7 @@ describe("ruling 503(b): a task born in an epic", () => {
   it("the epic's history and its lead hear of a task made in it, as of one added later", async () => {
     // CANARY: drop the `noteTaskMadeInEpic` call from createTask.
     const id = await newEpic("selin", { title: "Nursery wing", leadUserId: ids.murat });
-    const { key } = await taskActions.createTask(
+    const { key } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "Made in the wing", epic: id },
       actor("selin"),
@@ -891,7 +893,7 @@ describe("ruling 503(b): a task born in an epic", () => {
     // The person who made it is not told of their own act.
     expect(notices("selin", id)).toEqual([]);
     // Made by the lead: the history still says so, and nobody is told.
-    const { key: own } = await taskActions.createTask(
+    const { key: own } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "The lead's own", epic: id },
       actor("murat"),
@@ -914,11 +916,11 @@ describe("ruling 503(b): a task born in an epic", () => {
     const before = nextNumber();
     for (const epic of ["epic-99999", "goal-2"]) {
       await expect(
-        taskActions.createTask(app.db, { projectSlug: SLUG, title: "Orphan", epic }, actor("selin"), ctx()),
+        taskEdits.createTask(app.db, { projectSlug: SLUG, title: "Orphan", epic }, actor("selin"), ctx()),
       ).rejects.toMatchObject({ status: 404, userMessage: NOT_AN_EPIC(epic) });
     }
     expect(nextNumber()).toBe(before);
-    const { key } = await taskActions.createTask(
+    const { key } = await taskEdits.createTask(
       app.db,
       { projectSlug: SLUG, title: "Next in line" },
       actor("selin"),

@@ -51,13 +51,15 @@ import {
   acceptanceStanding,
   resolvePacket,
   setOwner,
+  setTaskArchived,
+  transitionStage,
+} from "~/server/tasks/task-actions.server";
+import {
   attachTaskFile,
   removeTaskAttachment,
-  setTaskArchived,
   setTaskMetadata,
-  transitionStage,
   updateTaskGoal,
-} from "~/server/tasks/task-actions.server";
+} from "~/server/tasks/task-edits.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { setTasksEpic } from "~/server/tasks/epic-actions.server";
 import { listEpicChips } from "~/server/projections/epic-query.server";

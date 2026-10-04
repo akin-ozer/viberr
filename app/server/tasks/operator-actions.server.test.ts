@@ -46,13 +46,12 @@ import {
   RECOMMENDATION_DECLINED_TITLE,
   applyAcceptanceWrite,
   applyRecommendation,
-  createTask,
   dismissRecommendation,
   resolvePacket,
   setTaskArchived,
   transitionStage,
-  updateTaskGoal,
 } from "./task-actions.server";
+import { createTask, updateTaskGoal } from "./task-edits.server";
 import type { TaskActionContext } from "./task-action-core.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";

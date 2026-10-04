@@ -144,7 +144,7 @@ async function makeEpic(userId: string, input: Omit<CreateEpicInput, "projectSlu
 
 /** A fresh task at the entry stage, in no epic. */
 async function makeTask(title: string) {
-  const { createTask } = await import("~/server/tasks/task-actions.server");
+  const { createTask } = await import("~/server/tasks/task-edits.server");
   return (await createTask(app.db, { projectSlug: SLUG, title }, actorOf(ids.arda))).key;
 }
 

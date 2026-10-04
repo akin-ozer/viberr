@@ -41,7 +41,7 @@ import { rolesForAction } from "~/shared/rbac";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
 import { announceRelease, clearDependencies } from "./dependencies.server";
-import { createTask } from "./task-actions.server";
+import { createTask } from "./task-edits.server";
 import {
   loadProjectContext,
   reprojectTask,

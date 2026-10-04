@@ -14,7 +14,7 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskFilePath } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { removeTaskAttachment } from "./task-actions.server";
+import { removeTaskAttachment } from "./task-edits.server";
 
 /**
  * Ruling 582: a project admin takes a file off a task's record. Round 1 of the

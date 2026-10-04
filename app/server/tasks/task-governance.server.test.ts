@@ -41,8 +41,8 @@ import {
   resolvePacket,
   setTaskArchived,
   transitionStage,
-  updateTaskGoal,
 } from "./task-actions.server";
+import { updateTaskGoal } from "./task-edits.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { resolveRemoteBranchCollision } from "~/server/github/github-reconciler.server";
 
@@ -3875,7 +3875,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   it("ruling 295: a rename writes the title and records BOTH, so old references still join", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
-    const { updateTaskTitle } = await import("./task-actions.server");
+    const { updateTaskTitle } = await import("./task-edits.server");
     // CANARY: drop the writer and the board keeps a title its own goal disproved.
     const { changed } = await updateTaskTitle(
       store.db,
@@ -3911,7 +3911,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
-    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-actions.server");
+    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-edits.server");
     const current = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",

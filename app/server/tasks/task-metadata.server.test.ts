@@ -11,7 +11,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { createTask, setTaskMetadata } from "./task-actions.server";
+import { createTask, setTaskMetadata } from "./task-edits.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 
 /**

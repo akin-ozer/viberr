@@ -150,8 +150,8 @@ import {
   defaultModelFor,
   resolveRunModel,
 } from "~/server/runtimes/model-catalog.server";
+import { DEFAULT_GOAL } from "./task-edits.server";
 import {
-  DEFAULT_GOAL,
   RECOMMENDATION_DISMISSED_AUDIT_ACTION,
   acceptanceRefusalFor,
   acceptanceTerminallyBlocked,

@@ -16,14 +16,9 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   appendComment,
   completeTaskMerge,
-  createTask,
   releaseOwner,
   setOwner,
-  attachTaskFile,
-  removeTaskAttachment,
-  setTaskMetadata,
   transitionStage,
-  updateTaskGoal,
   reorderTask,
   dismissRecommendation,
   applyRecommendation,
@@ -34,6 +29,13 @@ import {
   refreshAndReview,
   runProjectGatesByHand,
 } from "~/server/tasks/task-actions.server";
+import {
+  createTask,
+  attachTaskFile,
+  removeTaskAttachment,
+  setTaskMetadata,
+  updateTaskGoal,
+} from "~/server/tasks/task-edits.server";
 import {
   assignSpecialist,
 } from "~/server/tasks/specialist-run.server";

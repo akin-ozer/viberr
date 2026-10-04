@@ -204,15 +204,17 @@ import {
 import {
   acceptanceRefusalFor,
   appendComment,
-  createTask,
   releaseOwner,
   setOwner,
-  setTaskMetadata,
   transitionStage,
+} from "~/server/tasks/task-actions.server";
+import {
+  createTask,
+  setTaskMetadata,
   updateTaskGoal,
   updateTaskTitle,
   type CreateTaskInput,
-} from "~/server/tasks/task-actions.server";
+} from "~/server/tasks/task-edits.server";
 import { loadProjectContext } from "~/server/tasks/task-mutation.server";
 import { requireProjectMutable } from "~/server/auth/project-authority.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";

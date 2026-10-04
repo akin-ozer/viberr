@@ -32,7 +32,8 @@ import {
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
-import { commentToAgent, updateTaskGoal } from "./task-actions.server";
+import { commentToAgent } from "./task-actions.server";
+import { updateTaskGoal } from "./task-edits.server";
 
 /**
  * P13-D-3 — a reactivated agent re-anchors on the canonical task artifact

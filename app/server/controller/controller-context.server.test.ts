@@ -406,7 +406,7 @@ describe("gatherControllerContext", () => {
     const { gatherControllerContext, BOARD_CONTEXT_TASKS } = await import(
       "./controller-context.server"
     );
-    const { createTask } = await import("~/server/tasks/task-actions.server");
+    const { createTask } = await import("~/server/tasks/task-edits.server");
     const { findUserByEmail } = await import("~/server/auth/user-store.server");
     const elif = findUserByEmail(app.db, "elif@viberr.dev")!;
     const actor = { userId: elif.id, label: elif.email };

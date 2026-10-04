@@ -42,8 +42,6 @@ import { runOutcomeClause, OPERATOR_TASK_ACTOR } from "./task-action-core.server
 import {
   appendComment,
   classifyReviewerVerdict,
-  createTask,
-  DEFAULT_GOAL,
   operatorPromptAgent,
   packetIdentity,
   recordAgentCompletion,
@@ -64,8 +62,8 @@ import {
   liftStageHoldForPerson,
   reorderTask,
   resolvePacket,
-  updateTaskGoal,
 } from "./task-actions.server";
+import { createTask, DEFAULT_GOAL, updateTaskGoal } from "./task-edits.server";
 import { postAgentReplyComment, specialistReplyDirective } from "./task-replies.server";
 import type { TaskActionDeps } from "./task-action-core.server";
 import { postAgentComment } from "./agent-toolkit.server";
