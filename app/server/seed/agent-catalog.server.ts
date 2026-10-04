@@ -206,7 +206,12 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
  *  projects (and the demo test fixture) so the operator (and specialists it
  *  can assign) are preinstalled in every project. */
 export function defaultAgentDeployments(): AgentDeployment[] {
-  return deployments();
+  return SEED_AGENT_PROFILES.map((p) => {
+    // F14: a deliverer must hold the headline repo-write capability (master gate);
+    // repair any seed deliverer that grants scoped delivery without it.
+    const capabilities = normalizeDeliveryGrants(p.frontmatter.capabilities);
+    return { profileId: p.frontmatter.id, capabilities, extras: p.frontmatter.extras };
+  });
 }
 
 /** Profile ids of the built-in agents preinstalled on EVERY board: the operator
@@ -224,14 +229,5 @@ const BASE_AGENT_PROFILE_IDS = [
  *  and its core specialists are usable across all boards (ensureBaseAgentsDeployed). */
 export function baseAgentDeployments(): AgentDeployment[] {
   const wanted = new Set<string>(BASE_AGENT_PROFILE_IDS);
-  return deployments().filter((d) => wanted.has(d.profileId));
-}
-
-function deployments(): AgentDeployment[] {
-  return SEED_AGENT_PROFILES.map((p) => {
-    // F14: a deliverer must hold the headline repo-write capability (master gate);
-    // repair any seed deliverer that grants scoped delivery without it.
-    const capabilities = normalizeDeliveryGrants(p.frontmatter.capabilities);
-    return { profileId: p.frontmatter.id, capabilities, extras: p.frontmatter.extras };
-  });
+  return defaultAgentDeployments().filter((d) => wanted.has(d.profileId));
 }
