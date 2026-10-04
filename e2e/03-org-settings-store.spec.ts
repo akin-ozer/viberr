@@ -19,6 +19,11 @@ test("org settings tabs render", async ({ page }) => {
 
   await page.goto("/org/settings?tab=resources");
   await expect(panel("Agent resources")).toBeVisible();
+
+  // Ruling 653: the board file's door, with the seeded boards listed for export.
+  await page.goto("/org/settings?tab=boards");
+  await expect(panel("Import & export")).toBeVisible();
+  await expect(panel("Import & export").getByRole("button", { name: "Export Viberr Core" })).toBeVisible();
 });
 
 /**

@@ -831,6 +831,8 @@ type McpSaveAudit = {
   renamed?: boolean;
   oauthDropped?: boolean;
   requestedScope?: string | null;
+  /** Ruling 653: registered by a board import, never probed. */
+  unchecked?: boolean;
 };
 
 function addedAudit(name: string, transport: string, requestedScope: string | null): McpSaveAudit {
@@ -1640,6 +1642,104 @@ async function discoverHttpMcpTools(
   }
 }
 
+/** An MCP server's name, transport and command or endpoint as every writer
+ *  stores them, with ruling 176's write-tool list when one was given. */
+export interface McpDefinition {
+  name: string;
+  transport: "HTTP" | "stdio";
+  target: string;
+  writeTools: string[] | undefined;
+}
+
+/**
+ * The checks every MCP writer makes before it probes or writes anything,
+ * refused by name: a name of two characters or more that is not reserved, a
+ * command or endpoint, and write tools in the MCP alphabet. `saveMcpServer`
+ * and a board import's `registerMcpServer` (ruling 653) share them.
+ */
+export function checkedMcpDefinition(input: {
+  name: string;
+  transport: string;
+  target: string;
+  writeTools?: readonly string[];
+}): McpDefinition {
+  const name = slugify(input.name);
+  const target = input.target.trim();
+  const transport = input.transport === "stdio" ? "stdio" : "HTTP";
+  if (name.length < 2) throw AppError.validation("Give the server a name.");
+  // P13-KM-12: `viberr` is the OPERATOR's in-process governance server and
+  // `viberr_agent` is the specialist toolkit. A row under either name is
+  // unusable — the resolvers skip the reserved name — and shadows differently
+  // per backend, so refuse it at save instead of accepting a dead server.
+  if (isReservedMcpName(name)) {
+    throw AppError.validation(
+      `"${name}" is reserved for Viberr's built-in agent tools. Pick another name.`,
+    );
+  }
+  if (target.length < 4) {
+    throw AppError.validation(
+      transport === "stdio" ? "Enter the command." : "Enter the endpoint.",
+    );
+  }
+  const writeTools =
+    input.writeTools === undefined ? undefined : checkedWriteTools(input.writeTools);
+  return { name, transport, target, writeTools };
+}
+
+/**
+ * Ruling 653: register an MCP server a board import carries, WITHOUT checking
+ * it. A check spawns a stdio command or calls an endpoint, and an import must
+ * not run a command or reach an address that arrived in a file: the import
+ * dialog shows each one before anything is written, and the server's first
+ * Test (or the first run granted it) is the first time it is contacted. It
+ * comes in with no credential and no sign-in, which a board file never
+ * carries, so the row reads "not checked yet" until an admin tests it.
+ */
+export function registerMcpServer(
+  db: DatabaseSync,
+  input: { name: string; transport: string; target: string; writeTools?: readonly string[] },
+  actor: AuditActor,
+): McpView {
+  const { name, transport, target, writeTools } = checkedMcpDefinition(input);
+  const clash = db.prepare(`SELECT id FROM org_mcp_servers WHERE name = ?`).get(name);
+  if (clash) throw AppError.conflict(`An MCP server named ${name} already exists.`);
+  const id = newId("mcp");
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO org_mcp_servers
+       (id, name, transport, target, tool_policy_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    name,
+    transport,
+    target,
+    writeTools === undefined ? null : toolPolicyJson(writeTools),
+    now,
+    now,
+  );
+  const details = addedAudit(name, transport, null);
+  details.unchecked = true;
+  recordAudit(db, {
+    action: "org.mcp.added",
+    actor,
+    subjectKind: "org_mcp",
+    subjectId: id,
+    details,
+  });
+  if (writeTools?.length) {
+    recordAudit(db, {
+      action: "org.mcp.tool_policy.changed",
+      actor,
+      subjectKind: "org_mcp",
+      subjectId: id,
+      details: { name, before: [], after: writeTools },
+    });
+  }
+  publishResourceUpdated("mcp", id);
+  return getMcpServer(db, id)!;
+}
+
 export async function saveMcpServer(
   db: DatabaseSync,
   input: {
@@ -1704,24 +1804,8 @@ export async function saveMcpServer(
   } else {
     cred = null;
   }
-  if (name.length < 2) throw AppError.validation("Give the server a name.");
-  // P13-KM-12: `viberr` is the OPERATOR's in-process governance server and
-  // `viberr_agent` is the specialist toolkit. A row under either name is
-  // unusable — the resolvers skip the reserved name — and shadows differently
-  // per backend, so refuse it at save instead of accepting a dead server.
-  if (isReservedMcpName(name)) {
-    throw AppError.validation(
-      `"${name}" is reserved for Viberr's built-in agent tools. Pick another name.`,
-    );
-  }
-  if (target.length < 4) {
-    throw AppError.validation(
-      transport === "stdio" ? "Enter the command." : "Enter the endpoint.",
-    );
-  }
   // Checked before the probe, so a bad name is refused without spawning anything.
-  const writeTools =
-    input.writeTools === undefined ? undefined : checkedWriteTools(input.writeTools);
+  const { writeTools } = checkedMcpDefinition(input);
   const requestedScope =
     input.requestedScopes === undefined ? undefined : checkedRequestedScope(input.requestedScopes);
 

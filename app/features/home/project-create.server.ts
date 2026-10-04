@@ -26,7 +26,7 @@ import {
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { recordAudit, type AuditDetails } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { getDataRoot } from "~/server/files/file-store-root.server";
@@ -527,7 +527,7 @@ const OPERATOR_PROFILE_ID = "operator";
 
 /** The data root and GitHub transport a caller threads through (the
  *  controller's `create_project` passes both). */
-interface CreateProjectContext {
+export interface CreateProjectContext {
   dataRoot?: string;
   fetchImpl?: typeof fetch;
 }
@@ -549,12 +549,32 @@ export async function createProject(
   );
 }
 
-async function createProjectImpl(
+/**
+ * Ruling 653: what a new project is called, its key, and the repository it
+ * is bound to, checked before anything else is judged or written. The New
+ * project modal, the controller's `create_project` and a board import all
+ * start here, so the three are refused for the same reasons in the same words.
+ */
+export interface NewProjectIdentity {
+  name: string;
+  key: string;
+  owner: string;
+  repoName: string;
+  /** `<owner>/<repoName>`. */
+  repo: string;
+  slug: string;
+}
+
+/** The fields {@link checkNewProjectIdentity} reads. */
+export type NewProjectIdentityInput = Pick<
+  CreateProjectInput,
+  "name" | "key" | "owner" | "repoName" | "createRepository"
+>;
+
+export function checkNewProjectIdentity(
   db: DatabaseSync,
-  input: CreateProjectInput,
-  actor: { userId: string; label: string },
-  ctx: CreateProjectContext = {},
-): Promise<CreateProjectResult> {
+  input: NewProjectIdentityInput,
+): NewProjectIdentity {
   const name = input.name.trim();
   if (name.length < 2) {
     throw AppError.validation("A project name of at least 2 characters is required.");
@@ -591,6 +611,17 @@ async function createProjectImpl(
       userMessage: `A project at projects/${slug} already exists.`,
     });
   }
+  return { name, key, owner, repoName, repo: `${owner}/${repoName}`, slug };
+}
+
+async function createProjectImpl(
+  db: DatabaseSync,
+  input: CreateProjectInput,
+  actor: { userId: string; label: string },
+  ctx: CreateProjectContext = {},
+): Promise<CreateProjectResult> {
+  const identity = checkNewProjectIdentity(db, input);
+  const { name } = identity;
   // P13-AP-04 / owner ruling 2: the Standard 5-stage board is the ONLY preset.
   // The "Lightweight · 3 stages" template was deleted — it created a board
   // (`todo`/`doing`/`done`) that the preinstalled roster's governed stage ids
@@ -608,8 +639,103 @@ async function createProjectImpl(
   // repository probe and creation below (ruling 462), so a refused roster
   // leaves nothing on GitHub or on disk.
   const roster = resolveRoster(input, name, ctx.dataRoot);
-  const repo = `${owner}/${repoName}`;
+  const reached = await reachProjectRepository(db, identity, input.createRepository, actor, ctx);
 
+  // Synthesized description — verbatim mock mapping (home spec §5.10), unless
+  // the custom shape brought its own prose. The board-shape half has to follow
+  // the stages actually written below: a custom list described as the
+  // "Standard 5-stage workflow" is a stored, projected and rendered claim
+  // about a board that does not exist.
+  const policyPhrase =
+    input.policy === "strict"
+      ? "strict human-gate policy."
+      : input.policy === "auto"
+        ? "agents act within policy."
+        : "balanced agent policy.";
+  const boardPhrase = blueprint?.stages?.length
+    ? `Custom ${blueprint.stages.length}-stage workflow · `
+    : "Standard 5-stage workflow · ";
+  const desc = blueprint?.description ?? boardPhrase + policyPhrase;
+
+  const stages = blueprint?.stages ?? template.stages;
+  const baseWorkflow = blueprint?.workflow ?? template.workflow;
+  const frontmatter: ProjectFrontmatter = {
+    ...newProjectFrontmatter(identity, reached),
+    stages,
+    // The policy preset shapes REAL governance (not just the description):
+    // strict human-gates the pre-work boundaries; auto runs the operator at
+    // full autonomy. See presetWorkflow / presetAgents. A custom shape's
+    // explicit boundary choices are applied AFTER the preset, so they win —
+    // except the edge into the terminal stage, which stays human and locked
+    // whatever anyone asks (resolveProjectBlueprint enforces it).
+    workflow: applyBoundaryOverrides(
+      presetWorkflow(input.policy, baseWorkflow, stages[stages.length - 1]?.id),
+      blueprint?.boundaryOverrides ?? [],
+      stages,
+    ),
+    members: [
+      { userId: actor.userId, role: "admin" },
+      ...(blueprint?.members ?? []).filter((m) => m.userId !== actor.userId),
+    ],
+    // Preinstall the default agent roster — the operator plus the base
+    // specialists it can assign — so every project can run governed agent work.
+    // Ruling 464: a designed roster replaces the base specialists.
+    agents: presetAgents(input.policy, roster),
+    // Ship the anti-noise guardrails ON — timeline compaction + chatter
+    // rejection are product defaults (PRD's #1 risk), not opt-in.
+    guardrails: DEFAULT_GUARDRAILS,
+    // Ruling 178: no required reviewer until a person or the controller
+    // declares one; required-ness stays emergent (engaged verdict-capable
+    // agents) until then.
+    requiredReviewers: [],
+  };
+
+  return writeNewProject(
+    db,
+    {
+      identity,
+      reached,
+      frontmatter,
+      description: desc,
+      details: {
+        template: blueprint?.stages ? "custom" : template.id,
+        policy: input.policy,
+        customStages: blueprint?.stages?.length ?? 0,
+        customMembers: blueprint?.members.length ?? 0,
+      },
+    },
+    actor,
+    ctx,
+  );
+}
+
+/** What the repository probe (and, asked for, its creation) settled before
+ *  anything is written: ruling 653 shares it with a board import. */
+export interface ReachedRepository {
+  /** The connection whose PAT the project is bound to. */
+  patId: string;
+  defaultBranch: string;
+  /** UI-09: what the probe found when it was not clean, or null. */
+  repoWarning: string | null;
+  /** Ruling 462: what a requested creation did; ruling 468: an empty repository. */
+  repoNote: string | null;
+  /** U33-2: the probe's reading, remembered once the project exists. */
+  repoAccess: RepoAccessResult | null;
+}
+
+/**
+ * Resolve the selected connection, probe the repository with its token and,
+ * when asked (ruling 462), create it. Everything here happens BEFORE any file
+ * is written, so a refusal leaves nothing on disk.
+ */
+export async function reachProjectRepository(
+  db: DatabaseSync,
+  identity: NewProjectIdentity,
+  createRepository: CreateRepositoryRequest | undefined,
+  actor: { userId: string; label: string },
+  ctx: CreateProjectContext = {},
+): Promise<ReachedRepository> {
+  const { owner, repoName, repo, slug } = identity;
   // Resolve the selected connection so we can (a) fetch the repo's real
   // default branch and (b) bind its PAT to the project — a project isn't
   // "connected" to GitHub just by holding a repo string; branch/PR sync and
@@ -634,7 +760,7 @@ async function createProjectImpl(
   let repoAccess: RepoAccessResult | null = null;
   {
     const token = getPatToken(db, connection.patId);
-    if (!token && input.createRepository) {
+    if (!token && createRepository) {
       throw AppError.validation(
         `The ${owner} connection has no token Viberr can read, so ${repo} cannot be created. Replace the token in Instance settings → GitHub connections and ask again.`,
       );
@@ -644,7 +770,7 @@ async function createProjectImpl(
       // Ruling 462: BEFORE project.md, so a refusal leaves nothing behind; the
       // probe it hands back (the re-probe of a repository it just made) is the
       // one recorded below.
-      if (input.createRepository) {
+      if (createRepository) {
         const made = await createRepositoryWhenMissing(
           db,
           {
@@ -655,7 +781,7 @@ async function createProjectImpl(
             owner,
             repoName,
             slug,
-            request: input.createRepository,
+            request: createRepository,
           },
           actor,
           ctx.fetchImpl,
@@ -714,72 +840,61 @@ async function createProjectImpl(
       : `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
     repoNote = repoNote ? `${repoNote} ${empty}` : empty;
   }
+  return { patId: connection.patId, defaultBranch, repoWarning, repoNote, repoAccess };
+}
 
-  // Synthesized description — verbatim mock mapping (home spec §5.10), unless
-  // the custom shape brought its own prose. The board-shape half has to follow
-  // the stages actually written below: a custom list described as the
-  // "Standard 5-stage workflow" is a stored, projected and rendered claim
-  // about a board that does not exist.
-  const policyPhrase =
-    input.policy === "strict"
-      ? "strict human-gate policy."
-      : input.policy === "auto"
-        ? "agents act within policy."
-        : "balanced agent policy.";
-  const boardPhrase = blueprint?.stages?.length
-    ? `Custom ${blueprint.stages.length}-stage workflow · `
-    : "Standard 5-stage workflow · ";
-  const desc = blueprint?.description ?? boardPhrase + policyPhrase;
-
-  const stages = blueprint?.stages ?? template.stages;
-  const baseWorkflow = blueprint?.workflow ?? template.workflow;
-  const frontmatter: ProjectFrontmatter = {
-    name,
-    slug,
-    repo,
-    defaultBranch,
-    taskPrefix: key,
+/** The frontmatter keys every new project starts with, whatever its board:
+ *  its identity and repository, a fresh key counter, and nothing that belongs
+ *  to work (no credential policy, no leases). */
+export function newProjectFrontmatter(
+  identity: NewProjectIdentity,
+  reached: ReachedRepository,
+): Pick<
+  ProjectFrontmatter,
+  "name" | "slug" | "repo" | "defaultBranch" | "taskPrefix" | "nextTaskNumber" | "credentialPolicy" | "fileLeases"
+> {
+  return {
+    name: identity.name,
+    slug: identity.slug,
+    repo: identity.repo,
+    defaultBranch: reached.defaultBranch,
+    taskPrefix: identity.key,
     nextTaskNumber: 1,
-    stages,
-    // The policy preset shapes REAL governance (not just the description):
-    // strict human-gates the pre-work boundaries; auto runs the operator at
-    // full autonomy. See presetWorkflow / presetAgents. A custom shape's
-    // explicit boundary choices are applied AFTER the preset, so they win —
-    // except the edge into the terminal stage, which stays human and locked
-    // whatever anyone asks (resolveProjectBlueprint enforces it).
-    workflow: applyBoundaryOverrides(
-      presetWorkflow(input.policy, baseWorkflow, stages[stages.length - 1]?.id),
-      blueprint?.boundaryOverrides ?? [],
-      stages,
-    ),
-    members: [
-      { userId: actor.userId, role: "admin" },
-      ...(blueprint?.members ?? []).filter((m) => m.userId !== actor.userId),
-    ],
-    // Preinstall the default agent roster — the operator plus the base
-    // specialists it can assign — so every project can run governed agent work.
-    // Ruling 464: a designed roster replaces the base specialists.
-    agents: presetAgents(input.policy, roster),
     credentialPolicy: null,
-    // Ship the anti-noise guardrails ON — timeline compaction + chatter
-    // rejection are product defaults (PRD's #1 risk), not opt-in.
-    guardrails: DEFAULT_GUARDRAILS,
-    // Ruling 178: no required reviewer until a person or the controller
-    // declares one; required-ness stays emergent (engaged verdict-capable
-    // agents) until then.
-    requiredReviewers: [],
-  fileLeases: [],
+    fileLeases: [],
   };
+}
 
+/**
+ * Write the new project.md, project it, bind the connection's PAT and prove
+ * it, remember the repository reading, and record `project.created`. The one
+ * place a project comes into existence, whichever door it came through.
+ */
+export async function writeNewProject(
+  db: DatabaseSync,
+  project: {
+    identity: NewProjectIdentity;
+    reached: ReachedRepository;
+    frontmatter: ProjectFrontmatter;
+    description: string;
+    /** What `project.created` records beyond the name, key, repository and
+     *  roster every creation records. */
+    details: AuditDetails;
+  },
+  actor: { userId: string; label: string },
+  ctx: CreateProjectContext = {},
+): Promise<CreateProjectResult> {
+  const { identity, reached, frontmatter } = project;
+  const { slug, key, name } = identity;
   await createProjectFile(
     { projectSlug: slug, dataRoot: ctx.dataRoot },
-    { frontmatter, description: desc },
+    { frontmatter, description: project.description },
   );
   reprojectProject(db, ctx, slug);
 
   // Bind the selected connection's PAT to the project so credential health,
   // branch creation, and PR sync work against the real repo.
-  setProjectCredential(db, { projectSlug: slug, patId: connection.patId }, actor);
+  setProjectCredential(db, { projectSlug: slug, patId: reached.patId }, actor);
   // F15-01: creation is the first moment this PAT meets the project's REAL
   // repository, and a fine-grained token's chips stay `assumed` until something
   // probes it. Attach/rotate has always followed the bind with that
@@ -789,7 +904,7 @@ async function createProjectImpl(
   // fail the creation.
   await proveAttachedCredential(db, slug, actor, ctx);
 
-  if (repoAccess) recordRepoAccess(db, slug, repoAccess);
+  if (reached.repoAccess) recordRepoAccess(db, slug, reached.repoAccess);
   recordAudit(db, {
     action: "project.created",
     actor,
@@ -800,10 +915,7 @@ async function createProjectImpl(
       name,
       key,
       repo: frontmatter.repo,
-      template: blueprint?.stages ? "custom" : template.id,
-      policy: input.policy,
-      customStages: blueprint?.stages?.length ?? 0,
-      customMembers: blueprint?.members.length ?? 0,
+      ...project.details,
       // Ruling 464: which roster was written, the base one or a designed one.
       agents: frontmatter.agents.map((a) => a.profileId),
     },
@@ -814,8 +926,8 @@ async function createProjectImpl(
     key,
     name,
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
-    repoWarning,
-    repoNote,
+    repoWarning: reached.repoWarning,
+    repoNote: reached.repoNote,
     agents: frontmatter.agents.map((a) => {
       const view = effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY);
       return { profileId: a.profileId, name: view.name, model: view.model, effort: view.effort };

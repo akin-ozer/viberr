@@ -39,6 +39,9 @@ export default [
   // layout above: it renders no component (the loader answers with the file
   // itself), so the shortcut and the header it mounts have nothing to do here.
   route("org/settings/audit-export", "routes/org.settings.audit-export.ts"),
+  // Ruling 653: one board as a board file, for the Import & export tab's
+  // Export buttons. Org-admin gated, outside the layout for the same reason.
+  route("org/settings/board-export", "routes/org.settings.board-export.ts"),
 
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),

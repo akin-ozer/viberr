@@ -1,4 +1,5 @@
 import { useFetcher, type FetcherWithComponents } from "react-router";
+import type { BoardImportPreview } from "~/server/org/board-import.server";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -26,6 +27,13 @@ export interface OrgActionSuccess {
    *  and the host of the server that asks. */
   authorizeUrl?: string;
   issuer?: string;
+  /** `board-import-preview` (ruling 653): what importing the file would do. */
+  boardImport?: BoardImportPreview;
+  /** `board-import` (ruling 653): the new project, and what its repository
+   *  probe found. */
+  slug?: string;
+  repoWarning?: string;
+  repoNote?: string;
 }
 
 /** A refusal names the form field it is about when it is about one

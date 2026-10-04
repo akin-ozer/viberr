@@ -414,6 +414,10 @@ const auditDetailsSchema = z.object({
   // Ruling 503: what an epic edit changed, as the epic's own history words it.
   summary: detailText,
 
+  // Ruling 653: a project made from a board file says which file.
+  template: detailText,
+  file: detailText,
+
   // Ruling 482: the gate list as written, and one gate run's outcome.
   gates: z.array(z.object({ name: z.string().catch("?") })).catch([]),
   headSha: detailText,
@@ -530,7 +534,10 @@ function auditText(
     case "project.agent_profile.deployed":
       return `${actor} deployed agent profile **${d.name ?? "?"}** to the project.`;
     case "project.created":
-      return `${actor} created the project.`;
+      // Ruling 653: an imported board names the file it came from.
+      return d.template === "imported" && d.file
+        ? `${actor} created the project from the board file **${d.file}**.`
+        : `${actor} created the project.`;
     case "project.repository.created": {
       const visibility =
         d.private === undefined ? "" : d.private ? " private" : " public";

@@ -10259,3 +10259,35 @@ a.pr-branch:hover { background: var(--tint-hover); }
    what is painted outside it, and the console and the page's transcript
    panel take the ring over their own border. */
 .console:focus-visible, .ctl-transcript:focus-visible, .dock-transcript:focus-visible { outline-offset: -2px; }
+
+/* ---------- appended: ruling 653, board import and export ---------- */
+/* Instance settings → Import & export. The two panels are the Agent
+   resources tab's (`.rsrc-grid`, `.rsrc-row`); what is new is the drop the
+   import starts from and the import dialog's resource rows. */
+.board-lede { margin: 0 0 .75rem; max-width: 70ch; }
+/* The drop takes a whole zip the way the store browser's tree takes files:
+   a dashed well that turns to the selection's blue while one is held over it. */
+.board-drop {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: .5rem;
+  padding: 1.5rem 1rem; border: 1px dashed var(--border); border-radius: var(--radius-card);
+  color: var(--muted); text-align: center;
+  transition: border-color .14s ease, background-color .14s ease;
+}
+.board-drop.on { border-color: var(--blue); background: color-mix(in srgb, var(--blue-soft), transparent 40%); }
+.board-drop > .ico { width: 16px; height: 16px; flex: none; }
+.board-drop-text { font-size: .88rem; }
+/* An Export row leads with the board's mark at the Home list row's size, and
+   names its key as the board card does. */
+.rsrc-row > .pj-mark { width: 32px; height: 32px; font-size: .88rem; border-radius: var(--radius-button); }
+.board-key { font-weight: 500; font-size: .75rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* The dialog: the board's own description in the body face, then a row per
+   resource the file carries, led by its Agent resources panel glyph. */
+.board-desc { margin: 0; font-size: .88rem; color: var(--muted); max-width: 70ch; }
+.board-res { align-items: flex-start; }
+.board-res > .rsrc-acts { align-self: center; }
+.board-res-ico {
+  display: grid; place-items: center; flex: none; width: 28px; height: 28px;
+  border-radius: var(--radius-button); background: var(--tint-well); color: var(--muted);
+}
+.board-res-ico .ico { width: 14px; height: 14px; }
+.board-problems { margin: .375rem 0 0; padding-left: 1.125rem; display: flex; flex-direction: column; gap: .25rem; }

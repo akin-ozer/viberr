@@ -125,6 +125,35 @@ export function scanStoreTree(absDir: string, depth = 0): StoreNode[] {
   return nodes;
 }
 
+/** One file under a store folder, by its forward-slash path in it. */
+export interface StoreFolderFile {
+  path: string;
+  data: Buffer;
+}
+
+/**
+ * Every file under a store folder with its bytes, by the walk `scanStoreTree`
+ * makes (no dot-names, no links, at most 32 deep): what a board file carries
+ * of a skill or knowledge base, and what an import compares it with (ruling
+ * 653). Missing folder → none.
+ */
+export function readStoreFolderFiles(absDir: string): StoreFolderFile[] {
+  const out: StoreFolderFile[] = [];
+  const walk = (nodes: StoreNode[], dirs: string[]) => {
+    for (const node of nodes) {
+      if (node.type === "dir") walk(node.children, [...dirs, node.name]);
+      else {
+        out.push({
+          path: [...dirs, node.name].join("/"),
+          data: readFileSync(path.join(absDir, ...dirs, node.name)),
+        });
+      }
+    }
+  };
+  walk(scanStoreTree(absDir), []);
+  return out;
+}
+
 // ------------------------------------------------------------- sanitizing
 
 /** One path segment: trimmed, backslashes → "-", no traversal. Returns
