@@ -773,7 +773,7 @@ export function releaseProjectConversations(
   db: DatabaseSync,
   projectSlug: string,
   projectName: string,
-): number {
+): void {
   // SAFETY: `id` is the TEXT PRIMARY KEY of `controller_conversations`
   // (0001_baseline), so every row answers this single-column select.
   const rows = db
@@ -798,7 +798,6 @@ export function releaseProjectConversations(
        WHERE id = ?`,
     ).run(new Date().toISOString(), row.id);
   }
-  return rows.length;
 }
 
 /** The longest title the rail and the thread switcher show whole. */

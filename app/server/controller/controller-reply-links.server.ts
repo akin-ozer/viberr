@@ -114,13 +114,6 @@ interface WalkResult {
   history: Set<string>;
 }
 
-export interface ReplyLinkBackfill {
-  /** Controller rows that now name the message they answer. */
-  linked: number;
-  /** User messages marked earlier history, not linked. */
-  history: number;
-}
-
 function timeOf(value: string): number | null {
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
@@ -322,7 +315,7 @@ function walkConversation(rows: Row[], facts: WalkFacts, out: WalkResult): void 
   if (unsure || bootBetween(facts.boots, lastAt, Number.POSITIVE_INFINITY)) lost();
 }
 
-export function backfillControllerReplyLinks(db: DatabaseSync): ReplyLinkBackfill {
+export function backfillControllerReplyLinks(db: DatabaseSync): void {
   const rows = messageRows.parse(
     db
       .prepare(
@@ -361,8 +354,4 @@ export function backfillControllerReplyLinks(db: DatabaseSync): ReplyLinkBackfil
   };
   if (db.isTransaction) write();
   else withTransaction(db, write);
-
-  let linked = 0;
-  for (const target of out.links.values()) if (target !== null) linked += 1;
-  return { linked, history: out.history.size };
 }
