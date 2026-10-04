@@ -33,6 +33,7 @@ import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import { kbDocHref, listProjectKbProposals } from "~/server/org/kb-proposals.server";
 import { listKbCorrections } from "~/server/org/kb-corrections.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -176,7 +177,7 @@ export interface ConversationListItem {
  * an org admin reading everyone's (`?all=1`) lands on a thread they can
  * actually talk in rather than on someone else's read-only transcript.
  */
-export function selectedConversationId(
+function selectedConversationId(
   db: DatabaseSync,
   url: URL,
   binding: { userId: string; projectSlug: string | null },
@@ -401,4 +402,22 @@ export function getControllerSurface(
     showAllAs,
     viewerIsOrgAdmin: admin,
   };
+}
+
+/** What both Controller pages load (ruling 99): `/controller` with
+ *  `projectSlug` null, `/projects/:slug/controller` with its slug. */
+export function controllerPageView(
+  db: DatabaseSync,
+  request: Request,
+  viewer: { id: string; email: string },
+  projectSlug: string | null,
+): ControllerSurfaceView {
+  const url = new URL(request.url);
+  return getControllerSurface(db, viewer, {
+    projectSlug,
+    conversationId: selectedConversationId(db, url, { userId: viewer.id, projectSlug }),
+    all: url.searchParams.get("all") === "1",
+    // Ruling 457 (owner decision 2): console lines on a document load only.
+    console: isDocumentNavigation(request) ? "shown" : "none",
+  });
 }

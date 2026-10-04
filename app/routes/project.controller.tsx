@@ -10,13 +10,9 @@ import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { ControllerPage } from "~/features/controller/controller-page";
 import { controllerPageAction } from "~/features/controller/waiting-actions.server";
-import {
-  getControllerSurface,
-  selectedConversationId,
-} from "~/features/controller/controller-query.server";
+import { controllerPageView } from "~/features/controller/controller-query.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { undoKbCorrectionOnTask } from "~/server/tasks/kb-correction-actions.server";
-import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
  * /projects/:slug/controller — the controller addressed INSIDE one project
@@ -39,23 +35,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     params.slug,
     "talk to the controller about this project",
   );
-  const url = new URL(request.url);
-  const db = getDb();
-  const view = getControllerSurface(
-    db,
-    { id: ctx.user.id, email: ctx.user.email },
-    {
-      projectSlug: params.slug,
-      conversationId: selectedConversationId(db, url, {
-        userId: ctx.user.id,
-        projectSlug: params.slug,
-      }),
-      all: url.searchParams.get("all") === "1",
-      // Ruling 457 (owner decision 2): console lines on a document load only.
-      console: isDocumentNavigation(request) ? "shown" : "none",
-    },
-  );
-  return { view };
+  return { view: controllerPageView(getDb(), request, ctx.user, params.slug) };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
