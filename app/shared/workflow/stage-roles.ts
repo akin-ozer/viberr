@@ -86,11 +86,10 @@ export function canAcceptFromStage(
   stages: readonly Pick<StageDef, "id">[],
   workflow: readonly Pick<WorkflowBoundary, "from" | "to">[],
 ): boolean {
-  const roles = resolveStageRoles(stages, workflow);
-  const terminalId = roles.terminalId ?? stages[stages.length - 1]?.id ?? null;
+  const { terminalId, reviewId } = resolveStageRoles(stages, workflow);
   if (!terminalId || stageId === terminalId) return true;
   if (workflow.some((w) => w.from === stageId && w.to === terminalId)) return true;
-  return stageId === roles.reviewId;
+  return stageId === reviewId;
 }
 
 /**
