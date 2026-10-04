@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   getProjectGithubContext,
+  githubContextFailureReason,
   type GithubContextOptions,
 } from "./github-context.server";
 import {
@@ -165,15 +166,7 @@ export async function runAgentGithubRead(
   options: GithubContextOptions = {},
 ): Promise<AgentGithubReadResult> {
   const ctx = getProjectGithubContext(db, projectSlug, options);
-  if (ctx.status === "no_repo_configured") {
-    return { ok: false, reason: "no repository is configured for this project" };
-  }
-  if (ctx.status === "no_pat_configured") {
-    return {
-      ok: false,
-      reason: "no GitHub credential is configured for this project",
-    };
-  }
+  if (ctx.status !== "ok") return { ok: false, reason: githubContextFailureReason(ctx) };
 
   const name = ctx.repo.slice(ctx.owner.length + 1);
   const scoped = scopeAgentGithubReadPath(rawPath, ctx.owner, name);
