@@ -159,8 +159,8 @@ emergency override (`project.org_admin.override`, repeats collapsed per minute);
 or a denial audited as `project.authority.denied` (silent only on the `@mention`
 run-agents probe). Reads go through the workspace layout loader (and the board
 loader, through the same `readWorkspace` read, ruling 457) and `requireProjectMember`,
-which return the **same 404 bytes** for a non-member and for an unknown slug (ruling 25); actions go through `requireVisibleProject`
-(`app/routes/project-visibility.server.ts`) before any try block. Config surfaces use
+which return the **same 404 bytes** for a non-member and for an unknown slug (ruling 25); actions go through `requireProjectFormAction`, which runs
+`requireVisibleProject` (`app/routes/project-visibility.server.ts`) before any try block. Config surfaces use
 `assertProjectAction`, which re-reads `project.md` and refuses an archived project
 with 409 unless `allowArchived`.
 

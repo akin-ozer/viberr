@@ -3,7 +3,7 @@ import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
 import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { formFiles } from "~/server/files/form-files.server";
@@ -15,10 +15,7 @@ import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
 import type { TaskActivitySummary } from "~/server/projections/board-query.server";
 import { toBoardCard } from "~/features/board/board-card";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { rescanProject } from "~/server/projections/rescan.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
@@ -125,15 +122,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
-  // R15-4 / E2: React Router runs this action WITHOUT the layout loader, so the
-  // membership gate has to be repeated here. Without it `create-task` answered a
-  // signed-in non-member with the inner guard's 403 ("Only project members can
-  // create tasks") while every other route and intent in the app answered 404 —
-  // one reply that confirmed the project exists (WI-13). Outside the try so the
-  // refusal stays a thrown 404 Response, byte-identical to the unknown-slug one.
-  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   try {
     if (intent === "create-task") {

@@ -19,10 +19,7 @@ import { countLabel } from "~/shared/text/plural";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -122,7 +119,10 @@ import {
   listProjectLabels,
   listProjectMembers,
 } from "~/server/projections/board-query.server";
-import { requireVisibleProject } from "./project-visibility.server";
+import {
+  requireProjectFormAction,
+  requireVisibleProject,
+} from "./project-visibility.server";
 import {
   requireRunAgents,
   type AuthorityProject,
@@ -721,15 +721,10 @@ export async function action({ request, params }: Route.ActionArgs) {
     formData,
     actor,
     intent,
-  } = await requireFormAction(request);
+  } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
   const projectSlug = params.slug;
   const taskKey = params.key;
-  // R15-4: the layout loader's membership refusal does NOT cover this action —
-  // React Router runs a child action without its parent's loader. Outside the
-  // try so the refusal stays a thrown 404 Response (the unknown-slug body),
-  // never an `appErrorResponse` 403 that would confirm the project exists.
-  requireVisibleProject(db, projectSlug, actor, "act on this project");
 
   try {
     switch (intent) {

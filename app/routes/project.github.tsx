@@ -3,13 +3,10 @@ import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.github";
 import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
 // R19-11 / F21-5: the credential-visibility rule is shared with /settings, which
 // renders the same card from the same fact (see credential-visibility.server).
@@ -111,13 +108,8 @@ function reconcileCheckView(
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, actor, intent } = await requireFormAction(request);
+  const { refused, db, actor, intent } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
-
-  // E2 (pass 16): the layout loader does not run for an action, so the
-  // members-only gate is repeated here — otherwise a signed-in non-member got a
-  // 403 that confirms the project exists while every other surface answered 404.
-  requireVisibleProject(db, params.slug, actor, "act on this project");
 
   // RBAC — the single guard path (project-authority.server) consulting the
   // ACTION_ROLES source (rbac.ts), never a hardcoded role string, so the

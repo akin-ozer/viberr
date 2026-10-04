@@ -2,12 +2,9 @@ import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.policy";
 import { pageTitle } from "~/shared/page-title";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import type { loader as projectLoader } from "./project";
-import {
-  appErrorResponse,
-  requireFormAction,
-} from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
@@ -51,12 +48,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireProjectFormAction(
+    request,
+    params.slug,
+    "change this project's policy",
+  );
   if (refused) return refused;
-  // R15-4: this action runs WITHOUT the layout loader's membership gate
-  // (React Router does not run parent loaders for a child action), so refuse a
-  // non-member here with the same unknown-slug 404 the loader gives.
-  requireVisibleProject(db, params.slug, actor, "change this project's policy");
 
   try {
     if (intent === "set-role") {

@@ -4,7 +4,7 @@ import type { Route } from "./+types/project.epics";
 import type { loader as projectLoader } from "./project";
 import { pageTitle } from "~/shared/page-title";
 import { requireUser } from "~/server/auth/require-user.server";
-import { appErrorResponse, requireFormAction } from "~/server/auth/form-action.server";
+import { appErrorResponse } from "~/server/auth/form-action.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { createEpic } from "~/server/tasks/epic-actions.server";
 import { archiveEpicTasks } from "~/server/tasks/epic-archive.server";
@@ -12,7 +12,7 @@ import { roleCan } from "~/shared/rbac";
 import { EpicsPage } from "~/features/epics/epics-page";
 import { getEpicsPage } from "~/features/epics/epics-query.server";
 import { epicFormFields } from "~/features/epics/epic-form.server";
-import { requireVisibleProject } from "./project-visibility.server";
+import { requireProjectFormAction } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 
 /**
@@ -37,10 +37,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireProjectFormAction(request, params.slug);
   if (refused) return refused;
-  // R15-4 / E2: an action runs without the layout's loader.
-  requireVisibleProject(db, params.slug, actor, "act on this project");
   try {
     if (intent === "create-epic") {
       const fields = epicFormFields(formData);
