@@ -163,17 +163,16 @@ export interface KeyRotationStatus {
   text: string;
 }
 
-function scanStore(
-  db: DatabaseSync,
-  store: (typeof SEALED_STORES)[number],
-): SealedStoreScan {
+/** Every sealed value one store holds, in id order: what a scan reads and a
+ *  reseal rewrites. */
+function sealedRows(db: DatabaseSync, store: (typeof SEALED_STORES)[number]) {
   // SAFETY: every SEALED_STORES entry names columns 0001_baseline declares
   // TEXT — its id column is the table's primary key and its name column is NOT
   // NULL in every registered store (so `string | null` is the conservative
   // reading), and `WHERE <box column> IS NOT NULL` is what makes `box` a string
   // on the two stores whose box column is nullable (`org_mcp_servers.cred_ref`
   // and `user_backend_credentials.secret_box`, NULL on every `login` row).
-  const rows = db
+  return db
     .prepare(
       `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box
          FROM ${store.table}
@@ -181,7 +180,13 @@ function scanStore(
         ORDER BY ${store.idColumn}`,
     )
     .all() as { id: string; name: string | null; box: string }[];
+}
 
+function scanStore(
+  db: DatabaseSync,
+  store: (typeof SEALED_STORES)[number],
+): SealedStoreScan {
+  const rows = sealedRows(db, store);
   const previous = previousSecretKeys();
   const secrets: SealedSecretRef[] = rows.map((row) => ({
     store: store.id,
@@ -320,18 +325,7 @@ export function resealSecrets(
   const previous = previousSecretKeys();
 
   for (const store of SEALED_STORES) {
-    // SAFETY: the same store/column correspondence `scanStore` states above —
-    // this is byte-for-byte its query, run for the write pass.
-    const rows = db
-      .prepare(
-        `SELECT ${store.idColumn} AS id, ${store.nameColumn} AS name, ${store.column} AS box
-           FROM ${store.table}
-          WHERE ${store.column} IS NOT NULL
-          ORDER BY ${store.idColumn}`,
-      )
-      .all() as { id: string; name: string | null; box: string }[];
-
-    for (const row of rows) {
+    for (const row of sealedRows(db, store)) {
       const ref: SealedSecretRef = {
         store: store.id,
         id: row.id,
