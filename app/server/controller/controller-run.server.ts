@@ -303,8 +303,8 @@ export interface ControllerMountInput {
   projectSlug: string | null;
   /** Ruling 121: the conversation's anchored task, when it has one. */
   taskKey: string | null;
-  /** Ruling 476(h): the conversation the turn answers in, which a goal the
-   *  turn creates records. */
+  /** Ruling 476(h): the conversation the turn answers in, which an epic the
+   *  turn creates records (ruling 503). */
   conversationId?: string | null;
   /** The ORG MCP grants that resolved and pre-flighted for this turn. */
   orgServers: RunMcpServers;

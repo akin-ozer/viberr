@@ -2775,15 +2775,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               "Pass a title and/or a goal and/or at least one metadata field (priority, labels, dueDate, blockedBy, epic).",
             );
           }
-          // Two writers, two gates. Each part reports on its own so a goal that
-          // wrote is never hidden behind a metadata refusal (or the reverse);
-          // when nothing was applied the first refusal is the answer.
+          // Each axis has its own writer and gate and reports on its own, so a
+          // goal that wrote is never hidden behind a metadata refusal (or the
+          // reverse); when nothing was applied the first refusal is the answer.
           //
-          // Both writers short-circuit when the value is already what was
+          // Every writer short-circuits when the value is already what was
           // asked for: no file write, no timeline note, no audit row. Reporting
           // that as "[done] updated" told the person something happened when
-          // nothing did (review finding 14), so the before/after comparison
-          // below decides which axes really changed.
+          // nothing did (review finding 14), so each axis says whether it
+          // really changed (the metadata by the before/after comparison below).
           const before = getTaskSummary(db, slug, key);
           const applied: string[] = [];
           const unchanged: string[] = [];

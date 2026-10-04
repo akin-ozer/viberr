@@ -97,8 +97,8 @@ export interface ControllerOpsMcp {
   tools: SdkMcpToolDefinition<any>[];
 }
 
-/** The mount key, exported so the run assembly and the reserved-name guard
- *  can never disagree about what this server is called. */
+/** The mount key, exported so the run assembly can never disagree about
+ *  what this server is called. */
 export const CONTROLLER_OPS_MCP_NAME = "viberr_ops";
 
 const CONTROLLER_OPS_INSTRUCTIONS =
@@ -318,13 +318,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // The READING is ungated: it is what `/resources/health` already serves
         // UNAUTHENTICATED (aggregate counts, the lock holder's pid and host,
         // free bytes, build identity), plus availability booleans and three
-        // integers about run load that carry no name, project or run in them.
-        //
-        // Ruling 127 removed the org-admin-only credential DETAIL arm: it
-        // existed to withhold a deployment config path, and no such path
-        // exists any more. The per-backend reading below is now two integers
-        // and one boolean about the ASKER's own account — nothing that names
-        // another person, a host path or an environment variable.
+        // integers about run load that carry no name, project or run in them
+        // (`backendCredential` says why the per-backend reading is open too).
         const admin = orgAdmin();
         // Ruling 130(d): a signed-in read carries whose account a refusal was.
         const snapshot = healthSnapshot(db, { principal: true });
@@ -354,11 +349,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         const probed = probeTools(args.probe ?? []);
         if (probed.length > 0) body.probe = probed;
         // C05-A: the browser's configured executable PATH is deployment
-        // configuration and stays org-admin-only, which is why `admin` is
-        // still resolved above even though the per-backend reading beside it
-        // is now open to any asker (ruling 127 deleted the credential DETAIL
-        // arm this gate used to be paired with). The key is present only for
-        // an org admin, never carried empty.
+        // configuration and stays org-admin-only (`admin`, above). The key is
+        // present only for an org admin, never carried empty.
         const browserDetail = admin ? browserRuntimeStatus().detail : undefined;
         if (browserDetail) body.browserDetail = browserDetail;
         return json(body);
