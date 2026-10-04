@@ -262,7 +262,7 @@ function projectCorrections(
 
 export function getControllerSurface(
   db: DatabaseSync,
-  viewer: { id: string; email: string },
+  viewer: { id: string },
   input: {
     projectSlug?: string | null;
     conversationId?: string | null;
@@ -409,7 +409,7 @@ export function getControllerSurface(
 export function controllerPageView(
   db: DatabaseSync,
   request: Request,
-  viewer: { id: string; email: string },
+  viewer: { id: string },
   projectSlug: string | null,
 ): ControllerSurfaceView {
   const url = new URL(request.url);

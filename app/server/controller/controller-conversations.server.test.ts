@@ -100,7 +100,7 @@ describe("conversation access", () => {
     try {
       getControllerSurface(
         app.db,
-        { id: otherMemberId, email: "murat@viberr.dev" },
+        { id: otherMemberId },
         {
           projectSlug: null,
           conversationId: conversation.id,
@@ -1334,7 +1334,7 @@ describe("ruling 465: the queue is visible and every reply names its message", (
     // The page's view carries the server's own reading.
     const view = getControllerSurface(
       app.db,
-      { id: ownerId, email: "selin@viberr.dev" },
+      { id: ownerId },
       { conversationId: conversation.id, dataRoot: app.dataRoot },
     );
     expect(view.turn).toMatchObject(expected);

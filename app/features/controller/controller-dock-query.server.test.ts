@@ -127,7 +127,7 @@ function dock(
 ) {
   return getControllerDock(
     store.db,
-    { id: viewer.id, email: viewer.email },
+    { id: viewer.id },
     { ...input, dataRoot: store.dataRoot },
   );
 }

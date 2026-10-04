@@ -150,7 +150,7 @@ export function conversationMatchesScope(
 
 export function getControllerDock(
   db: DatabaseSync,
-  viewer: { id: string; email: string },
+  viewer: { id: string },
   input: {
     projectSlug: string | null;
     taskKey: string | null;

@@ -130,7 +130,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const c = url.searchParams.get("c")?.trim() || null;
   const view = getControllerDock(
     db,
-    { id: auth.user.id, email: auth.user.email },
+    { id: auth.user.id },
     // O39-d: only an OPEN panel reads the transcript it loads.
     { ...scope, conversationId: c, markSeen: url.searchParams.get("seen") === "1" },
   );
