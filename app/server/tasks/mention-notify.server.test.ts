@@ -23,11 +23,8 @@ import {
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import { relayToTask, takeFromTask } from "./task-relay.server";
-import {
-  operatorDispatchAgent,
-  operatorPostComment,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+import { operatorDispatchAgent, operatorPostComment } from "./operator-actions.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import { appendComment } from "./task-comments.server";
 import { operatorPromptAgent, recordAgentCompletion } from "./agent-completion.server";
 import { postAgentReplyComment } from "./task-replies.server";

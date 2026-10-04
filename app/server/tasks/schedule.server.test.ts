@@ -6,7 +6,8 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
-import { operatorScheduleRun, type OperatorAuthority } from "./operator-actions.server";
+import { operatorScheduleRun } from "./operator-actions.server";
+import type { OperatorAuthority } from "./operator-authority.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,

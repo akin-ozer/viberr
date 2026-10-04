@@ -2144,7 +2144,7 @@ export async function resolvePacket(
       // the operator itself (ruling 134(b)); the SUPERVISED half gets the
       // server-attributed "Move to <review>" card, where the board lets it
       // apply (`recordDeliveredNextStep` re-checks everything under the lock).
-      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      const { resolveOperatorAuthority } = await import("./operator-authority.server");
       if (resolveOperatorAuthority(ctx, input.projectSlug).autonomy !== "full") {
         await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, deliveredPr);
       }
@@ -2215,7 +2215,7 @@ export async function resolvePacket(
         if (parsed.frontmatter.readiness === "blocked") parsed.frontmatter.readiness = "ready";
       });
       reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      const { resolveOperatorAuthority } = await import("./operator-authority.server");
       if (resolveOperatorAuthority(ctx, input.projectSlug).autonomy !== "full") {
         await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, delivery.prNumber);
       }

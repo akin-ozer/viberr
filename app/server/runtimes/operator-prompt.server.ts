@@ -28,9 +28,9 @@ import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   OPERATOR_POLICY_SCOPE_NOTE,
-  type OperatorAuthority,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
+import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import { RESULT_DELIVERY_RULE, RESULT_GOAL_RULE } from "~/server/tasks/result-delivery.server";
 import type { RelayPayload } from "~/server/tasks/task-relay.server";
 import {

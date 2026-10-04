@@ -944,7 +944,7 @@ export async function performDelivery(
         await returnChangedRevisionToReview(db, ctx, projectSlug, taskKey, headSha, actor);
       }
       let operatorRequeued = false;
-      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      const { resolveOperatorAuthority } = await import("./operator-authority.server");
       const autonomy =
         ctx.operatorRun?.autonomy ??
         resolveOperatorAuthority(ctx, projectSlug).autonomy;

@@ -58,10 +58,7 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
-  deliverGate,
-  gate,
   operatorAcceptCompletion,
-  operatorAcceptsDirectly,
   operatorDeliverForReview,
   operatorDispatchAgent,
   operatorOpenPacket,
@@ -75,13 +72,18 @@ import {
   OPERATOR_TIMELINE_DEFAULT,
   operatorTransitionStage,
   operatorWriteCompletionPacket,
+  type OperatorPacketOptionInput,
+  GOAL_DRAFT_MAX_CHARS,
+} from "./operator-actions.server";
+import {
+  deliverGate,
+  gate,
+  operatorAcceptsDirectly,
   operatorAutonomyFor,
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
-  type OperatorPacketOptionInput,
-  GOAL_DRAFT_MAX_CHARS,
-} from "./operator-actions.server";
+} from "./operator-authority.server";
 import {
   KB_CORRECTED_TITLE,
   KB_CORRECTION_UNDONE_TITLE,

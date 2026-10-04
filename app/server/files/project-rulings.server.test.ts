@@ -86,7 +86,7 @@ describe("the runtimes that build a run's knowledge call it", () => {
     // An undeployed operator resolves no knowledge at all, so deploy one.
     deployDeliveryOperator(store, "supervised");
     setRulings("team-rulings");
-    const { resolveOperatorAuthority } = await import("~/server/tasks/operator-actions.server");
+    const { resolveOperatorAuthority } = await import("~/server/tasks/operator-authority.server");
     // CANARY: read `view.resources.kb` without `withProjectRulings` and the
     // operator's list loses the project's rulings.
     expect(resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug).kb).toContain(

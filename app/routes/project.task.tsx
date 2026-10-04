@@ -111,7 +111,7 @@ import {
   operatorAcceptsDirectly,
   operatorAutonomyFor,
   operatorBackendFor,
-} from "~/server/tasks/operator-actions.server";
+} from "~/server/tasks/operator-authority.server";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import {
   completionToast,

@@ -22,6 +22,10 @@ import {
   deliverGate,
   dispatchGate,
   gate,
+  type OperatorActionResult,
+  type OperatorAuthority,
+} from "./operator-authority.server";
+import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
   operatorDispatchAgent,
@@ -45,8 +49,6 @@ import {
   operatorSnapshot,
   operatorTransitionStage,
   operatorWriteCompletionPacket,
-  type OperatorActionResult,
-  type OperatorAuthority,
   type OperatorOpenPacketInput,
   type OperatorPacketOptionInput,
 } from "./operator-actions.server";

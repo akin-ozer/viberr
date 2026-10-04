@@ -31,12 +31,8 @@ import {
   operatorPlanToolsFor,
 } from "~/server/runtimes/operator-codex-plan.server";
 import { createEpic, type CreateEpicInput } from "./epic-actions.server";
-import {
-  operatorOpenPacket,
-  operatorSetEpic,
-  operatorSnapshot,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+import { operatorOpenPacket, operatorSetEpic, operatorSnapshot } from "./operator-actions.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { resolvePacket } from "./packet-resolution.server";
 import type { TaskActionContext } from "./task-action-core.server";

@@ -1,7 +1,4 @@
-import {
-  gate,
-  resolveOperatorAuthority,
-} from "~/server/tasks/operator-actions.server";
+import { gate, resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 
 /**
  * P13-D-9 (MOCK-3): does THIS project's deployed operator hold the one

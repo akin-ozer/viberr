@@ -16,12 +16,7 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   CREATE_TASK_BASE_NOTE,
-  deliverGate,
-  dispatchGate,
-  gate,
   operatorAcceptCompletion,
-  type OperatorActionResult,
-  type OperatorAuthority,
   operatorCancelSchedule,
   operatorCorrectKnowledgeDoc,
   operatorDeliverForReview,
@@ -43,6 +38,13 @@ import {
   operatorTransitionStage,
   operatorWriteCompletionPacket,
 } from "~/server/tasks/operator-actions.server";
+import {
+  deliverGate,
+  dispatchGate,
+  gate,
+  type OperatorActionResult,
+  type OperatorAuthority,
+} from "~/server/tasks/operator-authority.server";
 import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import {

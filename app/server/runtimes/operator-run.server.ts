@@ -45,14 +45,16 @@ import {
 } from "~/server/files/task-writer.server";
 import {
   OPERATOR_TIMELINE_DEFAULT,
-  type OperatorAuthority,
-  type OperatorAuthorityOverrides,
-  type OperatorAutonomy,
   operatorOpenPacket,
   type OperatorOpenPacketInput,
   operatorSnapshot,
-  resolveOperatorAuthority,
 } from "~/server/tasks/operator-actions.server";
+import {
+  type OperatorAuthority,
+  type OperatorAuthorityOverrides,
+  type OperatorAutonomy,
+  resolveOperatorAuthority,
+} from "~/server/tasks/operator-authority.server";
 import type { RelayPayload } from "~/server/tasks/task-relay.server";
 import { buildOperatorToolkit } from "~/server/tasks/operator-toolkit.server";
 import { getProject } from "~/server/projections/board-query.server";

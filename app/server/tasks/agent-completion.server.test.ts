@@ -5102,9 +5102,8 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
      * CANARY: in `withdrawSupersededStuckPacket`, take any blocked packet again
      * instead of `packet.stalled`.
      */
-    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
-      "./operator-actions.server"
-    );
+    const { operatorOpenPacket } = await import("./operator-actions.server");
+    const { resolveOperatorAuthority } = await import("./operator-authority.server");
     await withOperatorDeployed(async () => {
       const authorized = { dataRoot: store.dataRoot, operatorAuthorized: true };
       const opened = await operatorOpenPacket(

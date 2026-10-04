@@ -16,7 +16,8 @@ import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
-import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
+import { CREATE_TASK_BASE_NOTE } from "./operator-actions.server";
+import type { OperatorAuthority } from "./operator-authority.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import {
   operatorPlanSchemaFor,

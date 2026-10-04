@@ -18,11 +18,10 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   dispatchGate,
   gate,
-  operatorDispatchAgent,
-  operatorOpenPacket,
   type OperatorActionResult,
   type OperatorAuthority,
-} from "~/server/tasks/operator-actions.server";
+} from "~/server/tasks/operator-authority.server";
+import { operatorDispatchAgent, operatorOpenPacket } from "~/server/tasks/operator-actions.server";
 import {
   recordAcceptancePacketWithdrawal,
   recordRecommendationWithdrawal,

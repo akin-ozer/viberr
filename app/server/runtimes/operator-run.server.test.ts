@@ -64,10 +64,9 @@ import * as operatorCodexPlan from "./operator-codex-plan.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   CREATE_TASK_BASE_NOTE,
-  type OperatorAuthority,
-  type OperatorAutonomy,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
+import type { OperatorAuthority, OperatorAutonomy } from "~/server/tasks/operator-authority.server";
 import {
   approveReviewEntry,
   baseTaskFrontmatter,

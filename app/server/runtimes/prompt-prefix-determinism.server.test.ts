@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
-import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import {
   buildSpecialistPromptPrefix,
   type SpecialistPersonaInput,

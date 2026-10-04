@@ -46,7 +46,7 @@ import {
   VERDICT_REPORT_TITLE,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
-import type { OperatorAutonomy } from "./operator-actions.server";
+import type { OperatorAutonomy } from "./operator-authority.server";
 import {
   buildReviewDeadlockPacket,
   delivererNameOf,
@@ -2432,7 +2432,7 @@ export async function applyAgentCompletionEffects(
   //    — there is no separate verdict write to race anything.)
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
-  const { resolveOperatorAuthority } = await import("./operator-actions.server");
+  const { resolveOperatorAuthority } = await import("./operator-authority.server");
   let reactAutonomy: OperatorAutonomy;
   let currentDepth: number;
   if (input.operatorRun) {

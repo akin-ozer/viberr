@@ -4938,9 +4938,8 @@ describe("pass 35: operator and task actions", () => {
         pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: "a".repeat(40), mergeable: "clean" },
       });
       if (packetWritten) {
-        const { operatorWriteCompletionPacket, resolveOperatorAuthority } = await import(
-          "./operator-actions.server"
-        );
+        const { operatorWriteCompletionPacket } = await import("./operator-actions.server");
+        const { resolveOperatorAuthority } = await import("./operator-authority.server");
         const written = await operatorWriteCompletionPacket(
           store.db,
           { dataRoot: store.dataRoot },

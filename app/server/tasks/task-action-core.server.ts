@@ -498,7 +498,7 @@ export async function autoInvokeOperator(
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease, relay } = options;
   try {
-    const { resolveOperatorAuthority } = await import("./operator-actions.server");
+    const { resolveOperatorAuthority } = await import("./operator-authority.server");
     const authority = resolveOperatorAuthority(ctx, projectSlug);
     if (!authority.deployed) return; // no operator in this project — nothing to run
     const runOperator =

@@ -425,7 +425,8 @@ describe("what the gate record does to acceptance (ruling 482)", () => {
 
     // The operator's snapshot carries the same record, with the failure named.
     // CANARY: drop `gates: operatorGatesOf(...)` from operatorSnapshot.
-    const { operatorSnapshot, resolveOperatorAuthority } = await import("./operator-actions.server");
+    const { operatorSnapshot } = await import("./operator-actions.server");
+    const { resolveOperatorAuthority } = await import("./operator-authority.server");
     const snap = operatorSnapshot(
       store.db,
       { dataRoot: store.dataRoot },

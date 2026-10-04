@@ -31,7 +31,8 @@ import {
 import type { ProjectFrontmatter } from "~/schemas/project-file.schema";
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { stageOutcome } from "./agent-outcome.server";
-import { operatorSnapshot, resolveOperatorAuthority } from "./operator-actions.server";
+import { operatorSnapshot } from "./operator-actions.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import type { TaskActionContext } from "./task-action-core.server";
