@@ -15,6 +15,7 @@ import {
   type FakeResponder,
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { checksPill } from "~/features/github/github-pills";
 import { mapPrChecks } from "~/shared/mapping/task.server";
@@ -91,6 +92,21 @@ function setup() {
   return { store, actor };
 }
 
+/** One reconcile of VIB-301 as `actor`, over `fetchImpl`. */
+function reconcileVib301(store: TestStore, actor: AuditActor, fetchImpl: typeof fetch) {
+  return reconcileTask(
+    store.db,
+    { projectSlug: store.slug, taskKey: "VIB-301" },
+    actor,
+    { dataRoot: store.dataRoot, fetchImpl },
+  );
+}
+
+/** VIB-301's task file as it stands. */
+function readVib301(store: TestStore) {
+  return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot });
+}
+
 /**
  * The fake transport's route table. Deliberately OPEN: the helpers below hand
  * back a base table and each test overlays the one or two routes its scenario
@@ -155,12 +171,7 @@ describe("reconcileTask", () => {
   it("happy path: writes the pr/github frontmatter cache, reprojects, records provenance", async () => {
     const { store, actor } = setup();
     const gh = fakeGithubFetch(happyRoutes());
-    const result = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const result = await reconcileVib301(store, actor, gh.fetchImpl);
     expect(result).toMatchObject({
       status: "reconciled",
       taskKey: "VIB-301",
@@ -172,11 +183,7 @@ describe("reconcileTask", () => {
     });
 
     // task.md is the canonical cache (frontmatter writers, files stay truth).
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    });
+    const file = readVib301(store);
     const fm = file!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({
       number: 318,
@@ -227,17 +234,8 @@ describe("reconcileTask", () => {
       body: { total_count: 3, check_runs: [null, "x"] },
     };
     const gh = fakeGithubFetch(routes);
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, gh.fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     // What task.md keeps is the honest count — not "3 checks, none of them bad".
     expect(fm.pr).toMatchObject({
       checks: { total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 },
@@ -263,19 +261,10 @@ describe("reconcileTask", () => {
       },
     };
     const gh = fakeGithubFetch(routes);
-    const result = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const result = await reconcileVib301(store, actor, gh.fetchImpl);
     // The two readable commits survive — the branch footprint is not emptied.
     expect(result).toMatchObject({ status: "reconciled", commits: 2 });
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     // Ruling 187: this compare DROPPED an entry, so it is incomplete and no
     // commit is judged — an unjudged entry must not read as judged.
     expect(fm.github?.commits).toEqual([
@@ -323,17 +312,8 @@ describe("reconcileTask", () => {
     routes[`GET ${REPO_PATH}/compare/rev0delivered...headsha318`] = {
       body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
   });
 
@@ -370,24 +350,14 @@ describe("reconcileTask", () => {
       actor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
-    const readFm = () =>
-      readTaskFile({
-        projectSlug: store.slug,
-        taskKey: "VIB-301",
-        dataRoot: store.dataRoot,
-      })!.parsed.frontmatter;
+    const readFm = () => readVib301(store)!.parsed.frontmatter;
 
     // Pass 1 — the PR is open and its head carries 2 commits the review never saw.
     const openRoutes = happyRoutes();
     openRoutes[`GET ${REPO_PATH}/compare/rev0delivered...headsha318`] = {
       body: { ahead_by: 2, behind_by: 0, status: "ahead", commits: [] },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(openRoutes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(openRoutes).fetchImpl);
     expect(readFm().pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
 
     // Pass 2 — a human CLOSES the PR on GitHub. A settled PR deliberately buys
@@ -411,12 +381,7 @@ describe("reconcileTask", () => {
     closedRoutes[`GET ${REPO_PATH}/branches/vib-301-workspace`] = {
       body: { commit: { sha: "headsha318" } },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(closedRoutes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(closedRoutes).fetchImpl);
     const closed = readFm();
     expect(closed.pr?.state).toBe("closed");
     expect(closed.pr?.revisionDrift).toEqual({ headSha: "headsha318", authored: 2, baseRefresh: null });
@@ -466,17 +431,8 @@ describe("reconcileTask", () => {
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     // No `rev...head` compare route registered — if the reconciler asked for one
     // (it must not, the shas are equal) the fake would throw an unknown route.
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.revisionDrift).toBeUndefined();
   });
 
@@ -502,18 +458,9 @@ describe("reconcileTask", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr, "an unowned PR must never become this task's PR").toBeNull();
 
     // …and the collision is REPORTED, not silently swallowed — with the same
@@ -555,18 +502,9 @@ describe("reconcileTask", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     // The collision itself is recorded…
     expect(fm.github?.unownedPr).toBe(318);
     // …but the stranger's footprint is not: no commits (despite the
@@ -594,12 +532,7 @@ describe("reconcileTask", () => {
     const policyNotes = () =>
       listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
 
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     const first = policyNotes();
     expect(first.map((n) => n.title)).toContain(
       "Branch name collision on VIB-301: PR #318 is not this task's",
@@ -610,12 +543,7 @@ describe("reconcileTask", () => {
     expect(notice.text).toContain("`resolve_remote_collision`");
 
     // The same collision on the next pass is not news.
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     expect(policyNotes().filter((n) => (n.title ?? "").startsWith("Branch name collision"))).toHaveLength(1);
   });
 
@@ -660,8 +588,7 @@ describe("reconcileTask", () => {
     );
     expect(result).toMatchObject({ status: "cleared", branch: "vib-301-workspace", closedUnownedPr: null });
 
-    const events = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
-      .parsed.timeline;
+    const events = readVib301(store)!.parsed.timeline;
     const cleared = events.find((e) => e.text.startsWith("Branch collision cleared:"));
     expect(cleared).toBeDefined();
     expect(cleared!.type).toBe("github");
@@ -698,19 +625,10 @@ describe("reconcileTask", () => {
     const routes = happyRoutes();
     // Nobody opened a PR on the branch — the squatter is the branch itself.
     routes[`GET ${REPO_PATH}/pulls`] = { body: [] };
-    const result = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    const result = await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
 
     expect(result).toMatchObject({ status: "reconciled", commits: 0 });
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.github?.commits ?? []).toEqual([]);
     expect(fm.github?.changed ?? null).toBeNull();
     // Residual, deliberately asserted: the collision SURFACE keys on a PR
@@ -723,9 +641,7 @@ describe("reconcileTask", () => {
     // Canary: drop the `foreignHead` write in the reconciler and both records
     // below are absent; the archive dialog then cannot say what origin holds.
     const { store, actor } = setup();
-    const fmOf = () =>
-      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
-        .parsed.frontmatter;
+    const fmOf = () => readVib301(store)!.parsed.frontmatter;
     // 1. A stranger's PR stands on the branch: its head is the foreign head.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-301", {
@@ -736,12 +652,7 @@ describe("reconcileTask", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     expect(fmOf().github?.unownedPr).toBe(318);
     expect(fmOf().github?.foreignHead).toEqual({ sha: "headsha318", prNumber: 318 });
 
@@ -749,12 +660,7 @@ describe("reconcileTask", () => {
     //    task behind it (the V5 squatter): the compare's tip is the head.
     const prLess = happyRoutes();
     prLess[`GET ${REPO_PATH}/pulls`] = { body: [] };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(prLess).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(prLess).fetchImpl);
     expect(fmOf().github?.unownedPr ?? null).toBeNull();
     expect(fmOf().github?.foreignHead).toEqual({ sha: "0000000ffff", prNumber: null });
 
@@ -783,12 +689,7 @@ describe("reconcileTask", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(prLess).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(prLess).fetchImpl);
     expect(fmOf().github?.foreignHead).toEqual({ sha: "0000000ffff", prNumber: null });
 
     // 4. The same revision once the delivery push PUBLISHED its head: it left
@@ -805,12 +706,7 @@ describe("reconcileTask", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(prLess).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(prLess).fetchImpl);
     expect(fmOf().github?.foreignHead ?? null).toBeNull();
   });
 
@@ -841,19 +737,10 @@ describe("reconcileTask", () => {
 
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls`] = { body: [] };
-    const result = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    const result = await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
 
     expect(result).toMatchObject({ status: "reconciled", commits: 2 });
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     // Ruling 187: each entry is stamped with whether the remote has it. These
     // came FROM the compare, so they are pushed.
     expect(fm.github?.commits).toEqual([
@@ -891,18 +778,9 @@ describe("reconcileTask", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.github?.commits ?? []).toEqual([]);
     expect(fm.github?.changed ?? null).toBeNull();
     // The collision is still named, and the drop reaches every surface.
@@ -945,18 +823,9 @@ describe("reconcileTask", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.github?.unownedPr).toBe(318);
     expect(fm.github?.commits).toEqual([
       { sha: "de11ver", msg: "delivered from the workspace" },
@@ -988,12 +857,7 @@ describe("reconcileTask", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
     const detail = getTaskDetail(store.db, store.slug, "VIB-301");
     expect(detail?.unownedPr).toBe(318);
@@ -1048,18 +912,9 @@ describe("reconcileTask", () => {
         },
       },
     });
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    await reconcileVib301(store, actor, gh.fetchImpl);
 
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr, "the owned link stands").toMatchObject({
       number: 318,
       state: "review",
@@ -1089,13 +944,7 @@ describe("reconcileTask", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const run = () =>
-      reconcileTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
-        actor,
-        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-      );
+    const run = () => reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     await run();
     await run();
     await run();
@@ -1111,26 +960,12 @@ describe("reconcileTask", () => {
 
   it("is idempotent: identical GitHub facts → no file write (changed: false)", async () => {
     const { store, actor } = setup();
-    const run = () =>
-      reconcileTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
-        actor,
-        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-      );
+    const run = () => reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     await run();
-    const before = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.content;
+    const before = readVib301(store)!.content;
     const second = await run();
     expect(second).toMatchObject({ status: "reconciled", changed: false });
-    const after = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.content;
+    const after = readVib301(store)!.content;
     expect(after).toBe(before); // byte-stable, no updatedAt churn
   });
 
@@ -1157,13 +992,7 @@ describe("reconcileTask", () => {
         additions: 1, deletions: 0, changed_files: 1,
       },
     };
-    const pass = () =>
-      reconcileTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
-        actor,
-        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-      );
+    const pass = () => reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     // Started together, never awaited in between — the real overlap.
     await Promise.all([pass(), pass()]);
 
@@ -1197,12 +1026,7 @@ describe("reconcileTask", () => {
         changed_files: 9,
       },
     };
-    const result = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    const result = await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(result).toMatchObject({ status: "reconciled", sync: "merged" });
   });
 
@@ -1227,17 +1051,8 @@ describe("reconcileTask", () => {
       actor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("accepted"); // still open on GitHub → stays accepted
   });
 
@@ -1326,10 +1141,7 @@ describe("reconcileTask", () => {
       }
       return inner(input, init);
     };
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
-      dataRoot: store.dataRoot,
-      fetchImpl,
-    });
+    await reconcileVib301(store, actor, fetchImpl);
     const pr = readTaskFile(ref)!.parsed.frontmatter.pr;
     // The pass did write (it learned the checks), and kept the newer record.
     expect(pr?.checks).toBeTruthy();
@@ -1363,17 +1175,8 @@ describe("reconcileTask", () => {
         additions: 412, deletions: 87, changed_files: 9,
       },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("merged"); // real terminal state overrides "accepted"
   });
 
@@ -1388,14 +1191,9 @@ describe("reconcileTask", () => {
         additions: 1, deletions: 0, changed_files: 1,
       },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     // Stage is UNCHANGED — files stay canonical, no auto-advance.
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.stage).toBe("review");
     // A typed divergence event landed on the timeline (projected to task_events).
     // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
@@ -1408,12 +1206,7 @@ describe("reconcileTask", () => {
     expect(notifs.some((n) => n.kind === "policy" && /merged on GitHub/.test(n.text))).toBe(true);
     // Idempotent: a second reconcile (PR still merged in the cache) does NOT
     // re-announce the divergence.
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events2 = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
@@ -1446,10 +1239,8 @@ describe("reconcileTask", () => {
     const { store, actor } = setup();
     const gh = fakeGithubFetch(mergedOutOfBandRoutes());
     const results = await Promise.all([
-      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
-      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+      reconcileVib301(store, actor, gh.fetchImpl),
+      reconcileVib301(store, actor, gh.fetchImpl),
     ]);
 
     // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
@@ -1464,8 +1255,7 @@ describe("reconcileTask", () => {
       .toHaveLength(1);
     // The mutex must not change the no-auto-advance rule.
     expect(
-      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
-        .parsed.frontmatter.stage,
+      readVib301(store)!.parsed.frontmatter.stage,
     ).toBe("review");
     // A QUEUE, not a coalescer: the second pass ran its own read AFTER the
     // first wrote, so it saw the merged cache and found nothing new — rather
@@ -1488,12 +1278,9 @@ describe("reconcileTask", () => {
     const explodingFetch: typeof fetch = async () => unreadableResponse();
     const gh = fakeGithubFetch(happyRoutes());
     const settled = await Promise.allSettled([
-      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-        { dataRoot: store.dataRoot, fetchImpl: explodingFetch }),
-      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
-      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-        { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+      reconcileVib301(store, actor, explodingFetch),
+      reconcileVib301(store, actor, gh.fetchImpl),
+      reconcileVib301(store, actor, gh.fetchImpl),
     ]);
     expect(settled[0]).toMatchObject({
       status: "fulfilled",
@@ -1532,9 +1319,8 @@ describe("reconcileTask", () => {
       body: { number: 318, title: "Attach execution workspace", state: "closed",
         merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
     };
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     // transition + accept_completion withdrawn (PR is gone); assign_specialist survives.
     expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-assign"]);
     // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
@@ -1549,15 +1335,13 @@ describe("reconcileTask", () => {
         merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
         additions: 1, deletions: 0, changed_files: 1 },
     };
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db
       .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
       .all() as { text: string }[];
     return {
-      fm: readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!
-        .parsed.frontmatter,
+      fm: readVib301(store)!.parsed.frontmatter,
       divergence: events.find((e) => /was merged on GitHub/.test(e.text))?.text ?? "",
     };
   };
@@ -1585,7 +1369,7 @@ describe("reconcileTask", () => {
     // offers it.
     const { store, actor } = setup();
     seedWithRecs(store);
-    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!;
+    const file = readVib301(store)!;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: { ...file.parsed.frontmatter, stage: "impl" },
     });
@@ -1654,17 +1438,8 @@ describe("reconcileTask", () => {
         ],
       },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.github?.commits).toEqual([
       // Ruling 187: the carve-out's real case — the agent skipped the `[KEY]`
       // prefix so the filter found nothing, the cache is kept, AND the compare
@@ -1763,17 +1538,8 @@ describe("reconcileTask", () => {
         additions: 412, deletions: 87, changed_files: 9,
       },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const file = readVib301(store)!;
     expect(file.parsed.frontmatter.pr?.state).toBe("closed");
     // P13-LV-03: a neutral divergence note, not a policy VIOLATION.
     const policy = file.parsed.timeline.find((e) => e.type === "note");
@@ -1855,11 +1621,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
   const REVIEWS = `GET ${REPO_PATH}/pulls/318/reviews`;
 
   function readPr(store: TestStore) {
-    return readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter.pr;
+    return readVib301(store)!.parsed.frontmatter.pr;
   }
 
   it("writes pr.review onto the PR ref and projects it", async () => {
@@ -1871,12 +1633,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
         { user: { login: "mert" }, state: "CHANGES_REQUESTED" },
       ],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(readPr(store)).toMatchObject({
       number: 318,
       state: "review",
@@ -1910,12 +1667,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     const { store, actor } = setup();
     const good = happyRoutes();
     good[REVIEWS] = { body: [{ user: { login: "ayse" }, state: "APPROVED" }] };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(good).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(good).fetchImpl);
     expect(readPr(store)).toMatchObject({
       review: "approved",
       checks: { total: 2, passing: 2 },
@@ -1929,12 +1681,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
       status: 500,
       body: { message: "Server Error" },
     };
-    const second = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(flaky).fetchImpl },
-    );
+    const second = await reconcileVib301(store, actor, fakeGithubFetch(flaky).fetchImpl);
     expect(second).toMatchObject({ status: "reconciled", changed: false });
     expect(readPr(store)).toMatchObject({
       review: "approved",
@@ -1951,12 +1698,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
       status: 403,
       body: { message: "Resource not accessible by personal access token" },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(refused).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(refused).fetchImpl);
     const pr = readPr(store);
     expect(pr?.checks).toBeUndefined();
     expect(pr?.checksUnread).toMatchObject({
@@ -1975,12 +1717,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
 
     // The read succeeds: the summary lands, the refusal goes, and EVERY open
     // checks:read row in the project resolves (CANARY: resolve this task's only).
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     const after = readPr(store);
     expect(after?.checks).toMatchObject({ total: 2, passing: 2 });
     expect(after?.checksUnread).toBeUndefined();
@@ -1992,12 +1729,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     const { store, actor } = setup();
     const first = happyRoutes();
     first[REVIEWS] = { body: [{ user: { login: "ayse" }, state: "CHANGES_REQUESTED" }] };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(first).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(first).fetchImpl);
     expect(readPr(store)).toMatchObject({ review: "changes_requested" });
 
     const second = happyRoutes();
@@ -2016,12 +1748,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
         ],
       },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(second).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(second).fetchImpl);
     expect(readPr(store)).toMatchObject({
       review: "approved",
       checks: { total: 2, passing: 0, failing: 1, pending: 1 },
@@ -2032,12 +1759,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     const { store, actor } = setup();
     const open = happyRoutes();
     open[REVIEWS] = { body: [{ user: { login: "ayse" }, state: "APPROVED" }] };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(open).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(open).fetchImpl);
     expect(readPr(store)).toMatchObject({ review: "approved" });
 
     const merged = happyRoutes();
@@ -2057,12 +1779,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     merged[`GET ${REPO_PATH}/branches/vib-301-workspace`] = {
       body: { commit: { sha: "headsha318" } },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(merged).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(merged).fetchImpl);
     const pr = readPr(store);
     expect(pr).toMatchObject({ state: "merged" });
     expect("review" in pr!).toBe(false);
@@ -2087,11 +1804,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
       } as ReturnType<typeof baseTaskFrontmatter>,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!;
+    const file = readVib301(store)!;
     // The line really is on disk (so the assertion below is not vacuous) — and
     // it is preserved as an UNKNOWN key, not read back as frontmatter.
     expect(file.content).toContain("repo: akin-ozer/some-other-repo");
@@ -2100,12 +1813,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     });
 
     const gh = fakeGithubFetch(happyRoutes());
-    const result = await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
+    const result = await reconcileVib301(store, actor, gh.fetchImpl);
     expect(result).toMatchObject({ status: "reconciled", repo: "akin-ozer/viberr" });
     expect(
       gh.calls.every((c) => c.url.pathname.startsWith("/repos/akin-ozer/viberr/")),
@@ -2522,11 +2230,7 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     );
     expect(violation).not.toBeNull();
     // Policy event written to THE VIOLATION'S OWN task (ruling 5).
-    const file = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!;
+    const file = readVib301(store)!;
     expect(file.parsed.timeline[0]).toMatchObject({
       type: "policy",
       text: expect.stringContaining(
@@ -3000,11 +2704,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
   }
 
   function readPr(store: TestStore) {
-    return readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter.pr;
+    return readVib301(store)!.parsed.frontmatter.pr;
   }
 
   it("counts a project member's approval of the delivered head", async () => {
@@ -3021,12 +2721,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
         },
       ],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(readPrHumanApproval(readPr(store))).toMatchObject({
       login: "muratdev",
       userId: store.users.murat.id,
@@ -3041,12 +2736,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     routes[REVIEWS] = {
       body: [{ user: { login: "octocat" }, state: "APPROVED", commit_id: "headsha318" }],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(readPrHumanApproval(readPr(store))).toMatchObject({
       login: "octocat",
       userId: null,
@@ -3062,12 +2752,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     routes[REVIEWS] = {
       body: [{ user: { login: "denizdev" }, state: "APPROVED", commit_id: "headsha318" }],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(readPrHumanApproval(readPr(store))).toMatchObject({
       userId: store.users.deniz.id,
       status: "not_a_member",
@@ -3083,12 +2768,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     routes[REVIEWS] = {
       body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "oldersha" }],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(readPrHumanApproval(readPr(store))).toMatchObject({
       status: "stale_revision",
       commitSha: "oldersha",
@@ -3102,12 +2782,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     good[REVIEWS] = {
       body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" }],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(good).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(good).fetchImpl);
     expect(readPrHumanApproval(readPr(store))?.status).toBe("counted");
 
     // The reviews endpoint 500s on the next pass. Erasing the approval here
@@ -3115,12 +2790,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     // same "unknown is not none" rule `checks` and `review` already follow.
     const flaky = happyRoutes();
     flaky[REVIEWS] = { status: 500, body: { message: "Server Error" } };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(flaky).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(flaky).fetchImpl);
     expect(readPrHumanApproval(readPr(store))?.status).toBe("counted");
   });
 
@@ -3131,12 +2801,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     good[REVIEWS] = {
       body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" }],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(good).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(good).fetchImpl);
     const dismissed = happyRoutes();
     dismissed[REVIEWS] = {
       body: [
@@ -3144,12 +2809,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
         { user: { login: "muratdev" }, state: "DISMISSED" },
       ],
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(dismissed).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(dismissed).fetchImpl);
     expect(readPrHumanApproval(readPr(store))).toBeNull();
   });
 
@@ -3170,13 +2830,7 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     routes[REVIEWS] = {
       body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" }],
     };
-    const pass = () =>
-      reconcileTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
-        actor,
-        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-      );
+    const pass = () => reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     await pass();
     expect(readPr(store)?.bodyWritten).toEqual(bodyWritten);
     expect(readPrHumanApproval(readPr(store))).toMatchObject({ status: "counted" });
@@ -3225,13 +2879,8 @@ describe("ruling 135: the unpushed delivered revision", () => {
     const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler135" }, actor);
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const run = async (routes: FakeRoutes) => {
-      await reconcileTask(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-301" },
-        actor,
-        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-      );
-      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+      await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+      return readVib301(store)!.parsed.frontmatter;
     };
     return { store, run };
   }
@@ -3401,7 +3050,7 @@ describe("F34-9: PR adoption is recorded", () => {
     return { store, actor };
   }
   const adoptedLines = (store: ReturnType<typeof setupTestStore>) =>
-    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.timeline.filter(
+    readVib301(store)!.parsed.timeline.filter(
       (e) => e.type === "github" && e.text.includes("Adopted **PR #"),
     );
 
@@ -3416,7 +3065,7 @@ describe("F34-9: PR adoption is recorded", () => {
       },
     };
     await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, ctxWith);
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 318, state: "review", headSha: REV });
     const lines = adoptedLines(store);
     expect(lines).toHaveLength(1);
@@ -3441,7 +3090,7 @@ describe("F34-9: PR adoption is recorded", () => {
       ...ctxWith,
       fetchImpl: fakeGithubFetch(refreshed).fetchImpl,
     });
-    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.checks?.total).toBe(1);
+    expect(readVib301(store)!.parsed.frontmatter.pr?.checks?.total).toBe(1);
     expect(adoptedLines(store)).toHaveLength(1);
     expect(listAuditEvents(store.db, { action: "github.pr.adopted" })).toHaveLength(1);
   });
@@ -3508,11 +3157,8 @@ describe("ruling 132: drift is classified, not counted", () => {
     const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler132" }, actor);
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const run = async (routes: FakeRoutes) => {
-      await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
-        dataRoot: store.dataRoot,
-        fetchImpl: fakeGithubFetch(routes).fetchImpl,
-      });
-      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+      await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+      return readVib301(store)!.parsed.frontmatter;
     };
     return { store, run };
   }
@@ -3663,7 +3309,7 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
           wakes.push(trigger);
         },
       });
-      return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+      return readVib301(store)!.parsed;
     };
     return { store, run, wakes };
   }
@@ -3790,18 +3436,16 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
         merged_at: null, head: { sha: "headsha318" }, mergeable: false, mergeable_state: "dirty",
         additions: 1, deletions: 0, changed_files: 1 },
     };
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
-    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const parsed = readVib301(store)!.parsed;
     expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
     expect(parsed.frontmatter.recommendations.map((r) => r.id).sort()).toEqual(["r-assign", "r-trans"]);
     const note = parsed.timeline.find((e) => e.type === "note" && e.text.startsWith("**Conflict:**"))!;
     expect(note.text).toContain("VIB-301's review PR #318 conflicts with the base branch");
     expect(note.text).toContain("“Accept completion and move VIB-301 to Done” recommendation was withdrawn");
     // A second pass on the same answer flips nothing and writes nothing new.
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
-    const again = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
+    const again = readVib301(store)!.parsed;
     expect(again.timeline.filter((e) => e.text.startsWith("**Conflict:**"))).toHaveLength(1);
   });
 
@@ -3827,7 +3471,7 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
       { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(result).toMatchObject({ status: "not_mergeable", prNumber: 318, mergeable: "conflicting" });
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.mergeable).toBe("conflicting");
     expect(fm.pr?.state).toBe("review");
   });
@@ -3847,7 +3491,7 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
       { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
     );
     expect(result).toMatchObject({ status: "not_mergeable", mergeable: "conflicting" });
-    expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+    expect(readVib301(store)!.parsed.frontmatter.pr?.mergeable).toBe("conflicting");
   });
 });
 
@@ -3951,7 +3595,7 @@ describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to con
       reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
         { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl, wakeOperator });
     await pass();
-    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    const parsed = readVib301(store)!.parsed;
     expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
     expect(parsed.packet).toBeNull();
     expect(parsed.timeline.find((e) => e.text.startsWith("**Packet withdrawn:**"))!.text).toBe(
@@ -4034,8 +3678,7 @@ describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to con
  * (third test).
  */
 describe("ruling 160: the reconciler records who closed the PR", () => {
-  const read = (store: TestStore) =>
-    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr;
+  const read = (store: TestStore) => readVib301(store)!.parsed.frontmatter.pr;
 
   it("the transition into closed stamps `closure` with the closer from the issue payload", async () => {
     const { store, actor } = setup();
@@ -4045,8 +3688,7 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
         merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
     };
     routes[`GET ${REPO_PATH}/issues/318`] = { body: { closed_by: { login: "akin-ozer" } } };
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     const pr = read(store);
     expect(pr).toMatchObject({ number: 318, state: "closed", closure: { by: "akin-ozer", answered: null } });
     expect(Number.isNaN(Date.parse(pr!.closure!.at))).toBe(false);
@@ -4060,8 +3702,7 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
         merged: false, head: { sha: "headsha318" }, additions: 1, deletions: 0, changed_files: 1 },
     };
     // No issues route: the fake answers 404.
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl });
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     expect(read(store)!.closure).toEqual({ at: expect.any(String), by: null, answered: null });
   });
 
@@ -4083,8 +3724,7 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     // happyRoutes: PR #318 is open again on GitHub.
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(happyRoutes()).fetchImpl });
+    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     const pr = read(store);
     expect(pr).toMatchObject({ number: 318, state: "review" });
     expect(pr!.closure).toBeUndefined();
@@ -4188,20 +3828,10 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
     return routes;
   }
 
-  const fileOf = (store: Store) =>
-    readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-301",
-      dataRoot: store.dataRoot,
-    })!.parsed;
+  const fileOf = (store: Store) => readVib301(store)!.parsed;
 
   async function reconcileWith(store: Store, actor: { userId: string; label: string }, routes: FakeRoutes): Promise<void> {
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
   }
 
   it("is marked NOT pushed instead of being rendered as repository state", async () => {
@@ -4314,12 +3944,7 @@ describe("F37-9: a sync verdict that changes is recorded, even on a quiet poll",
     level[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
       body: { ahead_by: 0, behind_by: 0, status: "identical", commits: [] },
     };
-    await reconcileTask(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-301" },
-      actor,
-      { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(level).fetchImpl },
-    );
+    await reconcileVib301(store, actor, fakeGithubFetch(level).fetchImpl);
     expect(syncRows(store)).toEqual(["synced"]);
 
     // Pass 2: main moved. NOTHING in the task file changes — same PR, same
@@ -4496,8 +4121,7 @@ describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
   const T4 = "2026-09-25T23:27:00.000Z";
   afterEach(() => vi.useRealTimers());
 
-  const fileOf = (store: TestStore) =>
-    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!;
+  const fileOf = (store: TestStore) => readVib301(store)!;
   const prOf = (store: TestStore) => fileOf(store).parsed.frontmatter.pr;
   const reconcileRows = (store: TestStore): number =>
     store.db.prepare(`SELECT id FROM provenance WHERE action = 'github.reconcile'`).all().length;
