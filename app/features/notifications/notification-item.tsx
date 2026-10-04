@@ -55,8 +55,7 @@ export function NotificationItem({
       }
       onClick={() => onOpen(n)}
       // F18-1: an orphan (its project was deleted) has nowhere to open — the
-      // click only marks it read. `aria-disabled` (not `disabled`) keeps it
-      // focusable so a keyboard user can still dismiss it.
+      // click only marks it read.
       // A row with no destination is not a live control either: an org-wide
       // row has no page to open, and it used to render as a normal button that
       // navigated nowhere. `aria-disabled` (not `disabled`) keeps it focusable
