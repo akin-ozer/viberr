@@ -2,29 +2,25 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * Ruling 366(f): a figure that counts up to its value. A frame loop eases from
- * the figure last drawn to the new one (ease-out cubic: most of the distance in
- * the first half of the time, settling gently), so a mount counts up from
- * `start`, and a retarget mid-count carries on from wherever the count was
- * instead of restarting. The target rides on `data-count` in plain text, so the
- * DOM reads without waiting for the animation, and the count stands still under
- * reduced motion. The server and the first client render both draw `start`.
+ * the figure last drawn to the new one over two seconds (ease-out cubic: most
+ * of the distance in the first half of the time, settling gently), so a mount
+ * counts up from zero, and a retarget mid-count carries on from wherever the
+ * count was instead of restarting. The target rides on `data-count` in plain
+ * text, so the DOM reads without waiting for the animation, and the count
+ * stands still under reduced motion. The server and the first client render
+ * both draw zero.
  */
 export interface NumberTickerProps {
   /** The figure to reach. */
   end: number;
-  /** Where the first count starts (default 0). A later retarget starts from the figure drawn. */
-  start?: number;
-  /** Seconds one count takes, whatever its distance (default 2). */
-  duration?: number;
-  decimals?: number;
-  prefix?: string;
-  suffix?: string;
-  className?: string;
   /** Own copy around the moving figure, right at every frame ("1 event",
    *  "2 events"): the rounded figure and its text. Without it the span reads
-   *  prefix, figure, suffix. */
+   *  the figure alone. */
   children?: (figure: number, text: string) => ReactNode;
 }
+
+/** Seconds one count takes, whatever its distance. */
+const DURATION_S = 2;
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -34,24 +30,15 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.(REDUCED_MOTION).matches ?? false;
 }
 
-export function NumberTicker({
-  end,
-  start = 0,
-  duration = 2,
-  decimals = 0,
-  prefix = "",
-  suffix = "",
-  className,
-  children,
-}: NumberTickerProps) {
-  const [value, setValue] = useState(start);
+export function NumberTicker({ end, children }: NumberTickerProps) {
+  const [value, setValue] = useState(0);
   /** The figure on screen: the next count's origin. */
-  const drawn = useRef(start);
+  const drawn = useRef(0);
 
   useEffect(() => {
     const from = drawn.current;
     if (from === end) return;
-    if (duration <= 0 || prefersReducedMotion()) {
+    if (prefersReducedMotion()) {
       drawn.current = end;
       setValue(end);
       return;
@@ -63,14 +50,14 @@ export function NumberTicker({
     // where the count really is; React hears only the frames that change the
     // text, which draws the same pixels with one commit per figure instead of
     // one per frame (126 for a +1).
-    let text = from.toFixed(decimals);
+    let text = from.toFixed(0);
     const step = (now: number) => {
       began ??= now;
-      const t = Math.min((now - began) / (duration * 1000), 1);
+      const t = Math.min((now - began) / (DURATION_S * 1000), 1);
       const eased = 1 - (1 - t) ** 3;
       const next = t < 1 ? from + (end - from) * eased : end;
       drawn.current = next;
-      const nextText = next.toFixed(decimals);
+      const nextText = next.toFixed(0);
       if (nextText !== text) {
         text = nextText;
         setValue(next);
@@ -79,16 +66,12 @@ export function NumberTicker({
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [end, duration, decimals]);
+  }, [end]);
 
-  // Passing the class attribute straight through reads as a class named
-  // "className" to app.css.test's orphan gate (which also scans comments), so
-  // the attribute rides in a props object, as radio-seg.tsx does.
-  const dress = { className };
-  const text = value.toFixed(decimals);
+  const text = value.toFixed(0);
   return (
-    <span {...dress} data-count={end.toFixed(decimals)}>
-      {children ? children(Number(text), text) : `${prefix}${text}${suffix}`}
+    <span data-count={end.toFixed(0)}>
+      {children ? children(Number(text), text) : text}
     </span>
   );
 }
