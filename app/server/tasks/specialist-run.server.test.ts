@@ -76,10 +76,8 @@ import {
 import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import { assignReviewer, assignSpecialist, removeReviewer } from "./specialist-assignment.server";
 import {
-  assignReviewer,
-  assignSpecialist,
-  removeReviewer,
   startAgentRun,
   isDispatchHeld,
   resolveResumeConfinement,

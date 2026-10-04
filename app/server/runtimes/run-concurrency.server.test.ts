@@ -279,7 +279,7 @@ describe("run concurrency cap — a real specialist dispatch", () => {
    *  engage it on VIB-1 — the shape a Run-agent click produces. */
   async function deployAndAssignDev(): Promise<void> {
     const { readProjectFile } = await import("~/server/files/project-writer.server");
-    const { assignSpecialist } = await import("~/server/tasks/specialist-run.server");
+    const { assignSpecialist } = await import("~/server/tasks/specialist-assignment.server");
     const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,

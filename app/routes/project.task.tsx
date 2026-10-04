@@ -80,11 +80,11 @@ import {
 import { completionView } from "~/server/tasks/completion-packet.server";
 import {
   directiveDeferredNote,
-  removeReviewer,
   isAgentBusy,
   isDispatchHeld,
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
+import { removeReviewer } from "~/server/tasks/specialist-assignment.server";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";

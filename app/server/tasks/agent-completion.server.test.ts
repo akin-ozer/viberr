@@ -57,11 +57,8 @@ import {
 import { resolvePacket } from "./packet-resolution.server";
 import { attachTaskFile } from "./task-edits.server";
 import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
-import {
-  assignReviewer,
-  startAgentRun,
-  assignSpecialist,
-} from "./specialist-run.server";
+import { assignReviewer, assignSpecialist } from "./specialist-assignment.server";
+import { startAgentRun } from "./specialist-run.server";
 
 /**
  * The UNIFIED agent-run completion pipeline (fixes A1/A2/A11/X6/X9 from the

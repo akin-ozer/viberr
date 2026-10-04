@@ -37,9 +37,7 @@ import {
   setTaskMetadata,
   updateTaskGoal,
 } from "~/server/tasks/task-edits.server";
-import {
-  assignSpecialist,
-} from "~/server/tasks/specialist-run.server";
+import { assignSpecialist } from "~/server/tasks/specialist-assignment.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {

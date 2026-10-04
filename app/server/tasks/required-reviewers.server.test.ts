@@ -517,7 +517,7 @@ describe("ruling 556: the project's required reviewer cannot deliver", () => {
   it("refuses to make it a task's deliverer", async () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, { stage: "review", engagements: [DEVELOPER] });
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     // CANARY: drop the check in `assignSpecialist` and Code Reviewer takes
     // delivery of VIB-1.
     await expect(

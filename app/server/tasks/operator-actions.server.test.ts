@@ -908,7 +908,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(DEFAULT_POLICY);
     withholdReviewerFiles();
     seedTask("impl");
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1020,7 +1020,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   it("refuses `delivers: false` aimed at the CURRENT deliverer — a delivering run cannot be demoted per-dispatch", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1045,7 +1045,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   it("allows a delivering run when the profileId IS the current deliverer", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1072,7 +1072,7 @@ describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", (
     seedTask("impl");
     // Engage the specialist directly first (engagement isn't what's recommended
     // here — starting its run is).
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1482,7 +1482,7 @@ describe("operatorDispatchAgent — supporting posture (delivers derivation)", (
   it("an ENGAGED profile keeps its shape on a bare re-dispatch", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
-    const { assignReviewer } = await import("./specialist-run.server");
+    const { assignReviewer } = await import("./specialist-assignment.server");
     await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },
