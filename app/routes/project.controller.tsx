@@ -1,5 +1,5 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
-import { data, replace } from "react-router";
+import { data } from "react-router";
 import type { Route } from "./+types/project.controller";
 import { pageTitle } from "~/shared/page-title";
 import { appErrorResponse } from "~/server/auth/form-action.server";
@@ -8,19 +8,8 @@ import { csrfError } from "~/features/shell/csrf-result.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { createConversation } from "~/server/controller/controller-conversations.server";
-import { deleteControllerConversation } from "~/server/controller/controller-deletion.server";
-import {
-  checkMessageFiles,
-  interruptControllerTurn,
-  runControllerTurn,
-} from "~/server/controller/controller-run.server";
-import { formFiles } from "~/server/files/form-files.server";
 import { ControllerPage } from "~/features/controller/controller-page";
-import {
-  sendModeOf,
-  waitingMessageAction,
-} from "~/features/controller/waiting-actions.server";
+import { controllerPageAction } from "~/features/controller/waiting-actions.server";
 import {
   getControllerSurface,
   selectedConversationId,
@@ -83,54 +72,6 @@ export async function action({ request, params }: Route.ActionArgs) {
     label: auth.user.email,
   }, "talk to the controller about this project");
   try {
-    if (intent === "send") {
-      const text = String(formData.get("text") ?? "");
-      // Ruling 573: the files it carries, checked before a thread is made for
-      // it, so a refused file leaves no empty conversation behind.
-      const files = checkMessageFiles(await formFiles(formData));
-      let conversationId = String(formData.get("conversationId") ?? "");
-      if (!conversationId) {
-        conversationId = createConversation(db, {
-          userId: auth.user.id,
-          userLabel: auth.user.email,
-          projectSlug: params.slug,
-        }).id;
-      }
-      const result = await runControllerTurn(db, {
-        conversationId,
-        text,
-        files,
-        user: {
-          id: auth.user.id,
-          email: auth.user.email,
-          name: auth.user.name,
-          orgRole: auth.user.role,
-        },
-        // Ruling 121(d): the page a user message was sent from (finding 23).
-        surface: String(formData.get("surface") ?? "") || null,
-        // U39-24: the reader's zone; normalized by the engine.
-        timeZone: String(formData.get("timeZone") ?? "") || null,
-        // Ruling 527: steer the working turn (the default) or queue behind it.
-        mode: sendModeOf(formData),
-      });
-      if (result.state === "refused") {
-        // U35-4 (pass 35): the refusal is in the transcript, and the door
-        // answers 409 rather than a 200 for a message nothing will answer.
-        return data(
-          { ok: false as const, error: result.reason, conversationId },
-          { status: 409 },
-        );
-      }
-      return { ok: true as const, conversationId };
-    }
-    // Ruling 527: Send now and Retract on a message still waiting.
-    const waiting = waitingMessageAction(db, intent, formData, {
-      id: auth.user.id,
-      email: auth.user.email,
-      name: auth.user.name,
-      orgRole: auth.user.role,
-    });
-    if (waiting) return waiting;
     if (intent === "kb-correction-undo") {
       // Ruling 498: the Knowledge base panel's Undo, confirmed on the page.
       // Direct, not through the controller: an undo is the recorded edit in
@@ -158,47 +99,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       );
       return { ok: result.outcome === "done", toast: result.message };
     }
-    if (intent === "interrupt") {
-      // The Live-run strip's Interrupt, confirmed on the page. The engine
-      // decides who may stop a controller turn (its owner or an org admin) and
-      // settles the turn so the transcript records that it was stopped.
-      const result = await interruptControllerTurn(
-        db,
-        {
-          conversationId: String(formData.get("conversationId") ?? ""),
-          runId: String(formData.get("runId") ?? ""),
-        },
-        { userId: auth.user.id, label: auth.user.email },
-      );
-      return {
-        ok: true as const,
-        toast:
-          result.outcome === "interrupted"
-            ? "Turn interrupted. The transcript records that it was stopped."
-            : "That turn had already ended.",
-      };
-    }
-    if (intent === "delete-conversation") {
-      // Ruling 525: the rail's Delete, confirmed on the page. The engine
-      // decides who may (its starter, an org admin, or a holder of
-      // `delete-controller-conversations` here), stops a running turn and
-      // purges what the turns logged. Only this board's and its tasks'
-      // threads: another scope's id is not found.
-      const conversationId = String(formData.get("conversationId") ?? "");
-      deleteControllerConversation(
-        db,
-        { conversationId, projectSlug: params.slug },
-        { userId: auth.user.id, label: auth.user.email },
-      );
-      // The thread on screen is gone, and its URL would now answer 404: land
-      // where a bare visit does (U33-8), in place of the entry that named it.
-      if (String(formData.get("open") ?? "") === conversationId) {
-        const page = `/projects/${encodeURIComponent(params.slug)}/controller`;
-        return replace(formData.get("all") === "1" ? `${page}?all=1` : page);
-      }
-      return { ok: true as const, toast: "Conversation deleted." };
-    }
-    return data({ ok: false as const, error: "Unknown action." }, { status: 400 });
+    return await controllerPageAction(db, intent, formData, auth.user, params.slug);
   } catch (cause) {
     return appErrorResponse(cause);
   }
