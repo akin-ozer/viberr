@@ -21,6 +21,86 @@ import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 
+/** The Codex thread options + CLI options these tests read. `config` is the
+ *  SDK's own recursive `--config` value, so a leaf is decoded where read. */
+interface CodexCapture {
+  thread: {
+    model?: string;
+    sandboxMode?: string;
+    workingDirectory?: string;
+    networkAccessEnabled?: boolean;
+    webSearchMode?: string;
+  };
+  env?: Record<string, string>;
+  config?: CodexOptions["config"];
+}
+
+async function drain(): Promise<void> {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+}
+
+/** Start the SAME spec on both real adapters; return what each SDK was handed. */
+async function startOnBoth(
+  spec: Omit<RunSpec, "backend">,
+): Promise<{ claude: ClaudeQueryOptions; codex: CodexCapture }> {
+  let claude: ClaudeQueryOptions = {};
+  const codex: CodexCapture = { thread: {} };
+
+  const codexFactory: CodexFactory = (options) => {
+    codex.env = options?.env;
+    codex.config = options?.config;
+    const thread: ReturnType<CodexClient["startThread"]> = {
+      id: "thread-parity",
+      async runStreamed() {
+        const events = (async function* (): AsyncGenerator<ThreadEvent> {
+          yield {
+            type: "turn.completed",
+            usage: {
+              input_tokens: 1,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 1,
+              reasoning_output_tokens: 0,
+            },
+          };
+        })();
+        return { events };
+      },
+    };
+    const client: CodexClient = {
+      startThread: (opts) => {
+        Object.assign(codex.thread, opts ?? {});
+        return thread;
+      },
+      resumeThread: (_id, opts) => {
+        Object.assign(codex.thread, opts ?? {});
+        return thread;
+      },
+    };
+    return client;
+  };
+
+  const adapters = createAdapters({
+    claudeQueryFn: (params) => {
+      claude = params.options ?? {};
+      return fakeClaudeQuery({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        num_turns: 1,
+        usage: {},
+      });
+    },
+    codexFactory,
+  });
+
+  const sink = { onLine: () => {}, onExit: () => {} };
+  adapters.claude.start({ ...spec, backend: "claude" }, sink);
+  adapters.codex.start({ ...spec, backend: "codex" }, sink);
+  await drain();
+  return { claude, codex };
+}
+
 describe("runtime-registry", () => {
   const RESTORE: Record<string, string | undefined> = {};
   function setEnv(key: string, value: string): void {
@@ -126,62 +206,20 @@ describe("runtime-registry", () => {
     setEnv("CODEX_SQLITE_HOME", "/ambient/codex-state");
     setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
 
-    let claudeEnv: Record<string, string> | undefined;
-    let codexEnv: Record<string, string> | undefined;
-    const adapters = createAdapters({
-      claudeQueryFn: (params) => {
-        claudeEnv = params.options?.env;
-        return fakeClaudeQuery({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          num_turns: 1,
-          usage: {},
-        });
-      },
-      codexFactory: (options) => {
-        codexEnv = options?.env;
-        const thread: ReturnType<CodexClient["startThread"]> = {
-          id: "thread-hygiene",
-          async runStreamed() {
-            const events = (async function* (): AsyncGenerator<ThreadEvent> {
-              yield {
-                type: "turn.completed",
-                usage: {
-                  input_tokens: 1,
-                  cached_input_tokens: 0,
-                  cache_write_input_tokens: 0,
-                  output_tokens: 1,
-                  reasoning_output_tokens: 0,
-                },
-              };
-            })();
-            return { events };
-          },
-        };
-        return { startThread: () => thread, resumeThread: () => thread };
-      },
-    });
-
-    const spec: RunSpec = {
+    const { claude, codex } = await startOnBoth({
       runId: "run_hygiene",
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
       threadId: "primary",
       role: "Primary specialist",
       kind: "primary",
-      backend: "claude",
       model: "sonnet",
       prompt: "hello",
       workdir: "/tmp",
       autonomous: true,
-    };
-    const sink = { onLine: () => {}, onExit: () => {} };
-    adapters.claude.start(spec, sink);
-    adapters.codex.start({ ...spec, backend: "codex" }, sink);
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+    });
 
-    for (const env of [claudeEnv, codexEnv]) {
+    for (const env of [claude.env, codex.env]) {
       expect(env?.PATH).toBeTruthy();
       expect(env?.VIBERR_CLAUDE_TEST_MARKER).toBe("present");
       // Nothing the deployment happens to hold reaches a child.
@@ -296,62 +334,20 @@ describe("runtime-registry", () => {
     setEnv("VIBERR_BROWSER_EXECUTABLE", "/usr/bin/chromium");
     setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
 
-    let claudeEnv: Record<string, string> | undefined;
-    let codexEnv: Record<string, string> | undefined;
-    const adapters = createAdapters({
-      claudeQueryFn: (params) => {
-        claudeEnv = params.options?.env;
-        return fakeClaudeQuery({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          num_turns: 1,
-          usage: {},
-        });
-      },
-      codexFactory: (options) => {
-        codexEnv = options?.env;
-        const thread: ReturnType<CodexClient["startThread"]> = {
-          id: "thread-app-config",
-          async runStreamed() {
-            const events = (async function* (): AsyncGenerator<ThreadEvent> {
-              yield {
-                type: "turn.completed",
-                usage: {
-                  input_tokens: 1,
-                  cached_input_tokens: 0,
-                  cache_write_input_tokens: 0,
-                  output_tokens: 1,
-                  reasoning_output_tokens: 0,
-                },
-              };
-            })();
-            return { events };
-          },
-        };
-        return { startThread: () => thread, resumeThread: () => thread };
-      },
-    });
-
-    const spec: RunSpec = {
+    const { claude, codex } = await startOnBoth({
       runId: "run_app_config",
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
       threadId: "primary",
       role: "Primary specialist",
       kind: "primary",
-      backend: "claude",
       model: "sonnet",
       prompt: "hello",
       workdir: "/tmp",
       autonomous: true,
-    };
-    const sink = { onLine: () => {}, onExit: () => {} };
-    adapters.claude.start(spec, sink);
-    adapters.codex.start({ ...spec, backend: "codex" }, sink);
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+    });
 
-    for (const env of [claudeEnv, codexEnv]) {
+    for (const env of [claude.env, codex.env]) {
       expect(env).toBeTruthy();
       expect(env?.PATH).toBeTruthy();
       expect(env?.VIBERR_CLAUDE_TEST_MARKER).toBe("present");
@@ -405,86 +401,6 @@ describe("runtime-registry", () => {
  * which needs a real repo, real PRs and 20 minutes of provider time.
  */
 describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () => {
-  /** The Codex thread options + CLI options these tests read. `config` is the
-   *  SDK's own recursive `--config` value, so a leaf is decoded where read. */
-  interface CodexCapture {
-    thread: {
-      model?: string;
-      sandboxMode?: string;
-      workingDirectory?: string;
-      networkAccessEnabled?: boolean;
-      webSearchMode?: string;
-    };
-    env?: Record<string, string>;
-    config?: CodexOptions["config"];
-  }
-
-  async function drain(): Promise<void> {
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
-  }
-
-  /** Start the SAME spec on both real adapters; return what each SDK was handed. */
-  async function startOnBoth(
-    spec: Omit<RunSpec, "backend">,
-  ): Promise<{ claude: ClaudeQueryOptions; codex: CodexCapture }> {
-    let claude: ClaudeQueryOptions = {};
-    const codex: CodexCapture = { thread: {} };
-
-    const codexFactory: CodexFactory = (options) => {
-      codex.env = options?.env;
-      codex.config = options?.config;
-      const thread: ReturnType<CodexClient["startThread"]> = {
-        id: "thread-parity",
-        async runStreamed() {
-          const events = (async function* (): AsyncGenerator<ThreadEvent> {
-            yield {
-              type: "turn.completed",
-              usage: {
-                input_tokens: 1,
-                cached_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                output_tokens: 1,
-                reasoning_output_tokens: 0,
-              },
-            };
-          })();
-          return { events };
-        },
-      };
-      const client: CodexClient = {
-        startThread: (opts) => {
-          Object.assign(codex.thread, opts ?? {});
-          return thread;
-        },
-        resumeThread: (_id, opts) => {
-          Object.assign(codex.thread, opts ?? {});
-          return thread;
-        },
-      };
-      return client;
-    };
-
-    const adapters = createAdapters({
-      claudeQueryFn: (params) => {
-        claude = params.options ?? {};
-        return fakeClaudeQuery({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          num_turns: 1,
-          usage: {},
-        });
-      },
-      codexFactory,
-    });
-
-    const sink = { onLine: () => {}, onExit: () => {} };
-    adapters.claude.start({ ...spec, backend: "claude" }, sink);
-    adapters.codex.start({ ...spec, backend: "codex" }, sink);
-    await drain();
-    return { claude, codex };
-  }
-
   /** The task identity every run carries: same key, same branch checkout. */
   const PARITY_TASK = {
     runId: "run_parity",
