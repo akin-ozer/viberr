@@ -207,13 +207,6 @@ const repoResponseSchema = z
   })
   .catch({ default_branch: undefined, permissions: undefined, size: undefined });
 
-/** The optional overrides `proveAttachedCredential` accepts, named so the call
- *  below can be built one key at a time. */
-interface ProveCredentialContext {
-  dataRoot?: string;
-  fetchImpl?: typeof fetch;
-}
-
 async function probeRemoteRepo(
   token: string,
   repo: string,
@@ -794,12 +787,7 @@ async function createProjectImpl(
   // credential card affirming scopes nothing had proven. Best-effort by
   // contract — the bind has already happened, and a degraded GitHub must not
   // fail the creation.
-  // Only the overrides this caller actually has: a key present with `undefined`
-  // is not the same as an absent one to the credential prover's own defaults.
-  const proveCtx: ProveCredentialContext = {};
-  if (ctx.dataRoot) proveCtx.dataRoot = ctx.dataRoot;
-  if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
-  await proveAttachedCredential(db, slug, actor, proveCtx);
+  await proveAttachedCredential(db, slug, actor, ctx);
 
   if (repoAccess) recordRepoAccess(db, slug, repoAccess);
   recordAudit(db, {
