@@ -122,6 +122,11 @@ export interface NotificationRecord {
   waitingOnYou: boolean;
 }
 
+/** The one field the terminal-stage check reads out of a stored stage list. */
+interface StageIdOnly {
+  id: string;
+}
+
 /**
  * Live "waiting on you" reconciliation (F7-NOTIF1): a decision notification
  * waits only while the projected task still carries that KIND of pending
@@ -130,11 +135,6 @@ export interface NotificationRecord {
  * doesn't resolve locally (deleted, or a foreign soft ref) has no live decision
  * to wait on.
  */
-/** The one field the terminal-stage check reads out of a stored stage list. */
-interface StageIdOnly {
-  id: string;
-}
-
 function liveWaitingOnYou(row: NotificationRow): boolean {
   if (!isDecisionKind(row.kind)) return false;
   if (row.task_stage == null) return false; // no local task row → nothing pending

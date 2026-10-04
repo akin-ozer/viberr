@@ -169,7 +169,6 @@ const VALIDATION_BY_VALUE = new Map<string, PillDisplay>(
   Object.entries(VALIDATION_DISPLAY),
 );
 
-/** Never dotted (mock contract). Unknown values fall back to `none`. */
 /** The validation vocabulary's label alone — for surfaces that fold a pill
  *  into a "+N" overflow and need its words for the title (one vocabulary
  *  source; restating the labels elsewhere is how they drift). */
@@ -185,6 +184,7 @@ export function validationQuiet(value: string): boolean {
   return (VALIDATION_BY_VALUE.get(value) ?? VALIDATION_DISPLAY.none).quiet === true;
 }
 
+/** Never dotted (mock contract). Unknown values fall back to `none`. */
 export function ValidationPill({
   value,
   sm,

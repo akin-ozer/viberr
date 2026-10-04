@@ -41,7 +41,7 @@ export function ConfirmDialog({
   title: string;
   body: ReactNode;
   /** Ruling 419(c): a field the decision carries, such as the optional reason a
-   *  goal cancel records on the chain's history. Rendered under the body, so
+   *  knowledge-base correction's undo records. Rendered under the body, so
    *  the consequence is read before anything is typed. */
   children?: ReactNode;
   /** Names the outcome, the way the hand-written dialogs do ("Remove stage",

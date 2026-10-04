@@ -593,6 +593,13 @@ const PR_REVIEW_VALUES = [
 ] as const;
 export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
 
+/** Ruling 236: the cap on `pr.paths.changed`. A PR touching more files than
+ *  this records the first `PR_PATHS_MAX` and sets `truncated`, which the
+ *  overlap read treats as "this list may be short" rather than as the whole
+ *  diff. Chosen to cover any review-sized change while bounding what a
+ *  hand-edited file can put in memory. */
+export const PR_PATHS_MAX = 300;
+
 /**
  * P14-LV-07: the canonical `pr.mergeable` vocabulary — whether GitHub can
  * actually merge this PR, derived by the linker from the PR detail's
@@ -611,13 +618,6 @@ export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
  * indistinguishable from a credential outage. ABSENT/null means "never read",
  * exactly like `checks`/`review`.
  */
-/** Ruling 236: the cap on `pr.paths.changed`. A PR touching more files than
- *  this records the first `PR_PATHS_MAX` and sets `truncated`, which the
- *  overlap read treats as "this list may be short" rather than as the whole
- *  diff. Chosen to cover any review-sized change while bounding what a
- *  hand-edited file can put in memory. */
-export const PR_PATHS_MAX = 300;
-
 const PR_MERGEABLE_VALUES = ["clean", "conflicting", "unknown"] as const;
 export type PrMergeable = (typeof PR_MERGEABLE_VALUES)[number];
 
@@ -813,16 +813,6 @@ export function unpushedRevisionOf(
 }
 
 /**
- * Ruling 135 — why an UNPUSHED delivered revision blocks acceptance, or null.
- * Ranked ABOVE `conflictingPrBlockedReason` by every consumer: `mergeable:
- * conflicting` describes the OLD head, and the fact the person can act on is
- * that the delivered revision is not on the pull request. The remedy is to
- * deliver ("push"), never to rebase: a behind or absent remote reaches the PR
- * by a plain push; a diverged remote needs the history resolved first, and the
- * sentence names the act that resolves it (ruling 321) rather than asserting
- * that one exists.
- */
-/**
  * Ruling 321 — the one act that resolves a diverged branch, said once.
  *
  * Five separate sentences told a person to "resolve the branch history" and
@@ -845,6 +835,16 @@ export const DIVERGED_BRANCH_REMEDY =
   "amend: a branch a pull request tracks has published commits, and rewriting them is what " +
   "diverges it.";
 
+/**
+ * Ruling 135 — why an UNPUSHED delivered revision blocks acceptance, or null.
+ * Ranked ABOVE `conflictingPrBlockedReason` by every consumer: `mergeable:
+ * conflicting` describes the OLD head, and the fact the person can act on is
+ * that the delivered revision is not on the pull request. The remedy is to
+ * deliver ("push"), never to rebase: a behind or absent remote reaches the PR
+ * by a plain push; a diverged remote needs the history resolved first, and the
+ * sentence names the act that resolves it (ruling 321) rather than asserting
+ * that one exists.
+ */
 export function unpushedRevisionBlockedReason(
   pr: PrRef | null | undefined,
   currentRevisionSha: string | null,

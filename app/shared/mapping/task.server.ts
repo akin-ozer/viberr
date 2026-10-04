@@ -443,16 +443,6 @@ function unaccountedChecks(checks: PrChecks): number {
 }
 
 /**
- * Null when there is nothing honest to draw: no PR, GitHub never read (the
- * `checks` key is absent — see the schema), or the head commit genuinely ran no
- * checks (`total: 0`, i.e. the repo has no CI). "Zero checks" must not render as
- * a green passing pill.
- *
- * Neither may runs nobody could read: `passing` is reserved for a summary where
- * every one of `total` runs was counted and concluded well. The precedence is
- * the worst TRUE statement first — failing, then still-running, then unknown.
- */
-/**
  * Ruling 276 (pass 37, F37-109): has GitHub's check state ever been READ for
  * this PR?
  *
@@ -484,6 +474,16 @@ export function mapPrChecksUnread(pr: PrRef | null): PrChecksUnread | null {
   return { status: pr.checksUnread.status, message: pr.checksUnread.message, at: pr.checksUnread.at };
 }
 
+/**
+ * Null when there is nothing honest to draw: no PR, GitHub never read (the
+ * `checks` key is absent — see the schema), or the head commit genuinely ran no
+ * checks (`total: 0`, i.e. the repo has no CI). "Zero checks" must not render as
+ * a green passing pill.
+ *
+ * Neither may runs nobody could read: `passing` is reserved for a summary where
+ * every one of `total` runs was counted and concluded well. The precedence is
+ * the worst TRUE statement first — failing, then still-running, then unknown.
+ */
 export function mapPrChecks(pr: PrRef | null): PrChecksRender | null {
   const checks = pr?.checks;
   if (!checks || checks.total <= 0) return null;
