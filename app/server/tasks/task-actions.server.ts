@@ -548,14 +548,6 @@ function requireDecisionAuthority(
 
 const avatarToneRowSchema = z.object({ avatar_tone: z.string() });
 
-/** The user's DISPLAY name — what the `@operator` mention path passes as
- *  `humanCommentBy`, so the operator's reply tags a name the mention matcher
- *  knows (NEW-4: an email tag chips nothing and notifies nobody). Exported for
- *  the steered manual run, which must speak the same name. */
-export function userName(db: DatabaseSync, userId: string): string {
-  return userDisplayName(db, userId);
-}
-
 /** The user's avatar tint for a notification's `from` render; "" when the user
  *  is gone or never picked one. */
 function avatarTone(db: DatabaseSync, userId: string): string {
@@ -569,7 +561,7 @@ function humanActorRef(db: DatabaseSync, actor: TaskActor) {
   return {
     kind: "human" as const,
     userId: actor.userId,
-    nameHint: userName(db, actor.userId),
+    nameHint: userDisplayName(db, actor.userId),
   };
 }
 
@@ -958,7 +950,7 @@ export async function createTask(
       projectSlug: input.projectSlug,
       recipientUserId: namedOwnerId,
       actor: creator,
-      actorName: userName(db, creator.userId),
+      actorName: userDisplayName(db, creator.userId),
       change: { kind: "seated_at_creation", taskKey: key },
       // The creation's `assign` event carries the file's own `now`.
       eventAt: now,
@@ -1947,7 +1939,7 @@ export async function appendComment(
   // are not even looked up.
   let mentionedUserIds: string[] = [];
   if (text.includes("@")) {
-    const actorName = userName(db, actor.userId);
+    const actorName = userDisplayName(db, actor.userId);
     mentionedUserIds = await stampNotifiedRecipients(
       db,
       taskRef(ctx, input.projectSlug, input.taskKey),
@@ -2542,7 +2534,7 @@ export async function commentToAgent(
     };
   }
 
-  const commenterName = userName(db, actor.userId);
+  const commenterName = userDisplayName(db, actor.userId);
 
   // 3b. `@operator` → run the OPERATOR (a governed run), not a specialist. The
   //     human's comment is already on the timeline (appended above), so the
@@ -5243,7 +5235,7 @@ export async function deliverDeferredMention(
     mine.length === 1
       ? oldest.text
       : mine
-          .map((m) => (authors.size > 1 ? `${userName(db, m.userId)}: ${m.text}` : m.text))
+          .map((m) => (authors.size > 1 ? `${userDisplayName(db, m.userId)}: ${m.text}` : m.text))
           .join("\n\n");
   logger.info("delivering the @mention(s) refused while the agent was running", {
     projectSlug: input.projectSlug,
@@ -5262,7 +5254,7 @@ export async function deliverDeferredMention(
     },
     // The person who has been waiting longest is the one the agent is told to
     // tag back.
-    { userId: oldest.userId, label: userName(db, oldest.userId) },
+    { userId: oldest.userId, label: userDisplayName(db, oldest.userId) },
     ctx,
   );
   // Ruling 211(b): the caller needs to know a delivery was OWED, not only
@@ -7219,9 +7211,9 @@ export async function setOwner(
     text =
       "Took task ownership. The owner is the human reviewer and acceptance authority for this task.";
   } else if (isTake) {
-    text = `Took over task ownership from **${userName(db, currentOwnerId!)}**. The owner is the human reviewer and acceptance authority.`;
+    text = `Took over task ownership from **${userDisplayName(db, currentOwnerId!)}**. The owner is the human reviewer and acceptance authority.`;
   } else {
-    text = `Handed task ownership to **${userName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
+    text = `Handed task ownership to **${userDisplayName(db, input.targetUserId)}**. They hold review & acceptance for this task now.`;
   }
 
   const event = ownerAssignEvent(db, actor, text);
@@ -7243,7 +7235,7 @@ export async function setOwner(
   // displaced owner lost the credential principal role, the review duty and
   // the acceptance authority in silence, and the audit row named the wrong
   // person as the one told (pass 34 review).
-  const actorName = userName(db, actor.userId);
+  const actorName = userDisplayName(db, actor.userId);
   const notified = notifyOwnerSeatChange(db, {
     projectSlug: input.projectSlug,
     recipientUserId: input.targetUserId,
@@ -7332,7 +7324,7 @@ export async function releaseOwner(
   // is the server half, read by exactly the same humans.
   const text = isSelf
     ? "Released task ownership. Review & acceptance stall until another member takes the seat."
-    : `Released **${userName(db, currentOwnerId)}** from task ownership (admin). The seat is open to any contributor or above.`;
+    : `Released **${userDisplayName(db, currentOwnerId)}** from task ownership (admin). The seat is open to any contributor or above.`;
 
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
@@ -7355,7 +7347,7 @@ export async function releaseOwner(
         projectSlug: input.projectSlug,
         recipientUserId: currentOwnerId,
         actor,
-        actorName: userName(db, actor.userId),
+        actorName: userDisplayName(db, actor.userId),
         change: { kind: "admin_released", taskKey: input.taskKey },
         eventAt: event.occurredAt,
       });
@@ -9384,7 +9376,7 @@ async function recordPushedHead(
   if (!input.headSha) return;
   const humanUserId =
     !ctx.operatorAuthorized && input.actor.userId ? input.actor.userId : null;
-  const nameHint = humanUserId ? userName(db, humanUserId) : null;
+  const nameHint = humanUserId ? userDisplayName(db, humanUserId) : null;
   const actor: FileActorRef = ctx.operatorAuthorized
     ? { kind: "operator" }
     : humanUserId
@@ -11822,7 +11814,7 @@ export async function resolvePacket(
           `Only a signed-in person can accept ${key} without the containment check.`,
         );
       }
-      const waiverLabel = userName(db, waiverUserId) ?? "";
+      const waiverLabel = userDisplayName(db, waiverUserId) ?? "";
       event = {
         occurredAt: now,
         type: "transition",
@@ -13455,7 +13447,7 @@ export async function requestPacketMaintainerDecision(
 
   // Notification `from` is an ActorRender (a render shape), not the FileActorRef
   // the timeline event carries — build the human render when we have a user id.
-  const fromName = actor.userId ? userName(db, actor.userId) : ownerLabel;
+  const fromName = actor.userId ? userDisplayName(db, actor.userId) : ownerLabel;
   const notice: TaskWatcherNotice = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -15837,7 +15829,7 @@ export async function applyRecommendation(
       profileId: rec.profileId,
       // Display name, not `actor.label` (the email) — the run's report tags
       // the applying human, and only a display name notifies (R21-9).
-      triggeredByName: userName(db, actor.userId),
+      triggeredByName: userDisplayName(db, actor.userId),
       triggeredByUserId: actor.userId,
     };
     if (rec.prompt?.trim()) dispatch.directive = rec.prompt.trim();

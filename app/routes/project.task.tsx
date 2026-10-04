@@ -57,7 +57,6 @@ import {
   setTaskMetadata,
   transitionStage,
   updateTaskGoal,
-  userName,
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { setTasksEpic } from "~/server/tasks/epic-actions.server";
@@ -85,6 +84,7 @@ import {
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import {
   createReconcileBehindByLookup,
@@ -1250,7 +1250,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // The DISPLAY name, exactly as the @operator steer path resolves it —
         // the run's report tags "@<name>", and only a known display name chips
         // and notifies (R21-9's live catch: `actor.label` is the email).
-        const dispatcherName = userName(db, actor.userId);
+        const dispatcherName = userDisplayName(db, actor.userId);
         const dispatch: Parameters<typeof startAgentRun>[1] = {
           projectSlug,
           taskKey,
@@ -1456,7 +1456,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // the operator tags "@<name>" in its reply, and only a known display
           // name chips and notifies (NEW-4; live-caught: `actor.label` is the
           // email, and "@arda@viberr.dev" notified nobody).
-          operatorInput.humanCommentBy = userName(db, actor.userId);
+          operatorInput.humanCommentBy = userDisplayName(db, actor.userId);
         }
         const started = await runOperator(db, operatorInput);
         // Record the steer as an @operator timeline comment ONLY once the run is
@@ -1540,7 +1540,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // label becomes the fired run's triggerer tag and the "by <name>" row.
         const sched = await scheduleTaskAction(db, schedInput, {
           userId: actor.userId,
-          label: userName(db, actor.userId),
+          label: userDisplayName(db, actor.userId),
         });
         return {
           ok: true as const,

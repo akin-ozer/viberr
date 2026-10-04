@@ -213,9 +213,9 @@ import {
   transitionStage,
   updateTaskGoal,
   updateTaskTitle,
-  userName,
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import {
@@ -2663,7 +2663,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         );
         const summary = getTaskSummary(db, slug, key);
         if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
-        const text = `${prose(args.text).trim()}\n\n_Posted by the controller for ${userName(db, user.id)}._`;
+        const text = `${prose(args.text).trim()}\n\n_Posted by the controller for ${userDisplayName(db, user.id)}._`;
         await postAgentComment(db, { dataRoot }, {
           projectSlug: slug,
           taskKey: key,
@@ -2957,7 +2957,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (!mayRunAgents(slug, "run agents through the controller")) {
             return "[denied] Running agents needs the maintainer role (or project admin) in this project.";
           }
-          const display = userName(db, user.id);
+          const display = userDisplayName(db, user.id);
           // Ruling 263 (R21-9's law): the directive goes on the record as the
           // person's own comment, addressed to the agent it is for.
           const recordDirective = (handle: string, prompt: string) =>

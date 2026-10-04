@@ -143,9 +143,9 @@ import {
   markWaitingAgent,
   reprojectTask,
   taskRef,
-  userName,
   type TaskMutationContext,
 } from "~/server/tasks/task-actions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { RUN_PHASE } from "./adapter.server";
 import type { RealBackend } from "./runtime-registry.server";
 import {
@@ -2009,7 +2009,7 @@ export async function runOperator(
   } else if ((input.trigger ?? "manual") === "manual" && input.actor) {
     const byName =
       input.humanCommentBy ??
-      (input.actor.userId ? userName(db, input.actor.userId) : null);
+      (input.actor.userId ? userDisplayName(db, input.actor.userId) : null);
     await liftHoldForRun(db, ctx, input.projectSlug, input.taskKey, {
       kind: "operator-run",
       trigger: "manual",
