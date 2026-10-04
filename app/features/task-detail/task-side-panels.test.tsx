@@ -11,6 +11,7 @@ import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
+import { taskDetail } from "../../../test-support/task-detail";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -21,12 +22,6 @@ import { Icon, type IconName } from "~/ui/icon";
  */
 
 afterEach(cleanup);
-
-const STAGES = [
-  { id: "triage", name: "Triage", color: "slate" },
-  { id: "review", name: "Review", color: "blue" },
-  { id: "done", name: "Done", color: "green" },
-];
 
 const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: false,
@@ -39,57 +34,13 @@ const ACCEPTANCE: AcceptanceAffordance = {
 };
 
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
-  return {
-    projectSlug: "viberr-core",
-    key: "VIB-151",
-    title: "Compress long-running task timelines",
-    stage: "review",
-    readiness: "ready",
-    displayReadiness: "ready",
-    waiting: "agent",
-    urgent: false,
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    archived: false,
-    validation: "healthy",
-    blockReason: null,
-    continuity: null,
-    owner: null,
-    specialist: null,
-    reviewers: [],
-    operator: null,
-    branch: "vib-151",
-    repo: "akin-ozer/viberr",
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
+  return taskDetail({
     goal: "Keep the timeline readable.",
-    packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: null,
     // The file-write stamp is deliberately FRESH in every fixture here: it is
     // the value the panel must NOT be reading.
     updatedAt: new Date().toISOString(),
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-151/task.md",
-    timeline: [],
-    diagnostics: [],
-    stages: STAGES,
-    workflow: [],
-    lastActivityAt: null,
-    atAcceptanceBoundary: false,
-    quiet: false,
     ...patch,
-  };
+  });
 }
 
 function renderPanel(patch: Partial<TaskDetail> = {}, myRole = "viewer") {
@@ -100,7 +51,7 @@ function renderPanel(patch: Partial<TaskDetail> = {}, myRole = "viewer") {
       Component: () => (
         <CurrentStatePanel
           task={task}
-          stage={STAGES[1]}
+          stage={task.stages[1]}
           meId="u-arda"
           myRole={myRole}
           archived={task.archived === true}

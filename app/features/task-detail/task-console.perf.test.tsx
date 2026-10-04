@@ -15,6 +15,7 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import { TaskDetailPage } from "./task-detail-page";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { createRenderCounter, observeMutations } from "../../../test-support/render-counter";
+import { taskDetail } from "../../../test-support/task-detail";
 
 /**
  * Ruling 457, journey `live-run`: what the browser does per console line, per
@@ -190,58 +191,20 @@ const OPERATOR = runView(
 );
 
 function detail(): TaskDetail {
-  return {
-    projectSlug: SLUG,
-    key: KEY,
-    title: "Compress long-running task timelines",
+  return taskDetail({
     stage: "impl",
-    readiness: "ready",
     displayReadiness: "agent_working",
-    waiting: "agent",
-    urgent: false,
     priority: "high",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    archived: false,
-    validation: "healthy",
-    continuity: null,
-    blockReason: null,
-    atAcceptanceBoundary: false,
     owner: { kind: "human", userId: "u-arda", name: "Arda Kaya", initials: "AK", tone: "" },
-    specialist: null,
-    reviewers: [],
-    operator: null,
-    branch: "vib-151",
-    repo: "akin-ozer/viberr",
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
-    goal: "Keep the timeline readable on long tasks.",
-    packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
     createdAt: "2026-09-20T08:00:00.000Z",
     updatedAt: "2026-09-24T09:00:00.000Z",
-    boardRank: null,
-    filePath: `projects/${SLUG}/tasks/${KEY}/task.md`,
-    timeline: [],
-    diagnostics: [],
     stages: [
       { id: "triage", name: "Triage", color: "slate" },
       { id: "impl", name: "In Progress", color: "violet" },
       { id: "done", name: "Done", color: "green" },
     ],
-    workflow: [],
     lastActivityAt: "2026-09-24T09:00:00.000Z",
-    quiet: false,
-  };
+  });
 }
 
 function pageProps(rows: 40 | 400): PageProps {
