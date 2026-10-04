@@ -236,7 +236,7 @@ export default function Board({ loaderData }: Route.ComponentProps) {
       // U33-2: the remembered repository probe, so a project pointed at a
       // repository GitHub will not serve says so where the work happens instead
       // of only on its GitHub page.
-      repoAccess={loaderData.repoAccess ?? undefined}
+      repoAccess={loaderData.repoAccess}
       epics={loaderData.epics}
     />
   );

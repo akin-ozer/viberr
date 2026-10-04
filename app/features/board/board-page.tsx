@@ -2094,10 +2094,10 @@ export function BoardPage({
    * U33-2: GitHub's own answer for this project's repository, the last one
    * recorded (`readRepoHealth`, ruling 517). The board must NOT reach for
    * GitHub itself — the check is a live `GET /repos/:repo`, and project-scope
-   * SSE revalidates this view on every task event. `undefined` means "nobody
+   * SSE revalidates this view on every task event. Null or absent means "nobody
    * has established it", which the banner reads as silence, never as health.
    */
-  repoAccess?: RepoAccessResult;
+  repoAccess?: RepoAccessResult | null;
   /** Ruling 503: the project's epics, for the epic filter and the New-task
    *  Epic pick. */
   epics?: readonly EpicOption[];
