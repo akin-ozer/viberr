@@ -28,13 +28,10 @@ import {
 import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
-  operatorDispatchAgent,
   operatorFlagContextConflict,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
-  operatorCancelSchedule,
-  operatorScheduleRun,
   operatorPostComment,
   operatorRelayToTask,
   operatorTakeFromTask,
@@ -44,6 +41,11 @@ import {
   operatorTransitionStage,
   operatorWriteCompletionPacket,
 } from "./operator-actions.server";
+import {
+  operatorDispatchAgent,
+  operatorCancelSchedule,
+  operatorScheduleRun,
+} from "./operator-dispatch.server";
 import {
   OPERATOR_TIMELINE_DEFAULT,
   OPERATOR_TIMELINE_MAX,

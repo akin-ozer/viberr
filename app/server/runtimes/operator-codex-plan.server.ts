@@ -23,16 +23,13 @@ import {
 } from "~/server/tasks/operator-packets.server";
 import {
   operatorAcceptCompletion,
-  operatorCancelSchedule,
   operatorCorrectKnowledgeDoc,
   operatorDeliverForReview,
-  operatorDispatchAgent,
   operatorEditComment,
   operatorFlagContextConflict,
   operatorLeaseFiles,
   operatorPostComment,
   operatorRelayToTask,
-  operatorScheduleRun,
   operatorSetDependencies,
   operatorSetEpic,
   operatorSetGoal,
@@ -40,6 +37,11 @@ import {
   operatorTransitionStage,
   operatorWriteCompletionPacket,
 } from "~/server/tasks/operator-actions.server";
+import {
+  operatorCancelSchedule,
+  operatorDispatchAgent,
+  operatorScheduleRun,
+} from "~/server/tasks/operator-dispatch.server";
 import {
   deliverGate,
   dispatchGate,

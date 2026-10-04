@@ -22,7 +22,7 @@ import {
   requireProjectAuthority,
   requireProjectMutable,
 } from "~/server/auth/project-authority.server";
-import type { operatorDispatchAgent } from "./operator-actions.server";
+import type { operatorDispatchAgent } from "./operator-dispatch.server";
 import type { DependencyReleasePayload } from "~/shared/dependencies";
 import {
   resolveStageRoles,

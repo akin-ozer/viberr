@@ -64,7 +64,6 @@ import {
 import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
-  operatorDispatchAgent,
   operatorPostComment,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
@@ -73,6 +72,7 @@ import {
   operatorTransitionStage,
   operatorWriteCompletionPacket,
 } from "./operator-actions.server";
+import { operatorDispatchAgent } from "./operator-dispatch.server";
 import {
   operatorOpenPacket,
   operatorResolvePacket,
