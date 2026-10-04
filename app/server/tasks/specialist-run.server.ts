@@ -248,7 +248,7 @@ export interface ResolvedSpecialist {
   mcps: string[];
   /** The profile's long persona/instructions (template body, D6) — the SINGLE
    *  persona source. F10-30 removed the `agents/definitions/<id>.md` override
-   *  (`buildSpecialistPersona` documents the removal); this comment still
+   *  (`buildSpecialistPromptPrefix` documents the removal); this comment still
    *  promised it (B-AG5). */
   definition: string;
   /** The deployment's stored capability grants — drive run-time tool
@@ -3217,13 +3217,6 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
   const missingSection = missingResourcesSection(missing);
   if (missingSection) dynamic.push(missingSection);
   return { static: parts, dynamic };
-}
-
-/** The persona as one document — the static block and the dynamic tail in
- *  order, exactly what Codex receives as `developer_instructions` and what a
- *  test reads when it asserts on the prompt as text. */
-export function buildSpecialistPersona(input: SpecialistPersonaInput): string {
-  return joinedPrompt(buildSpecialistPromptPrefix(input));
 }
 
 /** Ruling 371: the PR the anchor names, with its GitHub URL when the project's

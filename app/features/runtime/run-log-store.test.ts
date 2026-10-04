@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLiveRunLogStore, type ConsoleThreadInput } from "./run-log-store";
 import {
-  NO_RUN_CACHE,
   RUN_LOG_WINDOW_LINES,
   runBoundaryLine,
   type LogLine,
   type RunLiveFacts,
   type RunLogWindow,
 } from "./runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 
 /**
  * The run-log store on its own (ruling 457): what it asks `/resources/run-log`

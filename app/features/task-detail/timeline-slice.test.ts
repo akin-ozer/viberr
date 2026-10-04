@@ -25,7 +25,6 @@ describe("timelineSlice over the whole history", () => {
     const slice = timelineSlice(events, events.length, 30);
     expect(slice.events).toHaveLength(30);
     expect(slice.events[0]).toEqual({ id: 0 }); // newest-first order kept
-    expect(slice.total).toBe(75);
     expect(slice.hasMore).toBe(true);
     expect(slice.remaining).toBe(45);
     expect(slice.nextLimit).toBe(60);

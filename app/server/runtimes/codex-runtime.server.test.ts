@@ -1231,7 +1231,7 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
     // R18-5: granted skills reach a CLAUDE run through the SDK's native skills
     // mechanism. Codex has no equivalent to switch on, so its whole skills
     // channel stays severed and the grants ride the system prompt as text
-    // (built upstream in `buildSpecialistPersona`). If a future edit forwarded
+    // (built upstream in `buildSpecialistPromptPrefix`). If a future edit forwarded
     // `spec.skills` into this config it would be re-opening the channel that
     // re-installs the CLI's own five bundled `.system` skills into any home.
     const withSkills = await configWith({

@@ -13,8 +13,9 @@ import {
   type RunInputs,
   type RunView,
 } from "./runtime-types";
-import { NO_RUN_CACHE } from "./runtime-types";
-import { createLiveRunLogStore, staticRunLogStore, type OlderLogState } from "./run-log-store";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
+import { createLiveRunLogStore, type OlderLogState } from "./run-log-store";
+import { staticRunLogStore } from "../../../test-support/static-run-log-store";
 
 /** A console line as a test hands it over; the key defaults to its position. */
 type StreamedLine = { display: LogLine; raw: string | null; key?: string };

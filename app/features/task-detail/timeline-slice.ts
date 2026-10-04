@@ -20,7 +20,6 @@ export function clampTimelineLimit(raw: string | null | undefined): number {
 
 export interface TimelineSlice<T> {
   events: T[];
-  total: number;
   hasMore: boolean;
   /** How many older events are hidden (0 when !hasMore). */
   remaining: number;
@@ -45,7 +44,6 @@ export function timelineSlice<T>(events: T[], total: number, limit: number): Tim
   const hasMore = total > shown;
   return {
     events: events.slice(0, shown),
-    total,
     hasMore,
     remaining: total - shown,
     nextLimit: hasMore ? Math.min(total, shown + TIMELINE_SLICE_STEP) : shown,

@@ -593,7 +593,7 @@ async function reconcileTaskUnlocked(
   // (owner ruling R17-1 — keep "ahead"), but honestly. Only a PR whose head
   // actually differs from the reviewed revision needs the extra compare call; a
   // "diverged" head (delivered revision NOT an ancestor) is a REFUSAL handled by
-  // `acceptancePrHeadMismatch`, so we record drift only for a clean "ahead".
+  // `acceptancePrHeadCheck`, so we record drift only for a clean "ahead".
   const reviewedSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
   // F21-17 (residual): drift is only MEASURABLE on a live PR — a settled one
   // gets no compare call, deliberately. But unlike `review` or `mergeable`, the

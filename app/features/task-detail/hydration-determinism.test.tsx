@@ -10,9 +10,11 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
+import { taskDetail } from "../../../test-support/task-detail";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
-import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
+import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import type { DeployedSpecialistView } from "./execution-profile";
 import type { RecommendationView } from "./operator-recommendations";
 
@@ -67,12 +69,6 @@ const VIEWER_NOW = "2026-07-04T00:00:01.000Z";
 const SYSTEM_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /* ----------------------------------------------------------- fixtures */
-
-const STAGES = [
-  { id: "triage", name: "Triage", color: "slate" },
-  { id: "review", name: "Review", color: "blue" },
-  { id: "done", name: "Done", color: "green" },
-];
 
 const ARDA = { kind: "human" as const, userId: "u-arda", name: "Arda Kaya", initials: "AK", tone: "" };
 const DEVELOPER = { kind: "agent" as const, backend: "claude" as const, name: "Developer", role: "Developer" };
@@ -135,55 +131,20 @@ const TIMELINE: TimelineEventRender[] = [
 ];
 
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
-  return {
-    projectSlug: "viberr-core",
-    key: "VIB-151",
-    title: "Compress long-running task timelines",
-    stage: "review",
-    readiness: "ready",
-    displayReadiness: "ready",
+  return taskDetail({
     waiting: "human",
-    urgent: false,
     priority: "high",
     labels: ["runtime"],
     dueDate: "2026-07-03",
-    blockedBy: [],
-    archived: false,
-    validation: "healthy",
-    continuity: null,
-    blockReason: null,
-    atAcceptanceBoundary: false,
-    owner: { kind: "human", userId: "u-arda", name: "Arda Kaya", initials: "AK", tone: "" },
-    specialist: null,
-    reviewers: [],
-    operator: null,
-    branch: "vib-151",
-    repo: "akin-ozer/viberr",
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
-    goal: "Keep the timeline readable on long tasks.",
-    packet: null,
+    owner: ARDA,
     eventCount: TIMELINE.length,
     commentCount: 1,
-    diagnosticCount: 0,
     createdAt: "2026-06-30T08:00:00.000Z",
     updatedAt: "2026-07-03T23:30:00.000Z",
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-151/task.md",
     timeline: TIMELINE,
-    diagnostics: [],
-    stages: STAGES,
-    workflow: [],
     lastActivityAt: "2026-07-03T23:30:00.000Z",
-    quiet: false,
     ...patch,
-  };
+  });
 }
 
 /** A console the way a real run fills it: every line kind the panel folds,
@@ -581,44 +542,11 @@ describe.each([
     freezeClock();
     const html = await serverHtml(sighting);
 
-    /** The frame the run sink publishes per console line (`sse-event.schema.ts`). */
-    interface RunLogAppendedFrame {
-      projectSlug: string;
-      taskKey: string;
-      runId: string;
-      threadId: string;
-      seq: number;
-    }
     // The page's own live-tail plumbing, so the update takes the real path:
     // The layout's `useLiveUpdates` opens THIS EventSource in its effect, and
     // the console answers a `run.log-appended` frame on it with a
     // `/resources/run-log` tail fetch.
-    class FakeEventSource {
-      static readonly CONNECTING = 0;
-      static readonly OPEN = 1;
-      static readonly CLOSED = 2;
-      static instances: FakeEventSource[] = [];
-      readonly url: string;
-      readyState = FakeEventSource.OPEN;
-      onopen: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      private readonly listeners = new Map<string, ((event: MessageEvent) => void)[]>();
-      constructor(url: string) {
-        this.url = url;
-        FakeEventSource.instances.push(this);
-      }
-      addEventListener(type: string, listener: (event: MessageEvent) => void): void {
-        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-      }
-      close(): void {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-      emit(type: string, data: RunLogAppendedFrame): void {
-        for (const listener of this.listeners.get(type) ?? []) {
-          listener(new MessageEvent(type, { data: JSON.stringify({ data }) }));
-        }
-      }
-    }
+    FakeEventSource.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource);
     const tailRequests: string[] = [];
     const APPENDED = "Sweep finished: 12 passed. Delivering the branch.";
@@ -669,13 +597,14 @@ describe.each([
     expect(source).toBeDefined();
     expect(source!.url).toContain("task");
     await act(async () => {
-      source!.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-151",
-        runId: "run_1",
-        threadId: "primary",
-        seq: CONSOLE.length,
-      });
+      // The frame the run sink publishes per console line (`sse-event.schema.ts`).
+      source!.emit(
+        "run.log-appended",
+        "",
+        JSON.stringify({
+          data: { projectSlug: "viberr-core", taskKey: "VIB-151", runId: "run_1", threadId: "primary", seq: CONSOLE.length },
+        }),
+      );
     });
     expect(tailRequests).toHaveLength(1);
     expect(tailRequests[0]).toContain(`runId=run_1&since=${CONSOLE.length - 1}`);

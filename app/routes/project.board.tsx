@@ -58,7 +58,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // viewer's action (the single member-scoped source), so the board's
   // "Waiting on me" chip + per-card badge stop reading the project-wide
   // `waiting === "human"` enum. `waitingOnMe` is viewer-specific, so derive
-  // fresh task objects instead of mutating the ones getBoard returned — a
+  // fresh task objects instead of mutating the ones getBoardWithTasks returned — a
   // future read-model cache in board-query.server must never let one viewer's
   // annotation leak into another's board (RU #11).
   // UI-48: the board's "waiting on me" and the review queue's "Waiting on your

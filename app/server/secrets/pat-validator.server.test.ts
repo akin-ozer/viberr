@@ -6,7 +6,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
-import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { withEnv } from "../../../test-support/env";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countOpenPolicyViolations,
@@ -409,12 +409,13 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
         body: { message: "Validation Failed" },
       },
     });
-    const result = await validatePatToken(FINE, {
-      repo: REPO,
-      requiredScopes: ["repo", "pull_request:write"],
-      fetchImpl: gh.fetchImpl,
-      writeProbe: true,
-    });
+    const result = await withEnv({ VIBERR_GITHUB_WRITE_PROBE: "1" }, () =>
+      validatePatToken(FINE, {
+        repo: REPO,
+        requiredScopes: ["repo", "pull_request:write"],
+        fetchImpl: gh.fetchImpl,
+      }),
+    );
     expect(result.status).toBe("valid");
     const byId = new Map(result.scopes.map((s) => [s.id, s]));
     expect(byId.get("pull_request:write")).toMatchObject({
@@ -430,48 +431,6 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     ).toHaveLength(0);
   });
 
-  // Ruling 458(c): the env opt-in is read through `getEnv()`, which parses once
-  // per process — so the case drops the cached parse on the way in and out.
-  it("the env opt-in turns the dry-run on when the caller passes no writeProbe", async () => {
-    const gh = fakeGithubFetch({
-      "GET /user": { body: { login: "viberr-bot" } },
-      "GET /repos/akin-ozer/viberr": {
-        body: { full_name: REPO, permissions: { push: true } },
-      },
-      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
-      "POST /repos/akin-ozer/viberr/pulls": {
-        status: 422,
-        body: { message: "Validation Failed" },
-      },
-    });
-    process.env.VIBERR_GITHUB_WRITE_PROBE = "yes";
-    resetEnvCacheForTests();
-    try {
-      const result = await validatePatToken(FINE, {
-        repo: REPO,
-        requiredScopes: ["pull_request:write"],
-        fetchImpl: gh.fetchImpl,
-      });
-      expect(result.scopes[0]).toMatchObject({
-        ok: true,
-        source: "probe",
-        note: "write proven by dry-run",
-      });
-      expect(gh.callsTo("POST /repos/akin-ozer/viberr/pulls")).toHaveLength(1);
-      // An explicit `writeProbe: false` still wins over the env opt-in.
-      await validatePatToken(FINE, {
-        repo: REPO,
-        requiredScopes: ["pull_request:write"],
-        fetchImpl: gh.fetchImpl,
-        writeProbe: false,
-      });
-      expect(gh.callsTo("POST /repos/akin-ozer/viberr/pulls")).toHaveLength(1);
-    } finally {
-      delete process.env.VIBERR_GITHUB_WRITE_PROBE;
-      resetEnvCacheForTests();
-    }
-  });
-
   it("an opted-in dry-run 403 is a REFUSED write", async () => {
     const gh = fakeGithubFetch({
       "GET /user": { body: { login: "viberr-bot" } },
@@ -484,12 +443,13 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
         body: { message: "Resource not accessible by personal access token" },
       },
     });
-    const result = await validatePatToken(FINE, {
-      repo: REPO,
-      requiredScopes: ["pull_request:write"],
-      fetchImpl: gh.fetchImpl,
-      writeProbe: true,
-    });
+    const result = await withEnv({ VIBERR_GITHUB_WRITE_PROBE: "1" }, () =>
+      validatePatToken(FINE, {
+        repo: REPO,
+        requiredScopes: ["pull_request:write"],
+        fetchImpl: gh.fetchImpl,
+      }),
+    );
     expect(result.status).toBe("insufficient_scope");
     expect(result.scopes[0]).toMatchObject({
       ok: false,
@@ -681,11 +641,12 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
         body: { message: "Validation Failed" },
       },
     });
-    const result = await revalidateProjectCredential(store.db, store.slug, actor, {
-      dataRoot: store.dataRoot,
-      fetchImpl: gh.fetchImpl,
-      writeProbe: true,
-    });
+    const result = await withEnv({ VIBERR_GITHUB_WRITE_PROBE: "1" }, () =>
+      revalidateProjectCredential(store.db, store.slug, actor, {
+        dataRoot: store.dataRoot,
+        fetchImpl: gh.fetchImpl,
+      }),
+    );
     expect(result.status).toBe("revalidated");
     if (result.status === "revalidated") {
       expect(result.resolvedViolations).toHaveLength(1);

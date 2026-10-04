@@ -1562,17 +1562,13 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
  * The page's read: the instance's oversight, every backend's run count, and
  * each backend that ran, read alone (ruling 635).
  */
-export function getInsightsSummary(
-  db: DatabaseSync,
-  nowIso: string,
-  filter: InsightsFilter = {},
-): InsightsSummary {
-  const backends = backendRuns(db, filter);
+export function getInsightsSummary(db: DatabaseSync, nowIso: string): InsightsSummary {
+  const backends = backendRuns(db);
   return {
-    oversight: oversightSummary(db, filter),
+    oversight: oversightSummary(db),
     backends,
     runs: backends
       .filter((b) => b.runs > 0)
-      .map((b) => runAnalytics(db, nowIso, { ...filter, backend: b.backend })),
+      .map((b) => runAnalytics(db, nowIso, { backend: b.backend })),
   };
 }

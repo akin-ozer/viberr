@@ -14,7 +14,7 @@ import {
 } from "~/server/files/project-file.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { getBoard, listProjects } from "~/server/projections/board-query.server";
+import { getBoardWithTasks, listProjects } from "~/server/projections/board-query.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { createTask } from "~/server/tasks/task-actions.server";
@@ -201,7 +201,7 @@ describe("demo fixture", () => {
       "viberr-core",
     ]);
 
-    const board = getBoard(db, "viberr-core")!;
+    const board = getBoardWithTasks(db, "viberr-core")!.board;
     const byStage = Object.fromEntries(
       board.columns.map((c) => [c.stage.id, c.tasks.map((t) => t.key)]),
     );
@@ -219,7 +219,7 @@ describe("demo fixture", () => {
     expect(vib139.displayReadiness).toBe("merged");
 
     // Custom 3-stage board fixture (ruling 15).
-    const billing = getBoard(db, "billing-service")!;
+    const billing = getBoardWithTasks(db, "billing-service")!.board;
     expect(billing.columns.map((c) => c.stage.id)).toEqual(["todo", "doing", "done"]);
   });
 

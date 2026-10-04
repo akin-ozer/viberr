@@ -189,7 +189,7 @@ export async function runAgentGithubRead(
 }
 
 /** The run-prompt section describing `github_read`, appended by
- *  `buildSpecialistPersona` only when the tool actually mounted (Claude, real
+ *  `buildSpecialistPromptPrefix` only when the tool actually mounted (Claude, real
  *  backend, grant held) — so prompt and tool surface agree (XS-4). */
 export function githubReadPersonaSection(repo: string): string {
   return (

@@ -26,7 +26,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   forceAcceptCompletion,
   recordAgentCompletion,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   resolvePacket,
   transitionStage,
 } from "./task-actions.server";
@@ -321,10 +321,10 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(quality?.text).not.toContain("no delivered revision to bind");
 
     // …and the acceptance affordance is now OPEN for the human.
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       dataCtx(),
-    );
+    ).affordance;
     expect(affordance.blockedReason).toBeNull();
     expect(affordance.canAccept).toBe(true);
   });
@@ -484,10 +484,10 @@ describe("the verdict binds — a verification revision is minted at review time
         kind: "verified",
       },
     });
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       dataCtx(),
-    );
+    ).affordance;
     expect(affordance.blockedReason).toBeNull();
   });
 

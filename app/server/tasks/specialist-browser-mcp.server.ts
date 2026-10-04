@@ -304,7 +304,7 @@ export function attachmentsDropSection(attachmentsDir: string): string {
 /**
  * The run-prompt section for a mounted browser (owner decision b: prompt-level
  * guardrails, the same posture MCP governance takes). Appended by
- * `buildSpecialistPersona` when — and only when — the server actually mounted,
+ * `buildSpecialistPromptPrefix` when — and only when — the server actually mounted,
  * so prompt and tool surface tell the same story (XS-4).
  */
 export function browserPersonaSection(

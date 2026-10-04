@@ -221,7 +221,8 @@ let snapshot: { at: number; value: DiskSpace | null } | null = null;
  * cheap but not free, and nothing needs sub-5s resolution on a disk that fills
  * over days.
  */
-export function cachedDataRootSpace(now: number = Date.now()): DiskSpace | null {
+export function cachedDataRootSpace(): DiskSpace | null {
+  const now = Date.now();
   if (snapshot && now - snapshot.at < DISK_MEASUREMENT_TTL_MS) {
     return snapshot.value;
   }

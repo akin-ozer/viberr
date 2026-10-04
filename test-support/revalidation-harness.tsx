@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { act, render } from "@testing-library/react";
-import { vi } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, vi } from "vitest";
 import {
   createMemoryRouter,
   data,
@@ -22,6 +22,7 @@ import {
   connectSseClient,
   parseSseScope,
   publishSseEvent,
+  resetSseBrokerForTests,
   type SseConnectionHandle,
   type SseRoute,
   type SseScope,
@@ -567,4 +568,33 @@ export async function advance(ms: number): Promise<void> {
     await vi.advanceTimersByTimeAsync(ms);
   });
   await settle();
+}
+
+/** Gives every test of the file a fresh broker and a tab of its own: the
+ *  stream runs through the broker, any other fetch answers 404, and the
+ *  timers are fake. */
+export function harnessLifecycle(): void {
+  beforeEach(() => {
+    resetSseBrokerForTests();
+    BrokerEventSource.instances = [];
+    vi.stubGlobal("EventSource", BrokerEventSource);
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}", { status: 404 })));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    resetSseBrokerForTests();
+  });
+}
+
+/** A tab on `path` with its streams open and the first load behind it. */
+export async function tab(options: HarnessOptions): Promise<Harness> {
+  const harness = mountHarness(options);
+  await settle();
+  await connect();
+  await advance(1_000);
+  harness.resetCounts();
+  return harness;
 }

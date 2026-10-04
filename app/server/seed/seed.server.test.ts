@@ -80,7 +80,7 @@ describe("runSeed (clean-sheet product seed)", () => {
     await runSeed(db, { dataRoot });
 
     // The template BODY is the agent's system prompt (agents-query
-    // `effectiveProfileView.definition` → buildSpecialistPersona). Seed used to
+    // `effectiveProfileView.definition` → buildSpecialistPromptPrefix). Seed used to
     // write the 2-sentence catalog blurb there, and the boot backfill only
     // writes files that are MISSING — so on the documented install order
     // (`npm run seed` then `npm run dev`) the rich personas never reached disk.

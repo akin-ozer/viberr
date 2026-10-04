@@ -26,7 +26,7 @@ import { getReviewQueue } from "~/server/projections/review-queue.server";
 import {
   acceptanceRefusalFor,
   forceAcceptCompletion,
-  resolveAcceptanceAffordance,
+  acceptanceStanding,
   resolvePacket,
 } from "./task-actions.server";
 
@@ -208,10 +208,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     seed(store, reviewedByOther(), ACCEPT_PACKET);
 
     // The affordance every acceptance surface reads.
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.blockedReason).toBe(RULE_SENTENCE);
     expect(affordance.canAccept).toBe(false);
     // The operator's `notAcceptableReason` is the same stack.
@@ -236,17 +236,17 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, reviewedByOther({ verdicts: [approval("qa-bot"), { ...approval("reviewer"), revisionId: "rev_0", headSha: "0".repeat(40) }] }));
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
         { dataRoot: store.dataRoot },
-      ).blockedReason,
+      ).affordance.blockedReason,
     ).toBe(RULE_SENTENCE);
 
     seed(store, reviewedByOther({ verdicts: [approval("qa-bot"), approval("reviewer")] }));
-    const affordance = resolveAcceptanceAffordance(
+    const affordance = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    );
+    ).affordance;
     expect(affordance.blockedReason).toBeNull();
     expect(affordance.canAccept).toBe(true);
   });
@@ -255,10 +255,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, { stage: "review", waiting: "human", noChanges: true });
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
         { dataRoot: store.dataRoot },
-      ).blockedReason,
+      ).affordance.blockedReason,
     ).toBeNull();
   });
 
@@ -279,10 +279,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
       [reportEvent()],
     );
     // CANARY: restore `if (!rev && !fm.pr) return []` and this is null.
-    const reason = resolveAcceptanceAffordance(
+    const reason = acceptanceStanding(
       { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
       { dataRoot: store.dataRoot },
-    ).blockedReason;
+    ).affordance.blockedReason;
     expect(reason).toContain("Required reviewer Code Reviewer");
     // No sha to name, so it names what there IS to review.
     expect(reason).toContain("the work delivered on this task");
@@ -342,10 +342,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     // CANARY: key `requiredReviewerApproved` on `workRevision` again and this
     // is the refusal sentence forever.
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
         { dataRoot: store.dataRoot },
-      ).blockedReason,
+      ).affordance.blockedReason,
     ).toBeNull();
   });
 
@@ -373,10 +373,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
       [reportEvent()],
     );
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
         { dataRoot: store.dataRoot },
-      ).blockedReason,
+      ).affordance.blockedReason,
     ).toContain("Required reviewer Code Reviewer");
   });
 
@@ -396,10 +396,10 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
       },
     ]);
     expect(
-      resolveAcceptanceAffordance(
+      acceptanceStanding(
         { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
         { dataRoot: store.dataRoot },
-      ).blockedReason,
+      ).affordance.blockedReason,
     ).toBeNull();
   });
 

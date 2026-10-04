@@ -26,7 +26,7 @@ import {
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { writeProject } from "../../../test-support/test-store";
+import { MERGE_STAGE_BOARD, REVIEW_STAGE_REVIEWER, writeProject } from "../../../test-support/test-store";
 import { operatorSnapshot, type OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import { performDelivery, type TaskActionDeps } from "~/server/tasks/task-actions.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -815,28 +815,8 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
-      stages: [
-        { id: "triage", name: "Triage", color: "slate" },
-        { id: "impl", name: "In Progress", color: "violet" },
-        { id: "review", name: "Review", color: "blue" },
-        { id: "merge", name: "Merge", color: "teal" },
-        { id: "done", name: "Done", color: "green" },
-      ],
-      workflow: [
-        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
-        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
-        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
-        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
-      ],
-      agents: [
-        ...file.parsed.frontmatter.agents,
-        {
-          profileId: "reviewer",
-          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
-          extras: [],
-          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
-        },
-      ],
+      ...MERGE_STAGE_BOARD,
+      agents: [...file.parsed.frontmatter.agents, REVIEW_STAGE_REVIEWER],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
@@ -1032,28 +1012,8 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
     const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,
-      stages: [
-        { id: "triage", name: "Triage", color: "slate" },
-        { id: "impl", name: "In Progress", color: "violet" },
-        { id: "review", name: "Review", color: "blue" },
-        { id: "merge", name: "Merge", color: "teal" },
-        { id: "done", name: "Done", color: "green" },
-      ],
-      workflow: [
-        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
-        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
-        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
-        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
-      ],
-      agents: [
-        ...project.parsed.frontmatter.agents,
-        {
-          profileId: "reviewer",
-          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
-          extras: [],
-          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
-        },
-      ],
+      ...MERGE_STAGE_BOARD,
+      agents: [...project.parsed.frontmatter.agents, REVIEW_STAGE_REVIEWER],
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

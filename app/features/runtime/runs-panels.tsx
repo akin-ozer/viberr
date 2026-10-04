@@ -1695,7 +1695,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   sel: string | null;
   onSel: (id: string | null) => void;
   /** Ruling 457: the lines, their backward pages and the live tail's state
-   *  (`useRunLogStream`, or `staticRunLogStore` for a console fed by hand). */
+   *  (`useRunLogStream`; a test feeds one by hand). */
   store: RunLogStore;
   /** Retry the failed run's agent on the other backend (D4). Receives the
    *  failed run so the caller can dispatch it (run-agent + the run's own

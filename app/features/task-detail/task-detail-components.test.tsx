@@ -29,6 +29,7 @@ import {
   type TaskMemberView,
 } from "./execution-profile";
 import type { TaskRunPrincipalView } from "./run-principal-view";
+import { taskDetail, taskSummary } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
@@ -691,58 +692,16 @@ const membersFixture: TaskMemberView[] = [
   { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "violet" } },
 ];
 
-/** VIB-151 as the projection hands it over. The panels below read a handful of
- *  these fields; the rest carry the neutral values an open, un-delivered task
- *  has, so no panel branches on a field the fixture forgot. */
+/** VIB-151 before its branch exists, owned by the person named. */
 function taskFixture(ownerId: string, ownerName: string): TaskSummary {
-  return {
-    projectSlug: "viberr-core",
-    key: "VIB-151",
-    title: "Compress long-running task timelines",
-    stage: "review",
-    readiness: "ready",
-    displayReadiness: "ready",
-    waiting: "agent",
-    urgent: false,
-    priority: "normal",
-    labels: [],
-    dueDate: null,
-    blockedBy: [],
-    archived: false,
+  return taskSummary({
     validation: "none",
-    continuity: null,
-    blockReason: null,
-    atAcceptanceBoundary: false,
-    owner: {
-      kind: "human",
-      userId: ownerId,
-      name: ownerName,
-      initials: "XX",
-      tone: "",
-    },
-    specialist: null,
-    reviewers: [],
-    operator: null,
+    owner: { kind: "human", userId: ownerId, name: ownerName, initials: "XX", tone: "" },
     branch: null,
     repo: null,
-    pr: null,
-    prChecks: null,
-    prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
     goal: "Bound the timeline payload and add a Show-older affordance.",
-    packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: null,
-    updatedAt: null,
-    boardRank: null,
     filePath: "projects/viberr-core/tasks/VIB-151.md",
-  };
+  });
 }
 
 describe("ReleaseConfirm", () => {
@@ -1936,17 +1895,7 @@ describe("ExecutionProfile — the agent listbox dismisses cleanly", () => {
 const GH_HOST = "https://github.com";
 
 function traceTask(patch: Partial<TaskDetail> = {}): TaskDetail {
-  return {
-    ...taskFixture("u-arda", "Arda Kaya"),
-    branch: "vib-151",
-    timeline: [],
-    diagnostics: [],
-    stages: [],
-    workflow: [],
-    lastActivityAt: null,
-    quiet: false,
-    ...patch,
-  };
+  return taskDetail({ ...taskFixture("u-arda", "Arda Kaya"), branch: "vib-151", stages: [], ...patch });
 }
 
 /** UX19-2: the panel reads the acceptance gate from the SAME live affordance the
@@ -3917,16 +3866,7 @@ function renderWithRouter(
 }
 
 function heroTask(patch: Partial<TaskDetail> = {}): TaskDetail {
-  return {
-    ...taskFixture("u-arda", "Arda Kaya"),
-    timeline: [],
-    diagnostics: [],
-    stages: [],
-    workflow: [],
-    lastActivityAt: null,
-    quiet: false,
-    ...patch,
-  };
+  return taskDetail({ ...taskFixture("u-arda", "Arda Kaya"), stages: [], ...patch });
 }
 
 function schedule(patch: Partial<TaskSchedule> = {}): TaskSchedule {

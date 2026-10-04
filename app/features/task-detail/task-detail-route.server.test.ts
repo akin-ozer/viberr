@@ -201,7 +201,6 @@ describe("loader — VIB-142 fidelity", () => {
     expect(t.changed).toEqual({ files: 9, add: 412, del: 87 });
 
     // Timeline: all 9 seeded events, newest first, typed fidelity.
-    expect(result.timelineTotal).toBe(9);
     expect(result.timelineHasMore).toBe(false);
     expect(t.timeline).toHaveLength(9);
     expect(t.timeline.map((e) => e.type)).toEqual([
@@ -227,7 +226,6 @@ describe("loader — VIB-142 fidelity", () => {
   it("slices the timeline via ?events= (progressive disclosure)", async () => {
     const result = await runLoader("VIB-142", ids.arda, "?events=2");
     expect(result.task.timeline).toHaveLength(2);
-    expect(result.timelineTotal).toBe(9);
     expect(result.timelineHasMore).toBe(true);
     expect(result.timelineRemaining).toBe(7);
     expect(result.timelineNextLimit).toBe(9); // capped at the total
@@ -1744,8 +1742,8 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
  * and a render test with the prop supplied by hand proves the opposite of what
  * is needed.
  *
- * A loader field that is deliberately not a page prop (`timelineTotal`) is out
- * of scope by construction: the rule is about props that EXIST and go unfed.
+ * A loader field that is deliberately not a page prop is out of scope by
+ * construction: the rule is about props that EXIST and go unfed.
  */
 describe("ruling 320 — the loader-to-page wire", () => {
   it("passes every loader field the page declares as a prop", async () => {
