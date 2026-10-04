@@ -2501,9 +2501,11 @@ async function dispatchAgentRun(
       : runStartedDetails,
   });
 
-  const { liftHoldForRun, markWaitingAgent, registerAgentCompletion } = await import(
-    "./task-actions.server"
-  );
+  const {
+    liftHoldForRun,
+    markWaitingAgent,
+    registerAgentCompletion,
+  } = await import("./agent-completion.server");
   // Dynamic, like the import above: agent-reply already imports THIS module for
   // the deployed-specialist list, so a static import here would close a cycle.
   const { agentMentionHandle } = await import("./agent-reply.server");

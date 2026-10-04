@@ -5947,7 +5947,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     // re-send that mints a SECOND schedule on top of the pending one.
     deployDevSpecialist(["codex"]);
     await exhaustCodex(Math.round(Date.now() / 1000) + 3600);
-    const { operatorPromptAgent } = await import("./task-actions.server");
+    const { operatorPromptAgent } = await import("./agent-completion.server");
     let thrown: DispatchHeldError | null = null;
     try {
       await operatorPromptAgent(

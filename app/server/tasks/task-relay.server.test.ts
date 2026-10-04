@@ -33,7 +33,7 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { stageOutcome } from "./agent-outcome.server";
 import { operatorSnapshot, resolveOperatorAuthority } from "./operator-actions.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
-import { applyAgentCompletionEffects } from "./task-actions.server";
+import { applyAgentCompletionEffects } from "./agent-completion.server";
 import type { TaskActionContext } from "./task-action-core.server";
 
 /**

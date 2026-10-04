@@ -55,7 +55,8 @@ import {
   runFailureReason,
 } from "./agent-reply.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
-import { commentToAgent, deliverDeferredMention } from "./task-actions.server";
+import { commentToAgent } from "./task-actions.server";
+import { deliverDeferredMention } from "./agent-completion.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { emptyRunFailureFacts } from "~/shared/run-failure";

@@ -381,7 +381,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         action: "task.hold.lifted",
         taskKey: "VIB-1",
         run: async () => {
-          const { liftHoldForRun } = await import("~/server/tasks/task-actions.server");
+          const { liftHoldForRun } = await import("~/server/tasks/agent-completion.server");
           const { updateTaskFile } = await import("~/server/files/task-writer.server");
           await updateTaskFile(
             { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },

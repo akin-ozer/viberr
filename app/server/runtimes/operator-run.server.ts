@@ -140,7 +140,7 @@ import {
   liftHoldForRun,
   liftStageHoldForPerson,
   markWaitingAgent,
-} from "~/server/tasks/task-actions.server";
+} from "~/server/tasks/agent-completion.server";
 import { OPERATOR_TRANSITION_CHAIN_CAP } from "~/server/tasks/task-action-core.server";
 import {
   reprojectTask,

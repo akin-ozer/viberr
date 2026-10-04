@@ -32,11 +32,8 @@ import { setupProjectedStore } from "../../../test-support/projected-store";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
-import {
-  classifyReviewerVerdict,
-  recordAgentCompletion,
-  resolvePacket,
-} from "./task-actions.server";
+import { classifyReviewerVerdict, recordAgentCompletion } from "./agent-completion.server";
+import { resolvePacket } from "./task-actions.server";
 import { reorderTask, transitionStage } from "./task-transitions.server";
 import { completeTaskMerge, forceAcceptCompletion } from "./task-acceptance.server";
 import { setTaskArchived } from "./task-archive.server";

@@ -53,8 +53,8 @@ import {
   applyAgentCompletionEffects,
   classifyReviewerVerdict,
   markWaitingAgent,
-  resolvePacket,
-} from "./task-actions.server";
+} from "./agent-completion.server";
+import { resolvePacket } from "./task-actions.server";
 import { attachTaskFile } from "./task-edits.server";
 import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
 import {
@@ -3580,7 +3580,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         "No verdict recorded - the directive said not to return one. " +
         "The five prettier-failing markdown files fail identically on the base commit, " +
         "so that is not a blocker I would raise.";
-      const { classifyReviewerVerdict } = await import("./task-actions.server");
+      const { classifyReviewerVerdict } = await import("./agent-completion.server");
       // The classifier really does read this as an objection; the guard is what
       // stops it, not a kinder regex.
       expect(classifyReviewerVerdict(answer)).toBe("request_changes");

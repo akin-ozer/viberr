@@ -140,7 +140,7 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
 
     // Ruling 203's completion hook, asked directly with this run's window:
     // nothing to redeliver, nothing started.
-    const { deliverDeferredMention } = await import("~/server/tasks/task-actions.server");
+    const { deliverDeferredMention } = await import("~/server/tasks/agent-completion.server");
     const delivered = await deliverDeferredMention(
       app.db,
       { dataRoot: app.dataRoot },

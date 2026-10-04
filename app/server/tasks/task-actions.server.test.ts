@@ -41,16 +41,18 @@ import {
 import { runOutcomeClause, OPERATOR_TASK_ACTOR } from "./task-action-core.server";
 import {
   appendComment,
-  classifyReviewerVerdict,
-  operatorPromptAgent,
   packetIdentity,
-  recordAgentCompletion,
-  clearWaitingToHuman,
   commentToAgent,
-  liftHoldForRun,
-  liftStageHoldForPerson,
   resolvePacket,
 } from "./task-actions.server";
+import {
+  classifyReviewerVerdict,
+  operatorPromptAgent,
+  recordAgentCompletion,
+  clearWaitingToHuman,
+  liftHoldForRun,
+  liftStageHoldForPerson,
+} from "./agent-completion.server";
 import { applyRecommendation } from "./task-recommendations.server";
 import { transitionStage, reorderTask } from "./task-transitions.server";
 import { manualDeliverForReview, performDelivery } from "./task-delivery.server";
