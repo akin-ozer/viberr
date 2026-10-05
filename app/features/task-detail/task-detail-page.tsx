@@ -48,10 +48,9 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { useStableRows } from "~/ui/use-stable-rows";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageName } from "~/shared/workflow/stage-roles";
-import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
+import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
 import {
-  setDisclosure,
   useLogSelection,
   useRunControls,
   type ActionResult,

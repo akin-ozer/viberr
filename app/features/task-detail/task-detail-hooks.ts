@@ -3,10 +3,7 @@ import { useFetcher } from "react-router";
 import { inFlightIntent } from "~/ui/in-flight";
 import { useActionToast } from "~/ui/use-action-toast";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
-import {
-  acceptanceDisclosureFields,
-  type AcceptanceDisclosure,
-} from "~/shared/acceptance-disclosure";
+import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { RunView } from "~/features/runtime/runtime-types";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 
@@ -28,15 +25,6 @@ export type ActionResult =
       goalDraft?: string;
     }
   | { ok: false; error: string };
-
-/** Ruling 88 (F21-2): the acceptance ceremony's echo of what it displayed, on
- *  the form an acceptance intent posts; nothing for an intent that has none. */
-export function setDisclosure(fd: FormData, disclosure: AcceptanceDisclosure | undefined): void {
-  if (!disclosure) return;
-  for (const [field, value] of Object.entries(acceptanceDisclosureFields(disclosure))) {
-    fd.set(field, value);
-  }
-}
 
 /**
  * Run-control mutations (interrupt / retry-on-other-backend / complete the

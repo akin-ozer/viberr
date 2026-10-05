@@ -60,6 +60,16 @@ export function acceptanceDisclosureFields(disclosure: AcceptanceDisclosure) {
   };
 }
 
+/** Ruling 88 (F21-2): the acceptance ceremony's echo of what it displayed, on
+ *  the form an acceptance intent posts; nothing for an intent that has none. The task page's doors and the
+ *  board's move onto Done post it alike (ruling 657). */
+export function setDisclosure(fd: FormData, disclosure: AcceptanceDisclosure | undefined): void {
+  if (!disclosure) return;
+  for (const [field, value] of Object.entries(acceptanceDisclosureFields(disclosure))) {
+    fd.set(field, value);
+  }
+}
+
 const PR_VALUES: readonly (PrState | "none")[] = [
   "review",
   "accepted",
