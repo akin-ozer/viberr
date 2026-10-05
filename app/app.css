@@ -296,7 +296,8 @@
      max(20px, safe-area) from the bottom-right corner (see `.dock`). Every
      scroll container that ends under it reserves this much below its last
      block, so the last control on a surface can always be scrolled clear of
-     the trigger instead of sitting under it (interface review 2026-09-06). */
+     the trigger instead of sitting under it (interface review 2026-09-06). A
+     board lane reserves it only while its cards overflow it (ruling 661). */
   --dock-clear: calc(max(20px, env(safe-area-inset-bottom)) + 44px + 1rem);
 }
 
@@ -1379,12 +1380,20 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
      the scrollport (it was clipped), and the gutter is reserved (ruling 457's
      live-scroller gutter) so a lane's cards do not narrow when it starts to
      scroll. One edge, not both: both took 18px from every card, which pushed
-     the owner seat 13px past a 156px card's edge at 1280. */
-  padding: .125rem .5rem var(--dock-clear);
+     the owner seat 13px past a 156px card's edge at 1280. Ruling 661: the
+     foot matches the top, so the last card's ring stays inside as well, and
+     the board reads a lane's overflow by that equality. */
+  padding: .125rem .5rem;
   scrollbar-gutter: stable;
   flex: 1;
   min-height: 0;
 }
+/* Ruling 661: the dock reserve, only while the lane's cards overflow it (the
+   board measures them and marks the lane). It used to be every lane's foot,
+   so a lane whose cards all fit with less than 80px to spare scrolled by the
+   difference, and its scrollbar's whole travel was empty ground (Intake:
+   four cards, 40px free, a 40px scroll). */
+.col-body.overflows { padding-bottom: var(--dock-clear); }
 .col-body > .empty { padding-block: 1rem; }
 .col-body::-webkit-scrollbar { width: 9px; }
 .col-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--border), transparent 40%); border-radius: var(--radius-chip); border: 2px solid transparent; background-clip: padding-box; }
@@ -2714,7 +2723,11 @@ button.ev-result:hover .ev-result-text { text-decoration: underline; text-underl
   padding: .125rem 1.5rem 1.5rem;
   flex: 1; min-height: 0;
 }
-.profile-list { display: flex; flex-direction: column; gap: .375rem; overflow-y: auto; padding: .125rem .25rem var(--dock-clear) 0; }
+/* Ruling 661: no dock reserve. The list is the left column wherever it
+   scrolls (over 1100px), so it never ends under the trigger, and the reserve
+   only made a list that fit with under 80px to spare scroll over empty
+   ground (13px at 1280×950). */
+.profile-list { display: flex; flex-direction: column; gap: .375rem; overflow-y: auto; padding: .125rem .25rem .125rem 0; }
 .ag-group-label {
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   color: var(--faint); padding: 1rem .25rem .375rem;

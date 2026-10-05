@@ -2671,14 +2671,22 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
       ".insights",
       ".policy-wrap",
       ".detail",
-      ".col-body",
       ".live-wrap",
-      ".profile-list",
       ".ag-detail",
     ]) {
       expect(decls(selector), selector).toMatch(/padding:[^;]*var\(--dock-clear\)/);
     }
     expect(decls(".board.list")).toMatch(/padding-block:\s*0 var\(--dock-clear\)/);
+    // Ruling 661: a board lane takes it only while its cards overflow it (the
+    // board marks it `.overflows`), and reads that overflow by the lane's foot
+    // matching its top. CANARY: make the reserve `.col-body`'s foot again, and
+    // a lane whose cards fit with under 80px to spare scrolls by the
+    // difference; or give the lane a foot unlike its top, and the board's read
+    // of an overflowing lane is off by the difference.
+    expect(decls(".col-body.overflows")).toMatch(/padding-bottom:\s*var\(--dock-clear\)/);
+    const lane = requiredDecls(plain, ".col-body");
+    const [top, , foot = top] = lane.get("padding")!.trim().split(/\s+/);
+    expect(lane.get("padding-bottom") ?? foot).toBe(top);
   });
 
   it("overlays the stage-move control in the card's bottom-right corner (ruling 365)", () => {

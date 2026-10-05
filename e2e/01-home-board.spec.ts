@@ -73,6 +73,69 @@ test("viberr-core board renders stage columns and the VIB-142 card", async ({
   await expect(page.getByText("VIB-142").first()).toBeVisible();
 });
 
+test("a lane scrolls only while its cards overflow it, and then reserves the dock's reach (ruling 661)", async ({
+  page,
+}) => {
+  // The dock reserve (`--dock-clear`, 80px) was every lane's foot, so a lane
+  // whose cards fit with less than 80px to spare scrolled by the difference
+  // over empty ground. The board now marks a lane `.overflows` from its cards
+  // alone and only then pads its foot; jsdom lays nothing out, so only a
+  // browser holds this. CANARY: make the reserve `.col-body`'s foot again, and
+  // step 1 scrolls; read the lane with the reserve in it (as a scroll-state
+  // query would), and step 3 still scrolls.
+  await page.goto("/projects/viberr-core/board");
+  const bodies = page.locator("section.column .col-body");
+  await expect(bodies).toHaveCount(5);
+  const counts = await bodies.evaluateAll((els) =>
+    els.map((el) => el.querySelectorAll(":scope > .card-wrap").length),
+  );
+  expect(Math.max(...counts)).toBeGreaterThanOrEqual(2);
+  const body = bodies.nth(counts.indexOf(Math.max(...counts)));
+  const lane = () =>
+    body.evaluate((el) => {
+      const last = el.lastElementChild!.getBoundingClientRect();
+      return {
+        // The lane's top to its last card's foot, however it is scrolled,
+        // plus the foot under the card (it matches the top).
+        need:
+          last.bottom - el.getBoundingClientRect().top + el.scrollTop +
+          parseFloat(getComputedStyle(el).paddingTop),
+        client: el.clientHeight,
+        scrolls: el.scrollHeight > el.clientHeight,
+        overflows: el.classList.contains("overflows"),
+      };
+    });
+  /** Size the viewport so the lane's cards leave `spare` px under them. */
+  const leave = async (spare: number) => {
+    const { need, client } = await lane();
+    const view = page.viewportSize()!;
+    await page.setViewportSize({
+      width: view.width,
+      height: Math.round(view.height + need + spare - client),
+    });
+  };
+
+  // 1. The cards fit with 40px to spare: the lane does not scroll.
+  await leave(40);
+  await expect.poll(lane).toMatchObject({ scrolls: false, overflows: false });
+
+  // 2. They overflow by 40px: the lane scrolls, and at its end the last card
+  //    stands clear of the controller trigger.
+  await leave(-40);
+  await expect.poll(lane).toMatchObject({ scrolls: true, overflows: true });
+  await body.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  const lastFoot = await body.evaluate((el) => el.lastElementChild!.getBoundingClientRect().bottom);
+  const trigger = (await page.locator(".dock-fab").boundingBox())!;
+  expect(lastFoot).toBeLessThanOrEqual(trigger.y);
+
+  // 3. Back to 40px to spare, still scrolled down: the reserve leaves with the
+  //    overflow, so the lane stops scrolling again.
+  await leave(40);
+  await expect.poll(lane).toMatchObject({ scrolls: false, overflows: false });
+});
+
 test("same-stage pointer reorder submits a non-append slot and the server order lands", async ({
   page,
 }, testInfo) => {
