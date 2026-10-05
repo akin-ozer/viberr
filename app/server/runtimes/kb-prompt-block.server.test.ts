@@ -4,11 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildControllerSystemPrompt } from "~/server/controller/controller-run.server";
 import type { ControllerConversation } from "~/server/controller/controller-conversations.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
-import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-run.server";
+import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
+import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-prompt.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
-import { buildOperatorSystemPrompt } from "./operator-run.server";
+import { buildOperatorSystemPrompt } from "./operator-prompt.server";
 
 /**
  * The attached-resources block, byte for byte: the trusted banner, the skill

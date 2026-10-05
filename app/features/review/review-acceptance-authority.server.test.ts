@@ -3,7 +3,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
-import type { OperatorAutonomy } from "~/server/tasks/operator-actions.server";
+import type { OperatorAutonomy } from "~/server/tasks/operator-authority.server";
 import { resolveAcceptanceAuthority } from "./review-acceptance-authority.server";
 
 /**

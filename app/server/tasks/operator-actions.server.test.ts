@@ -58,30 +58,38 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
-  deliverGate,
-  gate,
+  operatorSnapshot,
+  OPERATOR_TIMELINE_DEFAULT,
+} from "./operator-snapshot.server";
+import {
   operatorAcceptCompletion,
-  operatorAcceptsDirectly,
   operatorDeliverForReview,
-  operatorDispatchAgent,
-  operatorOpenPacket,
+  operatorTransitionStage,
+  operatorWriteCompletionPacket,
+} from "./operator-moves.server";
+import {
   operatorPostComment,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
   operatorSetGoal,
+} from "./operator-actions.server";
+import { operatorDispatchAgent } from "./operator-dispatch.server";
+import {
+  operatorOpenPacket,
   operatorResolvePacket,
-  operatorSnapshot,
-  OPERATOR_TIMELINE_DEFAULT,
-  operatorTransitionStage,
-  operatorWriteCompletionPacket,
+  type OperatorPacketOptionInput,
+  GOAL_DRAFT_MAX_CHARS,
+} from "./operator-packets.server";
+import {
+  deliverGate,
+  gate,
+  operatorAcceptsDirectly,
   operatorAutonomyFor,
   operatorBackendFor,
   resolveOperatorAuthority,
   type OperatorAutonomy,
-  type OperatorPacketOptionInput,
-  GOAL_DRAFT_MAX_CHARS,
-} from "./operator-actions.server";
+} from "./operator-authority.server";
 import {
   KB_CORRECTED_TITLE,
   KB_CORRECTION_UNDONE_TITLE,
@@ -745,7 +753,7 @@ describe("operatorDispatchAgent", () => {
     })[0];
     expect(trace).toBeTruthy();
     // SAFETY: `task.operator.agent_selected` has ONE writer
-    // (recordAgentSelectionTrace in operator-actions.server.ts), and it records
+    // (recordAgentSelectionTrace in operator-dispatch.server.ts), and it records
     // exactly these four fields — `candidates` straight off the
     // deployed-specialist map.
     const d = trace!.details as AgentSelectionTrace;
@@ -908,7 +916,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(DEFAULT_POLICY);
     withholdReviewerFiles();
     seedTask("impl");
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1020,7 +1028,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   it("refuses `delivers: false` aimed at the CURRENT deliverer — a delivering run cannot be demoted per-dispatch", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1045,7 +1053,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   it("allows a delivering run when the profileId IS the current deliverer", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1072,7 +1080,7 @@ describe("operatorDispatchAgent — recommend is an APPLYABLE run_agent card", (
     seedTask("impl");
     // Engage the specialist directly first (engagement isn't what's recommended
     // here — starting its run is).
-    const { assignSpecialist } = await import("./specialist-run.server");
+    const { assignSpecialist } = await import("./specialist-assignment.server");
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer" },
@@ -1482,7 +1490,7 @@ describe("operatorDispatchAgent — supporting posture (delivers derivation)", (
   it("an ENGAGED profile keeps its shape on a bare re-dispatch", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
-    const { assignReviewer } = await import("./specialist-run.server");
+    const { assignReviewer } = await import("./specialist-assignment.server");
     await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer" },

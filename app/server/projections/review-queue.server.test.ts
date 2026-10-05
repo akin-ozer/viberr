@@ -685,7 +685,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
       frontmatter: baseTaskFrontmatter("VIB-31", {
         title: "Blocked at the boundary",
         stage: "review",
-        // A blocked packet is what SET waiting to human (operator-actions).
+        // A blocked packet is what SET waiting to human (operator-packets).
         waiting: "human",
         readiness: "blocked",
         validation: "healthy",

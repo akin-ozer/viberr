@@ -130,7 +130,7 @@ async function agentsLeftOut(
   c: Pick<KbCorrection, "kb" | "rulings">,
 ): Promise<string[]> {
   if (c.rulings) return [];
-  const { listDeployedSpecialists } = await import("./specialist-run.server");
+  const { listDeployedSpecialists } = await import("./specialist-roster.server");
   return listDeployedSpecialists(projectSlug, ctx)
     .filter((s) => !s.resources.kb.includes(c.kb))
     .map((s) => s.name);

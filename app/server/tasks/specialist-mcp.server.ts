@@ -502,10 +502,11 @@ export function resolveBoardMcp(input: {
  * Best-effort and idempotent: a registry read failure returns the resolution
  * unchanged, and a healthy server is left exactly as it was mounted.
  *
- * Wired into every run path that mounts org MCP: the specialist runtime
- * (`specialist-run.server.ts`, both the fresh mount and the resume mount), the
- * operator (`operatorMcpResolution` in `operator-run.server.ts`, F21-3) and the
- * controller (`controller-run.server.ts`).
+ * Wired into every run path that mounts org MCP: the specialist runtime (the
+ * fresh mount, `mcpServersFor` in `specialist-roster.server.ts`, and the resume
+ * mount in `specialist-run.server.ts`), the operator (`operatorMcpResolution` in
+ * `operator-prompt.server.ts`, F21-3) and the controller
+ * (`controller-run.server.ts`).
  *
  * Ruling 461: the pre-flight runs WITH the server's credential on every
  * backend. A credentialed stdio server is started by Viberr's gateway with

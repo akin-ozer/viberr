@@ -15,7 +15,7 @@ import {
   SEED_AGENT_PROFILES,
 } from "./agent-catalog.server";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
-import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-run.server";
+import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-prompt.server";
 import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
 

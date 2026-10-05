@@ -16,11 +16,9 @@ import { taskProvenancePath } from "~/server/provenance/provenance-query.server"
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import { reconcileTask, recompareAfterPush } from "~/server/github/github-reconciler.server";
 import type { WorkRevision } from "~/schemas/task-file.schema";
-import {
-  operatorDeliverForReview,
-  operatorSnapshot,
-  type OperatorAuthority,
-} from "./operator-actions.server";
+import { operatorDeliverForReview } from "./operator-moves.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
+import type { OperatorAuthority } from "./operator-authority.server";
 import type { TaskActionContext } from "./task-action-core.server";
 
 /**

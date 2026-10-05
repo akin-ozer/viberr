@@ -76,22 +76,25 @@ import {
 import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import { assignReviewer, assignSpecialist, removeReviewer } from "./specialist-assignment.server";
 import {
-  assignReviewer,
-  assignSpecialist,
+  startAgentRun,
+  isDispatchHeld,
+  resolveResumeConfinement,
+  type DispatchHeldError,
+} from "./specialist-run.server";
+import {
   buildAnalyzePrompt,
   directiveRequestsDelivery,
   knowledgeBaseReadDirs,
-  listDeployedSpecialists,
-  removeReviewer,
-  resolveDeployedSpecialist,
-  runDispatchLine,
-  startAgentRun,
   buildSpecialistPromptPrefix,
   githubReadForRun,
-  isDispatchHeld,
-  pinSupportCheckout,
-  resolveResumeConfinement,
+} from "./specialist-prompt.server";
+import { pinSupportCheckout } from "./specialist-workspace.server";
+import {
+  listDeployedSpecialists,
+  resolveDeployedSpecialist,
+  runDispatchLine,
   KB_CORRECTION_NOTE_CLAUDE,
   KB_CORRECTION_NOTE_CODEX,
   RELAY_NOTE_CLAUDE,
@@ -100,8 +103,7 @@ import {
   KB_CONTRACT_CORRECTION_SENTENCE,
   ATTACHMENTS_READ_SENTENCE,
   OTHER_TASK_FILES_SENTENCE,
-  type DispatchHeldError,
-} from "./specialist-run.server";
+} from "./specialist-roster.server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 

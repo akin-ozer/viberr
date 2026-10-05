@@ -3,8 +3,10 @@
 > The Operator, the one agent that drives every task: what wakes it, what it may do, how
 > its authority is gated, what it reads, the packets it opens, and the backstops that keep
 > a task from stopping silently.
-> Source of truth: `app/server/runtimes/operator-run.server.ts`,
-> `app/server/tasks/operator-actions.server.ts`, `app/server/tasks/operator-toolkit.server.ts`,
+> Source of truth: `app/server/runtimes/operator-run.server.ts` (with `operator-prompt` and
+> `operator-codex-plan` beside it), `app/server/tasks/operator-actions.server.ts` (with
+> `operator-authority`, `operator-packets`, `operator-snapshot`, `operator-dispatch` and
+> `operator-moves` beside it, ruling 656), `app/server/tasks/operator-toolkit.server.ts`,
 > `app/server/tasks/operator-repo-read.server.ts`,
 > `app/server/github/update-branch-operator.server.ts`, `app/server/tasks/packet-resolution.server.ts`,
 > `app/server/tasks/stranded-sweep.server.ts`, `app/server/tasks/review-deadlock.server.ts`,
@@ -847,9 +849,15 @@ ruling 502).
 
 ## 8. Where to look
 
-- Triggers, lease and queue, stranded-drive backstop, prompts, Codex plan execution,
-  failure escalation: `app/server/runtimes/operator-run.server.ts`.
-- Authority, gates, snapshot, every governed action: `app/server/tasks/operator-actions.server.ts`.
+- Triggers, lease and queue, stranded-drive backstop, the run starters and failure
+  escalation: `app/server/runtimes/operator-run.server.ts`; the prompts:
+  `operator-prompt.server.ts`; the Codex plan's tools, schema and execution:
+  `operator-codex-plan.server.ts` (both beside it).
+- Authority and gates: `app/server/tasks/operator-authority.server.ts`; comments,
+  recommendations and packets: `operator-packets.server.ts`; the snapshot:
+  `operator-snapshot.server.ts`; dispatch and schedules: `operator-dispatch.server.ts`;
+  delivery, stage moves and acceptance: `operator-moves.server.ts`; the direct task actions:
+  `operator-actions.server.ts` (all in `app/server/tasks/`, ruling 656).
 - The Claude tool surface: `app/server/tasks/operator-toolkit.server.ts`.
 - The default-branch read: `app/server/tasks/operator-repo-read.server.ts`.
 - The branch update: `app/server/github/update-branch-operator.server.ts`.

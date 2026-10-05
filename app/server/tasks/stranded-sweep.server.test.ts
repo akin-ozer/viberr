@@ -12,11 +12,8 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 import type { TaskActionDeps } from "./task-action-core.server";
-import {
-  operatorCancelSchedule,
-  operatorScheduleRun,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+import { operatorCancelSchedule, operatorScheduleRun } from "./operator-dispatch.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import {
   findStrandedTasks,
   STRANDED_AFTER_MS,

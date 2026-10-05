@@ -1576,7 +1576,7 @@ row every tick). None of the skips spends a retry. A schedule pins no backend or
 `UNIFIED_CAP_CATALOG` in `app/shared/capabilities.ts` (31 ids); modes `direct | recommend |
 human | off`. The Enforcement column is `capabilityEnforcement(id)`: `both`, `claude-only`
 (`CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS`) or `advisory`; the operator rows are enforced by
-the operator's own `gate()` (`operator-actions.server.ts`).
+the operator's own `gate()` (`operator-authority.server.ts`).
 
 | id | Kinds | Default | Enforcement | Notes |
 |---|---|---|---|---|

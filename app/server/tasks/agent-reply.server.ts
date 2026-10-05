@@ -18,11 +18,8 @@ import {
 import { SESSION_MISSING_RE } from "~/server/runtimes/session-export.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
-import {
-  listDeployedSpecialists,
-  type DeployedSpecialistView,
-} from "./specialist-run.server";
-import { resolveOperatorAuthority } from "./operator-actions.server";
+import { listDeployedSpecialists, type DeployedSpecialistView } from "./specialist-roster.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import type { TaskMutationContext } from "./task-mutation.server";
 import { extractMentions, RESERVED_MENTION_HANDLES } from "~/ui/mention-spans";
 import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
@@ -802,7 +799,7 @@ function withProviderText(failure: RunFailure, providerText: string): RunFailure
 // -------------------------------------------------------- resume workdir
 
 /**
- * The working directory a resumed reply run should use: the specialist-run
+ * The working directory a resumed reply run should use: the specialist-workspace
  * clone at `<taskDir>/workspace/<repo-name>` when it still exists (so the
  * agent keeps its repo context), else the dedicated workspace root. The
  * workspace fallback keeps `GIT_CEILING_DIRECTORIES=<taskDir>` a strict

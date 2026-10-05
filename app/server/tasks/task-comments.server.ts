@@ -167,7 +167,10 @@ export async function answerAskingAgent(
 ): Promise<boolean> {
   try {
     const { agentMentionHandle } = await import("./agent-reply.server");
-    const { assertResumeEligible, listDeployedSpecialists } = await import("./specialist-run.server");
+    const {
+      assertResumeEligible,
+      listDeployedSpecialists,
+    } = await import("./specialist-roster.server");
     const specialistCtx: TaskMutationContext = {};
     if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
     const deployed = listDeployedSpecialists(
@@ -872,7 +875,7 @@ export async function commentToAgent(
     // door. Inside the A8 try, so a supporting agent gets the honest partial
     // success (comment posted, `runNotStarted` names the refusal) while the
     // engaged deliverer resumes anywhere.
-    const { assertResumeEligible } = await import("./specialist-run.server");
+    const { assertResumeEligible } = await import("./specialist-roster.server");
     assertResumeEligible(db, ctx, input.projectSlug, input.taskKey, target.profileId);
     // 4a. Resume the agent's existing provider session, reusing the clone
     //     workdir so it keeps its repo context. P8 (pass 25): a supporting agent

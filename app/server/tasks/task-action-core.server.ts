@@ -22,7 +22,7 @@ import {
   requireProjectAuthority,
   requireProjectMutable,
 } from "~/server/auth/project-authority.server";
-import type { operatorDispatchAgent } from "./operator-actions.server";
+import type { operatorDispatchAgent } from "./operator-dispatch.server";
 import type { DependencyReleasePayload } from "~/shared/dependencies";
 import {
   resolveStageRoles,
@@ -169,7 +169,7 @@ export async function verdictStageOf(
   project: ProjectContext,
   fm: { stage: string; engagements: Engagement[] },
 ): Promise<string | null> {
-  const { listDeployedSpecialists } = await import("./specialist-run.server");
+  const { listDeployedSpecialists } = await import("./specialist-roster.server");
   const specialistCtx: TaskMutationContext = {};
   if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
   return verdictStageFor(project, fm, listDeployedSpecialists(projectSlug, specialistCtx));
@@ -498,7 +498,7 @@ export async function autoInvokeOperator(
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease, relay } = options;
   try {
-    const { resolveOperatorAuthority } = await import("./operator-actions.server");
+    const { resolveOperatorAuthority } = await import("./operator-authority.server");
     const authority = resolveOperatorAuthority(ctx, projectSlug);
     if (!authority.deployed) return; // no operator in this project — nothing to run
     const runOperator =

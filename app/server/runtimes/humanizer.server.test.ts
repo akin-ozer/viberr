@@ -8,14 +8,14 @@ import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { seedOrgResources } from "~/server/org/org-seed.server";
 import { listSkills } from "~/server/org/resources.server";
 import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
-import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import {
   HUMANIZER_PROMPT_SECTION,
   HUMANIZER_SKILL_SHA256,
   HUMANIZER_SOURCE,
   humanizerSkillFile,
 } from "./humanizer.server";
-import { buildOperatorSystemPrompt } from "./operator-run.server";
+import { buildOperatorSystemPrompt } from "./operator-prompt.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { createTestDbContext } from "../../../test-support/test-db";
 

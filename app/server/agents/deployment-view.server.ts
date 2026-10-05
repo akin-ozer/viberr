@@ -15,11 +15,12 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  *
  * Home rule (layering): the hottest read loaders — the board list, the task
  * page, the agents roster (all in `~/server/projections/*`) — need the live
- * `profileId → backend` overlay on every render, and the run path
- * (`~/server/tasks/specialist-run.server.ts`) needs `primaryRunBackend`. Those
- * are SERVER concerns, so they live in the server layer and the `features/agents`
- * display code imports them from here (features → server, the allowed direction)
- * — not the inversion where a projection reached up into a feature module.
+ * `profileId → backend` overlay on every render, and the run path's specialist
+ * resolution (`~/server/tasks/specialist-roster.server.ts`) needs
+ * `primaryRunBackend`. Those are SERVER concerns, so they live in the server
+ * layer and the `features/agents` display code imports them from here
+ * (features → server, the allowed direction) — not the inversion where a
+ * projection reached up into a feature module.
  *
  * Single source of truth: `deploymentRuntimeIdentity` is the ONE place the
  * `override ?? template ?? default` rule for `kind`/`backends` is written.

@@ -23,11 +23,9 @@ import {
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
 import { relayToTask, takeFromTask } from "./task-relay.server";
-import {
-  operatorDispatchAgent,
-  operatorPostComment,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+import { operatorDispatchAgent } from "./operator-dispatch.server";
+import { operatorPostComment } from "./operator-actions.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import { appendComment } from "./task-comments.server";
 import { operatorPromptAgent, recordAgentCompletion } from "./agent-completion.server";
 import { postAgentReplyComment } from "./task-replies.server";
@@ -991,7 +989,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     "server/tasks/task-comments.server.ts": 1,
     "server/tasks/agent-completion.server.ts": 2,
     "server/tasks/task-replies.server.ts": 1,
-    "server/tasks/operator-actions.server.ts": 2,
+    "server/tasks/operator-packets.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
     // Ruling 488: the relay's comment on the target task; ruling 557: the
     // take's claiming comment on the task that takes.

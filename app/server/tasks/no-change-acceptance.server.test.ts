@@ -27,11 +27,9 @@ import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.ser
 import { recordAgentCompletion } from "./agent-completion.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
-import {
-  operatorAcceptCompletion,
-  operatorSnapshot,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+import { operatorAcceptCompletion } from "./operator-moves.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 
 /**
  * R19-8 (ruling 62) — "Completed — no changes", end to end.

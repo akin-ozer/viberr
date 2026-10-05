@@ -247,8 +247,8 @@ export function formatUsd(amount: number): string {
  * step did not run, and the matcher that finds it again.
  *
  * Paired here for the same reason {@link RUN_DID_NOT_COMPLETE_RE} is: the
- * writer is in `operator-run.server.ts` and the reader is in
- * `operator-actions.server.ts`, and a silent drift between them turns the
+ * writer is in `operator-codex-plan.server.ts` and the reader is in
+ * `operator-snapshot.server.ts`, and a silent drift between them turns the
  * carry back into the "read them on the timeline" instruction ruling 400
  * retired.
  */

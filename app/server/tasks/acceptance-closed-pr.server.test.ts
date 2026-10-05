@@ -21,11 +21,9 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
-import {
-  operatorAcceptCompletion,
-  operatorSnapshot,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+import { operatorAcceptCompletion } from "./operator-moves.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 
 /**
  * P13-D-4 — the closed-PR guard on ALL THREE paths to Done.

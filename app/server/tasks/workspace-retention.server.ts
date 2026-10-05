@@ -31,8 +31,8 @@ import { taskWorkspaceLaunch } from "./workspace-git.server";
  * A workspace is a CACHE, not canonical state. The canonical record is
  * `task.md`; delivered work lives in the remote branch and the PR. The clone is
  * already treated as disposable at the other end — a failed clone falls back to
- * the workspace root and the run continues (`specialist-run.server.ts` logs
- * "specialist run clone failed — falling back to workspace root"). So the cost
+ * the workspace root and the run continues (`specialist-workspace.server.ts`
+ * logs "specialist run clone failed, running WITHOUT a checkout"). So the cost
  * of reclaiming one that is needed again is a re-clone, not lost work.
  *
  * The rule is nonetheless conservative: reclaim only a task sitting in its

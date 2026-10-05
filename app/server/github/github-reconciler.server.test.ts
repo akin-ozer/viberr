@@ -41,10 +41,8 @@ import {
   recordPatValidation,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import {
-  operatorSnapshot,
-  resolveOperatorAuthority,
-} from "~/server/tasks/operator-actions.server";
+import { operatorSnapshot } from "~/server/tasks/operator-snapshot.server";
+import { resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 import {
   BRANCH_CLEANUP_GUARDRAIL_DESC,
   BRANCH_CLEANUP_GUARDRAIL_ID,

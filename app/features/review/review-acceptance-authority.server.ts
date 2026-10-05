@@ -1,7 +1,4 @@
-import {
-  gate,
-  resolveOperatorAuthority,
-} from "~/server/tasks/operator-actions.server";
+import { gate, resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 
 /**
  * P13-D-9 (MOCK-3): does THIS project's deployed operator hold the one
@@ -12,7 +9,8 @@ import {
  * `completion-for-acceptance: direct` grant — `gate()` refuses to promote
  * `recommend → direct` for that one capability precisely so a silent agent
  * close cannot fall out of an autonomy setting alone (`gate` in
- * operator-actions.server.ts, enforced in `operatorAcceptCompletion`).
+ * operator-authority.server.ts, enforced in `operatorAcceptCompletion` in
+ * operator-moves.server.ts).
  *
  * The create modal (`home-page.tsx`) and the Policy note (`policy-page.tsx`,
  * commit 127721d) already disclose this; the Review queue — the screen where a

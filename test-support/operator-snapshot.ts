@@ -1,4 +1,4 @@
-import type { OperatorTaskSnapshot } from "~/server/tasks/operator-actions.server";
+import type { OperatorTaskSnapshot } from "~/server/tasks/operator-snapshot.server";
 
 /**
  * The task snapshot an operator prompt-byte test hands `buildOperatorTurnPrompt`

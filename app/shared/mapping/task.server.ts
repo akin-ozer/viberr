@@ -651,7 +651,7 @@ function mapOperatorRef(
  * 2. A HUMAN OWES AN ANSWER. An `input` packet ("Decision required" / an
  *    agent's ask-human) is a request for human input, but the operator leaves
  *    `readiness` as-is when it opens one — only a `blocked` packet flips
- *    readiness to "blocked" (operator-actions.server: "Blocked-ness lives on
+ *    readiness to "blocked" (operator-packets.server: "Blocked-ness lives on
  *    readiness alone"). That left a green "ready" beside a "Decision required"
  *    packet. Raising a packet flips `waiting` to "human", so this lift is also
  *    the reassertion path out of lift 1: the human's turn outranks a run that

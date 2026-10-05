@@ -1,10 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { authoredPacketOptions, buildOperatorSystemPrompt } from "./operator-run.server";
+import { authoredPacketOptions } from "./operator-codex-plan.server";
+import { buildOperatorSystemPrompt } from "./operator-prompt.server";
 import { HUMANIZER_PROMPT_SECTION } from "./humanizer.server";
 import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
-import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 

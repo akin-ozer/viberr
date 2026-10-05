@@ -57,11 +57,8 @@ import {
 import { resolvePacket } from "./packet-resolution.server";
 import { attachTaskFile } from "./task-edits.server";
 import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
-import {
-  assignReviewer,
-  startAgentRun,
-  assignSpecialist,
-} from "./specialist-run.server";
+import { assignReviewer, assignSpecialist } from "./specialist-assignment.server";
+import { startAgentRun } from "./specialist-run.server";
 
 /**
  * The UNIFIED agent-run completion pipeline (fixes A1/A2/A11/X6/X9 from the
@@ -5105,9 +5102,8 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
      * CANARY: in `withdrawSupersededStuckPacket`, take any blocked packet again
      * instead of `packet.stalled`.
      */
-    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
-      "./operator-actions.server"
-    );
+    const { operatorOpenPacket } = await import("./operator-packets.server");
+    const { resolveOperatorAuthority } = await import("./operator-authority.server");
     await withOperatorDeployed(async () => {
       const authorized = { dataRoot: store.dataRoot, operatorAuthorized: true };
       const opened = await operatorOpenPacket(

@@ -12,7 +12,8 @@ import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
-import { operatorWriteCompletionPacket, resolveOperatorAuthority } from "./operator-actions.server";
+import { operatorWriteCompletionPacket } from "./operator-moves.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import { completionView } from "./completion-packet.server";
 
 /**

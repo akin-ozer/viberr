@@ -22,34 +22,44 @@ import {
   deliverGate,
   dispatchGate,
   gate,
+  type OperatorActionResult,
+  type OperatorAuthority,
+} from "./operator-authority.server";
+import {
   operatorAcceptCompletion,
   operatorDeliverForReview,
-  operatorDispatchAgent,
+  operatorTransitionStage,
+  operatorWriteCompletionPacket,
+} from "./operator-moves.server";
+import {
   operatorFlagContextConflict,
   operatorCorrectKnowledgeDoc,
   operatorEditComment,
   operatorLeaseFiles,
-  CREATE_TASK_BASE_NOTE,
-  OPERATOR_TIMELINE_DEFAULT,
-  OPERATOR_TIMELINE_MAX,
-  operatorOpenPacket,
-  operatorResolvePacket,
-  operatorCancelSchedule,
-  operatorScheduleRun,
   operatorPostComment,
   operatorRelayToTask,
   operatorTakeFromTask,
   operatorSetDependencies,
   operatorSetEpic,
   operatorSetGoal,
+} from "./operator-actions.server";
+import {
+  operatorDispatchAgent,
+  operatorCancelSchedule,
+  operatorScheduleRun,
+} from "./operator-dispatch.server";
+import {
+  OPERATOR_TIMELINE_DEFAULT,
+  OPERATOR_TIMELINE_MAX,
   operatorSnapshot,
-  operatorTransitionStage,
-  operatorWriteCompletionPacket,
-  type OperatorActionResult,
-  type OperatorAuthority,
+} from "./operator-snapshot.server";
+import {
+  CREATE_TASK_BASE_NOTE,
+  operatorOpenPacket,
+  operatorResolvePacket,
   type OperatorOpenPacketInput,
   type OperatorPacketOptionInput,
-} from "./operator-actions.server";
+} from "./operator-packets.server";
 import { COMPLETION_SCREENSHOTS_MAX } from "~/shared/completion-packet";
 import {
   operatorUpdateBranchFromBase,
@@ -62,7 +72,7 @@ import {
   resolveSpecialistMcpServers,
   type SpecialistMcpServerConfig,
 } from "./specialist-mcp.server";
-import { listDeployedSpecialists } from "./specialist-run.server";
+import { listDeployedSpecialists } from "./specialist-roster.server";
 import { SCHEDULE_MAX_MINUTES } from "./schedule.server";
 import {
   readDefaultBranchFile,
@@ -71,8 +81,9 @@ import {
 
 /**
  * The operator's in-process governance TOOLS — a Claude Agent SDK MCP server
- * ("viberr") whose handlers call the capability-gated operator-actions with the
- * DB + task context closed over. Because operator runs execute in this same
+ * ("viberr") whose handlers call the capability-gated actions in
+ * operator-actions, operator-packets, operator-dispatch and operator-moves with
+ * the DB + task context closed over. Because operator runs execute in this same
  * Node process, the tools reach the real store directly (no network), so the
  * board updates live as the operator acts.
  *
@@ -243,7 +254,7 @@ const OPERATOR_TOOLKIT_INSTRUCTIONS =
  * Band-3 follow-up: the ledger and the writer live HERE, not inside
  * `buildOperatorToolkit`, because the Claude toolkit is only one of the two
  * paths that open packets. The Codex plan executor
- * (`executeCodexPlan`, operator-run.server.ts) opens them itself, so a
+ * (`executeCodexPlan`, operator-codex-plan.server.ts) opens them itself, so a
  * closure-scoped disclosure covered exactly one backend and a Codex plan that
  * prompted an agent and then opened a packet reached the human with nothing
  * said. One ledger + one writer, both backends.

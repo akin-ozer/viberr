@@ -2911,8 +2911,8 @@ describe("UI-42/UI-44: the decision packet", () => {
 // component that actually renders it.
 describe("UX19-4: the recovery packet names the in-app re-delivery path", () => {
   /** The pr-diverged recovery packet the operator authors for a CLOSED review
-   *  PR on a still-active task (operator-run.server.ts, `pr-diverged`): rework,
-   *  archive, archive + delete the remote branch. */
+   *  PR on a still-active task (operator-prompt.server.ts, `pr-diverged`):
+   *  rework, archive, archive + delete the remote branch. */
   const recoveryPacket: PacketRender = {
     ...packet142,
     kind: "Blocked decision",

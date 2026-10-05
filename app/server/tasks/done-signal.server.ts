@@ -20,7 +20,7 @@
  * said every acceptance merges in the same write, and that the read could be
  * raised "at" the acceptance, which withdraws an open decision unanswered; the
  * operator's own acceptance now waits for the answer to the read's
- * `create_task` option (`followUpOptionRefusal`, operator-actions.server.ts).
+ * `create_task` option (`followUpOptionRefusal`, operator-moves.server.ts).
  *
  * This is the rule's one home. Every door that writes a goal carries it in the
  * goal field's description: the controller's `create_task` and `update_task`

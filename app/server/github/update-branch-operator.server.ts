@@ -18,11 +18,11 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   dispatchGate,
   gate,
-  operatorDispatchAgent,
-  operatorOpenPacket,
   type OperatorActionResult,
   type OperatorAuthority,
-} from "~/server/tasks/operator-actions.server";
+} from "~/server/tasks/operator-authority.server";
+import { operatorDispatchAgent } from "~/server/tasks/operator-dispatch.server";
+import { operatorOpenPacket } from "~/server/tasks/operator-packets.server";
 import {
   recordAcceptancePacketWithdrawal,
   recordRecommendationWithdrawal,
@@ -50,7 +50,7 @@ import {
   type FileActorRef,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
-import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { stageName } from "~/shared/workflow/stage-roles";
 import { acceptanceBoundaryRefusal } from "./acceptance-boundary.server";

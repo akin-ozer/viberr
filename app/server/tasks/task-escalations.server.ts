@@ -9,7 +9,7 @@ import { taskClosure } from "./task-closure.server";
 import { endSentence } from "~/shared/text/sentence";
 import type { DatabaseSync } from "node:sqlite";
 import { consecutiveRequestChanges } from "~/schemas/task-file.schema";
-import type { OperatorOpenPacketInput, OperatorPacketOptionInput } from "./operator-actions.server";
+import type { OperatorOpenPacketInput, OperatorPacketOptionInput } from "./operator-packets.server";
 import {
   agentNamesOf,
   buildReviewDeadlockPacket,
@@ -125,9 +125,8 @@ export async function openStuckLoopPacket(
     // a failure, not an existing packet (T13 reads these apart).
     if (!existing) return { status: "failed" };
     if (existing.parsed.packet) return { status: "already_open" }; // already escalated
-    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
-      "./operator-actions.server"
-    );
+    const { operatorOpenPacket } = await import("./operator-packets.server");
+    const { resolveOperatorAuthority } = await import("./operator-authority.server");
     const authority = resolveOperatorAuthority(ctx, input.projectSlug, {});
     const hold: OperatorPacketOptionInput = {
       kind: "hold_runtime_debug",

@@ -286,8 +286,8 @@ const agentRefSchema = z
      *  keeps the whole engagement) so the review queue can tell a REQUIRED
      *  reviewer from a supporting agent without re-reading the task file.
      *  Optional at the type level because a hand-built ref (the engage paths
-     *  in specialist-run.server.ts) writes the flag on the engagement, not on
-     *  the ref; a reader treats absence as "not verdict-capable". */
+     *  in specialist-assignment.server.ts) writes the flag on the engagement,
+     *  not on the ref; a reader treats absence as "not verdict-capable". */
     verdictCapable: z.boolean().optional(),
   })
   .loose();
@@ -1833,7 +1833,7 @@ export function conflictingPrBlockedReason(
   // product recommended the operation it forbids everywhere else, to the one
   // reader with no tool and the most freedom to do it by hand. It is also the
   // operation that broke a branch on this very board: "Live on SHOP-11: a
-  // rebase diverged the branch from its own PR #15" (operator-actions.server).
+  // rebase diverged the branch from its own PR #15" (operator-packets.server).
   return `${taskKey}'s review PR #${pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.`;
 }
 

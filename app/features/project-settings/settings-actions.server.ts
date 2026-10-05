@@ -63,7 +63,7 @@ import {
 } from "~/shared/workflow/transitions";
 import { countLiveAdmins, removedAccountLabel } from "./membership.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-ownership.server";
-import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import {
   resolveRequiredReviewers,
   type RequiredReviewerView,

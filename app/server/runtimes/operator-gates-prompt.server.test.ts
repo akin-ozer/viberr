@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexOperatorPrompt, buildOperatorTurnPrompt } from "./operator-run.server";
+import { buildCodexOperatorPrompt, buildOperatorTurnPrompt } from "./operator-prompt.server";
 import { operatorSnapshot } from "../../../test-support/operator-snapshot";
 
 /**

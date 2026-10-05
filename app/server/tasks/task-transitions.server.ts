@@ -604,9 +604,8 @@ export async function transitionStage(
         // `operatorTransitionStage` itself, never here.
         if (!ctx.operatorAuthorized) {
           try {
-            const { foldAcceptanceRecommendation, resolveOperatorAuthority } = await import(
-              "./operator-actions.server"
-            );
+            const { foldAcceptanceRecommendation } = await import("./operator-moves.server");
+            const { resolveOperatorAuthority } = await import("./operator-authority.server");
             const authority = resolveOperatorAuthority(ctx, input.projectSlug);
             const folded = await foldAcceptanceRecommendation(
               db,

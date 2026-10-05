@@ -274,10 +274,10 @@ export function requireProjectAuthority(
  * The `run-agents` authority check (start/interrupt runs, @mention triggers),
  * centralized so the action id + audit copy live in ONE place. The runtime call
  * sites — @mention trigger (task-comments), specialist/reviewer dispatch
- * (specialist-run), interrupt (run-service), run-operator (route) — each build
- * the `memberRoles` map from wherever they have it (file store or DB projection)
- * and delegate the tier + audit here (pass-8 rbac-audit §4g dedup). Throws on
- * deny with the canonical 403 copy.
+ * (`requireRuntimeRole`, specialist-roster), interrupt (run-service),
+ * run-operator (route) — each build the `memberRoles` map from wherever they
+ * have it (file store or DB projection) and delegate the tier + audit here
+ * (pass-8 rbac-audit §4g dedup). Throws on deny with the canonical 403 copy.
  */
 export function requireRunAgents(
   db: DatabaseSync,

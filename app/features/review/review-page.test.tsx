@@ -391,7 +391,7 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
   it("qualifies the chip and the footer for a direct-authority operator", () => {
     // Owner ruling Q1: a full-autonomy operator with an explicit
     // `completion-for-acceptance: direct` grant moves tasks to Done itself
-    // (`operatorAcceptCompletion`, operator-actions.server.ts). The create
+    // (`operatorAcceptCompletion`, operator-moves.server.ts). The create
     // modal and the Policy note were updated to disclose it; the Review queue —
     // where a maintainer forms the acceptance belief — shipped "always a human
     // action" regardless.

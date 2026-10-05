@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import { EPIC_STATUS_LABEL, isEpicOpen, type EpicStatus } from "~/schemas/epic-file.schema";
-import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import { epicHref } from "~/shared/epic-href";
 
 /**
@@ -271,7 +271,7 @@ export function searchWorkspace(
         // (`sel = searchParams.get("profile") ?? "operator"`, agents-page.tsx)
         // and nothing naming what was searched for — deterministically the
         // wrong agent, on every agent hit. `agent.id` is `resolved.profileId`
-        // (`listDeployedSpecialists`, specialist-run.server.ts), the same key
+        // (`listDeployedSpecialists`, specialist-roster.server.ts), the same key
         // the roster resolves against and the same deep link "open this
         // profile" already uses from the Policy page (`PolicyPage`'s
         // `onOpenProfile`, policy-page.tsx). The agent hit was the only hit

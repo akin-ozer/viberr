@@ -14,7 +14,7 @@ import { formatUsd, localNetworkFailureCode } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { endSentence } from "~/shared/text/sentence";
 import type { RunFailure } from "./agent-reply.server";
-import type { OperatorPacketOptionInput } from "./operator-actions.server";
+import type { OperatorPacketOptionInput } from "./operator-packets.server";
 import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.server";
 
 /**

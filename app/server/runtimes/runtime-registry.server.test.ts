@@ -16,7 +16,7 @@ import type { CodexClient, CodexFactory } from "./codex-runtime.server";
 import type { ClaudeQueryOptions } from "./claude-runtime.server";
 import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
 import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-policy";
-import { agentGitIdentity } from "../tasks/specialist-run.server";
+import { agentGitIdentity } from "../tasks/specialist-workspace.server";
 import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
@@ -589,7 +589,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
 
   it("both backends carry the same task identity into the run (NFR15 traceability)", async () => {
     // F24: one delivery identity, whichever backend ran. `agentGitIdentityEnv`
-    // (specialist-run) builds these from the DELIVERING profile id, and the two
+    // (specialist-workspace) builds these from the DELIVERING profile id, and the two
     // adapters have to land them in different places: Claude's SDK replaces the
     // child env with `options.env`, while Codex splits the CLI env (which
     // carries subscription auth) from the model's OWN shell — where

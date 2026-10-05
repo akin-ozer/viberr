@@ -952,7 +952,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // The whole prompt a real operator gets: the STORE's definition (seeded)
     // plus the non-negotiable rules appended after it. Both said the opposite.
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
-    const { buildOperatorSystemPrompt } = await import("~/server/runtimes/operator-run.server");
+    const { buildOperatorSystemPrompt } = await import("~/server/runtimes/operator-prompt.server");
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
     const { prompt } = buildOperatorSystemPrompt(

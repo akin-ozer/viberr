@@ -80,12 +80,12 @@ import {
 import { completionView } from "~/server/tasks/completion-packet.server";
 import {
   directiveDeferredNote,
-  listDeployedSpecialists,
-  removeReviewer,
   isAgentBusy,
   isDispatchHeld,
   startAgentRun,
 } from "~/server/tasks/specialist-run.server";
+import { removeReviewer } from "~/server/tasks/specialist-assignment.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { githubWebHost } from "~/server/github/github-client.server";
@@ -111,7 +111,7 @@ import {
   operatorAcceptsDirectly,
   operatorAutonomyFor,
   operatorBackendFor,
-} from "~/server/tasks/operator-actions.server";
+} from "~/server/tasks/operator-authority.server";
 import { parseAcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import {
   completionToast,

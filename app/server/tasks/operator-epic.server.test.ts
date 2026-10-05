@@ -23,18 +23,18 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
 import {
   executeStrandedCodexPlan,
-  operatorPlanSchemaFor,
-  operatorPlanToolsFor,
   resetOperatorLeasesForTests,
   type runOperator,
 } from "~/server/runtimes/operator-run.server";
-import { createEpic, type CreateEpicInput } from "./epic-actions.server";
 import {
-  operatorOpenPacket,
-  operatorSetEpic,
-  operatorSnapshot,
-  resolveOperatorAuthority,
-} from "./operator-actions.server";
+  operatorPlanSchemaFor,
+  operatorPlanToolsFor,
+} from "~/server/runtimes/operator-codex-plan.server";
+import { createEpic, type CreateEpicInput } from "./epic-actions.server";
+import { operatorOpenPacket } from "./operator-packets.server";
+import { operatorSetEpic } from "./operator-actions.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
+import { resolveOperatorAuthority } from "./operator-authority.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { resolvePacket } from "./packet-resolution.server";
 import type { TaskActionContext } from "./task-action-core.server";
