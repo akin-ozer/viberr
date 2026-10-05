@@ -301,7 +301,9 @@ table list with retention is in [data-model.md](data-model.md).
   `danger-full-access` with no OS sandbox (ruling 185): a withheld repo-write grant is
   advisory there (the prompt omits the steps and the delivery gate refuses them), web
   search is off unless granted, and marked MCP write tools are removed through
-  `disabled_tools` (ruling 176). The repo's own `.claude` catalog is stripped and only
+  `disabled_tools` (ruling 176). Every MCP server a Codex run mounts must start before
+  its first turn, or the run fails naming it, unless its last probe already failed
+  (ruling 658). The repo's own `.claude` catalog is stripped and only
   granted skills are mounted; reserved MCP names are enforced at the writer, picker and
   resolver; the browser MCP is isolated and capability-gated; the in-process GitHub read
   tool scopes every path under the task's own repo; every child env starts from

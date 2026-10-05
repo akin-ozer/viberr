@@ -2626,6 +2626,58 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
   });
 });
 
+describe("a resumed @mention keeps its known-down server optional (ruling 658)", () => {
+  it("hands the resumed run the server mounted on a failed probe as one it may start without", async () => {
+    // Codex requires every other mounted server (codex-runtime). Without the
+    // carry, a resumed run that is told the server may be missing fails on it.
+    // CANARY: drop the `mcpOptional` copy from `commentToAgent`'s resume branch
+    // (task-comments.server) and this fails.
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, up, last_checked_at, created_at, updated_at)
+         VALUES ('mcp_down', 'down', 'HTTP', 'https://mcp.example.test/down', 0, ?, ?, ?)`,
+      )
+      .run(now, now, now);
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist", name: "dev", role: "developer",
+            backends: ["claude"], model: "claude-sonnet",
+            resources: { skills: [], mcps: ["down"], kb: [] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    upsertRun(store.db, {
+      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
+      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
+      sdk: "claude", sessionId: "claude-session-mcp", agentName: "dev",
+      agentProfileId: "dev", state: "finished",
+    });
+    writeTranscript("claude-session-mcp");
+
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing please" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+    const specs = startedRunSpecs();
+    const resumed = specs[specs.length - 1]!;
+    expect(Object.keys(resumed.mcpServers ?? {})).toContain("down");
+    expect(resumed.mcpOptional).toEqual(["down"]);
+  });
+});
+
 describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
   it("hands the resumed run the rulings index, which its profile never granted", async () => {
     // The resume builds its own knowledge list (R18-1 parity), and ruling 239

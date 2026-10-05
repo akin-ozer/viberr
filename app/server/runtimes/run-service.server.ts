@@ -470,6 +470,8 @@ export interface StartRunInput {
   /** Ruling 176: the org servers' marked write tools this run withholds (see
    *  `RunSpec.mcpToolDenials`), as the MCP resolver returned them. */
   mcpToolDenials?: McpToolDenial[];
+  /** Ruling 658: see `RunSpec.mcpOptional`. */
+  mcpOptional?: string[];
   /** Granted skills mounted for the run (`mountGrantedSkills`). Claude only —
    *  the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
@@ -1057,6 +1059,11 @@ export async function startRun(
     spec.attachmentsWritableDir = input.attachmentsWritableDir;
   }
   if (input.mcpServers) spec.mcpServers = input.mcpServers;
+  // Ruling 658: only servers this run mounts can be optional.
+  const mcpOptional = (input.mcpOptional ?? []).filter((name) =>
+    Object.hasOwn(input.mcpServers ?? {}, name),
+  );
+  if (mcpOptional.length) spec.mcpOptional = mcpOptional;
   if (allowedTools) spec.allowedTools = allowedTools;
   // Ruling 176: a marked write tool is denied by name AFTER the auto-approval
   // above, which keeps its `mcp__<server>` allow entry (D4) — a deny rule wins
@@ -1784,6 +1791,8 @@ export interface ResumeRunInput {
   /** Ruling 176: re-apply the org servers' withheld write tools on resume, or
    *  a resumed read-only agent would get back the tools its fresh run lacked. */
   mcpToolDenials?: McpToolDenial[];
+  /** Ruling 658: see `RunSpec.mcpOptional`, re-derived for the resume. */
+  mcpOptional?: string[];
   /** Re-apply the granted skills mounted for the resumed run. A resume
    *  re-mounts (ruling 180: one plugin per run), but the SDK options do not
    *  carry over: without this a resumed @mention run would enable NO skill
@@ -1853,6 +1862,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.actor) target.actor = input.actor;
   if (input.disallowedTools) target.disallowedTools = input.disallowedTools;
   if (input.mcpToolDenials) target.mcpToolDenials = input.mcpToolDenials;
+  if (input.mcpOptional) target.mcpOptional = input.mcpOptional;
   if (input.skills) target.skills = input.skills;
   if (input.skillPlugin) target.skillPlugin = input.skillPlugin;
   if (input.allowedTools) target.allowedTools = input.allowedTools;

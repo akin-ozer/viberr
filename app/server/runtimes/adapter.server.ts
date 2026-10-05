@@ -124,6 +124,11 @@ export interface RunSpec {
    *  Codex, which has no denylist channel, sends them as that server's
    *  `disabled_tools`. */
   mcpToolDenials?: McpToolDenial[];
+  /** Ruling 658: the servers in `mcpServers` a Codex run may start without:
+   *  those mounted although their last probe failed or is stale, which the
+   *  run's prompt already names as possibly missing. Codex marks every other
+   *  server `required`. Claude ignores it. */
+  mcpOptional?: string[];
   /** The task's attachments directory, when this run's profile holds
    *  `attach-evidence-references` — where the agent copies files to "post a
    *  file on the task thread" (ruling 109). Neither adapter has to widen

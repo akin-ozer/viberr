@@ -643,6 +643,17 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   (the CLI reads it per `mcp_servers.<name>`, beside `enabled_tools`), by
   the server's own tool names. Live (2026-09-11), a withheld run listed and called only the
   unmarked tools.
+- Ruling 658: every mounted server is `required = true` with `startup_timeout_sec = 60`.
+  The CLI starts MCP servers in the background and gives a turn the tools of the
+  servers that are ready when it starts, and a Codex run is one turn, so a server that
+  started a second late was missing for the whole run without a word. A required server
+  is started before the first turn, and one that cannot start ends the session before
+  the model is called. The run then fails with a sentence naming the server
+  (`classifyCodexFailure`), ahead of the network branch, which would otherwise read its
+  transport error as this deployment failing to reach Codex. The exception is
+  `spec.mcpOptional`: servers mounted although their last probe failed (the run's
+  `unhealthy` disclosure, which the prompt names as possibly unavailable). They stay
+  optional, so a server the run was told may be missing cannot stop it.
 - No `maxTurns` and no budget option: the instance's spending cap (ruling 175) does not
   bind a Codex run, and its run-inputs disclosure says so ("Codex has no budget option:
   this run is bounded by its idle timer only"). Idle 15 min

@@ -285,11 +285,15 @@ describe("codex adapter (SDK, injected fake client)", () => {
       docs: {
         url: "https://mcp.example.test",
         default_tools_approval_mode: "approve",
+        required: true,
+        startup_timeout_sec: 60,
       },
       local: {
         command: "npx",
         args: ["-y", "example-mcp"],
         default_tools_approval_mode: "approve",
+        required: true,
+        startup_timeout_sec: 60,
       },
       // Ruling 554: Codex waits past the supervisor's deadline, so the model
       // reads the supervisor's "restarted" answer rather than a bare timeout.
@@ -299,8 +303,53 @@ describe("codex adapter (SDK, injected fake client)", () => {
         args: ["browser-supervisor.server.ts", "cli.js"],
         default_tools_approval_mode: "approve",
         tool_timeout_sec: 120,
+        required: true,
+        startup_timeout_sec: 60,
       },
     });
+  });
+
+  /**
+   * Ruling 658. The CLI starts MCP servers in the background and gives a turn
+   * the tools of the servers ready when it starts; a run is one turn, so a
+   * server a second late was missing for the whole run (live: AWSC-106's
+   * rework had no board readers and asked a person for the verdicts). A
+   * required server is started before the first turn or fails the session.
+   * A server the run names optional is one its prompt already calls possibly
+   * missing, and it must not stop the run.
+   * CANARY: drop `startFirst` from either transport and that server reaches
+   * the CLI optional again.
+   */
+  it("ruling 658: every mounted server must start before the first turn, except the ones the run names optional", async () => {
+    const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
+    createCodexAdapter({ codexFactory: run.factory }).start(
+      {
+        ...SPEC,
+        mcpServers: {
+          docs: { type: "http", url: "https://mcp.example.test" },
+          flaky: { type: "http", url: "https://flaky.example.test" },
+          local: { command: "npx", args: ["-y", "example-mcp"] },
+          stale: { command: "uvx", args: ["stale-mcp"] },
+        },
+        mcpOptional: ["flaky", "stale"],
+      },
+      { onLine: () => {}, onExit: () => {} },
+    );
+    await drain();
+
+    const servers = z
+      .record(
+        z.string(),
+        z.looseObject({ required: z.boolean().optional(), startup_timeout_sec: z.number().optional() }),
+      )
+      .parse(run.factoryOptions()?.config?.mcp_servers);
+    for (const name of ["docs", "local"]) {
+      expect(servers[name], name).toMatchObject({ required: true, startup_timeout_sec: 60 });
+    }
+    for (const name of ["flaky", "stale"]) {
+      expect(servers[name], name).not.toHaveProperty("required");
+      expect(servers[name], name).not.toHaveProperty("startup_timeout_sec");
+    }
   });
 
   it("overlays spec.env on a COMPLETE base env, never on {} (#3)", async () => {
@@ -865,6 +914,36 @@ describe("codex failure classification survives redaction into runFailureReason 
     }
   });
 
+  /**
+   * Ruling 658: a required MCP server that did not start ends the session
+   * before the model is called, and the CLI's stderr carries the server's own
+   * transport error. The network branch read that as this deployment failing
+   * to reach Codex. The CLI's wording below is verbatim from a 0.156.0 run
+   * with two required servers down, the transport detail shortened.
+   * CANARY: delete the required-server branch and this reads "Codex could not
+   * be reached from this deployment".
+   */
+  it("ruling 658: a required MCP server that did not start is named, not read as this deployment's network", async () => {
+    const failed =
+      "Failed to initialize session: required MCP servers failed to initialize: viberr_board: handshaking with MCP " +
+      "server failed: Send message error Transport [..] error: Client error: HTTP request failed: http/request " +
+      "failed: error sending request for url (http://127.0.0.1:4100/mcp/viberr_board), when send initialize " +
+      "request; aws-pricing: handshaking with MCP server failed: Send message error Transport [..] error: Broken " +
+      "pipe (os error 32), when send initialize request";
+    const reason = await classifyThrownFailure(
+      `Codex Exec exited with code 1: Reading additional input from stdin...\n` +
+        `2026-10-05T02:40:39.317879Z ERROR codex_core::session: ${failed}\n` +
+        `Error: thread/start: thread/start failed: error creating thread: Fatal error: ${failed} (code -32603)`,
+    );
+    expect(reason?.kind).toBe("unknown");
+    expect(reason?.text).toContain(
+      "Codex could not start this run: the MCP servers `viberr_board` and `aws-pricing` it mounts did not start",
+    );
+    expect(reason?.text).toContain("Nothing reached the model.");
+    expect(reason?.text).not.toContain("could not be reached from this deployment");
+    expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
+  });
+
   it("an unclassifiable failure classifies as 'unknown'", async () => {
     const reason = await classifyThrownFailure(
       "segmentation fault in /opt/codex/bin during run",
@@ -1209,11 +1288,15 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
       url: "http://127.0.0.1:43111/mcp/everything-http",
       default_tools_approval_mode: "approve",
       http_headers: { Authorization: `Bearer ${RUN_TOKEN}` },
+      required: true,
+      startup_timeout_sec: 60,
     });
     expect(servers["everything-stdio"]).toEqual({
       command: "npx",
       args: ["-y", "example-mcp"],
       default_tools_approval_mode: "approve",
+      required: true,
+      startup_timeout_sec: 60,
     });
   });
 
