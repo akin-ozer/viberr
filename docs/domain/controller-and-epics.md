@@ -219,8 +219,8 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   button preloads it when a pointer or focus reaches it, and until it lands the frame
   shows the same "Reading where you are…" and "Loading…" the body shows before its view
   arrives. The shared not-connected note lives in `not-connected.tsx` for the same
-  reason. The transcript reuses the
-  page's message vocabulary, reply order and queue states (ruling 465; `MessageState` in
+  reason. The transcript is the page's own list (`MessageList` in `message-list.tsx`,
+  ruling 657): its message vocabulary, reply order and queue states (ruling 465; `MessageState` in
   `turn-step.tsx`), ruling 527's steering, Steer and Queue, Send now and Retract (posted to
   its own resource route) and the composer takes focus on open (the send hint names the
   viewer's own modifier and drops on a coarse pointer) — on a user-initiated open only, so
