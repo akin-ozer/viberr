@@ -904,6 +904,11 @@ describe("codex failure classification survives redaction into runFailureReason 
     for (const text of [
       "server_error: The server is currently overloaded, please try again later",
       "503 Service Unavailable from api.openai.com",
+      // Ruling 659, verbatim from AWSC-109's Judge (2026-10-05): the CLI's own
+      // context compaction failed on it and ended a 228-turn run, which read
+      // `unknown` and sent the owner to "review its authentication".
+      // CANARY: drop `at capacity` from the overload pattern and this is `unknown`.
+      "Error running remote compact task: Selected model is at capacity. Please try a different model.",
     ]) {
       const reason = await classifyThrownFailure(text);
       expect(reason?.kind, text).toBe("overloaded");

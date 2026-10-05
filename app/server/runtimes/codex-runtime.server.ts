@@ -812,7 +812,7 @@ function classifyCodexFailure(
     };
   }
   if (
-    /overloaded|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(
+    /overloaded|\bat capacity\b|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(
       raw,
     )
   ) {
