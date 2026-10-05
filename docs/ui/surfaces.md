@@ -294,10 +294,14 @@ Intents behind `project.task.tsx` are explained in
 - **Dock clearance**: `--dock-clear` (`:root`) is the fixed dock trigger's reach,
   `44px + max(20px, safe-area-inset-bottom) + 1rem`; the scroll containers that
   end under the trigger (`.home-shell`, `.insights`, `.policy-wrap`, `.detail`,
-  `.col-body`, `.live-wrap`, `.board.list`, `.profile-list`, `.ag-detail`)
-  reserve it below their last block, so the last control on a surface can
-  always be scrolled clear of the trigger. The set is pinned in
-  `app.css.test.ts`; a new scroller under the dock joins it there.
+  `.live-wrap`, `.board.list`, `.ag-detail`) reserve it below their last
+  block, so the last control on a surface can always be scrolled clear of the
+  trigger. A board lane (`.col-body`) reserves it only while its cards
+  overflow it: the board measures the cards without the reserve and marks the
+  lane `.overflows`, so a lane whose cards fit does not scroll. Agents'
+  profile list never ends under the trigger and reserves nothing (ruling
+  661). The set is pinned in `app.css.test.ts`; a new scroller under the dock
+  joins it there.
 - **Form refusals** (ruling 147): every create/save primary stays enabled until
   the request starts (`busy` alone disables it, painted by the `aria-busy`
   rule). A submit that fails validation is refused with the message the surface

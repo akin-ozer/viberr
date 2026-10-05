@@ -749,6 +749,32 @@ function Column({
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
   const landingEl = landing ? <DropPreview task={landing.task} landing /> : null;
+  // Ruling 661: a lane takes the dock reserve (`.col-body.overflows`) only
+  // while its cards overflow it, so a lane whose cards fit does not scroll.
+  // The read leaves the reserve out (the lane's own foot matches its top):
+  // counted in, it would keep a lane scrolling once its cards fit again,
+  // which is what a `scroll-state(scrollable)` query would do. Measured after
+  // layout, as `Collapsible` measures its height.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const measure = () => {
+      const style = getComputedStyle(body);
+      const reserve = body.classList.contains("overflows")
+        ? parseFloat(style.paddingBottom) - parseFloat(style.paddingTop)
+        : 0;
+      setOverflows(body.scrollHeight - reserve > body.clientHeight);
+    };
+    measure();
+    // No guard: dnd-kit needs a ResizeObserver wherever the board renders
+    // (jsdom's is the stub in setup-dom.ts).
+    const ro = new ResizeObserver(measure);
+    ro.observe(body);
+    for (const block of body.children) ro.observe(block);
+    return () => ro.disconnect();
+  }, [tasks, showPreview, beforeKey, landing]);
   return (
     <section
       className={"column" + (dropTarget ? " drop-over" : "")}
@@ -791,7 +817,8 @@ function Column({
           scroll without a mouse. Tab lands on the column to scroll it; the card
           handler still owns the arrow keys once a card is focused. */}
       <div
-        className="col-body"
+        ref={bodyRef}
+        className={"col-body" + (overflows ? " overflows" : "")}
         role={tasks.length > 0 ? "list" : undefined}
         aria-label={tasks.length > 0 ? `${stage.name} tasks` : undefined}
         tabIndex={tasks.length > 0 ? 0 : undefined}
