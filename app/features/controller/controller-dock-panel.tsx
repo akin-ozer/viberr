@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router";
-import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
-import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
+import { TurnStep, WorkingSentence } from "./turn-step";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
 import { TranscriptJumpButton } from "./transcript-jump";
@@ -10,18 +9,17 @@ import type {
   ConversationTurnState,
   SendMode,
 } from "~/server/controller/controller-run.server";
-import { WaitingActions, withRetracted } from "./waiting-actions";
+import { withRetracted } from "./waiting-actions";
+import { MessageList } from "./message-list";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import { NotConnectedNote } from "./not-connected";
 import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
 import { Icon } from "~/ui/icon";
-import { Markdown } from "~/ui/markdown";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
 import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
-import { MessageFiles } from "./message-files";
 
 /**
  * The OPEN controller dock's body (ruling 121): the context line, the replies
@@ -154,13 +152,6 @@ export function DockPanelBody({
   const conversationId = current?.conversation?.id ?? null;
   const messages = current?.messages ?? [];
   const fresh = useFreshMessageIds(messages, conversationId);
-  // Ruling 465: the page's order and vocabulary — each reply under the
-  // message it answers, "answering now" / "queued · N ahead" on a message
-  // with no reply yet, and "is working…" under the message the turn answers.
-  // Ruling 527: steering sits in the turn it steers, as on the page.
-  const ordered = inReplyOrder(messages, turn);
-  const answered = answeredMessageIds(messages);
-  const workingAfter = turn ? workingRowAfter(ordered, turn) : null;
 
   // Scroll the transcript's own box, never the page underneath. This body
   // mounts on every open, and a fresh scroll container starts at scrollTop 0,
@@ -280,60 +271,29 @@ export function DockPanelBody({
               )}
             </div>
           ) : (
-            <div className="ctl-msgs dock-msgs">
-              {ordered.map((m) => (
-                <Fragment key={m.id}>
-                  <article
-                    className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
-                    data-message-id={m.id}
-                    data-fresh={fresh.has(m.id) ? "true" : undefined}
-                  >
-                    <header>
-                      <span className="ctl-msg-who">
-                        {m.author === "user" ? (
-                          "You"
-                        ) : (
-                          <>
-                            <Icon name="cpu" /> {current.controllerName}
-                          </>
-                        )}
-                      </span>
-                      <LocalDayDotTime iso={m.createdAt} />
-                      {m.author === "user" && !answered.has(m.id) && (
-                        <MessageState turn={turn} messageId={m.id} steered={m.steeredInto !== null} />
-                      )}
-                      {/* Ruling 527: Send now and Retract, for the sender. */}
-                      {m.author === "user" && current.viewerOwnsActive && conversationId && (
-                        <WaitingActions
-                          turn={turn}
-                          messageId={m.id}
-                          conversationId={conversationId}
-                          csrf={csrf}
-                          action="/resources/controller"
-                          files={m.files}
-                          onRetracted={(retracted, back) => {
-                            onText(withRetracted(text, retracted));
-                            if (back.length > 0) onFiles((cur) => addPickedFiles(cur, back, MESSAGE_BATCH).files);
-                          }}
-                        />
-                      )}
-                    </header>
-                    {m.text && (
-                      <div className="md-body">
-                        <Markdown text={m.text} taskLinks={current.taskLinks} />
-                      </div>
-                    )}
-                    {m.files && <MessageFiles files={m.files} />}
-                  </article>
-                  {m.id === workingAfter && turn?.working && (
-                    <DockWorkingRow name={current.controllerName} turn={turn} />
-                  )}
-                </Fragment>
-              ))}
-              {workingAfter === null && turn?.working && (
-                <DockWorkingRow name={current.controllerName} turn={turn} />
-              )}
-            </div>
+            <MessageList
+              className="ctl-msgs dock-msgs"
+              messages={messages}
+              turn={turn}
+              fresh={fresh}
+              controllerName={current.controllerName}
+              userLabel="You"
+              taskLinks={current.taskLinks}
+              waiting={
+                current.viewerOwnsActive && conversationId
+                  ? {
+                      conversationId,
+                      csrf,
+                      action: "/resources/controller",
+                      onRetracted: (retracted, back) => {
+                        onText(withRetracted(text, retracted));
+                        if (back.length > 0) onFiles((cur) => addPickedFiles(cur, back, MESSAGE_BATCH).files);
+                      },
+                    }
+                  : null
+              }
+              working={turn?.working && <DockWorkingRow name={current.controllerName} turn={turn} />}
+            />
           )}
           <TranscriptJumpButton jump={jump} />
         </section>

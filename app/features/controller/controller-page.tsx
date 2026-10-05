@@ -1,6 +1,5 @@
 import {
   createContext,
-  Fragment,
   useContext,
   useEffect,
   useMemo,
@@ -9,8 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
-import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
+import { TurnStep, WorkingSentence } from "./turn-step";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
 import { TranscriptJumpButton } from "./transcript-jump";
@@ -26,7 +24,6 @@ import type {
   ConversationListItem,
 } from "./controller-query.server";
 import { Icon } from "~/ui/icon";
-import { Markdown } from "~/ui/markdown";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { correctionAnchor, proposalAnchor } from "~/shared/page-anchors";
@@ -51,14 +48,14 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
 import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
-import { MessageFiles } from "./message-files";
 import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { NotConnectedNote } from "./not-connected";
 import { KnowledgePanel } from "./knowledge-panel";
 import { useOpResultToast, type ActionResult } from "./op-result";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
-import { WaitingActions, withRetracted } from "./waiting-actions";
+import { withRetracted } from "./waiting-actions";
+import { MessageList } from "./message-list";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -771,13 +768,6 @@ function Transcript({
       </section>
     );
   }
-  // Ruling 465 (F40-8): each reply sits under the message it answers, an
-  // unanswered message says where it stands, and "is working…" sits under
-  // the message the live turn answers, never under a later one. Ruling 527:
-  // a message that steered the turn, or waits to, sits in it.
-  const ordered = inReplyOrder(view.messages, view.turn);
-  const answered = answeredMessageIds(view.messages);
-  const workingAfter = workingRowAfter(ordered, view.turn);
   const conversationId = view.conversation.id;
   const onRetracted = (text: string, files: readonly File[]) => restoreDraft?.current?.(text, files);
   // Ruling 476(d): the row is what a sighted person watches. The page's one
@@ -805,57 +795,18 @@ function Transcript({
       // left nothing inside that took focus.
       tabIndex={0}
     >
-      <div className="ctl-msgs">
-        {ordered.map((m) => (
-          <Fragment key={m.id}>
-            <article
-              className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
-              data-message-id={m.id}
-              data-fresh={fresh.has(m.id) ? "true" : undefined}
-            >
-              <header>
-                <span className="ctl-msg-who">
-                  {m.author === "user" ? (
-                    view.conversation?.userLabel
-                  ) : (
-                    <>
-                      <Icon name="cpu" /> {view.controllerName}
-                    </>
-                  )}
-                </span>
-                <LocalDayDotTime iso={m.createdAt} />
-                {m.surface && (
-                  <span className="ctl-msg-surface" title={m.surface}>
-                    from {surfaceLabel(m.surface)}
-                  </span>
-                )}
-                {m.author === "user" && !answered.has(m.id) && (
-                  <MessageState turn={view.turn} messageId={m.id} steered={m.steeredInto !== null} />
-                )}
-                {/* Ruling 527: Send now and Retract, for the message's sender. */}
-                {m.author === "user" && view.viewerOwnsActive && (
-                  <WaitingActions
-                    turn={view.turn}
-                    messageId={m.id}
-                    conversationId={conversationId}
-                    csrf={csrf}
-                    files={m.files}
-                    onRetracted={onRetracted}
-                  />
-                )}
-              </header>
-              {m.text && (
-                <div className="md-body">
-                  <Markdown text={m.text} taskLinks={messageLinks} />
-                </div>
-              )}
-              {m.files && <MessageFiles files={m.files} />}
-            </article>
-            {m.id === workingAfter && working}
-          </Fragment>
-        ))}
-        {workingAfter === null && working}
-      </div>
+      <MessageList
+        className="ctl-msgs"
+        messages={view.messages}
+        turn={view.turn}
+        fresh={fresh}
+        controllerName={view.controllerName}
+        userLabel={view.conversation.userLabel}
+        surfaceLabel={surfaceLabel}
+        taskLinks={messageLinks}
+        waiting={view.viewerOwnsActive ? { conversationId, csrf, onRetracted } : null}
+        working={working}
+      />
       <TranscriptJumpButton jump={jump} />
     </section>
   );
