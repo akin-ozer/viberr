@@ -203,6 +203,21 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
   });
 
+  it("ruling 662: the restart note names a supporting agent's run by its role, not as a reviewer", async () => {
+    // `kind: "reviewer"` is every non-delivering run (F31-C7), and the note
+    // said "(reviewer)" for each, so the AWS board's Cloud Solutions Architect
+    // read as one. CANARY: label the run by its kind again.
+    seedRun("run_arch_orphan", {
+      kind: "reviewer", role: "Cloud Solutions Architect", agentProfileId: "cloud-solutions-architect",
+    });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Interrupted by a restart");
+    expect(note!.text).toContain("`run_arch_orphan` (Cloud Solutions Architect)");
+    expect(note!.text).not.toContain("reviewer");
+  });
+
   /**
    * Ruling 567. A person's Stop and a failed run both reach the completion
    * effects, which post the run's saved files under its name and record a

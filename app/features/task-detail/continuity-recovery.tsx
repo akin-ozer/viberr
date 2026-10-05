@@ -97,7 +97,8 @@ export interface ContinuityAgent {
   /** Run-group id — the Agent-logs selection key (`RunView.id`). */
   threadId: string;
   name: string;
-  /** "Operator" | "Delivering agent" | "Reviewer" — the engagement, in UI words. */
+  /** "Operator" | "Delivering agent" | "Reviewer" | "Supporting agent" — the
+   *  engagement, in UI words. */
   roleLabel: string;
   backendLabel: string;
   /** The provider session that is gone, when the wire envelope carried it. */
@@ -112,9 +113,18 @@ export interface ContinuityLoss {
   agents: ContinuityAgent[];
 }
 
-function roleLabelOf(run: RunView): string {
+/** A deployed profile, as far as the label needs it: whether its verdict
+ *  gates acceptance (`DeployedSpecialistView`). */
+type VerdictProfile = { id: string; capabilities?: { verdict: boolean } };
+
+function roleLabelOf(run: RunView, agents: readonly VerdictProfile[]): string {
   if (run.op || run.kind === "operator") return "Operator";
-  return run.kind === "reviewer" ? "Reviewer" : "Delivering agent";
+  if (run.kind === "primary") return "Delivering agent";
+  // Ruling 662: `reviewer` is every non-delivering run (F31-C7), and the UI
+  // calls one a reviewer only when its verdict gates acceptance, as the run
+  // picker does; an unknown profile reads as supporting, the weaker claim.
+  const verdict = agents.find((a) => a.id === run.profileId)?.capabilities?.verdict;
+  return verdict ? "Reviewer" : "Supporting agent";
 }
 
 function progressOf(run: RunView): ContinuityProgress {
@@ -131,6 +141,8 @@ export function deriveContinuityLoss(input: {
   /** Newest-first timeline slice as the loader ships it. */
   timeline: TimelineEventRender[];
   runtime: RunView[];
+  /** The deployed profiles (`deployedSpecialists`), for the reviewer label. */
+  agents?: readonly VerdictProfile[];
 }): ContinuityLoss | null {
   const event =
     input.timeline.find((e) => e.type === "continuity") ?? null;
@@ -141,7 +153,7 @@ export function deriveContinuityLoss(input: {
     agents.push({
       threadId: run.id,
       name: run.who.name,
-      roleLabel: roleLabelOf(run),
+      roleLabel: roleLabelOf(run, input.agents ?? []),
       backendLabel: backendLabelOf(run.backend),
       sessionId: run.sessionMissing.sessionId,
       progress: progressOf(run),
@@ -186,6 +198,7 @@ function progressSentence(agent: ContinuityAgent): string {
 export function ContinuityRecoveryPanel({
   timeline,
   runtime,
+  agents = [],
   runsVisible = true,
   canRunAgents = false,
   onOpenConsole,
@@ -195,6 +208,9 @@ export function ContinuityRecoveryPanel({
   timeline: TimelineEventRender[];
   /** The per-task run projection (`runtime`) — one entry per agent group. */
   runtime: RunView[];
+  /** The deployed profiles, so a supporting agent is not called a reviewer
+   *  unless its verdict gates acceptance (ruling 662). */
+  agents?: readonly VerdictProfile[];
   /** UI-30: false ⇒ the viewer is not a project member and the loader withheld
    *  `lines`/`raw`/`sid`, so there is no console to open and no session id to
    *  name. The panel still reports the break from the canonical timeline. */
@@ -210,7 +226,7 @@ export function ContinuityRecoveryPanel({
   /** The page's "Ask operator" signal — prefills and focuses the composer. */
   onAsk?: () => void;
 }) {
-  const loss = deriveContinuityLoss({ timeline, runtime });
+  const loss = deriveContinuityLoss({ timeline, runtime, agents });
 
   // A consequential state change has to be ANNOUNCED, not merely rendered
   // (spec §accessibility). A live region that arrives already populated is not

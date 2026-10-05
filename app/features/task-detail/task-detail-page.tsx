@@ -1032,6 +1032,7 @@ export function TaskDetailPage({
         <ContinuityRecoveryPanel
           timeline={task.timeline}
           runtime={runtime}
+          agents={deployedSpecialists}
           runsVisible={runsVisible}
           canRunAgents={canRunAgents}
           // Ruling 380: the run card's `onViewLogs` is a Show/Hide toggle; from
