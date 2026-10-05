@@ -841,6 +841,28 @@ function OptionKey({ index }: { index: number }) {
   );
 }
 
+/**
+ * N20-15: not inert — drops `@operator` into the comment composer below and
+ * focuses it; sending that comment starts a real operator run (the mention
+ * path). The title says so, because a click that only scrolls to an
+ * already-focused composer looked like a no-op. Open to everyone, resolver or
+ * not (commenting is app-wide). One button for the open and the decided packet
+ * (ruling 657).
+ */
+function AskOperatorButton({ onAsk }: { onAsk: () => void }) {
+  return (
+    <button
+      type="button"
+      className="btn ghost"
+      onClick={onAsk}
+      title="Starts a comment mentioning @operator below. Send it to pull the operator in"
+    >
+      <Icon name="message" />
+      Ask operator
+    </button>
+  );
+}
+
 export function DecisionPacket({
   packet,
   busy,
@@ -1209,15 +1231,7 @@ export function DecisionPacket({
             </figure>
           )}
           <div className="packet-actions">
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={onAsk}
-              title="Starts a comment mentioning @operator below. Send it to pull the operator in"
-            >
-              <Icon name="message" />
-              Ask operator
-            </button>
+            <AskOperatorButton onAsk={onAsk} />
             {canEditGoal && chosen && draft && onEditGoal && (
               <button
                 type="button"
@@ -1657,21 +1671,8 @@ export function DecisionPacket({
         )}
 
         <div className="packet-actions">
-          {/* N20-15: not inert — drops `@operator` into the comment composer
-              below and focuses it; sending that comment starts a real operator
-              run (the mention path). The title says so, because a click that
-              only scrolls to an already-focused composer looked like a no-op.
-              Open to everyone, resolver or not (commenting is app-wide).
-              FIRST in the row: actions end on the primary commit (flex-end). */}
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={onAsk}
-            title="Starts a comment mentioning @operator below. Send it to pull the operator in"
-          >
-            <Icon name="message" />
-            Ask operator
-          </button>
+          {/* FIRST in the row: actions end on the primary commit (flex-end). */}
+          <AskOperatorButton onAsk={onAsk} />
           {canResolve && (
             <button
               type="button"
