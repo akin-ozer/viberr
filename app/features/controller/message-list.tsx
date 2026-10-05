@@ -29,7 +29,7 @@ export interface MessageListWaiting {
  * steered the turn, or waits to, sits in it.
  */
 export function MessageList({
-  className,
+  inDock = false,
   messages,
   turn,
   fresh,
@@ -40,7 +40,8 @@ export function MessageList({
   waiting,
   working,
 }: {
-  className: string;
+  /** The dock's list, which its own rules size (`.dock-msgs`). */
+  inDock?: boolean;
   messages: readonly ControllerMessage[];
   turn: ConversationTurnState | null;
   /** Ruling 451(d): the messages that arrived while the list was on screen. */
@@ -58,7 +59,7 @@ export function MessageList({
   const answered = answeredMessageIds(messages);
   const workingAfter = turn ? workingRowAfter(ordered, turn) : null;
   return (
-    <div className={className}>
+    <div className={inDock ? "ctl-msgs dock-msgs" : "ctl-msgs"}>
       {ordered.map((m) => (
         <Fragment key={m.id}>
           <article

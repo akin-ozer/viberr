@@ -796,7 +796,6 @@ function Transcript({
       tabIndex={0}
     >
       <MessageList
-        className="ctl-msgs"
         messages={view.messages}
         turn={view.turn}
         fresh={fresh}

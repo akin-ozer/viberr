@@ -272,7 +272,7 @@ export function DockPanelBody({
             </div>
           ) : (
             <MessageList
-              className="ctl-msgs dock-msgs"
+              inDock
               messages={messages}
               turn={turn}
               fresh={fresh}
