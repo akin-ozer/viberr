@@ -20,9 +20,7 @@
 
 import { languageForName, PLAIN_LANGUAGE } from "~/ui/code-language";
 import { BINARY_EXTENSIONS } from "~/shared/attachment-kinds";
-
-/** Image-typed attachment names — thumbnail previews + the image lightbox. */
-export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
+import { IMAGE_RE } from "~/ui/picked-files";
 
 
 export type AttachmentKind = "image" | "binary" | "text";

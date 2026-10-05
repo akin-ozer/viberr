@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, useState, type DragEvent } from "react";
 import { ATTACHMENT_BATCH_MAX } from "~/shared/attachment-kinds";
+import { IMAGE_RE } from "./picked-files";
 import { prettySize } from "~/shared/text/byte-size";
 import { Icon } from "./icon";
-import { PICTURE_RE } from "./picked-files";
 
 /**
  * Ruling 573: the files a person hands over with a message, picked, dropped or
@@ -125,7 +125,7 @@ function useObjectUrl(file: File, wanted: boolean): string | null {
 }
 
 function TrayChip({ file, onRemove, disabled }: { file: File; onRemove: () => void; disabled: boolean }) {
-  const thumb = useObjectUrl(file, PICTURE_RE.test(file.name));
+  const thumb = useObjectUrl(file, IMAGE_RE.test(file.name));
   return (
     <li className="att-chip">
       <span className="att-chip-media" aria-hidden="true">
