@@ -559,6 +559,8 @@ interface StoreActionReply {
   /** `store-read-doc`: the document body and whether the read was cut short. */
   text?: string;
   truncated?: boolean;
+  /** `store-read-doc` (ruling 663): the version read. */
+  version?: string;
   /** `store-import-github`: the store-relative folder the snapshot landed in. */
   folder?: string;
   error?: string;
@@ -745,11 +747,31 @@ interface DocDraft {
   saved: string | null;
   /** The on-disk file exceeded the read cap, so this body is a partial copy. */
   truncated: boolean;
+  /** Ruling 663: the version the read returned. The save sends it back, and
+   *  the server refuses the save once the file is no longer that version, so
+   *  a correction an agent merged meanwhile is not wiped. Null for a new
+   *  document and until the read answers. */
+  version: string | null;
   /** Ruling 614: rendered or raw. An existing markdown file opens rendered; a
    *  new document opens raw, since there is nothing to render yet. */
   view: DocView;
   err: string | null;
 }
+
+/** What a document save posts (`store-write-doc`). `overwrite` rides only a
+ *  confirmed replace, and `version` only a document that was opened (ruling
+ *  663); each is sent or absent, never blank. */
+type DocSaveFields = {
+  _csrf: string;
+  intent: "store-write-doc";
+  kind: string;
+  id: string;
+  path: string;
+  name: string;
+  body: string;
+  overwrite?: "1";
+  version?: string;
+};
 
 /** The name a new document is saved under: `writeStoreDoc` gives a name with
  *  no extension `.md`. */
@@ -794,6 +816,7 @@ function useDocEditor(
               body: d.text ?? "",
               saved: d.text ?? "",
               truncated: Boolean(d.truncated),
+              version: d.version ?? null,
               err: null,
             }
           : { ...prev, err: d.error ?? "That document could not be read." }
@@ -823,6 +846,7 @@ function useDocEditor(
       existing: false,
       saved: null,
       truncated: false,
+      version: null,
       view: "raw",
       err: null,
     });
@@ -835,6 +859,7 @@ function useDocEditor(
       existing: true,
       saved: null,
       truncated: false,
+      version: null,
       view: isMarkdownName(name) ? "preview" : "raw",
       err: null,
     });
@@ -852,7 +877,7 @@ function useDocEditor(
 
   const save = (overwrite: boolean) => {
     if (!doc || saving) return;
-    const fields = {
+    const fields: DocSaveFields = {
       _csrf: csrf,
       intent: "store-write-doc",
       kind: resource.kind,
@@ -863,10 +888,10 @@ function useDocEditor(
     };
     // Only a confirmed replace carries the field: the action reads it as
     // `overwrite === "1"`, so it is sent or absent, never blank.
-    saveFetcher.submit(overwrite ? { ...fields, overwrite: "1" } : fields, {
-      method: "post",
-      action: STORE_ACTION,
-    });
+    if (overwrite) fields.overwrite = "1";
+    // Ruling 663: an opened document is saved against the version it read.
+    if (doc.version) fields.version = doc.version;
+    saveFetcher.submit(fields, { method: "post", action: STORE_ACTION });
   };
 
   return {

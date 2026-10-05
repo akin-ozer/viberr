@@ -25,6 +25,7 @@ interface StubActionReply {
   error?: string;
   text?: string;
   truncated?: boolean;
+  version?: string;
 }
 
 const TREE: StoreNode[] = [
@@ -384,7 +385,7 @@ describe("StoreBrowser document editor", () => {
       renderBrowser({
         respond: (intent) =>
           intent === "store-read-doc"
-            ? { ok: true, text: "# Overview\n\nLOADED **text**", truncated: false }
+            ? { ok: true, text: "# Overview\n\nLOADED **text**", truncated: false, version: "0a1b2c3d4e5f" }
             : undefined,
       });
     fireEvent.click(getByLabelText("Open overview.md"));
@@ -420,12 +421,16 @@ describe("StoreBrowser document editor", () => {
     expect(getByText("EDITED")).toBeTruthy();
 
     fireEvent.click(save);
+    // Ruling 663: the save names the version the read returned, so the server
+    // can refuse it once the file has changed. CANARY: stop sending it, and a
+    // correction an agent merged while this editor was open is wiped.
     await waitFor(() =>
       expect(lastForm).toMatchObject({
         intent: "store-write-doc",
         name: "overview.md",
         body: "# Overview\nEDITED",
         overwrite: "1",
+        version: "0a1b2c3d4e5f",
       }),
     );
   });

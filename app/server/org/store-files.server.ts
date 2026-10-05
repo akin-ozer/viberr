@@ -486,7 +486,13 @@ export function storeDocVersion(target: StoreTarget, nodePath: string[]): string
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
   if (!existsSync(abs) || !statSync(abs).isFile()) return null;
-  return sha256Hex(readFileSync(abs)).slice(0, 12);
+  return docVersionOf(readFileSync(abs));
+}
+
+/** The version of a document's bytes: what `storeDocVersion` reports and what
+ *  a replace names (rulings 305 and 663). */
+function docVersionOf(bytes: Buffer): string {
+  return sha256Hex(bytes).slice(0, 12);
 }
 
 /** Read one store text doc for the editor (`null` when absent). A doc the
@@ -571,6 +577,14 @@ export function writeStoreDoc(
      * on the record and not only in the editor's transcript.
      */
     edit?: { replaced: string; text: string };
+    /**
+     * Ruling 663: the version this replace read (`storeDocVersion`). A replace
+     * that names one is refused once the file is no longer that version, so a
+     * write made meanwhile (an agent's correction, another person's save) is
+     * not wiped by a save that never saw it. The document editor sends it;
+     * the controller checks its own (ruling 305).
+     */
+    replaces?: string;
   } = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
@@ -608,6 +622,13 @@ export function writeStoreDoc(
     );
   }
   const previous = existed ? readFileSync(abs) : null;
+  if (previous && opts.replaces !== undefined && docVersionOf(previous) !== opts.replaces) {
+    throw AppError.conflict(
+      `${[...base, withExt].join("/")} changed after you opened it: an agent's correction or another ` +
+        "edit was saved meanwhile. Nothing was written, and your text is still here. Copy your change, " +
+        "reopen the document, and make it again on top of what is there now.",
+    );
+  }
   const sent = Buffer.from(body, "utf8");
   const written = opts.append && previous ? Buffer.concat([previous, sent]) : sent;
   // Ruling 183: the document editor is a SKILL.md writer too.

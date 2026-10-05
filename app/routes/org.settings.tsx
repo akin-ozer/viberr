@@ -101,6 +101,7 @@ import {
   deleteStoreNode,
   importGithubSnapshot,
   readStoreDoc,
+  storeDocVersion,
   writeStoreDoc,
   writeStoreFiles,
   type UploadFileInput,
@@ -202,6 +203,8 @@ type SettingsOk = {
   /** `store-read-doc`: the document body and whether the read was cut short. */
   text?: string;
   truncated?: boolean;
+  /** `store-read-doc` (ruling 663): the version read, which the save sends back. */
+  version?: string;
   /** `store-import-github`: the store-relative folder the snapshot landed in. */
   folder?: string;
   /** `mcp-oauth-start` (ruling 469): where the admin's browser signs in, and
@@ -831,6 +834,13 @@ export async function action({ request }: Route.ActionArgs) {
       case "store-write-doc": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));
         if (!target) return fail("That resource no longer exists.", 404);
+        // Ruling 663: a document the editor opened is saved against the
+        // version it read, so a write made meanwhile is not wiped.
+        const writeOpts: NonNullable<Parameters<typeof writeStoreDoc>[6]> = {
+          overwrite: field("overwrite") === "1",
+        };
+        const readVersion = field("version");
+        if (readVersion) writeOpts.replaces = readVersion;
         const result = writeStoreDoc(
           db,
           target,
@@ -842,7 +852,7 @@ export async function action({ request }: Route.ActionArgs) {
           // so authoring a name that already existed destroyed the old file with
           // a success message. The server refuses a collision unless the UI's
           // replace confirm says otherwise.
-          { overwrite: field("overwrite") === "1" },
+          writeOpts,
         );
         return ok(
           `${result.path.join("/")} ${result.replaced ? "replaced" : "saved"} · ${result.bytes} bytes`,
@@ -856,7 +866,10 @@ export async function action({ request }: Route.ActionArgs) {
         if (!target) return fail("That resource no longer exists.", 404);
         const doc = readStoreDoc(target, parseJsonStringArray(field("path")));
         if (!doc) return fail("That file no longer exists.", 404);
-        return ok(undefined, { text: doc.text, truncated: doc.truncated });
+        const read: SettingsOkPayload = { text: doc.text, truncated: doc.truncated };
+        const version = storeDocVersion(target, parseJsonStringArray(field("path")));
+        if (version) read.version = version;
+        return ok(undefined, read);
       }
       case "store-mkdir": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));
