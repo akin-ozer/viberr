@@ -2557,6 +2557,34 @@ describe("resolvePacket kind matrix", () => {
     expect(back.timeline[0]!.text).toContain("Run the operator");
   });
 
+  it("ruling 664: a task restored at the terminal stage waits on nobody, and its note says so", async () => {
+    // Ruling 651 archives finished tasks too. Restoring one wrote `waiting:
+    // human` and "waiting on a human. Run the operator to reopen coordination,
+    // or move the task on yourself" over work that was done. Live: AWSC-3,
+    // restored at Done so a later benchmark run could take a file from it.
+    // CANARY: write `waiting = "human"` and F20-25's note on every restore.
+    const store = setupProjectedStore(ctx);
+    withTask(store, { stage: "done", waiting: "none" });
+    for (const archived of [true, false]) {
+      await setTaskArchived(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", archived },
+        actorOf(store.users.murat),
+        { dataRoot: store.dataRoot },
+      );
+    }
+    const back = readTaskFile({
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      dataRoot: store.dataRoot,
+    })!.parsed;
+    expect(back.frontmatter.archived).toBe(false);
+    expect(back.frontmatter.waiting).toBe("none");
+    expect(back.timeline[0]!.text).toBe(
+      "**Restored:** VIB-1 was restored from the archive and is back on the board. It is done, so nothing waits on it.",
+    );
+  });
+
   // F20-18 (N20-7): a contributor-owner handed a packet whose every option needs
   // maintainer authority has an in-app path — route the decision UP.
   const STRANDED_PACKET: TaskPacket = {

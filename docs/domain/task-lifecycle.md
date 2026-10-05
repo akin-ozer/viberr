@@ -1104,7 +1104,9 @@ default view and the review queue; the open packet and pending recommendations a
 withdrawn and named in the "Archived:" note; pending and claimed schedules are
 cancelled; live runs are interrupted (ruling 177, §11); `waiting` becomes `none`; the
 audit row is `task.archived`. `restore-task` brings it back waiting on a human
-(`task.unarchived`). Archiving through a `pr-diverged` recovery packet may also delete
+(`task.unarchived`), with a note that names the next step; a task restored at the
+terminal stage is finished work, so it comes back with `waiting: none` and a note that
+says it is done and nothing waits on it (ruling 664). Archiving through a `pr-diverged` recovery packet may also delete
 the remote branch. An archived task cannot be moved. Archiving an unfinished task another
 task waits on does not release the dependent (ruling 131(e)): before the archive returns,
 `noteDeadDependency` writes one "Waiting on work that cannot complete" note on each

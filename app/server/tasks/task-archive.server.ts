@@ -104,6 +104,13 @@ export async function setTaskArchived(
       ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. Restoring the task brings it back to a human, who can run the operator to reopen the decision.`
       : "";
 
+  // Ruling 664: a task restored at the terminal stage is finished work. Ruling
+  // 651 archives done tasks too, and restoring one said it was "waiting on a
+  // human" with a next step to take, over work nobody has anything left to do
+  // on (live: AWSC-3, restored at Done so a later run could take a file).
+  const restoredDone =
+    !input.archived && isTerminalStage(existing.parsed.frontmatter.stage, project.stages);
+
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     // Neutral disposition, not a governance violation (P13-LV-03).
@@ -112,9 +119,11 @@ export async function setTaskArchived(
     title: null,
     text: input.archived
       ? `**Archived:** ${input.taskKey} was archived. It leaves the board and the review queue, and its record is kept.${withdrawnNote}`
-      : // F20-25: a restored task waits on a human but carries no decision object
-        // — name the next step so it is not stranded on a silent "Human decision".
-        `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human. Run the operator to reopen coordination, or move the task on yourself.`,
+      : restoredDone
+        ? `**Restored:** ${input.taskKey} was restored from the archive and is back on the board. It is done, so nothing waits on it.`
+        : // F20-25: a restored task waits on a human but carries no decision object
+          // — name the next step so it is not stranded on a silent "Human decision".
+          `**Restored:** ${input.taskKey} was restored from the archive and is back on the board, waiting on a human. Run the operator to reopen coordination, or move the task on yourself.`,
     toAgent: false,
     evidence: null,
   };
@@ -144,8 +153,9 @@ export async function setTaskArchived(
       );
     } else {
       // A restored task is back in a human's hands — it has no agent in flight
-      // and no decision object, so the honest wait state is "human".
-      parsed.frontmatter.waiting = "human";
+      // and no decision object, so the honest wait state is "human". A done
+      // task waits on nobody (ruling 664).
+      parsed.frontmatter.waiting = restoredDone ? "none" : "human";
     }
     parsed.timeline.unshift(event);
   });
