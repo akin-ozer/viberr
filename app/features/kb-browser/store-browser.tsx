@@ -564,6 +564,10 @@ interface StoreActionReply {
   error?: string;
 }
 
+/** Where the browser's every read and write posts (ruling 657: no caller ever
+ *  passed another). */
+const STORE_ACTION = "/org/settings";
+
 /**
  * All store mutations behind the modal: the two fetcher POSTs to the
  * org-settings action (file ops + GitHub import), the file-ops toast
@@ -573,7 +577,6 @@ interface StoreActionReply {
  */
 function useStoreOps(
   resource: StoreBrowserResource,
-  action: string,
   expand: (path: string[]) => void,
 ) {
   const push = useToast();
@@ -612,7 +615,7 @@ function useStoreOps(
         id: resource.id,
         ...fields,
       },
-      { method: "post", action },
+      { method: "post", action: STORE_ACTION },
     );
   };
   const submitUpload = (
@@ -646,7 +649,7 @@ function useStoreOps(
     fd.set("_csrf", csrf);
     opsFetcher.submit(fd, {
       method: "post",
-      action,
+      action: STORE_ACTION,
       encType: "multipart/form-data",
     });
     // P13-UI-08: an upload had no busy state at all, so a large drop looked
@@ -705,7 +708,7 @@ function useStoreOps(
         // always landed at the store root regardless of the browsed folder.
         path: JSON.stringify(dest),
       },
-      { method: "post", action },
+      { method: "post", action: STORE_ACTION },
     );
   };
 
@@ -770,7 +773,6 @@ function draftFileName(name: string): string {
  */
 function useDocEditor(
   resource: StoreBrowserResource,
-  action: string,
   onSaved: (path: string) => void,
 ) {
   const csrf = useCsrfToken();
@@ -844,7 +846,7 @@ function useDocEditor(
         id: resource.id,
         path: JSON.stringify([...dir, name]),
       },
-      { method: "post", action },
+      { method: "post", action: STORE_ACTION },
     );
   };
 
@@ -863,7 +865,7 @@ function useDocEditor(
     // `overwrite === "1"`, so it is sent or absent, never blank.
     saveFetcher.submit(overwrite ? { ...fields, overwrite: "1" } : fields, {
       method: "post",
-      action,
+      action: STORE_ACTION,
     });
   };
 
@@ -1142,7 +1144,6 @@ export function StoreBrowser({
   tree,
   resource,
   onClose,
-  action = "/org/settings",
   initialDoc,
 }: {
   title: string;
@@ -1153,7 +1154,6 @@ export function StoreBrowser({
   tree: StoreNode[];
   resource: StoreBrowserResource;
   onClose: () => void;
-  action?: string;
   /** Ruling 483: a document to open on arrival (a store-relative path), for
    *  the link a knowledge-base proposal carries to the document it stands in. */
   initialDoc?: string;
@@ -1187,9 +1187,9 @@ export function StoreBrowser({
       return n;
     });
 
-  const ops = useStoreOps(resource, action, expand);
+  const ops = useStoreOps(resource, expand);
   const push = useToast();
-  const editor = useDocEditor(resource, action, (toast) => {
+  const editor = useDocEditor(resource, (toast) => {
     push(toast);
     expand(dest);
   });
