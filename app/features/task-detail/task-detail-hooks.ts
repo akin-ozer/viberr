@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useFetcher } from "react-router";
 import { inFlightIntent } from "~/ui/in-flight";
 import { useActionToast } from "~/ui/use-action-toast";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { RunView } from "~/features/runtime/runtime-types";
 import type { TaskRunPrincipalView } from "./run-principal-view";
@@ -76,13 +76,7 @@ export function useRunControls({
   );
   // Interrupt is admin|maintainer (contracts §3.2); the button hides for
   // everyone else. Server re-checks RBAC regardless.
-  //
-  // SAFETY: `myRole` is the project layout loader's own value (routes/project.tsx
-  // — `project_members.role`, which 0001_baseline CHECK-constrains to exactly the
-  // four project roles, or "admin" for the org-admin override, or null); the prop
-  // chain down to this hook is what widens it to `string`. `roleCan` denies any
-  // value outside the four regardless, so the widening can only ever under-grant.
-  const canInterrupt = roleCan(myRole as ProjectRole | null, "run-agents");
+  const canInterrupt = roleCan(asProjectRole(myRole), "run-agents");
   const onInterrupt = (runThreadId: string) => {
     if (runBusy) return;
     const run = runtime.find((r) => r.id === runThreadId);
@@ -175,10 +169,8 @@ export function useRunControls({
   // `pr.state: accepted` on a PR GitHub has already closed. Live (H10) the rail
   // offered exactly that while the recovery packet beside it said otherwise, so
   // the affordance is withheld entirely and the packet is the path.
-  //
-  // SAFETY: same loader-sourced `myRole` as `canInterrupt` above.
   const canForceAccept =
-    roleCan(myRole as ProjectRole | null, "force-accept-completion") &&
+    roleCan(asProjectRole(myRole), "force-accept-completion") &&
     !acceptanceTerminallyBlocked;
   // Ruling 88 (F21-2): the force ceremony discloses MORE than the ordinary one
   // (the skipped stages, the bypassed refusal), so it echoes on the same terms

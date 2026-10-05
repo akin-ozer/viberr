@@ -1,5 +1,5 @@
 import { useFetcher, useNavigate } from "react-router";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
@@ -503,16 +503,7 @@ export function GithubViewPage({
   // push "Updating branch and PR status from GitHub…" BEFORE submitting, so a
   // viewer clicked, watched fake progress, and then got a 403 — while the
   // sibling grant-scope control in this same file was correctly gated.
-  //
-  // SAFETY: `myRole` is the project layout loader's own value (routes/project.tsx
-  // — `project_members.role`, which 0001_baseline CHECK-constrains to exactly the
-  // four project roles, or "admin" for the org-admin override, or null); this
-  // page's prop is what widens it to `string`. `roleCan` denies any value outside
-  // the four regardless, so the widening can only ever under-grant.
-  const canReconcile = roleCan(
-    myRole as ProjectRole | null,
-    "reconcile-github",
-  );
+  const canReconcile = roleCan(asProjectRole(myRole), "reconcile-github");
   const reconcile = () => {
     if (!canReconcile) return;
     // First toast on submit, completion toast from the action (spec §4.1).
@@ -537,9 +528,7 @@ export function GithubViewPage({
   // attach/re-attach/remove row renders — so a role can never be shown a control
   // it may not use, nor hidden from one it may. The loader redacts the payload
   // on the same rule; a client-only gate would leave the token tail in the HTML.
-  //
-  // SAFETY: same loader-sourced `myRole` as `canReconcile` above.
-  const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
+  const canGrant = roleCan(asProjectRole(myRole), "grant-github-scope");
   // Re-check scopes re-validates an existing PAT — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".

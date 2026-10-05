@@ -51,11 +51,7 @@ import {
 } from "~/schemas/project-file.schema";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { isTerminalStage, stageLockReason, stageName } from "~/shared/workflow/stage-roles";
-import {
-  PROJECT_ROLES,
-  roleCan,
-  type ProjectRole,
-} from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import { countLabel } from "~/shared/text/plural";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
@@ -72,14 +68,6 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 type ActionResult =
   | { ok: true; toast: string; stageId?: string }
   | { ok: false; error: string };
-
-/** The route hands the viewer's project role through as a raw string. Decode it
- *  against the canonical list once, so every gate below reads a domain value
- *  instead of a hopeful cast — an unrecognized role holds nothing, which is
- *  what `roleCan` already answered for one. */
-function asProjectRole(raw: string | null): ProjectRole | null {
-  return PROJECT_ROLES.find((role) => role === raw) ?? null;
-}
 
 // ------------------------------------------------------------------ project
 

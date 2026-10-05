@@ -162,6 +162,17 @@ export const ACTION_ROLES = new Map<RbacAction, readonly ProjectRole[]>(
   ),
 );
 
+/**
+ * A project role as a page receives it, a plain string (the layout loader's
+ * `myRole`, a member's stored role), read against the four roles rather than
+ * cast into them. Anything else is no role at all, which is what `roleCan`
+ * answers for a non-member (ruling 657: one decoder where four modules kept a
+ * copy and six cast).
+ */
+export function asProjectRole(raw: string | null | undefined): ProjectRole | null {
+  return PROJECT_ROLES.find((role) => role === raw) ?? null;
+}
+
 /** Does this project role hold this action? A null role (non-member) never does. */
 export function roleCan(role: ProjectRole | null | undefined, action: RbacAction): boolean {
   if (!role) return false;

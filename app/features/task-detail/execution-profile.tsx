@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import { type ProjectRole, roleCan } from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
@@ -145,13 +145,7 @@ function OwnerControl({
   // Q5 tiering (XS-12): only contributor+ may take ownership — a viewer is
   // read + comment only, so its take button would just 403. Gate the control
   // the same way the server does rather than render a button that fails.
-  //
-  // SAFETY: `myRole` is the project layout loader's own value (routes/project.tsx
-  // — `project_members.role`, which 0001_baseline CHECK-constrains to exactly the
-  // four project roles, or "admin" for the org-admin override, or null); the prop
-  // chain down to here is what widens it to `string`. `roleCan` denies any value
-  // outside the four regardless, so the widening can only ever under-grant.
-  const canOwn = roleCan(myRole as ProjectRole | null, "own-task");
+  const canOwn = roleCan(asProjectRole(myRole), "own-task");
 
   if (!o) {
     // Only contributor+ may take ownership (Q5) — hide from viewers/non-members.
@@ -166,11 +160,7 @@ function OwnerControl({
       task.archived;
     // Ruling 118: an admin may still reassign a CLOSED (not archived) seat for
     // the record — the same tier that releases any owner.
-    // SAFETY: same invariant as `canOwn` above — `myRole` is the layout loader's
-    // own project role (or "admin"/null), widened to `string` by the prop chain;
-    // `roleCan` denies any other value, so the widening can only under-grant.
-    const adminSeat =
-      !task.archived && roleCan(myRole as ProjectRole | null, "release-any-ownership");
+    const adminSeat = !task.archived && roleCan(asProjectRole(myRole), "release-any-ownership");
     return canOwn && (!closed || adminSeat) ? (
       <button
         type="button"
