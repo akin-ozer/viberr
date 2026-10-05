@@ -197,12 +197,20 @@ describe("deriveContinuityLoss", () => {
   });
 
   it("labels the engagement the way the UI names it", () => {
+    const architect = { id: "cloud-solutions-architect", capabilities: { verdict: false } };
+    const judge = { id: "estimate-judge", capabilities: { verdict: true } };
     const roleOf = (patch: Partial<RunView>) =>
-      deriveContinuityLoss({ timeline: [], runtime: [brokenRun(patch)] })!.agents[0]!
-        .roleLabel;
+      deriveContinuityLoss({ timeline: [], runtime: [brokenRun(patch)], agents: [architect, judge] })!
+        .agents[0]!.roleLabel;
     expect(roleOf({ kind: "operator", op: true })).toBe("Operator");
-    expect(roleOf({ kind: "reviewer" })).toBe("Reviewer");
     expect(roleOf({ kind: "primary" })).toBe("Delivering agent");
+    // Ruling 662: a non-delivering run is a reviewer only when its profile's
+    // verdict gates acceptance, as the run picker says; otherwise, or when the
+    // profile is unknown, a supporting agent. CANARY: label every `reviewer`
+    // kind "Reviewer" again, and the Cloud Solutions Architect reads as one.
+    expect(roleOf({ kind: "reviewer", profileId: "estimate-judge" })).toBe("Reviewer");
+    expect(roleOf({ kind: "reviewer", profileId: "cloud-solutions-architect" })).toBe("Supporting agent");
+    expect(roleOf({ kind: "reviewer", profileId: "no-longer-deployed" })).toBe("Supporting agent");
   });
 
   it("reads where recovery stands off the group's representative run", () => {

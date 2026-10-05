@@ -1951,7 +1951,10 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
               disabled={retrying}
               aria-busy={retryingThis || undefined}
               onClick={() => onRetryBackend!(altBackend!, cur)}
-              title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
+              // Ruling 662: the agent by name. The kind said "reviewer" for
+              // every supporting agent and "specialist", a retired word, for
+              // the deliverer.
+              title={`Re-run ${cur.who.name} on ${altLabel}. The current backend was unavailable`}
             >
               <GlyphSwap rest="refresh" alt="loader" on={retryingThis} spinAlt />
               {retryingThis ? `Retrying on ${altLabel}…` : `Retry on ${altLabel}`}

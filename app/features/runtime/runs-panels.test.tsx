@@ -445,6 +445,12 @@ describe("AgentLogsPanel", () => {
     fireEvent.click(getByText("Retry on Codex"));
     expect(onRetryBackend).toHaveBeenCalledWith("codex", run);
     expect(container.querySelector(".logs-bar .btn.sm")).not.toBeNull();
+    // Ruling 662: the button names the agent it re-runs. Titled from the run's
+    // kind it said "specialist", a retired word, here, and "reviewer" for every
+    // supporting agent. CANARY: title it from the kind again.
+    expect(getByText("Retry on Codex").closest("button")!.title).toBe(
+      "Re-run Claude Code on Codex. The current backend was unavailable",
+    );
   });
 
   it("tells a viewer without the grant that a maintainer can retry — only when one could", () => {

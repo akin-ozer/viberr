@@ -405,8 +405,11 @@ export function finalizeOrphanedRuns(
     for (const [taskId, t] of realTasks) {
       const runs = runsByTask.get(taskId) ?? [];
       const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
-      const label = (r: { id: string; kind: string }): string =>
-        `\`${r.id}\` (${r.kind === "operator" ? "operator" : r.kind === "reviewer" ? "reviewer" : "agent"})`;
+      // Ruling 662: an agent run by its role. The kind called every
+      // supporting agent a "reviewer" (F31-C7: the kind says only whether the
+      // run delivers), so the Cloud Solutions Architect read as one.
+      const label = (r: { id: string; kind: string; role: string | null }): string =>
+        `\`${r.id}\` (${r.kind === "operator" ? "operator" : (r.role ?? "agent")})`;
       // Ruling 310(b): a run that never got a concurrency slot was not running,
       // and saying it was is the same defect as ruling 311's "Started". The
       // controller found this one by joining the timeline against the run

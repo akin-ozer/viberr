@@ -2064,7 +2064,8 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    name. They are its work in progress and never the delivery (ruling 601): only a run
    that finished reports one, so `deliveredAt` stays where it was. One
    "Interrupted by a restart" note per task then lists what was running and, separately,
-   what was queued and had not started (ruling 310(b)); then, once every note is written,
+   what was queued and had not started (ruling 310(b)), each agent run by its role, never
+   by its kind (ruling 662); then, once every note is written,
    one `runOperator({ trigger: "manual" })` per affected task (controller
    turns get a conversation note instead), capped at 3 per task per 30 min via
    `run.recovery.reinvoked` audit rows. **The cap is decided BEFORE the note is written**
