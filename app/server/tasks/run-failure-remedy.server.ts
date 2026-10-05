@@ -397,9 +397,9 @@ function operatorOptions(
 }
 
 /** A specialist's recovery options: the other backend first when the owner
- *  has it (rule unchanged), else "send the agent back to continue"; `redirect`
- *  present and NOT recommended for a backend failure or a hung run (the agent
- *  did nothing wrong, ruling 595). */
+ *  has it, else "send the agent back to continue"; an overload retries on the
+ *  same backend first (ruling 660); `redirect` present and NOT recommended for
+ *  a backend failure or a hung run (the agent did nothing wrong, ruling 595). */
 function specialistOptions(
   kind: RunFailure["kind"],
   backend: string,
@@ -485,8 +485,14 @@ function specialistOptions(
       };
       options.push(wait);
     }
+    // Ruling 660 (owner, 2026-10-05): an overload is the provider busy for a
+    // moment, so the same-backend retry is the recommendation and comes first.
+    // The other backend stays offered: it changes the agent's model for the
+    // rest of the task to save a wait of minutes.
+    const overloaded = kind === "overloaded";
+    let retry: OperatorPacketOptionInput | null = null;
     if (ownerHasOther) {
-      const retry: OperatorPacketOptionInput = {
+      retry = {
         kind: "retry_other_backend",
         title: `Retry ${handle} on ${BACKEND_LABEL[other]} now`,
         detail:
@@ -500,16 +506,17 @@ function specialistOptions(
           // the option rather than left for the reader to work out.
           (localNetwork
             ? ` This failure was on this deployment's own network path, which the other provider is reached over too, so this is a change of model rather than a fix.`
-            : ""),
+            : overloaded
+              ? ` An overload usually clears in minutes; this changes the agent's model to avoid that wait.`
+              : ""),
         backend: other,
       };
       // Ruling 212: not recommended when the fault is this deployment's own
       // network path. Ruling 224: nor when waiting for a dated window is on the
       // table — exactly one option is recommended, and a permanent model change
-      // is not it.
-      if (!localNetwork && !waitUntil) retry.recommended = true;
+      // is not it. Ruling 660: nor for any overload, local or the provider's.
+      if (!overloaded && !waitUntil) retry.recommended = true;
       if (profileId) retry.profileId = profileId;
-      options.push(retry);
     }
     const sendBack: OperatorPacketOptionInput = {
       kind: "request_edit",
@@ -536,7 +543,8 @@ function specialistOptions(
       // Ruling 224: and never when the wait is offered — asking a human to
       // assert the window has reset, minutes after the provider said it has
       // hours to run, is the one thing on this packet that is simply false.
-      recommended: (!ownerHasOther || localNetwork) && !waitUntil,
+      // Ruling 660: and for every overload, the provider's included.
+      recommended: (!ownerHasOther || overloaded) && !waitUntil,
       ev:
         kind === "quota"
           ? "**Decision:** the usage window has reset or the account was switched; the agent continues. No project policy was changed."
@@ -555,7 +563,9 @@ function specialistOptions(
     // agent back to continue" — cannot be kept (ruling 164). The overloaded and
     // unavailable titles assert nothing about quota and name nothing.
     if (kind === "quota" || kind === "auth") sendBack.backend = failed;
-    options.push(sendBack);
+    // Ruling 660: the recommended option comes first.
+    if (overloaded) options.push(sendBack, ...(retry ? [retry] : []));
+    else options.push(...(retry ? [retry] : []), sendBack);
     options.push(redirect);
     return options;
   }

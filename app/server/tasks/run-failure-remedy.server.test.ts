@@ -340,7 +340,17 @@ describe("describeRunFailure", () => {
     );
   });
 
-  it("specialist overloaded: retry on the other backend first WHEN the owner has it; the same-backend retry asserts that nothing was changed", async () => {
+  /**
+   * Ruling 660 (owner, 2026-10-05: "yes recommend same-backend retry for
+   * overloads"). An overload is the provider busy for a moment. Live on
+   * AWSC-110 a Codex compaction hit "Selected model is at capacity", and the
+   * packet recommended moving a GPT-6 Luna agent to Claude Sonnet for the rest
+   * of the task. The same-backend retry is the recommendation and comes first;
+   * the other backend stays offered, saying what it costs.
+   * CANARY: recommend the other-backend retry for an overload again, or push it
+   * first, and the second half goes red.
+   */
+  it("specialist overloaded: the same-backend retry is recommended and first, even when the owner has the other backend", async () => {
     const store = setupTestStore(ctx);
     const without = describe_(store, {
       role: "specialist",
@@ -366,12 +376,26 @@ describe("describeRunFailure", () => {
       failure: failure("overloaded", { apiErrorStatus: 529 }),
     });
     expect(withOther.options.map((o) => [o.kind, o.recommended ?? false])).toEqual([
-      ["retry_other_backend", true],
-      ["request_edit", false],
+      ["request_edit", true],
+      ["retry_other_backend", false],
       ["redirect", false],
     ]);
-    expect(withOther.options[0]).toMatchObject({ backend: "codex" });
+    expect(withOther.options[0]!.title).toBe(
+      "Retry @jc-developer on Claude now: the provider was overloaded, nothing was changed",
+    );
+    expect(withOther.options[1]).toMatchObject({ backend: "codex" });
+    expect(withOther.options[1]!.detail).toContain(
+      "An overload usually clears in minutes; this changes the agent's model to avoid that wait.",
+    );
     expect(withOther.remedy).toContain("or run it on Codex now");
+
+    // A quota refusal keeps the other backend first: that is not a moment's wait.
+    const quota = describe_(store, {
+      role: "specialist",
+      agentHandle: "jc-developer",
+      failure: failure("quota", { apiErrorStatus: 429 }),
+    });
+    expect(quota.options[0]).toMatchObject({ kind: "retry_other_backend", recommended: true });
   });
 
   /**
@@ -434,17 +458,19 @@ describe("describeRunFailure", () => {
     // deployment's own network path and the other provider is reached over the
     // same path. Taking it would change the task's model permanently to work
     // around a DNS or TLS problem that is still there.
+    // Ruling 660: an overload of either origin puts the recommended same-backend
+    // retry first.
     // CANARY: restore `recommended: true` on the retry_other_backend arm and
     // viberr's default answer to a local network fault is a model change.
-    expect(sp.options[0]).toMatchObject({ kind: "retry_other_backend", backend: "codex" });
-    expect(sp.options[0]!.recommended).toBeUndefined();
-    expect(sp.options[0]!.detail).toContain("a change of model rather than a fix");
-    expect(sp.options[1]).toMatchObject({ recommended: true });
-    expect(sp.options[1]).toMatchObject({
+    expect(sp.options[0]).toMatchObject({ recommended: true });
+    expect(sp.options[0]).toMatchObject({
       kind: "request_edit",
       title: "Retry @jc-developer on Claude now: this deployment could not reach the provider, nothing was changed",
     });
-    expect(sp.options[1]!.ev).toContain("this deployment could not reach Claude; the agent is retried as it was");
+    expect(sp.options[0]!.ev).toContain("this deployment could not reach Claude; the agent is retried as it was");
+    expect(sp.options[1]).toMatchObject({ kind: "retry_other_backend", backend: "codex" });
+    expect(sp.options[1]!.recommended).toBeUndefined();
+    expect(sp.options[1]!.detail).toContain("a change of model rather than a fix");
   });
 
   it("an unowned task yields no owner sentence and no retry option", () => {

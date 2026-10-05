@@ -445,6 +445,11 @@ order of an epic's work is each task's own list.
     decision at once, with a note naming where it came from. Only waiting, retrying on
     the other backend and holding may stand; an answer that re-runs the agent on the
     refused account would answer its own next refusal, in a loop.
+  - a run the provider could not serve (`overloaded`: the provider busy or failing on its
+    own side, or, ruling 212, this deployment's network path) recommends the same-backend
+    retry and lists it first ("Retry @agent on <backend> now: … nothing was changed"). The
+    other backend stays offered when the owner has it, not recommended: it changes the
+    agent's model for the rest of the task to save a wait of minutes (ruling 660).
   - a run the instance's **spending cap** cut off (ruling 175, Claude only) is a cut-off,
     not a failure, like the turn cap: the `blocked` event reads "the Claude run reached the
     instance's spending cap of $X after spending $Y and was CUT OFF mid-work, which is not a
