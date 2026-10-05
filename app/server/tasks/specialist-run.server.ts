@@ -1424,6 +1424,9 @@ async function dispatchAgentRun(
   runInput.compactAnchor = compactAnchor;
   if (disallowedTools.length) runInput.disallowedTools = disallowedTools;
   if (resolvedMcps.toolDenials.length) runInput.mcpToolDenials = resolvedMcps.toolDenials;
+  // Ruling 658: a server mounted on a failed or stale probe may be missing;
+  // Codex starts every other one before the agent works, or fails the run.
+  if (resolvedMcps.unhealthy.length) runInput.mcpOptional = resolvedMcps.unhealthy;
   // The SDK's native skills filter (Claude): exactly what mounted, nothing else.
   // Empty ⇒ the adapter keeps the fully-isolated defaults and the `Skill` tool
   // stays denied.
@@ -1995,6 +1998,8 @@ export interface ResumeConfinement {
   /** Ruling 176: the org servers' marked write tools the resumed run
    *  withholds, re-derived like the rest of its policy. */
   mcpToolDenials?: McpToolDenial[];
+  /** Ruling 658: the mounted servers the resumed run may start without. */
+  mcpOptional?: string[];
   env: Record<string, string>;
   mcpServers?: RunMcpServers;
   /** Ruling 370: the persona as its static/dynamic split. */
@@ -2304,6 +2309,9 @@ export async function resolveResumeConfinement(
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
     if (resumeMcps.toolDenials.length) confinement.mcpToolDenials = resumeMcps.toolDenials;
+    // Ruling 658: the same split the fresh run takes, from the same disclosure.
+    const resumeOptional = resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name);
+    if (resumeOptional.length) confinement.mcpOptional = resumeOptional;
     // Each key is set only when this resume really has that policy: the caller
     // spreads the result into the resume spec, where an ABSENT key means "keep
     // the adapter's default" and a present-but-undefined one would not.

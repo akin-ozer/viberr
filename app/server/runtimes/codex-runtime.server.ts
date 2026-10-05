@@ -252,6 +252,14 @@ const codexMcpServerSchema = z.union([
  */
 const STDIO_SERVER_ENV_KEYS = [RUN_MARKER_ENV, ...RUN_TMP_ENV_KEYS] as const;
 
+/**
+ * Ruling 658: how long the CLI may take to start a required MCP server. A
+ * minute is room for a stdio server that installs on its first start (`uvx`)
+ * and for the gateway to reach a remote upstream; a server that has not
+ * started by then ends the run before the model is called.
+ */
+const MCP_REQUIRED_STARTUP_TIMEOUT_SEC = 60;
+
 function stdioServerEnv(runEnv: RunSpec["env"]) {
   const out: Partial<Record<(typeof STDIO_SERVER_ENV_KEYS)[number], string>> = {};
   for (const key of STDIO_SERVER_ENV_KEYS) {
@@ -295,14 +303,33 @@ function stdioServerEnv(runEnv: RunSpec["env"]) {
  * a token that opens only this run's grants, only through the loopback
  * gateway and only while this run is live, so argv is an acceptable place for
  * it. That is what ended "a credentialed org MCP connects unauthenticated on
- * Codex" (F40-3): both backends now get the same gateway config. */
+ * Codex" (F40-3): both backends now get the same gateway config.
+ *
+ * Ruling 658: every server is `required` unless the run names it optional.
+ * The CLI starts MCP servers in the background and builds a turn's tools from
+ * the ones ready when the turn starts; a run is one turn, so a server a second
+ * late was missing for the whole run and nothing said so (live: AWSC-106's
+ * rework had no board readers, and 16 of 31 runs whose agent printed its tools
+ * lacked a server Viberr mounted). A required server is started before the
+ * first turn, within `MCP_REQUIRED_STARTUP_TIMEOUT_SEC`, and one that cannot
+ * start ends the session before the model is called. An optional server is a
+ * mount whose probe already failed: the prompt says it may be missing, so it
+ * must not stop the run. */
 function codexMcpServers(
   servers: RunSpec["mcpServers"],
   runEnv: RunSpec["env"],
   toolDenials: RunSpec["mcpToolDenials"] = [],
+  optional: RunSpec["mcpOptional"] = [],
 ): CodexConfig {
   const serverEnv = stdioServerEnv(runEnv);
   const translated: CodexConfig = {};
+  const optionalNames = new Set(optional);
+  /** Ruling 658: the CLI starts this server before the first turn, or fails. */
+  const startFirst = (server: CodexConfig, name: string) => {
+    if (optionalNames.has(name)) return;
+    server.required = true;
+    server.startup_timeout_sec = MCP_REQUIRED_STARTUP_TIMEOUT_SEC;
+  };
   // Ruling 370: servers in name order and their withheld tools sorted, so two
   // runs of one profile hand the CLI the same argv whatever order the grants
   // were stored in.
@@ -326,6 +353,7 @@ function codexMcpServers(
         http.http_headers = sortedRecord(declaration.data.headers);
       }
       if (disabledTools.length) http.disabled_tools = disabledTools;
+      startFirst(http, name);
       translated[name] = http;
       continue;
     }
@@ -342,6 +370,7 @@ function codexMcpServers(
     // deadline, saying the browser was restarted, so Codex must still be
     // waiting then; its default gives up first and says only "timed out".
     if (name === BROWSER_MCP_NAME) stdio.tool_timeout_sec = BROWSER_TOOL_TIMEOUT_SEC;
+    startFirst(stdio, name);
     translated[name] = stdio;
   }
   return translated;
@@ -516,7 +545,7 @@ function codexConfigForRun(
     // run sees only the MCPs its profile selected. NOTE: the CLI merges this
     // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
     // home declares — the app-owned run home is what makes this exhaustive.
-    mcp_servers: codexMcpServers(spec.mcpServers, spec.env, spec.mcpToolDenials),
+    mcp_servers: codexMcpServers(spec.mcpServers, spec.env, spec.mcpToolDenials, spec.mcpOptional),
     shell_environment_policy: shellEnvironmentPolicy,
   };
   // The persona/expertise prompt, when the run carries one. Set after the
@@ -630,6 +659,33 @@ interface CodexFailure {
   origin: RunFailureFacts["origin"];
 }
 
+/** Ruling 658: what the CLI writes when a required MCP server did not start,
+ *  followed by `<server>: <reason>` for each, `; ` between them. */
+const REQUIRED_MCP_FAILED_MARK = "required MCP servers failed to initialize: ";
+
+/** Ruling 658: the servers a session failed on, by the names the CLI gives
+ *  them, or null when no required server failed. Only a name is kept: the
+ *  reasons are the CLI's own transport errors. */
+function requiredMcpServersThatFailed(raw: string): string[] | null {
+  if (!raw.includes(REQUIRED_MCP_FAILED_MARK)) return null;
+  const names = new Set<string>();
+  for (const after of raw.split(REQUIRED_MCP_FAILED_MARK).slice(1)) {
+    for (const entry of (after.split("\n")[0] ?? "").split("; ")) {
+      const name = entry.split(": ")[0]?.trim() ?? "";
+      if (/^[\w.-]+$/.test(name)) names.add(name);
+    }
+  }
+  return [...names];
+}
+
+/** "the MCP server `a` it mounts", "the MCP servers `a` and `b` it mounts". */
+function mountedServersPhrase(names: readonly string[]): string {
+  const quoted = names.map((name) => `\`${name}\``);
+  if (quoted.length === 0) return "an MCP server it mounts";
+  if (quoted.length === 1) return `the MCP server ${quoted[0]} it mounts`;
+  return `the MCP servers ${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)} it mounts`;
+}
+
 /** Classify a provider failure IN MEMORY before its raw text is redacted, and
  * pair the class with a redaction-safe canonical message. The raw error can
  * echo stderr, command lines, or credentials, so ONLY the class and the
@@ -695,6 +751,23 @@ function classifyCodexFailure(
       kind: "session_missing",
       message:
         "The Codex session could not be resumed: its rollout no longer exists under $CODEX_HOME/sessions. Nothing is wrong with the credential; the conversation history is gone. Re-run the agent to start a fresh session anchored on task.md.",
+      providerText,
+      origin: null,
+    };
+  }
+  // Ruling 658: a required MCP server did not start. Before the quota, auth
+  // and network branches: its stderr carries the server's own transport error
+  // ("error sending request for url"), which the network branch would read as
+  // this deployment failing to reach Codex.
+  const failedServers = requiredMcpServersThatFailed(raw);
+  if (failedServers) {
+    return {
+      kind: "unknown",
+      message:
+        `Codex could not start this run: ${mountedServersPhrase(failedServers)} did not start, and a run ` +
+        "starts only with every server it mounts (ruling 658). Nothing reached the model. Run the agent " +
+        "again. If it fails the same way, the server is down: retest it in Instance settings → MCP " +
+        "servers, or take it off the agent's grants.",
       providerText,
       origin: null,
     };

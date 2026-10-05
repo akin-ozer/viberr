@@ -2147,6 +2147,8 @@ async function startCodexOperatorRun(
   if (Object.keys(orgMcpServers).length) spec.mcpServers = orgMcpServers;
   // Ruling 176: Codex sends these as each server's `disabled_tools`.
   if (mcp.toolDenials.length) spec.mcpToolDenials = mcp.toolDenials;
+  // Ruling 658: what the prompt names as possibly missing need not start.
+  if (mcp.unhealthy.length) spec.mcpOptional = mcp.unhealthy;
   // R21-4: adopt the row the human has been watching since before the clone,
   // instead of opening a second one beside it.
   if (start.reservation) spec.reservation = start.reservation;

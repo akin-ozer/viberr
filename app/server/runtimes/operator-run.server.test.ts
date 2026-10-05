@@ -1247,6 +1247,35 @@ describe("Codex structured operator completion", () => {
     );
   });
 
+  // Ruling 658: Codex requires every mounted server except the ones the run
+  // names optional, and the operator's prompt already calls a server whose
+  // last probe failed possibly unavailable.
+  // CANARY: drop the operator's `mcpOptional` line and the known-down server
+  // is required, so the operator run fails on it.
+  it("names the operator's known-down org server as one its Codex run may start without", async () => {
+    const now = new Date().toISOString();
+    const insert = store.db.prepare(
+      `INSERT INTO org_mcp_servers (id, name, transport, target, up, last_checked_at, created_at, updated_at)
+       VALUES (?, ?, 'HTTP', ?, ?, ?, ?, ?)`,
+    );
+    insert.run("mcp_ops", "ops-readonly", "https://mcp.example/sse", 1, now, now, now);
+    insert.run("mcp_down", "ops-down", "https://mcp.example/down", 0, now, now, now);
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        codexOperator(OPERATOR_POLICY, {
+          resources: { skills: [], kb: [], mcps: ["ops-readonly", "ops-down"] },
+        }),
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    expect(Object.keys(adapter.pending!.spec.mcpServers ?? {}).sort()).toEqual(["ops-down", "ops-readonly"]);
+    expect(adapter.pending!.spec.mcpOptional).toEqual(["ops-down"]);
+  });
+
   /**
    * R20-9 / ruling 84 residual (band-3 follow-up) — the MECHANICAL
    * delegated-ask disclosure rode the CLAUDE toolkit's `open_decision_packet`
