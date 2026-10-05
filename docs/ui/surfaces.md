@@ -377,8 +377,11 @@ Preview / Raw switch; the document, rendered on arrival when it is markdown and 
 text otherwise; and a foot with its state and Close (Cancel once it changed) beside Save
 document. Raw is where a document is edited; Save (`store-write-doc`) stays disabled on
 an opened document until its text changes, and the foot reads "Unsaved changes" while it
-differs (its line count and size otherwise). A new document opens on Raw under its
-file-name row, and Preview renders the draft.
+differs (its line count and size otherwise). The read hands back the document's version
+and the save sends it back (ruling 663): once the file is no longer that version, because
+an agent merged a correction or someone else saved, the save is refused, the card keeps
+the typed text and says the document changed after it was opened. A new document opens
+on Raw under its file-name row, and Preview renders the draft.
 A GitHub connection row (ruling 463) says what its token reaches: a `<details>`
 (`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"
 when the read stopped at its cap) and whose body lists each repository with a quiet
