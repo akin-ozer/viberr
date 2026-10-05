@@ -1310,7 +1310,14 @@ describe("ruling 130(a): structured classification", () => {
   });
 
   it("a thrown stream error naming a 529 / overload classifies `overloaded` by prose, never quota or unknown", async () => {
-    for (const text of ["API Error: 529 Overloaded", "The upstream service is temporarily unavailable", "503 Service Unavailable"]) {
+    // Ruling 659: a provider's "model is at capacity" is the same busy provider.
+    // CANARY: drop `at capacity` from the overload pattern and the last is `unknown`.
+    for (const text of [
+      "API Error: 529 Overloaded",
+      "The upstream service is temporarily unavailable",
+      "503 Service Unavailable",
+      "Selected model is at capacity. Please try a different model.",
+    ]) {
       const { q } = fakeQuery([], { rejectWith: new Error(text) });
       const adapter = createClaudeAdapter({ queryFn: () => q });
       const lines: EmittedLine[] = [];

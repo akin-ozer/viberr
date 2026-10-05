@@ -526,8 +526,9 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   when the provider did not answer with a 5xx: kind `overloaded`, `origin: "local"`) →
   `overloaded` (a result the SDK ended on a provider-side status — `api_error_status: 529`
   or another 5xx, structural since SDK 0.3.223 — an assistant-envelope `error` of
-  `overloaded` or `server_error`, or the prose regex `overloaded | 500/502/503/529 |
-  temporarily unavailable | service unavailable | server error`) → `unknown`. A
+  `overloaded` or `server_error`, or the prose regex `overloaded | at capacity |
+  500/502/503/529 | temporarily unavailable | service unavailable | server error`, "at
+  capacity" since ruling 659) → `unknown`. A
   provider-side status is where the run ENDED, so an earlier `rate_limit` banner the SDK
   retried through does not re-route it to `quota`; a REJECTED rate-limit reading still
   does. With no prose at all (an API-refused result under `subtype: "success"`), the
@@ -690,11 +691,15 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   Classification runs the session classes first, both `session_missing` with their own
   sentence: a session store the CLI cannot open (`SESSION_STORE_UNREADABLE_RE`, ruling
   221) and a torn rollout that "does not start with session metadata"
-  (`SESSION_DAMAGED_RE`, ruling 434); then a missing session (`SESSION_MISSING_RE`), quota
-  and auth; then the local-network arm (`LOCAL_NETWORK_FAILURE_RE`, skipped when the text
-  carries a 5xx code; kind `overloaded`, `origin: "local"`); then `overloaded`, which is
-  prose-only here (Codex streams no status): `overloaded | 500/502/503/529 | temporarily
-  unavailable | service unavailable | server error`.
+  (`SESSION_DAMAGED_RE`, ruling 434); then a missing session (`SESSION_MISSING_RE`); then
+  a required MCP server that did not start (ruling 658: `unknown`, with a sentence naming
+  the server); then quota and auth; then the local-network arm
+  (`LOCAL_NETWORK_FAILURE_RE`, skipped when the text carries a 5xx code; kind
+  `overloaded`, `origin: "local"`); then `overloaded`, which is prose-only here (Codex
+  streams no status): `overloaded | at capacity | 500/502/503/529 | temporarily
+  unavailable | service unavailable | server error`. "At capacity" (ruling 659) is the
+  CLI's "Selected model is at capacity", which also ends a run when it hits the CLI's own
+  context compaction.
 - Structured output: when a specialist has a verdict, ask or evidence grant, the run
   carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
   calls a Claude specialist would make. The SDK writes the schema into a directory of

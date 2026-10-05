@@ -783,7 +783,7 @@ export function runFailureReason(
           ? "quota"
           : /unauthor|forbidden|invalid.*(key|token|credential)|401|403|not logged in|authenticate/i.test(text)
             ? "auth"
-            : /overloaded|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(text)
+            : /overloaded|\bat capacity\b|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(text)
               ? "overloaded"
               : "unknown";
   return withProviderText({ kind, text }, providerText);

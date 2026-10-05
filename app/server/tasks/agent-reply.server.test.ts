@@ -877,6 +877,18 @@ describe("runFailureReason (F7-RUN1)", () => {
     expect(prose?.kind).toBe("quota");
   });
 
+  it("ruling 659: an untagged \"model is at capacity\" line is the provider being busy, not `unknown`", () => {
+    // CANARY: drop `at capacity` from the prose fallback's overload pattern
+    // and this reads `unknown`, whose packet asks for sharper guidance.
+    const busy = classify([
+      errLine({
+        tag: "error",
+        text: "Error running remote compact task: Selected model is at capacity. Please try a different model.",
+      }),
+    ]);
+    expect(busy?.kind).toBe("overloaded");
+  });
+
   it("trusts the structured `·<kind>` tag over the generic prose (codex path)", () => {
     // The redaction-safe auth message does NOT match the auth prose regex on
     // its own; the classified tag is what routes it correctly.

@@ -1175,7 +1175,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
     (evidence.apiError !== null && OVERLOAD_API_ERRORS.has(evidence.apiError));
   if (
     overloadByEvidence ||
-    /overloaded|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(
+    /overloaded|\bat capacity\b|\b5(?:0[023]|29)\b|temporarily unavailable|service unavailable|server error/i.test(
       raw,
     )
   ) {
