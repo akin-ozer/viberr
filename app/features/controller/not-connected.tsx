@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
+import { CONTROLLER_NOT_CONNECTED_NOTE } from "~/shared/controller-not-connected";
 
 /**
  * Ruling 127: what a viewer whose Claude is not connected reads, on the
@@ -8,19 +9,14 @@ import { Icon } from "~/ui/icon";
  *
  * The controller bills the ASKER, so this is never "the deployment has no
  * credential" — it is one person's account, and the remedy is theirs. The
- * words are the server's own (`controllerRefusalNote` in
- * controller-run.server.ts), so the disabled composer and the refusal the
- * transcript would record say the same thing.
+ * words are the server's own (`CONTROLLER_NOT_CONNECTED_NOTE`, ruling 657),
+ * so the disabled composer and the refusal the transcript would record say the
+ * same thing.
  *
  * Its own small module (ruling 457, FL-1): root mounts the dock on every page,
  * and taking these from `controller-page.tsx` put the whole controller page,
  * its run console and their packages into every route's first download.
  */
-const CLAUDE_NOT_CONNECTED =
-  "The controller runs on your own Claude account, and Claude isn't connected " +
-  "for you yet. Connect it on your Profile → Agent accounts, then send your " +
-  "message again.";
-
 /** Where the sentence above sends a person, linked where it is printed. */
 const AGENT_ACCOUNTS_PLACE = "Profile → Agent accounts";
 
@@ -39,7 +35,7 @@ export const CONNECT_TO_SEND = "Connect Claude to send a message.";
  * (ruling 121), so the two still tell one story.
  */
 export function NotConnectedNote() {
-  const [before, after] = CLAUDE_NOT_CONNECTED.split(AGENT_ACCOUNTS_PLACE);
+  const [before, after] = CONTROLLER_NOT_CONNECTED_NOTE.split(AGENT_ACCOUNTS_PLACE);
   return (
     <p className="deny-note ctl-unavailable" data-not-connected>
       <Icon name="alert" />
