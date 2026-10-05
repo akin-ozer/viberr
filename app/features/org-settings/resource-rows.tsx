@@ -2,7 +2,7 @@ import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { GlyphSwap } from "~/ui/copy-glyph";
-import { Icon } from "~/ui/icon";
+import { Icon, type IconName } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { storedStageLabel } from "./resource-helpers";
 import { LocalRelative, useHydrated } from "~/ui/local-time";
@@ -58,6 +58,26 @@ function signInPhrase(oauth: McpView["oauth"], hydrated: boolean): string | null
 function grantPhrase(scope: string | null): string {
   const phrase = mcpGrantPhrase(scope);
   return phrase ? `, ${phrase}` : "";
+}
+
+/** A row's icon action (ruling 657): the tip says what it does, and its
+ *  accessible name says which row too, as A11Y-2 has the add buttons do. */
+function RowAction({
+  icon,
+  title,
+  label,
+  onClick,
+}: {
+  icon: IconName;
+  title: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="stg-x" title={title} aria-label={label} onClick={onClick}>
+      <Icon name={icon} />
+    </button>
+  );
 }
 
 export function KbPanel({
@@ -148,15 +168,12 @@ export function KbPanel({
               </span>
             </span>
             <span className="rsrc-acts">
-              <button
-                type="button"
-                className="stg-x"
+              <RowAction
+                icon="folder"
                 title="Browse files"
-                aria-label={"Browse files in " + kb.name}
+                label={"Browse files in " + kb.name}
                 onClick={() => onBrowse(kb)}
-              >
-                <Icon name="folder" />
-              </button>
+              />
               {/* Ruling 368: the probe in flight shows itself here — busy, the
                   loader spinning, a name that says the work — and a second
                   press cannot re-submit it. */}
@@ -171,24 +188,18 @@ export function KbPanel({
               >
                 <GlyphSwap rest="refresh" alt="loader" on={reindexing === kb.id} spinAlt />
               </button>
-              <button
-                type="button"
-                className="stg-x"
+              <RowAction
+                icon="edit"
                 title="Edit"
-                aria-label={"Edit " + kb.name}
+                label={"Edit " + kb.name}
                 onClick={() => onEdit(kb)}
-              >
-                <Icon name="edit" />
-              </button>
-              <button
-                type="button"
-                className="stg-x"
+              />
+              <RowAction
+                icon="x"
                 title="Delete"
-                aria-label={"Delete " + kb.name}
+                label={"Delete " + kb.name}
                 onClick={() => onDelete(kb)}
-              >
-                <Icon name="x" />
-              </button>
+              />
             </span>
           </div>
         ))}
@@ -417,24 +428,18 @@ export function McpPanel({
               >
                 <GlyphSwap rest="refresh" alt="loader" on={testing === m.id} spinAlt />
               </button>
-              <button
-                type="button"
-                className="stg-x"
+              <RowAction
+                icon="edit"
                 title="Edit"
-                aria-label={"Edit " + m.name}
+                label={"Edit " + m.name}
                 onClick={() => onEdit(m)}
-              >
-                <Icon name="edit" />
-              </button>
-              <button
-                type="button"
-                className="stg-x"
+              />
+              <RowAction
+                icon="x"
                 title="Remove"
-                aria-label={"Remove " + m.name}
+                label={"Remove " + m.name}
                 onClick={() => onDelete(m)}
-              >
-                <Icon name="x" />
-              </button>
+              />
             </span>
           </div>
         ))}
@@ -506,33 +511,24 @@ export function SkillPanel({
               </span>
             </span>
             <span className="rsrc-acts">
-              <button
-                type="button"
-                className="stg-x"
+              <RowAction
+                icon="folder"
                 title="Browse files"
-                aria-label={"Browse files in " + s.name}
+                label={"Browse files in " + s.name}
                 onClick={() => onBrowse(s)}
-              >
-                <Icon name="folder" />
-              </button>
-              <button
-                type="button"
-                className="stg-x"
+              />
+              <RowAction
+                icon="edit"
                 title="Edit"
-                aria-label={"Edit " + s.name}
+                label={"Edit " + s.name}
                 onClick={() => onEdit(s)}
-              >
-                <Icon name="edit" />
-              </button>
-              <button
-                type="button"
-                className="stg-x"
+              />
+              <RowAction
+                icon="x"
                 title="Delete"
-                aria-label={"Delete " + s.name}
+                label={"Delete " + s.name}
                 onClick={() => onDelete(s)}
-              >
-                <Icon name="x" />
-              </button>
+              />
             </span>
           </div>
         ))}
@@ -607,24 +603,18 @@ export function AgentPanel({
                 </span>
               </span>
               <span className="rsrc-acts">
-                <button
-                  type="button"
-                  className="stg-x"
+                <RowAction
+                  icon="edit"
                   title="Edit"
-                  aria-label={"Edit " + a.name}
+                  label={"Edit " + a.name}
                   onClick={() => onEdit(a)}
-                >
-                  <Icon name="edit" />
-                </button>
-                <button
-                  type="button"
-                  className="stg-x"
+                />
+                <RowAction
+                  icon="x"
                   title="Delete"
-                  aria-label={"Delete " + a.name}
+                  label={"Delete " + a.name}
                   onClick={() => onDelete(a)}
-                >
-                  <Icon name="x" />
-                </button>
+                />
               </span>
             </div>
           );
