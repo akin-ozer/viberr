@@ -974,6 +974,7 @@ export async function commentToAgent(
     if (confinement) {
       resume.disallowedTools = confinement.disallowedTools;
       if (confinement.mcpToolDenials) resume.mcpToolDenials = confinement.mcpToolDenials;
+      if (confinement.mcpOptional) resume.mcpOptional = confinement.mcpOptional;
       resume.env = confinement.env;
       if (confinement.skills) resume.skills = confinement.skills;
       if (confinement.skillPlugin) resume.skillPlugin = confinement.skillPlugin;

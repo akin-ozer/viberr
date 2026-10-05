@@ -1179,6 +1179,38 @@ describe("ruling 176 — marked MCP write tools reach the denylist", () => {
   });
 });
 
+/* ------- ruling 658: the mounted servers a run may start without ------- */
+
+describe("ruling 658 — the servers a Codex run may start without", () => {
+  it("names only servers the run mounts, on a fresh run and on its resume", async () => {
+    // Canary: drop the `mcpOptional` copy in startRun, or its carry in
+    // `carryResumeOptions`, and Codex requires a server the run's prompt
+    // already called possibly missing.
+    const specs = captureSpecs("sess-a");
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Reviewer", kind: "reviewer",
+      backend: "codex", model: "m", prompt: "go",
+      mcpServers: { github: stdioServerStub, docs: stdioServerStub },
+      // A server this run does not mount names nothing, so it is not carried.
+      mcpOptional: ["docs", "dropped"],
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs[0]!.mcpOptional).toEqual(["docs"]);
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      credentialUserId: store.users.arda.id,
+      mcpServers: { github: stdioServerStub },
+      mcpOptional: ["github"],
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(specs.find((s) => s.runId === resumed.runId)!.mcpOptional).toEqual(["github"]);
+  });
+});
+
 /* ---------------- runtime continuity recovery (P13-D-2 / FR22) ------------- */
 
 describe("resumeRun — continuity recovery", () => {

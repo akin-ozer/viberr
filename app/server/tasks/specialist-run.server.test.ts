@@ -5289,6 +5289,52 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputsLine(grantedRun)!.mcp.writeToolsDenied).toEqual([]);
   });
 
+  it("ruling 658: a server mounted on a failed probe is the one a run may start without, fresh and resumed", async () => {
+    // Codex makes every other mounted server required (codex-runtime). The
+    // rows are HTTP so no stdio pre-flight spawns anything.
+    // CANARY: drop the `mcpOptional` line from either path and the known-down
+    // server is required, so a run that was told it may be missing fails.
+    const now = new Date().toISOString();
+    const insert = store.db.prepare(
+      `INSERT INTO org_mcp_servers (id, name, transport, target, up, last_checked_at, created_at, updated_at)
+       VALUES (?, ?, 'HTTP', ?, ?, ?, ?, ?)`,
+    );
+    insert.run("mcp_docs", "docs", "https://mcp.example.test/docs", 1, now, now, now);
+    insert.run("mcp_down", "down", "https://mcp.example.test/down", 0, now, now, now);
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...fm,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "sonnet",
+            resources: { skills: [], mcps: ["docs", "down"], kb: [] },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await assignAndRun();
+    const spec = lastRunSpec()!;
+    expect(Object.keys(spec.mcpServers ?? {}).sort()).toEqual(["docs", "down"]);
+    expect(spec.mcpOptional).toEqual(["down"]);
+
+    const confinement = await resolveResumeConfinement(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend: "claude", delivers: true },
+    );
+    expect(confinement.mcpOptional).toEqual(["down"]);
+  });
+
   it("ruling 585: a Codex run that holds a knowledge base mounts the gateway's knowledge server, fresh and resumed", async () => {
     // CANARY: leave the mount out of either path, index the private knowledge
     // base as unreachable, or send its corrections to the report, and this is
