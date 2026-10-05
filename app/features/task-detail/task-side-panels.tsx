@@ -9,7 +9,7 @@ import { Icon, type IconName } from "~/ui/icon";
 import { Pill, type PillKind } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
-import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import {
@@ -94,13 +94,6 @@ function prSignal({
       </div>
     </li>
   );
-}
-
-/** The layout hands these panels `myRole` as a raw string. Decode it to the
- *  domain role once, so every matrix read asks about a role the matrix knows —
- *  anything else is no role at all, exactly as `roleCan` already treats it. */
-function viewerRole(myRole: string | null): ProjectRole | null {
-  return PROJECT_ROLES.find((role) => role === myRole) ?? null;
 }
 
 /** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
@@ -813,7 +806,7 @@ export function CurrentStatePanel({
   // operator recommendation does, so it posts the **Transition:** timeline
   // comment and hands the task to the operator at its new stage. The submission
   // itself is the page's (`onTransition`) — see F19-37 on the prop.
-  const role = viewerRole(myRole);
+  const role = asProjectRole(myRole);
   const canTransition = roleCan(role, "approve-transition");
   const canOwn = roleCan(role, "own-task");
   // E3: releasing SOMEONE ELSE's seat is `release-any-ownership`, which is what

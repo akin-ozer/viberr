@@ -113,6 +113,22 @@ export function EpicPage({
     if (isTerminalStage(task.stageId, stages)) rowAct("archive-task", task.key);
     else setArchivingOpen(task);
   };
+  // One row for both lists (ruling 657): a live task offers Archive and Remove,
+  // an archived one Restore.
+  const taskRow = (task: EpicTaskView) => (
+    <EpicTaskRow
+      key={task.key}
+      task={task}
+      projectSlug={projectSlug}
+      epicId={epic.id}
+      stage={stageById.get(task.stageId) ?? null}
+      pending={rowPending?.taskKey === task.key ? rowPending.intent : null}
+      locked={rowBusy}
+      onArchive={canArchive && !task.archived ? () => archiveRow(task) : null}
+      onRestore={canArchive && task.archived ? () => rowAct("restore-task", task.key) : null}
+      onRemove={canEditTasks && !task.archived ? () => rowAct("remove-task", task.key) : null}
+    />
+  );
   const archivable = canArchive ? archivableTasks(epic) : 0;
   const statusBusy = statusFetcher.state !== "idle";
   const pendingStatus = statusBusy ? String(statusFetcher.formData?.get("status") ?? "") : null;
@@ -254,20 +270,7 @@ export function EpicPage({
                 </p>
               ) : (
                 <ul className="epic-task-list" aria-label={`Tasks in ${epic.id}`}>
-                  {live.map((task) => (
-                    <EpicTaskRow
-                      key={task.key}
-                      task={task}
-                      projectSlug={projectSlug}
-                      epicId={epic.id}
-                      stage={stageById.get(task.stageId) ?? null}
-                      pending={rowPending?.taskKey === task.key ? rowPending.intent : null}
-                      locked={rowBusy}
-                      onArchive={canArchive ? () => archiveRow(task) : null}
-                      onRestore={null}
-                      onRemove={canEditTasks ? () => rowAct("remove-task", task.key) : null}
-                    />
-                  ))}
+                  {live.map(taskRow)}
                 </ul>
               )}
               {archived.length > 0 && (
@@ -281,20 +284,7 @@ export function EpicPage({
                     one archived unfinished is left out of its progress.
                   </p>
                   <ul className="epic-task-list" aria-label={`Archived tasks in ${epic.id}`}>
-                    {archived.map((task) => (
-                      <EpicTaskRow
-                        key={task.key}
-                        task={task}
-                        projectSlug={projectSlug}
-                        epicId={epic.id}
-                        stage={stageById.get(task.stageId) ?? null}
-                        pending={rowPending?.taskKey === task.key ? rowPending.intent : null}
-                        locked={rowBusy}
-                        onArchive={null}
-                        onRestore={canArchive ? () => rowAct("restore-task", task.key) : null}
-                        onRemove={null}
-                      />
-                    ))}
+                    {archived.map(taskRow)}
                   </ul>
                 </details>
               )}

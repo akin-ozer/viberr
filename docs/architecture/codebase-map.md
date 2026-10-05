@@ -129,7 +129,7 @@ the route table is `app/routes.ts`.
 | `project-settings/` | Identity, workflow stages (with colour presets, ruling 364), required reviewers, file leases, members, repository and credentials (change, scope re-check, branch cleanup toggle), danger zone. |
 | `org-settings/` | Tabs: GitHub connections, users and access, sign-in & SSO, agent resources (KBs, MCP servers, skills, global agent templates, store browser), import & export (a board's file out, a board file in through the import dialog, ruling 653), controller (profile, locks, standing requests); below the tabs: run concurrency and run spend cap, the audit export card, the storage line. |
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
-| `controller/` | The conversation surface; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); where a transcript puts its reader and the jump back to its newest message, shared by the page and the dock (`transcript-follow.ts`, `transcript-jump.tsx`, rulings 476(c) and 572); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`; the files sent with a message, `message-files.tsx`, served by `routes/resources.controller-file.ts`, ruling 573), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
+| `controller/` | The conversation surface; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); where a transcript puts its reader and the jump back to its newest message, shared by the page and the dock (`transcript-follow.ts`, `transcript-jump.tsx`, rulings 476(c) and 572), as is the message list both draw (`message-list.tsx`, ruling 657); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`, in the server's own words from `shared/controller-not-connected.ts`; the files sent with a message, `message-files.tsx`, served by `routes/resources.controller-file.ts`, ruling 573), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
 | `notifications/` | The inbox page and the shared notification row. |
 | `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 127): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live; ruling 507: several accounts per backend, Rename and Disconnect each; ruling 616: the account in use as a picker (`AccountPicker`) whose menu switches to another (no sign-in), adds another account and opens the others' management. |
 | `insights/` | Read-only run analytics dashboard (oversight cards, backend quota, prompt cache, breakdowns, daily chart). |
@@ -168,13 +168,13 @@ date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-t
 ticking reader, ruling 457), `use-stable-rows` (structural sharing of loader rows and
 values across revalidations, ruling 457), `number-ticker` (counts up to a figure,
 ruling 366(f); it commits only when the drawn digits change),
-`attach-files` (a composer's tray of picked, dropped or pasted files, its paperclip and its drop target, ruling 573) + `picked-files` (the rules a composer keeps files by, which the New task dialog shares), `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
+`attach-files` (a composer's tray of picked, dropped or pasted files, its paperclip and its drop target, ruling 573) + `picked-files` (the rules a composer keeps files by, which the New task dialog shares, and `IMAGE_RE`, the one test for a picture's file name, ruling 657), `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
 ruling 166), `pagination` (Previous, the page numbers with a gap for each skipped run, Next:
 shadcn's Pagination drawn with the sheet's classes, ruling 618), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-hint`.
 
 ## 6. `app/shared/`
 
-`rbac.ts` (the permission table), `capabilities.ts` (the capability catalog, enforcement
+`rbac.ts` (the permission table, and `asProjectRole`, the one decoder of a role string, ruling 657), `capabilities.ts` (the capability catalog, enforcement
 scopes, grant couplings), `acceptance-disclosure.ts` (the accept echo contract),
 `mcp-reserved.ts`, `mcp-tools.ts` (admin-marked MCP write tools, ruling 176),
 `model-ids.ts`, `freshness.ts` (stale after 1 h), `controller-locks.ts` (ruling 108),
@@ -182,7 +182,7 @@ scopes, grant couplings), `acceptance-disclosure.ts` (the accept echo contract),
 `blockedBy` and epic id spellings the task schema validates, and the epic statuses:
 import-free, because that schema reaches every page, ruling 457), `file-leases.ts` (ruling
 245), `credential-scopes.ts` (violation vs advisory GitHub scopes, ruling 380(b)),
-`github-handle.ts` (ruling 154), `names.ts`, `attachment-kinds.ts`, `page-title.ts`
+`github-handle.ts` (ruling 154), `names.ts`, `attachment-kinds.ts`, `controller-not-connected.ts` (ruling 657), `page-title.ts`
 (one title grammar), `errors.ts` (`toError` / `errorMessage`, the one normalization of a
 caught value), `packet-goal-draft.ts` (ruling 138), `packet-server-outcome.ts`
 (ruling 136(a)), `provider-marker.ts`, `revision-drift.ts` (ruling 132), `run-failure.ts`

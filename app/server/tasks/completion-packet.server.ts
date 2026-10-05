@@ -19,10 +19,10 @@ import {
   COMPLETION_SCREENSHOTS_MAX,
   COMPLETION_SMALL_CHANGE_LINES,
   COMPLETION_SUMMARY_MAX,
-  SCREENSHOT_NAME_RE,
   changedLines,
   isSmallChange,
 } from "~/shared/completion-packet";
+import { IMAGE_RE } from "~/ui/picked-files";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
@@ -92,7 +92,7 @@ export function completionPacketRefusal(fm: PacketState, taskKey: string): strin
 
 /** The image attachments a packet may show, newest first. */
 function screenshotCandidates(entries: readonly TaskAttachmentEntry[]): string[] {
-  return entries.filter((e) => SCREENSHOT_NAME_RE.test(e.name)).map((e) => e.name);
+  return entries.filter((e) => IMAGE_RE.test(e.name)).map((e) => e.name);
 }
 
 /** The operator's snapshot fact: what is on file, and what writing it takes. */
@@ -244,9 +244,9 @@ export async function writeCompletionPacket(
       message: `Pick at most ${COMPLETION_SCREENSHOTS_MAX} screenshots: the ones that show the result.`,
     };
   }
-  const notImages = screenshots.filter((s) => !SCREENSHOT_NAME_RE.test(s.name)).map((s) => s.name);
+  const notImages = screenshots.filter((s) => !IMAGE_RE.test(s.name)).map((s) => s.name);
   const missing = screenshots
-    .filter((s) => SCREENSHOT_NAME_RE.test(s.name))
+    .filter((s) => IMAGE_RE.test(s.name))
     .filter((s) => !taskAttachmentExists(projectSlug, taskKey, s.name, ctx.dataRoot))
     .map((s) => s.name);
   if (notImages.length > 0 || missing.length > 0) {

@@ -23,10 +23,6 @@ export const COMPLETION_SCREENSHOTS_MAX = 6;
 /** One screenshot's caption, in characters. */
 export const COMPLETION_CAPTION_MAX = 200;
 
-/** Attachment names a packet may show as a screenshot: the image kinds the
- *  task page's lightbox opens (`IMAGE_RE` in `attachment-kind.ts`). */
-export const SCREENSHOT_NAME_RE = /\.(png|jpe?g|webp|gif)$/i;
-
 /** The change stats a task records (`github.changed`, the PR's own counts). */
 export interface ChangeStats {
   files: number;

@@ -1,7 +1,6 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
-import { useLocation, useNavigate, useFetcher } from "react-router";
+import { useNavigate, useFetcher } from "react-router";
 import { pageTitle } from "~/shared/page-title";
-import { z } from "zod";
 import type { Route } from "./+types/notifications";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
@@ -33,14 +32,6 @@ export function meta() {
   return [{ title: pageTitle("Notifications") }];
 }
 
-/** Overlay routes are opened from the shell with the path to return to in
- *  history state (top-bell, user-menu). Browser history state survives reloads
- *  and back/forward and is not the app's to trust, so it is parsed here rather
- *  than asserted. */
-const overlayReturnState = z
-  .object({ returnTo: z.string().optional().catch(undefined) })
-  .catch({});
-
 /** Most-recent notifications the page loads. The list is capped (no paging
  *  past it), so the loader over-fetches by one to detect when the window is
  *  full and surfaces `truncated` — the truncation used to be silent (P12/RU-4). */
@@ -70,7 +61,6 @@ export async function loader({ request }: Route.LoaderArgs) {
 export default function Notifications({ loaderData }: Route.ComponentProps) {
   const { notifications, unread, truncated, limit, decisionCount } = loaderData;
   const navigate = useNavigate();
-  const location = useLocation();
   const readFetcher = useFetcher<{ ok: boolean; error?: string }>();
   // R14-3: mark-all-read owns its own fetcher. Sharing one with the row read
   // meant a row click ABORTED an in-flight mark-all, and React Router drops an
@@ -99,10 +89,6 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   // it renders without the workspace shell underneath).
   useLiveUpdates([sseScopes.user()]);
 
-  const close = () => {
-    const { returnTo } = overlayReturnState.parse(location.state);
-    navigate(returnTo ?? "/");
-  };
 
   const markRead = (id: string) => {
     const item = notifications.find((n) => n.id === id);
@@ -130,7 +116,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   };
 
   return (
-    <PageOverlay label="Notifications" onClose={close}>
+    <PageOverlay label="Notifications">
       <NotificationsPage
         items={notifications}
         unread={unread}

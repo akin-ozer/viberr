@@ -7,6 +7,7 @@ import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { formatUsd } from "~/shared/run-failure";
+import { CONTROLLER_NOT_CONNECTED_NOTE } from "~/shared/controller-not-connected";
 import type { DatabaseSync } from "node:sqlite";
 import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import {
@@ -683,16 +684,6 @@ export function retractWaitingMessage(db: DatabaseSync, input: WaitingMessageRef
   }
   throw AppError.conflict("That message has already been read, so it can't be taken back.");
 }
-
-/**
- * The refusal a person with no Claude connected reads: in the transcript
- * (this engine) and, U35-4 (pass 35), from the HTTP send door itself, which
- * answers it as a 409 before any thread is created, so the door says no where
- * the dock's disabled composer already did.
- */
-export const CONTROLLER_NOT_CONNECTED_NOTE =
-  "The controller runs on your own Claude account, and Claude isn't connected for you yet. " +
-  "Connect it on your Profile → Agent accounts, then send your message again.";
 
 /**
  * The sentence an unavailable Claude gets, from the health alone: one home for

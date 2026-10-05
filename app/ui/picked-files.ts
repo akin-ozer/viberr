@@ -94,5 +94,9 @@ export function filesFromPaste(
   });
 }
 
-/** The kinds a composer and a transcript show as their own picture. */
-export const PICTURE_RE = /\.(png|jpe?g|webp|gif)$/i;
+/** The names a picture has, of the image types `INLINE_TYPES` serves: what a
+ *  composer and a controller transcript show as the picture itself, what the
+ *  task page shows as a thumbnail and opens in its lightbox, and what a
+ *  completion packet may show as a screenshot (ruling 657: one pattern where
+ *  three modules kept a copy). */
+export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;

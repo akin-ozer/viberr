@@ -1,22 +1,31 @@
 import { type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router";
+import { z } from "zod";
 import { Icon } from "./icon";
 import { useDialog } from "./use-dialog";
+
+/** Overlay routes are opened from the shell with the path to return to in
+ *  history state (top-bell, user-menu). Browser history state survives reloads
+ *  and back/forward and is not the app's to trust, so it is parsed here rather
+ *  than asserted. */
+const overlayReturnState = z
+  .object({ returnTo: z.string().optional().catch(undefined) })
+  .catch({});
 
 /**
  * Full-page modal built on native <dialog> via useDialog (focus trap, initial
  * focus, Escape, backdrop-click close, scroll lock, focus restore — come from
  * showModal() + the hook; the old hand-rolled trap and scrim div are gone).
+ * Closing goes back where the shell opened it from (ruling 657: the overlay
+ * routes each kept a copy of that close).
  */
-export function PageOverlay({
-  label,
-  onClose,
-  children,
-}: {
-  label: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const { ref: panelRef, close } = useDialog(onClose);
+export function PageOverlay({ label, children }: { label: string; children: ReactNode }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { ref: panelRef, close } = useDialog(() => {
+    const { returnTo } = overlayReturnState.parse(location.state);
+    navigate(returnTo ?? "/");
+  });
 
   return (
     <dialog

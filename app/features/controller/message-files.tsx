@@ -1,5 +1,5 @@
 import type { MessageFile } from "~/server/controller/controller-conversations.server";
-import { PICTURE_RE } from "~/ui/picked-files";
+import { IMAGE_RE } from "~/ui/picked-files";
 import { Icon } from "~/ui/icon";
 import { prettySize } from "~/shared/text/byte-size";
 
@@ -20,7 +20,7 @@ export function MessageFiles({ files }: { files: readonly MessageFile[] }) {
     <ul className="ctl-files" aria-label={files.length === 1 ? "1 file sent" : `${files.length} files sent`}>
       {files.map((file) => (
         <li key={file.id}>
-          {PICTURE_RE.test(file.name) ? (
+          {IMAGE_RE.test(file.name) ? (
             <a
               className="ctl-file-pic"
               href={messageFileHref(file)}

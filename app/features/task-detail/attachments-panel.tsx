@@ -7,7 +7,7 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AttachmentThumb } from "./attachment-image";
-import { IMAGE_RE } from "./attachment-kind";
+import { IMAGE_RE } from "~/ui/picked-files";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**

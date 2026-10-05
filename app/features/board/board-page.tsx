@@ -64,10 +64,7 @@ import type { RepoAccessResult } from "~/server/github/repo-access-check.server"
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
 import { mergeCollisions, type PrOverlap } from "~/shared/pr-overlaps";
 import { MoveBackConfirm } from "~/features/task-detail/move-back-confirm";
-import {
-  acceptanceDisclosureFields,
-  type AcceptanceDisclosure,
-} from "~/shared/acceptance-disclosure";
+import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
@@ -2316,13 +2313,7 @@ export function BoardPage({
     fd.set("to", to);
     fd.set("beforeKey", beforeKey);
     if (reason) fd.set("reason", reason);
-    if (disclosure) {
-      for (const [field, value] of Object.entries(
-        acceptanceDisclosureFields(disclosure),
-      )) {
-        fd.set(field, value);
-      }
-    }
+    setDisclosure(fd, disclosure);
     transitionFetcher.submit(fd, { method: "post" });
   };
 

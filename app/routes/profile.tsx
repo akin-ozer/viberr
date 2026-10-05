@@ -1,13 +1,7 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useRef } from "react";
 import { pageTitle } from "~/shared/page-title";
-import {
-  data,
-  useFetcher,
-  useLocation,
-  useNavigate,
-  useRouteLoaderData,
-} from "react-router";
+import { data, useFetcher, useRouteLoaderData } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/profile";
 import type { loader as rootLoader } from "../root";
@@ -57,14 +51,6 @@ import { revealTarget, scrollingBox, useHashTarget } from "~/ui/use-hash-target"
 export function meta() {
   return [{ title: pageTitle("Profile & preferences") }];
 }
-
-/** Overlay routes are opened from the shell with the path to return to in
- *  history state (top-bell, user-menu). Browser history state survives reloads
- *  and back/forward and is not the app's to trust, so it is parsed here rather
- *  than asserted. */
-const overlayReturnState = z
-  .object({ returnTo: z.string().optional().catch(undefined) })
-  .catch({});
 
 /**
  * Ruling 127 form fields. Decoded, never coerced: `backend` names a directory
@@ -254,8 +240,6 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const { profile } = loaderData;
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
   const theme = rootData?.theme ?? "system";
-  const navigate = useNavigate();
-  const location = useLocation();
   const csrf = useCsrfToken();
   const push = useToast();
   // Ruling 532: Home's setup checklist opens `#agent-accounts`. Here, above
@@ -287,10 +271,6 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   // and the inline error settle on.
   const backendsFetcher = useFetcher<ProfileActionData>();
 
-  const close = () => {
-    const { returnTo } = overlayReturnState.parse(location.state);
-    navigate(returnTo ?? "/");
-  };
 
   const submitWith =
     (fetcher: typeof identityFetcher) => (fields: Record<string, string>) => {
@@ -336,7 +316,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   };
 
   return (
-    <PageOverlay label="Profile & preferences" onClose={close}>
+    <PageOverlay label="Profile & preferences">
       <ProfilePage
         key={profile.user.id}
         data={profile}

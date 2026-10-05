@@ -46,12 +46,11 @@ import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { useStableRows } from "~/ui/use-stable-rows";
-import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import { stageName } from "~/shared/workflow/stage-roles";
-import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
+import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
 import {
-  setDisclosure,
   useLogSelection,
   useRunControls,
   type ActionResult,
@@ -376,10 +375,7 @@ export function TaskDetailPage({
   // recommendation) are admin|maintainer (contracts §3.2); server re-checks
   // RBAC. The execution mutations live in ExecutionSection; applying a
   // recommendation is page-owned (F19-3 — an Apply can be an acceptance).
-  // `myRole` arrives from the loader as a plain string; narrow it ONCE to the
-  // project-role domain. A value outside the four roles holds no action — the
-  // same answer `roleCan` already gives a non-member.
-  const role: ProjectRole | null = PROJECT_ROLES.find((r) => r === myRole) ?? null;
+  const role = asProjectRole(myRole);
   const canRunAgents = roleCan(role, "run-agents");
   const canOwn = roleCan(role, "own-task");
   // E3: ask for the action the SERVER enforces, not a neighbouring one.

@@ -4,7 +4,7 @@ import { Icon } from "~/ui/icon";
 import { IconTile } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
-import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import { asProjectRole, roleCan } from "~/shared/rbac";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 
 /**
@@ -17,12 +17,6 @@ import type { OwnerAction, TaskMemberView } from "./execution-profile";
  * which provides Escape + backdrop-click close, focus handling, and scroll
  * lock. Identity comparisons by user id (ruling 6).
  */
-/** `TaskMemberView.role` is a stored string; only the four known project roles
- *  carry any RBAC power, so anything else decodes to "no role at all". */
-function projectRole(role: string): ProjectRole | null {
-  return PROJECT_ROLES.find((known) => known === role) ?? null;
-}
-
 export function ReleaseConfirm({
   task,
   me,
@@ -60,7 +54,7 @@ export function ReleaseConfirm({
   const candidates = members
     .filter(
       (m) =>
-        m.userId !== o.userId && roleCan(projectRole(m.role), "own-task"),
+        m.userId !== o.userId && roleCan(asProjectRole(m.role), "own-task"),
     )
     .sort(
       (a, b) => (b.userId === me.id ? 1 : 0) - (a.userId === me.id ? 1 : 0),
