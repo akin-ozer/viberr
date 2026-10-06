@@ -1128,7 +1128,16 @@ export async function changeProjectRepo(
       { projectSlug: input.projectSlug, repo, byController: options.byController === true },
       actor,
     );
-    return { ...changed, toast: changed.toast + settledSentences(settled), settled };
+    // The settings door starts no controller (a repository attached for the
+    // agents to read must not switch the board), so where a question or a
+    // ruling was waiting on this and nobody may write the repository, it says
+    // what is left and who does it.
+    const waited = settled.rulingRemoved !== null || settled.answered.length > 0;
+    const left =
+      waited && !options.byController && !boardWritesRepo(input.projectSlug, ctx)
+        ? ". No agent on this board may write it yet: ask the controller to switch the board to pull requests"
+        : "";
+    return { ...changed, toast: changed.toast + settledSentences(settled) + left, settled };
   }
   const { defaultBranch, reading } = await probeRepoTarget(gh.client, repo, {
     subject: "The attached credential",

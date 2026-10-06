@@ -462,11 +462,17 @@ describe("a repository connected in the project's settings (ruling 672)", () => 
     expect(noRepositoryRuling(store.slug, at(store))).not.toBeNull();
 
     const result = await attach(store);
-    expect(result.toast).toContain(
-      `The ruling that this board connects no repository was removed from ${store.slug}-rulings`,
+    // The settings door starts no controller, so on a board nobody may write
+    // it says what is left. CANARY: drop the sentence and the board looks
+    // switched while its tasks still come back as files.
+    expect(result.toast).toBe(
+      "Repository attached: acme/site (default branch trunk), checked and bound with acme's connection. " +
+        `The ruling that this board connects no repository was removed from ${store.slug}-rulings. ` +
+        "No agent on this board may write it yet: ask the controller to switch the board to pull requests",
     );
     expect(noRepositoryRuling(store.slug, at(store))).toBeNull();
     expect(listAuditEvents(store.db, { action: "project.repo.ruling_removed" })).toHaveLength(1);
+    expect(runControllerTurn).not.toHaveBeenCalled();
   });
 });
 
