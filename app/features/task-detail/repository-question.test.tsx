@@ -109,16 +109,30 @@ describe("ruling 672: the repository question's card", () => {
     expect(box(container).value).toBe("acme/site");
   });
 
-  it("is a project admin's to answer: both answers are inert for anyone else, and each says who can", () => {
+  it("is a project admin's to answer: both answers are inert for anyone else, and the card says who answers once", () => {
     // CANARY: drop either row from PACKET_TIER_GATES and a maintainer is
-    // handed a Confirm the server refuses.
+    // handed a Confirm the server refuses. Ruling 673: put a clause back on
+    // each answer, or give the selected one a refusal line of its own, and
+    // the card names a project admin three ways; block Confirm on that line
+    // instead of on the gate and a kind without one goes through; drop
+    // `aria-describedby` and a screen reader on a dimmed answer hears no
+    // reason at all.
     const onResolve = vi.fn();
     const { container } = renderQuestion(QUESTION, false, onResolve);
     const [connect, keep] = radios(container);
-    expect(connect!.textContent).toContain("your role can't connect one (a project admin must)");
-    expect(keep!.textContent).toContain("your role can't decide this for the board (a project admin must)");
+    for (const answer of [connect!, keep!]) {
+      expect(answer.getAttribute("aria-disabled")).toBe("true");
+      expect(answer.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+      expect(answer.textContent).not.toContain("project admin");
+    }
     expect(connect!.getAttribute("title")).toBe("Connecting a repository to the board is reserved for project admins");
-    fireEvent.click(confirmButton(container));
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toContain(
+      "Both answers decide the board, so a project admin gives one.",
+    );
+    expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
+    const confirm = confirmButton(container);
+    expect(confirm.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+    fireEvent.click(confirm);
     expect(onResolve).not.toHaveBeenCalled();
   });
 
@@ -163,5 +177,11 @@ describe("ruling 672: the repository question's card", () => {
       "You can\u2019t answer this decision: both answers decide the board, so a project admin gives one. You can still comment or ask the operator below.",
     );
     expect(note).not.toContain("owner can");
+    // Ruling 673: said once here too, and each answer is described by it.
+    expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toContain("so a project admin gives one");
+    for (const answer of radios(container)) {
+      expect(answer.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+    }
   });
 });

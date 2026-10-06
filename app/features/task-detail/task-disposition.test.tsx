@@ -983,7 +983,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
       ],
     };
     const maintainer = renderPage({ myRole: "maintainer", task: { packet: question } });
-    expect(maintainer.container.textContent).toContain("your role can't connect one (a project admin must)");
+    expect(maintainer.container.textContent).toContain("Both answers decide the board, so a project admin gives one.");
     fireEvent.click(findButton(maintainer.container, "Confirm decision")!);
     expect(maintainer.submitted).toHaveLength(0);
     // A maintainer is stranded on it as a contributor-owner is on a
@@ -994,7 +994,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     cleanup();
 
     const admin = renderPage({ myRole: "admin", task: { packet: question } });
-    expect(admin.container.textContent).not.toContain("a project admin must");
+    expect(admin.container.textContent).not.toContain("a project admin gives one");
     expect(findButton(admin.container, "Send to a project admin")).toBeUndefined();
     fireEvent.click(findButton(admin.container, "Confirm decision")!);
     await waitFor(() => expect(admin.submitted).toHaveLength(1));
