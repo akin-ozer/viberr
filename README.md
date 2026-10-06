@@ -69,7 +69,7 @@ npm run seed
 npm run dev        # http://localhost:5173
 ```
 
-Sign in as the bootstrap admin: `admin@viberr.dev` / `viberr-dev-2828` by default, or
+Sign in as the bootstrap admin:
 set `VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` in `.env` before seeding.
 The admin is created only while the users table is EMPTY — after that, manage users
 in-app (Instance settings → Users & access).
