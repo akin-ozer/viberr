@@ -222,6 +222,8 @@ export function NewProjectModal({
     connections.length > 0 ? "software" : "results",
   );
   const [attachRepo, setAttachRepo] = useState(false);
+  // Ruling 672: a software board may start with no repository.
+  const [repoLater, setRepoLater] = useState(false);
   // Which field is flagged: only after a submit was refused (the dialog must
   // not open with a red field, the same rule as the new-task title). Counted,
   // so every refusal re-inserts the alert (see NewProjectFooter).
@@ -289,12 +291,13 @@ export function NewProjectModal({
     if (v && !nameTouched) setName(projectNameFromRepo(v));
   };
   // The effective repo owner: a picked connection. A board that delivers
-  // software REQUIRES a repository, and therefore a PAT connection (owner
-  // ruling 2026-07-17, reverses F10): its agents deliver through GitHub, so
-  // without one it dead-ends at execution. Ruling 667: a board that delivers
-  // results needs none, and takes one only when the person attaches it.
+  // software delivers through GitHub, so it takes a repository, and with it a
+  // PAT connection, unless the person connects it later (ruling 672: the
+  // operator asks for one when a task needs it, so a board without is no dead
+  // end). Ruling 667: a board that delivers results needs none, and takes one
+  // only when the person attaches it.
   const effOwner = connOwner;
-  const needsRepo = delivers === "software" || attachRepo;
+  const needsRepo = delivers === "software" ? !repoLater : attachRepo;
   const ok =
     name.trim().length > 1 &&
     effKey.length >= 2 &&
@@ -429,6 +432,8 @@ export function NewProjectModal({
           setDelivers={setDelivers}
           attachRepo={attachRepo}
           setAttachRepo={setAttachRepo}
+          repoLater={repoLater}
+          setRepoLater={setRepoLater}
         />
         {needsRepo && (
           <>

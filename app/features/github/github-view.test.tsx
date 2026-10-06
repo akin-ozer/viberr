@@ -597,7 +597,9 @@ describe("RepositoryPanel", () => {
     expect(container.querySelectorAll(".panel")).toHaveLength(1);
     const only = panel(container, "Repository");
     expect(only.textContent).toContain(
-      "This board delivers results: each task comes back as the files its agents save on it, so there are no branches or pull requests to show.",
+      // Ruling 672: a software board that has not connected its repository
+      // yet reads this page too, so it does not call the board a results one.
+      "This project has no repository: each task comes back as the files its agents save on it, so there are no branches or pull requests to show.",
     );
     expect(only.querySelector("a")!.getAttribute("href")).toBe("/projects/viberr-core/settings");
     expect(container.querySelector(".board-head .sub")!.textContent).toBe("Viberr Core has no repository");

@@ -16,6 +16,8 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  OPERATOR_PACKET_OPTION_KINDS,
+  operatorAskForRepository,
   operatorOpenPacket,
   type OperatorOpenPacketInput,
   type OperatorPacketOptionInput,
@@ -51,7 +53,7 @@ import {
   type OperatorActionResult,
   type OperatorAuthority,
 } from "~/server/tasks/operator-authority.server";
-import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
+import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import {
   noteConsultedProfile,
@@ -149,6 +151,12 @@ const OPERATOR_PLAN_TOOLS = [
   // `edit_comment`: `commentAt` names the comment, `text` the words that
   // replace it (null deletes it), `reason` why.
   "edit_comment",
+  // Ruling 672: ask a person to connect a repository to a board that has
+  // none, because this task needs one. The plan mirror of the Claude
+  // toolkit's `ask_for_repository`: `reason` is why the task needs it and
+  // `text` the repository the goal or a person named (`owner/name`), if any.
+  // Offered only where asking is possible (`authority.repositoryAsk`).
+  "ask_for_repository",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -166,6 +174,8 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   set_goal: ["append-typed-events"],
   open_packet: ["generate-packets"],
   resolve_packet: ["generate-packets"],
+  // Ruling 672: a packet, on the packets' grant.
+  ask_for_repository: ["generate-packets"],
   run_agent: ["dispatch-agents"],
   transition_stage: ["stage-transitions"],
   // R15-2: absent-means-granted polarity — resolved via deliverGate below, not
@@ -215,7 +225,11 @@ export function operatorPlanToolsFor(
   authority: OperatorAuthority,
 ): OperatorPlanTool[] {
   const permitted = OPERATOR_PLAN_TOOLS.filter((toolName) =>
-    toolName === "deliver_for_review" || toolName === "lease_files"
+    toolName === "ask_for_repository"
+      ? // Ruling 672: only where the question can be asked: a board with no
+        // repository whose rulings hold no decision to keep none.
+        authority.repositoryAsk === "open" && gate(authority, "generate-packets") !== "deny"
+      : toolName === "deliver_for_review" || toolName === "lease_files"
       ? deliverGate(authority) !== "deny"
       : toolName === "update_branch_from_base"
         ? updateBranchGate(authority) !== "deny"
@@ -256,6 +270,8 @@ export function operatorPlanToolsFor(
     "lease_files",
     "schedule_task_action",
     "cancel_task_schedule",
+    // Ruling 672: it is offered on its own condition above and never by default.
+    "ask_for_repository",
   ];
   return permitted.length
     ? [...permitted]
@@ -270,6 +286,17 @@ export function operatorPlanSchemaFor(authority: OperatorAuthority) {
 }
 
 function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
+  // Ruling 672: `ask_for_repository` reads two fields other tools own, and is
+  // offered on few boards. Its sentences join their descriptions only where
+  // it is offered, and its two answers are not among the option kinds an
+  // operator writes (`OPERATOR_PACKET_OPTION_KINDS`), so the schema every
+  // other project is given is the one it had.
+  const askForRepository = tools.includes("ask_for_repository")
+    ? {
+        text: " For ask_for_repository: the repository the goal or a person named, as owner/name, or null when none was named.",
+        reason: " For ask_for_repository: why THIS task needs a repository (the code it has to change, or that it must ship as a pull request; a task that only reads one is not this question), in a sentence or two a person reads before deciding; it opens a decision packet with two answers, connect one or keep the board without, both a project admin's, and you stop there.",
+      }
+    : { text: "", reason: "" };
   return {
   type: "object",
   additionalProperties: false,
@@ -295,8 +322,8 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
           // Ruling 492: `set_goal` drafts the task's goal in `text`, so this
           // field is one of the doors that write a goal.
-          text: { type: ["string", "null"], description: "For post_comment: the comment text (narration the HUMANS read, which starts no agent, so an @name in it reaches nobody); put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), an empty string to delete that passage (ruling 581), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for take_from_task: optional, one line on what the files are for, on the comment that claims them here (an @name in it is notified), or null for the default line; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 521), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE },
-          reason: { type: ["string", "null"], description: "Short why: recommendation-card reasoning (for a transition_stage that moves the task, shown on the move in its history), or the packet body for open_packet. For write_completion_packet: your summary of the code changes by area, naming the files that matter, required when the snapshot's `completionPacket.changesSummaryRequired` is true (more than 200 changed lines), else null so the diff is shown whole. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text (narration the HUMANS read, which starts no agent, so an @name in it reaches nobody); put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), an empty string to delete that passage (ruling 581), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for take_from_task: optional, one line on what the files are for, on the comment that claims them here (an @name in it is notified), or null for the default line; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 521), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE + askForRepository.text },
+          reason: { type: ["string", "null"], description: "Short why: recommendation-card reasoning (for a transition_stage that moves the task, shown on the move in its history), or the packet body for open_packet. For write_completion_packet: your summary of the code changes by area, naming the files that matter, required when the snapshot's `completionPacket.changesSummaryRequired` is true (more than 200 changed lines), else null so the diff is shown whole. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." + askForRepository.reason },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For correct_knowledge_doc: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For correct_knowledge_doc: the EVIDENCE that proves the passage wrong or the convention missing: the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
           blockedBy: {
@@ -399,7 +426,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
               type: "object",
               additionalProperties: false,
               properties: {
-                kind: { type: "string", enum: [...PACKET_OPTION_KINDS] },
+                kind: { type: "string", enum: [...OPERATOR_PACKET_OPTION_KINDS] },
                 title: { type: "string" },
                 detail: { type: ["string", "null"], description: "One concise line of extra context for this option; null if none." },
                 recommended: { type: "boolean" },
@@ -575,7 +602,7 @@ const operatorPlanActionSchema = z.strictObject({
   packetOptions: z
     .array(
       z.strictObject({
-        kind: z.enum(PACKET_OPTION_KINDS),
+        kind: z.enum(OPERATOR_PACKET_OPTION_KINDS),
         title: z.string(),
         detail: z.string().nullable(),
         recommended: z.boolean(),
@@ -949,6 +976,22 @@ export async function executeCodexPlan(
               ),
             );
           } else skippedMalformed(a.tool, "the packet title");
+          break;
+        }
+        case "ask_for_repository": {
+          // Ruling 672: the plan mirror of the Claude tool. The question is
+          // the server's packet; the plan carries the reason and, if the
+          // goal named one, the repository.
+          if (a.reason) {
+            const ask: Parameters<typeof operatorAskForRepository>[2] = { ...base, reason: a.reason };
+            if (a.text) ask.repository = a.text;
+            record(
+              a.tool,
+              await operatorAskForRepository(db, ctx, ask, authority, (packet) =>
+                operatorOpenPacketDisclosed(db, ctx, packet, authority, consultedProfileIds),
+              ),
+            );
+          } else skippedMalformed(a.tool, "the reason this task needs a repository");
           break;
         }
         case "set_dependencies": {

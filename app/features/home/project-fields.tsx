@@ -126,21 +126,27 @@ export function NewProjectNameFields({
 }
 
 /**
- * Ruling 667: what the board delivers, and with it whether the project needs
- * a repository. A results board needs none; its second control attaches one
- * anyway, for agents that read a repository and never write it.
+ * Ruling 667: what the board delivers. A results board needs no repository;
+ * its second control attaches one anyway, for agents that read a repository
+ * and never write it. Ruling 672: a software board may start without one too,
+ * and its second control says so.
  */
 export function NewProjectDeliversField({
   delivers,
   setDelivers,
   attachRepo,
   setAttachRepo,
+  repoLater,
+  setRepoLater,
 }: {
   delivers: BoardDelivers;
   setDelivers: (v: BoardDelivers) => void;
   /** Results only: attach a repository for the agents to read. */
   attachRepo: boolean;
   setAttachRepo: (v: boolean) => void;
+  /** Software only: start with no repository and connect it later. */
+  repoLater: boolean;
+  setRepoLater: (v: boolean) => void;
 }) {
   return (
     <div className="field">
@@ -167,13 +173,43 @@ export function NewProjectDeliversField({
       </div>
       <span className="fhint flush">
         {delivers === "software"
-          ? "Agents change a repository and each task ships as a pull request."
+          ? repoLater
+            ? SOFTWARE_REPO_LATER_HINT
+            : "Agents change a repository and each task ships as a pull request."
           : "You file a task with an input, agents work on it, and the result comes back as files on the task. No repository needed."}
       </span>
-      {delivers === "results" && (
+      {delivers === "results" ? (
         <AttachRepoLine attachRepo={attachRepo} setAttachRepo={setAttachRepo} />
+      ) : (
+        <RepoLaterLine repoLater={repoLater} setRepoLater={setRepoLater} />
       )}
     </div>
+  );
+}
+
+/** Ruling 672: what a software board that starts with no repository does
+ *  until it has one. Shared with the board import dialog. */
+export const SOFTWARE_REPO_LATER_HINT =
+  "The board starts with no repository. Tasks come back as files until one is connected, and the operator asks for it the first time a task needs a pull request.";
+
+/** Ruling 672: a software board's way to start with no repository, shared
+ *  with the board import dialog. */
+export function RepoLaterLine({
+  repoLater,
+  setRepoLater,
+}: {
+  repoLater: boolean;
+  setRepoLater: (v: boolean) => void;
+}) {
+  return (
+    <label className="check-line">
+      <input
+        type="checkbox"
+        checked={repoLater}
+        onChange={(e) => setRepoLater(e.target.checked)}
+      />
+      Connect the repository later
+    </label>
   );
 }
 

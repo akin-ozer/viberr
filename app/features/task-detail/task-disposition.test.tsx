@@ -966,6 +966,41 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.ackVerdict).toBe("failing");
   });
 
+  it("ruling 672: the repository question's answers are a project admin's on the page, and Confirm sends the repository typed", async () => {
+    // CANARY: stop passing `canEditPolicy` to the card and an admin finds
+    // both answers inert; pass it to everyone and a maintainer is handed a
+    // Confirm the server refuses.
+    const question: PacketRender = {
+      type: "input",
+      kind: "Decision required",
+      from: "Operator",
+      title: "Connect a repository to Viberr Core?",
+      body: "VIB-151 changes the checkout page.",
+      observations: [],
+      options: [
+        { kind: "connect_repository", t: "Connect a repository", d: "", rec: true, reply: true, repo: "acme/site" },
+        { kind: "keep_without_repository", t: "Keep this board without one", d: "", rec: false },
+      ],
+    };
+    const maintainer = renderPage({ myRole: "maintainer", task: { packet: question } });
+    expect(maintainer.container.textContent).toContain("your role can't connect one (a project admin must)");
+    fireEvent.click(findButton(maintainer.container, "Confirm decision")!);
+    expect(maintainer.submitted).toHaveLength(0);
+    // A maintainer is stranded on it as a contributor-owner is on a
+    // maintainer's decision, so the page offers the way up.
+    fireEvent.click(findButton(maintainer.container, "Send to a project admin")!);
+    await waitFor(() => expect(maintainer.submitted).toHaveLength(1));
+    expect(maintainer.submitted[0]!.intent).toBe("request-maintainer-decision");
+    cleanup();
+
+    const admin = renderPage({ myRole: "admin", task: { packet: question } });
+    expect(admin.container.textContent).not.toContain("a project admin must");
+    expect(findButton(admin.container, "Send to a project admin")).toBeUndefined();
+    fireEvent.click(findButton(admin.container, "Confirm decision")!);
+    await waitFor(() => expect(admin.submitted).toHaveLength(1));
+    expect(admin.submitted[0]).toMatchObject({ intent: "resolve-packet", option: "0", note: "acme/site" });
+  });
+
   /**
    * Pass-35 cluster review of ruling 164. A `force_accept` option is offered
    * FROM a blocked packet, and the resolution clears that packet BEFORE

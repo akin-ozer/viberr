@@ -447,20 +447,30 @@ anyone to push a first commit (ruling 468). A project with no repository (ruling
 no view to provision: the drive clones nothing, and the turn's workspace paragraph says
 every task on the board is delivered as the files its delivering agent saves, that
 delivery is handed with `run_agent` and `delivers: true`, and that `deliver_for_review`
-and `update_branch_from_base` are never called there.
+and `update_branch_from_base` are never called there. It also says what to do when a task
+needs a repository (ruling 672), from `OperatorAuthority.repositoryAsk`: while the question
+is `open`, call `ask_for_repository` with the reason and stop, never having an agent
+improvise the change as loose files; once a person `declined` it (the project's rulings
+hold `no-repository-<project>.md`), do not ask, say what cannot be done and deliver the rest as
+files. The tool (the Claude toolkit's, and the Codex plan's action of the same name) is
+offered on the same fact, so only where the question is open; its two answers,
+`connect_repository` and `keep_without_repository`, are never written through
+`open_decision_packet`. `docs/domain/github-delivery.md` §2 says what each answer does.
 
 **Backends.** Writes and shell are denied on both. On Claude the operator gets the
 in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org MCP servers
 with marked write tools withheld (ruling 176), and the deny list
 `OPERATOR_READ_ONLY_DENIED_TOOLS` (`Bash`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`).
 On Codex it runs in a scratch working directory with the task store and checkout read-only
-and returns a structured plan over seventeen verbs (`post_comment`, `open_packet`,
+and returns a structured plan over twenty-one verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
-`update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
-`set_dependencies`, `set_epic`, `correct_knowledge_doc`, `lease_files`,
-`schedule_task_action`, `cancel_task_schedule`, `relay_to_task`, `take_from_task`), the schema narrowed to what its policy allows
+`update_branch_from_base`, `accept_completion`, `write_completion_packet`,
+`flag_context_conflict`, `set_dependencies`, `set_epic`, `correct_knowledge_doc`,
+`lease_files`, `schedule_task_action`, `cancel_task_schedule`, `relay_to_task`,
+`take_from_task`, `edit_comment`, `ask_for_repository`), the schema narrowed to what its policy allows
 (`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
-in the all-denied fallback) and its packet options carrying every payload the
+in the all-denied fallback; `ask_for_repository` only on a project with no repository whose
+rulings hold no decision to keep none, ruling 672, and never in the fallback) and its packet options carrying every payload the
 Claude tool does (ruling 433). `relay_to_task` takes the target in the plan's `taskKey` and the files it carries in `files` (ruling 538)
 field (required and nullable, ruling 488) and the text in `text`, and like `post_comment`
 it still posts after a step of the plan opened a packet. The server executes the plan after the run
@@ -492,6 +502,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `edit_comment` | `operatorEditComment` (ruling 584: edits or deletes a comment the operator or an agent wrote on this task, itself and silently; an edit keeps the author, time, title and files, a delete takes the entry off, and the linked notifications follow; a person's comment is refused; audit `task.comment.edited` or `task.comment.deleted`, never the words) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84; refuses while a packet is open) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
+| `ask_for_repository` | `operatorAskForRepository` → `operatorOpenPacket` (ruling 672: the server's packet with `connect_repository` and `keep_without_repository`, the `reason` as its body, the named `repository` on the first option; a `noop` on a project that has a repository, on one whose rulings hold the decision to keep none, and with no reason) | `generate-packets`, and only where `authority.repositoryAsk` is `open` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |
 | `set_epic` | `operatorSetEpic` → `setTasksEpic` (ruling 503: puts THIS task in an epic, moves it to another or takes it out with `""`; an unknown epic or an archived task is a `noop` with the writer's sentence, an unchanged one a `noop`; the Codex plan carries it in `epicId`) | `append-typed-events` |
 | `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`, `noVerdict`: ruling 583, the run's verdict is withheld) | `dispatch-agents` |
@@ -718,7 +729,10 @@ something the task can show before acceptance, and a proof only the merged or de
 can show is a follow-up read task.
 
 Who opens packets: the operator's own decision (`operatorOpenPacket`, either
-backend); an agent's `ask_human` (kind `Agent question`, `custom` option only); Viberr's
+backend, over `OPERATOR_PACKET_OPTION_KINDS`: every kind but the repository question's
+two); the operator's repository question (`ask_for_repository` →
+`operatorAskForRepository`, ruling 672: the server writes both of its answers);
+an agent's `ask_human` (kind `Agent question`, `custom` option only); Viberr's
 review-deadlock escalation at the third consecutive objection (§4, ruling 237); the
 stuck-loop escalation after a no-progress react or the transition chain cap (the stock
 set: `redirect` recommended, `request_edit`, `hold_runtime_debug`; at the react depth cap
@@ -786,6 +800,8 @@ Resolution effects by option kind (`resolvePacket`):
 | `accept_unverified_head` | Re-reads the PR head check live; when it still cannot be verified, records a `headCheckWaiver` for that one (PR, delivered revision, live head) triple, honoured only while all three match (ruling 226). Requires `accept-completion`. |
 | `block_on_dependencies` | Writes the option's `blockedBy` as the task's wait through `setTaskDependencies`, so Viberr holds the task and releases it when every entry is done (ruling 230). |
 | `question_reviewer` | Starts THAT reviewer with `REVIEW_DEADLOCK_QUESTION` (name everything it would still block on, no new verdict), `waiting: agent`, the stage unmoved (ruling 237); on a held task the question is queued on the task and put the moment the wait clears (ruling 241). |
+| `connect_repository` | Attaches the repository the person typed through the Change door's attach arm, as one the board delivers through (its token has to push), BEFORE the packet clears; a refusal of that door leaves the question open, and a board that already has a repository is answered as it stands. The records an earlier repository left are stated on the card ("Earlier records"), so the answer acknowledges them. Then `carryOnAfterConnection` starts a board-level controller turn as that person and hands each answered task back to its operator: at once where an agent may write the repository or no controller turn started, otherwise when the controller has switched the board (each waiting task says so; ruling 330's sweep is the net). Never re-queued by `resolvePacket` itself (ruling 672). |
+| `keep_without_repository` | Writes `no-repository-<slug>.md` into the project's rulings knowledge base before the packet clears (creating `<slug>-rulings` when the project names none), `waiting: agent`, re-queued. While the document stands the question is refused and its tool is not built (ruling 672). |
 | `create_task` | Creates `newTask` through `createTask` under the RESOLVING person's authority and names the new key on both timelines; when `newTask.blocks` names this task, this task then waits on the new one (rulings 269, 287, 322). A created task starts from the base branch, which the authoring guidance says (`CREATE_TASK_BASE_NOTE`, ruling 441). It is also how a post-merge proof gets its task (ruling 492): acceptance closes the task and nothing after it happens inside the task, so before the operator puts a task up for acceptance, its doctrine has it read the goal and the delivering agent's report, and when either names a proof only the merged or deployed code can show and no task owns that read (`read_board` lists none, and no task in its `epic` is one), raise a `create_task` option for the read, `newTask.blockedBy` naming this task and `newTask.goal` confirming the change is merged and deployed before it reads (the read is released when this task reaches Done, which under the operator's own full-autonomy acceptance comes before the merge). The read is the new task's own done signal. The operator then waits for a person's answer before it puts the task up for acceptance, because an acceptance withdraws the option unanswered, and its `accept_completion` refuses while the option is open (§5). |
 | `deliver_for_review` | After the resolution write, runs the task page's own delivery door (`manualDeliverForReview` → `performDelivery`, the core behind the operator's `deliver_for_review` tool) under the resolving person's authority: the push, the PR, the `github.delivery.manual` row and every refusal's own timeline event. A delivery that reached the PR lifts the stall's `blocked` readiness; a supervised task also gets the delivery's "Move to <review>" card. Exactly one hand-off: a full-autonomy delivery that moved the head re-queues the operator itself, otherwise `packet-resolved` carries the typed `serverOutcome` (`delivered`, `current`, `failed`). The `run-agents` tier (or the owner) and ruling 240's hold are checked before the write, so a refusal leaves the packet open. Authoring refuses it unless the task's head is committed and not delivered (ruling 489). Process-only: not appended to the goal. |
 
@@ -814,10 +830,17 @@ maintainer, or the live task owner); `force_accept` by `force-accept-completion`
 `accept_unverified_head` by `accept-completion`; `move_stage`, `archive_task`,
 `discard_branch` and `resolve_remote_collision` by `approve-transition` (admin,
 maintainer); `deliver_for_review` by the owner exception, or by `resolve-packet` and
-`run-agents`, the manual delivery's own tier (both admin, maintainer; ruling 489); every
+`run-agents`, the manual delivery's own tier (both admin, maintainer; ruling 489);
+`connect_repository` and `keep_without_repository` by `edit-policy` (project admin; ruling
+672), with no owner exception: they decide the board; every
 other kind by the owner exception or `resolve-packet` (admin, maintainer). A stranded
 contributor-owner can `request-maintainer-decision`, which notifies and audits
-`task.packet.escalated` without touching the packet.
+`task.packet.escalated` without touching the packet. On the repository question a
+maintainer is stranded too: the same intent sends it to a project admin (its note, its
+notification "Decision needs a project admin: …" and its toast say so), and
+`decisionsRequiring` counts that packet as waiting on a project admin only, and lists it
+for a member who cannot answer under `needsProjectAdmin`, which the controller's
+`list_decisions` shows as `waitingOnAProjectAdmin`.
 `packetIdentity` (the id, or a content fingerprint) is snapshotted before any await,
 re-compared before the irreversible GitHub write and again inside the file lock; a
 replaced packet answers "This decision was replaced by a newer one." Confirming any

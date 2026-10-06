@@ -227,8 +227,9 @@ end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`).
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
 Home's setup checklist (ruling 532) lists it with the instance's other gaps, each a link
 to where it is closed: a GitHub connection, an account of your own beside the bootstrap
-admin, and the first project. GitHub is needed only for a board that delivers software:
-a board that delivers results is created with no repository (ruling 667), and the
+admin, and the first project. GitHub is needed only for a board that delivers through a
+repository: a board that delivers results is created with none (ruling 667), a software
+board can connect its repository later (ruling 672), and the
 checklist stops listing GitHub once a project exists on an instance with no connection.
 Until somebody does, the instance runs no agents: an agent started on a task whose owner
 has nothing connected is refused before any process starts, with an honest

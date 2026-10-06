@@ -538,6 +538,93 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(recorded).toContain("TAIL");
   });
 
+  it("ruling 672: keeping the board without a repository says what was recorded, not a generic decision", async () => {
+    // CANARY: let the answer fall through to "Decision recorded: …" and the
+    // person is not told the board now holds a ruling, nor that the question
+    // is closed for good.
+    const { readProjectFile, updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const { readTaskFile, updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { operatorAskForRepository } = await import("~/server/tasks/operator-packets.server");
+    const { resolveOperatorAuthority } = await import("~/server/tasks/operator-authority.server");
+    const { noRepositoryRuling } = await import("~/server/org/repository-ruling.server");
+    const ref = { projectSlug: "viberr-core", dataRoot: app.dataRoot };
+    await updateProjectFile(ref, (p) => {
+      p.frontmatter.repo = null;
+    });
+    await updateTaskFile({ ...ref, taskKey: "VIB-142" }, (t) => {
+      t.packet = null;
+    });
+    rebuildProject(app.db, "viberr-core", { dataRoot: app.dataRoot });
+    const asked = await operatorAskForRepository(
+      app.db,
+      { dataRoot: app.dataRoot },
+      { projectSlug: "viberr-core", taskKey: "VIB-142", reason: "VIB-142 changes code this board has no repository for." },
+      resolveOperatorAuthority({ dataRoot: app.dataRoot }, "viberr-core"),
+    );
+    expect(asked.outcome).toBe("done");
+
+    // SAFETY: the success arm of `resolve-packet`, as in the tests above.
+    const posted = (await postIntent("VIB-142", ids.arda, { intent: "resolve-packet", option: "1" })) as {
+      ok?: boolean;
+      toast?: string;
+      error?: string;
+    };
+    expect(posted.error).toBeUndefined();
+    expect(posted.toast).toBe("Recorded in the project's rulings · the operator does not ask again");
+    expect(noRepositoryRuling("viberr-core", { dataRoot: app.dataRoot })).not.toBeNull();
+    expect(readTaskFile({ ...ref, taskKey: "VIB-142" })!.parsed.packet).toBeNull();
+    expect(readProjectFile(ref)!.parsed.frontmatter.repo).toBeNull();
+  });
+
+  it("ruling 672: the route says a repository is connected, and that a question a maintainer cannot answer went to a project admin", async () => {
+    // CANARY: keep "the operator re-runs" in the toast and it is said on a
+    // board whose operators wait for the controller; count "maintainers" in
+    // the escalation's toast and it names people who cannot answer.
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const { readTaskFile, updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { operatorAskForRepository } = await import("~/server/tasks/operator-packets.server");
+    const { resolveOperatorAuthority } = await import("~/server/tasks/operator-authority.server");
+    const ref = { projectSlug: "viberr-core", dataRoot: app.dataRoot };
+    const setRepo = async (repo: string | null) => {
+      await updateProjectFile(ref, (p) => {
+        p.frontmatter.repo = repo;
+      });
+      rebuildProject(app.db, "viberr-core", { dataRoot: app.dataRoot });
+    };
+    await setRepo(null);
+    await updateTaskFile({ ...ref, taskKey: "VIB-142" }, (t) => {
+      t.packet = null;
+    });
+    await operatorAskForRepository(
+      app.db,
+      { dataRoot: app.dataRoot },
+      { projectSlug: "viberr-core", taskKey: "VIB-142", reason: "VIB-142 changes code this board has no repository for." },
+      resolveOperatorAuthority({ dataRoot: app.dataRoot }, "viberr-core"),
+    );
+    // SAFETY: the success arm of each intent, as in the tests above.
+    const sent = (await postIntent("VIB-142", ids.murat, { intent: "request-maintainer-decision" })) as {
+      toast?: string;
+      error?: string;
+    };
+    expect(sent.error).toBeUndefined();
+    expect(sent.toast).toBe("Sent · a project admin will decide");
+
+    // Connected meanwhile in the project's settings: the answer closes the
+    // question and attaches nothing, so no GitHub is needed to read its toast.
+    await setRepo("acme/site");
+    // SAFETY: the success arm again; `error` is asserted absent below.
+    const posted = (await postIntent("VIB-142", ids.arda, {
+      intent: "resolve-packet",
+      option: "0",
+      note: "acme/site",
+    })) as { toast?: string; error?: string };
+    expect(posted.error).toBeUndefined();
+    expect(posted.toast).toBe("acme/site is connected to this board");
+    expect(readTaskFile({ ...ref, taskKey: "VIB-142" })!.parsed.packet).toBeNull();
+  });
+
   it("ruling 315: a note past the shared cap is refused, and the packet stays open", async () => {
     const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
     const { readTaskFile } = await import("~/server/files/task-writer.server");

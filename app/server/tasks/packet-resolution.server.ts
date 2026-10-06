@@ -30,6 +30,7 @@ import {
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { roleCan } from "~/shared/rbac";
+import { isRepositoryAskCause } from "~/shared/repository-ask";
 import { REVIEW_DEADLOCK_QUESTION } from "./review-deadlock.server";
 import type { FanOutOutcome } from "./packet-fanout.server";
 import { setTaskDependencies } from "./dependencies.server";
@@ -152,6 +153,11 @@ function createTaskHoldsDecider(
  * set to know which authored options it must hold to that bar.
  */
 export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
+  // Ruling 672: both decide the BOARD, and the board keeps them (a repository
+  // in project.md, a ruling in its knowledge base). Neither is this task's
+  // contract, and their words are card copy ("Type it as owner/name").
+  "connect_repository",
+  "keep_without_repository",
   "request_edit",
   "hold_runtime_debug",
   "redirect",
@@ -410,6 +416,12 @@ export async function resolvePacket(
    *  only after the write lands, so the decision has to outlive that arm's
    *  block scope. Every other arm leaves it `none`. */
   let branchDisposition: EmptyBranchDisposition = { kind: "none" };
+  /** Ruling 672: the connection a person answered `connect_repository` with,
+   *  ON THIS TASK: what hands the answered tasks back to their operators once
+   *  the fan-out has run, and (when this answer attached the repository)
+   *  starts the controller on the board. Null on every other kind, and on a
+   *  task the answer only reached. */
+  let repositoryConnection: { repo: string; attached: boolean } | null = null;
 
   switch (option.kind) {
     case "accept_completion": {
@@ -1313,6 +1325,89 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "connect_repository": {
+      // Ruling 672: the decision IS the connection. The repository the person
+      // typed is attached HERE, before the write that clears the packet,
+      // through the Change door (ruling 669): GitHub confirms it or the door
+      // refuses in its own words, and a refusal leaves the question open with
+      // nothing recorded. Attaching is the board's policy, so it asks for the
+      // tier that door asks for. On a task the answer reached from another
+      // one (ruling 319's fan-out) nothing is attached twice.
+      requireAction(db, project, actor, "edit-policy", "connect a repository to this board");
+      const { connectRepositoryFromPacket } = await import("./repository-ask.server");
+      const connected = await connectRepositoryFromPacket(
+        db,
+        ctx,
+        {
+          projectSlug: input.projectSlug,
+          typed: noteText,
+          answeredElsewhere: input.fanOutOrigin !== undefined,
+        },
+        actor,
+      );
+      if (input.fanOutOrigin === undefined) {
+        repositoryConnection = { repo: connected.repo, attached: connected.attached };
+      }
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text: `**Decision:** ${option.t}. ${connected.sentence}`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.waiting = "agent";
+        fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
+    case "keep_without_repository": {
+      // Ruling 672: the decision is written into the project's rulings
+      // knowledge base before the packet clears, because that document is
+      // what stops the question being asked again: a decision recorded here
+      // and not there would be asked on the next task. It is the board's
+      // policy too, so the same tier.
+      requireAction(
+        db,
+        project,
+        actor,
+        "edit-policy",
+        "decide that this board keeps no repository",
+      );
+      const { keepWithoutRepositoryFromPacket } = await import("./repository-ask.server");
+      const ruling = await keepWithoutRepositoryFromPacket(
+        db,
+        ctx,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          byName: human.nameHint,
+          at: now,
+          answeredElsewhere: input.fanOutOrigin !== undefined,
+        },
+        actor,
+      );
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text:
+          `**Decision:** ${option.t}. It is in the project's rulings (\`${ruling.kb}/${ruling.doc}\`): ` +
+          "tasks on this board come back as files, and the operator does not ask again.",
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = (fm) => {
+        fm.waiting = "agent";
+        fm.readiness = "ready";
+      };
+      clearPacket = true;
+      break;
+    }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
       // Ruling 163 (pass 35, F35-13 (b)): a redirect the branch-conflict
@@ -1436,7 +1531,7 @@ export async function resolvePacket(
   // under the lock — the write, and the audit row that belongs to it, are the
   // racing acceptance's, not this call's.
   let alreadyAccepted = false;
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+  const decisionWritten = updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the acceptance arm's already-Done check, where it is a
     // decision rather than a guess. `acceptCompletion` re-runs it inside the
     // write lock (`applyAcceptanceWrite`) precisely because its own outside-lock
@@ -1541,6 +1636,26 @@ export async function resolvePacket(
       : event;
     parsed.timeline.unshift(eventWithNote);
   });
+  try {
+    await decisionWritten;
+  } catch (error) {
+    // Ruling 672: a `connect_repository` answer attaches before this write,
+    // and GitHub is asked in between. When the packet was answered or
+    // replaced meanwhile, the write refuses for a change that happened: the
+    // connection is settled as one made outside any task, and the refusal
+    // says the repository is connected.
+    if (repositoryConnection?.attached) {
+      const { connectionOutlivedItsDecision } = await import("./repository-ask.server");
+      throw await connectionOutlivedItsDecision(
+        db,
+        ctx,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, repo: repositoryConnection.repo },
+        actor,
+        toError(error),
+      );
+    }
+    throw error;
+  }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   // U3: one act, one row. A no-op write made no decision to record.
@@ -1637,6 +1752,10 @@ export async function resolvePacket(
     // while the question it is supposed to wait for is still unanswered, which
     // is the behaviour this packet exists to interrupt.
     "question_reviewer",
+    // Ruling 672: the answer alone does not make the board able to deliver.
+    // `carryOnAfterConnection` starts each answered task's operator, after
+    // the fan-out, at the moment it can do something with the repository.
+    "connect_repository",
   ];
   const requeue = !NO_REQUEUE.includes(option.kind);
   if (requeue) {
@@ -2645,7 +2764,7 @@ export async function resolvePacket(
     }
   }
 
-  await fanOutByCause(db, {
+  const reached = await fanOutByCause(db, {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     cause: packet.cause,
@@ -2653,6 +2772,32 @@ export async function resolvePacket(
     option,
     note: noteText,
   }, actor, ctx);
+
+  // Ruling 672: "If they decide to connect a repo, controller spawns on board
+  // level" (owner, 2026-10-06). After the fan-out, so the tasks handed back
+  // are every task the answer reached, and once: a task the answer only
+  // reached carries no connection of its own. Best-effort: the decision is
+  // written, and ruling 330's sweep starts a task nothing moved.
+  if (repositoryConnection !== null) {
+    try {
+      const { carryOnAfterConnection } = await import("./repository-ask.server");
+      await carryOnAfterConnection(db, ctx, {
+        projectSlug: input.projectSlug,
+        repo: repositoryConnection.repo,
+        taskKeys: [input.taskKey, ...reached],
+        switchFrom: repositoryConnection.attached
+          ? { userId: actor.userId, taskKey: input.taskKey }
+          : null,
+        controllerSwitches: false,
+        resolvedOption: { kind: option.kind, title: option.t, note: repositoryConnection.repo },
+      });
+    } catch (error) {
+      logger.warn("the tasks a repository connection answered were not handed back", {
+        taskKey: input.taskKey,
+        err: toError(error),
+      });
+    }
+  }
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -2726,8 +2871,8 @@ async function fanOutByCause(
   },
   actor: TaskActor,
   ctx: TaskActionContext,
-): Promise<void> {
-  if (!input.cause || input.suppressed) return;
+): Promise<string[]> {
+  if (!input.cause || input.suppressed) return [];
   const {
     FANNED_OUT_OPTION_KINDS,
     siblingPacketsSharingCause,
@@ -2750,7 +2895,7 @@ async function fanOutByCause(
       taskKey: input.taskKey,
       err: toError(error),
     });
-    return;
+    return [];
   }
 
   for (const sibling of siblings) {
@@ -2795,6 +2940,7 @@ async function fanOutByCause(
           fromTaskKey: input.taskKey,
           byName: actor.label,
           optionTitle: input.option.t,
+          cause: input.cause,
         }),
       });
       outcomes.push({ taskKey: sibling.taskKey, applied: true });
@@ -2808,8 +2954,10 @@ async function fanOutByCause(
     }
   }
 
-  const text = fanOutOutcomeText(outcomes);
-  if (!text) return;
+  // Ruling 672: the tasks the answer reached, for whoever carries on from it.
+  const applied = outcomes.flatMap((o) => (o.applied ? [o.taskKey] : []));
+  const text = fanOutOutcomeText(outcomes, input.cause);
+  if (!text) return applied;
   try {
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift({
@@ -2829,6 +2977,7 @@ async function fanOutByCause(
       err: toError(error),
     });
   }
+  return applied;
 }
 
 /**
@@ -2856,7 +3005,7 @@ export async function requestPacketMaintainerDecision(
   input: { projectSlug: string; taskKey: string; note?: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ notified: number }> {
+): Promise<{ notified: number; to: "admin" | "maintainer" }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -2869,7 +3018,11 @@ export async function requestPacketMaintainerDecision(
   // who can already act (and, for an owner, notify themselves). Refuse with a
   // pointer instead of sending a pointless alert.
   const role = project.memberRoles.get(actor.userId ?? "");
-  const canResolveDirectly = roleCan(role, "resolve-packet");
+  // Ruling 672: the repository question's two answers decide the board, so
+  // they are a project admin's. A maintainer cannot give one either, and may
+  // send it up exactly as a contributor-owner sends up a maintainer's.
+  const boardDecision = isRepositoryAskCause(packet.cause);
+  const canResolveDirectly = roleCan(role, boardDecision ? "edit-policy" : "resolve-packet");
   const isOwner = ownerException(
     project,
     actor,
@@ -2877,7 +3030,9 @@ export async function requestPacketMaintainerDecision(
   );
   if (canResolveDirectly) {
     throw AppError.validation(
-      "You can resolve this decision yourself; there is no need to route it to a maintainer.",
+      boardDecision
+        ? "You can answer this decision yourself; there is no need to send it to a project admin."
+        : "You can resolve this decision yourself; there is no need to route it to a maintainer.",
     );
   }
   if (!isOwner) {
@@ -2889,9 +3044,12 @@ export async function requestPacketMaintainerDecision(
   const ownerLabel = actor.label || "The task owner";
   const trimmedNote = input.note?.trim();
   const noteText =
-    `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
-    `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
-    `or admin to make the call.` +
+    (boardDecision
+      ? `${ownerLabel} cannot answer "${packet.title}" on ${input.taskKey}: both answers decide ` +
+        `the board, which is a project admin's, so they asked a project admin to make the call.`
+      : `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
+        `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
+        `or admin to make the call.`) +
     (trimmedNote ? `\n\n> ${trimmedNote.replace(/\n/g, "\n> ")}` : "");
   const occurredAt = new Date().toISOString();
 
@@ -2919,7 +3077,9 @@ export async function requestPacketMaintainerDecision(
     taskKey: input.taskKey,
     kind: "packet",
     ptype: packet.type === "blocked" ? "blocked" : "input",
-    title: `Decision needs a maintainer: ${packet.title}`,
+    title: boardDecision
+      ? `Decision needs a project admin: ${packet.title}`
+      : `Decision needs a maintainer: ${packet.title}`,
     text: noteText,
     occurredAt,
     // Ruling 497: the row opens the packet the maintainer is asked to decide.
@@ -2951,5 +3111,5 @@ export async function requestPacketMaintainerDecision(
     details: { packetKind: packet.kind, notified: notified.length },
   });
 
-  return { notified: notified.length };
+  return { notified: notified.length, to: boardDecision ? "admin" : "maintainer" };
 }

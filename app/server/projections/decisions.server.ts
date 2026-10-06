@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { listProjects } from "~/server/projections/board-query.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { isRepositoryAskCause } from "~/shared/repository-ask";
 import { isTerminalStage, resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
@@ -67,6 +68,11 @@ export interface DecisionsForUser {
   mine: DecisionRef[];
   /** Open decisions the user could act on ONLY via the org-admin override. */
   overrideEligible: DecisionRef[];
+  /** Ruling 672: open repository questions on boards this user is a member
+   *  of and cannot answer. Both answers decide the board, so they wait on a
+   *  project admin. Never this user's inbox; listed so that whoever asks what
+   *  is waiting is not told "nothing" about a packet they can see. */
+  needsProjectAdmin: DecisionRef[];
 }
 
 /** The columns the open-decision query below selects. A type alias, not an
@@ -78,6 +84,8 @@ type OpenDecisionRow = {
   stage: string;
   owner_user_id: string | null;
   has_packet: number;
+  /** The open packet's `cause` (ruling 315), or null. */
+  packet_cause: string | null;
   recommendation_count: number;
 };
 
@@ -141,6 +149,8 @@ export function decisionsRequiring(
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id,
               (CASE WHEN packet_json IS NOT NULL AND packet_json <> '' THEN 1 ELSE 0 END) AS has_packet,
+              (CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
+                    THEN json_extract(packet_json, '$.cause') END) AS packet_cause,
               recommendation_count
          FROM task_projections
         WHERE ((packet_json IS NOT NULL AND packet_json <> '')
@@ -204,11 +214,19 @@ export function decisionsRequiring(
 
   const mine: DecisionRef[] = [];
   const overrideEligible: DecisionRef[] = [];
+  const needsProjectAdmin: DecisionRef[] = [];
   // A task needs exactly one human action, so it contributes exactly one
   // decision even when it carries a packet AND is acceptance-ready.
   const seen = new Set<string>();
 
-  const classify = (ref: DecisionRef, ownerUserId: string | null): void => {
+  const classify = (
+    ref: DecisionRef,
+    ownerUserId: string | null,
+    /** Ruling 672: the packet is the repository question, whose two answers
+     *  both decide the board. It is a project admin's and nobody else's, so
+     *  it is not "waiting on" a maintainer or the task's owner. */
+    boardDecision = false,
+  ): void => {
     const taskId = `${ref.projectSlug}::${ref.taskKey}`;
     if (seen.has(taskId)) return;
     seen.add(taskId);
@@ -217,13 +235,13 @@ export function decisionsRequiring(
     // Maintainer+ holds every governing action (resolve-packet / accept-
     // completion / approve-transition / dismiss-recommendation all share the
     // maintainer+ tier), so a maintainer+ can act on ANY open decision.
-    const canGovern = roleCan(role, "resolve-packet");
+    const canGovern = roleCan(role, boardDecision ? "edit-policy" : "resolve-packet");
     // The task OWNER (contributor+) governs EVERY open decision on their own
     // task (R14-2): resolve the packet, accept the completion, apply what they
     // hold the inner authority for, and always dismiss. The old narrow rule
     // counted only packets and `accept_completion` recommendations — and the
     // server honored neither, which is exactly the dead-end this widening ends.
-    const ownerCanAct = ownerUserId === userId && roleCan(role, "own-task");
+    const ownerCanAct = !boardDecision && ownerUserId === userId && roleCan(role, "own-task");
 
     if (canGovern || ownerCanAct) {
       mine.push(ref);
@@ -233,6 +251,8 @@ export function decisionsRequiring(
       // (resolveProjectAuthority grants it whenever the member role is below the
       // required tier, not only to non-members).
       overrideEligible.push(ref);
+    } else if (boardDecision && role !== null) {
+      needsProjectAdmin.push(ref);
     }
     // viewer / contributor-non-owner (or owner of a maintainer-only rec) with no
     // org-admin override → nothing.
@@ -251,6 +271,7 @@ export function decisionsRequiring(
         stage: row.stage,
       },
       row.owner_user_id,
+      isRepositoryAskCause(row.packet_cause),
     );
   }
 
@@ -267,5 +288,5 @@ export function decisionsRequiring(
     );
   }
 
-  return { mine, overrideEligible };
+  return { mine, overrideEligible, needsProjectAdmin };
 }

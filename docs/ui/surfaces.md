@@ -334,10 +334,14 @@ Intents behind `project.task.tsx` are explained in
   The dialog asks what the board delivers (ruling 667): "This board delivers", Software
   or "Results · no code", travelling as `delivers=software|results`. It opens on
   results where the instance has no GitHub connection. Software shows the connection
-  and repository fields, both required. Results shows neither until "Attach a
+  and repository fields, both required unless "Connect the repository later" is ticked
+  (ruling 672): the fields then go, the hint says the board starts with no repository
+  and that the operator asks for one when a task needs a pull request, and an empty
+  `owner` and `repoName` are posted. Results shows neither until "Attach a
   repository for the agents to read" is ticked, and posts an empty `owner` and
   `repoName` otherwise. The board import dialog reads the same from the file: a board
-  none of whose agents writes a repository says so and offers the same tick.
+  none of whose agents writes a repository says so and offers the results tick, and any
+  other offers the software one.
   Under its repository field, once a connection is picked, the dialog offers
   "Create this repository on GitHub if it does not exist" (ruling 462), unchecked by
   default so a typo never becomes a repository; checking it shows "Create it as a
@@ -627,7 +631,17 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   options reads "Your answer to <agent>" with the hint "optional · goes back to <agent> with
   your choice · 4,000 characters max", or "required · …" (and the `*`) when the chosen
   option carries `reply`; the directive's hint reads "resolves this decision · goes back
-  to <agent>". Every other packet keeps "Note for the operator".
+  to <agent>". Every other packet keeps "Note for the operator", but for the repository
+  question (ruling 672): with "Connect a repository" chosen the box reads "Repository to
+  connect", required, "owner/name · checked on GitHub before anything changes", opened with
+  the repository the operator could name and kept apart from the note the other answer
+  takes. Both of its answers are a project admin's (`edit-policy`): for anyone else each
+  option is inert and says so, the card reads "Both answers decide the board, so a project
+  admin gives one", and "Send to a project admin" sends it up. A person who resolves no
+  packets reads "You can't answer this decision: both answers decide the board, so a
+  project admin gives one", where every other packet names a maintainer, an admin or the
+  task's owner. A board that had a repository before states its records in an "Earlier
+  records" observation.
 - **The task page's agent components** (ruling 500, AICSS's free components redrawn in the
   app's tokens): the decision packet is an approval card, a tile in its tone (amber for a
   question with a hand, coral for a block with an alert) beside the kind as its title and

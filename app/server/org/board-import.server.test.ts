@@ -37,6 +37,7 @@ import {
   saveSkill,
 } from "./resources.server";
 import { writeStoreFiles } from "./store-files.server";
+import { recordNoRepositoryRuling } from "./repository-ruling.server";
 
 /**
  * Ruling 653: a board file carries a board's workflow from one instance to
@@ -424,9 +425,20 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
     const into = { dataRoot: bare.dataRoot };
     const software = exported(source);
     expect(previewBoardImport(bare.db, software, into).delivers).toBe("software");
-    await expect(importBoard(bare.db, software, noRepository, actorOf(bare.users.arda), into)).rejects.toThrow(
-      "A GitHub repository is required for a board that delivers software.",
+    // Ruling 672: a board whose agents write a repository imports without
+    // one too, and says what that means; half a repository is still refused.
+    await expect(
+      importBoard(bare.db, software, { ...noRepository, owner: "acme" }, actorOf(bare.users.arda), into),
+    ).rejects.toThrow("Give both a GitHub connection and a repository name, or neither");
+    const later = await importBoard(
+      bare.db,
+      software,
+      { ...noRepository, name: "Release Train Later", key: "RTL" },
+      actorOf(bare.users.arda),
+      into,
     );
+    expect(later.repo).toBeNull();
+    expect(later.repoNote).toContain("It has no repository yet");
 
     // The same board with repo-write withheld from every agent, as a board
     // that delivers results is deployed.
@@ -455,6 +467,58 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
     const imported = await importBoard(bare.db, results, noRepository, actorOf(bare.users.arda), into);
     expect(imported.repo).toBeNull();
     expect(readProjectFile({ projectSlug: imported.slug, dataRoot: bare.dataRoot })!.parsed.frontmatter.repo).toBeNull();
+  });
+});
+
+describe("ruling 672: a board file does not carry a decision made on this instance", () => {
+  it("leaves the document that a board connects no repository out of the knowledge base it exports", async () => {
+    // CANARY: export the rulings knowledge base whole and a board brought up
+    // under the same name elsewhere is born refused: its operator is never
+    // offered the question nobody there was asked.
+    const source = await sourceBoard();
+    const ruling = await recordNoRepositoryRuling(
+      source.db,
+      { projectSlug: source.slug, byName: "Arda Test", taskKey: "REL-1", at: "2026-10-06T18:00:00.000Z" },
+      actorOf(source.users.arda),
+      { dataRoot: source.dataRoot },
+    );
+    expect(existsSync(path.join(kbDirPath(ruling.kb, source.dataRoot), ruling.doc))).toBe(true);
+    const paths = readZip(exported(source).bytes, { maxEntries: 200, maxTotalBytes: 10_000_000 }).map((e) => e.path);
+    const rulings = paths.filter((p) => p.includes(`/kb/${ruling.kb}/`));
+    expect(rulings.length).toBeGreaterThan(0);
+    expect(paths.filter((p) => p.endsWith(ruling.doc))).toEqual([]);
+  });
+
+  it("still finds the board's rulings already here beside its source, and takes no such document from a file that holds one", async () => {
+    // CANARY: compare the instance's whole folder with the file and a board's
+    // rulings read "Differs" from the day its decision is recorded, so an
+    // import beside the source forks the two boards' rulings by default; read
+    // the document out of a file and a board is brought up already refused.
+    const source = await sourceBoard();
+    const ruling = await recordNoRepositoryRuling(
+      source.db,
+      { projectSlug: source.slug, byName: "Arda Test", taskKey: "REL-1", at: "2026-10-06T18:00:00.000Z" },
+      actorOf(source.users.arda),
+      { dataRoot: source.dataRoot },
+    );
+    const beside = previewBoardImport(source.db, exported(source), { dataRoot: source.dataRoot });
+    expect(beside.resources.find((r) => r.kind === "kb")).toMatchObject({ key: ruling.kb, status: "same" });
+
+    // A file that holds one all the same: hand-made, or a copied folder.
+    const entries = readZip(exported(source).bytes, { maxEntries: 200, maxTotalBytes: 10_000_000 });
+    const folder = entries[0]!.path.split("/")[0]!;
+    const carried = `${folder}/kb/${ruling.kb}/${ruling.doc}`;
+    const file = {
+      name: "carried.zip",
+      bytes: writeZip([...entries, { path: carried, data: Buffer.from("# Viberr Core connects no repository\n") }], new Date()),
+    };
+    const target = targetStore();
+    expect(previewBoardImport(target.db, file, { dataRoot: target.dataRoot }).notes).toContainEqual(
+      expect.stringContaining(`left out: \`kb/${ruling.kb}/${ruling.doc}\``),
+    );
+    await importInto(target, file);
+    expect(existsSync(path.join(kbDirPath(ruling.kb, target.dataRoot), "rulings.md"))).toBe(true);
+    expect(existsSync(path.join(kbDirPath(ruling.kb, target.dataRoot), ruling.doc))).toBe(false);
   });
 });
 

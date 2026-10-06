@@ -58,6 +58,7 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel } from "~/shared/text/plural";
 import { PEOPLE_RULE } from "./people-rule.server";
 import type { OperatorWorkspaceView, RunOperatorInput } from "./operator-run.server";
+import type { RepositoryAskState } from "~/server/org/repository-ruling.server";
 
 /**
  * Built-in tools an operator run may never hold, stated where the run is
@@ -240,6 +241,9 @@ function workspaceSection(
    *  boundary is this contract, and the prompt may not claim a machine will
    *  refuse the write. */
   isolatedWritableRoot = false,
+  /** Ruling 672: whether this run may ask a person to connect a repository
+   *  (`OperatorAuthority.repositoryAsk`). Read only by the no-repository arm. */
+  repositoryAsk: RepositoryAskState | null = null,
 ): string {
   const head = isolatedWritableRoot
     ? "\n\n---\n# Your workspace\n\n" +
@@ -324,8 +328,35 @@ function workspaceSection(
     "to an agent that can save files (`run_agent` with `delivers: true`), and never call " +
     "`deliver_for_review` or `update_branch_from_base`: there is no branch to push or refresh. " +
     "Never describe your working directory or the task folder as \"the repository\", and make no " +
-    "claim about repository contents: there are none."
+    "claim about repository contents: there are none." +
+    repositoryAskSentence(repositoryAsk)
   );
+}
+
+/**
+ * Ruling 672: what a run on a board with no repository does when a task needs
+ * one. `open` names the one move, the question a person answers; `declined`
+ * says a person already answered it and what is left to do. The tool is
+ * offered on the same fact (`authority.repositoryAsk`), so the sentence never
+ * names a tool the run does not have.
+ */
+function repositoryAskSentence(state: RepositoryAskState | null): string {
+  if (state === "open") {
+    return (
+      "\nWhen this task cannot be done that way, because its goal changes a repository's code or " +
+      "it has to ship as a pull request, do not have an agent improvise the change as loose files: " +
+      "call `ask_for_repository` with the reason, and stop. A person then connects a repository " +
+      "or decides the board keeps none."
+    );
+  }
+  if (state === "declined") {
+    return (
+      "\nA person decided this board connects no repository, and the project's rulings hold that " +
+      "decision. Do not ask for one. Where this task cannot be done without a repository, say " +
+      "plainly what cannot be done and deliver the rest as files."
+    );
+  }
+  return "";
 }
 
 /**
@@ -554,7 +585,14 @@ export function buildOperatorSystemPrompt(
   // see and its scoping options were invented from that. Both arms carry the
   // never-describe-the-folder-as-the-repository rule, so the confabulation is
   // closed even when the checkout is missing.
-  dynamic.push(workspaceSection(workspace, isolatedWritableRoot));
+  // Ruling 672: the sentence that says to ask for a repository names a tool,
+  // so it is said only to a run that mounted it: an operator whose packets
+  // are withheld has the open question and no way to put it.
+  const repositoryAsk =
+    authority.repositoryAsk === "open" && !toolkit.includes("ask_for_repository")
+      ? null
+      : (authority.repositoryAsk ?? null);
+  dynamic.push(workspaceSection(workspace, isolatedWritableRoot, repositoryAsk));
   // Ruling 176: a server whose write tools an admin marked has them removed
   // from every operator run, on both backends, so it leaves the paragraph
   // below and a plain statement of what was removed replaces it.

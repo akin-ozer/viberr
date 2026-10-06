@@ -538,7 +538,7 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 19 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 21 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
@@ -548,7 +548,8 @@ options:
                                   #   accept_unverified_head |
                                   #   block_on_dependencies |
                                   #   question_reviewer | create_task |
-                                  #   deliver_for_review | custom
+                                  #   deliver_for_review | connect_repository |
+                                  #   keep_without_repository | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
@@ -677,6 +678,9 @@ Packet notes:
   an operator: the acceptance gate writes it itself, pinned to the shas it read (ruling 226).
   `deliver_for_review` carries no payload: it delivers the task's committed head, and
   authoring refuses it unless that head is committed and not delivered (ruling 489).
+  `connect_repository` and `keep_without_repository` are never written through the general
+  packet tool: `ask_for_repository` writes both, on a project with no repository whose
+  rulings hold no decision to keep none (ruling 672).
 
   | Field | Kind | Meaning |
   |---|---|---|
@@ -689,8 +693,9 @@ Packet notes:
   | `dueAt` | `wait_for_window` | the instant the provider said its window reopens; the resolution schedules a `run-operator` resume a minute after it (ruling 224; required) |
   | `blockedBy` | `block_on_dependencies` | what this task will wait on, in `blockedBy` spellings (ruling 230) |
   | `newTask` | `create_task` | `{ title, goal, blockedBy?, blocks?, labels? }`: the task the resolution creates; `blocks` names existing tasks that must wait on it (rulings 269, 287) |
+  | `repo` | `connect_repository` | the repository the operator could name, as `owner/name`; the card opens its repository box with it, and the person's typed answer is what the resolution attaches (ruling 672) |
   | `rework` | `redirect` | set by the branch-conflict packet: the resolution returns a task standing at or past the review stage to it in the same write (ruling 163) |
-  | `reply` | `custom` (an agent's question); `redirect`, `request_edit` (an operator's) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope, whose options-less fallback always carries it, and by an operator on a send-back that asks what to change (ruling 650; dropped on its other kinds) |
+  | `reply` | `custom` (an agent's question); `redirect`, `request_edit` (an operator's); `connect_repository` (always) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope, whose options-less fallback always carries it, and by an operator on a send-back that asks what to change (ruling 650; dropped on its other kinds) |
 
   The schema is `.loose()`, so an unknown option key round-trips and is read by nothing. There
   is no `accept:` field: acceptance is gated **solely** on `kind === "accept_completion"`, plus
@@ -699,7 +704,9 @@ Packet notes:
   `backend:<backend>:<kind>:<credentialUserId>`, stamped on a quota, auth or unavailable
   failure; answering one such packet applies the same option to every sibling still carrying
   it, ruling 319, and a quota answer stands for the rest of its window, ruling 602, kept
-  in `instance_settings` under `packetCauseDecision:<cause>`), `stalled: true` (ruling 432: a stall escalation, the only kind a later
+  in `instance_settings` under `packetCauseDecision:<cause>`; the repository question
+  carries `repository:<projectSlug>`, so its answer reaches every task on the board that
+  asked, ruling 672), `stalled: true` (ruling 432: a stall escalation, the only kind a later
   successful run may withdraw), and `askedBy` (R15-14: the profile of the agent that raised
   the question; resolving it resumes that agent's session).
 - `options` and `observations` parse per row: a malformed row drops only itself

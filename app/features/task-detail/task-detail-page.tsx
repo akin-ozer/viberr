@@ -47,6 +47,7 @@ import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { useStableRows } from "~/ui/use-stable-rows";
 import { asProjectRole, roleCan } from "~/shared/rbac";
+import { isRepositoryOptionKind } from "~/shared/repository-ask";
 import { stageName } from "~/shared/workflow/stage-roles";
 import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
@@ -659,7 +660,14 @@ export function TaskDetailPage({
   // refuses when the caller already holds `resolve-packet`, so this is wired
   // only for the owner-who-cannot-resolve-directly case.
   const [escalateBusy, onRequestMaintainer] = useIntentPost("request-maintainer-decision", csrf);
-  const canEscalatePacket = isOwner && !canRunAgents;
+  // Ruling 672: the repository question is a project admin's, so a maintainer
+  // is stranded on it too, and sends it up the same way.
+  const packetOptions = task.packet?.options ?? [];
+  const boardDecision =
+    packetOptions.length > 0 && packetOptions.every((o) => isRepositoryOptionKind(o.kind));
+  const canEscalatePacket = boardDecision
+    ? canResolvePacket && !roleCan(role, "edit-policy")
+    : isOwner && !canRunAgents;
 
   // Apply / dismiss an operator recommendation (apply is admin|maintainer; the
   // server re-checks). Lifted onto the page — with F19-3 an Apply can BE an
@@ -937,6 +945,9 @@ export function TaskDetailPage({
             // picker's move, so each carries that control's own tier.
             canForceAccept={canForceAcceptViaPacket}
             canMoveStage={canArchiveViaPacket}
+            // Ruling 672: both answers to the repository question decide the
+            // board, on the tier its repository setting holds.
+            canEditPolicy={roleCan(role, "edit-policy")}
             // UX19-9: what an `archive_task` resolution destroys — the branch
             // its `deleteBranch` variant deletes permanently, and the
             // recommendations the archive withdraws. The same two facts

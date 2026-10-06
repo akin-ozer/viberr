@@ -994,6 +994,65 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     }
   });
 
+  it("ruling 672: the shipped prompts know a board can start with no repository, how its operator asks for one, and how a board is switched to pull requests", async () => {
+    // CANARY: drop the operator's `ask_for_repository` sentence or the tool
+    // from its skill, the doctrine's or the guide's "can start without", the
+    // guide's switching section, a grant id it names or its step that starts
+    // the operators that waited, or an outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const dataRoot = seededStore();
+    seedDefaultAgentAssets(dataRoot);
+    const definition = read("controller.definition.md");
+    const guide = read("controller-guide.skill.md");
+    const operator = read("operator.definition.md");
+    const skill = read("viberr-app-expertise.skill.md");
+    const handbook = readFileSync(path.join(dataRoot, "kb", "controller-handbook", "handbook.md"), "utf8");
+
+    expect(operator).toContain("call `ask_for_repository` with the reason and stop (ruling 672)");
+    expect(operator).toContain("while it stands the question is not yours to ask again");
+    // The doctrine is the same text for every operator, so it says when the
+    // tool is absent instead of telling an operator without it to call it.
+    expect(operator).toContain(
+      "The tool is in your toolkit only while the question is yours to ask. It is absent once a person decided the board keeps none",
+    );
+    expect(operator).toContain("and when opening decision packets is not granted to you. Without it, deliver what can be delivered as files");
+    expect(skill).toContain("- `ask_for_repository` asks a person to connect a repository to a board that has none (ruling 672)");
+    expect(definition).toContain("A board that builds software can start without one too (ruling 672)");
+    expect(handbook).toContain("which it may connect later (ruling 672)");
+    expect(markdownSection(guide, "Bringing up a new project")).toContain(
+      "**A software board can start without its repository** (ruling 672).",
+    );
+    const switching = markdownSection(guide, "Switching a board to pull requests");
+    expect(switching).toContain("`connect_project_repository` (`delivers: true`)");
+    expect(switching).toContain("`no-repository-<project>.md`");
+    // The four grants a board without a repository withholds, by the ids
+    // `update_agent_deployment` takes.
+    for (const id of ["execute-code-or-write-repo", "create-task-branch", "commit-push-branch", "open-review-pr"]) {
+      expect(switching, id).toContain(`\`${id}\``);
+    }
+    // The operators that waited are the controller's to start: nothing else
+    // does before ruling 330's sweep, fifteen minutes on.
+    expect(switching).toContain("**Start the operators that waited.**");
+    expect(switching).toContain("start each with `run_agent_on_task`");
+    // A project admin's turn is refused a knowledge-base edit, so the guide
+    // says what the controller does then.
+    expect(switching).toContain("you name the passages for an org admin to change");
+
+    const outgoing: [string, string, string][] = [
+      [path.join("agents", "definitions", "controller.md"), "e69d11e6bc8cf0f4d49b4716e2450d5030968978222e057ff0cb1aceb86559cb", definition],
+      [path.join("skills", "controller-guide", "SKILL.md"), "7dcc5f4f84cd603a5614931b99c860d79f1456f75c7c12fec186d44cd608a46f", guide],
+      [path.join("agents", "definitions", "operator.md"), "5bdfa3077e700e497b231676e45c41e6005c91a5cb1b689eee7b614f21aaadf8", operator],
+      [path.join("skills", "viberr-app-expertise", "SKILL.md"), "3b3e4bb97fb8650b7964288219708e54879d83b756875bce13fea009bdaa2b3b", skill],
+      [path.join("kb", "controller-handbook", "handbook.md"), "627b7bdd1cf2eeedc3ece72bd1d713918054e5243059a18d312d7d6d8335b746", handbook],
+    ];
+    for (const [rel, hash, shipped] of outgoing) {
+      expect(shippedCopyIsUnedited(rel, hash, {}), `${rel}'s outgoing hash is not recorded`).toBe(true);
+      expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(sha256Hex(shipped));
+    }
+  });
+
   it("a GitHub read needs membership, not maintainer", () => {
     const skill = read("controller-guide.skill.md");
     expect(skill).not.toContain("reading GitHub state at depth need maintainer");

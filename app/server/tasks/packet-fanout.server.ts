@@ -8,6 +8,7 @@ import {
   type TaskPacket,
 } from "~/schemas/task-file.schema";
 import { deleteSetting, getSetting, setSetting } from "~/server/settings/instance-settings.server";
+import { isRepositoryAskCause } from "~/shared/repository-ask";
 import type { TaskActor } from "./task-mutation.server";
 
 /**
@@ -68,6 +69,12 @@ export const FANNED_OUT_OPTION_KINDS: ReadonlySet<PacketOptionKind> = new Set([
   "redirect",
   "hold_runtime_debug",
   "block_on_policy",
+  // Ruling 672: the repository question is asked about the BOARD, on whichever
+  // task met the need first, so both of its answers reach every task on the
+  // board that asked. Neither writes anything on a sibling: the repository is
+  // attached, or the ruling written, once, on the task the person answered.
+  "connect_repository",
+  "keep_without_repository",
 ]);
 
 /**
@@ -166,10 +173,22 @@ function joinKeys(keys: readonly string[]): string {
  * task it touched. Overstating it here would be the same failure in a smaller
  * font.
  */
-export function causeFanOutDisclosure(siblings: readonly CauseSibling[]): string | null {
+export function causeFanOutDisclosure(
+  siblings: readonly CauseSibling[],
+  cause?: string,
+): string | null {
   if (siblings.length === 0) return null;
   const keys = joinKeys(siblings.map((s) => s.taskKey));
   const them = siblings.length === 1 ? "one other task" : `${siblings.length} other tasks`;
+  // Ruling 672: the repository question shares a cause too, and nothing
+  // failed: the same question stands on each task.
+  if (isRepositoryAskCause(cause)) {
+    return (
+      `The same question is open on ${them}: ${keys}. ` +
+      "Answering here answers each of them the same way: you are deciding about the board, " +
+      "not about this task alone. A directive you write yourself applies only here."
+    );
+  }
   return (
     `The same failure stopped ${them}: ${keys}. ` +
     "Answering here answers each of them the same way, wherever that task's packet offers " +
@@ -192,14 +211,19 @@ export type FanOutOutcome =
  * that threw — is still sitting in someone's queue, and the person who thought
  * they had just cleared it is the one who has to know.
  */
-export function fanOutOutcomeText(outcomes: readonly FanOutOutcome[]): string | null {
+export function fanOutOutcomeText(
+  outcomes: readonly FanOutOutcome[],
+  cause?: string,
+): string | null {
   if (outcomes.length === 0) return null;
   const applied = outcomes.filter((o) => o.applied).map((o) => o.taskKey);
   const missed = outcomes.flatMap((o) => (o.applied ? [] : [o]));
   const parts: string[] = [];
   if (applied.length > 0) {
     parts.push(
-      `The same answer was applied to ${joinKeys(applied)}, stopped by the same failure.`,
+      isRepositoryAskCause(cause)
+        ? `The same answer was applied to ${joinKeys(applied)}, where the same question was open.`
+        : `The same answer was applied to ${joinKeys(applied)}, stopped by the same failure.`,
     );
   }
   for (const miss of missed) {
@@ -213,7 +237,14 @@ export function fanOutArrivalText(input: {
   fromTaskKey: string;
   byName: string;
   optionTitle: string;
+  cause?: string | undefined;
 }): string {
+  if (isRepositoryAskCause(input.cause)) {
+    return (
+      `Answered from ${input.fromTaskKey}: ${input.byName} chose "${input.optionTitle}" there for ` +
+      "the board, and the same question was open here."
+    );
+  }
   return (
     `Answered from ${input.fromTaskKey}: ${input.byName} chose "${input.optionTitle}" there for ` +
     "the account failure that stopped both tasks, and the same choice was applied here."

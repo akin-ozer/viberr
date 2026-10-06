@@ -643,9 +643,9 @@ export function GithubViewPage({
               <h2>Repository</h2>
             </div>
             <p className="empty sm">
-              This board delivers results: each task comes back as the files its
-              agents save on it, so there are no branches or pull requests to
-              show. A project admin attaches a repository in{" "}
+              This project has no repository: each task comes back as the files
+              its agents save on it, so there are no branches or pull requests to
+              show. A project admin attaches one in{" "}
               <Link to={`/projects/${slug}/settings`}>Settings → Repository &amp; credentials</Link>{" "}
               when its agents should read or write one.
             </p>

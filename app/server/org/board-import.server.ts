@@ -47,6 +47,7 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { existsSync, readdirSync } from "node:fs";
 import {
   BOARD_FILE_MAX_BYTES,
+  boardKbFiles,
   parseBoardFile,
   readBoardFile,
   type BoardBundle,
@@ -482,8 +483,11 @@ function planBoardImport(db: DatabaseSync, file: BoardFileUpload, ctx: OrgSeedCo
       continue;
     }
     const here = kbHere.get(dir);
+    // Compared as a board file carries it (`boardKbFiles`): the instance's
+    // folder may hold a board's own "connects no repository" decision, which
+    // no file carries and which is no difference between the two.
     const status: BoardResourceStatus = here
-      ? folderDigest(readStoreFolderFiles(kbDirPath(dir, ctx.dataRoot))) === folderDigest(files)
+      ? folderDigest(boardKbFiles(readStoreFolderFiles(kbDirPath(dir, ctx.dataRoot)))) === folderDigest(files)
         ? "same"
         : "differs"
       : "new";

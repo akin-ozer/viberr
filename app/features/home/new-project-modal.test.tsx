@@ -187,6 +187,51 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
     expect(attached.get("owner")).toBe("akin-ozer");
     expect(attached.get("repoName")).toBe("estimates");
   });
+
+  /**
+   * Ruling 672 (owner, 2026-10-06): "repoless boards should exist … at
+   * creation". A software board says it will connect its repository later,
+   * and is created with none.
+   */
+  const laterBox = (container: HTMLElement) =>
+    [...container.querySelectorAll("label")]
+      .find((l) => l.textContent!.includes("Connect the repository later"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? null;
+
+  it("ruling 672: a software board can connect its repository later: the fields go, the hint says what happens, and none is posted", async () => {
+    // CANARY: keep `needsRepo` true for every software board and the box
+    // changes nothing, so a person with no repository yet cannot create one;
+    // post the derived repository anyway and the board is bound to a name
+    // nobody chose.
+    const form = await submitWith(withConnection, (c) => {
+      expect(c.textContent).toContain("Agents change a repository and each task ships as a pull request.");
+      fireEvent.click(laterBox(c)!);
+      expect(repoField(c)).toBeNull();
+      expect(c.textContent).toContain(
+        "The board starts with no repository. Tasks come back as files until one is connected, and the operator asks for it the first time a task needs a pull request.",
+      );
+    });
+    expect(form.get("delivers")).toBe("software");
+    expect(form.get("owner")).toBe("");
+    expect(form.get("repoName")).toBe("");
+    expect(form.get("createRepository")).toBeNull();
+  });
+
+  it("ruling 672: with no GitHub connection a software board is still creatable, once it says it connects later", async () => {
+    // CANARY: block a software board on a connection whatever the box says
+    // and an instance with no connection can only make a no-code board.
+    const form = await submitWith({}, (c) => {
+      fireEvent.click(deliversChip(c, "Software"));
+      expect(c.textContent).toContain("No GitHub connections yet");
+      fireEvent.click(laterBox(c)!);
+      expect(c.textContent).not.toContain("No GitHub connections yet");
+    });
+    expect(form.get("delivers")).toBe("software");
+    expect([form.get("owner"), form.get("repoName")]).toEqual(["", ""]);
+    // The results choice has its own box, and not this one.
+    const view = renderModal();
+    expect(laterBox(view.container)).toBeNull();
+  });
 });
 
 describe("Q26-3: a task key already used by another project is flagged (not blocked)", () => {

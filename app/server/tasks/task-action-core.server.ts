@@ -42,6 +42,7 @@ import {
 import { appendTimelineEvent, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import type { runOperator, RunOperatorInput } from "~/server/runtimes/operator-run.server";
+import type { runControllerTurn } from "~/server/controller/controller-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import type { startAgentRun } from "./specialist-run.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
@@ -133,6 +134,10 @@ export interface TaskActionDeps {
    *  contract is WHOM it sends and with WHAT directive, and a real run would
    *  prepare a workspace from GitHub. */
   dispatchAgent?: typeof operatorDispatchAgent;
+  /** Ruling 672: the controller turn a connected repository starts on the
+   *  board. Injected for the same reason `runOperator` is: its contract is
+   *  WHO is asked WHAT, and a real turn starts a model on a person's account. */
+  runControllerTurn?: typeof runControllerTurn;
 }
 
 /** The mutation ctx plus the test seams: the impls above, and the mock
