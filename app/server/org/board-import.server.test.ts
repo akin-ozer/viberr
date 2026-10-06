@@ -458,6 +458,32 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
   });
 });
 
+describe("ruling 671: an import names a repository GitHub confirms", () => {
+  it("is refused before a single resource is written when GitHub does not show the repository", async () => {
+    // The form fills the repository's name in from the board's and leaves the
+    // create box unticked, so this is an import's ordinary first answer.
+    // CANARY: reach the repository after writing the board's resources and a
+    // refused import leaves its knowledge bases, skills and templates behind.
+    const source = await sourceBoard();
+    const target = targetStore();
+    await expect(
+      importBoard(target.db, exported(source), importInput(), actorOf(target.users.arda), {
+        dataRoot: target.dataRoot,
+        fetchImpl: fakeGithubFetch({}).fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage: expect.stringContaining(
+        "GitHub has no repository acme/release-train that the acme connection can see.",
+      ),
+    });
+    expect(readProjectFile({ projectSlug: "release-train", dataRoot: target.dataRoot })).toBeNull();
+    expect(existsSync(kbDirPath("release-rulings", target.dataRoot))).toBe(false);
+    expect(existsSync(skillDirPath("release-notes", target.dataRoot))).toBe(false);
+    expect(existsSync(agentProfileFilePath("release-manager", target.dataRoot))).toBe(false);
+  });
+});
+
 describe("ruling 653: what an import refuses", () => {
   it("lists every problem in board.md at once, and an import of it writes nothing", async () => {
     // CANARY: stop at the first problem, or write before checking, and a

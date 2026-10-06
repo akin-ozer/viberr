@@ -138,12 +138,16 @@ characters; last 8 lines, 600 characters.
   creation** (ruling 671): `owner/name` plus an existing connection for that owner. The
   connection's token probes the repo, and creation goes on only when GitHub answers
   with the repository's default branch, which the project takes; a read-only repo still
-  creates with a warning. A repository GitHub does not show (unless `createRepository`
-  makes it, below), a refused token, an unreachable GitHub and an answer naming no
-  default branch each refuse on all three doors, and nothing is written, bound or
-  recorded. So a software board cannot be made while GitHub is unreachable, or before
-  its repository exists unless the repository is made with it. The connection's PAT is
-  bound to the project and proved against the repo. Until ruling 671 those three arms
+  creates with a warning. Each of these refuses on all three doors, and nothing is
+  written, bound or recorded: a repository GitHub does not show (unless
+  `createRepository` makes it, below), a token GitHub rejects (401), a refusal of
+  GitHub's own (403: single sign-on, a pending approval, a rate limit, quoted in the
+  refusal), an unreachable GitHub, and an answer naming no default branch. The name is
+  checked against GitHub's alphabet first, so the name written is the name confirmed.
+  A results board that attaches a repository for reading is held to the same. So a
+  board that names a repository cannot be made while GitHub is unreachable, or before
+  the repository exists unless it is made with the project. The connection's PAT is
+  bound to the project and proved against the repo. Until ruling 671 the first four
   created the project with a warning and `defaultBranch: main`, a guess nothing
   confirmed.
 - **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
@@ -179,8 +183,9 @@ characters; last 8 lines, 600 characters.
   makes the server create it with the connection's PAT before `project.md` is written:
   `POST /user/repos` when the connection's owner is the token's own login (the stored
   validation's `login`), else `POST /orgs/{owner}/repos`, with `auto_init: true` so the
-  default branch exists, then a re-probe whose answer is recorded as for any creation.
-  An existing repository is used as it is. Everything else refuses and writes no
+  default branch exists, then a re-probe whose answer is recorded as for any creation;
+  a re-probe that does not confirm the repository refuses, saying it was created and
+  that asking again will use it (ruling 671). An existing repository is used as it is. Everything else refuses and writes no
   project: a 401/403 says the token cannot create repositories and that a fine-grained
   token needs **Administration: Read and write** for All repositories (a classic one
   `repo`); a 422 relays GitHub's message; a probe that cannot tell whether the

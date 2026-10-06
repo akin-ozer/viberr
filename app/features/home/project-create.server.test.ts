@@ -69,9 +69,11 @@ function seedConnection(db: import("node:sqlite").DatabaseSync, userId: string) 
 describe("createProject refuses a repository GitHub does not confirm (ruling 671)", () => {
   const ghost = { name: "Ghost", key: "GHO", owner: "akin-ozer", repoName: "ghost", policy: "balanced" } as const;
 
-  it("refuses one GitHub does not show, a refused token, an unreachable GitHub and an answer naming no default branch, and writes nothing", async () => {
-    // CANARY: let any of the four through and a project is written against a
-    // repository nobody confirmed, with a default branch nobody read.
+  it("refuses one GitHub does not show, a rejected token, a refusal of GitHub's own, an unreachable GitHub and an answer naming no default branch, and writes nothing", async () => {
+    // CANARY: let any of them through and a project is written against a
+    // repository nobody confirmed, with a default branch nobody read; call a
+    // 403 a bad token and a person replaces a token that single sign-on, not
+    // its age, is holding back.
     const answered = (spec: Parameters<typeof fakeGithubFetch>[0][string]) =>
       fakeGithubFetch({ "GET /repos/akin-ozer/ghost": spec }).fetchImpl;
     const rows: [typeof fetch, string][] = [
@@ -81,7 +83,11 @@ describe("createProject refuses a repository GitHub does not confirm (ruling 671
       ],
       [
         answered({ status: 401, body: { message: "Bad credentials" } }),
-        "The akin-ozer connection's token was refused for akin-ozer/ghost, so Viberr cannot confirm the repository. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.",
+        "GitHub rejected the akin-ozer connection's token, so Viberr cannot confirm akin-ozer/ghost. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.",
+      ],
+      [
+        answered({ status: 403, body: { message: "Resource protected by organization SAML enforcement." } }),
+        "GitHub refused the akin-ozer connection's token for akin-ozer/ghost (Resource protected by organization SAML enforcement), so Viberr cannot confirm the repository. Clear what GitHub names, then create the project. No project was created.",
       ],
       [
         unreachableFetch(),
@@ -89,7 +95,7 @@ describe("createProject refuses a repository GitHub does not confirm (ruling 671
       ],
       [
         answered({ body: { full_name: "akin-ozer/ghost" } }),
-        "GitHub named no default branch for akin-ozer/ghost, so Viberr cannot tell which branch tasks start from. No project was created.",
+        "GitHub named no default branch for akin-ozer/ghost, so Viberr cannot tell which branch tasks start from. Check the repository on GitHub, then try again. No project was created.",
       ],
     ];
     for (const [fetchImpl, userMessage] of rows) {
@@ -100,21 +106,61 @@ describe("createProject refuses a repository GitHub does not confirm (ruling 671
       ).rejects.toMatchObject({ status: 400, userMessage });
       expect(readProjectFile({ projectSlug: "ghost", dataRoot: store.dataRoot })).toBeNull();
       expect(getProjectCredential(store.db, "ghost")).toBeNull();
+      expect(store.db.prepare(`SELECT COUNT(*) AS n FROM project_github_health`).get()).toEqual({ n: 0 });
       expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(0);
     }
   });
 
-  it("a board that delivers results is created with GitHub unreachable: it has no repository to confirm", async () => {
-    // CANARY: probe before asking what the board delivers and a results board
-    // cannot be made offline either.
+  it("refuses a results board that names a repository to read on the same terms, and a name GitHub cannot have before asking", async () => {
+    // A repository attached for reading is checked out like any other.
+    // CANARY: let one GitHub does not show through and a results board is
+    // written against it; check the name's alphabet only when creating and
+    // `ghost?tab=readme`, which GitHub answers as `ghost`, is written as the
+    // project's repository.
+    const reading = setupTestStore(ctx);
+    seedConnection(reading.db, reading.users.arda.id);
+    await expect(
+      createProject(reading.db, { ...ghost, delivers: "results" }, ACTOR, {
+        dataRoot: reading.dataRoot,
+        fetchImpl: fakeGithubFetch({}).fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage: expect.stringContaining("GitHub has no repository akin-ozer/ghost that the akin-ozer connection can see."),
+    });
+
+    const named = setupTestStore(ctx);
+    seedConnection(named.db, named.users.arda.id);
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/ghost": { body: { full_name: "akin-ozer/ghost", default_branch: "main" } },
+    });
+    await expect(
+      createProject(named.db, { ...ghost, repoName: "ghost?tab=readme" }, ACTOR, {
+        dataRoot: named.dataRoot,
+        fetchImpl: gh.fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        'GitHub repository names use letters, digits, ".", "-" and "_" only, so "ghost?tab=readme" is not one. Pick a name in that alphabet and ask again.',
+    });
+    expect(gh.calls).toHaveLength(0);
+  });
+
+  it("finds the owner's connection however the owner is cased", async () => {
+    // Connections are stored under the owner's slug, and the form offers the
+    // owner as it was saved. CANARY: look the connection up by the owner as
+    // typed and `Akin-Ozer` answers "No GitHub connection".
     const store = setupTestStore(ctx);
-    const result = await createProject(
-      store.db,
-      { name: "Estimates", key: "EST", delivers: "results", owner: "", repoName: "", policy: "balanced" },
-      ACTOR,
-      { dataRoot: store.dataRoot, fetchImpl: unreachableFetch() },
-    );
-    expect(result).toMatchObject({ slug: "estimates", repo: null });
+    const patId = seedConnection(store.db, store.users.arda.id);
+    const gh = fakeGithubFetch({
+      "GET /repos/Akin-Ozer/ghost": { body: { full_name: "akin-ozer/ghost", default_branch: "main" } },
+    });
+    const result = await createProject(store.db, { ...ghost, owner: "Akin-Ozer" }, ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+    expect(getProjectCredential(store.db, result.slug)?.id).toBe(patId);
   });
 });
 
@@ -704,9 +750,8 @@ describe("ruling 462: createRepository creates the repository before the project
   });
 
   it("creates a missing repository through the connection's token, then writes and audits the project", async () => {
-    // CANARY: drop the createRepositoryWhenMissing call and no POST is made,
-    // the project is written against a repository nobody created, and the
-    // warning is the old "create it before agents start delivering".
+    // CANARY: drop the createRepositoryWhenMissing call and no POST is made:
+    // the creation is refused, because GitHub has no such repository.
     const store = setupTestStore(ctx);
     seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
     const gh = missingThenCreated("akin-ozer", "website", {

@@ -219,13 +219,17 @@ type RepoProbe =
     }
   | { status: "read_only"; defaultBranch: string | null; empty: boolean }
   | { status: "not_found" }
-  | { status: "forbidden" }
+  /** 401: GitHub rejected the token. 403: it refused the read for a reason of
+   *  its own (single sign-on, an approval still pending, a rate limit), which
+   *  `said` carries. */
+  | { status: "forbidden"; code: 401 | 403; said: string | null }
   | { status: "unreachable" };
 
 /** The `/repos/{owner}/{repo}` fields this probe reads. Every field is
- *  individually tolerant and the object itself falls back to empty: GitHub
- *  answering in an unexpected shape must read as "unknown" (the probe passes),
- *  never as a failed creation. The `permissions` block (F20-15, the read-only
+ *  individually tolerant and the object itself falls back to empty: an
+ *  unreadable `permissions` or `size` reads as "unknown" and passes, and an
+ *  unreadable `default_branch` reads as none, which creation refuses (ruling
+ *  671). The `permissions` block (F20-15, the read-only
  *  proof of write access; only a PROVEN read-only repo is called out) is
  *  decoded and judged by pat-validator.server.ts's `repoPermissionsSchema` /
  *  `repoWritable`. */
@@ -237,6 +241,11 @@ const repoResponseSchema = z
     size: z.number().optional().catch(undefined),
   })
   .catch({ default_branch: undefined, permissions: undefined, size: undefined });
+
+/** GitHub's own sentence on a refusal, when the body carries one. */
+const githubMessageSchema = z
+  .object({ message: z.string().trim().min(1).nullable().catch(null) })
+  .catch({ message: null });
 
 async function probeRemoteRepo(
   token: string,
@@ -253,7 +262,10 @@ async function probeRemoteRepo(
       signal: AbortSignal.timeout(10_000),
     });
     if (res.status === 404) return { status: "not_found" };
-    if (res.status === 401 || res.status === 403) return { status: "forbidden" };
+    if (res.status === 401 || res.status === 403) {
+      const said = githubMessageSchema.parse(await res.json().catch(() => null)).message;
+      return { status: "forbidden", code: res.status, said };
+    }
     if (!res.ok) return { status: "unreachable" };
     const data = repoResponseSchema.parse(await res.json());
     const defaultBranch = data.default_branch ?? null;
@@ -535,10 +547,10 @@ export interface CreateProjectResult {
   /** Ruling 667: `<owner>/<name>`, or null for a project with no repository. */
   repo: string | null;
   /**
-   * UI-09: what the repository probe found, or null when no token was
-   * available to probe with. A non-`ok` value means the project was created but
-   * agents will not be able to deliver until it's resolved — the caller states
-   * that instead of reporting a plain success.
+   * UI-09: what the repository probe found that a person has to act on, or
+   * null. Since ruling 671 that is one case: a repository the token can read
+   * and cannot push to, which is created against all the same. The caller
+   * states it instead of reporting a plain success.
    */
   repoWarning: string | null;
   /**
@@ -648,9 +660,12 @@ export function checkNewProjectIdentity(
       "There is no repository to create: name the GitHub connection and the repository, or leave `createRepository` out.",
     );
   }
-  if (input.createRepository && !GITHUB_REPO_NAME.test(repoName)) {
+  // Ruling 671: for every repository, not only one to create. GitHub answers
+  // `website?tab=readme` as `website`, so the probe would confirm one name and
+  // the project be written with another.
+  if (repo !== null && !GITHUB_REPO_NAME.test(repoName)) {
     throw AppError.validation(
-      `GitHub repository names use letters, digits, ".", "-" and "_" only, so "${repoName}" cannot be created. Pick a name in that alphabet and ask again.`,
+      `GitHub repository names use letters, digits, ".", "-" and "_" only, so "${repoName}" ${input.createRepository ? "cannot be created" : "is not one"}. Pick a name in that alphabet and ask again.`,
     );
   }
   const slug = slugify(name);
@@ -806,7 +821,7 @@ export async function reachProjectRepository(
   // credential health need the credential bound (project_github_credentials).
   // The connection is REQUIRED (same ruling as above): an owner string without
   // a PAT behind it can't deliver anything.
-  const connection = getConnection(db, owner);
+  const connection = getConnection(db, slugify(owner));
   if (!connection) {
     throw AppError.validation(
       `No GitHub connection for "${owner}". Add a PAT for that owner in Instance settings → GitHub connections first.`,
@@ -823,9 +838,7 @@ export async function reachProjectRepository(
   const token = getPatToken(db, connection.patId);
   if (!token) {
     throw AppError.validation(
-      createRepository
-        ? `The ${owner} connection has no token Viberr can read, so ${repo} cannot be created. Replace the token in Instance settings → GitHub connections and ask again.`
-        : `The ${owner} connection has no token Viberr can read, so ${repo} cannot be confirmed. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.`,
+      `The ${owner} connection has no token Viberr can read, so ${repo} cannot be ${createRepository ? "created" : "confirmed"}. Replace the token in Instance settings → GitHub connections and ask again.`,
     );
   }
   let probe = await probeRemoteRepo(token, repo, ctx.fetchImpl);
@@ -857,7 +870,8 @@ export async function reachProjectRepository(
   // Each refusal is thrown before `project.md` is written, so each can say no
   // project exists. One Viberr made a moment ago is said to be there: asked
   // again, the project uses it as it is.
-  if (madeNow && probe.status !== "ok" && probe.status !== "read_only") {
+  const confirmed = (probe.status === "ok" || probe.status === "read_only") && Boolean(probe.defaultBranch);
+  if (madeNow && !confirmed) {
     throw AppError.validation(
       `${repoNote} GitHub did not confirm it when asked again, so no project was written. Ask again: the repository is there now, and the project will use it as it is.`,
     );
@@ -869,7 +883,9 @@ export async function reachProjectRepository(
   }
   if (probe.status === "forbidden") {
     throw AppError.validation(
-      `The ${owner} connection's token was refused for ${repo}, so Viberr cannot confirm the repository. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.`,
+      probe.code === 401
+        ? `GitHub rejected the ${owner} connection's token, so Viberr cannot confirm ${repo}. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.`
+        : `GitHub refused the ${owner} connection's token for ${repo}${probe.said ? ` (${probe.said.replace(/\.$/, "")})` : ""}, so Viberr cannot confirm the repository. Clear what GitHub names, then create the project. No project was created.`,
     );
   }
   if (probe.status === "unreachable") {
@@ -879,7 +895,7 @@ export async function reachProjectRepository(
   }
   if (!probe.defaultBranch) {
     throw AppError.validation(
-      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. No project was created.`,
+      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. Check the repository on GitHub, then try again. No project was created.`,
     );
   }
   const defaultBranch = probe.defaultBranch;
