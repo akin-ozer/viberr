@@ -1,6 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { OPERATOR_AUDIT_ACTOR, recordAudit } from "~/server/audit/audit-recorder.server";
+import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import {
+  isBrowserWorkingArtifact,
+  listTaskAttachmentNames,
   listTaskAttachments,
   taskAttachmentExists,
   type TaskAttachmentEntry,
@@ -8,6 +11,7 @@ import {
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   activeWorkRevision,
+  deliveredAsFiles,
   requiredReviewers,
   reviewSubjectId,
   type CompletionPacket,
@@ -16,9 +20,13 @@ import {
 import {
   COMPLETION_CAPTION_MAX,
   COMPLETION_CHANGES_MAX,
+  COMPLETION_FILES_MAX,
+  COMPLETION_NOTE_MAX,
+  COMPLETION_NOTES,
   COMPLETION_SCREENSHOTS_MAX,
   COMPLETION_SMALL_CHANGE_LINES,
   COMPLETION_SUMMARY_MAX,
+  RESULT_PATHS_SHOWN,
   changedLines,
   isSmallChange,
 } from "~/shared/completion-packet";
@@ -49,6 +57,18 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * `accept_completion`, a decision packet with an `accept_completion` option,
  * and the fold that files the acceptance card after a move onto the boundary.
  * A person's own acceptance is never refused over it.
+ *
+ * Ruling 668 (owner, 2026-10-06): "we need operator to create summary of the
+ * task by outputs (like related output files, what are the considerations,
+ * what are the assumptions and what were the gaps), then ask for done. And if
+ * that recommendation is accepted, then there is a result card ... including
+ * final files (not in progress files)." So the packet also carries three
+ * notes (what to weigh, what was assumed, what is missing) and, on a task
+ * delivered as files, the files that are its result, each with a line saying
+ * what it is; and it stays on the task after the acceptance, where the page
+ * shows it as the result. A task delivered as a revision names no files: its
+ * pull request holds them, and the result shows the change's size, the
+ * operator's summary of it and the paths it changed.
  */
 
 /** The slice of the frontmatter the packet binds to. */
@@ -61,6 +81,24 @@ export function currentCompletionPacket(fm: PacketState): CompletionPacket | nul
   if (!packet) return null;
   const subject = reviewSubjectId(fm);
   return subject !== null && packet.subject === subject ? packet : null;
+}
+
+/**
+ * Ruling 668: the packet as one text, for a reader that takes prose (another
+ * task's read of what this one came to): the summary, each note under its
+ * label, and the result's files with what each is.
+ */
+export function completionPacketText(packet: CompletionPacket): string {
+  const parts = [packet.summary];
+  for (const { key, label } of COMPLETION_NOTES) {
+    const note = packet[key];
+    if (note) parts.push(`${label}:\n${note}`);
+  }
+  if (packet.files.length > 0) {
+    const lines = packet.files.map((f) => `- ${f.name}${f.caption ? `: ${f.caption}` : ""}`);
+    parts.push(`Result files:\n${lines.join("\n")}`);
+  }
+  return parts.join("\n\n");
 }
 
 /** How a person or the operator names the subject: `revision abc1234`, or
@@ -95,6 +133,31 @@ function screenshotCandidates(entries: readonly TaskAttachmentEntry[]): string[]
   return entries.filter((e) => IMAGE_RE.test(e.name)).map((e) => e.name);
 }
 
+type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | undefined };
+
+/**
+ * Ruling 668: the files a packet may name as the result of a task delivered as
+ * files. They are the files of the delivery under review as it was kept
+ * (ruling 597: what the reviewers judged), still on the task; a delivery
+ * nobody kept offers the task's files. The browser's working files are never
+ * a result (ruling 570). Empty when the delivery is a revision.
+ */
+function resultFileCandidates(fm: PacketState, ref: StoreRef): string[] {
+  if (!deliveredAsFiles(fm)) return [];
+  const onTask = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot).filter(
+    (name) => !isBrowserWorkingArtifact(name),
+  );
+  const kept = listKeptDeliveries(ref.projectSlug, ref.taskKey, ref.dataRoot).find(
+    (d) => d.deliveredAt === fm.deliveredAt,
+  );
+  if (!kept) return onTask.sort();
+  const delivered = new Set(kept.files);
+  return onTask.filter((name) => delivered.has(name)).sort();
+}
+
+/** How many candidate names a refusal or the snapshot lists. */
+const CANDIDATES_SHOWN = 40;
+
 /** The operator's snapshot fact: what is on file, and what writing it takes. */
 export interface CompletionPacketFact {
   /** `current` describes the subject under review; `stale` an earlier one;
@@ -107,6 +170,11 @@ export interface CompletionPacketFact {
   changesSummaryRequired: boolean;
   /** Image attachments you may name as screenshots, newest first. */
   screenshotCandidates: string[];
+  /** Ruling 668: the packet must name the result's files (`files`): the
+   *  delivery is files on the task. */
+  resultFilesRequired: boolean;
+  /** Ruling 668: the delivered files you may name as the result. */
+  resultFileCandidates: string[];
   note: string;
 }
 
@@ -124,6 +192,8 @@ export function completionPacketFact(
       changedLines: lines,
       changesSummaryRequired: false,
       screenshotCandidates: [],
+      resultFilesRequired: false,
+      resultFileCandidates: [],
       note: "Nothing is delivered yet, so there is no completion packet to write.",
     };
   }
@@ -132,8 +202,12 @@ export function completionPacketFact(
   const candidates = screenshotCandidates(
     listTaskAttachments(input.projectSlug, input.taskKey, input.dataRoot),
   ).slice(0, 20);
-  const size =
-    lines === null
+  const resultFiles = resultFileCandidates(fm, input);
+  const size = deliveredAsFiles(fm)
+    ? resultFiles.length > 0
+      ? "The delivery is files on the task, so the packet names the ones that are the result (`files`, from `resultFileCandidates`), each with a line saying what it is."
+      : "The delivery is files on the task, and none of them is still on it, so the packet names none."
+    : lines === null
       ? "The change's size is not known yet."
       : changesSummaryRequired
         ? `The change is ${lines} lines, more than ${COMPLETION_SMALL_CHANGE_LINES}, so the packet shows your summary of it (\`changes\`) and the diff one press away.`
@@ -148,6 +222,8 @@ export function completionPacketFact(
     changedLines: lines,
     changesSummaryRequired,
     screenshotCandidates: candidates,
+    resultFilesRequired: resultFiles.length > 0,
+    resultFileCandidates: resultFiles.slice(0, CANDIDATES_SHOWN),
     note,
   };
 }
@@ -157,7 +233,31 @@ export interface CompletionPacketInput {
   taskKey: string;
   summary: string;
   changes?: string | null;
+  /** Ruling 668: the three notes, each markdown or left out. */
+  considerations?: string | null;
+  assumptions?: string | null;
+  gaps?: string | null;
+  /** Ruling 668: the files that are the result of a task delivered as files. */
+  files?: readonly { name: string; caption?: string | null }[];
   screenshots?: readonly { name: string; caption?: string | null }[];
+}
+
+/** A caption as the packet keeps it: trimmed, and cut at the cap. */
+function captionOf(raw: string | null | undefined): string {
+  const caption = (raw ?? "").trim();
+  return caption.length > COMPLETION_CAPTION_MAX
+    ? `${caption.slice(0, COMPLETION_CAPTION_MAX - 1)}…`
+    : caption;
+}
+
+/** A list of names for a sentence: `a`, `b` and so on, cut at `max`. */
+function nameList(names: readonly string[], max = 12): string {
+  return (
+    names
+      .slice(0, max)
+      .map((n) => `\`${n}\``)
+      .join(", ") + (names.length > max ? ", and more" : "")
+  );
 }
 
 /** What the writer answers: written, or refused with the sentence to fix it. */
@@ -223,20 +323,77 @@ export async function writeCompletionPacket(
     };
   }
 
+  // Ruling 668: the three notes. One left out or blank is absent; none is cut.
+  const notes = {
+    considerations: input.considerations?.trim() || null,
+    assumptions: input.assumptions?.trim() || null,
+    gaps: input.gaps?.trim() || null,
+  };
+  for (const { key, label } of COMPLETION_NOTES) {
+    const note = notes[key];
+    if (note !== null && note.length > COMPLETION_NOTE_MAX) {
+      return {
+        written: false,
+        message: `${label} is ${note.length} characters; keep it under ${COMPLETION_NOTE_MAX}.`,
+      };
+    }
+  }
+
+  // Ruling 668: the result's files. A task delivered as files names them; a
+  // revision's pull request holds its files, so any named for one are left out
+  // and the reply says so.
+  const asFiles = deliveredAsFiles(fm);
+  const files: CompletionPacket["files"] = [];
+  const namedFiles = new Set<string>();
+  for (const file of input.files ?? []) {
+    const name = file.name.trim();
+    if (name === "" || namedFiles.has(name)) continue;
+    namedFiles.add(name);
+    files.push({ name, caption: captionOf(file.caption) });
+  }
+  const filesLeftOut = !asFiles && files.length > 0;
+  if (filesLeftOut) files.length = 0;
+  const candidates = asFiles
+    ? resultFileCandidates(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot })
+    : [];
+  // A delivery none of whose files is still on the task has nothing to name.
+  if (asFiles && candidates.length === 0) files.length = 0;
+  if (candidates.length > 0) {
+    const offer = ` The delivered files: ${nameList(candidates, CANDIDATES_SHOWN)}.`;
+    if (files.length === 0) {
+      return {
+        written: false,
+        message:
+          `${taskKey} is delivered as files, so the packet names the ones that are its result: pass ` +
+          "`files`, the final version of each output a person takes away, each with a line saying " +
+          `what it is. Leave out inputs, drafts, logs and working files.${offer}`,
+      };
+    }
+    if (files.length > COMPLETION_FILES_MAX) {
+      return {
+        written: false,
+        message: `Name at most ${COMPLETION_FILES_MAX} result files: the ones a person takes away.`,
+      };
+    }
+    const allowed = new Set(candidates);
+    const unknown = files.filter((f) => !allowed.has(f.name)).map((f) => f.name);
+    if (unknown.length > 0) {
+      return {
+        written: false,
+        message:
+          `${nameList(unknown)} ${unknown.length === 1 ? "is" : "are"} not among the files ${taskKey} ` +
+          `delivered, which is what the reviewers judged.${offer}`,
+      };
+    }
+  }
+
   const seen = new Set<string>();
   const screenshots: CompletionPacket["screenshots"] = [];
   for (const shot of input.screenshots ?? []) {
     const name = shot.name.trim();
     if (name === "" || seen.has(name)) continue;
     seen.add(name);
-    const caption = (shot.caption ?? "").trim();
-    screenshots.push({
-      name,
-      caption:
-        caption.length > COMPLETION_CAPTION_MAX
-          ? `${caption.slice(0, COMPLETION_CAPTION_MAX - 1)}…`
-          : caption,
-    });
+    screenshots.push({ name, caption: captionOf(shot.caption) });
   }
   if (screenshots.length > COMPLETION_SCREENSHOTS_MAX) {
     return {
@@ -270,10 +427,11 @@ export async function writeCompletionPacket(
   }
 
   const at = new Date().toISOString();
-  const packet: CompletionPacket = { subject, summary, changes, screenshots, at };
+  const packet: CompletionPacket = { subject, summary, changes, ...notes, files, screenshots, at };
   if (rev) packet.headSha = rev.headSha;
   const what = subjectPhrase(fm);
   const parts = [
+    files.length > 0 ? `${files.length} result file${files.length === 1 ? "" : "s"}` : "",
     screenshots.length > 0
       ? `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"}`
       : "",
@@ -301,7 +459,13 @@ export async function writeCompletionPacket(
     subjectId: taskKey,
     projectSlug,
     taskKey,
-    details: { subject, screenshots: screenshots.length, changes: changes !== null },
+    details: {
+      subject,
+      screenshots: screenshots.length,
+      changes: changes !== null,
+      files: files.length,
+      notes: COMPLETION_NOTES.filter(({ key }) => notes[key] !== null).map(({ key }) => key),
+    },
   });
   const size =
     lines === null
@@ -309,12 +473,16 @@ export async function writeCompletionPacket(
       : isSmallChange(fm.github?.changed)
         ? ` The ${lines}-line change is shown whole beside it.`
         : ` The ${lines}-line change is shown as your summary, with the diff one press away.`;
+  const leftOut = filesLeftOut
+    ? " `files` was left out: this task's pull request holds its files."
+    : "";
   return {
     written: true,
     message:
       `Wrote the completion packet for ${what}` +
       (parts.length > 0 ? ` (the summary, ${parts.join(" and ")}).` : " (the summary).") +
-      `${size} It stands until new work replaces ${what}.`,
+      `${size}${leftOut} It stands until new work replaces ${what}, and stays on the task as its ` +
+      "result once a person accepts it.",
   };
 }
 
@@ -342,6 +510,14 @@ export interface CompletionView {
   packet: {
     summary: string;
     changes: string | null;
+    /** Ruling 668: what to weigh, what was assumed, what is missing. */
+    considerations: string | null;
+    assumptions: string | null;
+    gaps: string | null;
+    /** Ruling 668: the result's files the viewer may see. */
+    files: { name: string; caption: string }[];
+    /** Result files the viewer may not see, or that have left the store. */
+    hiddenFiles: number;
     screenshots: { name: string; caption: string }[];
     /** Screenshots the viewer may not see (not a project member) or that
      *  have since left the attachments store. */
@@ -354,6 +530,11 @@ export interface CompletionView {
   verdicts: CompletionVerdictRow[];
   /** The change's size; null when there is no revision or nobody counted. */
   change: { files: number; add: number; del: number; small: boolean } | null;
+  /** Ruling 668: the paths the pull request changes, as last read (ruling
+   *  236), for the result of a task delivered as a revision: the first
+   *  `RESULT_PATHS_SHOWN`, how many more were read, and whether the read
+   *  itself was cut. Null when nobody read them. */
+  paths: { shown: string[]; more: number; truncated: boolean } | null;
 }
 
 /**
@@ -382,9 +563,15 @@ export function completionView(
   if (onFile) {
     const canSee = opts.canSee;
     const screenshots = canSee ? onFile.screenshots.filter((s) => canSee(s.name)) : [];
+    const files = canSee ? onFile.files.filter((f) => canSee(f.name)) : [];
     packet = {
       summary: onFile.summary,
       changes: onFile.changes,
+      considerations: onFile.considerations,
+      assumptions: onFile.assumptions,
+      gaps: onFile.gaps,
+      files,
+      hiddenFiles: onFile.files.length - files.length,
       screenshots,
       hiddenScreenshots: onFile.screenshots.length - screenshots.length,
       at: onFile.at,
@@ -426,6 +613,7 @@ export function completionView(
   });
 
   const stats = rev ? fm.github?.changed : null;
+  const changed = rev ? (fm.pr?.paths ?? null) : null;
   return {
     subjectSha: rev ? rev.headSha.slice(0, 7) : null,
     packet,
@@ -436,6 +624,13 @@ export function completionView(
           add: stats.add,
           del: stats.del,
           small: isSmallChange(stats) === true,
+        }
+      : null,
+    paths: changed
+      ? {
+          shown: changed.changed.slice(0, RESULT_PATHS_SHOWN),
+          more: Math.max(0, changed.changed.length - RESULT_PATHS_SHOWN),
+          truncated: changed.truncated,
         }
       : null,
   };

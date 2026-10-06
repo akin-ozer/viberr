@@ -8,9 +8,11 @@ import { useDialog } from "~/ui/use-dialog";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { slugify } from "~/shared/ids/slugify";
 import { keyFromName, projectNameFromRepo } from "./project-name";
+import type { BoardDelivers } from "~/shared/board-delivers";
 import {
   BLOCK_REASON_ID,
   NewProjectConnectionField,
+  NewProjectDeliversField,
   NewProjectNameFields,
   NewProjectRepoField,
   type BlockedField,
@@ -19,9 +21,9 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * The new-project dialog (home spec §4.9) and its fields: name + task key,
- * GitHub connection, repository (those three in `project-fields.tsx`, which
- * the board import dialog shares, ruling 653), workflow, policy preset,
- * footer. Split out of `home-page.tsx` (pass 16, pure structural refactor — no
+ * what the board delivers (ruling 667), GitHub connection, repository (those
+ * in `project-fields.tsx`, which the board import dialog shares, ruling 653),
+ * workflow, policy preset, footer. Split out of `home-page.tsx` (pass 16, pure structural refactor — no
  * behaviour or copy change); the name ↔ repo autocomplete and the create
  * submit stay together here in `NewProjectModal`, which owns all of the
  * dialog's state.
@@ -214,6 +216,12 @@ export function NewProjectModal({
     "balanced",
   );
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
+  // Ruling 667: what the board delivers. An instance with no GitHub
+  // connection opens on the kind it can create.
+  const [delivers, setDelivers] = useState<BoardDelivers>(() =>
+    connections.length > 0 ? "software" : "results",
+  );
+  const [attachRepo, setAttachRepo] = useState(false);
   // Which field is flagged: only after a submit was refused (the dialog must
   // not open with a red field, the same rule as the new-task title). Counted,
   // so every refusal re-inserts the alert (see NewProjectFooter).
@@ -280,16 +288,17 @@ export function NewProjectModal({
     setRepoTouched(true);
     if (v && !nameTouched) setName(projectNameFromRepo(v));
   };
-  // The effective repo owner: a picked connection. A repository (and therefore
-  // a PAT connection) is REQUIRED — repo-less projects were cut (2026-07-17,
-  // reverses F10): agents deliver through GitHub, so a project without a repo
-  // dead-ends at execution.
+  // The effective repo owner: a picked connection. A board that delivers
+  // software REQUIRES a repository, and therefore a PAT connection (owner
+  // ruling 2026-07-17, reverses F10): its agents deliver through GitHub, so
+  // without one it dead-ends at execution. Ruling 667: a board that delivers
+  // results needs none, and takes one only when the person attaches it.
   const effOwner = connOwner;
+  const needsRepo = delivers === "software" || attachRepo;
   const ok =
     name.trim().length > 1 &&
     effKey.length >= 2 &&
-    effOwner.length > 0 &&
-    effRepo.length > 0;
+    (!needsRepo || (effOwner.length > 0 && effRepo.length > 0));
   // LV-07: name the FIRST unmet requirement so a refused Create is never
   // unexplained (the previous modal offered no message anywhere). The field
   // is derived once and the copy from it, so the flagged input and the
@@ -299,11 +308,13 @@ export function NewProjectModal({
       ? "name"
       : effKey.length < 2
         ? "key"
-        : effOwner.length === 0
-          ? "conn"
-          : effRepo.length === 0
-            ? "repo"
-            : null;
+        : !needsRepo
+          ? null
+          : effOwner.length === 0
+            ? "conn"
+            : effRepo.length === 0
+              ? "repo"
+              : null;
   const blockedReason =
     blocked === "name"
       ? "Enter a project name (2+ characters)."
@@ -359,10 +370,11 @@ export function NewProjectModal({
     fd.set("intent", "create-project");
     fd.set("name", name.trim());
     fd.set("key", effKey);
-    fd.set("owner", effOwner);
-    fd.set("repoName", effRepo);
+    fd.set("delivers", delivers);
+    fd.set("owner", needsRepo ? effOwner : "");
+    fd.set("repoName", needsRepo ? effRepo : "");
     fd.set("policy", policy);
-    if (createRepo) fd.set("createRepository", repoPrivate ? "private" : "public");
+    if (needsRepo && createRepo) fd.set("createRepository", repoPrivate ? "private" : "public");
     // The list the collision note keeps reading until this request settles.
     setKeysAtSubmit(existingKeys ?? []);
     fetcher.submit(fd, { method: "post" });
@@ -384,7 +396,7 @@ export function NewProjectModal({
         <span className="mh-main">
           <h2>New project</h2>
           <div className="mh-sub">
-            One board and one repository, with agents under policy from the start
+            One board, with agents under policy from the start
           </div>
         </span>
         <button
@@ -412,26 +424,37 @@ export function NewProjectModal({
           keyInUse={keyInUse}
           submit={submit}
         />
-        <NewProjectConnectionField
-          connections={connections}
-          health={connectionHealth}
-          connOwner={connOwner}
-          setConnOwner={setConnOwner}
-          isAdmin={admin}
+        <NewProjectDeliversField
+          delivers={delivers}
+          setDelivers={setDelivers}
+          attachRepo={attachRepo}
+          setAttachRepo={setAttachRepo}
         />
-        <NewProjectRepoField
-          repoRef={repoRef}
-          invalidField={invalidField}
-          repo={repo}
-          setRepo={editRepo}
-          derived={!repoTouched}
-          effOwner={effOwner}
-          effRepo={effRepo}
-          createRepo={createRepo}
-          setCreateRepo={setCreateRepo}
-          repoPrivate={repoPrivate}
-          setRepoPrivate={setRepoPrivate}
-        />
+        {needsRepo && (
+          <>
+            <NewProjectConnectionField
+              connections={connections}
+              health={connectionHealth}
+              connOwner={connOwner}
+              setConnOwner={setConnOwner}
+              isAdmin={admin}
+            />
+            <NewProjectRepoField
+              repoRef={repoRef}
+              invalidField={invalidField}
+              repo={repo}
+              setRepo={editRepo}
+              derived={!repoTouched}
+              effOwner={effOwner}
+              effRepo={effRepo}
+              createRepo={createRepo}
+              setCreateRepo={setCreateRepo}
+              repoPrivate={repoPrivate}
+              setRepoPrivate={setRepoPrivate}
+              readOnly={delivers === "results"}
+            />
+          </>
+        )}
         <NewProjectWorkflowField />
         <NewProjectPolicyField policy={policy} setPolicy={setPolicy} />
         {/* Pass-19 UX coherence audit, finding #20: the two other outcomes of

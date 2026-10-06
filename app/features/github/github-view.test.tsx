@@ -580,7 +580,9 @@ describe("RepositoryPanel", () => {
     );
   });
 
-  it("says an unset repository in words, not a dash (ruling 148)", () => {
+  it("ruling 667: a project with no repository says so once, with where one is attached, and nothing about credentials or branches", () => {
+    // CANARY: drop the page's early return and a board that needs no
+    // repository shows a credential warning and three empty lists about one.
     const { container } = renderPage(
       viewData({
         project: {
@@ -592,15 +594,15 @@ describe("RepositoryPanel", () => {
         connection: { status: "no_repo_configured" },
       }),
     );
-    const rows = panel(container, "Repository").querySelectorAll(".kv-row");
-    // The same word the identical row on the settings page uses, and NOT the
-    // Connection pill's "no repository" one line below (ruling 14: one fact,
-    // one wording, said once).
-    expect(rows[0]!.textContent).toContain("not set");
-    expect(rows[0]!.textContent).not.toContain("−");
-    expect(rows[1]!.querySelector(".pill")!.textContent).toContain(
-      "no repository",
+    expect(container.querySelectorAll(".panel")).toHaveLength(1);
+    const only = panel(container, "Repository");
+    expect(only.textContent).toContain(
+      "This board delivers results: each task comes back as the files its agents save on it, so there are no branches or pull requests to show.",
     );
+    expect(only.querySelector("a")!.getAttribute("href")).toBe("/projects/viberr-core/settings");
+    expect(container.querySelector(".board-head .sub")!.textContent).toBe("Viberr Core has no repository");
+    expect(container.textContent).not.toContain("No credential configured");
+    expect(container.textContent).not.toContain("Update status");
   });
 
   it("claims connected only for a connected result", () => {

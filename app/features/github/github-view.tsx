@@ -1,4 +1,4 @@
-import { useFetcher, useNavigate } from "react-router";
+import { Link, useFetcher, useNavigate } from "react-router";
 import { asProjectRole, roleCan } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { GlyphSwap } from "~/ui/copy-glyph";
@@ -96,15 +96,9 @@ function RepositoryPanel({
           <span className="k">Default repository</span>
           <span className="v">
             <Icon name="github" />
-            {data.project.repo ? (
-              <span className="mono">{data.project.repo}</span>
-            ) : (
-              // Ruling 148: the absent fact in words. Same row on the settings
-              // page already says "not set" (ruling 14: one declaration, one
-              // wording), and the Connection row below already carries the
-              // "no repository" pill, so this slot must not repeat it.
-              <span className="fine md dim">not set</span>
-            )}
+            {/* Ruling 667: the page draws this panel only for a project that
+                has a repository. */}
+            <span className="mono">{data.project.repo}</span>
           </span>
         </div>
         <div className="kv-row">
@@ -628,6 +622,38 @@ export function GithubViewPage({
       : data.reconcile.at
         ? "When the cached branch/PR state last CHANGED. A background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new. Update status forces a check now."
         : "No branch or PR change has been recorded yet. Nothing is wrong. Update status checks GitHub now.";
+
+  // Ruling 667: a board that delivers results may have no repository, and
+  // then this page has one thing to say. The rail no longer lists the page
+  // for such a project; a link that still lands here reads this, not a
+  // credential warning and three empty lists about a repository nobody needs.
+  if (!data.project.repo) {
+    return (
+      <div className="board-wrap" data-screen-label="GitHub">
+        <div className="board-head">
+          <div>
+            <h1>GitHub</h1>
+            <div className="sub">{data.project.name} has no repository</div>
+          </div>
+        </div>
+        <div className="policy-wrap">
+          <div className="panel">
+            <div className="panel-head">
+              <Icon name="github" />
+              <h2>Repository</h2>
+            </div>
+            <p className="empty sm">
+              This board delivers results: each task comes back as the files its
+              agents save on it, so there are no branches or pull requests to
+              show. A project admin attaches a repository in{" "}
+              <Link to={`/projects/${slug}/settings`}>Settings → Repository &amp; credentials</Link>{" "}
+              when its agents should read or write one.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="board-wrap" data-screen-label="GitHub">

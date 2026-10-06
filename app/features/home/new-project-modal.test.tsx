@@ -61,23 +61,36 @@ function renderModal(
   return render(<Stub initialEntries={["/"]} />);
 }
 
+/** The "This board delivers" chip, by its first word (ruling 667). */
+const deliversChip = (container: HTMLElement, word: "Software" | "Results") =>
+  [...container.querySelectorAll<HTMLButtonElement>("button.pick-chip")].find((b) =>
+    b.textContent!.trim().startsWith(word),
+  )!;
+
 describe("#14: the zero-connections note never hands a member a 403", () => {
   const orgSettingsLink = (container: HTMLElement) =>
     container.querySelector('a[href^="/org/settings"]');
+  /** Ruling 667: with no connection the dialog opens on a board that needs
+   *  none, so the note stands behind the software choice. */
+  const renderSoftware = (props: Parameters<typeof renderModal>[0]) => {
+    const view = renderModal(props);
+    fireEvent.click(deliversChip(view.container, "Software"));
+    return view;
+  };
 
   it("an org ADMIN keeps the link — they are the one who can add the PAT", () => {
-    const { container } = renderModal({ isAdmin: true });
+    const { container } = renderSoftware({ isAdmin: true });
     expect(container.textContent).toContain("No GitHub connections yet");
     expect(orgSettingsLink(container)).not.toBeNull();
   });
 
   it("a MEMBER is told who adds it instead of being handed the admin-only door", () => {
-    const { container } = renderModal({ isAdmin: false });
+    const { container } = renderSoftware({ isAdmin: false });
     const text = container.textContent ?? "";
     expect(text).toContain("No GitHub connections yet");
     expect(orgSettingsLink(container)).toBeNull();
     // Not merely link-less: the member is left with a next step they can take.
-    expect(text).toContain("an org admin adds the PAT");
+    expect(text).toContain("An org admin adds the PAT");
     expect(text).toContain("Ask an admin");
   });
 
@@ -85,11 +98,94 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
     // `storeRoot` is `user.role === "admin" ? VIBERR_DATA_ROOT : null`
     // (routes/_index.tsx), so a null store root IS a non-admin reader. The gate
     // must never default to "admin" for someone who is not one.
-    expect(orgSettingsLink(renderModal({ storeRoot: null }).container)).toBeNull();
+    expect(orgSettingsLink(renderSoftware({ storeRoot: null }).container)).toBeNull();
     cleanup();
     expect(
-      orgSettingsLink(renderModal({ storeRoot: "/data" }).container),
+      orgSettingsLink(renderSoftware({ storeRoot: "/data" }).container),
     ).not.toBeNull();
+  });
+});
+
+/**
+ * Ruling 667: the dialog asks what the board delivers. Software needs a
+ * repository, as every project did; results needs none, and takes one only
+ * when the person attaches it for the agents to read.
+ */
+describe("ruling 667: a board that delivers results needs no repository", () => {
+  const withConnection = {
+    connections: ["akin-ozer"],
+    connectionHealth: { "akin-ozer": "valid" as const },
+  };
+  const repoField = (container: HTMLElement) => container.querySelector("#np-repo");
+  const attachBox = (container: HTMLElement) =>
+    [...container.querySelectorAll("label")]
+      .find((l) => l.textContent!.includes("Attach a repository for the agents to read"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? null;
+  /** Name the project, apply `pick`, press Create; resolves with the posted form. */
+  async function submitWith(
+    props: Parameters<typeof renderModal>[0],
+    pick: (container: HTMLElement) => void,
+  ) {
+    let posted: FormData | null = null;
+    const view = renderModal(props, async ({ request }) => {
+      posted = await request.formData();
+      return { ok: false, error: "held for the test" };
+    });
+    fireEvent.change(view.container.querySelector("#np-name")!, { target: { value: "Estimates" } });
+    pick(view.container);
+    fireEvent.click(view.getByText("Create project"));
+    await waitFor(() => expect(posted).not.toBeNull());
+    return posted!;
+  }
+
+  it("opens on results where no connection exists, asks for no repository, and posts none", async () => {
+    // CANARY: keep `effOwner.length > 0` in `ok` whatever the board delivers
+    // and an instance with no GitHub connection cannot create its first board.
+    const view = renderModal();
+    expect(deliversChip(view.container, "Results").getAttribute("aria-pressed")).toBe("true");
+    expect(repoField(view.container)).toBeNull();
+    expect(view.container.textContent).not.toContain("No GitHub connections yet");
+    cleanup();
+
+    const form = await submitWith({}, () => {});
+    expect(form.get("delivers")).toBe("results");
+    expect(form.get("owner")).toBe("");
+    expect(form.get("repoName")).toBe("");
+  });
+
+  it("opens on software where a connection exists, and a software board with no connection is refused by name", () => {
+    const withOne = renderModal(withConnection);
+    expect(deliversChip(withOne.container, "Software").getAttribute("aria-pressed")).toBe("true");
+    expect(repoField(withOne.container)).not.toBeNull();
+    expect(attachBox(withOne.container)).toBeNull();
+    cleanup();
+
+    const { container, getByText } = renderModal();
+    fireEvent.change(container.querySelector("#np-name")!, { target: { value: "Website" } });
+    fireEvent.click(deliversChip(container, "Software"));
+    fireEvent.click(getByText("Create project"));
+    expect(container.querySelector("#np-block-reason")!.textContent).toBe("Pick a GitHub connection.");
+  });
+
+  it("drops the repository when results is chosen, and takes one back when the person attaches it", async () => {
+    // CANARY: post `effOwner` and `effRepo` whatever `needsRepo` says and a
+    // results board is bound to the repository its name happened to spell.
+    const none = await submitWith(withConnection, (c) => fireEvent.click(deliversChip(c, "Results")));
+    expect(none.get("delivers")).toBe("results");
+    expect(none.get("owner")).toBe("");
+    expect(none.get("repoName")).toBe("");
+    cleanup();
+
+    const attached = await submitWith(withConnection, (c) => {
+      fireEvent.click(deliversChip(c, "Results"));
+      expect(repoField(c)).toBeNull();
+      fireEvent.click(attachBox(c)!);
+      expect(repoField(c)).not.toBeNull();
+      expect(c.textContent).toContain("The agents read it and commit nothing to it.");
+    });
+    expect(attached.get("delivers")).toBe("results");
+    expect(attached.get("owner")).toBe("akin-ozer");
+    expect(attached.get("repoName")).toBe("estimates");
   });
 });
 

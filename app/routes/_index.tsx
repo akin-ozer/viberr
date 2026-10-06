@@ -35,6 +35,7 @@ import {
   serializeSetupHidden,
 } from "~/features/home/setup-hidden.server";
 import { HomePage } from "~/features/home/home-page";
+import { asBoardDelivers } from "~/shared/board-delivers";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 
@@ -190,6 +191,9 @@ export async function action({ request }: Route.ActionArgs) {
       const input: CreateProjectInput = {
         name: String(formData.get("name") ?? ""),
         key: String(formData.get("key") ?? ""),
+        // Ruling 667: what the board delivers; a results board may leave the
+        // repository out.
+        delivers: asBoardDelivers(formData.get("delivers")),
         owner: String(formData.get("owner") ?? ""),
         repoName: String(formData.get("repoName") ?? ""),
         // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner

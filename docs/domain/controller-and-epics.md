@@ -99,8 +99,16 @@ own pieces:
   none, ruling 482), and no Developer and Reviewer to build them, unless the person asked
   for that software.
 
-Every project still needs a repository: every run works in a checkout of one, though on a
-results board nothing the person asked for is committed to it.
+A results board needs no repository (ruling 667). The controller says what the board
+delivers when it creates it (`create_project`'s `delivers`), and a results board is
+created with no `owner` and no `repoName`, so no GitHub connection is needed and its
+agents are deployed with repo-write withheld. With no repository a run works in the
+task's own `workspace/` folder, reads its knowledge bases and the task's files, and
+delivers the files it saves. A repository is passed for a results board only when its
+agents must read one that exists; they commit nothing to it. Before it is accepted the
+result is summarized by the operator (the completion packet, ruling 668), and that
+summary stays on the finished task as its result
+([task-lifecycle.md §9](task-lifecycle.md#9-packets-recommendations-schedules)).
 
 ## 2. Surfaces and access
 
@@ -721,7 +729,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | Tool | What it does | Gate |
 |---|---|---|
 | `list_github_connections` | Every GitHub connection: `owner`, `default`, token kind, validation (`valid` / `failed` with the validator's reason / `unvalidated`) and `lastValidatedAt`, expiry, `missingScopes`, bound project count, and `reach`: the repositories the TOKEN reaches, each with `private` and `canPush`, read when the token was last validated (`read` with a summary and counts, `unknown` with GitHub's reason, or `not_read` for a connection saved before the read existed). No token material, not even the masked suffix (ruling 463) | signed-in |
-| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner, and its description sends the model to `list_github_connections` first (ruling 463); the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created`. `agents` (`[{ profileId, model?, effort? }]`, ruling 464) writes the operator plus exactly that roster and no base Developer or Reviewer, each entry the deployment `deploy_agent` would write; `operator` (`{ backend?, model?, effort? }`, ruling 545) sets the operator's own, its model and effort judged against the backend named, else its own; a model of the other backend with no `backend` is refused with the sentence naming `backend`. Every entry is judged before anything is written, GitHub included: an unknown or non-specialist template, a model or effort its backend does not offer, a duplicate or an empty list is refused by name. Without `agents` the base roster is written, as from the New project dialog. The reply lists every deployment written with its model and effort, and `project.created` records the roster's ids | signed-in |
+| `create_project` | A project with any shape in one request (stages, boundaries, members, description); `delivers` says what the board delivers (ruling 667): `software`, the default, needs a GitHub connection for the repo owner, and the description sends the model to `list_github_connections` first (ruling 463); `results` takes no `owner` or `repoName`, writes `repo: null`, deploys every agent with repo-write withheld, and the reply says the project has no repository; the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created`. `agents` (`[{ profileId, model?, effort? }]`, ruling 464) writes the operator plus exactly that roster and no base Developer or Reviewer, each entry the deployment `deploy_agent` would write; `operator` (`{ backend?, model?, effort? }`, ruling 545) sets the operator's own, its model and effort judged against the backend named, else its own; a model of the other backend with no `backend` is refused with the sentence naming `backend`. Every entry is judged before anything is written, GitHub included: an unknown or non-specialist template, a model or effort its backend does not offer, a duplicate or an empty list is refused by name. Without `agents` the base roster is written, as from the New project dialog. The reply lists every deployment written with its model and effort, and `project.created` records the roster's ids | signed-in |
 
 **Board reads** (all `requireVisible`, archived projects included)
 

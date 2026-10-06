@@ -829,12 +829,15 @@ describe("Codex structured operator completion", () => {
    * Ruling 521: the plan mirror of `write_completion_packet`. `text` carries
    * the summary, `reason` the summary of the code changes and `screenshots`
    * the images; the offer later in the same plan is filed on the packet the
-   * step before it wrote.
+   * step before it wrote. Ruling 668: `result` carries the notes and the
+   * result's files.
    */
   it("ruling 521: a plan writes the completion packet, then offers the task on it", async () => {
     // CANARY: drop the `write_completion_packet` arm from `executeCodexPlan`
     // and the offer is refused for want of the packet; map `reason` to
-    // nothing and the over-200-line change is refused its summary.
+    // nothing and the over-200-line change is refused its summary; leave
+    // `result` unread and a Codex operator's result never carries its notes;
+    // skip the newline repair on them and the card prints a literal "\n".
     const sha = "a".repeat(40);
     const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
@@ -900,6 +903,14 @@ describe("Codex structured operator completion", () => {
             text: "The attach flow works end to end.",
             reason: "- **Policy gate**: refuses a second repository.",
             screenshots: [{ name: "after.png", caption: "The attach dialog" }],
+            result: {
+              considerations: null,
+              assumptions: "One repository per task.",
+              // As the model writes a line break inside a JSON string it
+              // escaped twice (finding #23).
+              gaps: "- Detaching a repository is not covered.\\n- Neither is renaming one.",
+              files: null,
+            },
           },
           { ...step, tool: "accept_completion" },
         ],
@@ -912,6 +923,10 @@ describe("Codex structured operator completion", () => {
         subject: "rev_1",
         summary: "The attach flow works end to end.",
         changes: "- **Policy gate**: refuses a second repository.",
+        considerations: null,
+        assumptions: "One repository per task.",
+        gaps: "- Detaching a repository is not covered.\n- Neither is renaming one.",
+        files: [],
         screenshots: [{ name: "after.png", caption: "The attach dialog" }],
       });
       expect(task().frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
@@ -6193,6 +6208,12 @@ describe("R19-1 — the operator's read-only repository view", () => {
     const prompt = systemPrompt();
     expect(prompt).toContain("There is no repository checkout on this run");
     expect(prompt).toContain('as "the repository"');
+    // Ruling 667: such a project is a board that delivers results, and the
+    // turn says how one delivers. CANARY: drop the sentence and the operator
+    // is left to try `deliver_for_review` on a board with nothing to push.
+    expect(prompt).toContain(
+      "Every task on it is delivered as the files its delivering agent saves on the task, so hand delivery to an agent that can save files (`run_agent` with `delivers: true`), and never call `deliver_for_review` or `update_branch_from_base`",
+    );
   });
 
   /**

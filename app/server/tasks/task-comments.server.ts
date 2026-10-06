@@ -815,6 +815,7 @@ export async function commentToAgent(
     // A supporting engagement never delivers, so its directive says so instead
     // of naming push/PR rules that don't apply to it (P13-RT-05).
     delivers: target.isPrimary,
+    repository: repo !== null,
   };
   if (anchor) directive.anchor = anchor;
   const followUp = specialistReplyDirective(directive);

@@ -1045,15 +1045,18 @@ export function CurrentStatePanel({
             )}
           </span>
         </div>
-        <div className="kv-row">
-          <span className="k">Repo</span>
-          <span className="v">
-            <span className="prop-fact">
-              {MARK.github}
-              <span className="mono">{task.repo}</span>
+        {/* Ruling 667: a project with no repository has no row to show. */}
+        {task.repo && (
+          <div className="kv-row">
+            <span className="k">Repo</span>
+            <span className="v">
+              <span className="prop-fact">
+                {MARK.github}
+                <span className="mono">{task.repo}</span>
+              </span>
             </span>
-          </span>
-        </div>
+          </div>
+        )}
       </div>
       {/* Gap-10: the cue, once the stamp above has crossed its threshold. Stated
           as the two facts the detector actually has — an empty timeline and an

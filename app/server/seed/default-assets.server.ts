@@ -115,8 +115,9 @@ work and the result comes back on that task (ruling 530).
   (admin, maintainer, contributor, viewer). Org admins pass project gates
   through an audited override.
 - Projects carry stages, workflow boundaries (auto, approval, human), members,
-  deployed agents and a GitHub repository. The move into the final stage is
-  always a human decision.
+  deployed agents and, on a board that delivers software, a GitHub repository;
+  a board that delivers results needs none (ruling 667). The move into the
+  final stage is always a human decision.
 - Knowledge bases, skills and MCP connections are org resources granted to
   agent profiles. Deleting and renaming them is done by admins in Instance
   settings → Agent resources.
@@ -191,6 +192,11 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
+    // Ruling 667 (owner, 2026-10-06): before the doctrine said to state what
+    // the board delivers at creation and that a results board needs no
+    // repository. Every project took one, and the AWS calculator board kept a
+    // repository it never committed to.
+    "db6f4b2c06bd93b69a1aa140b0dfc008da77ffba7e23044e4802de594ff7f914",
     // Ruling 530 (owner, 2026-09-27): before the doctrine said to settle what
     // a board delivers, software or results, and never to plan an application
     // to do what a results board's agents do on each task. Asked for a board
@@ -221,6 +227,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Rulings 667 and 668 (owner, 2026-10-06): before "Bringing up a new
+    // project" said a results board is created with no repository, and "A
+    // board that delivers results" said the operator summarizes the result
+    // before it is accepted. It said every project still needs a repository.
+    "dd2f98c43aee05e60cfa84f9b078ae55ffbfcf84aac2e6080bc9daf08b2668b8",
     // Ruling 637 (2026-10-03): before "Keeping a project's rulings current"
     // named `edit_knowledge_base_doc` for amending a passage and for the edit
     // after an undo refuses. It named `save_knowledge_base`, whose only ways to
@@ -288,6 +299,12 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Rulings 667 and 668 (owner, 2026-10-06): before the doctrine knew a
+    // project with no repository, and before the completion packet said what
+    // to weigh, what was assumed and what is missing, named the result's files
+    // on a task delivered as files, and stayed on the accepted task as its
+    // result.
+    "82224a585c7ba2ce6470e7da28ef41828164fe5bcb2a72b0b297a2827df020d8",
     // Ruling 531 (owner, 2026-09-28): before the triage gate said when a task
     // whose deliverable is a result is concrete, and the delivery paragraph
     // said such a task is delivered on the task, never in a pull request. The
@@ -536,6 +553,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // Ruling 530 (owner, 2026-09-27): before "Viberr manages AI software
     // delivery" gave way to a board that delivers software or results.
     "4977e270597f5dc9e70b54824c5e1d26246a1af4310bb94c6d590f877b6b0dd5",
+    // Ruling 667 (owner, 2026-10-06): before "The pieces you manage" said a
+    // board that delivers results needs no repository.
+    "864b8434eebe1577e1420d218e6136298c4d8ff9c2fe2fae2f9509a31662cf95",
   ],
   [path.join("agents", "profiles", "developer.md")]: [
     "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",

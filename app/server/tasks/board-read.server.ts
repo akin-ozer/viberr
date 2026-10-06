@@ -16,7 +16,7 @@ import {
 import { keptDeliveryMiss, listKeptDeliveries, type KeptDelivery } from "~/server/files/kept-deliveries.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
-import { currentCompletionPacket } from "./completion-packet.server";
+import { completionPacketText, currentCompletionPacket } from "./completion-packet.server";
 import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-actions.server";
 import type { TaskMutationContext } from "./task-mutation.server";
 
@@ -167,7 +167,7 @@ function taskOutcome(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): T
   const verdicts = subject ? fm.verdicts.filter((v) => v.revisionId === subject) : [];
   if (!packet && verdicts.length === 0) return null;
   return {
-    completion: packet ? outcomeExcerpt(packet.summary, "summary") : null,
+    completion: packet ? outcomeExcerpt(completionPacketText(packet), "summary") : null,
     verdicts: verdicts.map((v) => ({
       agent: v.profileId,
       result: v.result,

@@ -37,6 +37,8 @@ import {
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
 import { getProject, listProjects } from "~/server/projections/board-query.server";
 import { baseAgentDeployments } from "~/server/seed/agent-catalog.server";
+import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
+import type { BoardDelivers } from "~/shared/board-delivers";
 import { errorMessage } from "~/shared/errors";
 import { slugify } from "~/shared/ids/slugify";
 import { countLabel } from "~/shared/text/plural";
@@ -153,6 +155,10 @@ export interface BoardImportPreview {
   stages: StageDef[];
   /** The rule into each stage after the first, in stage order. */
   workflow: { from: string; to: string; boundary: Boundary }[];
+  /** Ruling 667: `software` when an agent the board deploys may write a
+   *  repository, so the import needs one; `results` when none may, so the
+   *  repository is optional. */
+  delivers: BoardDelivers;
   agents: BoardImportAgent[];
   guardrails: number;
   gates: string[];
@@ -663,6 +669,7 @@ function planBoardImport(db: DatabaseSync, file: BoardFileUpload, ctx: OrgSeedCo
     viberrVersion: board.viberrVersion,
     stages: board.stages,
     workflow: board.workflow.map((w) => ({ from: w.from, to: w.to, boundary: w.boundary })),
+    delivers: boardDelivers(board.agents),
     agents,
     guardrails: board.guardrails.length,
     gates: (board.gates ?? []).map((g) => g.name),
@@ -673,6 +680,19 @@ function planBoardImport(db: DatabaseSync, file: BoardFileUpload, ctx: OrgSeedCo
     notes,
   };
   return { preview, board, kbs, skills, mcps, templates };
+}
+
+/**
+ * Ruling 667: what an imported board delivers, read off its own roster. The
+ * file carries each deployment's grants as they were exported, so an agent
+ * that may write a repository makes it a software board, which needs one.
+ */
+function boardDelivers(agents: readonly AgentDeployment[]): BoardDelivers {
+  return agents.some(
+    (a) => a.profileId !== OPERATOR_PROFILE_ID && grantsWriteRepository(a.capabilities),
+  )
+    ? "software"
+    : "results";
 }
 
 /**
@@ -947,7 +967,8 @@ export async function importBoard(
     );
   }
   return withActionWatchdog(`import-board:${input.key || "?"}`, async () => {
-    const identity = checkNewProjectIdentity(db, input);
+    // Ruling 667: a board none of whose agents writes a repository needs none.
+    const identity = checkNewProjectIdentity(db, { ...input, delivers: plan.preview.delivers });
     const reached = await reachProjectRepository(db, identity, input.createRepository, actor, ctx);
     const renames: Renames = { kb: new Map(), skills: new Map(), mcps: new Map(), agents: new Map() };
     const record = (map: Map<string, string>, views: readonly BoardImportResource[]) => {

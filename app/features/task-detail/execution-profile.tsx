@@ -768,7 +768,11 @@ function AgentRunControl({
     : ineligible
       ? null
       : selected.id === deliveringProfileId
-      ? "Runs as the delivering agent: it owns the branch and PR."
+      ? // Ruling 665: a deliverer that cannot write the repository owns no
+        // branch. Its delivery is the files it saves (ruling 535).
+        selected.capabilities?.delivery === false
+        ? "Runs as the delivering agent: its delivery is the files it saves on the task."
+        : "Runs as the delivering agent: it owns the branch and PR."
       : engagedSupportingIds.includes(selected.id)
         ? selected.capabilities?.verdict
           ? "Runs as a reviewer (already engaged): its verdict gates acceptance."

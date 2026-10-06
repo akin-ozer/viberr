@@ -19,7 +19,11 @@ import { deleteRepoHealth, recordRepoAccess } from "~/server/github/repo-health.
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { logger } from "~/server/logging/logger.server";
 import { interruptRun } from "~/server/runtimes/run-service.server";
-import { clearProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  clearProjectCredential,
+  getPatToken,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 import {
   repoPermissionsSchema,
   repoWritable,
@@ -48,6 +52,14 @@ import {
   getProjectGithubContext,
   type GithubContextOptions,
 } from "~/server/github/github-context.server";
+import {
+  createGithubClient,
+  type GithubClient,
+  type GithubClientOptions,
+} from "~/server/github/github-client.server";
+import { getConnection, getDefaultConnection } from "~/server/org/connections.server";
+import { proveAttachedCredential } from "~/features/github/github-actions.server";
+import { slugify } from "~/shared/ids/slugify";
 import { releaseProjectConversations } from "~/server/controller/controller-conversations.server";
 import { overlappingLeases } from "~/server/tasks/file-leases.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
@@ -810,6 +822,154 @@ export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): numbe
   return countRow.parse(row).n;
 }
 
+/** What a probe of the repository a project is about to point at found. */
+interface RepoTarget {
+  /** GitHub's own default branch for it; null when the answer carried none. */
+  defaultBranch: string | null;
+  reading: RepoAccessResult;
+}
+
+/**
+ * Ask GitHub about `repo` with `client`'s token before a project is pointed at
+ * it, and refuse a miss in the door's own words: a change must not install
+ * the next misconfiguration. `subject` and `object` name whose token asked
+ * ("The attached credential", "the akin-ozer connection's token").
+ *
+ * F20-15: an answer proves the token can SEE the repository, not push to it.
+ * Adopting a read-only-visible repository silently defers the failure to the
+ * first delivery, so a PROVEN read-only target is refused where the board
+ * pushes (`needsPush`); an unknown or absent permissions block still passes.
+ */
+async function probeRepoTarget(
+  client: GithubClient,
+  repo: string,
+  who: { subject: string; object: string; needsPush: boolean },
+): Promise<RepoTarget> {
+  const res = await client.request("GET", `/repos/${repo}`, repoProbeSchema);
+  if (res.ok) {
+    const readOnly = repoWritable(res.data.permissions) === false;
+    if (readOnly && who.needsPush) {
+      throw AppError.validation(
+        `${who.subject} can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then try again. Nothing was changed.`,
+      );
+    }
+    const reading: RepoAccessResult = {
+      status: "connected",
+      repo,
+      remoteDefaultBranch: res.data.default_branch,
+      private: res.data.private ?? false,
+    };
+    if (readOnly) reading.readOnly = true;
+    return { defaultBranch: res.data.default_branch, reading };
+  }
+  if (res.kind === "network") {
+    throw AppError.validation(
+      `GitHub is unreachable (${res.message}). Nothing was changed. Try again when it is.`,
+    );
+  }
+  if (res.status === 404) {
+    throw AppError.validation(
+      `${who.subject} cannot see ${repo}. Check the owner/name, the token's repository access, or a pending organization approval. Nothing was changed.`,
+    );
+  }
+  if (res.status === 401) {
+    throw AppError.validation(
+      `GitHub rejected ${who.object}. Update the token in Instance settings, then try again. Nothing was changed.`,
+    );
+  }
+  throw AppError.validation(
+    `GitHub refused the check on ${repo} (${res.status}${res.kind === "http" ? `: ${res.message}` : ""}). Nothing was changed.`,
+  );
+}
+
+/**
+ * Ruling 667: a project with no repository takes one.
+ *
+ * It has no credential: creation bound none, and removing a repository
+ * unbinds it. The bound-credential probe therefore had nothing to ask with,
+ * and an attach that skipped it kept the placeholder `defaultBranch: main`.
+ * On a repository whose default is `master` the next branch preparation would
+ * find no `main`, and ruling 128's bootstrap would create one from the root
+ * commit and make it the repository's default branch.
+ *
+ * So the attach is checked with the connection the project is about to be
+ * given: the repository owner's, else the instance default (the choice
+ * `runSetCredential` makes). It refuses with no connection and on a miss,
+ * adopts the repository's own default branch, and binds that connection, so
+ * the project leaves this door as creation would have left it. A board none
+ * of whose agents writes the repository may attach one its token can only
+ * read.
+ */
+async function attachProjectRepo(
+  db: DatabaseSync,
+  input: { projectSlug: string; repo: string; footprint: number },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext,
+  options: { fetchImpl?: typeof fetch },
+): Promise<{ toast: string; changed: boolean; repo: string }> {
+  const { projectSlug, repo } = input;
+  const owner = repo.split("/")[0] ?? "";
+  const connection = getConnection(db, slugify(owner)) ?? getDefaultConnection(db);
+  if (!connection) {
+    throw AppError.validation(
+      `Attaching ${repo} needs a GitHub connection to check it with. Add one in Instance settings → GitHub connections, then attach the repository here. Nothing was changed.`,
+    );
+  }
+  const token = getPatToken(db, connection.patId);
+  if (token === null) {
+    throw AppError.validation(
+      `The ${connection.owner} connection has no token Viberr can read, so ${repo} cannot be checked. Replace the token in Instance settings → GitHub connections, then try again. Nothing was changed.`,
+    );
+  }
+  const clientOptions: GithubClientOptions = { token };
+  if (options.fetchImpl) clientOptions.fetchImpl = options.fetchImpl;
+  const target = await probeRepoTarget(createGithubClient(clientOptions), repo, {
+    subject: `The ${connection.owner} connection's token`,
+    object: `the ${connection.owner} connection's token`,
+    needsPush: listDeployedSpecialists(projectSlug, ctx).some((agent) => agent.capabilities.delivery),
+  });
+  if (!target.defaultBranch) {
+    throw AppError.validation(
+      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. Nothing was changed.`,
+    );
+  }
+  const defaultBranch = target.defaultBranch;
+
+  await updateProjectFile(projectRef(ctx, projectSlug), (parsed) => {
+    parsed.frontmatter.repo = repo;
+    parsed.frontmatter.defaultBranch = defaultBranch;
+  });
+  reprojectProject(db, ctx, projectSlug);
+  const auditActor = { userId: actor.userId, label: actor.label };
+  setProjectCredential(db, { projectSlug, patId: connection.patId }, auditActor);
+  invalidateRepoAccess(db, projectSlug);
+  recordRepoAccess(db, projectSlug, target.reading);
+  const proving: Parameters<typeof proveAttachedCredential>[3] = { dataRoot: ctx.dataRoot };
+  if (options.fetchImpl) proving.fetchImpl = options.fetchImpl;
+  await proveAttachedCredential(db, projectSlug, auditActor, proving);
+  const details: AuditDetails = {
+    from: null,
+    to: repo,
+    probed: true,
+    defaultBranch,
+    connection: connection.owner,
+  };
+  if (input.footprint > 0) details.footprintTasks = input.footprint;
+  recordAudit(db, {
+    action: "project.repo.updated",
+    actor: auditActor,
+    subjectKind: "project",
+    subjectId: projectSlug,
+    projectSlug,
+    details,
+  });
+  return {
+    toast: `Repository attached: ${repo} (default branch ${defaultBranch}), checked and bound with ${connection.owner}'s connection`,
+    changed: true,
+    repo,
+  };
+}
+
 /**
  * A project has ONE repository (owner ruling 2026-07-26), and this is the one
  * door that changes which. Ruling 539 renamed it: the owner pointed a new
@@ -866,8 +1026,13 @@ export async function changeProjectRepo(
   const footprint = repoFootprintTasks(db, input.projectSlug);
   if (footprint > 0 && !input.confirmFootprint) {
     throw AppError.validation(
-      `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "the current repo"}. Confirm the change to proceed; those records keep their history but future sync runs against ${repo}.`,
+      `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "a repository it had before"}. Confirm the change to proceed; those records keep their history but future sync runs against ${repo}.`,
     );
+  }
+  // Ruling 667: a project with no repository takes one through its own arm,
+  // which has to find a token to check the repository with.
+  if (from === null) {
+    return attachProjectRepo(db, { projectSlug: input.projectSlug, repo, footprint }, actor, ctx, options);
   }
 
   // Verify the target with the BOUND credential before anything is written.
@@ -880,42 +1045,14 @@ export async function changeProjectRepo(
   let defaultBranch: string | null = null;
   let reading: RepoAccessResult | null = null;
   if (gh.status === "ok") {
-    const res = await gh.client.request("GET", `/repos/${repo}`, repoProbeSchema);
-    if (res.ok) {
-      // F20-15: `res.ok` proves the credential can SEE the repo, not push to it.
-      // Adopting a read-only-visible repo silently defers the failure to first
-      // delivery (live: changing to a foreign public repo succeeded). Refuse a
-      // PROVEN read-only target; an unknown/absent permissions block still passes.
-      if (repoWritable(res.data.permissions) === false) {
-        throw AppError.validation(
-          `The attached credential can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then try again. Nothing was changed.`,
-        );
-      }
-      probed = true;
-      defaultBranch = res.data.default_branch;
-      reading = {
-        status: "connected",
-        repo,
-        remoteDefaultBranch: defaultBranch,
-        private: res.data.private ?? false,
-      };
-    } else if (res.kind === "network") {
-      throw AppError.validation(
-        `GitHub is unreachable (${res.message}). Nothing was changed. Try again when it is.`,
-      );
-    } else if (res.status === 404) {
-      throw AppError.validation(
-        `The attached credential cannot see ${repo}. Check the owner/name, the token's repository access, or a pending organization approval. Nothing was changed.`,
-      );
-    } else if (res.status === 401) {
-      throw AppError.validation(
-        "GitHub rejected the attached credential. Update the token in Instance settings, then try again. Nothing was changed.",
-      );
-    } else {
-      throw AppError.validation(
-        `GitHub refused the check on ${repo} (${res.status}${res.kind === "http" ? `: ${res.message}` : ""}). Nothing was changed.`,
-      );
-    }
+    const target = await probeRepoTarget(gh.client, repo, {
+      subject: "The attached credential",
+      object: "the attached credential",
+      needsPush: true,
+    });
+    probed = true;
+    defaultBranch = target.defaultBranch;
+    reading = target.reading;
   }
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
@@ -948,6 +1085,103 @@ export async function changeProjectRepo(
       : `Repository set to ${repo}. Attach a credential to verify access`,
     changed: true,
     repo,
+  };
+}
+
+/** A task whose work on the repository is not finished, by key. */
+const unfinishedRepoWorkRow = z.object({ task_key: z.string() });
+
+/**
+ * Ruling 667: the door that takes a project's repository away.
+ *
+ * A board whose agents hand back the files they save on each task needs no
+ * repository, and until this door a project could change its repository and
+ * never be without one: the AWS calculator board kept `akin-ozer/aws-calculator`
+ * through ten rounds of work that committed nothing to it.
+ *
+ * Contract:
+ *  - `edit-policy` tier (admin), the tier of the change;
+ *  - refused while the repository is in use: a deployed agent that may write
+ *    it (the board delivers software through it), named with where repo-write
+ *    is withheld; a task, not archived, whose pull request is still open on
+ *    GitHub (under review, or accepted with the merge pending: the states
+ *    every other reader calls open); and a task short of the terminal stage
+ *    with a delivered revision, which could then never be pushed or merged;
+ *  - writes `repo: null`, unbinds the project's credential (the connection
+ *    stays in Instance settings), drops the repository's reading, and audits
+ *    `project.repo.removed`;
+ *  - tasks keep the branch and pull request records they have, as history.
+ *    Nobody on the board may write a repository when it goes, so from here
+ *    every delivery is the files an agent saves on its task.
+ */
+export async function removeProjectRepo(
+  db: DatabaseSync,
+  input: { projectSlug: string },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; changed: boolean }> {
+  requireProjectAction(
+    db,
+    ctx,
+    "edit-policy",
+    input.projectSlug,
+    actor,
+    "remove the project repository",
+  );
+  const current = readProjectFile(projectRef(ctx, input.projectSlug));
+  if (!current) throw AppError.notFound(`Project not found: ${input.projectSlug}`);
+  const from = current.parsed.frontmatter.repo ?? null;
+  if (from === null) return { toast: "This project has no repository", changed: false };
+
+  const list = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+  const writers = listDeployedSpecialists(input.projectSlug, ctx)
+    .filter((agent) => agent.capabilities.delivery)
+    .map((agent) => agent.name);
+  if (writers.length > 0) {
+    throw AppError.validation(
+      `${list.format(writers)} may write ${from}, so this board delivers through it. Withhold "Execute code or write to the repo" from ${writers.length === 1 ? "that agent" : "those agents"} on the Agents page first, or change the repository instead. Nothing was changed.`,
+    );
+  }
+  const stages = current.parsed.frontmatter.stages;
+  const terminalStageId = stages[stages.length - 1]?.id ?? "";
+  const unfinished = db
+    .prepare(
+      `SELECT task_key FROM task_projections
+       WHERE project_slug = ? AND archived = 0
+         AND (json_extract(pr_json, '$.state') IN ('review', 'accepted')
+              OR (work_revision_sha IS NOT NULL AND stage <> ?))
+       ORDER BY task_key`,
+    )
+    .all(input.projectSlug, terminalStageId)
+    .map((row) => unfinishedRepoWorkRow.parse(row).task_key);
+  if (unfinished.length > 0) {
+    const one = unfinished.length === 1;
+    throw AppError.validation(
+      `${list.format(unfinished)} ${one ? "has" : "have"} unfinished work on ${from}: a pull request still open, or a delivered revision not yet accepted. Merge or close ${one ? "it" : "them"}, or archive the ${one ? "task" : "tasks"}, then remove the repository. Nothing was changed.`,
+    );
+  }
+
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    parsed.frontmatter.repo = null;
+  });
+  reprojectProject(db, ctx, input.projectSlug);
+  const unbound = clearProjectCredential(db, input.projectSlug, {
+    userId: actor.userId,
+    label: actor.label,
+  });
+  invalidateRepoAccess(db, input.projectSlug);
+  deleteRepoHealth(db, input.projectSlug);
+  recordAudit(db, {
+    action: "project.repo.removed",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: { from, credentialUnbound: unbound },
+  });
+  return {
+    toast: `Repository removed: ${from}. Tasks are delivered as the files their agents save on them`,
+    changed: true,
   };
 }
 

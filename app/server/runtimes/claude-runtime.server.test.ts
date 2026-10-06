@@ -2095,7 +2095,7 @@ describe("the file tools of a run that posts files (ruling 564)", () => {
         `is not granted on this run, so Edit writes only into the task's attachments folder \`${DROP}\`, ` +
         `where the files you post on the task go, and \`${tmpdir()}\` for scratch. ` +
         `\`${CHECKOUT}/mapping.md\` is outside both: write the file there by its absolute path, and ` +
-        "leave the repository checkout as it is.",
+        "leave everything else as it is.",
     );
     const denials = lines.filter((l) => l.display?.tag === "permission_denied");
     expect(denials).toHaveLength(6);

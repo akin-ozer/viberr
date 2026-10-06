@@ -356,6 +356,31 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
               required: ["name", "caption"],
             },
           },
+          // Ruling 668: what write_completion_packet says beside the summary.
+          result: {
+            type: ["object", "null"],
+            description: "For write_completion_packet ONLY (ruling 668): the rest of what a person reads before accepting, which stays on the task as its result. Null for every other tool.",
+            additionalProperties: false,
+            properties: {
+              considerations: { type: ["string", "null"], description: "The choices the work made that the person should weigh: an option taken over another and why, a trade-off, a default. Markdown; null when there are none (never write \"none\")." },
+              assumptions: { type: ["string", "null"], description: "What the work took as given without a person confirming it. Markdown; null when there are none." },
+              gaps: { type: ["string", "null"], description: "What the result does not cover and what is still owed: an input nobody gave, a check nobody ran, a follow-up. Markdown; null when there are none." },
+              files: {
+                type: ["array", "null"],
+                description: "On a task delivered as files (the snapshot's `completionPacket.resultFilesRequired`): the files that ARE the result, by exact name from `completionPacket.resultFileCandidates`, each with a line saying what the file is. The final version of each output a person takes away, never an input, a draft, a log or a working file. Null when the delivery is a revision: its pull request holds the files.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: "string" },
+                    caption: { type: ["string", "null"] },
+                  },
+                  required: ["name", "caption"],
+                },
+              },
+            },
+            required: ["considerations", "assumptions", "gaps", "files"],
+          },
           completeness: {
             type: ["boolean", "null"],
             description: "For run_agent ONLY (ruling 421): true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
@@ -478,7 +503,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "files", "screenshots", "completeness", "noVerdict", "dueAt", "delayMinutes", "scheduleId", "commentAt", "taskKey"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "epicId", "paths", "files", "screenshots", "result", "completeness", "noVerdict", "dueAt", "delayMinutes", "scheduleId", "commentAt", "taskKey"],
       },
     },
   },
@@ -516,6 +541,17 @@ const operatorPlanActionSchema = z.strictObject({
   // replay reason.
   screenshots: z
     .array(z.strictObject({ name: z.string(), caption: z.string().nullable() }))
+    .nullable()
+    .optional(),
+  // Ruling 668: write_completion_packet's notes and result files, `.optional()`
+  // for the same replay reason.
+  result: z
+    .strictObject({
+      considerations: z.string().nullable(),
+      assumptions: z.string().nullable(),
+      gaps: z.string().nullable(),
+      files: z.array(z.strictObject({ name: z.string(), caption: z.string().nullable() })).nullable(),
+    })
     .nullable()
     .optional(),
   // Ruling 421: run_agent's completeness question — `.optional()` for the same
@@ -800,6 +836,13 @@ export async function executeCodexPlan(
   for (const a of plan.actions) {
     if (a.text) a.text = normalizeEscapedNewlines(a.text);
     if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
+    // Ruling 668: the completion packet's notes are prose a person reads too.
+    if (a.result) {
+      for (const key of ["considerations", "assumptions", "gaps"] as const) {
+        const note = a.result[key];
+        if (note) a.result[key] = normalizeEscapedNewlines(note);
+      }
+    }
   }
   const base = { projectSlug: input.projectSlug, taskKey: input.taskKey };
   // Actions narrate themselves. Only a reply-only plan needs its reasoning
@@ -1002,6 +1045,15 @@ export async function executeCodexPlan(
             if (a.reason) packet.changes = a.reason;
             if (a.screenshots?.length) {
               packet.screenshots = a.screenshots.map((s) => ({ name: s.name, caption: s.caption }));
+            }
+            // Ruling 668: the notes and the result's files.
+            if (a.result) {
+              packet.considerations = a.result.considerations;
+              packet.assumptions = a.result.assumptions;
+              packet.gaps = a.result.gaps;
+              if (a.result.files?.length) {
+                packet.files = a.result.files.map((f) => ({ name: f.name, caption: f.caption }));
+              }
             }
             record(a.tool, await operatorWriteCompletionPacket(db, ctx, packet, authority));
           } else skippedMalformed(a.tool, "the summary");

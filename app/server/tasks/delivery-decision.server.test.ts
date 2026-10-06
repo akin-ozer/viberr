@@ -219,6 +219,27 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     ).toBe(false);
   });
 
+  it("ruling 667: no safety-net event on a project with no repository", async () => {
+    // A board that delivers results has no pull request to open, and the note
+    // told its owner the operator was deciding a push and a review PR.
+    // CANARY: drop the repository term from the condition and it is written.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: null });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    seed({ stage: "impl" });
+    await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", manual: true },
+      actorOf(store.users.arda),
+      dataCtx(),
+    );
+    await new Promise((r) => setTimeout(r, 80));
+    expect(fm().frontmatter.stage).toBe("review");
+    expect(
+      fm().timeline.some((e) => e.text.includes("no live review pull request")),
+    ).toBe(false);
+  });
+
   it("ruling 576: no safety-net event for a task a reviewer verified has nothing to deliver", async () => {
     // Live on AWSC-11 the note told the owner the operator decides a push and
     // a review PR, 30 seconds after the reviewer's approval verified there was
@@ -827,7 +848,8 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     {
       push: { status: "no_repo" as const, reason: "project has no repo" },
       outcome: "failed",
-      says: "no GitHub repository configured",
+      // Ruling 667: a standing state of a board that delivers results.
+      says: "has no repository, so there is no branch to push and no review PR to open: a task here is delivered as the files its delivering agent saves on it",
     },
     {
       push: { status: "no_branch" as const, reason: "HEAD not on a task branch (main)" },

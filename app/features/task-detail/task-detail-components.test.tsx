@@ -1223,6 +1223,25 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     expect(fifth.container.querySelector(".agent-run")!.textContent).toContain(
       "Runs as a reviewer: its verdict gates acceptance.",
     );
+    cleanup();
+
+    // Ruling 665: the task's deliverer on a board that delivers results holds
+    // no repo-write, so it owns no branch. CANARY: drop the `delivery ===
+    // false` arm and a files deliverer is promised a branch and a PR.
+    const builder: DeployedSpecialistView = {
+      id: "builder", name: "Calculator Builder", role: "Estimate", backend: "codex", model: "codex-large",
+      capabilities: { delivery: false, verdict: false, askHuman: true, browser: true },
+    };
+    const sixth = renderExec(
+      execTask({
+        specialist: { kind: "agent", profileId: "builder", backend: "codex", name: "Calculator Builder", role: "Estimate" },
+      }),
+      { deployedSpecialists: [...deployedFixture, builder] },
+    );
+    pickAgent(sixth.container, "Calculator Builder");
+    expect(sixth.container.querySelector(".agent-run")!.textContent).toContain(
+      "Runs as the delivering agent: its delivery is the files it saves on the task.",
+    );
   });
 
   it("discloses the dispatch-completion contract where the run starts", () => {

@@ -708,8 +708,9 @@ describe("the controller playbook learns list_github_connections (ruling 463)", 
       "./default-assets.server"
     );
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
-    expect(skill).toContain("Read the GitHub connections before you create anything.");
-    expect(skill).toContain("Call `list_github_connections` first");
+    // Ruling 667 scoped the bullet to the board that needs a connection.
+    expect(skill).toContain("For a software board, read the GitHub connections before you create anything.");
+    expect(skill).toContain("`list_github_connections` first");
     expect(skill).not.toMatch(/[–—]/);
     const rel = path.join("skills", "controller-guide", "SKILL.md");
     const outgoing = "26672ee429c9089c9c676bc178b5afaf401927f90596c6cb2f36660da185c762";
@@ -931,7 +932,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const bringUp = markdownSection(guide, "Bringing up a new project");
     const settle = bringUp.indexOf("**Settle what the board delivers before you design it** (ruling 530)");
     expect(settle, "the bring-up section opens by settling what the board delivers").toBeGreaterThan(-1);
-    expect(settle).toBeLessThan(bringUp.indexOf("**Read the GitHub connections"));
+    expect(settle).toBeLessThan(bringUp.indexOf("**For a software board, read the GitHub connections"));
     expect(bringUp).toContain("Words that only name the work");
     expect(bringUp).toContain("**On a software board, verify the toolchain before you promise a gate.**");
     expect(bringUp).toContain("**On a software board, declare the project's gates");
@@ -940,6 +941,57 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(results).toContain("**Plan no software to do the agents' work.**");
     expect(handbook).not.toContain("Viberr manages AI software delivery");
     expect(handbook).toContain("A board delivers software");
+  });
+
+  /**
+   * Rulings 667 and 668 (owner, 2026-10-06): "now this is a no-code development
+   * board. So let's just make the github connection for this board type
+   * optional", and the operator summarizes a task's result before it asks for
+   * Done. The guide said "Every project still needs a repository", so the
+   * controller asked for one on a board whose agents commit nothing: the AWS
+   * calculator board's repository held 92 branches with no commit on them.
+   */
+  it("rulings 667 and 668: the shipped prompts know a board with no repository and the result a completion packet becomes, and their outgoing hashes are recorded", async () => {
+    // CANARY: restore the guide's "still needs a repository" sentence, drop
+    // the `delivers` bullet or the doctrine's sentence, drop the operator's
+    // no-repository clause or its notes, or drop an outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const dataRoot = seededStore();
+    seedDefaultAgentAssets(dataRoot);
+    const definition = read("controller.definition.md");
+    const guide = read("controller-guide.skill.md");
+    const operator = read("operator.definition.md");
+    const handbook = readFileSync(path.join(dataRoot, "kb", "controller-handbook", "handbook.md"), "utf8");
+
+    expect(definition).toContain("Say which one when you create the project (`delivers`, ruling 667).");
+    expect(definition).toContain("never ask the person for a repository it will not use");
+    const bringUp = markdownSection(guide, "Bringing up a new project");
+    const say = bringUp.indexOf("**Say what the board delivers when you create it** (ruling 667)");
+    expect(say, "the bring-up section says how a results board is created").toBeGreaterThan(-1);
+    expect(say).toBeLessThan(bringUp.indexOf("**For a software board, read the GitHub connections"));
+    const results = markdownSection(guide, "A board that delivers results");
+    expect(guide).not.toContain("still needs a repository");
+    expect(results).toContain("The\n  board needs no repository (ruling 667)");
+    expect(results).toContain("**The result is summarized before it is accepted** (ruling 668).");
+    expect(handbook).toContain("a board that delivers results needs none (ruling 667)");
+    expect(operator).toContain("or that the project has no repository at all (ruling 667)");
+    expect(operator).toContain("what stays on the task as its result once they do");
+    for (const field of ["`considerations`", "`assumptions`", "`gaps`", "`completionPacket.resultFileCandidates`"]) {
+      expect(operator, field).toContain(field);
+    }
+
+    const outgoing: [string, string, string][] = [
+      [path.join("agents", "definitions", "controller.md"), "db6f4b2c06bd93b69a1aa140b0dfc008da77ffba7e23044e4802de594ff7f914", definition],
+      [path.join("skills", "controller-guide", "SKILL.md"), "dd2f98c43aee05e60cfa84f9b078ae55ffbfcf84aac2e6080bc9daf08b2668b8", guide],
+      [path.join("agents", "definitions", "operator.md"), "82224a585c7ba2ce6470e7da28ef41828164fe5bcb2a72b0b297a2827df020d8", operator],
+      [path.join("kb", "controller-handbook", "handbook.md"), "864b8434eebe1577e1420d218e6136298c4d8ff9c2fe2fae2f9509a31662cf95", handbook],
+    ];
+    for (const [rel, hash, shipped] of outgoing) {
+      expect(shippedCopyIsUnedited(rel, hash, {}), `${rel}'s outgoing hash is not recorded`).toBe(true);
+      expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(sha256Hex(shipped));
+    }
   });
 
   it("a GitHub read needs membership, not maintainer", () => {

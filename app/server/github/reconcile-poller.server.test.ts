@@ -134,6 +134,22 @@ describe("pollGithubReconcile (P11-14)", () => {
     expect(summary.projects).toBe(0); // archived → not polled
   });
 
+  it("ruling 667: skips a project with no repository, whatever branches its tasks recorded before it gave one up", async () => {
+    // CANARY: drop `p.repo IS NOT NULL` from `projectsToPoll` and each tick
+    // answers `no_repo_configured` for this project, which the failure streak
+    // counts: three ticks later its admins are told GitHub sync is failing on
+    // a board that has no GitHub.
+    const store = setupTestStore(ctx);
+    seedBranchedTask(store, "VIB-1");
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
+      .frontmatter;
+    writeProject(store.dataRoot, { ...fm, repo: null });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const summary = await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
+    expect(summary.projects).toBe(0);
+  });
+
   it("skips a project with no branched tasks", async () => {
     const store = setupTestStore(ctx);
     // A task with NO branch.

@@ -426,10 +426,12 @@ export function TaskDetailPage({
     archived;
   // Ruling 665: a task whose deliverer cannot write the repository is
   // delivered as files and has no branch, before the delivery as after it.
+  // Ruling 667: and so is every task of a project with no repository, before
+  // anyone is engaged on it.
   const deliverer = deployedSpecialists.find((s) => s.id === task.specialist?.profileId);
   const filesDelivery = filesDeliveredAt
     ? ("delivered" as const)
-    : deliverer?.capabilities?.delivery === false
+    : task.repo === null || deliverer?.capabilities?.delivery === false
       ? ("expected" as const)
       : null;
 
@@ -783,16 +785,19 @@ export function TaskDetailPage({
   // Ruling 521: the completion packet stands where the task is offered for
   // acceptance: inside the decision whose option offers it, else on its own
   // card at the top of the main column while an acceptance card waits below
-  // or the task stands at the boundary with a packet written. Never on a
-  // closed task, whose acceptance is over.
+  // or the task stands at the boundary with a packet written. Ruling 668: and
+  // on an accepted task it stays there as the result, archived or not.
   const acceptanceDecision =
     task.packet?.options.some((o) => o.kind === "accept_completion") ?? false;
+  const resultShown =
+    terminalStageId !== null && task.stage === terminalStageId && completion?.packet != null;
   const completionShown =
-    completion !== null &&
-    !taskClosed &&
-    (acceptanceDecision ||
-      recommendations.some((r) => reachesAcceptance(r, terminalStageId)) ||
-      (acceptance.atBoundary && completion.packet !== null));
+    resultShown ||
+    (completion !== null &&
+      !taskClosed &&
+      (acceptanceDecision ||
+        recommendations.some((r) => reachesAcceptance(r, terminalStageId)) ||
+        (acceptance.atBoundary && completion.packet !== null)));
   // The Changes panel's reader rides inside the packet while it shows, so the
   // page carries one reader (and one set of unsent notes), not two.
   const diffReadable = changesUrl !== null && task.pr?.state === "review" && workRevisionSha !== null;
@@ -814,6 +819,19 @@ export function TaskDetailPage({
         verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
         diff={completionDiff}
         standalone={!acceptanceDecision}
+        result={
+          resultShown
+            ? {
+                pr: task.pr
+                  ? {
+                      number: task.pr.number,
+                      url: task.repo ? `${githubHost}/${task.repo}/pull/${task.pr.number}` : null,
+                      merged: task.pr.state === "merged",
+                    }
+                  : null,
+              }
+            : null
+        }
       />
     ) : null;
 

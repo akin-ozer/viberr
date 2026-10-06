@@ -195,6 +195,11 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
     packet: {
       summary: "Long timelines fold their quiet stretches.",
       changes: "- **Timeline**: folds runs of quiet events.",
+      considerations: null,
+      assumptions: null,
+      gaps: null,
+      files: [],
+      hiddenFiles: 0,
       screenshots: [],
       hiddenScreenshots: 0,
       at: "2026-09-27T10:00:00.000Z",
@@ -204,6 +209,7 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
       { profileId: "reviewer", name: "Reviewer", result: "approve", reason: "", at: "2026-09-27T09:30:00.000Z", required: true, earlier: null },
     ],
     change: { files: 4, add: 260, del: 40, small: false },
+    paths: null,
   };
   const decision: PacketRender = {
     type: "input",
@@ -258,6 +264,71 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
       expect(container.querySelector(".detail-packet > .cmp-card > .cmp") !== null, JSON.stringify(props)).toBe(shown);
       unmount();
     }
+  });
+
+  it("ruling 668: stays on the accepted task as its result, in the archive too, with its pull request and no diff reader", () => {
+    // CANARY: restore `!taskClosed` over the whole condition and the summary a
+    // person accepted on is gone from the task the moment they accept it; key
+    // the result on `taskClosed` and a task archived unfinished shows one.
+    const merged: PrRef = { number: 3, state: "merged", title: "Notes" };
+    const done = { stage: "done", displayReadiness: "merged" as const, pr: merged };
+    const rows: [Parameters<typeof renderPage>[0], boolean][] = [
+      [{ task: done, acceptance: { atBoundary: false }, completion: COMPLETION }, true],
+      [{ task: done, archived: true, acceptance: { atBoundary: false }, completion: COMPLETION }, true],
+      [{ task: done, acceptance: { atBoundary: false }, completion: { ...COMPLETION, packet: null } }, false],
+      [{ archived: true, acceptance: { atBoundary: false }, completion: COMPLETION }, false],
+      // Ruling 667: the project gave its repository up since. The pull
+      // request's record stays on the result, with nowhere to link.
+      [{ task: { ...done, repo: null }, acceptance: { atBoundary: false }, completion: COMPLETION }, true],
+    ];
+    for (const [props, shown] of rows) {
+      const { container, unmount } = renderPage({
+        ...props,
+        workRevisionSha: "5d1f0e2c0ffee",
+        changesUrl: "/projects/viberr-core/tasks/VIB-151/changes",
+      });
+      const card = container.querySelector<HTMLElement>(".detail-packet > .cmp-card > .cmp");
+      expect(card !== null, JSON.stringify(props)).toBe(shown);
+      if (card) {
+        expect(card.querySelector(".cmp-title")?.textContent).toBe("Result");
+        expect(card.querySelector<HTMLAnchorElement>(".cmp-stat a")?.href, JSON.stringify(props)).toBe(
+          props.task?.repo === null ? undefined : "https://github.com/akin-ozer/viberr/pull/3",
+        );
+        expect(card.querySelector(".cmp-stat")?.textContent).toBe("PR #3merged·4 files changed+260−40");
+        expect(findButton(card, "Show the diff")).toBeUndefined();
+      }
+      unmount();
+    }
+  });
+});
+
+/**
+ * Ruling 667: a project with no repository is a board that delivers results,
+ * so nothing on its task page promises a branch or names a repository.
+ */
+describe("ruling 667: a task on a project with no repository", () => {
+  const githubPanel = (container: HTMLElement) =>
+    [...container.querySelectorAll<HTMLElement>(".detail-side .panel")].find(
+      (panel) => panel.querySelector(".panel-head h2")?.textContent === "GitHub",
+    )!;
+  const repoRow = (container: HTMLElement) =>
+    [...container.querySelectorAll(".kv-row .k")].find((k) => k.textContent === "Repo");
+
+  it("says it is delivered as files before anyone is engaged, and shows no Repo row", () => {
+    // CANARY: derive `filesDelivery` from the deliverer alone and a fresh
+    // task on a board with no repository is promised a task-key branch; draw
+    // the Repo row whatever `task.repo` is and it shows the GitHub mark
+    // beside nothing.
+    const none = renderPage({ task: { repo: null, branch: null } });
+    expect(githubPanel(none.container).textContent).toBe(
+      "GitHubNo branch. This task is delivered as the files saved on it.",
+    );
+    expect(repoRow(none.container)).toBeUndefined();
+    none.unmount();
+
+    const withRepo = renderPage({ task: { branch: null } });
+    expect(githubPanel(withRepo.container).textContent).toContain("No branch yet.");
+    expect(repoRow(withRepo.container)).toBeDefined();
   });
 });
 

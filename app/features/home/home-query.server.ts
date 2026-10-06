@@ -372,8 +372,8 @@ export function getHomeOrgSummary(
  * connection's token failed its last check, and the row sends an admin to that
  * connection's Update token. Claude or Codex is `stale` when the viewer's own
  * account stopped working (a wiped runtime volume), and the row asks them to
- * sign in again. The first project is `blocked` while no connection exists,
- * because a project takes its repository from one.
+ * sign in again. Ruling 667: the first project waits on nothing, because a
+ * board that delivers results needs no repository.
  */
 export type HomeSetupStep =
   | { id: "github"; state: "todo" }
@@ -383,7 +383,7 @@ export type HomeSetupStep =
   | { id: "agents"; state: "todo" }
   | { id: "agents"; state: "done"; backends: RealBackend[] }
   | { id: "agents"; state: "stale"; backend: RealBackend }
-  | { id: "project"; state: "todo" | "blocked" | "done" };
+  | { id: "project"; state: "todo" | "done" };
 
 const SETUP_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
 
@@ -395,6 +395,11 @@ const SETUP_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
  * the runs on their tasks and their controller turns bill (ruling 127), and a
  * first project among those they can see (`projects`). Null once every step is
  * done, which is when the checklist leaves Home.
+ *
+ * Ruling 667: GitHub is owed only where it is used. An instance with a project
+ * and no connection runs boards that deliver results, so the step is not
+ * listed there; a connection whose token failed is still listed, and the New
+ * project dialog says what a software board needs.
  */
 export function getHomeSetup(
   db: DatabaseSync,
@@ -402,13 +407,14 @@ export function getHomeSetup(
   projects: number,
 ): HomeSetupStep[] | null {
   const connections = listConnections(db);
-  const steps: HomeSetupStep[] =
-    viewer.role === "admin"
-      ? [githubStep(connections), accountStep(db)]
-      : [];
+  const steps: HomeSetupStep[] = [];
+  if (viewer.role === "admin") {
+    if (connections.length > 0 || projects === 0) steps.push(githubStep(connections));
+    steps.push(accountStep(db));
+  }
   steps.push(agentsStep(db, viewer.id), {
     id: "project",
-    state: projects > 0 ? "done" : connections.length > 0 ? "todo" : "blocked",
+    state: projects > 0 ? "done" : "todo",
   });
   return steps.every((step) => step.state === "done") ? null : steps;
 }

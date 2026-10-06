@@ -38,7 +38,7 @@ import { resolveRunModel } from "~/server/runtimes/model-catalog.server";
 import type { RunStartOutcome } from "~/server/runtimes/run-service.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
-import { specialistGrantModes } from "./specialist-tool-policy";
+import { grantsWriteRepository } from "./specialist-tool-policy";
 import {
   type McpRunGrant,
   resolveSpecialistMcpServersDetailed,
@@ -528,7 +528,8 @@ export interface DeployedSpecialistView {
    *  operator's second selection input (e.g. "reports validation verdicts"
    *  identifies a review-capable profile without a hardcoded id). */
   capabilities: {
-    /** May own the workspace/branch/PR when engaged as the deliverer. */
+    /** May own the workspace/branch/PR when engaged as the deliverer: its
+     *  grants let it write a repository (`grantsWriteRepository`). */
     delivery: boolean;
     /** Ruling 535: holds `attach-evidence-references`, so it can save files on
      *  the task, and an explicit hand-off makes it a deliverer whose delivery
@@ -754,25 +755,12 @@ export function listDeployedSpecialists(
     // Same empty-grant resolution the run path uses (AP-06), so what the
     // operator is told a candidate can do matches what it may actually do.
     const grants = deploymentGrants(deployment, projectSlug);
-    // Delivery capability: any repo-write grant in direct mode (the same set
-    // the tool denylist binds on).
     const granted = (id: string) =>
       grants.some(
         (g) =>
           g.capabilityId === id &&
           coerceSpecialistCapabilityMode(g.mode) === "direct",
       );
-    // The headline `execute-code-or-write-repo` gates ALL delivery, so ask the
-    // runtime's own view of it (`specialistGrantModes` includes the repair that
-    // reads an actionable scoped grant as an implied headline) rather than
-    // trusting a scoped grant on its own.
-    const headlineMode = specialistGrantModes(grants).get(
-      "execute-code-or-write-repo",
-    );
-    const repoWriteWithheld =
-      headlineMode === undefined ||
-      headlineMode === "off" ||
-      headlineMode === "human";
     const specialist: DeployedSpecialistView = {
       id: resolved.profileId,
       name: resolved.name,
@@ -782,19 +770,9 @@ export function listDeployedSpecialists(
       effort: resolved.effort,
       desc: view.desc,
       capabilities: {
-        // Asked of the RUNTIME's own resolver rather than re-derived here.
-        // Re-deriving it as "any scoped delivery grant is direct" was the same
-        // mistake XS-4 fixed on the prompt side: the headline
-        // `execute-code-or-write-repo` gates ALL delivery, so a profile with
-        // the headline off and `commit-push-branch` on read as delivery-capable
-        // to whoever picks the agent, while the tool layer denied every write
-        // it would need. `repairDeliveryGrants` deliberately preserves that
-        // combination (B-AG1), so it is a state a human can really save.
-        delivery:
-          !repoWriteWithheld &&
-          (granted("execute-code-or-write-repo") ||
-            granted("commit-push-branch") ||
-            granted("create-task-branch")),
+        // Asked of the RUNTIME's own resolver rather than re-derived here
+        // (`grantsWriteRepository`).
+        delivery: grantsWriteRepository(grants),
         // EXPLICIT grant only — the completion-time transition default
         // (absent grant → verdict-on for supporting engagements) is a
         // RECORDING rule, not a selection signal; applying it here made every

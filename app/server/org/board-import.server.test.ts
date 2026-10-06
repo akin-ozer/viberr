@@ -403,6 +403,61 @@ describe("ruling 653: a name this instance already uses for something else", () 
   });
 });
 
+/**
+ * Ruling 667: an imported board needs a repository only when one of its
+ * agents may write one. The file carries each deployment's grants, so the
+ * import reads what the board delivers off its own roster.
+ */
+describe("ruling 667: a board none of whose agents writes a repository imports without one", () => {
+  const REPO_WRITE = ["execute-code-or-write-repo", "create-task-branch", "commit-push-branch", "open-review-pr"];
+  const noRepository = { ...importInput(), owner: "", repoName: "" };
+
+  it("reads what the board delivers from its roster, and takes a results board with no repository and no connection", async () => {
+    // CANARY: read every imported board as software and a no-code board
+    // cannot be imported on an instance with no GitHub connection; read every
+    // one as results and a board whose Developer commits is written with
+    // nowhere to commit.
+    const source = await sourceBoard();
+    // A second instance with its shipped assets and NO GitHub connection.
+    const bare = setupTestStore(ctx);
+    seedDefaultAgentAssets(bare.dataRoot);
+    const into = { dataRoot: bare.dataRoot };
+    const software = exported(source);
+    expect(previewBoardImport(bare.db, software, into).delivers).toBe("software");
+    await expect(importBoard(bare.db, software, noRepository, actorOf(bare.users.arda), into)).rejects.toThrow(
+      "A GitHub repository is required for a board that delivers software.",
+    );
+
+    // The same board with repo-write withheld from every agent, as a board
+    // that delivers results is deployed.
+    const project = readProjectFile({ projectSlug: source.slug, dataRoot: source.dataRoot })!.parsed;
+    writeProject(
+      source.dataRoot,
+      {
+        ...project.frontmatter,
+        agents: project.frontmatter.agents.map((a) =>
+          a.profileId === "operator"
+            ? a
+            : {
+                ...a,
+                capabilities: [
+                  ...a.capabilities.filter((c) => !REPO_WRITE.includes(c.capabilityId)),
+                  ...REPO_WRITE.map((capabilityId) => ({ capabilityId, mode: "off" as const })),
+                ],
+              },
+        ),
+      },
+      project.description,
+    );
+    reprojectProject(source.db, { dataRoot: source.dataRoot }, source.slug);
+    const results = exported(source);
+    expect(previewBoardImport(bare.db, results, into).delivers).toBe("results");
+    const imported = await importBoard(bare.db, results, noRepository, actorOf(bare.users.arda), into);
+    expect(imported.repo).toBeNull();
+    expect(readProjectFile({ projectSlug: imported.slug, dataRoot: bare.dataRoot })!.parsed.frontmatter.repo).toBeNull();
+  });
+});
+
 describe("ruling 653: what an import refuses", () => {
   it("lists every problem in board.md at once, and an import of it writes nothing", async () => {
     // CANARY: stop at the first problem, or write before checking, and a

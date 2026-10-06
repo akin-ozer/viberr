@@ -314,11 +314,17 @@ function workspaceSection(
       "folder as \"the repository\"."
     );
   }
+  // Ruling 667: a project with no repository is a board that delivers
+  // results. The doctrine's delivery paragraph covers such a task by its goal;
+  // here the whole board is one, so the turn says it outright.
   return (
     head +
-    "There is no repository checkout on this run. Never describe your working directory or the " +
-    "task folder as \"the repository\", and make no claim about repository contents: you have " +
-    "not seen them."
+    "There is no repository checkout on this run: this project has no repository. Every task " +
+    "on it is delivered as the files its delivering agent saves on the task, so hand delivery " +
+    "to an agent that can save files (`run_agent` with `delivers: true`), and never call " +
+    "`deliver_for_review` or `update_branch_from_base`: there is no branch to push or refresh. " +
+    "Never describe your working directory or the task folder as \"the repository\", and make no " +
+    "claim about repository contents: there are none."
   );
 }
 

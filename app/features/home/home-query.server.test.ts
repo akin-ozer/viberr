@@ -187,13 +187,19 @@ describe("getHomeSetup — the setup checklist (ruling 532)", () => {
     const { db, admin, actor } = await freshInstance();
     const viewer = { id: admin.id, role: "admin" as const };
     // CANARY: count the bootstrap admin as an account of someone's own and
-    // "account" starts done.
+    // "account" starts done. Ruling 667: the first project waits on nothing;
+    // hold it behind a connection again and a board that delivers results
+    // cannot be started on an instance with none.
     expect(getHomeSetup(db, viewer, 0)).toEqual([
       { id: "github", state: "todo" },
       { id: "account", state: "todo" },
       { id: "agents", state: "todo" },
-      { id: "project", state: "blocked" },
+      { id: "project", state: "todo" },
     ]);
+    // Ruling 667: with a project and still no connection, the instance runs
+    // boards that need no GitHub, so that step is not owed. CANARY: list it
+    // whatever the projects are and the checklist never leaves this Home.
+    expect(getHomeSetup(db, viewer, 1)?.map((step) => step.id)).toEqual(["account", "agents", "project"]);
 
     await createUser(
       db,

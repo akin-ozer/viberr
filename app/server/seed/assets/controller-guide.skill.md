@@ -57,8 +57,15 @@ run on the board reads what you set here.
   wants software. Words that only name the work ("our invoice processing", "a reporting
   workflow") fit both: ask which one they want before you create anything, naming both
   shapes and what each would deliver.
-- **Read the GitHub connections before you create anything.** `create_project` needs a
-  connection for the repository's owner. Call `list_github_connections` first: it names every
+- **Say what the board delivers when you create it** (ruling 667): `create_project` takes
+  `delivers`. A results board needs no repository and no GitHub connection, so create it
+  with `delivers: "results"` and no `owner` or `repoName`, and never ask the person for a
+  repository it will not use. Its agents are deployed with repo-write withheld, whatever
+  their templates grant. Pass a repository for a results board only when its agents must
+  read one that already exists; they read it and commit nothing to it.
+- **For a software board, read the GitHub connections before you create anything.**
+  `create_project` needs a connection for the repository's owner. Call
+  `list_github_connections` first: it names every
   connection's owner, whether its token is valid, and which repositories that token reaches,
   private ones included. A fine-grained token reaches only the repositories it was granted, so
   a repository missing from a read reach is one the token cannot see. Say so, and name the
@@ -114,9 +121,15 @@ software to do the agents' work.
   attachments. The deliverable is the result, saved on the task in the files its delivering
   agent posts there, and the done signal is the required reviewer's approval of those files:
   a verdict binds to them when the work is not a commit (ruling 388). Nothing is committed
-  for the person, so the task opens no pull request and its acceptance merges nothing. Every
-  project still needs a repository, because every run works in a checkout of one, but
-  nothing the person asked for goes into it.
+  for the person, so the task opens no pull request and its acceptance merges nothing. The
+  board needs no repository (ruling 667): with none, a run works in the task's own scratch
+  folder, reads its knowledge bases and the task's files, and delivers the files it saves.
+- **The result is summarized before it is accepted** (ruling 668). The operator writes the
+  completion packet: what was done, what to weigh, what was assumed, what is missing, and
+  which of the delivered files are the result. A person accepts on that, and it stays on the
+  finished task as its result. So have the delivering agent record its assumptions and gaps
+  in its report or in a file, and name the result's files in the goal: the operator takes
+  them from there.
 - **Each step is an agent.** Give each step its own agent, with a skill that says how the
   step is done and the knowledge bases it needs, deployed at the stages where that step
   happens; the stages can be the steps themselves. Only the files the task's delivering agent

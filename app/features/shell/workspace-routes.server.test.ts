@@ -639,6 +639,44 @@ describe("create-project action (home)", () => {
     expect(result.error).toContain("already exists");
   });
 
+  it("ruling 667: the form's `delivers=results` creates a project with no repository; the same form without it is refused", async () => {
+    // CANARY: stop reading `delivers` in the route and the dialog's "Results ·
+    // no code" choice is refused for want of a repository it said it does not
+    // need.
+    const { action } = await import("~/routes/_index");
+    const post = async (name: string, key: string, delivers: string | null) => {
+      const { cookie, sessionId } = await app.cookieFor(seedIds.arda);
+      const fields = new URLSearchParams({
+        _csrf: await app.csrfFor(sessionId),
+        intent: "create-project",
+        name,
+        key,
+        owner: "",
+        repoName: "",
+        policy: "balanced",
+      });
+      if (delivers) fields.set("delivers", delivers);
+      const request = app.request("/", { method: "POST", cookie, body: fields });
+      return actionOutcome(
+        await action({
+          request,
+          url: new URL(request.url),
+          params: {},
+          pattern: HOME_PATTERN,
+          context: new RouterContextProvider(),
+        }),
+      );
+    };
+    const refused = await post("Supplier Invoices", "INV", null);
+    expect(refused.status).toBe(400);
+    expect(refused.error).toContain("A GitHub repository is required for a board that delivers software.");
+
+    const created = await post("Supplier Invoices", "INV", "results");
+    expect(created.ok).toBe(true);
+    const { getProject } = await import("~/server/projections/board-query.server");
+    expect(getProject(app.db, "supplier-invoices")!.repo).toBeNull();
+  });
+
   it("RBAC decision (pinned): any org MEMBER may create a project and is seeded its admin", async () => {
     // Deniz is a plain org member (not an org admin) — creation is self-serve,
     // no org-admin gate. This test pins the deliberate _index.tsx decision.

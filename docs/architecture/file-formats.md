@@ -104,7 +104,9 @@ Frontmatter (all governed project state) + markdown body (description).
 name: Viberr Core
 slug: viberr-core                 # must match the directory; the directory name wins
 archived: true                    # optional; only an archived project carries the key
-repo: akin-ozer/viberr            # THE project's GitHub repo (one per project)
+repo: akin-ozer/viberr            # THE project's GitHub repo (one per project), or
+                                  # null: a board that delivers results needs none
+                                  # (ruling 667)
 defaultBranch: main
 taskPrefix: VIB                   # letters only; task keys: VIB-142. `EPIC` is reserved
 nextTaskNumber: 169               # atomic per-project key counter
@@ -478,13 +480,20 @@ completionPacket:                 # optional; ruling 521 — what Operator hands
   headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or
   summary: "One repo per task…"   # `files:<deliveredAt>`; headSha only for a revision).
   changes: "- **Policy gate**…"   # summary: what was done and why it is complete;
-  screenshots:                    # changes: its summary of the code changes, null for a
-    - name: attach-dialog.png     # change of at most 200 lines (shown whole); screenshots:
-      caption: The attach dialog  # image attachments it picked, each with a caption.
+  considerations: null            # changes: its summary of the code changes, null for a
+  assumptions: "730 hours…"       # change of at most 200 lines (shown whole). Ruling
+  gaps: "No transfer figures…"    # 668: considerations, assumptions, gaps: what to
+  files:                          # weigh, what was assumed, what is missing, each
+    - name: My-Estimate.json      # markdown or null; files: the result's files on a
+      caption: The import file    # task delivered as files, named from that delivery,
+  screenshots:                    # each with a line saying what it is ([] for a
+    - name: attach-dialog.png     # revision, whose pull request holds them);
+      caption: The attach dialog  # screenshots: image attachments it picked, a caption each.
   at: 2026-09-25T10:20:00Z        # Written by `write_completion_packet` alone; the
                                   # verdicts and the change are read live, never copied
                                   # in. For another subject it is stale, and an operator
                                   # offer to accept is refused until it is written again.
+                                  # It stays after the acceptance, as the task's result.
                                   # A malformed record reads as absent (a diagnostic)
 headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
   prNumber: 114                   # containment check GitHub refused to run. Pinned to all

@@ -378,33 +378,29 @@ describe("createProject — policy preset shapes REAL governance", () => {
     }
   });
 
-  // Repo-bound projects only (2026-07-17 ruling, reverses F10): a repository +
-  // PAT connection are mandatory — repo-less creation is rejected in every form.
-  it("an EMPTY repo field is rejected (repo-less projects were cut)", async () => {
+  // A board that delivers software is repo-bound (2026-07-17 ruling, reverses
+  // F10): a repository and a PAT connection are mandatory, in every form the
+  // field can be left empty. Ruling 667 keeps that for software and lifts it
+  // for a board that delivers results (its own suite below).
+  it.each([
+    ["a blank repository name", "akin-ozer", "   "],
+    ["no owner and no repository", "", ""],
+    ["a repository name with no owner", "", "some-repo"],
+  ])("refuses a software board with %s", async (_label, owner, repoName) => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
     await expect(
       createProject(
         store.db,
-        { name: "Repoless", key: "RPL", owner: "akin-ozer", repoName: "   ", policy: "balanced" },
+        { name: "Repoless", key: "RPL", owner, repoName, policy: "balanced" },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/GitHub repository is required/i);
-  });
-
-  it("empty owner + empty repo is rejected (no more F10 self-serve repo-less)", async () => {
-    const store = setupTestStore(ctx);
-    vi.stubGlobal("fetch", vi.fn());
-    await expect(
-      createProject(
-        store.db,
-        { name: "First Project", key: "FST", owner: "", repoName: "", policy: "balanced" },
-        ACTOR,
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toThrow(/GitHub repository is required/i);
+    ).rejects.toThrow(
+      "A GitHub repository is required for a board that delivers software. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first. A board that delivers results needs none.",
+    );
+    expect(existsSync(join(store.dataRoot, "projects", "repoless"))).toBe(false);
   });
 
   it("refuses the reserved EPIC prefix before it creates anything", async () => {
@@ -425,17 +421,109 @@ describe("createProject — policy preset shapes REAL governance", () => {
     expect(existsSync(join(store.dataRoot, "projects", "epic-keeper"))).toBe(false);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
+});
 
-  it("a repo NAME without an owner is rejected", async () => {
+/**
+ * Ruling 667 (owner, 2026-10-06): "now this is a no-code development board. So
+ * let's just make the github connection for this board type optional." A
+ * board that delivers results hands back the files its agents save on each
+ * task, so creation asks what the board delivers and takes a results board
+ * with no repository and no connection. Live, the AWS calculator board had to
+ * be given `akin-ozer/aws-calculator`, to which ten rounds of work committed
+ * nothing and on which 92 empty task branches piled up.
+ */
+describe("ruling 667: a board that delivers results needs no repository", () => {
+  const REPO_WRITE = ["execute-code-or-write-repo", "create-task-branch", "commit-push-branch", "open-review-pr"];
+  /** Each specialist's repo-write grants, as project.md holds them. */
+  const repoWriteModes = (dataRoot: string, slug: string) =>
+    readProjectFile({ projectSlug: slug, dataRoot })!
+      .parsed.frontmatter.agents.filter((a) => a.profileId !== "operator")
+      .map((a): [string, (string | null)[]] => [
+        a.profileId,
+        REPO_WRITE.map((id) => a.capabilities.find((c) => c.capabilityId === id)?.mode ?? null),
+      ]);
+
+  it("is created with no repository, no connection and no credential, and none of its agents may write one", async () => {
+    // CANARY: require `owner` and `repoName` whatever the board delivers and
+    // this throws; drop `withoutRepoWrite` and the Developer is deployed able
+    // to commit to a repository the board does not have.
     const store = setupTestStore(ctx);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await createProject(
+      store.db,
+      { name: "Estimates", key: "EST", delivers: "results", owner: "", repoName: "", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({ slug: "estimates", repo: null, repoWarning: null, repoNote: null });
+    const fm = readProjectFile({ projectSlug: "estimates", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.repo).toBeNull();
+    expect(getProjectCredential(store.db, "estimates")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(repoWriteModes(store.dataRoot, "estimates")).toEqual([
+      ["developer", ["off", "off", "off", "off"]],
+      ["reviewer", ["off", "off", "off", "off"]],
+    ]);
+    // The operator's own row is untouched: its delivery grant is about the
+    // server's push, and there is nothing here for it to push.
+    expect(fm.agents.find((a) => a.profileId === "operator")!.capabilities).not.toContainEqual({
+      capabilityId: "execute-code-or-write-repo",
+      mode: "off",
+    });
+    const created = listAuditEvents(store.db).find((e) => e.action === "project.created")!;
+    expect(created.details).toMatchObject({ delivers: "results", repo: null });
+  });
+
+  it("takes a repository for its agents to read, binds it, and still deploys nobody able to write it", async () => {
+    // CANARY: withhold repo-write only when the repository is left out and a
+    // results board that reads a repository gets a Developer that commits to it.
+    const store = setupTestStore(ctx);
+    const patId = seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ default_branch: "trunk" }), { status: 200 })),
+    );
+    const result = await createProject(
+      store.db,
+      { name: "Audit Notes", key: "AUD", delivers: "results", owner: "akin-ozer", repoName: "audit-notes", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.repo).toBe("akin-ozer/audit-notes");
+    expect(getProjectCredential(store.db, result.slug)?.id).toBe(patId);
+    expect(repoWriteModes(store.dataRoot, result.slug).flatMap(([, modes]) => modes)).toEqual(
+      Array.from({ length: 8 }, () => "off"),
+    );
+  });
+
+  const refusals: [string, Partial<CreateProjectInput>, string][] = [
+    [
+      "half a repository",
+      { owner: "akin-ozer", repoName: "" },
+      "Give both a GitHub connection and a repository name, or neither: a board that delivers results needs no repository.",
+    ],
+    [
+      "a repository to create that it does not name",
+      { owner: "", repoName: "", createRepository: { private: true } },
+      "There is no repository to create: name the GitHub connection and the repository, or leave `createRepository` out.",
+    ],
+  ];
+  it.each(refusals)("refuses %s, and writes nothing", async (_label, patch, sentence) => {
+    // CANARY: drop either refusal and the project is written with a
+    // repository nobody chose, or with a creation request that did nothing.
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    vi.stubGlobal("fetch", vi.fn());
     await expect(
       createProject(
         store.db,
-        { name: "Needs Owner", key: "NDO", owner: "", repoName: "some-repo", policy: "balanced" },
+        { name: "Estimates", key: "EST", delivers: "results", owner: "", repoName: "", policy: "balanced", ...patch },
         ACTOR,
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toThrow(/GitHub repository is required/i);
+    ).rejects.toThrow(sentence);
+    expect(existsSync(join(store.dataRoot, "projects", "estimates"))).toBe(false);
   });
 });
 

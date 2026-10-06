@@ -29,6 +29,7 @@ import {
   deleteProject,
   inviteMember,
   removeMember,
+  removeProjectRepo,
   removeStage,
   renameStage,
   reorderStages,
@@ -750,6 +751,257 @@ describe("changeProjectRepo — the one door that changes a project's repository
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+/**
+ * Ruling 667 (owner, 2026-10-06): a board that delivers results needs no
+ * repository, and until this door a project could change its repository and
+ * never be without one. The AWS calculator board kept a repository through
+ * ten rounds of work that committed nothing to it.
+ */
+describe("removeProjectRepo — the door that takes a project's repository away (ruling 667)", () => {
+  const ctxOf = (store: TestStore) => ({ dataRoot: store.dataRoot });
+  /** Deploy one specialist, its repo-write headline in `mode`. */
+  function deploy(store: TestStore, mode: "direct" | "off"): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "builder",
+          capabilities: [
+            { capabilityId: "execute-code-or-write-repo", mode },
+            { capabilityId: "attach-evidence-references", mode: "direct" },
+          ],
+          extras: [],
+          definition: { kind: "specialist", name: "Calculator Builder", role: "Estimate", backends: ["codex"], model: "gpt-6-luna" },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("removes the repository, unbinds the credential, forgets its reading and audits the removal", async () => {
+    // CANARY: leave the credential bound, or the reading on file, and a board
+    // with no repository keeps a token pointed at nothing and a pill about it.
+    const store = setupTestStore(ctx);
+    deploy(store, "off");
+    const actor = admin(store);
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "github_pat_remove01" }, actor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    recordRepoAccess(store.db, store.slug, { status: "connected", repo: "akin-ozer/viberr", remoteDefaultBranch: "main", private: true });
+    // A finished task keeps the branch it recorded: history, not a blocker.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "done", branch: "vib-9", pr: { number: 12, state: "merged", title: "t" } }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const result = await removeProjectRepo(store.db, { projectSlug: store.slug }, actor, ctxOf(store));
+    expect(result).toEqual({
+      toast: "Repository removed: akin-ozer/viberr. Tasks are delivered as the files their agents save on them",
+      changed: true,
+    });
+    expect(readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.repo).toBeNull();
+    // The row itself, not `readRepoHealth`: that already reads a reading of
+    // another repository as none, and the same repository attached again
+    // would bring a kept row back as its current reading.
+    expect(
+      store.db
+        .prepare(`SELECT COUNT(*) AS c FROM project_github_health WHERE project_slug = ?`)
+        .get(store.slug),
+    ).toEqual({ c: 0 });
+    expect(listAuditEvents(store.db, { action: "github.credential.cleared" })).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "project.repo.removed" })[0]!.details).toEqual({
+      from: "akin-ozer/viberr",
+      credentialUnbound: true,
+    });
+    // A second removal has nothing to take.
+    expect(await removeProjectRepo(store.db, { projectSlug: store.slug }, actor, ctxOf(store))).toEqual({
+      toast: "This project has no repository",
+      changed: false,
+    });
+  });
+
+  it("refuses while an agent may write the repository, or a task's work on it is unfinished, and changes nothing", async () => {
+    // CANARY: drop the writer check and a software board loses the repository
+    // its Developer commits to; drop the unfinished-work check, or narrow it
+    // to `review`, and a pull request accepted with its merge pending, or a
+    // delivered revision nobody has accepted, is left with no repository to
+    // merge into.
+    const store = setupTestStore(ctx);
+    deploy(store, "direct");
+    await expect(
+      removeProjectRepo(store.db, { projectSlug: store.slug }, admin(store), ctxOf(store)),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        'Calculator Builder may write akin-ozer/viberr, so this board delivers through it. Withhold "Execute code or write to the repo" from that agent on the Agents page first, or change the repository instead. Nothing was changed.',
+    });
+
+    deploy(store, "off");
+    const sha = "a".repeat(40);
+    const unfinished: [string, Parameters<typeof baseTaskFrontmatter>[1]][] = [
+      // Under review.
+      ["VIB-10", { stage: "review", branch: "vib-10", pr: { number: 43, state: "review", title: "t" } }],
+      // Accepted into Done with the merge left to a person.
+      ["VIB-11", { stage: "done", branch: "vib-11", pr: { number: 44, state: "accepted", title: "t" } }],
+      // Delivered, not yet pushed to a pull request or accepted.
+      [
+        "VIB-12",
+        {
+          stage: "impl",
+          branch: "vib-12",
+          workRevision: { id: "rev_1", headSha: sha, treeSha: null, branch: "vib-12", createdAt: "2026-10-06T09:00:00.000Z", sourceProfileId: "builder" },
+        },
+      ],
+    ];
+    for (const [key, patch] of unfinished) {
+      writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, patch) });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+      await expect(
+        removeProjectRepo(store.db, { projectSlug: store.slug }, admin(store), ctxOf(store)),
+        key,
+      ).rejects.toMatchObject({
+        status: 400,
+        userMessage: `${key} has unfinished work on akin-ozer/viberr: a pull request still open, or a delivered revision not yet accepted. Merge or close it, or archive the task, then remove the repository. Nothing was changed.`,
+      });
+      // Archived, the task no longer holds the repository.
+      writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, { ...patch, archived: true }) });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+    }
+    expect(readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.repo).toBe("akin-ozer/viberr");
+
+    // The tier of the change: a maintainer is refused.
+    await expect(
+      removeProjectRepo(
+        store.db,
+        { projectSlug: store.slug },
+        { userId: store.users.murat.id, label: store.users.murat.email },
+        ctxOf(store),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+/**
+ * Ruling 667: a project with no repository takes one through the Change door.
+ * It has no credential to probe with, and an attach that skipped the probe
+ * kept the placeholder `defaultBranch: main`: on a repository whose default is
+ * `master`, ruling 128's bootstrap would then create `main` and make it the
+ * repository's default branch.
+ */
+describe("changeProjectRepo attaches a repository to a project that has none (ruling 667)", () => {
+  const REPO = "acme/site";
+  /** A project with no repository, and (unless told otherwise) an `acme` connection. */
+  function repoLess(connection = true) {
+    const store = setupTestStore(ctx);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, defaultBranch: "main" });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    if (!connection) return { store, patId: null };
+    const pat = createPat(store.db, { userId: store.users.arda.id, label: "connection · acme", token: "github_pat_attach01" }, admin(store));
+    const now = new Date().toISOString();
+    store.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)`,
+      )
+      .run("acme", "acme", pat.id, now, now);
+    return { store, patId: pat.id };
+  }
+  const attach = (store: TestStore, routes: Parameters<typeof fakeGithubFetch>[0]) =>
+    changeProjectRepo(
+      store.db,
+      { projectSlug: store.slug, repo: REPO },
+      admin(store),
+      { dataRoot: store.dataRoot },
+      { fetchImpl: fakeGithubFetch(routes).fetchImpl },
+    );
+  const projectOf = (store: TestStore) =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+
+  it("checks it with the owner's connection, takes GitHub's default branch and binds that connection", async () => {
+    // CANARY: write the repository without the probe and `defaultBranch`
+    // stays `main` on a repository whose default is `master`; skip the bind
+    // and the project is left with a repository and no credential.
+    const { store, patId } = repoLess();
+    const result = await attach(store, {
+      [`GET /repos/${REPO}`]: { body: { full_name: REPO, default_branch: "master", private: true, permissions: { push: true } } },
+    });
+    expect(result).toEqual({
+      toast: "Repository attached: acme/site (default branch master), checked and bound with acme's connection",
+      changed: true,
+      repo: REPO,
+    });
+    expect(projectOf(store)).toMatchObject({ repo: REPO, defaultBranch: "master" });
+    expect(
+      store.db.prepare(`SELECT pat_id FROM project_github_credentials WHERE project_slug = ?`).get(store.slug),
+    ).toEqual({ pat_id: patId });
+    expect(readRepoHealth(store.db, store.slug)?.result).toMatchObject({ status: "connected", repo: REPO, remoteDefaultBranch: "master" });
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })[0]!.details).toMatchObject({
+      from: null,
+      to: REPO,
+      probed: true,
+      defaultBranch: "master",
+      connection: "acme",
+    });
+  });
+
+  it("refuses with no connection to check it with, and on a repository the token cannot see, changing nothing", async () => {
+    // CANARY: let either through and a typo'd repository is attached.
+    const bare = repoLess(false).store;
+    await expect(attach(bare, {})).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "Attaching acme/site needs a GitHub connection to check it with. Add one in Instance settings → GitHub connections, then attach the repository here. Nothing was changed.",
+    });
+    expect(projectOf(bare).repo).toBeNull();
+
+    const { store } = repoLess();
+    await expect(
+      attach(store, { [`GET /repos/${REPO}`]: { status: 404, body: { message: "Not Found" } } }),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "The acme connection's token cannot see acme/site. Check the owner/name, the token's repository access, or a pending organization approval. Nothing was changed.",
+    });
+    expect(projectOf(store).repo).toBeNull();
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
+  });
+
+  it("takes a repository its token can only read when no agent writes it, and refuses one when an agent does", async () => {
+    // A board that delivers results attaches a repository for its agents to
+    // read. CANARY: require push for every attach and it cannot; require it
+    // for none and a board whose Developer commits is bound to a repository
+    // it cannot push to.
+    const readOnly = {
+      [`GET /repos/${REPO}`]: { body: { full_name: REPO, default_branch: "main", permissions: { push: false, admin: false, maintain: false } } },
+    };
+    const { store } = repoLess();
+    expect((await attach(store, readOnly)).changed).toBe(true);
+    expect(readRepoHealth(store.db, store.slug)?.result).toMatchObject({ status: "connected", readOnly: true });
+
+    const writer = repoLess().store;
+    const file = readProjectFile({ projectSlug: writer.slug, dataRoot: writer.dataRoot })!;
+    writeProject(writer.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "developer",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Developer", role: "Implementation", backends: ["claude"], model: "sonnet" },
+        },
+      ],
+    });
+    rebuildAll(writer.db, { dataRoot: writer.dataRoot, force: true });
+    await expect(attach(writer, readOnly)).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "The acme connection's token can see acme/site but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then try again. Nothing was changed.",
+    });
+    expect(projectOf(writer).repo).toBeNull();
   });
 });
 

@@ -2,6 +2,7 @@ import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   capabilityById,
+  coerceSpecialistCapabilityMode,
   GRANT_REQUIRED_CAPABILITY_IDS,
   SCOPED_DELIVERY_CAPABILITY_IDS,
 } from "~/shared/capabilities";
@@ -130,6 +131,31 @@ export function specialistGrantModes(
     modes.set("execute-code-or-write-repo", "direct");
   }
   return modes;
+}
+
+/**
+ * Whether these grants let an agent deliver by writing the repository: the
+ * headline `execute-code-or-write-repo` is not withheld, as the runtime itself
+ * resolves it ({@link specialistGrantModes}), and the headline or a scoped
+ * branch or commit grant is direct. One reading for whoever picks an agent
+ * (the roster's `capabilities.delivery`), for an imported board, and for the
+ * door that removes a project's repository (ruling 667).
+ *
+ * Re-deriving it as "any scoped delivery grant is direct" was the mistake XS-4
+ * fixed on the prompt side: the headline gates ALL delivery, so a profile with
+ * the headline off and `commit-push-branch` on read as delivery-capable to
+ * whoever picks the agent, while the tool layer denied every write it would
+ * need. `repairDeliveryGrants` deliberately preserves that combination
+ * (B-AG1), so it is a state a human can really save.
+ */
+export function grantsWriteRepository(grants: readonly CapabilityGrant[]): boolean {
+  const headline = specialistGrantModes(grants).get("execute-code-or-write-repo");
+  if (headline === undefined || headline === "off" || headline === "human") return false;
+  const direct = (id: string) =>
+    grants.some((g) => g.capabilityId === id && coerceSpecialistCapabilityMode(g.mode) === "direct");
+  return (
+    direct("execute-code-or-write-repo") || direct("commit-push-branch") || direct("create-task-branch")
+  );
 }
 
 export function isWithheld(

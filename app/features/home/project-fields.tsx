@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { Link } from "react-router";
+import type { BoardDelivers } from "~/shared/board-delivers";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -124,6 +125,79 @@ export function NewProjectNameFields({
   );
 }
 
+/**
+ * Ruling 667: what the board delivers, and with it whether the project needs
+ * a repository. A results board needs none; its second control attaches one
+ * anyway, for agents that read a repository and never write it.
+ */
+export function NewProjectDeliversField({
+  delivers,
+  setDelivers,
+  attachRepo,
+  setAttachRepo,
+}: {
+  delivers: BoardDelivers;
+  setDelivers: (v: BoardDelivers) => void;
+  /** Results only: attach a repository for the agents to read. */
+  attachRepo: boolean;
+  setAttachRepo: (v: boolean) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">This board delivers</span>
+      <div className="pick-chips">
+        <button
+          type="button"
+          className={"pick-chip" + (delivers === "software" ? " on" : "")}
+          aria-pressed={delivers === "software"}
+          onClick={() => setDelivers("software")}
+        >
+          <Icon name="github" />
+          Software
+        </button>
+        <button
+          type="button"
+          className={"pick-chip" + (delivers === "results" ? " on" : "")}
+          aria-pressed={delivers === "results"}
+          onClick={() => setDelivers("results")}
+        >
+          <Icon name="file" />
+          Results · no code
+        </button>
+      </div>
+      <span className="fhint flush">
+        {delivers === "software"
+          ? "Agents change a repository and each task ships as a pull request."
+          : "You file a task with an input, agents work on it, and the result comes back as files on the task. No repository needed."}
+      </span>
+      {delivers === "results" && (
+        <AttachRepoLine attachRepo={attachRepo} setAttachRepo={setAttachRepo} />
+      )}
+    </div>
+  );
+}
+
+/** Ruling 667: a results board's one repository control, shared with the
+ *  board import dialog, where the file decides what the board delivers. */
+export function AttachRepoLine({
+  attachRepo,
+  setAttachRepo,
+}: {
+  attachRepo: boolean;
+  setAttachRepo: (v: boolean) => void;
+}) {
+  return (
+    <label className="check-line">
+      <input
+        type="checkbox"
+        checked={attachRepo}
+        onChange={(e) => setAttachRepo(e.target.checked)}
+      />
+      Attach a repository for the agents to read
+    </label>
+  );
+}
+
 /** The GitHub connection chips, shared with the board import dialog. */
 export function NewProjectConnectionField({
   connections,
@@ -206,8 +280,8 @@ export function NewProjectConnectionField({
           <Icon name="alert" />
           {isAdmin ? (
             <span>
-              No GitHub connections yet. Every project needs a repository. Add
-              a PAT in{" "}
+              No GitHub connections yet, and a repository needs one. Add a
+              PAT in{" "}
               <Link to="/org/settings?tab=connections">
                 <b>Instance settings → GitHub connections</b>
               </Link>
@@ -215,8 +289,8 @@ export function NewProjectConnectionField({
             </span>
           ) : (
             <span>
-              No GitHub connections yet. Every project needs a repository, and
-              an org admin adds the PAT under{" "}
+              No GitHub connections yet, and a repository needs one. An org
+              admin adds the PAT under{" "}
               <b>Instance settings → GitHub connections</b>. Ask an admin to add
               one, then come back.
             </span>
@@ -257,6 +331,7 @@ export function NewProjectRepoField({
   setCreateRepo,
   repoPrivate,
   setRepoPrivate,
+  readOnly = false,
 }: {
   repoRef: RefObject<HTMLInputElement | null>;
   invalidField: BlockedField | null;
@@ -272,6 +347,9 @@ export function NewProjectRepoField({
   /** Ruling 462: the created repository's visibility, private by default. */
   repoPrivate: boolean;
   setRepoPrivate: (v: boolean) => void;
+  /** Ruling 667: a results board's repository, which its agents read and
+   *  never write. */
+  readOnly?: boolean;
 }) {
   return (
     <div className="field">
@@ -284,7 +362,9 @@ export function NewProjectRepoField({
             ? "requires a GitHub connection"
             : derived && repo
               ? "from the project name (type to replace)"
-              : "every task in this project uses it"}
+              : readOnly
+                ? "an existing repository"
+                : "every task in this project uses it"}
         </span>
       </label>
       <div className="repo-input">
@@ -309,6 +389,8 @@ export function NewProjectRepoField({
         <span className="fhint">
           Owner is fixed by the <b>{effOwner}</b> connection. Enter just the
           repository name.
+          {/* Ruling 667: a results board's repository is reference material. */}
+          {readOnly && " The agents read it and commit nothing to it."}
         </span>
       )}
       {/* Ruling 462: the server creates the repository with the connection's

@@ -7589,10 +7589,10 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
 .tl-attach-glyph path { vector-effect: non-scaling-stroke; }
 /* A family (`fileFamily`, from the code reader's name → grammar table) wears
    one pill tone on its label and, softer, on its page; plain keeps neutral. */
-.tl-attach-glyph[data-kind="docs"] { --kind-bg: var(--blue-soft); --kind-fg: var(--blue-pressed); }
-.tl-attach-glyph[data-kind="data"] { --kind-bg: var(--teal-light); --kind-fg: var(--teal-dark); }
-.tl-attach-glyph[data-kind="log"] { --kind-bg: var(--amber-light); --kind-fg: var(--amber-dark); }
-.tl-attach-glyph[data-kind="code"] { --kind-bg: var(--agent-soft); --kind-fg: var(--agent-dark); }
+:is(.tl-attach-glyph, .cmp-file-ext)[data-kind="docs"] { --kind-bg: var(--blue-soft); --kind-fg: var(--blue-pressed); }
+:is(.tl-attach-glyph, .cmp-file-ext)[data-kind="data"] { --kind-bg: var(--teal-light); --kind-fg: var(--teal-dark); }
+:is(.tl-attach-glyph, .cmp-file-ext)[data-kind="log"] { --kind-bg: var(--amber-light); --kind-fg: var(--amber-dark); }
+:is(.tl-attach-glyph, .cmp-file-ext)[data-kind="code"] { --kind-bg: var(--agent-soft); --kind-fg: var(--agent-dark); }
 .tl-attach-ext {
   position: absolute; top: calc(50% + 4px); left: 50%; transform: translateX(-50%);
   padding: .125rem .375rem; border-radius: var(--radius-small);
@@ -9814,6 +9814,26 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .cmp-del { color: var(--danger); }
 .cmp-sep { color: var(--placeholder); }
 .cmp-over { color: var(--faint); }
+/* Ruling 668: the result's files, each a row of the attachments list: its
+   kind on the file tile's label (ruling 491), its name, and under it what
+   Operator says the file is. A note (what to weigh, what was assumed, what is
+   missing) reads as the summary does, under its own kicker. The paths a
+   merged change touched fold after a few lines. */
+.cmp-files { display: flex; flex-direction: column; gap: .375rem; margin: 0; padding: 0; list-style: none; }
+.cmp-file { align-items: flex-start; }
+.cmp-file-ext {
+  flex: none; min-width: 3.25rem; margin-top: .0625rem; padding: .125rem .375rem;
+  border-radius: var(--radius-small); text-align: center;
+  font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--kind-bg, var(--tint-press)); color: var(--kind-fg, var(--muted));
+}
+.cmp-file-main { display: flex; flex-direction: column; gap: .125rem; flex: 1; min-width: 0; }
+.cmp-file-name { font-family: var(--font-mono); font-size: .75rem; overflow-wrap: anywhere; }
+.cmp-file-what { font-size: .75rem; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+.cmp-note { display: flex; flex-direction: column; gap: .5rem; }
+.cmp-paths ul { margin: 0; padding: 0; list-style: none; font-size: .75rem; line-height: 1.6; color: var(--muted); }
+.cmp-paths li { overflow-wrap: anywhere; }
+.cmp-paths .cmp-none { margin-top: .25rem; }
 .chg-inline > .chg-slot { margin-top: .5rem; }
 .chg-inline .chg-fail, .chg-inline .chg-stale { font-size: .75rem; }
 
@@ -9897,7 +9917,6 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .setup-step[data-state="done"] .setup-title { font-weight: 500; color: var(--muted); }
 .setup-sentence { font-size: .75rem; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
 .setup-fact { max-width: 12rem; font-size: .75rem; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
-.setup-wait { font-size: .75rem; color: var(--faint); text-align: right; }
 /* Profile's Agent accounts panel when the checklist's link opened it
    (`#agent-accounts`): ringed the way ruling 497's places are while the URL
    names it, and, like them, a region focused by script that paints no ring

@@ -20,6 +20,7 @@ import {
 import {
   addStage,
   changeProjectRepo,
+  removeProjectRepo,
   recolorStage,
   deleteProject,
   setProjectArchived,
@@ -193,6 +194,13 @@ export async function action({ request, params }: Route.ActionArgs) {
           },
           actor,
         );
+        return { ok: true as const, toast: result.toast };
+      }
+      // Ruling 667: take the repository away from a board that does not
+      // write it. Refused while an agent may write it or a pull request is
+      // open for review.
+      case "remove-repo": {
+        const result = await removeProjectRepo(db, { projectSlug: slug }, actor);
         return { ok: true as const, toast: result.toast };
       }
       // R15-6: post-merge branch cleanup, per project (default on).

@@ -50,6 +50,7 @@ const PREVIEW: BoardImportPreview = {
     { id: "done", name: "Done", color: "green" },
   ],
   workflow: [{ from: "draft", to: "done", boundary: "human" }],
+  delivers: "software",
   agents: [
     { profileId: "operator", name: "Operator", role: "Runs every task", backend: null, model: "", operator: true },
     { profileId: "release-manager", name: "Release Manager", role: "Release notes", backend: "claude", model: "sonnet", operator: false },
@@ -139,6 +140,31 @@ describe("ruling 653: the board import dialog", () => {
       "kb:release-rulings": "existing",
       "skill:release-notes": "copy",
     });
+  });
+
+  it("ruling 667: a board none of whose agents writes a repository imports without one, unless the person attaches it", async () => {
+    // CANARY: require a connection and a repository whatever the board
+    // delivers and a no-code board cannot be imported on an instance with no
+    // GitHub connection; post them whatever `needsRepo` says and it is bound
+    // to the repository its name happened to spell.
+    await postsLikeABrowser();
+    const posts: FormData[] = [];
+    const results = { ...PREVIEW, delivers: "results" as const };
+    const { container, getByRole, getByLabelText } = renderDialog(results, async ({ request }) => {
+      posts.push(await request.formData());
+      return { ok: false, error: "held for the test" };
+    });
+    expect(container.textContent).toContain("None of this board's agents writes a repository, so it needs none.");
+    expect(container.querySelector("#np-repo")).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Import board" }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect([posts[0]!.get("owner"), posts[0]!.get("repoName")]).toEqual(["", ""]);
+
+    fireEvent.click(getByLabelText("Attach a repository for the agents to read"));
+    expect(container.querySelector("#np-repo")).not.toBeNull();
+    fireEvent.click(getByRole("button", { name: "Import board" }));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect([posts[1]!.get("owner"), posts[1]!.get("repoName")]).toEqual(["acme", "release-train"]);
   });
 
   it("refuses a name whose project already exists, sending nothing", async () => {

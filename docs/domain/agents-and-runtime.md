@@ -1259,7 +1259,12 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   a "Workspace checkout failed" note by `system:policy-engine` names the cause, and the
   prompt says whether a credential was `supplied`, `absent` or `not_involved` (a local
   clone never reached GitHub; ruling 249). A run whose checkout failed records no verdict
-  at all (`no_checkout`, ruling 248).
+  at all (`no_checkout`, ruling 248). On a project with no repository (ruling 667) nothing
+  is cloned: the deliverer's working directory is `tasks/<KEY>/workspace` and a supporting
+  run's `workspace/support/<profileId>`, scratch space with nothing in it delivered. The
+  prompt keeps a workspace contract for such a run: its knowledge-base folders, the
+  task's attachments folder, and, for the deliverer, that its delivery is the files it
+  saves on the task.
 - Ruling 152(c) (pass 35, G35-4): after the eligibility gates and the principal
   resolution, before anything is spent, `backendDispatchHold` is read for the run's
   backend and the account it bills. A hold makes NO run row, reservation, clone or
