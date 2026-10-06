@@ -138,7 +138,10 @@ characters; last 8 lines, 600 characters.
   plus an existing connection for that owner. The connection's token probes the repo;
   success adopts the remote default branch, a read-only repo still creates with a
   warning, and 404/401/network produce warnings with `defaultBranch` falling back to
-  `main`. The connection's PAT is bound to the project and proved against the repo.
+  `main`. That `main` is unconfirmed: the first time a task's branch is prepared, a
+  repository whose default is another is not given a `main`, and the project takes the
+  repository's (ruling 670, below). The connection's PAT is bound to the project and
+  proved against the repo.
 - **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
   software | results` on all three doors (the New project dialog's "This board
   delivers", the controller's `create_project`, and a board import, which reads it off
@@ -231,7 +234,18 @@ characters; last 8 lines, 600 characters.
   Contents API on a repository with no refs, or the configured default branch at the
   first commit of GitHub's current default (a task branch pushed first) with the
   repository default restored. Both are disclosed on the task timeline and audited as
-  `github.repo.bootstrapped` (`repo-bootstrap.server.ts`). The Contents API is the one
+  `github.repo.bootstrapped` (`repo-bootstrap.server.ts`).
+- **A repository with a default branch of its own keeps it** (ruling 670). The second
+  repair above runs only when GitHub's default is a branch Viberr made for one of the
+  project's tasks (the branch a task records, or a task's key lowercased). When the
+  project names a branch the repository does not have and GitHub's default is any other
+  branch, `ensureDefaultBranch` answers `adopted`: `project.md`'s `defaultBranch`
+  becomes the repository's, the task's timeline says so, and the audit row is
+  `project.default_branch.adopted {repo, from, to}`. Nothing is written to GitHub. This
+  is what happens to a project created while its probe could not answer, to one whose
+  default branch was renamed on GitHub, and to a repository created empty whose first
+  push was a person's own branch. Branch preparation cuts the task branch from the
+  adopted base, and an operator checkout left unborn on the old name is moved onto it. The Contents API is the one
   door: GitHub answers every Git Database endpoint (blobs, trees, commits, refs) 409
   "Git Repository is empty." until a first commit exists, so an empty-tree commit made
   through them cannot be the first one (ruling 468).
@@ -897,7 +911,8 @@ credential handed to a model.
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
   `project.repo.updated`, `project.repo.removed` (ruling 667), `project.repository.created`
   (ruling 462, a repository made at project creation), `github.repo.bootstrapped` (ruling 128, a repository-level
-  change like `github.credential.assigned`), `github.branch.created|deleted`,
+  change like `github.credential.assigned`), `project.default_branch.adopted` (ruling 670),
+  `github.branch.created|deleted`,
   `github.branch.prepare_failed`, `github.branch_update.operator|acceptance`,
   `github.collision.resolved`,
   `github.pr.opened|adopted|merged|merge_refused|closed_unowned`,

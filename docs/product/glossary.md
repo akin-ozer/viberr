@@ -99,7 +99,7 @@
 
 **Recommendation** — a pending card the supervised operator leaves on a task (`RECOMMENDATION_KINDS`): `transition`, `run_agent`, `accept_completion`, `delivery`. Apply executes the same mutation a human would; Dismiss records it. An `accept_completion` card binds to the work revision it was made for (`forHeadSha`) and is withdrawn, on the record, when that revision is replaced, a packet opens, or the task leaves the acceptance boundary (ruling 137).
 
-**Repository bootstrap** — ruling 128: when the project's default branch has no ref (an empty repository, or one whose only refs are task branches), Viberr creates it before a task's first branch, by an initial commit or at the first commit of GitHub's current default, disclosed on the timeline and audited as `github.repo.bootstrapped`.
+**Repository bootstrap** — ruling 128: when the project's default branch has no ref (an empty repository, or one whose only refs are task branches), Viberr creates it before a task's first branch, by an initial commit or at the first commit of GitHub's current default, disclosed on the timeline and audited as `github.repo.bootstrapped`. Where the repository has a default branch of its own that is not a task branch, nothing is created: the project takes that branch (ruling 670, `project.default_branch.adopted`).
 
 **Review deadlock** — a required reviewer that returns `request_changes` on consecutive rounds. Round two is the operator's: it puts the completeness question to the reviewer itself (ruling 410). At `REVIEW_DEADLOCK_ROUNDS` (3) consecutive objections from one reviewer, Viberr opens a `policy-engine` packet for a person (ruling 237, `task.review.deadlock`). A rework the provider refused fought no round (ruling 416).
 

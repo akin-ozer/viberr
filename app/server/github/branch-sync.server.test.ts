@@ -668,6 +668,42 @@ describe("ruling 128: ensureTaskBranch bootstraps an empty repository", () => {
   });
 });
 
+/**
+ * Ruling 670: when the bootstrap answers that the project took the
+ * repository's own default branch, that branch is the base from there on.
+ */
+describe("ruling 670: ensureTaskBranch cuts the task branch from a default branch the project just took", () => {
+  it("reads the adopted base, creates the task branch at its head and compares against it", async () => {
+    // CANARY: keep reading the context's `main` after the bootstrap and the
+    // preparation answers `bootstrap_failed`: "`main` still has no ref".
+    const store = setupWithCredential("VIB-208", "vib-208");
+    const TIP = "7a57e1f".padEnd(40, "0");
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/vib-208`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/branches`]: { body: [{ name: "master" }] },
+      [`GET ${REPO_PATH}`]: { body: { default_branch: "master" } },
+      [`GET ${REPO_PATH}/git/ref/heads/master`]: { body: { object: { sha: TIP } } },
+      [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/vib-208" } },
+      [`GET ${REPO_PATH}/compare/master...vib-208`]: compareRoute([]),
+    });
+    const result = await ensureTaskBranch(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-208" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    expect(result).toMatchObject({ status: "synced", branch: "vib-208", created: true });
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`).map((call) => call.body)).toEqual([
+      { ref: "refs/heads/vib-208", sha: TIP },
+    ]);
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/master...vib-208`)).toHaveLength(1);
+    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch.created")?.details).toMatchObject({
+      from: "master",
+    });
+  });
+});
+
 describe("ref paths (B11)", () => {
   it("addresses `heads/<branch>` with the separator intact", async () => {
     // The fixtures above used to register `git/ref/heads%2F<branch>`, because

@@ -90,7 +90,7 @@ export async function initializeUnbornCheckout(
       DELIVERY_ACTOR,
       { dataRoot: input.dataRoot, before: "operator-checkout" },
     );
-    if (base.status !== "bootstrapped" && base.status !== "exists") {
+    if (base.status !== "bootstrapped" && base.status !== "exists" && base.status !== "adopted") {
       logger.warn("an empty repository's first commit could not be created before the operator's checkout", {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
@@ -99,11 +99,26 @@ export async function initializeUnbornCheckout(
       });
       return "unchanged";
     }
+    // Ruling 670: the project just took the repository's own default branch,
+    // and this checkout still stands, with no commit, on the name the project
+    // had before. It is pointed at the new one so the refresh below moves it;
+    // a checkout unborn on any other branch is a task's and is left alone.
+    if (base.status === "adopted") {
+      const head = (
+        await git.run(["-C", input.dir, "symbolic-ref", "-q", "HEAD"], { timeoutMs: 10_000 })
+      ).stdout.trim();
+      if (head === `refs/heads/${base.was}`) {
+        await git.run(["-C", input.dir, "symbolic-ref", "HEAD", `refs/heads/${base.defaultBranch}`], {
+          timeoutMs: 10_000,
+        });
+      }
+    }
     const refresh: WorkspaceRefreshInput = {
       projectSlug: input.projectSlug,
       repo: input.repo,
       dir: input.dir,
-      defaultBranch: input.defaultBranch,
+      // The branch the bootstrap settled on.
+      defaultBranch: base.defaultBranch,
       fastForward: true,
       createMirror: true,
       taskKey: input.taskKey,

@@ -38,6 +38,14 @@ const REPO = "acme/widgets";
 const REPO_PATH = `/repos/${REPO}`;
 const EMPTY = { status: 409, body: { message: "Git Repository is empty." } };
 
+/** What the fake GitHub is told about the repository. */
+interface FakeRepoState {
+  /** The first-commit write fails, the way a GitHub outage does. */
+  refuse: boolean;
+  /** The branch a person pushed first, which GitHub then calls the default. */
+  own: string | null;
+}
+
 async function emptyRepoTask() {
   const store = setupTestStore(ctx);
   const origins = ctx.makeTempDir();
@@ -57,10 +65,17 @@ async function emptyRepoTask() {
   // lands a real commit in the local origin the checkout clones from. While
   // `refuse` holds, the write fails the way a GitHub outage does.
   let head: string | null = null;
-  const control = { refuse: false };
+  const control: FakeRepoState = { refuse: false, own: null };
   const gh = fakeGithubFetch({
-    [`GET ${REPO_PATH}/git/ref/heads/main`]: () => (head ? { body: { object: { sha: head } } } : EMPTY),
-    [`GET ${REPO_PATH}/branches`]: () => (head ? { body: [{ name: "main" }] } : EMPTY),
+    [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+      control.own
+        ? { status: 404, body: { message: "Not Found" } }
+        : head
+          ? { body: { object: { sha: head } } }
+          : EMPTY,
+    [`GET ${REPO_PATH}/branches`]: () =>
+      control.own ? { body: [{ name: control.own }] } : head ? { body: [{ name: "main" }] } : EMPTY,
+    [`GET ${REPO_PATH}`]: () => ({ body: { default_branch: control.own ?? "main" } }),
     [`PUT ${REPO_PATH}/contents/README.md`]: (call) => {
       if (control.refuse) return { status: 502, body: { message: "Bad Gateway" } };
       // SAFETY: the bootstrap sends the Contents API's JSON body; `content`
@@ -83,7 +98,16 @@ async function emptyRepoTask() {
         { fetchImpl: gh.fetchImpl },
       ),
     );
-  return { store, gh, checkout, control, head: () => head };
+  /** A person's first push to the empty repository, on a branch of their own. */
+  const pushOwn = (branch: string): string => {
+    writeFileSync(path.join(origin.seed, "app.txt"), "theirs\n");
+    gitOutSync(origin.seed, ["add", "-A"]);
+    gitOutSync(origin.seed, ["commit", "-qm", "Their first commit"]);
+    gitOutSync(origin.seed, ["push", "-q", origin.bare, `HEAD:refs/heads/${branch}`]);
+    control.own = branch;
+    return gitOutSync(origin.seed, ["rev-parse", "HEAD"]);
+  };
+  return { store, gh, checkout, control, pushOwn, head: () => head };
 }
 
 describe("the operator's checkout of an empty repository (ruling 468)", () => {
@@ -130,5 +154,39 @@ describe("the operator's checkout of an empty repository (ruling 468)", () => {
     if (again.kind !== "checkout") throw new Error(again.kind);
     expect(await gitOut(again.dir, ["rev-parse", "HEAD"])).toBe(head());
     expect(existsSync(path.join(again.dir, "README.md"))).toBe(true);
+  });
+
+  it("ruling 670: a repository whose first push was a person's own branch is not given a `main`: the project takes that branch and the checkout moves onto it", async () => {
+    const { store, gh, checkout, control, pushOwn } = await emptyRepoTask();
+    // The first clone lands on the empty repository while the first commit
+    // cannot be made, so the checkout is unborn. Then a person pushes their
+    // code on `master`, and GitHub makes it the default branch.
+    control.refuse = true;
+    const first = await checkout();
+    if (first.kind !== "checkout") throw new Error(first.kind);
+    const theirs = pushOwn("master");
+    control.refuse = false;
+
+    // CANARY: refresh onto the branch the checkout was made for and it stays
+    // unborn, since `origin/main` does not exist; name that branch in the view
+    // and the operator is told the default is `main` for one more run.
+    const again = await checkout();
+    if (again.kind !== "checkout") throw new Error(again.kind);
+    expect(again.defaultBranch).toBe("master");
+    expect(await gitOut(again.dir, ["rev-parse", "HEAD"])).toBe(theirs);
+    expect(await gitOut(again.dir, ["symbolic-ref", "--short", "HEAD"])).toBe("master");
+    // Nothing was written to their repository: the one Contents call is the
+    // refused first commit, made while it was empty.
+    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
+    expect(gh.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.defaultBranch,
+    ).toBe("master");
+    expect(listAuditEvents(store.db, { action: "project.default_branch.adopted" })[0]).toMatchObject({
+      actorLabel: "system:delivery",
+      taskKey: "VIB-1",
+      details: { repo: REPO, from: "main", to: "master" },
+    });
   });
 });

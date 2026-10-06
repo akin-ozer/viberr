@@ -889,7 +889,9 @@ export async function reachProjectRepository(
         // that cries wolf while GitHub is briefly down teaches people to ignore
         // it), and overwritten by the next real probe.
         repoAccess = { status: "network_unavailable", repo };
-        repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main".`;
+        // Ruling 670: the unconfirmed `main` is replaced by the repository's
+        // own default the first time a task's branch is prepared.
+        repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main"; if the repository's is another, Viberr takes it when a task's first branch is prepared.`;
       }
     }
   }
