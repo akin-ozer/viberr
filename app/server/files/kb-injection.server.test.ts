@@ -93,11 +93,19 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     expect(readKbIndexDetailed("rulings", dataRoot).body).toBe(
       `Folder \`${kbDir}\`. 1 document:\n\n` +
         "- `rulings.md` · under 1k chars\n  # Rulings\n\n" +
-        "2 other files here are not documents (a template, a sample, an image): `read_knowledge_doc` does not read them, " +
-        "so open one from your shell in the folder above:\n\n" +
-        "- `brand/logo.png` · 100 KB to 1 MB\n" +
-        "- `proposal-template.html` · under 10 KB",
+        "2 other files here are not documents (a template, a sample, an image). `read_knowledge_doc` does not read them; " +
+        "a run with a shell opens one in the folder above:\n\n" +
+        "- `proposal-template.html` · under 10 KB\n" +
+        "- `brand/logo.png` · 100 KB to 1 MB",
     );
+    // CANARY: list them by path alone and a folder of forty imported assets
+    // pushes the template at the root past the cap, unnamed.
+    mkdirSync(path.join(kbDir, "assets"), { recursive: true });
+    for (let i = 0; i < 45; i += 1) writeFileSync(path.join(kbDir, "assets", `icon-${String(i).padStart(2, "0")}.svg`), "<svg/>");
+    const capped = readKbIndexDetailed("rulings", dataRoot).body;
+    expect(capped).toContain("47 other files here are not documents");
+    expect(capped).toContain("- `proposal-template.html` · under 10 KB\n- `assets/icon-00.svg` · under 10 KB");
+    expect(capped).toContain("- … 7 more files in this folder, not listed here.");
   });
 
   it("ruling 678: a folder that holds only such files is still given, as the list of them", () => {
@@ -110,8 +118,8 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     expect(given.unresolved).toBeUndefined();
     expect(given.body).toBe(
       `Folder \`${kbDir}\`. No documents.\n\n` +
-        "1 other file here is not a document (a template, a sample, an image): `read_knowledge_doc` does not read them, " +
-        "so open one from your shell in the folder above:\n\n- `proposal-template.pdf` · under 10 KB",
+        "1 other file here is not a document (a template, a sample, an image). `read_knowledge_doc` does not read them; " +
+        "a run with a shell opens one in the folder above:\n\n- `proposal-template.pdf` · under 10 KB",
     );
     // CANARY: give a private one the same index and a run is sent to a
     // folder its shell is refused, for files no tool of its own reads.

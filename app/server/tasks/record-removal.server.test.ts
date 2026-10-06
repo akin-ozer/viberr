@@ -88,6 +88,32 @@ describe("removeTaskAttachment (ruling 582)", () => {
     expect(row!.details).toEqual({ name: "golden-files.md", bytes: 3000, reason: "the answer key" });
   });
 
+  it("ruling 675: removes a file named in either Unicode form, and its claims in both", async () => {
+    // CANARY: take the claim off by its bytes and an entry that named the
+    // file in the other form keeps a tile that opens nothing.
+    const composed = "Çözüm Anahtarı.md";
+    const decomposed = composed.normalize("NFD");
+    // A name with no letter that decomposes would make this test prove nothing.
+    expect(decomposed).not.toBe(composed);
+    seedTask(
+      [
+        comment("2026-09-28T10:00:00.000Z", { attachments: [composed, "notes.md"] }),
+        comment("2026-09-28T09:00:00.000Z", { attachments: [decomposed] }),
+      ],
+      { [decomposed]: "the answers", "notes.md": "keep" },
+    );
+    await removeTaskAttachment(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", name: composed, reason: null },
+      arda(),
+      ctxOf(),
+    );
+    expect(existsSync(attachment(decomposed))).toBe(false);
+    const [, newer, older] = timeline();
+    expect(newer!.attachments).toEqual(["notes.md"]);
+    expect(older!.attachments ?? []).toEqual([]);
+  });
+
   it("refuses a name the task does not hold, or one outside its attachments, writing nothing", async () => {
     seedTask([comment("2026-09-28T10:00:00.000Z")]);
     const before = readFileSync(taskFilePath(store.slug, "VIB-1", store.dataRoot), "utf8");

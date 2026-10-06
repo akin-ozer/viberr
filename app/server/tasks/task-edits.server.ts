@@ -695,9 +695,14 @@ export async function removeTaskAttachment(
     throw missing();
   }
   const reason = input.reason?.trim() || null;
+  const composed = storedFileName(name);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     for (const event of parsed.timeline) {
-      if (event.attachments?.includes(name)) event.attachments = event.attachments.filter((n) => n !== name);
+      // Ruling 675: by composed name, as the store found the file, so a claim
+      // typed in the other Unicode form does not keep a tile that opens nothing.
+      if (event.attachments?.some((n) => storedFileName(n) === composed)) {
+        event.attachments = event.attachments.filter((n) => storedFileName(n) !== composed);
+      }
     }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),

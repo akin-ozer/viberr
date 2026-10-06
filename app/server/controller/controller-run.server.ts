@@ -15,7 +15,7 @@ import {
   attachedResourcesBlock,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
-import { readSkillBodies } from "~/server/files/skill-body.server";
+import { CONTROLLER_GUIDE_SKILL, CONTROLLER_SKILL_BUDGET, readSkillBodies } from "~/server/files/skill-body.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
   recordRunInputs,
@@ -1485,21 +1485,6 @@ interface SystemPromptInput {
   dataRoot?: string;
 }
 
-/**
- * Ruling 679: how many characters of its skills a controller turn is given.
- *
- * An agent's skills share 24,000 characters when they arrive as prompt text.
- * The controller's first skill is the guide this repository ships, which gains
- * a section with most rulings that teach it something: ruling 672's took its
- * body to 25,766 characters, and from that deploy every turn read the guide
- * with its end cut off ("Answer style", and that a run is never claimed
- * started unless the tool said so), told only by a line at the foot of the
- * text. The guide is the controller's doctrine, so its turn is given room for
- * it whole and for what an org admin attaches beside it; a test holds the
- * shipped guide inside this.
- */
-export const CONTROLLER_SKILL_BUDGET = 40_000;
-
 /** Ruling 344: the prompt, and the resolution it was built from. */
 export interface ControllerPromptBuild {
   /** The prompt as one document (the static block then the dynamic tail). */
@@ -1524,7 +1509,18 @@ export function buildControllerSystemPrompt(input: SystemPromptInput): Controlle
   const configSkills = sortedNames(input.config.skills);
   const mountedMcps = sortedNames(input.mountedMcps);
   const unresolvedMcps = sortedBy(input.unresolvedMcps, (u) => u.name);
-  const skillSet = readSkillBodies(configSkills, input.dataRoot, CONTROLLER_SKILL_BUDGET);
+  // Ruling 679: the controller's own budget, and its guide draws from it
+  // first, whatever its name sorts behind: a skill an org admin attached must
+  // not be what cuts the doctrine short. The block still renders sorted.
+  const drawn = readSkillBodies(
+    [
+      ...configSkills.filter((name) => name === CONTROLLER_GUIDE_SKILL),
+      ...configSkills.filter((name) => name !== CONTROLLER_GUIDE_SKILL),
+    ],
+    input.dataRoot,
+    CONTROLLER_SKILL_BUDGET,
+  );
+  const skillSet = { parts: sortedBy(drawn.parts, (part) => part.name), unresolved: drawn.unresolved };
   // Ruling 239: a controller conversation SCOPED to a project reads that
   // project's rulings, like every agent the project runs. The controller is
   // where a project's stages, profiles, grants and knowledge bases are set up,

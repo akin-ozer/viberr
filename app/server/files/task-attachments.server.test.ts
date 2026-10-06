@@ -552,6 +552,37 @@ describe("ruling 676: a text file's embedded files are named, not spelled out", 
     }
   });
 
+  it("reads a page with one very large embedded file, and pages the text that is left by its own offsets", () => {
+    // CANARY: match the payload as one `{256,}` run and a 6-million-character
+    // picture overflows the engine's stack: the file reads as an error at
+    // every offset, where it paged before this ruling.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-676-"));
+    try {
+      const picture = "QUJD".repeat(1_500_000);
+      const rows = Array.from({ length: 4_000 }, (_, i) => `<tr><td>row ${i}</td></tr>`).join("\n");
+      const page = `<img src="data:image/png;base64,${picture}">\n${rows}\n`;
+      writeTaskAttachment("p1", "VIB-1", "big.html", new TextEncoder().encode(page), root);
+      const whole = `<img src="data:image/png;base64,[6,000,000 base64 characters left out]">\n${rows}\n`;
+      const first = readTaskAttachment("p1", "VIB-1", "big.html", root);
+      if (!first || !("kind" in first) || first.kind !== "text") throw new Error("expected text");
+      expect(first.truncated).toBe(true);
+      expect(first.text).toBe(whole.slice(0, first.nextOffset));
+      // CANARY: page the file's own text and offer an offset into the text
+      // returned, and the second page starts inside the picture.
+      const second = readTaskAttachment("p1", "VIB-1", "big.html", root, first.nextOffset);
+      if (!second || !("kind" in second) || second.kind !== "text") throw new Error("expected text");
+      expect(second.offset).toBe(first.nextOffset);
+      expect(second.text).toBe(whole.slice(first.nextOffset!, second.nextOffset ?? whole.length));
+      expect(second.leftOut).toBe(first.leftOut);
+      // Past the end of the text as it is returned, not of the file.
+      expect(readTaskAttachment("p1", "VIB-1", "big.html", root, whole.length)).toEqual({
+        unreadable: `\`big.html\` reads as ${whole.length.toLocaleString("en-US")} characters; offset ${whole.length.toLocaleString("en-US")} is past its end.`,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("says nothing was left out of a file that embeds nothing", () => {
     // CANARY: set `leftOut` on every text read and a plain file claims a cut
     // it never had.

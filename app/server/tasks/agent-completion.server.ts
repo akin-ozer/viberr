@@ -102,7 +102,11 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import {
+  storedFileName,
+  taskAttachmentsDir,
+  taskDir,
+} from "~/server/files/file-store-root.server";
 import {
   agentNamesByProfile,
   getRun,
@@ -1669,16 +1673,23 @@ export async function applyAgentCompletionEffects(
   // another RUN is not excluded: the deliverer claims its whole window even
   // when a run beside it named one of its files (ruling 627 narrows what a run
   // that does not deliver claims, below).
+  // Ruling 675: by composed name on both sides. A hold is taken under the
+  // name as it will be stored, while an upload that replaces a file stored
+  // decomposed keeps that file's own name, so the two can differ in form.
   const carriedHere = new Set(
     thisRunStartedAt && completionFile
       ? completionFile.timeline
           .filter(
             (e) => e.occurredAt >= thisRunStartedAt && (e.actor.kind === "human" || isRelayComment(e)),
           )
-          .flatMap((e) => e.attachments ?? [])
+          .flatMap((e) => (e.attachments ?? []).map(storedFileName))
       : [],
   );
-  const runSaved = runAttachmentsRaw.filter((name) => !carriedHere.has(name) && !heldForOthers.has(name));
+  const heldComposed = new Set([...heldForOthers].map(storedFileName));
+  const runSaved = runAttachmentsRaw.filter((name) => {
+    const composed = storedFileName(name);
+    return !carriedHere.has(composed) && !heldComposed.has(composed);
+  });
   const verdictEngagement =
     input.profileId && completionFm
       ? completionFm.engagements.find((e) => e.profileId === input.profileId)

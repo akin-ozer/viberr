@@ -8,7 +8,13 @@ import type { DatabaseSync } from "node:sqlite";
 import { KB_DOC_OFFSET_DESCRIPTION, isInjectableKbDoc, readKbDocForRun } from "~/server/files/kb-injection.server";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import { type CopyTaskFileToKbInput, copyTaskFileToKnowledgeBase } from "~/server/org/kb-task-file.server";
-import { SKILL_INJECTION_BUDGET, skillBodyOverBudget } from "~/server/files/skill-body.server";
+import {
+  CONTROLLER_SKILL_BUDGET,
+  SKILL_INJECTION_BUDGET,
+  type SkillBodySize,
+  skillBodyOverBudget,
+} from "~/server/files/skill-body.server";
+import { resolveControllerConfig } from "./controller-profile.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
@@ -493,9 +499,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
    * than a run can be given. "" when it fits.
    */
   function skillBudgetNote(name: string): string {
-    const size = skillBodyOverBudget(name, dataRoot);
+    const size = skillSize(name);
     if (!size || size.over === 0) return "";
     const n = (value: number) => value.toLocaleString("en-US");
+    if (heldByController(name)) {
+      return (
+        ` Its body is ${n(size.chars)} characters, and a controller turn is given at most ${n(CONTROLLER_SKILL_BUDGET)} characters ` +
+        `of its skills together, its guide first: the last ${n(size.over)} characters of this one reach no turn. Shorten it, or move ` +
+        "its reference material into a knowledge base document, which is read on demand with no cap."
+      );
+    }
     return (
       ` Its body is ${n(size.chars)} characters, and a run that is handed its skills as prompt text ` +
       `(every Codex run, and a Claude run with no checkout to install them beside) gets at most ` +
@@ -503,6 +516,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       "reach no such run, and more is lost to an agent that holds another skill ahead of it. Shorten it, or move its reference " +
       "material into a knowledge base document, which a run reads on demand with no cap, and name that document here."
     );
+  }
+
+  /** Ruling 679: a skill the controller's own profile holds is read under the
+   *  controller's budget. One an agent holds as well is measured here as the
+   *  controller's: the list cannot know every deployment that grants it. */
+  function heldByController(name: string): boolean {
+    return resolveControllerConfig(dataRoot).skills.includes(name);
+  }
+
+  /** A skill's size against the budget of whoever holds it. */
+  function skillSize(name: string): SkillBodySize | null {
+    return skillBodyOverBudget(name, dataRoot, heldByController(name) ? CONTROLLER_SKILL_BUDGET : SKILL_INJECTION_BUDGET);
   }
 
   /**
@@ -1363,7 +1388,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_skills",
-      "List the org skills (grant key, name, summary, size). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill. `chars` is the length of the skill's body, and `charsPastBudget`, when present, is how much of its end a run handed its skills as prompt text is never given (ruling 679: 24,000 characters for all of an agent's skills together).",
+      "List the org skills (grant key, name, summary, size). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill. `chars` is the length of the skill's body, and `charsPastBudget`, when present, is how much of its end a run handed its skills as prompt text is never given (ruling 679: 24,000 characters for all of an agent's skills together; a skill your own profile holds is measured against the 40,000 a controller turn is given).",
       {},
       run(() => {
         requireOrgAdmin("read the org skills");
@@ -1374,7 +1399,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           listSkills(db, { dataRoot }).map((s) => {
             // Ruling 679: its size beside its name, and how much of it a run
             // handed its skills as prompt text cannot be given.
-            const size = skillBodyOverBudget(s.name, dataRoot);
+            const size = skillSize(s.name);
             const row: SkillListing = { grantKey: s.name, id: s.id, name: s.name, summary: s.summary };
             if (size) row.chars = size.chars;
             if (size && size.over > 0) row.charsPastBudget = size.over;
@@ -2205,32 +2230,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // not any profile grants it. Null means the project has named none,
           // and a settled rule has nowhere to live but each task's goal.
           rulingsKb: fm.rulingsKb ?? null,
-          // Ruling 483 (F40-59): the knowledge-base corrections agents on this
-          // project's tasks proposed and nobody has promoted or dismissed. Read
-          // from the documents themselves, where every run reads them.
-          openProposals: listProjectKbProposals(db, slug, dataRoot).map((p) => ({
-            ...p,
-            rulings: p.kb === (fm.rulingsKb ?? null),
-          })),
-          // Ruling 498: what agents on this project's tasks wrote into a
-          // knowledge base, newest first, each with its id for
-          // undo_kb_correction and whether a person already undid it.
-          // Ruling 677: each passage as an excerpt, so twenty of them never
-          // outgrow the reply; read_kb_correction reads one whole.
-          kbCorrections: listKbCorrections(db, { projectSlug: slug })
-            .slice(0, 20)
-            .map((c) => ({
-              id: c.id,
-              kb: c.kb,
-              doc: c.doc,
-              rulings: c.rulings,
-              replaced: c.replaced === null ? null : passageExcerpt(c.replaced),
-              text: passageExcerpt(c.text),
-              taskKey: c.taskKey,
-              filedBy: c.filedBy,
-              at: c.at,
-              undone: c.undone,
-            })),
           // Ruling 245: who owns which shared paths until they merge. Read here
           // rather than inferred from prose, which is what every agent was doing.
           //
@@ -2316,6 +2315,35 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               ? { ...entry, autonomy: row.autonomy ?? "supervised" }
               : entry;
           }),
+          // Ruling 677: the two lists with a narrower read of their own come
+          // last, with the epics: what a too-long reply loses is its end, and
+          // the deployments above have no other tool that returns them.
+          // Ruling 483 (F40-59): the knowledge-base corrections agents on this
+          // project's tasks proposed and nobody has promoted or dismissed. Read
+          // from the documents themselves, where every run reads them.
+          openProposals: listProjectKbProposals(db, slug, dataRoot).map((p) => ({
+            ...p,
+            rulings: p.kb === (fm.rulingsKb ?? null),
+          })),
+          // Ruling 498: what agents on this project's tasks wrote into a
+          // knowledge base, newest first, each with its id for
+          // undo_kb_correction and whether a person already undid it.
+          // Ruling 677: each passage as an excerpt, so twenty of them never
+          // outgrow the reply; read_kb_correction reads one whole.
+          kbCorrections: listKbCorrections(db, { projectSlug: slug })
+            .slice(0, 20)
+            .map((c) => ({
+              id: c.id,
+              kb: c.kb,
+              doc: c.doc,
+              rulings: c.rulings,
+              replaced: c.replaced === null ? null : passageExcerpt(c.replaced),
+              text: passageExcerpt(c.text),
+              taskKey: c.taskKey,
+              filedBy: c.filedBy,
+              at: c.at,
+              undone: c.undone,
+            })),
           // Ruling 503: each epic as `list_epics` reads it.
           epics: listEpics(db, slug).map(epicRow),
         });

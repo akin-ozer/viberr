@@ -84,6 +84,30 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     expect((await res.body()).byteLength).toBe(4);
   });
 
+  /**
+   * Ruling 675: a header value is Latin-1, so a name with a letter outside it
+   * made `new Response` throw. The owner's own input on AWSC-117, a PDF named
+   * in Turkish and stored decomposed by a Mac's upload, answered 500 from its
+   * tile and 404 when its name was typed.
+   */
+  it("ruling 675: serves a file named outside Latin-1, under either Unicode form, with its name in a header that can carry it", async () => {
+    const composed = "Aidea _ İçerik ve Eğitim _ AWS Maliyet Teklifi.pdf";
+    const dir = path.join(app.dataRoot, "projects", "viberr-core", "tasks", "VIB-142", "attachments");
+    writeFileSync(path.join(dir, composed.normalize("NFD")), "%PDF-1.4 the proposal");
+    // CANARY: put the raw name in the header again and both requests are 500.
+    // CANARY: resolve the name byte for byte and the typed one is 404.
+    for (const asked of [composed.normalize("NFD"), composed]) {
+      const res = await get(ardaId, asked);
+      expect(res.status, asked === composed ? "composed" : "decomposed").toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
+      expect(new TextDecoder().decode(await res.body())).toBe("%PDF-1.4 the proposal");
+      const disposition = res.headers.get("content-disposition")!;
+      // The ASCII fallback, then the whole name as the file is stored.
+      expect(disposition.startsWith('inline; filename="Aidea _ ')).toBe(true);
+      expect(disposition).toContain(`; filename*=UTF-8''${encodeURIComponent(composed.normalize("NFD"))}`);
+    }
+  });
+
   it("NEVER renders stored HTML on the app origin — download-only, generic type", async () => {
     const res = await get(ardaId, "sneaky.html");
     expect(res.status).toBe(200);

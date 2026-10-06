@@ -40,6 +40,25 @@ import { toError } from "~/shared/errors";
 /** Shared character budget across ALL of an agent's declared skills. */
 export const SKILL_INJECTION_BUDGET = 24_000;
 
+/**
+ * Ruling 679: how many characters of its skills a controller turn is given.
+ *
+ * An agent's skills share 24,000 characters when they arrive as prompt text.
+ * The controller's own skill is the guide this repository ships, which gains
+ * a section with most rulings that teach it something: ruling 672's took its
+ * body to 25,766 characters, and from that deploy every turn read the guide
+ * with its end cut off ("Answer style", and that a run is never claimed
+ * started unless the tool said so), told only by a line at the foot of the
+ * text. The guide is the controller's doctrine, so its turn is given room for
+ * it whole and for what an org admin attaches beside it; a test holds the
+ * shipped guide inside this.
+ */
+export const CONTROLLER_SKILL_BUDGET = 40_000;
+
+/** The skill the controller always loads: its own guide. It draws from the
+ *  controller's budget before any skill an org admin attached beside it. */
+export const CONTROLLER_GUIDE_SKILL = "controller-guide";
+
 /** A declared skill that reached the run with less (or none) of its content. */
 export interface UnresolvedSkillGrant {
   name: string;
@@ -141,6 +160,8 @@ export function readSkillBodyDetailed(
   name: string,
   dataRoot?: string,
   budgetChars: number = SKILL_INJECTION_BUDGET,
+  /** The whole budget this skill shares, for the sentence that names it. */
+  sharedBudget: number = SKILL_INJECTION_BUDGET,
 ): SkillInjection {
   let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
@@ -192,7 +213,7 @@ export function readSkillBodyDetailed(
       body: `_(skill omitted entirely: SKILL.md is ${trimmed.length} chars and none of the shared skill budget was left)_`,
       unresolved: {
         name,
-        reason: `it did not fit the shared ${SKILL_INJECTION_BUDGET}-char skill budget; none of its content reached this run`,
+        reason: `it did not fit the shared ${sharedBudget}-char skill budget; none of its content reached this run`,
       },
     };
   }
@@ -204,6 +225,12 @@ export function readSkillBodyDetailed(
   return {
     body: `${trimmed.slice(0, budgetChars)}\n\n_(skill truncated: SKILL.md is ${trimmed.length} chars and exceeds the ${budgetChars}-char injection budget)_`,
   };
+}
+
+/** A skill body's length, and how much of it is past its holder's budget. */
+export interface SkillBodySize {
+  chars: number;
+  over: number;
 }
 
 /**
@@ -219,7 +246,12 @@ export function readSkillBodyDetailed(
  * Architect's to 30,575; every save answered "updated", and the last 7,289 and
  * 6,575 characters of them reached no run, the newest rules among them.
  */
-export function skillBodyOverBudget(name: string, dataRoot?: string): { chars: number; over: number } | null {
+export function skillBodyOverBudget(
+  name: string,
+  dataRoot?: string,
+  /** The budget of whoever holds it: an agent's, unless the controller's. */
+  budget: number = SKILL_INJECTION_BUDGET,
+): SkillBodySize | null {
   let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
     resolved = resolveContainedSkillFile(name, dataRoot);
@@ -229,7 +261,7 @@ export function skillBodyOverBudget(name: string, dataRoot?: string): { chars: n
   if ("reason" in resolved) return null;
   try {
     const chars = splitFrontmatter(readFileSync(resolved.file, "utf8")).body.trim().length;
-    return { chars, over: Math.max(0, chars - SKILL_INJECTION_BUDGET) };
+    return { chars, over: Math.max(0, chars - budget) };
   } catch {
     return null;
   }
@@ -257,7 +289,7 @@ export function readSkillBodies(
   const unresolved: UnresolvedSkillGrant[] = [];
   let budget = budgetChars;
   for (const name of names) {
-    const injection = readSkillBodyDetailed(name, dataRoot, Math.max(0, budget));
+    const injection = readSkillBodyDetailed(name, dataRoot, Math.max(0, budget), budgetChars);
     if (injection.unresolved) unresolved.push(injection.unresolved);
     if (injection.body) {
       parts.push({ name, body: injection.body });

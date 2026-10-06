@@ -6,7 +6,7 @@ import {
   getConversation,
   getMessageFile,
 } from "~/server/controller/controller-conversations.server";
-import { attachmentContentType } from "~/server/files/task-attachments.server";
+import { attachmentContentType, attachmentDisposition } from "~/server/files/task-attachments.server";
 
 /**
  * GET /resources/controller-file/:id — one file a person sent with a controller
@@ -32,12 +32,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
   const { type, inline } = attachmentContentType(file.name);
   const forceDownload = new URL(request.url).searchParams.get("download") === "1";
-  const ascii = file.name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   return new Response(new Uint8Array(file.data), {
     headers: {
       "content-type": type,
       "content-length": String(file.data.length),
-      "content-disposition": `${inline && !forceDownload ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      "content-disposition": attachmentDisposition(file.name, inline && !forceDownload),
       "x-content-type-options": "nosniff",
       "content-security-policy": "sandbox; default-src 'none'",
       "cache-control": "private, max-age=300",

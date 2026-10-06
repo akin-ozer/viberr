@@ -433,6 +433,19 @@ describe("ruling 557: a task takes the files it works from", () => {
     expect(timeline("VIB-2")[0]!.attachments).toEqual(["Çıktı.md"]);
   });
 
+  it("ruling 675: never overwrites a file this task holds under the same name in the other Unicode form", async () => {
+    // CANARY: fold the target's names by case alone and a take by the
+    // composed name skips the next-free-name branch, resolves to the
+    // decomposed file already here and replaces it (ruling 538: never).
+    const decomposed = "Müşteri Envanteri.csv".normalize("NFD");
+    save("VIB-2", decomposed, "this task's own inventory");
+    save("VIB-3", "Müşteri Envanteri.csv", "another task's inventory");
+    expect(await take("VIB-2", "VIB-3", ["Müşteri Envanteri.csv"])).toMatch(/^\[done\] Took 1 file from VIB-3/);
+    expect(readFileSync(path.join(attachmentsOf("VIB-2"), decomposed), "utf8")).toBe("this task's own inventory");
+    expect(readFileSync(path.join(attachmentsOf("VIB-2"), "Müşteri Envanteri-2.csv"), "utf8")).toBe("another task's inventory");
+    expect(timeline("VIB-2")[0]!.attachments).toEqual(["Müşteri Envanteri-2.csv"]);
+  });
+
   it("refuses this task, another project's task, a missing task, an archived task and a missing file, and writes nothing", async () => {
     // CANARY: drop the archived-source refusal and VIB-4's file lands on VIB-2
     // while VIB-4, whose work was withdrawn, gets a "Taken by" line.

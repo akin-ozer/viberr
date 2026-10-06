@@ -56,10 +56,14 @@ export type ControllerToolText = {
  */
 const CONTROLLER_REPLY_MAX_BYTES = 60_000;
 
+/** How far back from the cut a line break is worth stepping to. */
+const LINE_BREAK_REACH = 4_000;
+
 /**
  * Ruling 677: a reply a turn can carry. One within {@link CONTROLLER_REPLY_MAX_BYTES}
- * is returned as it is. A longer one is cut at the last line break that fits,
- * and its first line says so, with the sizes, before anything else is read: a
+ * is returned as it is. A longer one is cut at the last line break that fits
+ * (or, when none is near, where the room ends), and its first line says so,
+ * with the sizes, before anything else is read: a
  * head the model can use and a plain account of what is missing, where the CLI
  * would have returned neither. Each tool still bounds its own reply (a page, a
  * limit, an excerpt); this is what stands behind the one that did not.
@@ -76,8 +80,11 @@ function carriedReply(text: string): string {
   // character the byte cut would have split.
   const room = CONTROLLER_REPLY_MAX_BYTES - Buffer.byteLength(note(bytes), "utf8");
   const head = Buffer.from(text, "utf8").subarray(0, room).toString("utf8").replace(/\uFFFD+$/, "");
+  // Back to a line break when one is near, so whole lines are kept. A reply
+  // that is mostly one line (a document inside a JSON string) is cut where it
+  // stands: stepping back to its last break would keep its first few bytes.
   const lineEnd = head.lastIndexOf("\n");
-  const kept = lineEnd > 0 ? head.slice(0, lineEnd) : head;
+  const kept = lineEnd > head.length - LINE_BREAK_REACH ? head.slice(0, lineEnd) : head;
   return note(Buffer.byteLength(kept, "utf8")) + kept;
 }
 

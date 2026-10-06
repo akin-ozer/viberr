@@ -427,6 +427,19 @@ export interface WrittenAttachment {
 }
 
 /**
+ * Ruling 675: the `content-disposition` of a served file, whatever its name
+ * holds. A header value is Latin-1, so a name with a letter outside it made
+ * `new Response` throw: the task's own input on AWSC-117, a PDF named in
+ * Turkish, answered 500 to the person who attached it. The quoted name is the
+ * ASCII fallback and `filename*` carries the real one (RFC 6266).
+ */
+export function attachmentDisposition(name: string, inline: boolean): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
  * The refusals every person's upload meets, before anything is written: an
  * empty or dot-prefixed name the store scanner would then hide, a name that
  * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
@@ -711,9 +724,15 @@ interface EmbeddedFilesLeftOut {
  *  favicon or a one-pixel spacer costs a reader nothing. */
 const EMBEDDED_FILE_MIN_CHARS = 256;
 
-/** A `data:` URI carrying a file in base64: its head, then the payload. */
+/**
+ * A `data:` URI carrying a file in base64: its head, then the payload. The
+ * payload is a counted run and then a starred one: a single `{256,}` run
+ * overflows the engine's stack on a payload past about 5.5 million
+ * characters, one embedded 4 MB picture, and the file then reads as an error
+ * at every offset.
+ */
 const EMBEDDED_FILE_RE = new RegExp(
-  `(data:[\\w.+-]*(?:\\/[\\w.+-]+)?(?:;[\\w.+-]+=[\\w.+-]*)*;base64,)([A-Za-z0-9+/]{${EMBEDDED_FILE_MIN_CHARS},}={0,2})`,
+  `(data:[\\w.+-]*(?:\\/[\\w.+-]+)?(?:;[\\w.+-]+=[\\w.+-]*)*;base64,)([A-Za-z0-9+/]{${EMBEDDED_FILE_MIN_CHARS}}[A-Za-z0-9+/]*={0,2})`,
   "g",
 );
 

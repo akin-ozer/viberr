@@ -333,8 +333,9 @@ export function writeStoreFiles(
   dirPath: string[],
   files: UploadFileInput[],
   actor: AuditActor,
-  /** Ruling 678: the task whose file this is a copy of, for the audit row. */
-  copiedFrom?: { projectSlug: string; taskKey: string; name: string },
+  /** Ruling 678: the task whose file this is a copy of, the name it took here
+   *  and whether it took a file's place, for the audit row. */
+  copiedFrom?: { projectSlug: string; taskKey: string; name: string; as: string; replaced: boolean },
 ): UploadResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = files

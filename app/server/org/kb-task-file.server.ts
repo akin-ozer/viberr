@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { isInjectableKbDoc, isPrivateKbFolder } from "~/server/files/kb-injection.server";
+import { resolveStoredSegment } from "~/server/files/file-store-root.server";
 import { keptDeliveryMiss, resolveKeptDeliveryFile } from "~/server/files/kept-deliveries.server";
 import {
   checkAttachmentUpload,
@@ -118,6 +119,19 @@ export function copyTaskFileToKnowledgeBase(
     );
   }
 
+  // The name is printed in the knowledge base's index, in every prompt that is
+  // given it, so it holds nothing that could end the line it stands on.
+  if ([...name].some((ch) => ch < " " || ch === "\u007f" || ch === "`")) {
+    return refuse(
+      "A knowledge base's index names this file to every run given it, so its name cannot hold a line break, " +
+        "a control character or a backtick. Give it a plain name with `as`.",
+    );
+  }
+  // The store's own rule for a path, said here instead of found after a write
+  // that kept nothing.
+  if (name.includes("..")) {
+    return refuse(`A file in a knowledge base cannot be named with two dots in a row (\`${name}\`). Give it another name with \`as\`.`);
+  }
   const document = isInjectableKbDoc(name);
   if (!document && isPrivateKbFolder(target.rootAbs)) {
     return refuse(
@@ -125,7 +139,9 @@ export function copyTaskFileToKnowledgeBase(
         `so no run could open \`${name}\` there. Copy it into an open knowledge base.`,
     );
   }
-  const into = path.join(target.rootAbs, name);
+  // Ruling 675: a file the folder holds under the same name in the other
+  // Unicode form is the one this would replace.
+  const into = resolveStoredSegment(target.rootAbs, name);
   const there = existsSync(into) ? statSync(into) : null;
   if (there?.isFile() && document) {
     return refuse(
@@ -135,26 +151,34 @@ export function copyTaskFileToKnowledgeBase(
   }
   if (there?.isFile() && !input.replace) {
     return refuse(
-      `${target.name} already holds a file named \`${name}\` (${there.size.toLocaleString("en-US")} bytes). ` +
+      `${target.name} already holds a file named \`${path.basename(into)}\` (${there.size.toLocaleString("en-US")} bytes). ` +
         "Pass `replace: true` to put this one in its place, or another name in `as`.",
     );
   }
+  const stored = path.basename(into);
+  let added: number;
   try {
-    writeStoreFiles(db, target, [], [{ relPath: name, data: read.bytes }], input.actor, {
+    added = writeStoreFiles(db, target, [], [{ relPath: stored, data: read.bytes }], input.actor, {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       name: path.basename(source),
-    });
+      as: stored,
+      replaced: there?.isFile() === true,
+    }).added;
   } catch (error) {
     if (isAppError(error)) return refuse(error.userMessage);
     throw error;
+  }
+  // The store skips a path it will not keep and says so only in its count.
+  if (added !== 1) {
+    return refuse(`The store keeps no file under the name \`${stored}\`. Give it another name with \`as\`.`);
   }
   publishResourceUpdated("kb", target.id);
   return {
     ok: true,
     kbName: target.name,
     folder: target.rootAbs,
-    path: name,
+    path: stored,
     bytes: read.bytes.byteLength,
     replaced: there?.isFile() === true,
     document,

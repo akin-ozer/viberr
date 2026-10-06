@@ -40,6 +40,17 @@ describe("ruling 677: a controller tool reply longer than a turn carries", () =>
     expect(body.length).toBeGreaterThan(59_000);
   });
 
+  it("keeps the room it has when the reply is mostly one line", async () => {
+    // CANARY: always step back to the last line break and a document carried
+    // inside one JSON string is cut to the two lines above it: 40 bytes of a
+    // 100,000-byte reply.
+    const text = await reply(`{\n "path": "notes.md",\n "text": "${"n".repeat(100_000)}"\n}`);
+    const body = text.slice(text.indexOf("\n") + 1);
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(60_000);
+    expect(body.length).toBeGreaterThan(59_000);
+    expect(body.startsWith('{\n "path": "notes.md",\n "text": "nnnn')).toBe(true);
+  });
+
   it("is never cut inside a character", async () => {
     // CANARY: slice the bytes without dropping the split character and the
     // head ends in U+FFFD, a letter the reply never held.

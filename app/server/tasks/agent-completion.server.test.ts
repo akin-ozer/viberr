@@ -849,6 +849,38 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.timeline.some((e) => (e.attachments ?? []).includes("sample-01-input.csv"))).toBe(false);
   });
 
+  it("ruling 675: a file held under its composed name is not the run's when it is stored decomposed", async () => {
+    // An upload that replaces a file a Mac stored decomposed keeps that file's
+    // name, and its hold is taken under the composed one.
+    // CANARY: compare the held name with the stored one byte for byte and the
+    // run claims the person's file and stamps `deliveredAt` with it.
+    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+    const runId = await finishedRunWith("Waiting for the inventory.");
+    const { withAttachmentClaims } = await import("~/server/files/task-attachments.server");
+    const composed = "Müşteri Envanteri.csv";
+    await withAttachmentClaims(store.slug, "VIB-1", [composed], async () => {
+      saveInRunWindow(runId, [composed.normalize("NFD")]);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "dev",
+          role: "Developer",
+          delivers: true,
+          workdir: null,
+          agentHandle: "dev",
+        },
+        { id: runId, state: "finished" },
+      );
+    });
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).toBeNull();
+    expect(parsed.timeline.some((e) => (e.attachments ?? []).some((n) => n.normalize("NFC") === composed))).toBe(false);
+  });
+
   /** Ruling 558's writers: each puts `SAMPLE` on VIB-1 for someone other
    *  than a run. The relay and the take bring it from VIB-2, which is Done. */
   const WRITERS = ["a person's upload", "a relay", "a take"] as const;

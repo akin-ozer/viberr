@@ -440,7 +440,10 @@ export function readKbIndexDetailed(
  */
 function otherFilesNote(files: readonly KbDoc[], hidden: boolean): string {
   if (files.length === 0) return "";
-  const listed = files.slice(0, KB_INDEX_MAX_OTHER_FILES);
+  // The folder's own files before a subfolder's: a template copied in sits at
+  // the root, and must not fall past the cap behind an imported `assets/`.
+  const rootFirst = [...files.filter((f) => !f.rel.includes("/")), ...files.filter((f) => f.rel.includes("/"))];
+  const listed = rootFirst.slice(0, KB_INDEX_MAX_OTHER_FILES);
   const lines = listed.map((file) => `- \`${file.rel}\` · ${kbFileSizeClass(file.size)}`);
   if (files.length > listed.length) {
     lines.push(`- … ${countLabel(files.length - listed.length, "more file")} in this folder, not listed here.`);
@@ -450,7 +453,7 @@ function otherFilesNote(files: readonly KbDoc[], hidden: boolean): string {
     `\n\n${what}` +
     (hidden
       ? ", and no run can open them: the folder is closed to every shell and `read_knowledge_doc` reads documents only:"
-      : " (a template, a sample, an image): `read_knowledge_doc` does not read them, so open one from your shell in the folder above:") +
+      : " (a template, a sample, an image). `read_knowledge_doc` does not read them; a run with a shell opens one in the folder above:") +
     `\n\n${lines.join("\n")}`
   );
 }

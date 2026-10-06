@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { sha256Hex } from "~/server/files/content-hash.server";
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { kbDirPath } from "~/server/files/file-store-root.server";
 import { collectKbDocs, resolveKbDocPath } from "~/server/files/kb-injection.server";
+import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
 import { fenceFor } from "~/shared/text/fence";
 import { legacyProposalsSpan, looseText } from "./kb-proposals.server";
 import { publishResourceUpdated } from "./resource-events.server";
@@ -713,10 +714,14 @@ export async function editSkillPassage(
   ctx: { dataRoot?: string } = {},
 ): Promise<EditSkillPassageResult> {
   const target = resolveStoreTarget(db, "skill", input.id, { dataRoot: ctx.dataRoot });
-  const abs = target ? path.join(target.rootAbs, "SKILL.md") : null;
-  if (!target || !abs || !existsSync(abs)) {
+  // The contained resolver every reader of a SKILL.md uses: a folder or a
+  // file that is a link out of the store is not read, so a missed passage
+  // never answers with another file's lines.
+  const contained = target ? resolveContainedSkillFile(path.basename(target.rootAbs), ctx.dataRoot) : null;
+  if (!target || !contained || "reason" in contained) {
     return { ok: false, message: `No skill with id ${input.id} holds a SKILL.md. Nothing was written. list_skills names them.` };
   }
+  const abs = contained.file;
   const edited = await replacePassage(db, {
     abs,
     dir: [],
