@@ -635,6 +635,8 @@ export async function ensureTaskBranch(
   if (ctx.fetchImpl) ghOptions.fetchImpl = ctx.fetchImpl;
   const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   if (gh.status !== "ok") return gh;
+  /** The branch the task's is cut from and compared with. */
+  let base = gh.defaultBranch;
 
   // Ruling 122: a task that has never had a branch gets one ALLOCATED here —
   // the canonical key when it is free, `<key>-<4 hex>` when a ref or any past
@@ -698,7 +700,7 @@ export async function ensureTaskBranch(
       //    that could not be read degrades exactly as before.
       let baseRef = await gh.client.request(
         "GET",
-        `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
+        `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${base}`)}`,
         ghRefSchema,
       );
       if (!baseRef.ok && isMissingRefAnswer(baseRef)) {
@@ -713,9 +715,12 @@ export async function ensureTaskBranch(
         if (bootstrap.status === "scope_violation") return bootstrap;
         if (bootstrap.status === "auth_failed") return bootstrap;
         if (bootstrap.status === "network_unavailable") return bootstrap;
+        // Ruling 670: the project may have just taken the repository's own
+        // default branch, so the base is the one the bootstrap names.
+        base = bootstrap.defaultBranch;
         baseRef = await gh.client.request(
           "GET",
-          `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
+          `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${base}`)}`,
           ghRefSchema,
         );
       }
@@ -723,8 +728,8 @@ export async function ensureTaskBranch(
         if (isMissingRefAnswer(baseRef)) {
           return {
             status: "bootstrap_failed",
-            defaultBranch: gh.defaultBranch,
-            reason: `\`${gh.defaultBranch}\` still has no ref after the bootstrap`,
+            defaultBranch: base,
+            reason: `\`${base}\` still has no ref after the bootstrap`,
           };
         }
         if (baseRef.kind === "network") {
@@ -846,14 +851,14 @@ export async function ensureTaskBranch(
       subjectId: branch,
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
-      details: { repo: gh.repo, from: gh.defaultBranch, canonical, branch, suffixed },
+      details: { repo: gh.repo, from: base, canonical, branch, suffixed },
     });
   }
 
   const compareResult = await getBranchCompare(
     gh.client,
     gh.repo,
-    gh.defaultBranch,
+    base,
     branch,
   );
   return {

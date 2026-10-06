@@ -225,6 +225,46 @@ function mirrorCanCheckOut(mirrorDir: string): boolean {
 }
 
 /**
+ * Ruling 670: a mirror's `HEAD` is written once, by the clone that built it,
+ * and names the repository's default branch as it was then: `main` for one
+ * mirrored while it was empty, the old name for one renamed on GitHub since.
+ * While that ref does not exist the mirror cannot serve a clone
+ * (`mirrorCanCheckOut`), and nothing repointed it, because the bootstrap used
+ * to create the missing name on GitHub. It no longer does, so a `HEAD` that
+ * names a missing ref follows the remote's.
+ *
+ * One `ls-remote`, and only in that state with branches to point at. Never
+ * throws: a mirror that could not be repointed is what it was, and the caller
+ * clones from GitHub.
+ */
+async function followRemoteHead(mirrorDir: string, env: NodeJS.ProcessEnv): Promise<void> {
+  if (mirrorCanCheckOut(mirrorDir)) return;
+  try {
+    // A mirror of a repository that has no branch yet has nothing to follow,
+    // and is refreshed too often to pay a second network call each time.
+    const heads = await execFileAsync(
+      "git",
+      ["-C", mirrorDir, "for-each-ref", "--count=1", "refs/heads"],
+      { timeout: 10_000, env: serverGitEnv() },
+    );
+    if (!heads.stdout.trim()) return;
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", mirrorDir, "ls-remote", "--symref", "origin", "HEAD"],
+      { timeout: MIRROR_REFRESH_TIMEOUT_MS, env },
+    );
+    const ref = /^ref:\s+(refs\/heads\/\S+)\s+HEAD$/m.exec(stdout)?.[1];
+    if (!ref) return;
+    await execFileAsync("git", ["-C", mirrorDir, "symbolic-ref", "HEAD", ref], {
+      timeout: 10_000,
+      env: serverGitEnv(),
+    });
+  } catch {
+    // Left as it was.
+  }
+}
+
+/**
  * D1 (pass 23, owner ruling Q3): is THIS clone the cold FIRST-task clone?
  *
  * Only the first task in a project pays the full network clone (minutes on a
@@ -400,6 +440,7 @@ async function ensureProjectMirror(input: {
           env,
         });
         mirrorFetchFailures.delete(mirrorDir);
+        await followRemoteHead(mirrorDir, env);
         return { dir: mirrorDir, refreshed: true };
       } catch (error) {
         // R21-4b: a mirror that EXISTS is worth more than the network that

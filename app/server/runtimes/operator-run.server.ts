@@ -1525,10 +1525,16 @@ export async function ensureOperatorRepoCheckout(
       { projectSlug: input.projectSlug, taskKey: input.taskKey, repo, dir, defaultBranch, dataRoot: input.dataRoot },
       options,
     );
-  if (existsSync(path.join(dir, ".git", "HEAD"))) {
-    await initialize();
-    return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
-  }
+  // Ruling 670: initializing an unborn checkout can move the project onto the
+  // repository's own default branch, so the view names the branch read after.
+  const view = async (): Promise<OperatorWorkspaceView> => {
+    const settled =
+      (await initialize()) === "born"
+        ? defaultBranch
+        : (operatorCheckoutTarget(input)?.defaultBranch ?? defaultBranch);
+    return { kind: "checkout", repo, dir, relativeDir, defaultBranch: settled };
+  };
+  if (existsSync(path.join(dir, ".git", "HEAD"))) return view();
 
   let token: string | null = null;
   // Ruling 249: the operator's checkout is always a network clone, and the
@@ -1602,8 +1608,7 @@ export async function ensureOperatorRepoCheckout(
       taskKey: input.taskKey,
       repo,
     });
-    await initialize();
-    return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
+    return await view();
   } catch (error) {
     if (error instanceof WorkspaceFault) credential = "not_involved";
     const details = cloneFailureLogDetails(error, { token });

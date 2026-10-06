@@ -90,12 +90,13 @@ export async function initializeUnbornCheckout(
       DELIVERY_ACTOR,
       { dataRoot: input.dataRoot, before: "operator-checkout" },
     );
-    if (base.status !== "bootstrapped" && base.status !== "exists") {
-      logger.warn("an empty repository's first commit could not be created before the operator's checkout", {
+    if (base.status !== "bootstrapped" && base.status !== "exists" && base.status !== "adopted") {
+      logger.warn("the repository's base could not be settled before the operator's checkout", {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         repo: input.repo,
         status: base.status,
+        reason: base.status === "bootstrap_failed" ? base.reason : null,
       });
       return "unchanged";
     }
@@ -103,7 +104,10 @@ export async function initializeUnbornCheckout(
       projectSlug: input.projectSlug,
       repo: input.repo,
       dir: input.dir,
-      defaultBranch: input.defaultBranch,
+      // Ruling 670: the branch the bootstrap settled on, which is the
+      // repository's own once the project has taken it. The refresh moves an
+      // unborn checkout onto it from whatever name it was cloned with.
+      defaultBranch: base.defaultBranch,
       fastForward: true,
       createMirror: true,
       taskKey: input.taskKey,

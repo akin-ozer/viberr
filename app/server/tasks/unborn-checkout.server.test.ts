@@ -38,6 +38,15 @@ const REPO = "acme/widgets";
 const REPO_PATH = `/repos/${REPO}`;
 const EMPTY = { status: 409, body: { message: "Git Repository is empty." } };
 
+/** What the fake GitHub is told about the repository. */
+interface FakeRepoState {
+  /** The first-commit write fails, the way a GitHub outage does. */
+  refuse: boolean;
+  /** The branch a person pushed first, which GitHub then calls the default,
+   *  and its head. */
+  own: { branch: string; sha: string } | null;
+}
+
 async function emptyRepoTask() {
   const store = setupTestStore(ctx);
   const origins = ctx.makeTempDir();
@@ -57,10 +66,21 @@ async function emptyRepoTask() {
   // lands a real commit in the local origin the checkout clones from. While
   // `refuse` holds, the write fails the way a GitHub outage does.
   let head: string | null = null;
-  const control = { refuse: false };
+  const control: FakeRepoState = { refuse: false, own: null };
   const gh = fakeGithubFetch({
-    [`GET ${REPO_PATH}/git/ref/heads/main`]: () => (head ? { body: { object: { sha: head } } } : EMPTY),
-    [`GET ${REPO_PATH}/branches`]: () => (head ? { body: [{ name: "main" }] } : EMPTY),
+    [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+      control.own
+        ? { status: 404, body: { message: "Not Found" } }
+        : head
+          ? { body: { object: { sha: head } } }
+          : EMPTY,
+    [`GET ${REPO_PATH}/git/ref/heads/master`]: () =>
+      control.own?.branch === "master"
+        ? { body: { object: { sha: control.own.sha } } }
+        : { status: 404, body: { message: "Not Found" } },
+    [`GET ${REPO_PATH}/branches`]: () =>
+      control.own ? { body: [{ name: control.own.branch }] } : head ? { body: [{ name: "main" }] } : EMPTY,
+    [`GET ${REPO_PATH}`]: () => ({ body: { default_branch: control.own?.branch ?? "main" } }),
     [`PUT ${REPO_PATH}/contents/README.md`]: (call) => {
       if (control.refuse) return { status: 502, body: { message: "Bad Gateway" } };
       // SAFETY: the bootstrap sends the Contents API's JSON body; `content`
@@ -74,16 +94,26 @@ async function emptyRepoTask() {
       return { status: 201, body: { commit: { sha: head } } };
     },
   });
-  const checkout = () =>
+  const checkout = (taskKey = "VIB-1") =>
     withLocalGithub(origins, () =>
       ensureOperatorRepoCheckout(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey, dataRoot: store.dataRoot },
         undefined,
         { fetchImpl: gh.fetchImpl },
       ),
     );
-  return { store, gh, checkout, control, head: () => head };
+  /** A person's first push to the empty repository, on a branch of their own. */
+  const pushOwn = (branch: string): string => {
+    writeFileSync(path.join(origin.seed, "app.txt"), "theirs\n");
+    gitOutSync(origin.seed, ["add", "-A"]);
+    gitOutSync(origin.seed, ["commit", "-qm", "Their first commit"]);
+    gitOutSync(origin.seed, ["push", "-q", origin.bare, `HEAD:refs/heads/${branch}`]);
+    const sha = gitOutSync(origin.seed, ["rev-parse", "HEAD"]);
+    control.own = { branch, sha };
+    return sha;
+  };
+  return { store, gh, checkout, control, pushOwn, head: () => head };
 }
 
 describe("the operator's checkout of an empty repository (ruling 468)", () => {
@@ -130,5 +160,57 @@ describe("the operator's checkout of an empty repository (ruling 468)", () => {
     if (again.kind !== "checkout") throw new Error(again.kind);
     expect(await gitOut(again.dir, ["rev-parse", "HEAD"])).toBe(head());
     expect(existsSync(path.join(again.dir, "README.md"))).toBe(true);
+  });
+
+  it("ruling 670: a repository whose first push was a person's own branch is not given a `main`: the project takes that branch and every unborn checkout moves onto it", async () => {
+    const { store, gh, checkout, control, pushOwn } = await emptyRepoTask();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
+      goal: "Build the other half.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // Two tasks' first clones land on the empty repository while the first
+    // commit cannot be made, so both checkouts are unborn. Then a person
+    // pushes their code on `master`, and GitHub makes it the default branch.
+    control.refuse = true;
+    for (const key of ["VIB-1", "VIB-2"]) {
+      const first = await checkout(key);
+      if (first.kind !== "checkout") throw new Error(first.kind);
+      // The premise: unborn, on the name the project had then.
+      expect(await gitOut(first.dir, ["symbolic-ref", "--short", "HEAD"])).toBe("main");
+    }
+    const refused = gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`).length;
+    const theirs = pushOwn("master");
+    control.refuse = false;
+
+    // CANARY: refresh onto the branch the checkout was made for and it stays
+    // unborn, since `origin/main` does not exist; name that branch in the view
+    // and the operator is told the default is `main` for one more run.
+    const again = await checkout();
+    if (again.kind !== "checkout") throw new Error(again.kind);
+    expect(again.defaultBranch).toBe("master");
+    expect(await gitOut(again.dir, ["rev-parse", "HEAD"])).toBe(theirs);
+    expect(await gitOut(again.dir, ["symbolic-ref", "--short", "HEAD"])).toBe("master");
+    // The second task's run finds the project already on `master`: its
+    // bootstrap answers `exists`, and its checkout moves all the same.
+    // CANARY: move only the checkout whose own run took the branch and this
+    // one stays unborn on `main` for good.
+    const other = await checkout("VIB-2");
+    if (other.kind !== "checkout") throw new Error(other.kind);
+    expect(await gitOut(other.dir, ["rev-parse", "HEAD"])).toBe(theirs);
+    expect(listAuditEvents(store.db, { action: "project.default_branch.adopted" })).toHaveLength(1);
+    // Nothing was written to their repository: the only Contents calls are
+    // the refused first commits, made while it was empty.
+    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(refused);
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
+    expect(gh.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.defaultBranch,
+    ).toBe("master");
+    expect(listAuditEvents(store.db, { action: "project.default_branch.adopted" })[0]).toMatchObject({
+      actorLabel: "system:delivery",
+      taskKey: "VIB-1",
+      details: { repo: REPO, from: "main", to: "master" },
+    });
   });
 });

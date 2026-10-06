@@ -6,9 +6,9 @@ import {
   readTaskFile,
   resolveTaskFilePath,
 } from "~/server/files/task-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { rebuildPath, reprojectProject } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { readProjectFile, updateProjectFile } from "~/server/files/project-writer.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
 import {
   githubFailureMessage,
@@ -41,6 +41,16 @@ import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
  *     default branch and restore the configured name as the repository default
  *     (the repair the owner approved live, Q34-3).
  *
+ * Ruling 670: that repair is for a repository whose default on GitHub is a
+ * branch named for one of the project's tasks. It ran on every repository
+ * that had refs and lacked the project's branch, so a project created while
+ * GitHub was unreachable (written with `main`, unconfirmed), or one whose
+ * default branch was renamed on GitHub, had a `main` created at the first
+ * commit of somebody's `master` and made the repository's default. A default
+ * branch that is not a task's is the repository's own: the project takes it
+ * (`adopted`), `project.md` is the only thing written, and the timeline and
+ * the audit log (`project.default_branch.adopted`) say so.
+ *
  * GitHub answers, recorded for the fakes (see the live-validation step in
  * TESTPLAN V2; update these lines from the observed answers before merge):
  *   GET  /repos/{r}/git/ref/heads/main   → 404 `Not Found` when the ref is
@@ -71,6 +81,10 @@ export type EnsureDefaultBranchResult =
       /** `ref_from_branch_root`: whether the repository default was restored. */
       defaultRestored?: boolean;
     }
+  /** Ruling 670: the repository has a default branch of its own and the
+   *  project named one it does not have. Nothing was created on GitHub: the
+   *  project names the repository's now, and `defaultBranch` is that one. */
+  | { status: "adopted"; defaultBranch: string; was: string }
   | { status: "scope_violation"; scope: string; violationId: string }
   | { status: "auth_failed"; message: string }
   | { status: "network_unavailable"; message: string }
@@ -123,6 +137,30 @@ async function rootCommitOf(
     if (result.data.length < 100) break;
   }
   return oldest ? { sha: oldest } : { failure: { ok: false, kind: "network", message: "no commits" } };
+}
+
+/**
+ * Ruling 670: whether `branch` is named for a task of this project: a task's
+ * key in the form its branch takes (`taskBranchName`, the key lowercased), or
+ * that followed by a suffix (ruling 122's `<key>-<4 hex>`, the older
+ * `<key>-<title>`). An archived task's branch is still a task's.
+ *
+ * The name, never the `branch:` a task records, and without regard to case,
+ * as `LIKE` compares. `reconcileWorkspaceDelivery` records whatever branch a
+ * finished run's checkout stood on unless it is the project's default, so a
+ * project that names the wrong default has tasks recording the repository's
+ * real one, and reading that record here ran the repair on exactly the
+ * repository it must leave alone.
+ */
+export function isTaskBranch(db: DatabaseSync, projectSlug: string, branch: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM task_projections
+          WHERE project_slug = ? AND (lower(task_key) = lower(?) OR ? LIKE lower(task_key) || '-%') LIMIT 1`,
+      )
+      .get(projectSlug, branch, branch) !== undefined
+  );
 }
 
 /**
@@ -287,6 +325,11 @@ export async function ensureDefaultBranch(
         reason: `GitHub reports no default branch for \`${gh.repo}\` although it has refs.`,
       };
     }
+    // Ruling 670: the repair below is for a default branch named for a task.
+    // Any other is the repository's own, and the project takes it.
+    if (from !== base && !isTaskBranch(db, scope.projectSlug, from)) {
+      return adoptRepositoryDefault(db, gh, scope, actor, ctx, from);
+    }
     const root = await rootCommitOf(gh, from);
     // Walking history is a READ of the repository's commits.
     if ("failure" in root) return failureOf(root.failure, base, `walking \`${from}\`'s history`, "read");
@@ -377,6 +420,56 @@ export async function ensureDefaultBranch(
     }
   }
   return outcome;
+}
+
+/**
+ * Ruling 670: the repository has a default branch of its own, and the project
+ * names one it does not have: never confirmed when the project was created
+ * (the probe did not answer), or renamed on GitHub since. Creating the
+ * project's name there and making it the default would rewrite somebody's
+ * repository to match a guess, so the project takes the repository's instead.
+ */
+async function adoptRepositoryDefault(
+  db: DatabaseSync,
+  gh: GithubContext,
+  scope: { projectSlug: string; taskKey?: string | null },
+  actor: AuditActor,
+  ctx: EnsureDefaultBranchContext,
+  from: string,
+): Promise<EnsureDefaultBranchResult> {
+  const was = gh.defaultBranch;
+  // A `project.md` that cannot be written throws, as it does from every other
+  // writer of it: the callers already turn that into their own failure.
+  await updateProjectFile({ projectSlug: scope.projectSlug, dataRoot: ctx.dataRoot }, (parsed) => {
+    parsed.frontmatter.defaultBranch = from;
+  });
+  reprojectProject(db, { dataRoot: ctx.dataRoot }, scope.projectSlug);
+  const audit: Parameters<typeof recordAudit>[1] = {
+    action: "project.default_branch.adopted",
+    actor,
+    subjectKind: "project",
+    subjectId: scope.projectSlug,
+    projectSlug: scope.projectSlug,
+    details: { repo: gh.repo, from: was, to: from },
+  };
+  if (scope.taskKey) audit.taskKey = scope.taskKey;
+  recordAudit(db, audit);
+  if (scope.taskKey) {
+    const ref = { projectSlug: scope.projectSlug, taskKey: scope.taskKey, dataRoot: ctx.dataRoot };
+    if (readTaskFile(ref)) {
+      await appendTimelineEvent(ref, {
+        occurredAt: new Date().toISOString(),
+        type: "github",
+        actor: { kind: "system", systemId: "delivery" },
+        title: null,
+        text: `\`${gh.repo}\` has no **${was}**: its default branch on GitHub is **${from}**, which Viberr did not make. Nothing was created there. This project now uses **${from}** as its default branch.`,
+        toAgent: false,
+        evidence: null,
+      });
+      rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+    }
+  }
+  return { status: "adopted", defaultBranch: from, was };
 }
 
 async function violation(

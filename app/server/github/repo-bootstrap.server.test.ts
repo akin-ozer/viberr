@@ -8,12 +8,13 @@ import {
 } from "../../../test-support/test-store";
 import { fakeGithubFetch, type FakeGithub } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, getPatMetadata, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { getProjectGithubContext } from "./github-context.server";
-import { ensureDefaultBranch } from "./repo-bootstrap.server";
+import { ensureDefaultBranch, isTaskBranch } from "./repo-bootstrap.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -217,7 +218,8 @@ describe("ensureDefaultBranch (ruling 128)", () => {
 
   it("a repository whose only branch is a pushed task branch gets `main` at that branch's first commit and the default restored", async () => {
     // Canary: post the ref with the NEWEST sha (the first page entry) and the
-    // sha assertions fail.
+    // sha assertions fail. Ruling 670: stop reading a task's key as its
+    // branch and `jc-1` is taken as the project's default instead.
     const store = setup();
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 404, body: { message: "Not Found" } },
@@ -313,6 +315,129 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(
       (await ensureDefaultBranch(store.db, offline, { projectSlug: store.slug }, ACTOR, { dataRoot: store.dataRoot })).status,
     ).toBe("network_unavailable");
+  });
+});
+
+/**
+ * Ruling 670: ruling 128's repair is for a repository whose default on GitHub
+ * is a task branch. A default branch that is not one is the repository's own.
+ * The repair used to run there too: a project written with `main` while
+ * GitHub was unreachable, or left on `master` after a rename on GitHub, had
+ * that name created at the first commit of the real default branch and made
+ * the repository's default.
+ */
+describe("ensureDefaultBranch and a repository with a default branch of its own (ruling 670)", () => {
+  /** GitHub's answers for a repository whose default is `branch`, with the
+   *  writes the repair would make answering as they do when it runs. */
+  const routes = (branch: string) => ({
+    [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 404, body: { message: "Not Found" } },
+    [`GET ${REPO_PATH}/branches`]: { body: [{ name: branch }] },
+    [`GET ${REPO_PATH}`]: { body: { default_branch: branch } },
+    [`GET ${REPO_PATH}/commits`]: { body: [{ sha: NEWER }, { sha: ROOT }] },
+    [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/main" } },
+    [`PATCH ${REPO_PATH}`]: { body: { default_branch: "main" } },
+  });
+
+  it("the project takes it when it names a branch the repository does not have, and nothing is created on GitHub", async () => {
+    // CANARY: drop the task-branch question and `main` is created at the
+    // first commit of somebody's `master` and made the repository's default;
+    // skip the reprojection and every later reader still gets `main`.
+    const store = setup();
+    const gh = fakeGithubFetch(routes("master"));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toEqual({ status: "adopted", defaultBranch: "master", was: "main" });
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
+    expect(gh.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.defaultBranch,
+    ).toBe("master");
+    // The projection is what every later reader of the base goes through.
+    expect(contextFor(store, gh).defaultBranch).toBe("master");
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "JC-1", dataRoot: store.dataRoot })!.parsed.timeline[0]!.text,
+    ).toBe(
+      "`akin-ozer/viberr` has no **main**: its default branch on GitHub is **master**, which Viberr did not make. Nothing was created there. This project now uses **master** as its default branch.",
+    );
+    const audits = listAuditEvents(store.db);
+    expect(audits.find((e) => e.action === "project.default_branch.adopted")).toMatchObject({
+      taskKey: "JC-1",
+      details: { repo: "akin-ozer/viberr", from: "main", to: "master" },
+    });
+    expect(audits.some((e) => e.action === "github.repo.bootstrapped")).toBe(false);
+  });
+
+  it("a branch a task recorded is not a task's by that alone: a task that records the repository's default leaves it the repository's", async () => {
+    // A finished run's checkout is recorded as its task's branch unless it
+    // stood on the project's default, so a project naming the wrong default
+    // has tasks recording the real one. CANARY: read `branch:` as well as the
+    // name and the repair runs on a person's `master`.
+    const store = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("JC-1", { title: "Bootstrap the repo", branch: "master" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch(routes("master"));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({ status: "adopted", defaultBranch: "master" });
+    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
+    expect(gh.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
+  });
+
+  it("a branch is a task's when it is a task's key or that with a suffix, in any case, and nothing else", () => {
+    // The refresh asks this of an unborn checkout's branch too. CANARY:
+    // compare the key by case and `JC-1` is nobody's: a checkout unborn on it
+    // is moved off its own task's branch.
+    const store = setup();
+    const rows: [string, boolean][] = [
+      ["jc-1", true],
+      ["JC-1", true],
+      ["jc-1-0c88", true],
+      ["JC-1-rework", true],
+      ["jc-10", false],
+      ["jc-", false],
+      ["xjc-1", false],
+      ["master", false],
+      ["", false],
+    ];
+    for (const [branch, tasks] of rows) {
+      expect(isTaskBranch(store.db, store.slug, branch), branch).toBe(tasks);
+    }
+    expect(isTaskBranch(store.db, "another-project", "jc-1")).toBe(false);
+  });
+
+  it("a task's key with a suffix is a task's branch, an archived task's too: the repair runs and the project keeps its own", async () => {
+    // Ruling 122 allocates `<key>-<4 hex>` when the key is taken. CANARY: ask
+    // only whether the name IS a task's key, or leave archived tasks out, and
+    // `jc-1-0c88` becomes the project's default branch.
+    const store = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("JC-1", { title: "Bootstrap the repo", archived: true }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const gh = fakeGithubFetch(routes("jc-1-0c88"));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({ status: "bootstrapped", how: "ref_from_branch_root", from: "jc-1-0c88" });
+    expect(
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.defaultBranch,
+    ).toBe("main");
   });
 });
 
