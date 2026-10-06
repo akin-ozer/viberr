@@ -201,13 +201,13 @@ function presetAgents(
  * UI-09: this used to be a silent best-effort default-branch fetch — a 404 (a
  * typo'd repo name, or one the token cannot see) was swallowed, the branch fell
  * back to `main`, and the toast reported plain success. The failure surfaced
- * much later, when the first agent delivery could not push. The outcome is
- * REPORTED now so creation can disclose it; creation itself is deliberately not
- * blocked (creating the Viberr project before the GitHub repo exists is a real
- * flow), and a 10s timeout keeps the action from hanging on a blackholed
- * network. The one exception is a creation that asked for the repository
- * (ruling 462, `createRepositoryWhenMissing`): there the probe decides whether
- * to create, so an answer it cannot give refuses instead.
+ * much later, when the first agent delivery could not push. The outcome was
+ * REPORTED and creation went on, so a project could be made before its
+ * repository existed. Ruling 671 (owner, 2026-10-06): a creation GitHub does
+ * not confirm is refused (`reachProjectRepository`). The branch such a project
+ * was written with was a guess, and `defaultBranch` is what keeps a push off
+ * the repository's real default branch. A 10s timeout keeps the action from
+ * hanging on a blackholed network.
  */
 type RepoProbe =
   | {
@@ -355,11 +355,11 @@ async function createRepositoryWhenMissing(
   },
   actor: { userId: string; label: string },
   fetchImpl: typeof fetch | undefined,
-): Promise<{ probe: RepoProbe; note: string }> {
+): Promise<{ probe: RepoProbe; note: string; made: boolean }> {
   const { probe, token, owner, repoName, request } = target;
   const repo = `${owner}/${repoName}`;
   if (probe.status === "ok" || probe.status === "read_only") {
-    return { probe, note: `${repo} already exists on GitHub, so the project uses it as it is.` };
+    return { probe, note: `${repo} already exists on GitHub, so the project uses it as it is.`, made: false };
   }
   if (probe.status === "forbidden") {
     throw AppError.validation(
@@ -404,7 +404,7 @@ async function createRepositoryWhenMissing(
     recordRepositoryCreated(db, target.slug, repo, request.private, actor);
     const after = await probeRemoteRepo(token, repo, fetchImpl);
     reachIt(after);
-    return { probe: after, note: `${made}.` };
+    return { probe: after, note: `${made}.`, made: true };
   }
   // A 5xx or a dropped connection does not say whether GitHub made it (a slow
   // `auto_init` create can outlive the gateway), so GitHub is asked. The probe
@@ -420,7 +420,7 @@ async function createRepositoryWhenMissing(
         created.kind === "network"
           ? "the connection dropped before GitHub answered"
           : `GitHub answered ${created.status}`;
-      return { probe: after, note: `${made}: ${answer}, but the repository is there now.` };
+      return { probe: after, note: `${made}: ${answer}, but the repository is there now.`, made: true };
     }
   }
   throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
@@ -812,7 +812,6 @@ export async function reachProjectRepository(
       `No GitHub connection for "${owner}". Add a PAT for that owner in Instance settings → GitHub connections first.`,
     );
   }
-  let defaultBranch = "main";
   let repoWarning: string | null = null;
   let repoNote: string | null = null;
   // U33-2: the SAME probe, remembered. Creation is the other place that already
@@ -821,88 +820,90 @@ export async function reachProjectRepository(
   // does not exist looked healthy on every surface except its GitHub page while
   // every agent run in it died on the clone. Recorded after the project exists,
   // below; mapped onto the shape the board and the home card already read.
-  let repoAccess: RepoAccessResult | null = null;
-  {
-    const token = getPatToken(db, connection.patId);
-    if (!token && createRepository) {
-      throw AppError.validation(
-        `The ${owner} connection has no token Viberr can read, so ${repo} cannot be created. Replace the token in Instance settings → GitHub connections and ask again.`,
-      );
-    }
-    if (token) {
-      let probe = await probeRemoteRepo(token, repo, ctx.fetchImpl);
-      // Ruling 462: BEFORE project.md, so a refusal leaves nothing behind; the
-      // probe it hands back (the re-probe of a repository it just made) is the
-      // one recorded below.
-      if (createRepository) {
-        const made = await createRepositoryWhenMissing(
-          db,
-          {
-            probe,
-            token,
-            patId: connection.patId,
-            connectionId: connection.id,
-            owner,
-            repoName,
-            slug,
-            request: createRepository,
-          },
-          actor,
-          ctx.fetchImpl,
-        );
-        probe = made.probe;
-        repoNote = made.note;
-      }
-      if (probe.status === "ok") {
-        repoAccess = {
-          status: "connected",
-          repo,
-          remoteDefaultBranch: probe.defaultBranch ?? null,
-          private: false,
-        };
-        if (probe.empty) repoAccess.empty = true;
-        if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
-      } else if (probe.status === "read_only") {
-        // The repo exists and is visible, so we can adopt its default branch —
-        // but the token can't push, so delivery will fail until it's fixed.
-        if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
-        // Readable but not writable is a DELIVERY problem, not an unreachable
-        // repository: the board stays quiet (the GitHub page owns the scope
-        // story) and the connection reads as connected.
-        repoAccess = {
-          status: "connected",
-          repo,
-          remoteDefaultBranch: probe.defaultBranch ?? null,
-          private: false,
-          readOnly: true,
-        };
-        if (probe.empty) repoAccess.empty = true;
-        repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
-      } else if (probe.status === "not_found") {
-        repoAccess = { status: "repo_not_found", repo };
-        repoWarning = `GitHub has no repository ${repo} that this connection can see. Check the name, or create it before agents start delivering.`;
-      } else if (probe.status === "forbidden") {
-        repoAccess = { status: "forbidden", repo, message: `The ${owner} connection's token was refused for ${repo}.` };
-        repoWarning = `The ${owner} connection's token was refused for ${repo}. Agents won't be able to deliver until it's replaced.`;
-      } else {
-        // Transient: recorded so the surfaces can stay quiet about it (a board
-        // that cries wolf while GitHub is briefly down teaches people to ignore
-        // it), and overwritten by the next real probe.
-        repoAccess = { status: "network_unavailable", repo };
-        // Ruling 670: on a repository that has branches and no `main`, the
-        // unconfirmed `main` is replaced by the repository's own default the
-        // first time a task's branch is prepared. One it does have is kept,
-        // and an empty repository gets its first commit on it.
-        repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main"; if the repository has branches and no "main", Viberr takes the repository's own default when a task's first branch is prepared.`;
-      }
-    }
+  const token = getPatToken(db, connection.patId);
+  if (!token) {
+    throw AppError.validation(
+      createRepository
+        ? `The ${owner} connection has no token Viberr can read, so ${repo} cannot be created. Replace the token in Instance settings → GitHub connections and ask again.`
+        : `The ${owner} connection has no token Viberr can read, so ${repo} cannot be confirmed. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.`,
+    );
+  }
+  let probe = await probeRemoteRepo(token, repo, ctx.fetchImpl);
+  // Ruling 462: BEFORE project.md, so a refusal leaves nothing behind; the
+  // probe it hands back (the re-probe of a repository it just made) is the
+  // one recorded below.
+  let madeNow = false;
+  if (createRepository) {
+    const made = await createRepositoryWhenMissing(
+      db,
+      {
+        probe,
+        token,
+        patId: connection.patId,
+        connectionId: connection.id,
+        owner,
+        repoName,
+        slug,
+        request: createRepository,
+      },
+      actor,
+      ctx.fetchImpl,
+    );
+    probe = made.probe;
+    repoNote = made.note;
+    madeNow = made.made;
+  }
+  // Ruling 671: a repository GitHub did not confirm is not created against.
+  // Each refusal is thrown before `project.md` is written, so each can say no
+  // project exists. One Viberr made a moment ago is said to be there: asked
+  // again, the project uses it as it is.
+  if (madeNow && probe.status !== "ok" && probe.status !== "read_only") {
+    throw AppError.validation(
+      `${repoNote} GitHub did not confirm it when asked again, so no project was written. Ask again: the repository is there now, and the project will use it as it is.`,
+    );
+  }
+  if (probe.status === "not_found") {
+    throw AppError.validation(
+      `GitHub has no repository ${repo} that the ${owner} connection can see. Check the owner and the name, give the connection's token access to it, or have Viberr create it with the project. No project was created.`,
+    );
+  }
+  if (probe.status === "forbidden") {
+    throw AppError.validation(
+      `The ${owner} connection's token was refused for ${repo}, so Viberr cannot confirm the repository. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.`,
+    );
+  }
+  if (probe.status === "unreachable") {
+    throw AppError.validation(
+      `Couldn't reach GitHub to confirm ${repo}, so no project was created. Try again once GitHub answers.`,
+    );
+  }
+  if (!probe.defaultBranch) {
+    throw AppError.validation(
+      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. No project was created.`,
+    );
+  }
+  const defaultBranch = probe.defaultBranch;
+  // U33-2: the SAME probe, remembered: the board and the home card read it
+  // from the project's first moment. Readable but not writable is a DELIVERY
+  // problem, not an unreachable repository: the board stays quiet (the GitHub
+  // page owns the scope story) and the connection reads as connected.
+  const repoAccess: RepoAccessResult = {
+    status: "connected",
+    repo,
+    remoteDefaultBranch: defaultBranch,
+    private: false,
+  };
+  if (probe.empty) repoAccess.empty = true;
+  if (probe.status === "read_only") {
+    repoAccess.readOnly = true;
+    repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
   }
 
   // Ruling 468: an empty repository is stated, not warned about: Viberr makes
   // its first commit (ruling 128's bootstrap) before the first task branch.
   // Its dated note (R-repo-2): not with a token that can only read, which
   // GitHub refuses that commit; the fix is the token, and the note says so.
-  if (repoAccess?.status === "connected" && repoAccess.empty) {
+  if (repoAccess.status === "connected" && repoAccess.empty) {
     const empty = repoAccess.readOnly
       ? `${repo} is empty, and this connection's token can only read it, so Viberr cannot create its first commit on ${defaultBranch} yet. Once the token can push, Viberr makes that commit before the first task branch.`
       : `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;

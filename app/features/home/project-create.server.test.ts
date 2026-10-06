@@ -26,6 +26,18 @@ const defaultBranchRow = z.object({ default_branch: z.string() });
 const idRow = z.object({ id: z.string() });
 
 const ctx = createTestDbContext();
+/**
+ * GitHub confirming the repository a project is created against. Ruling 671:
+ * a creation it does not confirm is refused, so a test about anything else
+ * needs the answer.
+ */
+function answeringGithub(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ default_branch: "main" }), { status: 200 })),
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   ctx.cleanup();
@@ -47,6 +59,64 @@ function seedConnection(db: import("node:sqlite").DatabaseSync, userId: string) 
   ).run("akin-ozer", "akin-ozer", pat.id, now, now);
   return pat.id;
 }
+
+/**
+ * Ruling 671 (owner, 2026-10-06): a creation GitHub does not confirm is
+ * refused. It used to go on with a warning and `defaultBranch: main`, a guess
+ * nothing confirmed later, and `defaultBranch` is what keeps a delivery's
+ * push off the repository's real default branch.
+ */
+describe("createProject refuses a repository GitHub does not confirm (ruling 671)", () => {
+  const ghost = { name: "Ghost", key: "GHO", owner: "akin-ozer", repoName: "ghost", policy: "balanced" } as const;
+
+  it("refuses one GitHub does not show, a refused token, an unreachable GitHub and an answer naming no default branch, and writes nothing", async () => {
+    // CANARY: let any of the four through and a project is written against a
+    // repository nobody confirmed, with a default branch nobody read.
+    const answered = (spec: Parameters<typeof fakeGithubFetch>[0][string]) =>
+      fakeGithubFetch({ "GET /repos/akin-ozer/ghost": spec }).fetchImpl;
+    const rows: [typeof fetch, string][] = [
+      [
+        answered({ status: 404, body: { message: "Not Found" } }),
+        "GitHub has no repository akin-ozer/ghost that the akin-ozer connection can see. Check the owner and the name, give the connection's token access to it, or have Viberr create it with the project. No project was created.",
+      ],
+      [
+        answered({ status: 401, body: { message: "Bad credentials" } }),
+        "The akin-ozer connection's token was refused for akin-ozer/ghost, so Viberr cannot confirm the repository. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.",
+      ],
+      [
+        unreachableFetch(),
+        "Couldn't reach GitHub to confirm akin-ozer/ghost, so no project was created. Try again once GitHub answers.",
+      ],
+      [
+        answered({ body: { full_name: "akin-ozer/ghost" } }),
+        "GitHub named no default branch for akin-ozer/ghost, so Viberr cannot tell which branch tasks start from. No project was created.",
+      ],
+    ];
+    for (const [fetchImpl, userMessage] of rows) {
+      const store = setupTestStore(ctx);
+      seedConnection(store.db, store.users.arda.id);
+      await expect(
+        createProject(store.db, ghost, ACTOR, { dataRoot: store.dataRoot, fetchImpl }),
+      ).rejects.toMatchObject({ status: 400, userMessage });
+      expect(readProjectFile({ projectSlug: "ghost", dataRoot: store.dataRoot })).toBeNull();
+      expect(getProjectCredential(store.db, "ghost")).toBeNull();
+      expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(0);
+    }
+  });
+
+  it("a board that delivers results is created with GitHub unreachable: it has no repository to confirm", async () => {
+    // CANARY: probe before asking what the board delivers and a results board
+    // cannot be made offline either.
+    const store = setupTestStore(ctx);
+    const result = await createProject(
+      store.db,
+      { name: "Estimates", key: "EST", delivers: "results", owner: "", repoName: "", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: unreachableFetch() },
+    );
+    expect(result).toMatchObject({ slug: "estimates", repo: null });
+  });
+});
 
 describe("createProject — GitHub connection wiring", () => {
   it("binds the selected connection's PAT and adopts the repo's real default branch", async () => {
@@ -215,7 +285,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   it("balanced = template defaults (pre-work auto, supervised operator)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const r = await createProject(
       store.db,
       { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", policy: "balanced" },
@@ -237,7 +307,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   it("a custom board is not described as the Standard 5-stage workflow", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const r = await createProject(
       store.db,
       {
@@ -272,7 +342,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   it("strict = human-gates the pre-work boundaries (no operator auto-advance)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const r = await createProject(
       store.db,
       { name: "Strict", key: "STR", owner: "akin-ozer", repoName: "s", policy: "strict" },
@@ -302,7 +372,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   it("balanced keeps the shipped template's deliver-review-pr: direct and its automatic move into Review", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const r = await createProject(
       store.db,
       { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", policy: "balanced" },
@@ -322,7 +392,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   it("auto = the operator runs at full autonomy + explicit completion-for-acceptance:direct (Q1)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const r = await createProject(
       store.db,
       { name: "Auto", key: "AUT", owner: "akin-ozer", repoName: "a", policy: "auto" },
@@ -351,7 +421,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   it("AP-04: every preinstalled specialist is stage-eligible on the board creation produced", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const r = await createProject(
       store.db,
       { name: "Eligible", key: "ELG", owner: "akin-ozer", repoName: "e", policy: "balanced" },
@@ -531,7 +601,7 @@ describe("ruling 364: a stage colour is one of twenty preset names, or the door 
   it("accepts a preset name, refuses a hex naming the presets, and colours omitted stages from the presets", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
-    vi.stubGlobal("fetch", vi.fn());
+    answeringGithub();
     const create = (key: string, color: string) =>
       createProject(
         store.db,
@@ -673,6 +743,28 @@ describe("ruling 462: createRepository creates the repository before the project
     expect(audit[0]!.projectSlug).toBe("website");
     expect(audit[0]!.details).toEqual({ repo: "akin-ozer/website", private: true });
     expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(1);
+  });
+
+  it("ruling 671: a repository Viberr just made, which GitHub then does not confirm, is said to be there and no project is written", async () => {
+    // The create answered 201 and the read after it found nothing: GitHub
+    // lagging. CANARY: answer with the plain not-found refusal and a person is
+    // told to check the name of a repository Viberr created a moment ago.
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": { status: 201, body: { full_name: "akin-ozer/website", default_branch: "main" } },
+    });
+    await expect(
+      createProject(store.db, website(), ACTOR, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "Created akin-ozer/website on GitHub (private). GitHub did not confirm it when asked again, so no project was written. Ask again: the repository is there now, and the project will use it as it is.",
+    });
+    expect(readProjectFile({ projectSlug: "website", dataRoot: store.dataRoot })).toBeNull();
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(0);
   });
 
   it("a token that cannot create repositories refuses by name and writes nothing", async () => {

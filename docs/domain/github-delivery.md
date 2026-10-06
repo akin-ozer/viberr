@@ -134,16 +134,18 @@ characters; last 8 lines, 600 characters.
 
 ## 2. Attaching a repository
 
-- **A board that delivers software needs a repository at project creation**: `owner/name`
-  plus an existing connection for that owner. The connection's token probes the repo;
-  success adopts the remote default branch, a read-only repo still creates with a
-  warning, and 404/401/network produce warnings with `defaultBranch` falling back to
-  `main`. That `main` is unconfirmed. A repository that has branches of its own and no
-  `main` is not given one: the first time a task's branch is prepared, the project
-  takes the repository's own default (ruling 670, below). An empty repository gets its
-  first commit on `main`, and one that does have a `main` beside another default keeps
-  the project on `main`; nothing re-reads GitHub's default there. The connection's PAT
-  is bound to the project and proved against the repo.
+- **A board that delivers software needs a repository GitHub confirms at project
+  creation** (ruling 671): `owner/name` plus an existing connection for that owner. The
+  connection's token probes the repo, and creation goes on only when GitHub answers
+  with the repository's default branch, which the project takes; a read-only repo still
+  creates with a warning. A repository GitHub does not show (unless `createRepository`
+  makes it, below), a refused token, an unreachable GitHub and an answer naming no
+  default branch each refuse on all three doors, and nothing is written, bound or
+  recorded. So a software board cannot be made while GitHub is unreachable, or before
+  its repository exists unless the repository is made with it. The connection's PAT is
+  bound to the project and proved against the repo. Until ruling 671 those three arms
+  created the project with a warning and `defaultBranch: main`, a guess nothing
+  confirmed.
 - **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
   software | results` on all three doors (the New project dialog's "This board
   delivers", the controller's `create_project`, and a board import, which reads it off
@@ -249,9 +251,9 @@ characters; last 8 lines, 600 characters.
   and GitHub's default is any other branch, `ensureDefaultBranch` answers `adopted`:
   `project.md`'s `defaultBranch` becomes the repository's, the task's timeline says so,
   and the audit row is `project.default_branch.adopted {repo, from, to}`. Nothing is
-  written to GitHub. This is what happens to a project created while its probe could
-  not answer, to one whose default branch was renamed on GitHub, and to a repository
-  created empty whose first push was a person's own branch. Branch preparation cuts the
+  written to GitHub. This is what happens to a project whose default branch was renamed
+  on GitHub, to a repository created empty whose first push was a person's own branch,
+  and to a project created before ruling 671 while its probe could not answer. Branch preparation cuts the
   task branch from the adopted base, the delivery gate lets it through and the pull
   request is opened against it, a checkout that was never committed to and stands on
   the old name is moved onto it at its next refresh (not one holding staged files, or
