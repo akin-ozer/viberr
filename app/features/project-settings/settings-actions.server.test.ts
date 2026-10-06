@@ -15,6 +15,7 @@ import {
   updateProjectFile,
 } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { repoFootprintTasks } from "~/server/projections/repo-footprint.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
@@ -33,7 +34,6 @@ import {
   removeStage,
   renameStage,
   reorderStages,
-  repoFootprintTasks,
   setBranchCleanup,
   setProjectRulingsKb,
   setRequiredReviewers,
