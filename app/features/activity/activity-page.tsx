@@ -288,6 +288,16 @@ function AuditRow({
             </Link>
           </>
         )}
+        {/* Ruling 681: the row names the document and never quotes it; who may
+            open it reads it there. */}
+        {entry.docHref && (
+          <>
+            {" "}
+            <Link className="linkish" to={entry.docHref}>
+              Open document
+            </Link>
+          </>
+        )}
         {entry.kind === "violation" && (
           <>
             {" "}

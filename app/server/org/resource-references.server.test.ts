@@ -1,13 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore, writeProject } from "../../../test-support/test-store";
+import { setupTestStore } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import {
   countProjectDeploymentGrants,
   countTemplateGrants,
+  auditedResource,
   updateResourceReferences,
 } from "./resource-references.server";
 
@@ -21,40 +22,44 @@ import {
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-function deployProfile(
+const yamlList = (key: string, items: string[]): string[] =>
+  items.length === 0
+    ? [`  ${key}: []`]
+    : [`  ${key}:`, ...items.map((i) => `    - ${i}`)];
+
+/** One org template, `agents/profiles/<id>.md`, named by its id. */
+function writeProfile(
   dataRoot: string,
-  slug: string,
-  resources: { skills?: string[]; mcps?: string[]; kb?: string[] },
+  id: string,
+  kind: string,
+  resources: { skills?: string[]; kb?: string[]; mcps?: string[] },
 ): void {
-  writeProject(dataRoot, {
-    name: "Viberr Core",
-    slug,
-    repo: "akin-ozer/viberr",
-    defaultBranch: "main",
-    taskPrefix: "VIB",
-    nextTaskNumber: 100,
-    stages: GOVERNED_TEMPLATE.stages,
-    workflow: GOVERNED_TEMPLATE.workflow,
-    members: [],
-    agents: [
-      {
-        profileId: "operator",
-        capabilities: [],
-        extras: [],
-        definition: { name: "Operator", resources: { skills: ["viberr-app-expertise"] } },
-      },
-      {
-        profileId: "scout",
-        capabilities: [],
-        extras: [],
-        definition: { name: "Scout", resources },
-      },
-    ],
-    credentialPolicy: null,
-    guardrails: [],
-    requiredReviewers: [],
-  fileLeases: [],
-  });
+  const dir = path.join(dataRoot, "agents", "profiles");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, `${id}.md`),
+    [
+      "---",
+      `id: ${id}`,
+      `name: ${id}`,
+      `kind: ${kind}`,
+      "backends:",
+      "  - claude",
+      "role: Test",
+      "stages: []",
+      "resources:",
+      ...yamlList("skills", resources.skills ?? []),
+      ...yamlList("kb", resources.kb ?? []),
+      ...yamlList("mcps", resources.mcps ?? []),
+      "capabilities: []",
+      "extras: []",
+      "---",
+      "",
+      "A profile.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
 }
 
 function deployedResources(
@@ -72,7 +77,7 @@ function deployedResources(
 describe("updateResourceReferences — project deployments (rewriteProjects)", () => {
   it("rewrites a renamed MCP inside agents[].definition.resources", async () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, {
+    writeBoardHolding(store.dataRoot, store.slug, {
       skills: [],
       mcps: ["vm-memory", "billing-api"],
       kb: [],
@@ -94,7 +99,7 @@ describe("updateResourceReferences — project deployments (rewriteProjects)", (
 
   it("drops a deleted KB from the deployment and leaves the rest alone", async () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, {
+    writeBoardHolding(store.dataRoot, store.slug, {
       skills: ["reviewer"],
       mcps: [],
       kb: ["p13-facts", "release-checklist"],
@@ -113,7 +118,7 @@ describe("updateResourceReferences — project deployments (rewriteProjects)", (
 
   it("does not duplicate the target when a profile already grants both names", async () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, {
+    writeBoardHolding(store.dataRoot, store.slug, {
       skills: ["old-craft", "new-craft"],
       mcps: [],
       kb: [],
@@ -133,7 +138,7 @@ describe("updateResourceReferences — project deployments (rewriteProjects)", (
 
   it("reports nothing changed when no deployment references the slug", async () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: [], kb: [] });
+    writeBoardHolding(store.dataRoot, store.slug, { skills: [], mcps: [], kb: [] });
 
     const result = await updateResourceReferences(
       "kb",
@@ -147,7 +152,7 @@ describe("updateResourceReferences — project deployments (rewriteProjects)", (
 
   it("a malformed project.md cannot block the rewrite of the healthy ones", async () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
+    writeBoardHolding(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
     const brokenDir = path.join(store.dataRoot, "projects", "broken");
     mkdirSync(brokenDir, { recursive: true });
     writeFileSync(path.join(brokenDir, "project.md"), "not: [valid\n---\nnope");
@@ -169,7 +174,7 @@ describe("updateResourceReferences — project deployments (rewriteProjects)", (
 describe("countProjectDeploymentGrants — the read-only twin", () => {
   it("counts a KB granted ONLY by a project deployment (the org-template blind spot)", () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, {
+    writeBoardHolding(store.dataRoot, store.slug, {
       skills: [],
       mcps: [],
       kb: ["p13-facts", "release-checklist"],
@@ -187,9 +192,9 @@ describe("countProjectDeploymentGrants — the read-only twin", () => {
 
   it("counts each deployment that grants the slug across projects", () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
+    writeBoardHolding(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
     // A second project also granting the same MCP — both deployments count.
-    deployProfile(store.dataRoot, "second-project", {
+    writeBoardHolding(store.dataRoot, "second-project", {
       skills: [],
       mcps: ["vm-memory"],
       kb: [],
@@ -202,7 +207,7 @@ describe("countProjectDeploymentGrants — the read-only twin", () => {
 
   it("returns 0 when no deployment grants the slug", () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: [], kb: [] });
+    writeBoardHolding(store.dataRoot, store.slug, { skills: [], mcps: [], kb: [] });
 
     expect(
       countProjectDeploymentGrants("skills", "never-granted", store.dataRoot),
@@ -211,7 +216,7 @@ describe("countProjectDeploymentGrants — the read-only twin", () => {
 
   it("skips a malformed project.md instead of throwing", () => {
     const store = setupTestStore(ctx);
-    deployProfile(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
+    writeBoardHolding(store.dataRoot, store.slug, { skills: [], mcps: ["vm-memory"], kb: [] });
     const brokenDir = path.join(store.dataRoot, "projects", "broken");
     mkdirSync(brokenDir, { recursive: true });
     writeFileSync(path.join(brokenDir, "project.md"), "not: [valid\n---\nnope");
@@ -232,45 +237,6 @@ describe("countProjectDeploymentGrants — the read-only twin", () => {
  * their grants.
  */
 describe("countTemplateGrants — the read-only twin of rewriteTemplates", () => {
-  const yamlList = (key: string, items: string[]): string[] =>
-    items.length === 0
-      ? [`  ${key}: []`]
-      : [`  ${key}:`, ...items.map((i) => `    - ${i}`)];
-
-  function writeProfile(
-    dataRoot: string,
-    id: string,
-    kind: string,
-    resources: { skills?: string[]; kb?: string[]; mcps?: string[] },
-  ): void {
-    const dir = path.join(dataRoot, "agents", "profiles");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      path.join(dir, `${id}.md`),
-      [
-        "---",
-        `id: ${id}`,
-        `name: ${id}`,
-        `kind: ${kind}`,
-        "backends:",
-        "  - claude",
-        "role: Test",
-        "stages: []",
-        "resources:",
-        ...yamlList("skills", resources.skills ?? []),
-        ...yamlList("kb", resources.kb ?? []),
-        ...yamlList("mcps", resources.mcps ?? []),
-        "capabilities: []",
-        "extras: []",
-        "---",
-        "",
-        "A profile.",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-  }
-
   it("counts a grant held only by a template the specialist list hides", () => {
     const store = setupTestStore(ctx);
     // The shipped shape: a resource attached to the CONTROLLER template alone.
@@ -305,5 +271,58 @@ describe("countTemplateGrants — the read-only twin of rewriteTemplates", () =>
     writeFileSync(path.join(dir, "broken.md"), "not a profile at all", "utf8");
 
     expect(countTemplateGrants("mcps", "shared", store.dataRoot)).toBe(2);
+  });
+});
+
+/**
+ * Ruling 681: the boards whose runs are given a resource, which the audit row
+ * of a write to it keeps, and which puts the write on those boards' Activity.
+ */
+describe("auditedResource — the boards given a resource (ruling 681)", () => {
+  // CANARY: drop the `rulingsKb` leg and the board that only names the
+  // knowledge base as its rulings is gone; skip the operator's deployment and
+  // no board holds the operator's skill.
+  it("names each board by the agents that hold the resource, and the board whose rulings it is", () => {
+    const store = setupTestStore(ctx);
+    writeBoardHolding(store.dataRoot, store.slug, { kb: ["mapping"] }, { rulingsKb: "house-rules" });
+    writeBoardHolding(store.dataRoot, "second-project", { kb: ["house-rules", "mapping"] });
+    // A board whose file cannot be read is not asked, and stops nobody.
+    const brokenDir = path.join(store.dataRoot, "projects", "broken");
+    mkdirSync(brokenDir, { recursive: true });
+    writeFileSync(path.join(brokenDir, "project.md"), "not: [valid\n---\nnope");
+
+    expect(auditedResource("kb", "house-rules", store.dataRoot)).toEqual({
+      kind: "kb",
+      key: "house-rules",
+      boards: [
+        { project: "second-project", rulings: false, agents: ["Scout"] },
+        { project: store.slug, rulings: true, agents: [] },
+      ],
+    });
+    expect(auditedResource("skill", "viberr-app-expertise", store.dataRoot).boards).toEqual([
+      { project: "second-project", rulings: false, agents: ["Operator"] },
+      { project: store.slug, rulings: false, agents: ["Operator"] },
+    ]);
+    expect(auditedResource("kb", "nobody-holds-this", store.dataRoot).boards).toEqual([]);
+  });
+
+  // CANARY: read `deployment.definition?.resources` alone, as the count above
+  // does, and the judge that resolves its template holds nothing.
+  it("asks a deployment that wrote no copy of its grants through its template", () => {
+    const store = setupTestStore(ctx);
+    writeProfile(store.dataRoot, "judge", "specialist", { kb: ["golden-set"], mcps: ["pricing"] });
+    writeBoardHolding(
+      store.dataRoot,
+      store.slug,
+      {},
+      { agents: [{ profileId: "judge", capabilities: [], extras: [] }] },
+    );
+
+    expect(auditedResource("kb", "golden-set", store.dataRoot).boards).toEqual([
+      { project: store.slug, rulings: false, agents: ["judge"] },
+    ]);
+    expect(auditedResource("mcp", "pricing", store.dataRoot).boards).toEqual([
+      { project: store.slug, rulings: false, agents: ["judge"] },
+    ]);
   });
 });

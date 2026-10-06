@@ -41,6 +41,7 @@ import {
   getDefaultConnectionTokenFresh,
   type FreshnessOptions,
 } from "./connections.server";
+import { auditedResource } from "./resource-references.server";
 
 /**
  * StoreBrowser server layer (kb-browser spec §5): every operation is a
@@ -69,6 +70,39 @@ export interface StoreTarget {
   rootAbs: string;
   /** Display root, e.g. "store://kb/api-contracts" (no trailing slash). */
   rootUri: string;
+  /** The grant key agents and a board's rulings name it by: a knowledge
+   *  base's store directory, a skill's folder name. */
+  key: string;
+  /** The data root the folder is under, when it is not the default one: where
+   *  the boards that hold the resource are read (ruling 681). */
+  dataRoot?: string;
+}
+
+/**
+ * The audit row of one write into a store folder.
+ *
+ * Ruling 681: it says which resource was written (`resource.kind` and `key`;
+ * the row otherwise names only a row id and a path inside the folder) and
+ * which boards' runs are given it at this moment (`resource.boards`), which is
+ * what puts the write on those boards' Activity.
+ */
+function recordStoreWrite(
+  db: DatabaseSync,
+  target: StoreTarget,
+  action: string,
+  actor: AuditActor,
+  details: AuditDetails,
+): void {
+  recordAudit(db, {
+    action,
+    actor,
+    subjectKind: `org_${target.kind}`,
+    subjectId: target.id,
+    details: {
+      ...details,
+      resource: auditedResource(target.kind, target.key, target.dataRoot),
+    },
+  });
 }
 
 // ------------------------------------------------------------------ scan
@@ -377,12 +411,9 @@ export function writeStoreFiles(
 
   if (cleaned.length > 0) {
     touchResource(db, target);
-    recordAudit(db, {
-      action: "org.store.files_added",
-      actor,
-      subjectKind: `org_${target.kind}`,
-      subjectId: target.id,
-      details: { path: base.join("/"), count: cleaned.length },
+    recordStoreWrite(db, target, "org.store.files_added", actor, {
+      path: base.join("/"),
+      count: cleaned.length,
     });
   }
   return {
@@ -439,12 +470,8 @@ export function createStoreFolder(
   }
   mkdirSync(path.join(target.rootAbs, ...base, ...segs), { recursive: true });
   touchResource(db, target);
-  recordAudit(db, {
-    action: "org.store.folder_created",
-    actor,
-    subjectKind: `org_${target.kind}`,
-    subjectId: target.id,
-    details: { path: [...base, ...segs].join("/") },
+  recordStoreWrite(db, target, "org.store.folder_created", actor, {
+    path: [...base, ...segs].join("/"),
   });
   return { createdPath: [...base, ...segs] };
 }
@@ -585,6 +612,12 @@ export function writeStoreDoc(
      * the controller checks its own (ruling 305).
      */
     replaces?: string;
+    /**
+     * Ruling 681: the task whose correction, or whose correction's undo, this
+     * write is (ruling 498). That task's timeline already says so, so its
+     * board's Activity does not show the write a second time.
+     */
+    onTask?: { projectSlug: string; taskKey: string };
   } = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
@@ -646,13 +679,8 @@ export function writeStoreDoc(
   };
   if (appendedBytes !== undefined) details.appended = appendedBytes;
   if (opts.edit) details.edited = { replaced: opts.edit.replaced, text: opts.edit.text };
-  recordAudit(db, {
-    action: "org.store.doc_written",
-    actor,
-    subjectKind: `org_${target.kind}`,
-    subjectId: target.id,
-    details,
-  });
+  if (opts.onTask) details.task = { project: opts.onTask.projectSlug, key: opts.onTask.taskKey };
+  recordStoreWrite(db, target, "org.store.doc_written", actor, details);
   const result: StoreDocResult = {
     path: [...base, withExt],
     bytes: written.length,
@@ -691,13 +719,13 @@ export function deleteStoreNode(
   const filesRemoved = wasDir ? countKbFiles(scanStoreTree(abs)) : 1;
   rmSync(abs, { recursive: true, force: true });
   touchResource(db, target);
-  recordAudit(db, {
-    action: wasDir ? "org.store.folder_deleted" : "org.store.file_deleted",
+  recordStoreWrite(
+    db,
+    target,
+    wasDir ? "org.store.folder_deleted" : "org.store.file_deleted",
     actor,
-    subjectKind: `org_${target.kind}`,
-    subjectId: target.id,
-    details: { path: parts.join("/"), filesRemoved },
-  });
+    { path: parts.join("/"), filesRemoved },
+  );
   return { name: parts[parts.length - 1]!, wasDir, filesRemoved };
 }
 
@@ -965,19 +993,13 @@ export async function importGithubSnapshot(
     touchResource(db, target);
     const fileSource = `${owner}/${repo}/${subPath}`;
     const destination = [...base, filename].join("/");
-    recordAudit(db, {
-      action: "org.store.github_import",
-      actor,
-      subjectKind: `org_${target.kind}`,
-      subjectId: target.id,
-      details: {
-        source: fileSource,
-        branch,
-        folder: destination,
-        fileCount: 1,
-        skipped: 0,
-        truncated: false,
-      },
+    recordStoreWrite(db, target, "org.store.github_import", actor, {
+      source: fileSource,
+      branch,
+      folder: destination,
+      fileCount: 1,
+      skipped: 0,
+      truncated: false,
     });
     return {
       status: "imported",
@@ -1096,19 +1118,13 @@ export async function importGithubSnapshot(
   // Store-relative destination: what the client expands, and the honest answer
   // to "where did my import go" now that it is not always the root.
   const destination = [...base, folder].join("/");
-  recordAudit(db, {
-    action: "org.store.github_import",
-    actor,
-    subjectKind: `org_${target.kind}`,
-    subjectId: target.id,
-    details: {
-      source,
-      branch,
-      folder: destination,
-      fileCount: written,
-      skipped,
-      truncated,
-    },
+  recordStoreWrite(db, target, "org.store.github_import", actor, {
+    source,
+    branch,
+    folder: destination,
+    fileCount: written,
+    skipped,
+    truncated,
   });
   const suffix = [
     ...(truncated ? [" (truncated)"] : []),

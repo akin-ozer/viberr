@@ -7,9 +7,10 @@ import type {
   CapabilityMode,
 } from "~/schemas/project-file.schema";
 import {
+  deploymentName,
+  deploymentResources,
   deploymentRuntimeIdentity,
   OPERATOR_FIXED_FIELDS,
-  OPERATOR_NAME,
   OPERATOR_SCOPE,
   primaryRunBackend,
   readTemplate,
@@ -554,10 +555,7 @@ export function effectiveProfileView(
     kind,
     // Ruling 518: the operator is called Operator, whatever its template or an
     // older save says, and has no role.
-    name:
-      kind === "operator"
-        ? OPERATOR_NAME
-        : (def?.name ?? template?.name ?? deployment.profileId),
+    name: deploymentName(deployment, { def, template, kind }),
     // U12 residual: a specialist's default was "Specialist", retired
     // vocabulary, and the one value the card cannot improve on, since
     // `profileRoleLabel` only rewrites a role that is empty or repeats the
@@ -617,11 +615,7 @@ export function effectiveProfileView(
     ),
     capabilities,
     extras,
-    resources: {
-      skills: def?.resources?.skills ?? template?.resources.skills ?? [],
-      mcps: def?.resources?.mcps ?? template?.resources.mcps ?? [],
-      kb: def?.resources?.kb ?? template?.resources.kb ?? [],
-    },
+    resources: deploymentResources({ def, template }),
     // Ruling 156 (F35-7): the grants signal beside the identity one. A copy
     // exists only when the deployment wrote `definition.resources`; a
     // definition-less row resolves the template live and cannot drift.

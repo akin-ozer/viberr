@@ -242,6 +242,7 @@ the only gates. Jobs run again since 2026-10-01.
 | `mcp-oauth-server.ts` | `startOAuthMcpServer(options)`: an in-test MCP server that signs in with OAuth the way Cloudflare's does (401 with `resource_metadata`, dynamic client registration, PKCE S256, refresh and revocation), and `signInWithOAuth` / `consentAt`, which go through the real `startMcpOAuthSignIn` / `completeMcpOAuthSignIn` (ruling 469) |
 | `cloudflare-read-only-grant.ts` | `CLOUDFLARE_READ_ONLY_SCOPES` / `CLOUDFLARE_READ_ONLY_GRANT`: the 194 read scopes Cloudflare's read-only consent template granted the live sign-in (ruling 486) |
 | `kb-legacy-proposals.ts` | `withLegacyProposals(text, inputs)`: a knowledge-base document with a "Proposed corrections (not binding)" section, byte for byte the way rulings 378 and 483 filed them, for the readers that still meet one after ruling 498 |
+| `resource-boards.ts` | `writeBoardHolding(dataRoot, slug, resources, more?)`: one board's `project.md` whose Scout holds the given skills, knowledge bases and MCP servers beside an Operator, for the suites that ask which boards are given a resource (ruling 681) |
 | `css-rules.ts` | the one parser of `app/app.css` the stylesheet gates share (`cssRules`, `declsFor`, `requiredDecls`, `selectorParts`) |
 | `perf-*.ts`, `perf-budgets/`, `render-counter.ts`, `revalidation-harness.tsx`, `static-imports.ts`, `console-fixture.ts` | the ruling-457 perf harnesses and budget tables; [performance.md](performance.md) §4 documents them |
 

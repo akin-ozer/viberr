@@ -410,6 +410,18 @@ raw vendor line never reach an audit row.
   `boundary: approval` is never written (ruling 151).
 - `project.required_reviewers.updated` records the ruling-178 rule (via the controller
   or the project settings form).
+- Every write to a knowledge base, a skill or an MCP server that changes what a run is
+  given carries `resource {kind: "kb" | "skill" | "mcp", key, boards: [{project,
+  rulings, agents}]}` (ruling 681): the grant key, and the boards that name it as their
+  rulings or whose deployed agents hold it, as they stood at the write. That is every
+  `org.store.*` row (which before named only a row id and a path inside the folder), a
+  knowledge base's rename (`renamedFrom`), `org.kb.privacy` and `org.kb.deleted`, a
+  skill's rewrite or rename and `org.skill.deleted`, and `org.mcp.updated`,
+  `org.mcp.tool_policy.changed` (on a server that exists) and `org.mcp.removed`. A
+  delete asks before it drops the grants. A save that changes only a knowledge base's
+  display name or refresh mode, or a skill's summary, carries none.
+  `org.store.doc_written` also carries `task {project, key}` when the write is an
+  agent's correction or its undo (ruling 498).
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),
   `bypassedGates` (the same list), `skippedStages`, `validation` and `withdrawnPacket`
   (U35-3; null when the force answered the open decision instead, ruling 471).
@@ -440,7 +452,17 @@ Where it is read:
 - **S3 push**: a single `s3_audit_config` row (bucket, region, prefix, optional
   endpoint, access key, sealed secret) and the `audit-export-s3` intent, which PUTs a
   full export with a hand-rolled SigV4 signature.
-- **Project Activity page**: project-scoped rows for members.
+- **Project Activity page**: project-scoped rows for members, and the instance rows
+  about what the board's runs are given (ruling 681). A write to a knowledge base, a
+  skill or an MCP server is audited with no project and names, in `resource`, the boards
+  whose runs are given it at that moment; each of those boards' audit panel shows the row as a
+  change ("<person> edited a passage of **rules.md** in the project's rulings
+  **house-rules**.", "… rewrote the skill **estimating**, which Scout uses."). No
+  sentence quotes a document: an edit's `edited` passage is read as whether there was
+  one, so a private knowledge base (ruling 578) is safe whoever reads the panel. An org
+  admin's row links the knowledge-base document it wrote; nobody else is handed the
+  link. A write that is an agent's correction or its undo names its task (`task`) and
+  is left off that task's board, whose Stream already carries the task's entry.
 - Derived facts: the Policy page's "last change" chip, the GitHub page's "last checked"
   time, and Insights' packet and time-to-review metrics.
 

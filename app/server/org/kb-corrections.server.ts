@@ -577,7 +577,11 @@ export async function mergeKbCorrection(
     if (undoneAnchored) return undoneAnchored;
     const segments = located.rel.split("/");
     const name = segments.pop()!;
-    writeStoreDoc(db, target, segments, name, next, input.actor, { overwrite: true });
+    // Ruling 681: the task's own entry is this board's record of the write.
+    writeStoreDoc(db, target, segments, name, next, input.actor, {
+      overwrite: true,
+      onTask: { projectSlug: input.projectSlug, taskKey: input.taskKey },
+    });
     const at = (input.now ?? new Date()).toISOString();
     const correction: KbCorrection = {
       id: `kc-${sha256Hex(`${input.kb}\n${located.rel}\n${recorded.replaced ?? ""}\n${recorded.text}\n${at}`).slice(0, 10)}`,
@@ -805,7 +809,10 @@ export async function undoKbCorrection(
         : raw.slice(0, at) + asDocText(correction.replaced, eol) + raw.slice(at + text.length);
     const segments = located.rel.split("/");
     const name = segments.pop()!;
-    writeStoreDoc(db, target, segments, name, next, actor, { overwrite: true });
+    writeStoreDoc(db, target, segments, name, next, actor, {
+      overwrite: true,
+      onTask: { projectSlug: correction.projectSlug, taskKey: correction.taskKey },
+    });
     const reason = input.reason?.trim() || null;
     recordAudit(db, {
       action: KB_CORRECTION_UNDONE_ACTION,

@@ -14,8 +14,14 @@ import {
   parseAgentProfileContent,
   serializeAgentProfile,
 } from "~/server/files/agent-profile-file.server";
+import {
+  deploymentName,
+  deploymentResources,
+  deploymentRuntimeIdentity,
+} from "~/server/agents/deployment-view.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
+import type { OrgResourceKind } from "./resource-events.server";
 
 /**
  * Referential integrity for agent RESOURCES (P13-KM-07).
@@ -262,4 +268,87 @@ export function countTemplateGrants(
     }
   }
   return count;
+}
+
+/** The grant list of a deployment each kind is held in. */
+const GRANT_LIST = {
+  kb: "kb",
+  skill: "skills",
+  mcp: "mcps",
+} as const satisfies Record<OrgResourceKind, ResourceKind>;
+
+/** One board whose runs are given a resource. A type literal, not an
+ *  interface: it is written into an audit row's `details`. */
+export type ResourceBoard = {
+  project: string;
+  /** A knowledge base the board names as its rulings (ruling 239): every run
+   *  on the board reads it, whoever holds it. */
+  rulings: boolean;
+  /** The deployed agents that hold it, by name, the operator among them. */
+  agents: string[];
+};
+
+/** The resource a write changed and the boards given it, as the write's audit
+ *  row keeps them. `kind` is the row's `subject_kind` without `org_`. */
+export type AuditedResource = {
+  kind: OrgResourceKind;
+  /** The grant key: a knowledge base's store directory, a skill's folder
+   *  name, an MCP server's name. */
+  key: string;
+  boards: ResourceBoard[];
+};
+
+/**
+ * Ruling 681: the boards whose runs are given one org resource right now, for
+ * the audit row of a write to it.
+ *
+ * A knowledge base, a skill and an MCP server are kept for the instance, and a
+ * write to one is audited with no project: live on 2026-10-07 the controller
+ * edited the AWS calculator board's rulings and three of its agents' skills,
+ * and the board's Activity showed none of it. A board is given a resource
+ * when its `project.md` names it as `rulingsKb` or a deployed agent holds it
+ * (`deploymentResources`: the deployment's own copy, or its template's when
+ * it wrote none). The row keeps the answer as it stood at the write, so a
+ * board's history does not change when a grant does, and a delete is asked
+ * BEFORE it drops the grants.
+ *
+ * `heldAs` is the key the grants still carry when a rename is audited before
+ * its references are rewritten. Never throws: a projects folder that cannot be
+ * listed names no board and a project.md that cannot be read is skipped,
+ * exactly as the rewrite skips it, because a write is never refused for its
+ * audit row.
+ */
+export function auditedResource(
+  kind: OrgResourceKind,
+  key: string,
+  dataRoot?: string,
+  heldAs: string = key,
+): AuditedResource {
+  const boards: ResourceBoard[] = [];
+  const root = projectsDir(dataRoot);
+  let projects: string[] = [];
+  try {
+    if (heldAs && existsSync(root)) projects = readdirSync(root).sort();
+  } catch {
+    projects = [];
+  }
+  for (const project of projects) {
+    if (!existsSync(path.join(root, project, "project.md"))) continue;
+    try {
+      const read = readProjectFile({ projectSlug: project, dataRoot });
+      if (!read) continue;
+      const fm = read.parsed.frontmatter;
+      const rulings = kind === "kb" && (fm.rulingsKb ?? "").trim() === heldAs;
+      const agents = fm.agents.flatMap((deployment) => {
+        const identity = deploymentRuntimeIdentity(deployment, dataRoot);
+        return deploymentResources(identity)[GRANT_LIST[kind]].includes(heldAs)
+          ? [deploymentName(deployment, identity)]
+          : [];
+      });
+      if (rulings || agents.length > 0) boards.push({ project, rulings, agents });
+    } catch {
+      // Unreadable project: it cannot be asked what it holds.
+    }
+  }
+  return { kind, key, boards };
 }

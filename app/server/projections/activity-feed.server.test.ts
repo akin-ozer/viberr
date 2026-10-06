@@ -13,6 +13,13 @@ import {
 } from "./policy-violations.server";
 import { rebuildAll } from "./rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
+import { writeBoardHolding } from "../../../test-support/resource-boards";
+import { encodeActorRef } from "~/server/files/actor-ref.server";
+import { editKbPassage, mergeKbCorrection } from "~/server/org/kb-corrections.server";
+import type { OrgResourceKind } from "~/server/org/resource-events.server";
+import type { ResourceBoard } from "~/server/org/resource-references.server";
+import { resolveStoreTarget, saveKnowledgeBase, saveSkill } from "~/server/org/resources.server";
+import { writeStoreDoc } from "~/server/org/store-files.server";
 import {
   countActivityStream,
   countAuditLog,
@@ -924,5 +931,279 @@ describe("ruling 503: epic rows on the audit column", () => {
     expect(listAuditLog(store.db, store.slug, { filters: { kind: "audit" } }).map((r) => r.text)).toEqual([
       "Goal **goal-4** became epic **epic-4** (Launch) with 3 tasks.",
     ]);
+  });
+});
+
+/**
+ * Ruling 681: a write to a knowledge base, a skill or an MCP server is audited
+ * for the instance, with no project. The boards whose runs are given the
+ * resource see it on their audit panel, as a sentence that names the document
+ * and quotes none of it.
+ */
+describe("ruling 681: the instance writes to what a board's runs are given", () => {
+  /** A knowledge base in the store's own root, and the target writes go through. */
+  async function kbNamed(store: ReturnType<typeof setupTestStore>, name: string) {
+    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const { kb } = await saveKnowledgeBase(store.db, { name, refresh: "manual" }, actor, {
+      dataRoot: store.dataRoot,
+    });
+    return resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+  }
+
+  // CANARY: put `edited.text` (or `.replaced`) into the edit's sentence and the
+  // passage of a document reaches every member of the board; drop the board
+  // from `resourceRowsWhere` and the other board reads all four rows.
+  it("a board's panel shows a write to its rulings and to what its agents hold, quoting nothing, and no other board's", async () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const actor = { userId: arda.id, label: encodeControllerInstrument(arda.email) };
+    const where = { dataRoot: store.dataRoot };
+    const rules = await kbNamed(store, "House rules");
+    const golden = await kbNamed(store, "Golden set");
+    const elsewhere = await kbNamed(store, "Elsewhere");
+    const { skill } = await saveSkill(
+      store.db,
+      { name: "estimating", summary: "How to estimate.", body: "# v1" },
+      actor,
+      where,
+    );
+    writeBoardHolding(
+      store.dataRoot,
+      store.slug,
+      { kb: ["golden-set"], skills: ["estimating"] },
+      { rulingsKb: "house-rules" },
+    );
+    writeBoardHolding(store.dataRoot, "other-board", { skills: ["something-else"] });
+
+    writeStoreDoc(store.db, rules, [], "proposal.md", "one\nSECRET-LINE\nthree\n", actor);
+    const edit = await editKbPassage(
+      store.db,
+      { kb: "house-rules", doc: "proposal.md", was: "SECRET-LINE", now: "REPLACED-LINE", actor },
+      where,
+    );
+    expect(edit.ok).toBe(true);
+    writeStoreDoc(store.db, golden, [], "key.md", "SECRET-KEY\n", actor);
+    await saveSkill(
+      store.db,
+      { id: skill.id, name: "estimating", summary: "How to estimate.", body: "# v2 SECRET-SKILL" },
+      actor,
+      where,
+    );
+    // Nobody on either board is given this one.
+    writeStoreDoc(store.db, elsewhere, [], "notes.md", "n\n", actor);
+
+    const who = `${arda.name} (via the controller)`;
+    const panel = listAuditLog(store.db, store.slug);
+    expect(panel.map((e) => e.text)).toEqual([
+      `${who} rewrote the skill **estimating**, which Scout uses.`,
+      `${who} added the document **key.md** to the knowledge base **golden-set**, which Scout reads.`,
+      `${who} edited a passage of **proposal.md** in the project's rulings **house-rules**.`,
+      `${who} added the document **proposal.md** to the project's rulings **house-rules**.`,
+    ]);
+    expect(panel.every((e) => e.kind === "change" && e.taskKey === null)).toBe(true);
+    expect(JSON.stringify(panel)).not.toMatch(/SECRET|REPLACED/);
+    // The document a row wrote, for the route to link for who may open it.
+    expect(panel.map((e) => e.doc)).toEqual([
+      undefined,
+      { kb: "golden-set", doc: "key.md" },
+      { kb: "house-rules", doc: "proposal.md" },
+      { kb: "house-rules", doc: "proposal.md" },
+    ]);
+    expect(countAuditLog(store.db, store.slug)).toBe(4);
+    // One option per person, whichever instrument wrote the row.
+    expect(auditFilterActors(store.db, store.slug).map((o) => o.label)).toEqual([arda.name]);
+
+    // They are changes, by a person, on no task.
+    const filtered = (filters: Parameters<typeof listAuditLog>[2] & object) =>
+      listAuditLog(store.db, store.slug, filters).length;
+    expect(filtered({ filters: { kind: "audit" } })).toBe(0);
+    expect(filtered({ filters: { task: "VIB-1" } })).toBe(0);
+    expect(filtered({ filters: { actor: arda.name } })).toBe(4);
+    expect(filtered({ filters: { q: "golden-set" } })).toBe(1);
+
+    expect(listAuditLog(store.db, "other-board")).toEqual([]);
+    expect(countAuditLog(store.db, "other-board")).toBe(0);
+    expect(auditFilterActors(store.db, "other-board")).toEqual([]);
+  });
+
+  // CANARY: drop `onTask` from the correction's store write, or the
+  // `task.project` term from `resourceRowsWhere`, and the board whose task
+  // already says "Knowledge base corrected" on the Stream shows it again here.
+  it("an agent's correction is not repeated on the board whose task records it, and is shown on another board given the knowledge base", async () => {
+    const store = setupTestStore(ctx);
+    const facts = await kbNamed(store, "Shared facts");
+    writeStoreDoc(store.db, facts, [], "facts.md", "The limit is 10.\n", {
+      userId: store.users.arda.id,
+      label: store.users.arda.email,
+    });
+    writeBoardHolding(store.dataRoot, store.slug, { kb: ["shared-facts"] });
+    writeBoardHolding(store.dataRoot, "second-board", { kb: ["shared-facts"] });
+    const scout = encodeActorRef({
+      kind: "agent",
+      backend: "claude",
+      profileId: "scout",
+      roleHint: "Research",
+    });
+
+    const merged = await mergeKbCorrection(
+      store.db,
+      {
+        kb: "shared-facts",
+        doc: "facts.md",
+        replaces: "The limit is 10.",
+        text: "The limit is 25.",
+        evidence: "Measured it.",
+        projectSlug: store.slug,
+        taskKey: "VIB-7",
+        filedBy: "Scout",
+        actorRef: scout,
+        rulings: false,
+        actor: { userId: null, label: scout },
+      },
+      { dataRoot: store.dataRoot },
+    );
+    expect(merged.ok).toBe(true);
+
+    expect(listAuditLog(store.db, store.slug)).toEqual([]);
+    const [seen, ...rest] = listAuditLog(store.db, "second-board");
+    expect(rest).toEqual([]);
+    expect(seen!.text).toContain(
+      "replaced **facts.md** in the knowledge base **shared-facts**, which Scout reads.",
+    );
+    // The other board is told what changed, not on whose task.
+    expect(JSON.stringify(seen)).not.toMatch(/VIB-7|viberr-core|limit/);
+  });
+
+  const HELD: ResourceBoard = { project: "viberr-core", rulings: false, agents: ["Scout"] };
+  const given = (kind: OrgResourceKind, key: string, board: ResourceBoard = HELD) => ({
+    resource: { kind, key, boards: [board] },
+  });
+  // CANARY: print an import's `source` (a repository's name) in its sentence;
+  // name every holder instead of the first and a count; say "reads" of a
+  // knowledge base that is gone.
+  it.each<[string, AuditEventInput["details"], string]>([
+    [
+      "org.store.doc_written",
+      { path: "log.md", replaced: false, appended: 12, ...given("kb", "facts") },
+      "added to **log.md** in the knowledge base **facts**, which Scout reads.",
+    ],
+    [
+      "org.store.doc_written",
+      { path: "SKILL.md", replaced: true, ...given("skill", "estimating") },
+      "replaced **SKILL.md** in the skill **estimating**, which Scout uses.",
+    ],
+    [
+      "org.store.files_added",
+      { path: "", count: 3, ...given("kb", "facts") },
+      "added 3 files to the knowledge base **facts**, which Scout reads.",
+    ],
+    [
+      "org.store.file_deleted",
+      { path: "old.md", filesRemoved: 1, ...given("kb", "facts") },
+      "deleted **old.md** from the knowledge base **facts**, which Scout reads.",
+    ],
+    [
+      "org.store.folder_deleted",
+      { path: "drafts", filesRemoved: 4, ...given("kb", "facts") },
+      "deleted the folder **drafts** from the knowledge base **facts**, which Scout reads.",
+    ],
+    [
+      "org.store.github_import",
+      { source: "acme/private-repo/docs", fileCount: 2, ...given("kb", "facts") },
+      "imported 2 files from GitHub into the knowledge base **facts**, which Scout reads.",
+    ],
+    [
+      "org.kb.updated",
+      { renamed: true, renamedFrom: "facts", ...given("kb", "true-facts") },
+      "renamed the knowledge base **facts**, which Scout reads, to **true-facts**.",
+    ],
+    [
+      "org.kb.privacy",
+      { private: true, ...given("kb", "golden-set", { ...HELD, agents: ["Judge", "Scout"] }) },
+      "made the knowledge base **golden-set**, which Judge and Scout read, private.",
+    ],
+    [
+      "org.kb.privacy",
+      { private: false, ...given("kb", "rules", { ...HELD, rulings: true, agents: [] }) },
+      "made the project's rulings **rules** open again.",
+    ],
+    [
+      "org.kb.deleted",
+      { ...given("kb", "facts", { ...HELD, agents: ["A", "B", "C", "D", "E"] }) },
+      "deleted the knowledge base **facts**, which A and 4 others read.",
+    ],
+    [
+      "org.skill.updated",
+      { renamed: true, renamedFrom: "estimating", bodyKept: false, ...given("skill", "pricing") },
+      "renamed the skill **estimating**, which Scout uses, to **pricing** and rewrote it.",
+    ],
+    [
+      "org.skill.deleted",
+      { ...given("skill", "pricing") },
+      "deleted the skill **pricing**, which Scout used.",
+    ],
+    [
+      "org.mcp.updated",
+      { renamed: false, ...given("mcp", "aws-pricing") },
+      "changed the MCP server **aws-pricing**, which Scout uses.",
+    ],
+    [
+      "org.mcp.tool_policy.changed",
+      { before: [], after: ["create_estimate"], ...given("mcp", "aws-pricing") },
+      "changed which tools of the MCP server **aws-pricing**, which Scout uses, are marked as writes.",
+    ],
+    [
+      "org.mcp.removed",
+      { ...given("mcp", "aws-pricing") },
+      "removed the MCP server **aws-pricing**, which Scout used.",
+    ],
+  ])("%s reads as what it changed and who on the board is given it", (action, details, sentence) => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    recordAudit(store.db, { action, actor: { userId: arda.id, label: arda.email }, details });
+    expect(listAuditLog(store.db, store.slug).map((e) => e.text)).toEqual([`${arda.name} ${sentence}`]);
+  });
+
+  // CANARY: leave either action out of AUDIT_ACTION_KINDS and the board never
+  // says which knowledge base its rulings became, or that an agent's grants
+  // were replaced by its template's.
+  it("names the knowledge base a board took as its rulings, and a sync of an agent's grants", () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const row = (action: string, details: AuditEventInput["details"]) =>
+      recordAudit(store.db, {
+        action,
+        actor: { userId: arda.id, label: arda.email },
+        projectSlug: store.slug,
+        details,
+      });
+    row("project.rulings_kb.updated", { dir: "house-rules" });
+    row("project.rulings_kb.updated", { dir: null });
+    row("project.agent_profile.resources_synced", { name: "Estimate Judge", templateId: "judge" });
+    expect(listAuditLog(store.db, store.slug).map((e) => e.text)).toEqual([
+      `${arda.name} set **Estimate Judge**'s skills, knowledge bases and MCP servers to its template's.`,
+      `${arda.name} cleared the project's rulings.`,
+      `${arda.name} named **house-rules** the project's rulings.`,
+    ]);
+  });
+
+  // CANARY: sort the two legs by `occurred_at` alone and the board's own row,
+  // written first, is listed as the newer of the two.
+  it("orders an instance row and a board's own row of one millisecond as they were written", () => {
+    const store = setupTestStore(ctx);
+    const arda = { userId: store.users.arda.id, label: store.users.arda.email };
+    recordAudit(store.db, {
+      action: "project.rulings_kb.updated",
+      actor: arda,
+      projectSlug: store.slug,
+      details: { dir: "rules" },
+    });
+    recordAudit(store.db, {
+      action: "org.store.doc_written",
+      actor: arda,
+      details: { path: "a.md", replaced: false, ...given("kb", "rules") },
+    });
+    store.db.prepare(`UPDATE audit_events SET occurred_at = '2026-10-07T10:00:00.000Z'`).run();
+    expect(listAuditLog(store.db, store.slug).map((e) => e.text.includes("a.md"))).toEqual([true, false]);
   });
 });

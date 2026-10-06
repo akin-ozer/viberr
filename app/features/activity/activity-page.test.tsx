@@ -237,6 +237,26 @@ describe("ActivityPage", () => {
     expect(empty.getByText("No policy or access events yet.")).toBeTruthy();
   });
 
+  // CANARY: render the link from the sentence, or for every row, and a row
+  // the loader gave no `docHref` (a member's, or a delete's) offers a page its
+  // reader cannot open.
+  it("ruling 681: a row links the document it wrote only when the loader says where it opens", () => {
+    const href = "/org/settings?tab=resources&kb=house-rules&doc=rules.md";
+    const wrote = {
+      ...AUDIT[1]!,
+      text: "Arda Kaya edited a passage of **rules.md** in the project's rulings **house-rules**.",
+    };
+    const { container } = renderActivity(STREAM, [
+      { ...wrote, id: "evt_admin", docHref: href },
+      { ...wrote, id: "evt_member" },
+    ]);
+    const rows = container.querySelectorAll(".pev-list .pol-ev");
+    const link = rows[0]!.querySelector("a")!;
+    expect(link.textContent).toBe("Open document");
+    expect(link.getAttribute("href")).toBe(href);
+    expect(rows[1]!.querySelector("a")).toBeNull();
+  });
+
   it("audit rows: kind tints, violation status pill, task chips, freeform times", () => {
     const { container } = renderActivity();
     const audit = container.querySelectorAll(".pev-list .pol-ev");

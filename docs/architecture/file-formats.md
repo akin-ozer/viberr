@@ -1034,7 +1034,8 @@ corrected, or as it did before. The record is the audit row (below).
 - **Record.** `task.kb_correction.merged` (subject the task; details `id` = `kc-` and ten hex
   characters, `kb`, `doc`, `rulings`, `replaced`, `text`, `evidence` clipped to 4,000
   characters, `filedBy`, `actorRef`, `bytes`) and `task.kb_correction.undone` (`id`, `kb`,
-  `doc`, `reason`, `byName`), beside the `org.store.doc_written` row every store write makes.
+  `doc`, `reason`, `byName`), beside the `org.store.doc_written` row every store write makes,
+  which for a correction and its undo names the task (`task {project, key}`, ruling 681).
   Audit retention (90 days) bounds how long a correction is listed and undoable.
 
 ## 9. A board file (ruling 653)

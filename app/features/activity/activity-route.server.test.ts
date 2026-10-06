@@ -14,12 +14,15 @@ import { isRuntimeSessionOpen } from "./activity-page";
 
 let app: AppTestContext;
 let ardaId: string;
+/** The board's project admin, who is not an org admin. */
+let elifId: string;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda;
+  elifId = userIds.elif;
 });
 afterAll(() => app.cleanup());
 
@@ -125,5 +128,43 @@ describe("/projects/:slug/activity", () => {
     );
     expect(added).toHaveLength(1);
     expect(isRuntimeSessionOpen(added[0]!)).toBe(true);
+  });
+
+  // CANARY: hand `docHref` to every viewer and a person who cannot open
+  // Instance settings is given its link; send the row as the read model built
+  // it and `doc` rides along to everyone.
+  it("ruling 681: a row that wrote a knowledge-base document links it for an org admin, and for nobody else", async () => {
+    const { recordAudit } = await import("~/server/audit/audit-recorder.server");
+    recordAudit(app.db, {
+      action: "org.store.doc_written",
+      actor: { userId: ardaId, label: "arda@viberr.dev" },
+      subjectKind: "org_kb",
+      subjectId: "kb_house_rules",
+      details: {
+        path: "rules.md",
+        replaced: true,
+        resource: {
+          kind: "kb",
+          key: "house-rules",
+          boards: [{ project: "viberr-core", rulings: true, agents: [] }],
+        },
+      },
+    });
+    const rowFor = async (userId: string) => {
+      const { cookie } = await app.cookieFor(userId);
+      const { audit } = await runLoader("viberr-core", cookie);
+      return audit.find((e) => e.text.includes("**rules.md**"))!;
+    };
+
+    const admin = await rowFor(ardaId);
+    expect(admin.text).toBe(
+      "Arda Kaya replaced **rules.md** in the project's rulings **house-rules**.",
+    );
+    expect(admin).toMatchObject({
+      docHref: "/org/settings?tab=resources&kb=house-rules&doc=rules.md",
+    });
+    const member = await rowFor(elifId);
+    expect(member.text).toBe(admin.text);
+    expect(Object.keys(member)).toEqual(Object.keys(admin).filter((key) => key !== "docHref"));
   });
 });
