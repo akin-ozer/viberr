@@ -369,7 +369,8 @@ baseRefreshes: []                 # ruling 132: every base refresh the operator'
                                   # (ruling 439) is the branch head the merge was made
                                   # on, which lets a revision be followed through
                                   # Viberr's own refreshes instead of re-minted
-branch: vib-142-attach-workspace  # task-key branch; null before creation
+branch: vib-142-attach-workspace  # task-key branch; null before creation, and for
+                                  # good on a task delivered as files (ruling 665)
 archived: false                   # R14-3: filed away, kept for the record —
                                   # leaves the board's default view and the review
                                   # queue, keeps its timeline, restorable; archived

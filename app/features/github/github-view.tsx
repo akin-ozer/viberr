@@ -331,8 +331,8 @@ function BranchesPanel({
           {branches.length === 0 && (
             // Empty state the mock never designed (spec §7.9b).
             <div className="empty sm">
-              No execution branches yet. A task-key branch is created when
-              execution starts.
+              No execution branches yet. A task-key branch is created when an
+              agent that writes the repository starts delivering.
             </div>
           )}
           {branches.map((row) => {

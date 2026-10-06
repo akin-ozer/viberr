@@ -373,7 +373,11 @@ export async function operatorDispatchAgent(
   };
   if (input.reason) selection.reason = input.reason;
   recordAgentSelectionTrace(db, ctx, selection);
-  if (delivers) {
+  // Ruling 665: only a deliverer that writes the repository owns a branch. One
+  // whose delivery is the files it saves on the task (ruling 535) never puts a
+  // commit on one: live, the AWS board left 91 branches on its repository,
+  // none of them ahead of `main`.
+  if (delivers && agent.capabilities.delivery) {
     // Delivery spine (FR31): the agent is about to own the branch — ensure the
     // task-key branch exists on GitHub. Best-effort, degrades cleanly.
     await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);

@@ -134,6 +134,42 @@ test("at 375px the epic page reads in one column, and each task's title keeps a 
   expect(stage!.y).toBeGreaterThanOrEqual(key!.y + key!.height);
 });
 
+test("at 375px a task under a long-named epic does not scroll sideways (ruling 666)", async ({ page }) => {
+  // Live on the AWS board: an epic named "Research and tune the estimate
+  // workflow (round 10: owed choices, priced classes, sourced prices)" made
+  // its tasks' pages 191px wider than a phone.
+  const name = "Research and tune the checkout workflow (round 10: owed choices, priced classes, sourced prices)";
+  await page.goto(EPICS);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "New epic" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "New epic" });
+  await dialog.getByLabel("Name").fill(name);
+  await dialog.getByRole("button", { name: "Create epic" }).click();
+  await expect(page).toHaveURL(`${EPICS}/epic-2`);
+
+  await page.goto("/projects/viberr-core/tasks/VIB-166");
+  await expect(page.locator(".detail")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  const row = page.locator('.kv-row[data-prop="epic"]');
+  await row.getByRole("button", { name: "Epic Checkout polish" }).click();
+  await row.getByRole("menuitemradio", { name }).click();
+  const chip = page.locator(".detail-head .epic-chip");
+  await expect(chip).toContainText(name);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  // CANARY: drop `min-width: 0` from `.hero-field` and the field keeps the
+  // name's whole width: the page scrolls sideways by the difference.
+  const sideways = await page
+    .locator(".detail")
+    .evaluate((detail) => detail.scrollWidth - detail.clientWidth);
+  expect(sideways).toBeLessThanOrEqual(1);
+  // The name gives way instead: it is cut with an ellipsis inside the column.
+  const title = chip.locator(".epic-chip-title");
+  expect(await title.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  const box = await chip.boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+});
+
 test("the epic page and its dialogs have no WCAG 2.2 AA violations", async ({ page }) => {
   await page.goto("/");
   await inBothThemes(page, EPIC, ".epic-task-list", async () => {

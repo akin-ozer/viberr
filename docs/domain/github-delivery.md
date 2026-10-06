@@ -245,8 +245,10 @@ no note. A task that already carries a `branch:` keeps it verbatim — nothing i
 renamed. `ensureTaskBranchBestEffort` (`branch-sync.server.ts`) is the shared
 pre-dispatch hook, called from **both** dispatch paths: the operator's
 (`operatorDispatchAgent`) and a human's (`dispatchAgentRun`, for a delivering run on a
-task with no `branch:` yet). Both are best-effort: a task that cannot reach GitHub still
-runs. The hook DISCLOSES the failures a person can act on (F34-3): `auth_failed`,
+task with no `branch:` yet). Both call it only for a deliverer that writes the
+repository (ruling 665): an agent whose delivery is the files it saves on the task
+(ruling 535) never commits, so its task has no branch and its `branch:` stays null.
+Both are best-effort: a task that cannot reach GitHub still runs. The hook DISCLOSES the failures a person can act on (F34-3): `auth_failed`,
 `network_unavailable`, `bootstrap_failed` and a throw each write one `github` timeline
 event by `system:delivery` ("No task branch could be allocated on GitHub before
 dispatch: …" or "Branch `x` could not be confirmed on GitHub before dispatch: …"), an

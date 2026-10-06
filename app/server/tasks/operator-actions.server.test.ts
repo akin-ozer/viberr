@@ -33,7 +33,7 @@ import {
 import { getRun, upsertRun } from "~/server/runtimes/run-store.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
-import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { drainRunCompletions, installFakeRuntime } from "../../../test-support/fake-runtime";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { waitFor } from "../../../test-support/polling";
 import {
@@ -54,6 +54,7 @@ import { setTaskArchived } from "./task-archive.server";
 import { createTask, updateTaskGoal } from "./task-edits.server";
 import type { TaskActionContext } from "./task-action-core.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
@@ -1023,6 +1024,64 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       authority("full"),
     );
     expect(deliveringEngagement(task("VIB-2").frontmatter)).toBeNull();
+  });
+
+  it("ruling 665: a deliverer that cannot write the repository gets no branch on it", async () => {
+    // Ruling 535's deliverer never commits: its delivery is the files it saves
+    // on the task. The dispatch made its task branch on GitHub all the same,
+    // and live the AWS board left 91 branches on its repository, none of them
+    // ahead of `main`.
+    // CANARY: drop `agent.capabilities.delivery` from the operator's branch
+    // hook, or `ownsBranch` from the run's, and VIB-1 gets `vib-1`.
+    deployRoster(DEFAULT_POLICY);
+    const origins = ctx.makeTempDir("viberr-origins-");
+    const origin = await createLocalOrigin(origins, { repo: "acme/widgets" });
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: "acme/widgets" });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const pat = createPat(store.db, { ...patActor, label: "bot", token: "ghp_filesdeliverer1" }, patActor);
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    seedTask("impl");
+    seedTask("impl", "VIB-2");
+    const createRef = "POST /repos/acme/widgets/git/refs";
+    const github = fakeGithubFetch({
+      "GET /repos/acme/widgets/git/ref/heads/main": { body: { object: { sha: origin.firstCommit } } },
+      "GET /repos/acme/widgets/pulls": { body: [] },
+      [createRef]: { status: 201, body: { object: { sha: origin.firstCommit } } },
+    });
+    vi.stubGlobal("fetch", github.fetchImpl);
+    try {
+      await withLocalGithub(origins, () =>
+        operatorDispatchAgent(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", delivers: true },
+          authority("full"),
+        ),
+      );
+      await interruptRunningRuns("VIB-1");
+      expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("reviewer");
+      expect(github.callsTo(createRef)).toHaveLength(0);
+      expect(task().frontmatter.branch).toBeNull();
+
+      // A deliverer that writes the repository still owns its branch.
+      await withLocalGithub(origins, () =>
+        operatorDispatchAgent(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { projectSlug: store.slug, taskKey: "VIB-2", profileId: "developer" },
+          authority("full"),
+        ),
+      );
+      await interruptRunningRuns("VIB-2");
+      expect(github.callsTo(createRef)).toHaveLength(1);
+      expect(task("VIB-2").frontmatter.branch).toBe("vib-2");
+    } finally {
+      // The interrupted runs settle against the fake, never the real GitHub.
+      await drainRunCompletions();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("refuses `delivers: false` aimed at the CURRENT deliverer — a delivering run cannot be demoted per-dispatch", async () => {
