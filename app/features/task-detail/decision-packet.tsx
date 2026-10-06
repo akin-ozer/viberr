@@ -1584,13 +1584,16 @@ export function DecisionPacket({
           </p>
         )}
 
-        {canResolve && !customSelected && (
+        {canResolve && !customSelected && (!connectsRepository || !blockReason) && (
           // The one input on the app's highest-stakes card wears the same
           // form language as every other input: `.field` + uppercase label +
           // hint (owner feedback 2026-07-26 — it was a bare textarea outside
           // `.field`, so none of the border/focus/typography tokens applied).
           // Hidden while the custom choice is selected: the directive IS the
           // message, and two competing textareas would ask which one counts.
+          // Ruling 674 (owner, 2026-10-06: "hide the repository box too"):
+          // and hidden under "Connect a repository" for a person who cannot
+          // connect one, where it asked for a required value nothing reads.
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
               {/* Ruling 478(e) (F40-31): on an agent's question this box is the
