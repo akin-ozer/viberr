@@ -109,16 +109,29 @@ describe("ruling 672: the repository question's card", () => {
     expect(box(container).value).toBe("acme/site");
   });
 
-  it("is a project admin's to answer: both answers are inert for anyone else, and each says who can", () => {
+  it("is a project admin's to answer: both answers are inert for anyone else, and the card says who answers once", () => {
     // CANARY: drop either row from PACKET_TIER_GATES and a maintainer is
-    // handed a Confirm the server refuses.
+    // handed a Confirm the server refuses. Ruling 673: put a clause or a
+    // hover title back on each answer, or print the selected one's refusal
+    // beside the note, and the card names a project admin again and again;
+    // drop `aria-describedby` and a screen reader on a dimmed answer hears no
+    // reason at all.
     const onResolve = vi.fn();
     const { container } = renderQuestion(QUESTION, false, onResolve);
     const [connect, keep] = radios(container);
-    expect(connect!.textContent).toContain("your role can't connect one (a project admin must)");
-    expect(keep!.textContent).toContain("your role can't decide this for the board (a project admin must)");
-    expect(connect!.getAttribute("title")).toBe("Connecting a repository to the board is reserved for project admins");
-    fireEvent.click(confirmButton(container));
+    for (const answer of [connect!, keep!]) {
+      expect(answer.getAttribute("aria-disabled")).toBe("true");
+      expect(answer.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+      expect(answer.textContent).not.toContain("project admin");
+      expect(answer.getAttribute("title")).toBeNull();
+    }
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toContain(
+      "Both answers decide the board, so a project admin gives one.",
+    );
+    expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
+    const confirm = confirmButton(container);
+    expect(confirm.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+    fireEvent.click(confirm);
     expect(onResolve).not.toHaveBeenCalled();
   });
 
@@ -139,6 +152,28 @@ describe("ruling 672: the repository question's card", () => {
     const admin = renderQuestion(QUESTION, true, () => {}, send);
     expect(admin.container.textContent).not.toContain("a project admin gives one");
     expect(admin.queryByRole("button", { name: "Send to a project admin" })).toBeNull();
+  });
+
+  it("still says why a repository answer is refused on a packet that is not the question's own card", () => {
+    // No writer in the app makes such a packet; a task file edited by hand
+    // can. There the card has no note for both answers, so the selected one
+    // prints its own refusal, as every other gated kind does. CANARY: drop
+    // the kind's `denyNote` as text nobody reads and Confirm is refused there
+    // in silence, described by an element that is not on the page.
+    const { options } = QUESTION;
+    const mixed: PacketRender = {
+      ...QUESTION,
+      options: [options[0]!, { kind: "custom", t: "Something else", d: "", rec: false }],
+    };
+    const onResolve = vi.fn();
+    const { container } = renderQuestion(mixed, false, onResolve);
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toBe(
+      "Connecting a repository to the board is reserved for project admins.",
+    );
+    const confirm = confirmButton(container);
+    expect(confirm.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("tells a person who resolves no packets that a project admin answers, not a maintainer or the task's owner", () => {
@@ -163,5 +198,11 @@ describe("ruling 672: the repository question's card", () => {
       "You can\u2019t answer this decision: both answers decide the board, so a project admin gives one. You can still comment or ask the operator below.",
     );
     expect(note).not.toContain("owner can");
+    // Ruling 673: said once here too, and each answer is described by it.
+    expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toContain("so a project admin gives one");
+    for (const answer of radios(container)) {
+      expect(answer.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+    }
   });
 });

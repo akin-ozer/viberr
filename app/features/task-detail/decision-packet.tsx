@@ -31,7 +31,9 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * visible-backticks was corrected so the model's markdown reads as intended.
  */
 
-/** Ties the Confirm button to its visible refusal reason (E4). */
+/** Ties the Confirm button to its visible refusal reason (E4). On the
+ *  repository question that reason is the card's one note (ruling 673),
+ *  which describes each answer a person cannot give as well. */
 const BLOCK_REASON_ID = "pkt-block-reason";
 /** Ruling 147: where a refused Confirm says the directive is still empty. */
 const CUSTOM_ERR_ID = "pkt-custom-err";
@@ -691,8 +693,14 @@ interface PacketTierGate {
    * `accept_completion` has none on purpose. A packet addressed to someone
    * else's task keeps that option selectable and blocks the Confirm button
    * instead of 403ing on click (adversarial-review #15).
+   *
+   * The repository question's two kinds have neither a title nor a note
+   * (ruling 673): they stand together, on a card whose one note under the
+   * options says who answers, and each inert option is described by that
+   * note. Their `denyNote` is printed only on a packet that is not that
+   * card, which no writer in the app makes.
    */
-  option: { title: string; note: string } | null;
+  option: { title?: string; note?: string } | null;
 }
 
 /**
@@ -803,10 +811,7 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
       // settings door, so the option carries that door's tier.
       held: (grants) => grants.canEditPolicy,
       denyNote: "Connecting a repository to the board is reserved for project admins.",
-      option: {
-        title: "Connecting a repository to the board is reserved for project admins",
-        note: " · your role can't connect one (a project admin must)",
-      },
+      option: {},
     },
   ],
   [
@@ -815,10 +820,7 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
       // Ruling 672: it writes a standing ruling for the whole board.
       held: (grants) => grants.canEditPolicy,
       denyNote: "Deciding that the board keeps no repository is reserved for project admins.",
-      option: {
-        title: "Deciding that the board keeps no repository is reserved for project admins",
-        note: " · your role can't decide this for the board (a project admin must)",
-      },
+      option: {},
     },
   ],
 ]);
@@ -1185,6 +1187,13 @@ export function DecisionPacket({
   // admin's. A maintainer is stranded on it as a contributor-owner is on a
   // maintainer's, so the note and the way up name the admin.
   const boardDecision = p.options.length > 0 && p.options.every((o) => isRepositoryOptionKind(o.kind));
+  // Ruling 673 (owner, 2026-10-06: "trim the repeated \"project admin\"
+  // wording on the card"): that card says who answers ONCE, in the note under
+  // the options. Its answers carry no clause and no hover title of their own
+  // and the selected one's refusal is not printed beside it; the note takes
+  // that line's id, so it describes the refused Confirm and each dimmed
+  // option, and a screen reader on one still hears why.
+  const saidOnce = boardDecision && (everyOptionForbidden || !canResolve);
 
   // The open ask-first ceremony, chosen by the pending option's own `kind`. The
   // list is re-read every render rather than captured at click time, so a packet
@@ -1395,6 +1404,7 @@ export function DecisionPacket({
                   "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
                 }
                 title={refusal?.title}
+                aria-describedby={refusal && saidOnce ? BLOCK_REASON_ID : undefined}
                 onClick={() => {
                   if (blocked) return;
                   selectOption(i);
@@ -1411,7 +1421,7 @@ export function DecisionPacket({
                       user reading a dimmed option has nothing else to go on. */}
                   <div className="od">
                     {renderInlineCode(o.d)}
-                    {refusal ? refusal.note : ""}
+                    {refusal?.note ?? ""}
                   </div>
                   {/* Ruling 269: a create_task option writes a NEW task, and
                     until it is confirmed that task exists only inside the
@@ -1690,7 +1700,7 @@ export function DecisionPacket({
           </div>
         )}
 
-        {canResolve && blockReason && (
+        {canResolve && blockReason && !saidOnce && (
           <p className="deny-note spaced" id={BLOCK_REASON_ID}>
             <Icon name="lock" />
             {blockReason}
@@ -1700,7 +1710,7 @@ export function DecisionPacket({
         {/* F20-17: the viewer cannot resolve this packet at all — say who can,
             once, instead of leaving a live-looking radiogroup with no Confirm. */}
         {!canResolve && (
-          <p className="deny-note spaced">
+          <p className="deny-note spaced" id={saidOnce ? BLOCK_REASON_ID : undefined}>
             <Icon name="lock" />
             {boardDecision ? (
               // Ruling 672: neither a maintainer nor the task's owner can
@@ -1725,7 +1735,7 @@ export function DecisionPacket({
             settle. Name that, and hand the decision UP to a maintainer instead
             of leaving them stranded (server: requestPacketMaintainerDecision). */}
         {everyOptionForbidden && (
-          <div className="deny-note spaced">
+          <div className="deny-note spaced" id={saidOnce ? BLOCK_REASON_ID : undefined}>
             <Icon name="lock" />
             <span>
               {boardDecision ? (

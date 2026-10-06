@@ -3715,6 +3715,18 @@ describe("DecisionPacket — pass-20 governance", () => {
     expect(send).toBeDefined();
     fireEvent.click(send);
     expect(onRequestMaintainer).toHaveBeenCalled();
+    // Ruling 673 trimmed the card to one note on the repository question
+    // only. Here the options sit on different grants, so the selected one
+    // still says which it needs, and Confirm is described by that line alone.
+    // CANARY: let the one-note treatment reach every stranded packet and two
+    // elements carry the id Confirm is described by.
+    expect(container.querySelectorAll("#pkt-block-reason")).toHaveLength(1);
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toBe(
+      "Editing the goal is reserved for maintainers and admins.",
+    );
+    expect(
+      container.querySelector(".packet-actions .btn.primary")!.getAttribute("aria-describedby"),
+    ).toBe("pkt-block-reason");
   });
 
   // Ruling 368: the escalation in flight shows itself on its button. It was
