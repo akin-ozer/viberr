@@ -369,18 +369,12 @@ describe("editKbPassage (ruling 637)", () => {
 
     expect(result).toEqual({ ok: true, bytes: expect.any(Number), previousBytes: Buffer.byteLength(before) });
     expect(read(kb)).toBe("# Facts\n\n- RDS: OnDemand or Reserved, by instance class.\n- Aurora: OnDemand or Reserved.\n");
-    // The edit's write, beside the seed's. Found by what it holds: the two
-    // can land in one millisecond, and rows of one instant have no order.
-    const written = listAuditEvents(store.db, { action: "org.store.doc_written" }).map((row) => row.details);
-    expect(written).toContainEqual(
-      expect.objectContaining({
-        replaced: true,
-        edited: expect.objectContaining({
-          replaced: "- RDS: OnDemand only.",
-          text: "- RDS: OnDemand or Reserved, by instance class.",
-        }),
-      }),
-    );
+    // Newest first: the edit's write, then the seed's.
+    const row = listAuditEvents(store.db, { action: "org.store.doc_written" })[0];
+    expect(row?.details).toMatchObject({
+      replaced: true,
+      edited: { replaced: "- RDS: OnDemand only.", text: "- RDS: OnDemand or Reserved, by instance class." },
+    });
   });
 
   it("refuses a passage that is not there or stands twice, writing nothing, and an empty `now` deletes", async () => {

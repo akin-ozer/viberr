@@ -37,7 +37,15 @@ type AuditEventRow = {
   details_json: string | null;
 };
 
-/** Newest-first, optionally filtered to one action. */
+/**
+ * Newest-first, optionally filtered to one action.
+ *
+ * Rows of one instant come back in the order they were written, newest first
+ * (`rowid`), as the app's own audit readers order them. `occurred_at` is a
+ * millisecond and `id` is random, so ordering ties on `id` returned two rows
+ * written back to back in either order, and a test reading `[0]` as "the row
+ * this call just wrote" failed about one run in eight.
+ */
 export function listAuditEvents(
   db: DatabaseSync,
   options: { limit?: number; action?: string } = {},
@@ -51,12 +59,12 @@ export function listAuditEvents(
       ? db
           .prepare(
             `SELECT * FROM audit_events WHERE action = ?
-             ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+             ORDER BY occurred_at DESC, rowid DESC LIMIT ?`,
           )
           .all(options.action, limit)
       : db
           .prepare(
-            `SELECT * FROM audit_events ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+            `SELECT * FROM audit_events ORDER BY occurred_at DESC, rowid DESC LIMIT ?`,
           )
           .all(limit)
   ) as AuditEventRow[];
