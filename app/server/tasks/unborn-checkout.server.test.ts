@@ -176,6 +176,8 @@ describe("the operator's checkout of an empty repository (ruling 468)", () => {
     for (const key of ["VIB-1", "VIB-2"]) {
       const first = await checkout(key);
       if (first.kind !== "checkout") throw new Error(first.kind);
+      // The premise: unborn, on the name the project had then.
+      expect(await gitOut(first.dir, ["symbolic-ref", "--short", "HEAD"])).toBe("main");
     }
     const refused = gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`).length;
     const theirs = pushOwn("master");

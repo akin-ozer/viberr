@@ -14,7 +14,7 @@ import { findOpenScopeViolation } from "~/server/projections/policy-violations.s
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, getPatMetadata, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { getProjectGithubContext } from "./github-context.server";
-import { ensureDefaultBranch } from "./repo-bootstrap.server";
+import { ensureDefaultBranch, isTaskBranch } from "./repo-bootstrap.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -393,6 +393,28 @@ describe("ensureDefaultBranch and a repository with a default branch of its own 
     expect(result).toMatchObject({ status: "adopted", defaultBranch: "master" });
     expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
     expect(gh.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
+  });
+
+  it("a branch is a task's when it is a task's key or that with a suffix, in any case, and nothing else", () => {
+    // The refresh asks this of an unborn checkout's branch too. CANARY:
+    // compare the key by case and `JC-1` is nobody's: a checkout unborn on it
+    // is moved off its own task's branch.
+    const store = setup();
+    const rows: [string, boolean][] = [
+      ["jc-1", true],
+      ["JC-1", true],
+      ["jc-1-0c88", true],
+      ["JC-1-rework", true],
+      ["jc-10", false],
+      ["jc-", false],
+      ["xjc-1", false],
+      ["master", false],
+      ["", false],
+    ];
+    for (const [branch, tasks] of rows) {
+      expect(isTaskBranch(store.db, store.slug, branch), branch).toBe(tasks);
+    }
+    expect(isTaskBranch(store.db, "another-project", "jc-1")).toBe(false);
   });
 
   it("a task's key with a suffix is a task's branch, an archived task's too: the repair runs and the project keeps its own", async () => {

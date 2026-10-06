@@ -4046,7 +4046,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     expect(timeline[1]!.text).toContain("`d2e0fb0`");
   });
 
-  it("ruling 670: a base the project just took from the repository is pushed against and is the pull request's base", async () => {
+  it("ruling 670: a base the project just took from the repository passes the gate and is the pull request's base", async () => {
     // The gate finds no `main`, a repository with a `master` of its own, and
     // moves the project onto it. CANARY: refuse an adopted base and nothing is
     // pushed; open the pull request against the branch read before the gate

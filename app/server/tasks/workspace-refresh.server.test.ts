@@ -95,13 +95,14 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(describeWorkspaceRefresh(result, "main")).toContain("fast-forwarded the unborn checkout");
   });
 
-  it("ruling 670: an unborn checkout moves onto the default branch from whatever name it was cloned with, unless that name is a task's", async () => {
+  it("ruling 670: a checkout never committed to moves onto the default branch from the name it was cloned with; a task's branch and an orphan branch are left", async () => {
     // A clone of an empty repository is unborn on the name the project had
     // then. Once the project has taken the repository's own default branch,
     // that name never gets a commit. CANARY: keep "unborn and not on the
     // default is a task branch" and the first checkout stays empty for good;
     // move every unborn checkout and a branch an agent just made for its task
-    // is dropped.
+    // is dropped, and `checkout -B` resets a local default branch under an
+    // orphan one, leaving its unpushed commit to the reflog.
     const emptyOrigins = ctx.makeTempDir();
     const empty = await createLocalOrigin(emptyOrigins, { repo: REPO, empty: true });
     const unborn = async (name: string) => {
@@ -110,8 +111,20 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
       return dir;
     };
     const stale = await unborn("stale");
+    // The premise: git names the unborn branch as the remote does.
+    expect(await gitOut(stale, ["symbolic-ref", "--short", "HEAD"])).toBe("main");
     const tasks = await unborn("tasks");
     await exec("git", ["-C", tasks, "checkout", "-q", "-b", "vib-9"]);
+    const recorded = await unborn("recorded");
+    await exec("git", ["-C", recorded, "checkout", "-q", "-b", "feature-x"]);
+    // An orphan branch beside a local `master` that holds an unpushed commit.
+    const orphan = await unborn("orphan");
+    await exec("git", ["-C", orphan, "config", "user.email", "t@t.dev"]);
+    await exec("git", ["-C", orphan, "config", "user.name", "T"]);
+    await exec("git", ["-C", orphan, "checkout", "-q", "-b", "master"]);
+    await exec("git", ["-C", orphan, "commit", "-q", "--allow-empty", "-m", "local only"]);
+    const localOnly = await gitOut(orphan, ["rev-parse", "master"]);
+    await exec("git", ["-C", orphan, "switch", "-q", "--orphan", "scratch"]);
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9") });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     // A person's first push, on `master`.
@@ -120,7 +133,7 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     await exec("git", ["-C", empty.seed, "commit", "-qm", "Their first commit"]);
     await exec("git", ["-C", empty.seed, "push", "-q", empty.bare, "HEAD:refs/heads/master"]);
     const theirs = await gitOut(empty.seed, ["rev-parse", "HEAD"]);
-    const onto = (dir: string) =>
+    const onto = (dir: string, taskBranch: string | null = null) =>
       withLocalGithub(emptyOrigins, () =>
         refreshWorkspaceFromMirror(store.db, {
           projectSlug: store.slug,
@@ -129,14 +142,22 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
           defaultBranch: "master",
           dataRoot: store.dataRoot,
           fastForward: true,
+          taskBranch,
         }),
       );
 
     expect(await onto(stale)).toMatchObject({ status: "fast_forwarded", from: "unborn", head: theirs });
     expect(await gitOut(stale, ["symbolic-ref", "--short", "HEAD"])).toBe("master");
 
+    // Named for a task, and the branch the task records under any name.
     expect(await onto(tasks)).toMatchObject({ status: "fetched", head: "task_branch" });
     expect(await gitOut(tasks, ["symbolic-ref", "--short", "HEAD"])).toBe("vib-9");
+    expect(await onto(recorded, "feature-x")).toMatchObject({ status: "fetched", head: "task_branch" });
+    expect(await gitOut(recorded, ["symbolic-ref", "--short", "HEAD"])).toBe("feature-x");
+
+    expect(await onto(orphan)).toMatchObject({ status: "fetched", head: "task_branch" });
+    expect(await gitOut(orphan, ["symbolic-ref", "--short", "HEAD"])).toBe("scratch");
+    expect(await gitOut(orphan, ["rev-parse", "master"])).toBe(localOnly);
   });
 
   it("a clean checkout behind the origin is fast-forwarded; one with local commits is not", async () => {

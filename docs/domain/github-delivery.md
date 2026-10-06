@@ -138,11 +138,12 @@ characters; last 8 lines, 600 characters.
   plus an existing connection for that owner. The connection's token probes the repo;
   success adopts the remote default branch, a read-only repo still creates with a
   warning, and 404/401/network produce warnings with `defaultBranch` falling back to
-  `main`. That `main` is unconfirmed. A repository that has no `main` is not given one:
-  the first time a task's branch is prepared, the project takes the repository's own
-  default (ruling 670, below). A repository that does have a `main` beside another
-  default keeps the project on `main`; nothing re-reads GitHub's default there. The
-  connection's PAT is bound to the project and proved against the repo.
+  `main`. That `main` is unconfirmed. A repository that has branches of its own and no
+  `main` is not given one: the first time a task's branch is prepared, the project
+  takes the repository's own default (ruling 670, below). An empty repository gets its
+  first commit on `main`, and one that does have a `main` beside another default keeps
+  the project on `main`; nothing re-reads GitHub's default there. The connection's PAT
+  is bound to the project and proved against the repo.
 - **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
   software | results` on all three doors (the New project dialog's "This board
   delivers", the controller's `create_project`, and a board import, which reads it off
@@ -241,7 +242,7 @@ characters; last 8 lines, 600 characters.
   through them cannot be the first one (ruling 468).
 - **A repository with a default branch of its own keeps it** (ruling 670). The second
   repair above runs only when GitHub's default is a branch named for one of the
-  project's tasks: a task's key lowercased, or that followed by a suffix
+  project's tasks: a task's key, or that followed by a suffix, in any case
   (`isTaskBranch`). The name decides, never the `branch:` a task records, because a
   finished run's checkout is recorded as its task's branch whenever it did not stand on
   the project's default. When the project names a branch the repository does not have
@@ -252,11 +253,14 @@ characters; last 8 lines, 600 characters.
   not answer, to one whose default branch was renamed on GitHub, and to a repository
   created empty whose first push was a person's own branch. Branch preparation cuts the
   task branch from the adopted base, the delivery gate lets it through and the pull
-  request is opened against it, every checkout left unborn on the old name is moved
-  onto it at its next refresh, and a project mirror whose `HEAD` names a branch the
-  remote no longer has follows the remote's `HEAD` on its next refresh. Not handled: a
-  checkout that has commits and stands on the old name after a rename is left where it
-  is, and its run records that name as the task's branch.
+  request is opened against it, a checkout that was never committed to and stands on
+  the old name is moved onto it at its next refresh (not one holding staged files, or
+  an untracked file the branch also tracks), and a project mirror whose `HEAD` names a
+  branch the remote no longer has follows the remote's `HEAD` on its next refresh once
+  it holds a branch. Not handled: a checkout that has commits and stands on the old
+  name after a rename is left where it is, and its run records that name as the task's
+  branch; a task that recorded the repository's default as its branch under the wrong
+  default keeps that record.
 - **An empty repository is named, and initialized before anyone reads it** (ruling 468,
   F40-12). Project creation's probe and the GitHub page's access check read `size: 0` on
   `GET /repos/{r}` as the cue and `GET /repos/{r}/commits` answering 409 as the proof

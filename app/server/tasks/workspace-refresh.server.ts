@@ -34,7 +34,8 @@ const FETCH_TIMEOUT_MS = 60_000;
  * delivering dispatch; falling back to a server-side credentialed fetch when
  * the mirror cannot be built), (2) fetch its heads into the checkout's
  * `origin/*`, (3) with `fastForward`, move a checkout that is unborn (on the
- * default branch, or on any name that is no task's: ruling 670) or sits
+ * default branch, or never committed to and on a name that is no task's:
+ * ruling 670) or sits
  * clean on the default branch to `origin/<default>`; a task branch, a dirty
  * tree and a detached HEAD are never touched (`update_branch_from_base` owns a
  * diverged task branch); a branch sharing NO history with the default branch
@@ -243,13 +244,20 @@ export async function refreshWorkspaceFromMirror(
 
   try {
     if (!born) {
-      // Ruling 670: an unborn HEAD on a name that is no task's is the name the
-      // clone was given while the repository had nothing. When the project
-      // has since taken the repository's own default branch, that name never
-      // gets a commit, so the checkout moves like one unborn on the default.
-      const name = symbolic.replace(/^refs\/heads\//, "");
-      const tasks = name === input.taskBranch || isTaskBranch(db, input.projectSlug, name);
-      if (!onDefault && tasks) return { status: "fetched", head: "task_branch", mirrorRefreshed };
+      // Ruling 670: a checkout that never had a commit on any branch, and
+      // whose unborn HEAD is on a name that is no task's, still stands on the
+      // name the clone was given while the repository had nothing. When the
+      // project has since taken the repository's own default branch that name
+      // never gets a commit, so the checkout moves like one unborn on the
+      // default. An unborn HEAD in a checkout that has branches is an orphan
+      // branch somebody made on purpose: `checkout -B` would reset the local
+      // default under it, so it is left where it is.
+      if (!onDefault) {
+        const name = symbolic.replace(/^refs\/heads\//, "");
+        const tasks = name === input.taskBranch || isTaskBranch(db, input.projectSlug, name);
+        const branches = await git(input.dir, ["for-each-ref", "--count=1", "refs/heads"]);
+        if (tasks || branches) return { status: "fetched", head: "task_branch", mirrorRefreshed };
+      }
       await git(input.dir, ["checkout", "-q", "-B", input.defaultBranch, base]);
       const head = await git(input.dir, ["rev-parse", "HEAD"]);
       return { status: "fast_forwarded", head, from: "unborn", mirrorRefreshed };

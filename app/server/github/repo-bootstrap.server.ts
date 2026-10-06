@@ -145,18 +145,19 @@ async function rootCommitOf(
  * that followed by a suffix (ruling 122's `<key>-<4 hex>`, the older
  * `<key>-<title>`). An archived task's branch is still a task's.
  *
- * The name, never the `branch:` a task records. `syncWorkspaceDelivery`
- * records whatever branch a finished run's checkout stood on unless it is the
- * project's default, so a project that names the wrong default has tasks
- * recording the repository's real one, and reading that record here ran the
- * repair on exactly the repository it must leave alone.
+ * The name, never the `branch:` a task records, and without regard to case,
+ * as `LIKE` compares. `reconcileWorkspaceDelivery` records whatever branch a
+ * finished run's checkout stood on unless it is the project's default, so a
+ * project that names the wrong default has tasks recording the repository's
+ * real one, and reading that record here ran the repair on exactly the
+ * repository it must leave alone.
  */
 export function isTaskBranch(db: DatabaseSync, projectSlug: string, branch: string): boolean {
   return (
     db
       .prepare(
         `SELECT 1 FROM task_projections
-          WHERE project_slug = ? AND (lower(task_key) = ? OR ? LIKE lower(task_key) || '-%') LIMIT 1`,
+          WHERE project_slug = ? AND (lower(task_key) = lower(?) OR ? LIKE lower(task_key) || '-%') LIMIT 1`,
       )
       .get(projectSlug, branch, branch) !== undefined
   );

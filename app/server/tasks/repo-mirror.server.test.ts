@@ -369,6 +369,28 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
   });
 
+  it("ruling 670: a mirror built while the repository was empty follows its first branch, whatever that is named", async () => {
+    // The other way a mirror's HEAD names a branch that never comes: the
+    // repository was empty, and its first push was a person's own `master`.
+    // CANARY: follow only a HEAD that once resolved and this mirror never
+    // serves a clone.
+    origin = await createLocalOrigin(origins, { repo: REPO, empty: true });
+    await withLocalGithub(origins, () => clone("a"));
+    writeFileSync(path.join(origin.seed, "app.txt"), "theirs\n");
+    await exec("git", ["-C", origin.seed, "add", "-A"]);
+    await exec("git", ["-C", origin.seed, "commit", "-qm", "Their first commit"]);
+    await exec("git", ["-C", origin.seed, "push", "-q", origin.bare, "HEAD:refs/heads/master"]);
+    await exec("git", [`--git-dir=${origin.bare}`, "symbolic-ref", "HEAD", "refs/heads/master"]);
+
+    const result = await withLocalGithub(origins, () => clone("b"));
+
+    expect(result.viaMirror).toBe(true);
+    expect((await exec("git", ["-C", workspace("b"), "rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim()).toBe(
+      "master",
+    );
+    expect(existsSync(path.join(workspace("b"), "app.txt"))).toBe(true);
+  });
+
   it("a mirror with NO branches never becomes an empty checkout", async () => {
     // `git clone <ref-less repo>` warns and exits 0, so this arm used to report
     // success while handing a specialist a tree with no history and no
