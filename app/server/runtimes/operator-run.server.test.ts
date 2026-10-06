@@ -9,6 +9,7 @@ import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { recordNoRepositoryRuling } from "~/server/org/repository-ruling.server";
+import { resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import {
   updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
@@ -446,6 +447,52 @@ describe("Codex structured operator completion", () => {
     // Nothing was actually performed.
     expect(task().packet).toBeNull();
     expect(task().frontmatter.stage).toBe("impl");
+  });
+
+  it("ruling 672: a plan's ask_for_repository opens the repository question, with its reason and the repository named", async () => {
+    // CANARY: drop the executor's case and the step is carried out as
+    // nothing; swap `reason` and `text` and the person reads a repository
+    // name where the reason should be.
+    await start();
+    expect(adapter.pending!.spec.outputSchema).toMatchObject({
+      properties: { actions: { items: { properties: { tool: { enum: expect.arrayContaining(["ask_for_repository"]) } } } } },
+    });
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "The goal changes code this board has no repository for.",
+        actions: [
+          {
+            tool: "ask_for_repository",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "https://github.com/acme/site",
+            reason: "VIB-1 changes the checkout page, and this board has no repository.",
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      expect(task().packet).toMatchObject({
+        title: "Connect a repository to Viberr Core?",
+        body: "VIB-1 changes the checkout page, and this board has no repository.",
+        cause: `repository:${store.slug}`,
+      });
+    });
+    expect(task().packet!.options.map((o) => [o.kind, o.repo ?? null])).toEqual([
+      ["connect_repository", "acme/site"],
+      ["keep_without_repository", null],
+    ]);
+    // An operator writes neither answer through its own packet options.
+    const kinds = operatorPlanSchemaFor(resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug)).properties
+      .actions.items.properties.packetOptions.items.properties.kind.enum;
+    expect(kinds).toContain("redirect");
+    expect(kinds).not.toContain("connect_repository");
+    expect(kinds).not.toContain("keep_without_repository");
   });
 
   /**
@@ -6280,6 +6327,31 @@ describe("R19-1 — the operator's read-only repository view", () => {
     );
     expect(prompt).not.toContain("When this task cannot be done that way");
     expect(adapter7.pending?.spec.allowedTools).not.toContain("mcp__viberr__ask_for_repository");
+  });
+
+  it("ruling 672: an operator whose packets are withheld is not told to call a tool it does not have", async () => {
+    // CANARY: word the workspace section from the project alone and an
+    // operator with `generate-packets` off reads "call `ask_for_repository`"
+    // with no such tool mounted.
+    deploy(null);
+    const project = readProjectFile({ projectSlug: store7.slug, dataRoot: store7.dataRoot })!;
+    writeProject(store7.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: project.parsed.frontmatter.agents.map((agent) => ({
+        ...agent,
+        capabilities: agent.capabilities.map((c) =>
+          c.capabilityId === "generate-packets" ? { ...c, mode: "off" as const } : c,
+        ),
+      })),
+    });
+    rebuildAll(store7.db, { dataRoot: store7.dataRoot, force: true });
+
+    await drive();
+
+    const prompt = systemPrompt();
+    expect(adapter7.pending?.spec.allowedTools).not.toContain("mcp__viberr__ask_for_repository");
+    expect(prompt).toContain("There is no repository checkout on this run");
+    expect(prompt).not.toContain("When this task cannot be done that way");
   });
 
   it("ruling 672: a project with a repository is offered no repository question", async () => {

@@ -1802,7 +1802,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (connections.length === 0) {
           return json({
             connections,
-            note: "No GitHub connection exists, so create_project cannot make a board that delivers software yet: an org admin adds a connection in Instance settings → GitHub connections. A board that delivers results needs none (`delivers: \"results\"`, with no `owner` or `repoName`).",
+            note: "No GitHub connection exists, so create_project cannot give a board a repository yet: an org admin adds a connection in Instance settings → GitHub connections. Any board can start without one (ruling 672): create it with no `owner` or `repoName`, and connect the repository once a connection exists. A board that delivers results needs none at all (`delivers: \"results\"`).",
           });
         }
         return json({ connections });
@@ -3467,7 +3467,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "connect_project_repository",
-      "Connect a GitHub repository to a project that has NONE (ruling 672). Project admin. The same door as Attach in the project's Settings: the repository is checked with its owner's GitHub connection, else the instance default (call list_github_connections first), one GitHub does not confirm is refused with nothing changed, and the project takes its default branch from GitHub and is bound to that connection. Say what it is for in `delivers`: true when the board's tasks will ship as pull requests to it, so the token must be able to push; false when the agents only read it. Connecting one removes the ruling that the board connects no repository, if a person had decided that, and answers every task still asking for one. It grants nothing: on a board whose agents were deployed with repo-write withheld, switch the delivering agent with update_agent_deployment afterwards (your guide's section on switching a board to pull requests). A project that already has a repository is refused: changing it is a person's, in the project's settings.",
+      "Connect a GitHub repository to a project that has NONE (ruling 672). Project admin. The same door as Attach in the project's Settings: the repository is checked with its owner's GitHub connection, else the instance default (call list_github_connections first), one GitHub does not confirm is refused with nothing changed, and the project takes its default branch from GitHub and is bound to that connection. Say what it is for in `delivers`: true when the board's tasks will ship as pull requests to it, so the token must be able to push; false when the agents only read it. Connecting one removes the ruling that the board connects no repository, if a person had decided that, and answers every task still asking for one. A project whose tasks carry branch or pull request records from a repository it had before is refused until the person confirms; relay that sentence, then pass `confirmFootprint: true`. It grants nothing: on a board whose agents were deployed with repo-write withheld, switch the delivering agent with update_agent_deployment afterwards (your guide's section on switching a board to pull requests). A project that already has a repository is refused: changing it is a person's, in the project's settings.",
       {
         projectSlug: z.string().optional(),
         owner: z.string().describe("GitHub owner of the repository."),
@@ -3475,9 +3475,21 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         delivers: z
           .boolean()
           .describe("true = the board delivers pull requests to it (the token must push); false = the agents only read it."),
+        confirmFootprint: z
+          .boolean()
+          .optional()
+          .describe(
+            "Only after the person confirmed it: the project's tasks carry branch or pull request records from a repository it had before, which the first call refuses on and names. They keep their history; sync runs against the new one.",
+          ),
       },
       runWith(
-        async (args: { projectSlug?: string; owner: string; repoName: string; delivers: boolean }) => {
+        async (args: {
+          projectSlug?: string;
+          owner: string;
+          repoName: string;
+          delivers: boolean;
+          confirmFootprint?: boolean;
+        }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "change this project's repository");
           const project = getProject(db, slug);
@@ -3496,6 +3508,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               projectSlug: slug,
               repo: `${args.owner.trim()}/${args.repoName.trim()}`,
               delivers: args.delivers,
+              confirmFootprint: args.confirmFootprint === true,
             },
             actor,
             { dataRoot },

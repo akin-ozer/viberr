@@ -167,21 +167,34 @@ characters; last 8 lines, 600 characters.
   - `connect_repository`: the person types `owner/name` (the card's box, opened with the
     repository the operator could name). The resolution attaches it through the Change
     door as a repository the board delivers through, so its token has to push; a refusal
-    of that door leaves the question open. Then the controller is started on the board,
-    as that person, in a new board conversation, asked to switch the board to pull
-    requests. Each answered task's operator is started again when the board can write
-    its repository, or at once when no controller turn started; where the controller is
-    switching a board nobody may write yet, it starts them (ruling 330's sweep is the
-    net).
-  - `keep_without_repository`: the decision is written as `no-repository.md` in the
-    project's rulings knowledge base (one is created and named, `<slug>-rulings`, when
-    the project names none), audited as `project.repo.ruling_recorded`. While that
+    of that door leaves the question open. A project whose tasks carry records from a
+    repository it had before says so on the card ("Earlier records"), and the answer is
+    the acknowledgement the settings dialog asks for. Then the controller is started on
+    the board, as that person, in a new board conversation, asked to switch the board to
+    pull requests. Each answered task's operator is started again when the board can
+    write its repository, or at once when no controller turn started; where the
+    controller is switching a board nobody may write yet, each waiting task says so and
+    the controller starts them (ruling 330's sweep is the net). Two answers that attach
+    at once do not overwrite each other: the write re-reads the repository under the
+    project file's lock and refuses the second. An answer whose own record is refused
+    after the attach (the packet was answered or replaced while GitHub was asked) says
+    the repository is connected, and the board is settled as for a settings attach.
+  - `keep_without_repository`: the decision is written as `no-repository-<slug>.md` in
+    the project's rulings knowledge base (one is created and named, `<slug>-rulings`, when
+    the project names none; the document is named for the project, so two projects that
+    share a rulings knowledge base keep their decisions apart), audited as
+    `project.repo.ruling_recorded`. While that
     document stands `ask_for_repository` is refused, the operator has no such tool and
     its workspace section says not to ask. Deleting the document makes the question
-    askable again.
+    askable again. It moves with the project when the project names another rulings
+    knowledge base, a rename of the knowledge base follows into `rulingsKb`, and a board
+    file leaves it out of the knowledge base it exports. Clearing the project's rulings
+    knowledge base lifts it with every other ruling.
   A repository attached any other way (project settings, the controller's
   `connect_project_repository`) removes that document (`project.repo.ruling_removed`)
-  and answers every task still asking.
+  and answers every task still asking. The settings door starts no controller; the
+  controller's own connection holds the operators only when it connects one to deliver
+  through, and its reply names them.
 - **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
   software | results` on all three doors (the New project dialog's "This board
   delivers", the controller's `create_project`, and a board import, which reads it off

@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { listProjects } from "~/server/projections/board-query.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
+import { isRepositoryAskCause } from "~/shared/repository-ask";
 import { isTerminalStage, resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
@@ -78,6 +79,8 @@ type OpenDecisionRow = {
   stage: string;
   owner_user_id: string | null;
   has_packet: number;
+  /** The open packet's `cause` (ruling 315), or null. */
+  packet_cause: string | null;
   recommendation_count: number;
 };
 
@@ -141,6 +144,8 @@ export function decisionsRequiring(
     .prepare(
       `SELECT project_slug, task_key, stage, owner_user_id,
               (CASE WHEN packet_json IS NOT NULL AND packet_json <> '' THEN 1 ELSE 0 END) AS has_packet,
+              (CASE WHEN packet_json IS NOT NULL AND packet_json <> ''
+                    THEN json_extract(packet_json, '$.cause') END) AS packet_cause,
               recommendation_count
          FROM task_projections
         WHERE ((packet_json IS NOT NULL AND packet_json <> '')
@@ -208,7 +213,14 @@ export function decisionsRequiring(
   // decision even when it carries a packet AND is acceptance-ready.
   const seen = new Set<string>();
 
-  const classify = (ref: DecisionRef, ownerUserId: string | null): void => {
+  const classify = (
+    ref: DecisionRef,
+    ownerUserId: string | null,
+    /** Ruling 672: the packet is the repository question, whose two answers
+     *  both decide the board. It is a project admin's and nobody else's, so
+     *  it is not "waiting on" a maintainer or the task's owner. */
+    boardDecision = false,
+  ): void => {
     const taskId = `${ref.projectSlug}::${ref.taskKey}`;
     if (seen.has(taskId)) return;
     seen.add(taskId);
@@ -217,13 +229,13 @@ export function decisionsRequiring(
     // Maintainer+ holds every governing action (resolve-packet / accept-
     // completion / approve-transition / dismiss-recommendation all share the
     // maintainer+ tier), so a maintainer+ can act on ANY open decision.
-    const canGovern = roleCan(role, "resolve-packet");
+    const canGovern = roleCan(role, boardDecision ? "edit-policy" : "resolve-packet");
     // The task OWNER (contributor+) governs EVERY open decision on their own
     // task (R14-2): resolve the packet, accept the completion, apply what they
     // hold the inner authority for, and always dismiss. The old narrow rule
     // counted only packets and `accept_completion` recommendations — and the
     // server honored neither, which is exactly the dead-end this widening ends.
-    const ownerCanAct = ownerUserId === userId && roleCan(role, "own-task");
+    const ownerCanAct = !boardDecision && ownerUserId === userId && roleCan(role, "own-task");
 
     if (canGovern || ownerCanAct) {
       mine.push(ref);
@@ -251,6 +263,7 @@ export function decisionsRequiring(
         stage: row.stage,
       },
       row.owner_user_id,
+      isRepositoryAskCause(row.packet_cause),
     );
   }
 

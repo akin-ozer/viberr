@@ -37,6 +37,7 @@ import {
   saveSkill,
 } from "./resources.server";
 import { writeStoreFiles } from "./store-files.server";
+import { recordNoRepositoryRuling } from "./repository-ruling.server";
 
 /**
  * Ruling 653: a board file carries a board's workflow from one instance to
@@ -466,6 +467,26 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
     const imported = await importBoard(bare.db, results, noRepository, actorOf(bare.users.arda), into);
     expect(imported.repo).toBeNull();
     expect(readProjectFile({ projectSlug: imported.slug, dataRoot: bare.dataRoot })!.parsed.frontmatter.repo).toBeNull();
+  });
+});
+
+describe("ruling 672: a board file does not carry a decision made on this instance", () => {
+  it("leaves the document that a board connects no repository out of the knowledge base it exports", async () => {
+    // CANARY: export the rulings knowledge base whole and a board brought up
+    // under the same name elsewhere is born refused: its operator is never
+    // offered the question nobody there was asked.
+    const source = await sourceBoard();
+    const ruling = await recordNoRepositoryRuling(
+      source.db,
+      { projectSlug: source.slug, byName: "Arda Test", taskKey: "REL-1", at: "2026-10-06T18:00:00.000Z" },
+      actorOf(source.users.arda),
+      { dataRoot: source.dataRoot },
+    );
+    expect(existsSync(path.join(kbDirPath(ruling.kb, source.dataRoot), ruling.doc))).toBe(true);
+    const paths = readZip(exported(source).bytes, { maxEntries: 200, maxTotalBytes: 10_000_000 }).map((e) => e.path);
+    const rulings = paths.filter((p) => p.includes(`/kb/${ruling.kb}/`));
+    expect(rulings.length).toBeGreaterThan(0);
+    expect(paths.filter((p) => p.endsWith(ruling.doc))).toEqual([]);
   });
 });
 

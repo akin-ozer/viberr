@@ -30,6 +30,7 @@ import {
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { roleCan } from "~/shared/rbac";
+import { isRepositoryAskCause } from "~/shared/repository-ask";
 import { REVIEW_DEADLOCK_QUESTION } from "./review-deadlock.server";
 import type { FanOutOutcome } from "./packet-fanout.server";
 import { setTaskDependencies } from "./dependencies.server";
@@ -1530,7 +1531,7 @@ export async function resolvePacket(
   // under the lock — the write, and the audit row that belongs to it, are the
   // racing acceptance's, not this call's.
   let alreadyAccepted = false;
-  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+  const decisionWritten = updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the acceptance arm's already-Done check, where it is a
     // decision rather than a guess. `acceptCompletion` re-runs it inside the
     // write lock (`applyAcceptanceWrite`) precisely because its own outside-lock
@@ -1635,6 +1636,26 @@ export async function resolvePacket(
       : event;
     parsed.timeline.unshift(eventWithNote);
   });
+  try {
+    await decisionWritten;
+  } catch (error) {
+    // Ruling 672: a `connect_repository` answer attaches before this write,
+    // and GitHub is asked in between. When the packet was answered or
+    // replaced meanwhile, the write refuses for a change that happened: the
+    // connection is settled as one made outside any task, and the refusal
+    // says the repository is connected.
+    if (repositoryConnection?.attached) {
+      const { connectionOutlivedItsDecision } = await import("./repository-ask.server");
+      throw await connectionOutlivedItsDecision(
+        db,
+        ctx,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, repo: repositoryConnection.repo },
+        actor,
+        toError(error),
+      );
+    }
+    throw error;
+  }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   // U3: one act, one row. A no-op write made no decision to record.
@@ -2984,7 +3005,7 @@ export async function requestPacketMaintainerDecision(
   input: { projectSlug: string; taskKey: string; note?: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
-): Promise<{ notified: number }> {
+): Promise<{ notified: number; to: "admin" | "maintainer" }> {
   const project = loadProjectContext(ctx, input.projectSlug);
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
@@ -2997,7 +3018,11 @@ export async function requestPacketMaintainerDecision(
   // who can already act (and, for an owner, notify themselves). Refuse with a
   // pointer instead of sending a pointless alert.
   const role = project.memberRoles.get(actor.userId ?? "");
-  const canResolveDirectly = roleCan(role, "resolve-packet");
+  // Ruling 672: the repository question's two answers decide the board, so
+  // they are a project admin's. A maintainer cannot give one either, and may
+  // send it up exactly as a contributor-owner sends up a maintainer's.
+  const boardDecision = isRepositoryAskCause(packet.cause);
+  const canResolveDirectly = roleCan(role, boardDecision ? "edit-policy" : "resolve-packet");
   const isOwner = ownerException(
     project,
     actor,
@@ -3005,7 +3030,9 @@ export async function requestPacketMaintainerDecision(
   );
   if (canResolveDirectly) {
     throw AppError.validation(
-      "You can resolve this decision yourself; there is no need to route it to a maintainer.",
+      boardDecision
+        ? "You can answer this decision yourself; there is no need to send it to a project admin."
+        : "You can resolve this decision yourself; there is no need to route it to a maintainer.",
     );
   }
   if (!isOwner) {
@@ -3017,9 +3044,12 @@ export async function requestPacketMaintainerDecision(
   const ownerLabel = actor.label || "The task owner";
   const trimmedNote = input.note?.trim();
   const noteText =
-    `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
-    `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
-    `or admin to make the call.` +
+    (boardDecision
+      ? `${ownerLabel} cannot answer "${packet.title}" on ${input.taskKey}: both answers decide ` +
+        `the board, which is a project admin's, so they asked a project admin to make the call.`
+      : `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
+        `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
+        `or admin to make the call.`) +
     (trimmedNote ? `\n\n> ${trimmedNote.replace(/\n/g, "\n> ")}` : "");
   const occurredAt = new Date().toISOString();
 
@@ -3047,7 +3077,9 @@ export async function requestPacketMaintainerDecision(
     taskKey: input.taskKey,
     kind: "packet",
     ptype: packet.type === "blocked" ? "blocked" : "input",
-    title: `Decision needs a maintainer: ${packet.title}`,
+    title: boardDecision
+      ? `Decision needs a project admin: ${packet.title}`
+      : `Decision needs a maintainer: ${packet.title}`,
     text: noteText,
     occurredAt,
     // Ruling 497: the row opens the packet the maintainer is asked to decide.
@@ -3079,5 +3111,5 @@ export async function requestPacketMaintainerDecision(
     details: { packetKind: packet.kind, notified: notified.length },
   });
 
-  return { notified: notified.length };
+  return { notified: notified.length, to: boardDecision ? "admin" : "maintainer" };
 }

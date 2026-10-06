@@ -36,6 +36,7 @@ function renderQuestion(
   packet: PacketRender,
   canEditPolicy: boolean,
   onResolve: (i: number, note: string) => void = () => {},
+  onRequestMaintainer?: () => void,
 ) {
   return render(
     <DecisionPacket
@@ -49,6 +50,7 @@ function renderQuestion(
       onResolveCustom={() => {}}
       onResolve={onResolve}
       onAsk={() => {}}
+      {...(onRequestMaintainer ? { onRequestMaintainer } : {})}
     />,
   );
 }
@@ -118,5 +120,24 @@ describe("ruling 672: the repository question's card", () => {
     expect(connect!.getAttribute("title")).toBe("Connecting a repository to the board is reserved for project admins");
     fireEvent.click(confirmButton(container));
     expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("tells whoever cannot answer it that a project admin does, and sends it to one", () => {
+    // CANARY: keep the note written for a contributor-owner on a
+    // maintainer's packet and a maintainer reads "needs maintainer or admin
+    // authority" under two answers marked admin-only, beside a button that
+    // sends it to people who cannot answer it either.
+    const send = vi.fn();
+    const { container, getByRole } = renderQuestion(QUESTION, false, () => {}, send);
+    const note = [...container.querySelectorAll(".deny-note")].map((n) => n.textContent ?? "").join(" ");
+    expect(note).toContain("Both answers decide the board, so a project admin gives one. You can still answer with your own directive above.");
+    expect(note).not.toContain("maintainer or admin authority");
+    fireEvent.click(getByRole("button", { name: "Send to a project admin" }));
+    expect(send).toHaveBeenCalledOnce();
+    cleanup();
+    // A project admin has neither the note nor the button.
+    const admin = renderQuestion(QUESTION, true, () => {}, send);
+    expect(admin.container.textContent).not.toContain("a project admin gives one");
+    expect(admin.queryByRole("button", { name: "Send to a project admin" })).toBeNull();
   });
 });

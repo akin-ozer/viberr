@@ -13,7 +13,7 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
  *
  * Client-safe: no server import.
  */
-export const REPOSITORY_OPTION_KINDS: readonly PacketOptionKind[] = [
+const REPOSITORY_OPTION_KINDS: readonly PacketOptionKind[] = [
   "connect_repository",
   "keep_without_repository",
 ];
@@ -38,6 +38,22 @@ export function isRepositoryAskCause(cause: string | null | undefined): boolean 
   return (cause ?? "").startsWith(CAUSE_PREFIX);
 }
 
-/** The document, in the project's rulings knowledge base, that holds a
- *  person's decision to keep the board without a repository. */
-export const NO_REPOSITORY_RULING_DOC = "no-repository.md";
+/**
+ * The document, in the project's rulings knowledge base, that holds a
+ * person's decision to keep the board without a repository. Named for the
+ * project: two projects may name one knowledge base as their rulings (a board
+ * imported beside its source does), and one board's decision is not the
+ * other's.
+ */
+export function noRepositoryRulingDoc(projectSlug: string): string {
+  return `no-repository-${projectSlug}.md`;
+}
+
+/**
+ * Whether a file at a knowledge base's root is some project's such document.
+ * A board file leaves them out: each is one person's decision on one
+ * instance, and a board brought up elsewhere has not been asked.
+ */
+export function isNoRepositoryRulingDoc(relPath: string): boolean {
+  return /^no-repository-[^/]+\.md$/.test(relPath);
+}

@@ -64,6 +64,8 @@ import { OPERATOR_AUDIT_ACTOR, recordAudit } from "~/server/audit/audit-recorder
 import { completionPacketRefusal } from "./completion-packet.server";
 import { noRepositoryRuling } from "~/server/org/repository-ruling.server";
 import { isRepositoryOptionKind, repositoryAskCause } from "~/shared/repository-ask";
+import { normalizeRepoInput } from "~/shared/repo-ref";
+import { countLabel } from "~/shared/text/plural";
 import {
   type ClosedDecision,
   followClosedDecision,
@@ -511,6 +513,17 @@ export interface OperatorOpenPacketInput {
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
 
+/**
+ * Ruling 672: the option kinds an operator writes on a packet of its own:
+ * every kind but the repository question's two, which only
+ * `ask_for_repository` writes. Both backends' packet schemas offer these, so
+ * neither can express the two, and the schema a project with a repository is
+ * given is the one it had.
+ */
+export const OPERATOR_PACKET_OPTION_KINDS = PACKET_OPTION_KINDS.filter(
+  (kind) => !isRepositoryOptionKind(kind),
+);
+
 /** `agent_runs.backend` is NOT NULL with a CHECK; `agent_profile_id` is read
  *  as nullable because a row that names no profile must not sink the lookup. */
 const lastAgentRunSchema = z.object({
@@ -659,9 +672,8 @@ export async function operatorOpenPacket(
         outcome: "noop",
         message:
           `${stray.kind} is not an option you write yourself ("${stray.title}"). ` +
-          "Call ask_for_repository with the reason this task needs a repository: it opens the " +
-          "packet with both answers, and it is refused where the board has one or a person " +
-          "already decided it keeps none.",
+          "Only ask_for_repository writes it, with both answers, and a run has that tool only " +
+          "on a board with no repository whose rulings hold no decision to keep none.",
       };
     }
   }
@@ -1335,16 +1347,6 @@ export async function operatorOpenPacket(
   };
 }
 
-/** `owner/name` as a person or a goal writes it (a GitHub URL too), or null. */
-function namedRepository(raw: string | null | undefined): string | null {
-  const text = (raw ?? "")
-    .trim()
-    .replace(/^https?:\/\/github\.com\//i, "")
-    .replace(/\.git$/i, "")
-    .replace(/\/+$/, "");
-  return /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/.test(text) ? text : null;
-}
-
 export interface OperatorAskForRepositoryInput {
   projectSlug: string;
   taskKey: string;
@@ -1370,6 +1372,10 @@ export async function operatorAskForRepository(
   ctx: TaskMutationContext,
   input: OperatorAskForRepositoryInput,
   authority: OperatorAuthority,
+  /** The packet writer. Both operator backends pass the one that appends
+   *  ruling 84's disclosure of the agents this run consulted. */
+  open: (packet: OperatorOpenPacketInput) => Promise<OperatorActionResult> = (packet) =>
+    operatorOpenPacket(db, ctx, packet, authority),
 ): Promise<OperatorActionResult> {
   const reason = input.reason.trim();
   if (!reason) {
@@ -1401,15 +1407,28 @@ export async function operatorAskForRepository(
         "what cannot be done without a repository.",
     };
   }
-  const named = namedRepository(input.repository);
+  const named = normalizeRepoInput(input.repository ?? "");
   const connect: OperatorPacketOptionInput = {
     kind: "connect_repository",
     title: "Connect a repository",
     detail:
-      "Type it as owner/name. Viberr checks it on GitHub and attaches it, and the controller then switches this board to pull requests.",
+      "Type it as owner/name. Viberr checks it on GitHub and attaches it, then starts the controller on this board, on your Claude account, to switch it to pull requests.",
     recommended: true,
   };
   if (named) connect.repo = named;
+  // The settings door asks a person to acknowledge the records an earlier
+  // repository left before it attaches another. Here the card states them
+  // beside the answers, and confirming Connect is that acknowledgement.
+  const { repoFootprintTasks } = await import("~/features/project-settings/settings-actions.server");
+  const footprint = repoFootprintTasks(db, input.projectSlug);
+  const observations: NonNullable<OperatorOpenPacketInput["observations"]> = [];
+  if (named) observations.push({ k: "Repository named", v: named, code: true });
+  if (footprint > 0) {
+    observations.push({
+      k: "Earlier records",
+      v: `${countLabel(footprint, "task")} here ${footprint === 1 ? "carries" : "carry"} branch or pull request records from a repository this project had before. They keep their history, and sync runs against the one you connect.`,
+    });
+  }
   const packet: OperatorOpenPacketInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -1428,8 +1447,8 @@ export async function operatorAskForRepository(
     cause: repositoryAskCause(input.projectSlug),
     repositoryAsk: true,
   };
-  if (named) packet.observations = [{ k: "Repository named", v: named, code: true }];
-  return operatorOpenPacket(db, ctx, packet, authority);
+  if (observations.length > 0) packet.observations = observations;
+  return open(packet);
 }
 
 /**

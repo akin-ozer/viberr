@@ -575,6 +575,32 @@ describe("changeProjectRepo — the one door that changes a project's repository
     });
   });
 
+  it("ruling 672: refuses a change checked against a repository the project no longer has, writing nothing over it", async () => {
+    // GitHub is asked between the read and the write. CANARY: write without
+    // re-reading under the project file's own lock and, of two people who
+    // change the repository at once, the second silently replaces the first.
+    const store = setupTestStore(ctx);
+    await misconfigure(store);
+    bindCredential(store);
+    const projectFile = () => readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const racing = fakeGithubFetch({
+      [`GET /repos/${REPO_OK}`]: () => {
+        writeProject(store.dataRoot, { ...projectFile(), repo: "akin/first", defaultBranch: "main" });
+        return { body: { full_name: REPO_OK, default_branch: "develop" } };
+      },
+    });
+    await expect(
+      changeProjectRepo(store.db, { projectSlug: store.slug, repo: REPO_OK }, admin(store), { dataRoot: store.dataRoot }, {
+        fetchImpl: racing.fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      userMessage: "The project's repository became akin/first while akin-ozer/viberr was being checked. Nothing was changed.",
+    });
+    expect(projectFile()).toMatchObject({ repo: "akin/first", defaultBranch: "main" });
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
+  });
+
   it("ruling 517: the change's probe is the reading the board shows from then on", async () => {
     // The board and Home read the last reading taken of the project's
     // repository. A change probes the new repository and used to keep that

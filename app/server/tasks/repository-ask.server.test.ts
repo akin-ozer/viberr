@@ -25,8 +25,17 @@ import { resolveOperatorAuthority } from "./operator-authority.server";
 import { operatorAskForRepository, operatorOpenPacket } from "./operator-packets.server";
 import { causeFanOutDisclosure, siblingPacketsSharingCause } from "./packet-fanout.server";
 import { resolvePacket } from "./packet-resolution.server";
-import { boardSwitchRequest } from "./repository-ask.server";
+import {
+  connectRepositoryFromPacket,
+  keepWithoutRepositoryFromPacket,
+} from "./repository-ask.server";
+import { buildOperatorToolkit } from "./operator-toolkit.server";
+import { buildControllerToolkit } from "~/server/controller/controller-toolkit.server";
+import { requestPacketMaintainerDecision } from "./packet-resolution.server";
 import type { TaskActionDeps } from "./task-action-core.server";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
+import { callToolText, publishedSchemas } from "../../../test-support/mcp-tool-meta";
+import { z } from "zod";
 
 /**
  * Ruling 672 (owner, 2026-10-06): "operator creates a packet to remind to
@@ -211,7 +220,7 @@ describe("the operator asks for a repository (ruling 672)", () => {
       authority(store),
     );
     expect(stray).toMatchObject({ outcome: "noop" });
-    expect(stray.message).toContain("Call ask_for_repository");
+    expect(stray.message).toContain("Only ask_for_repository writes it");
     expect(taskOf(store).packet).toBeNull();
 
     writeProject(store.dataRoot, { ...projectOf(store), repo: REPO });
@@ -237,13 +246,13 @@ describe("a person keeps the board without a repository (ruling 672)", () => {
     await answer(store, "keep_without_repository", { runOperator });
 
     const ruling = noRepositoryRuling(store.slug, at(store));
-    expect(ruling).toEqual({ kb: `${store.slug}-rulings`, doc: "no-repository.md" });
+    expect(ruling).toEqual({ kb: `${store.slug}-rulings`, doc: `no-repository-${store.slug}.md` });
     expect(projectOf(store).rulingsKb).toBe(`${store.slug}-rulings`);
     expect(projectOf(store).repo).toBeNull();
     for (const key of ["VIB-1", "VIB-2"]) {
       expect(taskOf(store, key).packet, key).toBeNull();
       expect(timeline(store, key), key).toContain(
-        `**Decision:** Keep this board without one. It is in the project's rulings (\`${store.slug}-rulings/no-repository.md\`)`,
+        `**Decision:** Keep this board without one. It is in the project's rulings (\`${store.slug}-rulings/no-repository-${store.slug}.md\`)`,
       );
     }
     expect(timeline(store, "VIB-2")).toContain('chose "Keep this board without one" there for the board');
@@ -258,7 +267,7 @@ describe("a person keeps the board without a repository (ruling 672)", () => {
     const again = await ask(store, "VIB-2");
     expect(again).toMatchObject({ outcome: "noop" });
     expect(again.message).toContain("A person already decided this board connects no repository");
-    expect(again.message).toContain(`${store.slug}-rulings/no-repository.md`);
+    expect(again.message).toContain(`${store.slug}-rulings/no-repository-${store.slug}.md`);
     expect(taskOf(store, "VIB-2").packet).toBeNull();
     expect(authority(store).repositoryAsk).toBe("declined");
   });
@@ -275,7 +284,7 @@ describe("a person keeps the board without a repository (ruling 672)", () => {
 });
 
 describe("a person connects a repository from the packet (ruling 672)", () => {
-  it("attaches what they typed through the settings door, with GitHub's default branch and the connection bound, and removes nothing it should not", async () => {
+  it("attaches what they typed through the settings door, with GitHub's default branch and the connection bound", async () => {
     // CANARY: clear the packet without the attach and the board has no
     // repository under a record that says it does; attach without the probe
     // and `defaultBranch` is a guess (rulings 669, 671).
@@ -342,7 +351,9 @@ describe("a person connects a repository from the packet (ruling 672)", () => {
     await answer(store, "connect_repository", { note: "acme/other" });
     expect(taskOf(store).packet).toBeNull();
     expect(projectOf(store).repo).toBe(REPO);
-    expect(timeline(store)).toContain("**Decision:** Connect a repository. `acme/site` is connected to this board.");
+    expect(timeline(store)).toContain(
+      "**Decision:** Connect a repository. `acme/site` is connected to this board. It was connected before this answer, so `acme/other` was not: changing a project's repository is done in its settings.",
+    );
     expect(runControllerTurn).not.toHaveBeenCalled();
   });
 });
@@ -371,16 +382,22 @@ describe("the controller is started on the board, and the operators carry on whe
       conversationId: conversations[0]!.id,
       user: { id: store.users.arda.id, email: store.users.arda.email, orgRole: "admin" },
       surface: `/projects/${store.slug}/tasks/VIB-1`,
-      text: boardSwitchRequest({ repo: REPO, taskKey: "VIB-1", waiting: ["VIB-1", "VIB-2"] }),
     });
-    expect(turn.text).toContain("I connected `acme/site` to this board from VIB-1's decision packet");
-    expect(turn.text).toContain("start the operator again on VIB-1, VIB-2 with `run_agent_on_task`: they wait for that.");
+    expect(turn.text).toBe(
+      "I connected `acme/site` to this board from VIB-1's decision packet, so its tasks should ship as pull requests from here on. " +
+        "Switch the board to pull requests: give the agent that delivers its work repo-write back, correct any ruling that still says tasks here are delivered as files (or name the passages, if editing the knowledge base is not mine to ask for), and tell me what you changed and what is left for me to decide. " +
+        "When the board is switched, start the operator again on VIB-1, VIB-2 with `run_agent_on_task`: they wait for that.",
+    );
     // The second task took the answer and attached nothing of its own.
     expect(taskOf(store, "VIB-2").packet).toBeNull();
     expect(timeline(store, "VIB-2")).toContain("**Decision:** Connect a repository. `acme/site` is connected to this board.");
     expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(1);
     expect(timeline(store, "VIB-1")).toContain(
       "The controller was started on this board to switch it to pull requests. Its answer is in the board's Controller conversation. No agent here may write the repository yet, so the operator starts again when the controller has switched the board.",
+    );
+    // The other task waits too, and says why: it shows "waiting on agent".
+    expect(timeline(store, "VIB-2")).toContain(
+      "No agent on this board may write the repository yet, so the operator here starts again when the controller has switched the board to pull requests.",
     );
     // A hand-back is fire-and-forget, so give one the time it would take.
     await settle();
@@ -421,6 +438,182 @@ describe("the controller is started on the board, and the operators carry on whe
       "The controller was not started on this board: Claude is not connected on Arda Test's account, and the controller runs on the account of the person who asks it. No agent here may write the repository yet: ask the controller to switch the board to pull requests, or grant repo-write on the Agents page.",
     );
     await vi.waitFor(() => expect(startedOn(runOperator)).toEqual(["VIB-1"]));
+  });
+});
+
+describe("what the review of ruling 672 found (each a refusal or a record that was missing)", () => {
+  it("states the records an earlier repository left beside the answers, and Connect goes through on that", async () => {
+    // CANARY: drop `confirmFootprint` from the answer and a board that once
+    // had a repository (the AWS board) can never connect one from the card:
+    // the settings door refuses with "Confirm the change to proceed", and the
+    // card has no such control.
+    const store = board("direct");
+    connect(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "done",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 4, state: "merged", title: "Old work" },
+      }),
+      goal: "Finished against the repository this project had.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await ask(store);
+    expect(taskOf(store).packet!.observations).toEqual([
+      {
+        k: "Earlier records",
+        v: "1 task here carries branch or pull request records from a repository this project had before. They keep their history, and sync runs against the one you connect.",
+        code: false,
+      },
+    ]);
+    await answer(store, "connect_repository", { note: REPO, fetchImpl: github() });
+    expect(projectOf(store).repo).toBe(REPO);
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })[0]?.details).toMatchObject({ footprintTasks: 1 });
+  });
+
+  it("says the repository is connected when the decision's own write is refused, and settles the board all the same", async () => {
+    // CANARY: let the refusal out as it is and a person reads "already
+    // resolved" for an attach that happened, with the other task still asking.
+    const store = board("direct");
+    connect(store);
+    await ask(store, "VIB-1");
+    await ask(store, "VIB-2");
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // The operator withdraws VIB-1's packet while GitHub is being asked.
+    const racing = fakeGithubFetch({
+      [`GET /repos/${REPO}`]: () => {
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: taskOf(store).frontmatter,
+          goal: taskOf(store).goal,
+        });
+        return { body: { full_name: REPO, default_branch: "trunk", private: true, permissions: { push: true } } };
+      },
+    }).fetchImpl;
+    await expect(answer(store, "connect_repository", { note: REPO, fetchImpl: racing })).rejects.toMatchObject({
+      status: 409,
+      userMessage:
+        "acme/site was connected to this board, but the decision could not be recorded on VIB-1: This packet was already resolved. " +
+        "The repository stays connected, and every task still asking was answered. If no agent here may write it yet, ask the controller to switch the board to pull requests.",
+    });
+    expect(projectOf(store).repo).toBe(REPO);
+    expect(taskOf(store, "VIB-2").packet).toBeNull();
+    expect(timeline(store, "VIB-2")).toContain("connected `acme/site` to the board, so the question here is settled.");
+  });
+
+  it("refuses the second of two answers that attach at once, writing nothing over the first", async () => {
+    // CANARY: write without re-reading under the project's lock and the
+    // second person's repository silently replaces the first's.
+    const store = board("direct");
+    connect(store);
+    await ask(store);
+    const racing = fakeGithubFetch({
+      [`GET /repos/${REPO}`]: () => {
+        writeProject(store.dataRoot, { ...projectOf(store), repo: "acme/first", defaultBranch: "main" });
+        return { body: { full_name: REPO, default_branch: "trunk", private: true, permissions: { push: true } } };
+      },
+    }).fetchImpl;
+    await expect(answer(store, "connect_repository", { note: REPO, fetchImpl: racing })).rejects.toMatchObject({
+      status: 409,
+      userMessage: "The project's repository became acme/first while acme/site was being checked. Nothing was changed.",
+    });
+    expect(projectOf(store)).toMatchObject({ repo: "acme/first", defaultBranch: "main" });
+    expect(taskOf(store).packet).not.toBeNull();
+    expect(runControllerTurn).not.toHaveBeenCalled();
+  });
+
+  it("refuses to keep a board without a repository once it has one, and each answer that only reached a task checks what it claims", async () => {
+    // CANARY: record the ruling on a board that has a repository and every
+    // run there reads, as binding, that it has none.
+    const store = board("off");
+    await ask(store);
+    writeProject(store.dataRoot, { ...projectOf(store), repo: REPO });
+    await expect(answer(store, "keep_without_repository")).rejects.toMatchObject({
+      status: 409,
+      userMessage:
+        "This board has acme/site now, so there is nothing to keep it without. Remove it in the project's settings if the board should have none.",
+    });
+    expect(noRepositoryRuling(store.slug, at(store))).toBeNull();
+    expect(taskOf(store).packet).not.toBeNull();
+
+    // An answer that reached a task from elsewhere carries nothing out, so it
+    // refuses when what it would record is not so.
+    writeProject(store.dataRoot, { ...projectOf(store), repo: null });
+    const reached = { projectSlug: store.slug, answeredElsewhere: true };
+    await expect(
+      connectRepositoryFromPacket(store.db, at(store), { ...reached, typed: REPO }, actorOf(store.users.arda)),
+    ).rejects.toThrow("No repository is connected to this board, so the question here still stands.");
+    await expect(
+      keepWithoutRepositoryFromPacket(
+        store.db,
+        at(store),
+        { ...reached, taskKey: "VIB-1", byName: "Arda Test", at: "2026-10-06T18:00:00.000Z" },
+        actorOf(store.users.arda),
+      ),
+    ).rejects.toThrow("The project's rulings hold no decision about a repository, so the question here still stands.");
+    expect(noRepositoryRuling(store.slug, at(store))).toBeNull();
+  });
+
+  it("is waiting on a project admin and nobody else, and anyone who cannot answer sends it to one", async () => {
+    // CANARY: count it for whoever resolves packets and a maintainer's inbox
+    // holds a decision they cannot make; route it to "a maintainer" and the
+    // people told cannot answer it either.
+    const store = board("off");
+    await ask(store);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const mine = (user: TestStoreUser) =>
+      decisionsRequiring(store.db, user.id, { projectSlug: store.slug }).mine.map((d) => d.taskKey);
+    expect(mine(store.users.arda)).toEqual(["VIB-1"]);
+    expect(mine(store.users.murat)).toEqual([]);
+
+    await expect(
+      requestPacketMaintainerDecision(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actorOf(store.users.arda), at(store)),
+    ).rejects.toThrow("You can answer this decision yourself; there is no need to send it to a project admin.");
+    const sent = await requestPacketMaintainerDecision(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actorOf(store.users.murat),
+      at(store),
+    );
+    expect(sent.to).toBe("admin");
+    expect(timeline(store)).toContain(
+      `cannot answer "Connect a repository to Viberr Core?" on VIB-1: both answers decide the board, which is a project admin's, so they asked a project admin to make the call.`,
+    );
+    expect(
+      store.db
+        .prepare(`SELECT title FROM notifications WHERE user_id = ? ORDER BY rowid DESC LIMIT 1`)
+        .get(store.users.arda.id),
+    ).toEqual({ title: "Decision needs a project admin: Connect a repository to Viberr Core?" });
+  });
+
+  it("the operator's own tool opens the question, and its packet options cannot spell either answer", async () => {
+    // CANARY: drop the handler's `repository` and the card opens empty; put
+    // the two kinds back in the option enum and every operator's schema
+    // offers answers only this tool may write.
+    const store = board("off");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: at(store),
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority(store),
+    });
+    expect(
+      await callToolText(toolkit.tools, "ask_for_repository", { reason: REASON, repository: "github.com/acme/site" }),
+    ).toBe("[done] Opened a decision packet with 2 option(s).");
+    expect(taskOf(store).packet).toMatchObject({ body: REASON, cause: `repository:${store.slug}` });
+    expect(taskOf(store).packet!.options[0]).toMatchObject({ kind: "connect_repository", repo: REPO });
+    // What the model is shown of `open_decision_packet`: the kinds it may write.
+    const published = z
+      .object({
+        properties: z.object({
+          options: z.object({ items: z.object({ properties: z.object({ kind: z.object({ enum: z.array(z.string()) }) }) }) }),
+        }),
+      })
+      .parse((await publishedSchemas(toolkit.mcpServers.viberr)).get("open_decision_packet"));
+    const kinds = published.properties.options.items.properties.kind.enum;
+    expect(kinds).toContain("redirect");
+    expect(kinds).not.toContain("connect_repository");
+    expect(kinds).not.toContain("keep_without_repository");
   });
 });
 
@@ -473,6 +666,101 @@ describe("a repository connected in the project's settings (ruling 672)", () => 
     expect(noRepositoryRuling(store.slug, at(store))).toBeNull();
     expect(listAuditEvents(store.db, { action: "project.repo.ruling_removed" })).toHaveLength(1);
     expect(runControllerTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("the controller connects a repository (ruling 672)", () => {
+  /** The controller's toolkit as the store's project admin, on the board. */
+  const controller = (store: TestStore, fetchImpl: typeof fetch = github()) =>
+    buildControllerToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot, fetchImpl },
+      user: { id: store.users.arda.id, email: store.users.arda.email, name: store.users.arda.name },
+      projectSlug: store.slug,
+    }).tools;
+  const CONNECT = { owner: "acme", repoName: "site" };
+
+  it("to deliver through, on a board nobody may write: the question is answered, the operators wait, and the reply says whom to start", async () => {
+    // CANARY: start the operators with the connection and each meets a
+    // repository nobody may write while the controller is still switching
+    // the board; leave the tasks out of the reply and nothing starts them
+    // but the fifteen-minute sweep.
+    const store = board("off");
+    connect(store);
+    await ask(store, "VIB-1");
+    await ask(store, "VIB-2");
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const reply = await callToolText(controller(store), "connect_project_repository", { ...CONNECT, delivers: true });
+    expect(reply).toBe(
+      "[done] Repository attached: acme/site (default branch trunk), checked and bound with acme's connection. " +
+        "The operator's question on VIB-1, VIB-2 was answered. " +
+        "No deployed agent may write it: tasks still come back as files until one is granted repo-write with update_agent_deployment. " +
+        "Once one may, start the operator again on VIB-1, VIB-2 with run_agent_on_task: they wait for that.",
+    );
+    for (const key of ["VIB-1", "VIB-2"]) {
+      expect(taskOf(store, key).packet, key).toBeNull();
+      expect(timeline(store, key), key).toContain(
+        "the operator here starts again when the controller has switched the board to pull requests.",
+      );
+    }
+    // The controller made the connection in its own turn: no second one.
+    expect(runControllerTurn).not.toHaveBeenCalled();
+  });
+
+  it("for the agents to read: the question is answered, nobody waits for a switch that is not coming, and a standing ruling goes", async () => {
+    // CANARY: hold the operators whenever the controller connects and a
+    // repository attached only to be read leaves its tasks waiting for a
+    // switch nobody is making.
+    const READ = { ...CONNECT, delivers: false };
+    const asking = board("off");
+    connect(asking);
+    await ask(asking);
+    rebuildAll(asking.db, { dataRoot: asking.dataRoot, force: true });
+    const reply = await callToolText(controller(asking, github(false)), "connect_project_repository", READ);
+    expect(reply).toContain("The operator's question on VIB-1 was answered");
+    expect(reply).not.toContain("start the operator again");
+    expect(taskOf(asking).packet).toBeNull();
+    expect(timeline(asking)).not.toContain("starts again when the controller has switched the board");
+    expect(projectOf(asking).repo).toBe(REPO);
+
+    // On a board whose admin had decided to keep none, the decision goes.
+    const declined = board("off");
+    connect(declined);
+    await ask(declined);
+    await answer(declined, "keep_without_repository");
+    const second = await callToolText(controller(declined, github(false)), "connect_project_repository", READ);
+    expect(second).toContain(
+      `The ruling that this board connects no repository was removed from ${declined.slug}-rulings`,
+    );
+    expect(noRepositoryRuling(declined.slug, at(declined))).toBeNull();
+  });
+
+  it("relays the earlier repository's records before it connects over them, and says a board with no connection can still start", async () => {
+    // CANARY: drop `confirmFootprint` from the tool and a project that once
+    // had a repository can never be connected by the controller.
+    const store = board("direct");
+    expect(await callToolText(controller(store), "list_github_connections", {})).toContain(
+      "Any board can start without one (ruling 672): create it with no `owner` or `repoName`",
+    );
+    connect(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        stage: "done",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 4, state: "merged", title: "Old work" },
+      }),
+      goal: "Finished against the repository this project had.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const refused = await callToolText(controller(store), "connect_project_repository", { ...CONNECT, delivers: true });
+    expect(refused).toContain("Confirm the change to proceed");
+    expect(projectOf(store).repo).toBeNull();
+    const confirmed = await callToolText(controller(store), "connect_project_repository", {
+      ...CONNECT,
+      delivers: true,
+      confirmFootprint: true,
+    });
+    expect(confirmed).toContain("[done] Repository attached: acme/site");
   });
 });
 

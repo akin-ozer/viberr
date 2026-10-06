@@ -16,6 +16,7 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  OPERATOR_PACKET_OPTION_KINDS,
   operatorAskForRepository,
   operatorOpenPacket,
   type OperatorOpenPacketInput,
@@ -52,7 +53,7 @@ import {
   type OperatorActionResult,
   type OperatorAuthority,
 } from "~/server/tasks/operator-authority.server";
-import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
+import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import {
   noteConsultedProfile,
@@ -287,11 +288,13 @@ export function operatorPlanSchemaFor(authority: OperatorAuthority) {
 function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
   // Ruling 672: `ask_for_repository` reads two fields other tools own, and is
   // offered on few boards. Its sentences join their descriptions only where
-  // it is offered, so the schema every other project is given stays as it was.
+  // it is offered, and its two answers are not among the option kinds an
+  // operator writes (`OPERATOR_PACKET_OPTION_KINDS`), so the schema every
+  // other project is given is the one it had.
   const askForRepository = tools.includes("ask_for_repository")
     ? {
         text: " For ask_for_repository: the repository the goal or a person named, as owner/name, or null when none was named.",
-        reason: " For ask_for_repository: why THIS task needs a repository (what it has to change, or that it must ship as a pull request), in a sentence or two a person reads before deciding; it opens a decision packet with two answers, connect one or keep the board without, and you stop there.",
+        reason: " For ask_for_repository: why THIS task needs a repository (the code it has to change, or that it must ship as a pull request; a task that only reads one is not this question), in a sentence or two a person reads before deciding; it opens a decision packet with two answers, connect one or keep the board without, both a project admin's, and you stop there.",
       }
     : { text: "", reason: "" };
   return {
@@ -423,7 +426,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
               type: "object",
               additionalProperties: false,
               properties: {
-                kind: { type: "string", enum: [...PACKET_OPTION_KINDS] },
+                kind: { type: "string", enum: [...OPERATOR_PACKET_OPTION_KINDS] },
                 title: { type: "string" },
                 detail: { type: ["string", "null"], description: "One concise line of extra context for this option; null if none." },
                 recommended: { type: "boolean" },
@@ -599,7 +602,7 @@ const operatorPlanActionSchema = z.strictObject({
   packetOptions: z
     .array(
       z.strictObject({
-        kind: z.enum(PACKET_OPTION_KINDS),
+        kind: z.enum(OPERATOR_PACKET_OPTION_KINDS),
         title: z.string(),
         detail: z.string().nullable(),
         recommended: z.boolean(),
@@ -982,7 +985,12 @@ export async function executeCodexPlan(
           if (a.reason) {
             const ask: Parameters<typeof operatorAskForRepository>[2] = { ...base, reason: a.reason };
             if (a.text) ask.repository = a.text;
-            record(a.tool, await operatorAskForRepository(db, ctx, ask, authority));
+            record(
+              a.tool,
+              await operatorAskForRepository(db, ctx, ask, authority, (packet) =>
+                operatorOpenPacketDisclosed(db, ctx, packet, authority, consultedProfileIds),
+              ),
+            );
           } else skippedMalformed(a.tool, "the reason this task needs a repository");
           break;
         }

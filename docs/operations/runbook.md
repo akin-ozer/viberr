@@ -303,7 +303,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   settings door and starts the controller on the board to switch it to pull requests; the
   task's timeline says whether the controller started, and when it did not (the person
   has no Claude account connected) the remedy is to ask the controller for the switch, or
-  to grant repo-write on the Agents page. **Keep without** writes `no-repository.md` into
+  to grant repo-write on the Agents page. **Keep without** writes `no-repository-<project>.md` into
   the project's rulings knowledge base (audit `project.repo.ruling_recorded`), and the
   operator is not offered the question again. To have it asked again, delete that
   document in Instance settings → Agent resources; attaching a repository in project

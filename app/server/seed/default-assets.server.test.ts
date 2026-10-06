@@ -997,7 +997,8 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   it("ruling 672: the shipped prompts know a board can start with no repository, how its operator asks for one, and how a board is switched to pull requests", async () => {
     // CANARY: drop the operator's `ask_for_repository` sentence or the tool
     // from its skill, the doctrine's or the guide's "can start without", the
-    // guide's switching section or a grant id it names, or an outgoing hash.
+    // guide's switching section, a grant id it names or its step that starts
+    // the operators that waited, or an outgoing hash.
     const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
       "./default-assets.server"
     );
@@ -1019,12 +1020,19 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     );
     const switching = markdownSection(guide, "Switching a board to pull requests");
     expect(switching).toContain("`connect_project_repository` (`delivers: true`)");
-    expect(switching).toContain("`no-repository.md`");
+    expect(switching).toContain("`no-repository-<project>.md`");
     // The four grants a board without a repository withholds, by the ids
     // `update_agent_deployment` takes.
     for (const id of ["execute-code-or-write-repo", "create-task-branch", "commit-push-branch", "open-review-pr"]) {
       expect(switching, id).toContain(`\`${id}\``);
     }
+    // The operators that waited are the controller's to start: nothing else
+    // does before ruling 330's sweep, fifteen minutes on.
+    expect(switching).toContain("**Start the operators that waited.**");
+    expect(switching).toContain("start each with `run_agent_on_task`");
+    // A project admin's turn is refused a knowledge-base edit, so the guide
+    // says what the controller does then.
+    expect(switching).toContain("you name the passages for an org admin to change");
 
     const outgoing: [string, string, string][] = [
       [path.join("agents", "definitions", "controller.md"), "e69d11e6bc8cf0f4d49b4716e2450d5030968978222e057ff0cb1aceb86559cb", definition],

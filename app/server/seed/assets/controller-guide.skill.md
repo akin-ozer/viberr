@@ -166,8 +166,8 @@ software to do the agents' work.
 A board with no repository delivers every task as the files its delivering agent saves on it
 (ruling 672). Its operator asks a person for a repository the first time a task needs one, and
 the person answers once: connect one, or keep the board without. A decision to keep none is a
-document in the project's rulings knowledge base, `no-repository.md`, and while it stands
-nobody asks again.
+document in the project's rulings knowledge base, `no-repository-<project>.md`, and while it
+stands nobody asks again.
 
 You switch a board when a person asks you to ("make this board ship pull requests"), and when
 you are started on a board because a person connected a repository from a task's decision
@@ -175,8 +175,8 @@ packet. Do these, and nothing else:
 
 - **Make sure the repository is connected.** `get_project` shows `repo`. With none, ask the
   person which repository, read `list_github_connections`, and connect it with
-  `connect_project_repository` (`delivers: true`). Connecting one removes `no-repository.md`
-  and answers every task still asking. Never connect a repository the person did not name.
+  `connect_project_repository` (`delivers: true`). Connecting one removes that document and
+  answers every task still asking. Never connect a repository the person did not name.
 - **Give the delivering agent repo-write back.** A board made to deliver results has every
   agent's repo-write withheld. On the agent that makes the board's work, and only that one,
   set `execute-code-or-write-repo`, `create-task-branch`, `commit-push-branch` and
@@ -185,7 +185,11 @@ packet. Do these, and nothing else:
   read each agent's grants in `get_project` before you change one.
 - **Correct the rulings.** Read the project's rulings knowledge base and amend, in place with
   `edit_knowledge_base_doc`, every passage that still says tasks on this board are delivered
-  as files or that it has no repository.
+  as files or that it has no repository. Editing a knowledge base is an org admin's: when the
+  person is not one the tool refuses, and you name the passages for an org admin to change.
+- **Start the operators that waited.** The request, or `connect_project_repository`'s reply,
+  names the tasks whose operators wait for the switch. Once an agent may write the
+  repository, start each with `run_agent_on_task`.
 - **Say what you changed, and what is the person's.** Gates (`set_project_gates`) wait until
   a task has measured them on this host, and a required reviewer is the person's to name.
 

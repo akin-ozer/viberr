@@ -986,10 +986,16 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(maintainer.container.textContent).toContain("your role can't connect one (a project admin must)");
     fireEvent.click(findButton(maintainer.container, "Confirm decision")!);
     expect(maintainer.submitted).toHaveLength(0);
+    // A maintainer is stranded on it as a contributor-owner is on a
+    // maintainer's decision, so the page offers the way up.
+    fireEvent.click(findButton(maintainer.container, "Send to a project admin")!);
+    await waitFor(() => expect(maintainer.submitted).toHaveLength(1));
+    expect(maintainer.submitted[0]!.intent).toBe("request-maintainer-decision");
     cleanup();
 
     const admin = renderPage({ myRole: "admin", task: { packet: question } });
     expect(admin.container.textContent).not.toContain("a project admin must");
+    expect(findButton(admin.container, "Send to a project admin")).toBeUndefined();
     fireEvent.click(findButton(admin.container, "Confirm decision")!);
     await waitFor(() => expect(admin.submitted).toHaveLength(1));
     expect(admin.submitted[0]).toMatchObject({ intent: "resolve-packet", option: "0", note: "acme/site" });

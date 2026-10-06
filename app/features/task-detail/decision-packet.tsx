@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.schema";
+import { isRepositoryOptionKind } from "~/shared/repository-ask";
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon, type IconName } from "~/ui/icon";
@@ -999,7 +1000,9 @@ export function DecisionPacket({
    *  contributor-OWNER who may resolve the packet but for whom EVERY option
    *  needs a tier above theirs — the one case `requestPacketMaintainerDecision`
    *  exists for. Absent hides the affordance (a maintainer/admin already holds
-   *  every tier, and a non-owner has no standing to route another's task). */
+   *  every tier, and a non-owner has no standing to route another's task).
+   *  Ruling 672: also present for a maintainer on the repository question,
+   *  whose two answers are a project admin's. */
   onRequestMaintainer?: () => void;
   /** Ruling 368: the escalation {@link onRequestMaintainer} sent is in flight,
    *  so its button says so instead of staying live and silent. */
@@ -1178,6 +1181,10 @@ export function DecisionPacket({
     canResolve &&
     p.options.length > 0 &&
     p.options.every((o) => gateFor(o.kind) !== null);
+  // Ruling 672: the repository question, whose every answer is a project
+  // admin's. A maintainer is stranded on it as a contributor-owner is on a
+  // maintainer's, so the note and the way up name the admin.
+  const boardDecision = p.options.length > 0 && p.options.every((o) => isRepositoryOptionKind(o.kind));
 
   // The open ask-first ceremony, chosen by the pending option's own `kind`. The
   // list is re-read every render rather than captured at click time, so a packet
@@ -1709,10 +1716,19 @@ export function DecisionPacket({
           <div className="deny-note spaced">
             <Icon name="lock" />
             <span>
-              Every listed option needs maintainer or admin authority. You own{" "}
-              {archiveDisclosure?.taskKey ?? "this task"} and raised this
-              decision, but settling it with one of them is above your role. You
-              can still answer with your own directive above.
+              {boardDecision ? (
+                <>
+                  Both answers decide the board, so a project admin gives one.
+                  You can still answer with your own directive above.
+                </>
+              ) : (
+                <>
+                  Every listed option needs maintainer or admin authority. You own{" "}
+                  {archiveDisclosure?.taskKey ?? "this task"} and raised this
+                  decision, but settling it with one of them is above your role. You
+                  can still answer with your own directive above.
+                </>
+              )}
               {onRequestMaintainer && (
                 <>
                   {" "}
@@ -1724,7 +1740,11 @@ export function DecisionPacket({
                     onClick={onRequestMaintainer}
                   >
                     <GlyphSwap rest="message" alt="loader" on={escalating} spinAlt />
-                    {escalating ? "Sending…" : "Send to a maintainer"}
+                    {escalating
+                      ? "Sending…"
+                      : boardDecision
+                        ? "Send to a project admin"
+                        : "Send to a maintainer"}
                   </button>
                 </>
               )}

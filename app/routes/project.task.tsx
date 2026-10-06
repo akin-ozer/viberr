@@ -929,7 +929,9 @@ export async function action({ request, params }: Route.ActionArgs) {
                     : // Ruling 672: both answers to the repository question
                       // act on the board, so each says what it did there.
                       option.kind === "connect_repository"
-                      ? `${getProject(db, projectSlug)?.repo ?? "The repository"} is connected to this board · the operator re-runs`
+                      ? // What happens next (the controller, the operators) is
+                        // on the task's timeline; it differs by board.
+                        `${getProject(db, projectSlug)?.repo ?? "The repository"} is connected to this board`
                       : option.kind === "keep_without_repository"
                         ? "Recorded in the project's rulings · the operator does not ask again"
                         : `Decision recorded: ${option.t}`;
@@ -959,7 +961,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           typeof requestPacketMaintainerDecision
         >[1] = { projectSlug, taskKey };
         if (note.trim()) escalateInput.note = note;
-        const { notified } = await requestPacketMaintainerDecision(
+        const { notified, to } = await requestPacketMaintainerDecision(
           db,
           escalateInput,
           actor,
@@ -968,9 +970,13 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           toast:
-            notified > 0
-              ? `Sent to ${countLabel(notified, "maintainer")} · they'll decide`
-              : "Sent · a maintainer will decide",
+            // Ruling 672: the repository question is a project admin's, and
+            // the people told of it are not all admins, so no count is given.
+            to === "admin"
+              ? "Sent · a project admin will decide"
+              : notified > 0
+                ? `Sent to ${countLabel(notified, "maintainer")} · they'll decide`
+                : "Sent · a maintainer will decide",
         };
       }
       case "complete-merge": {

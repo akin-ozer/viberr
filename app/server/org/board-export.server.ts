@@ -35,6 +35,7 @@ import {
   listSkills,
   type OrgSeedContext,
 } from "./resources.server";
+import { isNoRepositoryRulingDoc } from "~/shared/repository-ask";
 import { readStoreFolderFiles } from "./store-files.server";
 
 /**
@@ -299,7 +300,14 @@ export function exportBoard(
     const kb = kbRows.get(dir);
     if (!kb) continue;
     knowledgeBases.push({ dir, name: kb.name, refresh: kb.refresh, private: kb.private });
-    kbFiles.set(dir, kb.folderExists ? readStoreFolderFiles(kbDirPath(dir, ctx.dataRoot)) : []);
+    // Ruling 672: a decision that a board connects no repository is one
+    // person's, on this instance, and does not travel with the board.
+    kbFiles.set(
+      dir,
+      kb.folderExists
+        ? readStoreFolderFiles(kbDirPath(dir, ctx.dataRoot)).filter((f) => !isNoRepositoryRulingDoc(f.path))
+        : [],
+    );
   }
   const skillRows = new Map(listSkills(db, ctx).map((s) => [s.name, s]));
   const skills: BoardSkill[] = [];

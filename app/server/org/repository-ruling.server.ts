@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
@@ -7,7 +7,7 @@ import { kbDirPath } from "~/server/files/file-store-root.server";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import { readProjectFile, updateProjectFile } from "~/server/files/project-writer.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
-import { NO_REPOSITORY_RULING_DOC } from "~/shared/repository-ask";
+import { noRepositoryRulingDoc } from "~/shared/repository-ask";
 import { publishResourceUpdated } from "./resource-events.server";
 import { kbStoreTargetForDir, saveKnowledgeBase } from "./resources.server";
 import { deleteStoreNode, writeStoreDoc } from "./store-files.server";
@@ -21,7 +21,9 @@ import { deleteStoreNode, writeStoreDoc } from "./store-files.server";
  * the project makes: the operator reads it, and so does each agent it
  * dispatches. The document's presence is the whole fact. Nothing else stores
  * the decision, so a person who deletes it, or the connection of a repository
- * that removes it, is all it takes for the question to be askable again.
+ * that removes it, is all it takes for the question to be askable again. It
+ * is named for its project (`noRepositoryRulingDoc`), so a knowledge base two
+ * projects share as their rulings holds each board's decision apart.
  */
 export interface NoRepositoryRuling {
   /** The rulings knowledge base's store directory. */
@@ -39,16 +41,19 @@ export function noRepositoryRuling(
   projectSlug: string,
   ctx: RulingContext = {},
 ): NoRepositoryRuling | null {
-  return rulingIn(projectRulingsKb(projectSlug, ctx), ctx);
+  return rulingIn(projectRulingsKb(projectSlug, ctx), projectSlug, ctx);
 }
 
-/** The ruling in the knowledge base a project names as its rulings. */
-function rulingIn(kb: string | null, ctx: RulingContext): NoRepositoryRuling | null {
+/** The project's ruling in the knowledge base it names as its rulings. */
+function rulingIn(
+  kb: string | null,
+  projectSlug: string,
+  ctx: RulingContext,
+): NoRepositoryRuling | null {
   if (!kb) return null;
+  const doc = noRepositoryRulingDoc(projectSlug);
   try {
-    return existsSync(path.join(kbDirPath(kb, ctx.dataRoot), NO_REPOSITORY_RULING_DOC))
-      ? { kb, doc: NO_REPOSITORY_RULING_DOC }
-      : null;
+    return existsSync(path.join(kbDirPath(kb, ctx.dataRoot), doc)) ? { kb, doc } : null;
   } catch {
     // A `rulingsKb` that is not a name a store folder can have holds nothing.
     return null;
@@ -69,11 +74,15 @@ export type RepositoryAskState = "open" | "declined";
  * second read of `project.md` for this.
  */
 export function repositoryAskState(
-  project: { repo?: string | null | undefined; rulingsKb?: string | null | undefined },
+  project: {
+    slug: string;
+    repo?: string | null | undefined;
+    rulingsKb?: string | null | undefined;
+  },
   ctx: RulingContext = {},
 ): RepositoryAskState | null {
   if (project.repo) return null;
-  return rulingIn(project.rulingsKb?.trim() || null, ctx) ? "declined" : "open";
+  return rulingIn(project.rulingsKb?.trim() || null, project.slug, ctx) ? "declined" : "open";
 }
 
 export interface RecordNoRepositoryRulingInput {
@@ -87,12 +96,12 @@ export interface RecordNoRepositoryRulingInput {
 }
 
 /** The ruling's text. Its heading is what a run's index of the knowledge base
- *  shows, so the heading alone says what was decided. */
-function rulingText(input: RecordNoRepositoryRulingInput): string {
+ *  shows, so the heading alone says what was decided, and for which project. */
+function rulingText(input: RecordNoRepositoryRulingInput, projectName: string): string {
   return (
-    "# This board connects no repository\n\n" +
+    `# ${projectName} connects no repository\n\n` +
     `Decided by ${input.byName} on ${input.at.slice(0, 10)}, answering the operator's question on ${input.taskKey}.\n\n` +
-    "- Every task on this board is delivered as the files its delivering agent saves on the task. Nothing is committed and no pull request is opened.\n" +
+    `- Every task on ${projectName}'s board is delivered as the files its delivering agent saves on the task. Nothing is committed and no pull request is opened.\n` +
     "- Do not ask a person to connect a repository. Where a task cannot be done without one, say what cannot be done and deliver the rest.\n" +
     "- This stands until a repository is connected to the project, which removes this document.\n"
   );
@@ -154,7 +163,8 @@ export async function recordNoRepositoryRuling(
       `${input.projectSlug} names \`${kb}\` as its rulings knowledge base, and the store has no such folder, so the decision has nowhere to be written. Name a rulings knowledge base that exists and answer again.`,
     );
   }
-  writeStoreDoc(db, target, [], NO_REPOSITORY_RULING_DOC, rulingText(input), actor, {
+  const doc = noRepositoryRulingDoc(input.projectSlug);
+  writeStoreDoc(db, target, [], doc, rulingText(input, project.parsed.frontmatter.name), actor, {
     overwrite: true,
   });
   publishResourceUpdated("kb", target.id);
@@ -165,9 +175,34 @@ export async function recordNoRepositoryRuling(
     subjectId: input.projectSlug,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { kb, doc: NO_REPOSITORY_RULING_DOC, createdKb },
+    details: { kb, doc, createdKb },
   });
-  return { kb, doc: NO_REPOSITORY_RULING_DOC, createdKb };
+  return { kb, doc, createdKb };
+}
+
+/**
+ * The project names another rulings knowledge base, so the decision goes with
+ * it: the document is written into the new one and taken out of the old. The
+ * decision is the board's, not the knowledge base's, and a project that only
+ * changed where its rulings live has not been asked again. A project that
+ * clears its rulings knowledge base keeps no rulings, this one included.
+ */
+export function moveNoRepositoryRuling(
+  db: DatabaseSync,
+  input: { projectSlug: string; fromKb: string | null; toKb: string | null },
+  actor: AuditActor,
+  ctx: RulingContext = {},
+): void {
+  const standing = rulingIn(input.fromKb, input.projectSlug, ctx);
+  if (!standing || input.toKb === null || input.toKb === input.fromKb) return;
+  const from = kbStoreTargetForDir(db, standing.kb, ctx);
+  const to = kbStoreTargetForDir(db, input.toKb, ctx);
+  if (!from || !to) return;
+  const text = readFileSync(path.join(from.rootAbs, standing.doc), "utf8");
+  writeStoreDoc(db, to, [], standing.doc, text, actor, { overwrite: true });
+  deleteStoreNode(db, from, [standing.doc], actor);
+  publishResourceUpdated("kb", from.id);
+  publishResourceUpdated("kb", to.id);
 }
 
 /**

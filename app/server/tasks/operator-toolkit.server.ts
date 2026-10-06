@@ -55,6 +55,7 @@ import {
 } from "./operator-snapshot.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  OPERATOR_PACKET_OPTION_KINDS,
   operatorAskForRepository,
   operatorOpenPacket,
   operatorResolvePacket,
@@ -70,7 +71,6 @@ import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
 } from "~/server/github/update-branch-operator.server";
-import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import {
@@ -865,7 +865,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .array(
               z.strictObject({
                 kind: z
-                  .enum(PACKET_OPTION_KINDS)
+                  .enum(OPERATOR_PACKET_OPTION_KINDS)
                   .describe(
                     "Stable option kind the resolver dispatches on. For a delivery push_conflict caused by an UNRELATED remote branch squatting on this task's branch name (usually with an unowned PR), use 'resolve_remote_collision': the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work. Never author 'discard_branch' as the way to clear the remote: it deletes the LOCAL branch and is refused once the revision has left the workspace (a PR tracks the branch, an unowned PR stands on the name, or a delivery push published the head; ruling 161). A revision the agent reported but never pushed does not block it: offer 'discard_branch' when the person's choice is to throw the local draft away, and the discard retires that revision. When offering 'archive_task' with deleteBranch on a task whose get_task shows `foreignHead`, say in the option text that origin's branch carries commits this task did not author and deleting it removes them too. Ruling 164: 'force_accept' performs the admin force-accept itself, on the same disclosure and the same audited bypass record as the task page's Force accept button, and only an admin may resolve it, so offer it when a wedged gate leaves no other route and never as a custom option that merely describes one. 'move_stage' carries `toStage` and performs the move on the stage picker's own path; it is how a person shows the task at another stage when you cannot make the move yourself. Ruling 237: 'question_reviewer' carries `profileId` and starts THAT reviewer with the standing question about everything it would still block on, asking for a comment and no fresh verdict; it is the option for a reviewer that keeps objecting, and Viberr opens it itself at the second consecutive objection, so author one only when no packet was raised. Ruling 269: 'create_task' carries `newTask` and CREATES that task when the person confirms, under their own authority; it is the option for work you have found that belongs outside this task's scope (another service, a contract nobody produces, a gap a report named). Offer it instead of writing 'you create the task' in an option's text: an option that instructs the reader is not a decision they can take. " +
                     CREATE_TASK_BASE_NOTE +
@@ -1067,7 +1067,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       add(
         tool(
           "ask_for_repository",
-          "Ask a person to connect a repository to this board, which has none, because THIS task needs one: its goal changes a codebase or names a repository, or it has to ship as a pull request. Give the `reason` in a sentence or two a person reads before deciding, and the `repository` (owner/name) when the goal or a person named it. It opens a decision packet with two answers and you stop there: connecting one attaches it and starts the controller on the board; keeping the board without one is written into the project's rulings and the question is never asked again. Do not have an agent improvise a code change as loose files while the question is open, and never write these two answers as options of open_decision_packet. ONE packet stands at a time, so this is refused while another is open.",
+          "Ask a person to connect a repository to this board, which has none, because THIS task needs one: its goal changes a repository's code, or it has to ship as a pull request. A task that only needs to READ a repository is not this question: say so in a comment, and a project admin attaches one for the agents to read in the project's settings. Give the `reason` in a sentence or two a person reads before deciding, and the `repository` (owner/name) when the goal or a person named it. It opens a decision packet with two answers, both a project admin's, and you stop there: connecting one attaches it and starts the controller on the board to switch it to pull requests; keeping the board without one is written into the project's rulings and the question is never asked again. Do not have an agent improvise a code change as loose files while the question is open, and never write these two answers as options of open_decision_packet. ONE packet stands at a time, so this is refused while another is open.",
           {
             reason: z
               .string()
@@ -1083,7 +1083,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
               reason: prose(args.reason),
             };
             if (args.repository) ask.repository = args.repository;
-            return resultText(await operatorAskForRepository(db, ctx, ask, authority));
+            return resultText(
+              await operatorAskForRepository(db, ctx, ask, authority, (packet) =>
+                operatorOpenPacketDisclosed(db, ctx, packet, authority, consultedProfileIds),
+              ),
+            );
           },
         ),
         "ask_for_repository",

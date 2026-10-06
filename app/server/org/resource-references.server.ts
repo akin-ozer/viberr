@@ -169,8 +169,15 @@ async function rewriteProjects(
             definition: { ...definition, resources: nextResources },
           };
         });
+        // Ruling 672: the project's RULINGS knowledge base is a reference to
+        // the same folder (ruling 239), and it was left pointing at the old
+        // name: every run then read no rulings at all, and a decision kept
+        // there (that the board connects no repository) stopped standing.
+        const rulingsKb =
+          kind === "kb" && (fm.rulingsKb ?? null) === from ? to : (fm.rulingsKb ?? null);
+        if (rulingsKb !== (fm.rulingsKb ?? null)) changed = true;
         if (!changed) return parsed;
-        return { ...parsed, frontmatter: { ...fm, agents } };
+        return { ...parsed, frontmatter: { ...fm, agents, rulingsKb } };
       });
       if (changed) updated += 1;
     } catch (error) {

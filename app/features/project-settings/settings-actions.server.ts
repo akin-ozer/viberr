@@ -91,8 +91,10 @@ import {
 } from "~/schemas/project-file.schema";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
-import { toError } from "~/shared/errors";
+import { errorMessage, toError } from "~/shared/errors";
 import type { RepositoryConnectedOutcome } from "~/server/tasks/repository-ask.server";
+import { moveNoRepositoryRuling } from "~/server/org/repository-ruling.server";
+import { normalizeRepoInput } from "~/shared/repo-ref";
 
 /**
  * The `GET /repos/{owner}/{repo}` fields the change reads, decoded by the
@@ -527,8 +529,9 @@ export async function setProjectRulingsKb(
     }
   }
   let changed = false;
+  let before: string | null = null;
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
-    const before = parsed.frontmatter.rulingsKb ?? null;
+    before = parsed.frontmatter.rulingsKb ?? null;
     changed = before !== wanted;
     if (!changed) return;
     parsed.frontmatter.rulingsKb = wanted;
@@ -542,6 +545,14 @@ export async function setProjectRulingsKb(
       changed: false,
     };
   }
+  // Ruling 672: a decision that the board connects no repository lives in the
+  // rulings knowledge base, so it moves with the project to the new one.
+  moveNoRepositoryRuling(
+    db,
+    { projectSlug: input.projectSlug, fromKb: before, toKb: wanted },
+    { userId: actor.userId, label: actor.label },
+    ctx,
+  );
   reprojectProject(db, ctx, input.projectSlug);
   recordAudit(db, {
     action: RULINGS_KB_AUDIT_ACTION,
@@ -795,19 +806,6 @@ export async function setProjectGates(
 
 // -------------------------------------------------------- repository change
 
-/** `owner/name` from free input — tolerates a pasted GitHub URL and a
- * trailing `.git`, refuses anything that is not exactly one owner + one
- * name. */
-function normalizeRepoInput(raw: string): string | null {
-  let s = raw.trim();
-  s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
-  s = s.replace(/^github\.com\//i, "");
-  s = s.replace(/\.git$/i, "").replace(/\/+$/, "");
-  return /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/.test(s)
-    ? s
-    : null;
-}
-
 /** Tasks whose GitHub records point at the CURRENT repo: a linked PR, or
  * commits observed on a pushed branch. A project that never reached its
  * repository has zero (every push failed), which is what keeps changing it
@@ -959,6 +957,7 @@ async function changeRepoByConnection(
   });
 
   await updateProjectFile(projectRef(ctx, projectSlug), (parsed) => {
+    assertRepoUnmoved(parsed.frontmatter.repo ?? null, from, repo);
     parsed.frontmatter.repo = repo;
     parsed.frontmatter.defaultBranch = defaultBranch;
   });
@@ -992,6 +991,22 @@ async function changeRepoByConnection(
     changed: true,
     repo,
   };
+}
+
+/**
+ * Ruling 672: the change was checked against the repository the project had
+ * when it started, and GitHub was asked in between. Two people answering the
+ * operator's repository question on two tasks at once would both attach, the
+ * second over the first. Checked inside the project file's own lock, so the
+ * second is refused with nothing written.
+ */
+function assertRepoUnmoved(now: string | null, from: string | null, wanted: string): void {
+  if (now === from) return;
+  throw AppError.conflict(
+    now === null
+      ? `The project's repository was removed while ${wanted} was being checked. Nothing was changed; try again.`
+      : `The project's repository became ${now} while ${wanted} was being checked. Nothing was changed.`,
+  );
 }
 
 /** What {@link changeProjectRepo} did. */
@@ -1122,12 +1137,32 @@ export async function changeProjectRepo(
     const { afterRepositoryConnected } = await import("~/server/tasks/repository-ask.server");
     const taskCtx: Parameters<typeof afterRepositoryConnected>[1] = { dataRoot: ctx.dataRoot };
     if (options.fetchImpl) taskCtx.fetchImpl = options.fetchImpl;
-    const settled = await afterRepositoryConnected(
-      db,
-      taskCtx,
-      { projectSlug: input.projectSlug, repo, byController: options.byController === true },
-      actor,
-    );
+    let settled: RepositoryConnectedOutcome;
+    try {
+      settled = await afterRepositoryConnected(
+        db,
+        taskCtx,
+        {
+          projectSlug: input.projectSlug,
+          repo,
+          // A controller that connects one for the agents to read switches
+          // nothing, so nobody waits for it.
+          byController: options.byController === true && input.delivers === true,
+        },
+        actor,
+      );
+    } catch (error) {
+      // The repository IS attached. What it should have settled failing is
+      // not that change failing, so the answer says both.
+      logger.warn("what an attached repository settles could not be settled", {
+        projectSlug: input.projectSlug,
+        err: toError(error),
+      });
+      return {
+        ...changed,
+        toast: `${changed.toast}. What it settles on the board could not be recorded: ${errorMessage(error).replace(/[.!?]$/, "")}`,
+      };
+    }
     // The settings door starts no controller (a repository attached for the
     // agents to read must not switch the board), so where a question or a
     // ruling was waiting on this and nobody may write the repository, it says
@@ -1146,6 +1181,7 @@ export async function changeProjectRepo(
   });
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    assertRepoUnmoved(parsed.frontmatter.repo ?? null, from, repo);
     parsed.frontmatter.repo = repo;
     parsed.frontmatter.defaultBranch = defaultBranch;
   });

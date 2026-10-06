@@ -343,10 +343,10 @@ function workspaceSection(
 function repositoryAskSentence(state: RepositoryAskState | null): string {
   if (state === "open") {
     return (
-      "\nWhen this task cannot be done that way, because its goal changes a codebase or names a " +
-      "repository, or a person wants a pull request, do not have an agent improvise the change as " +
-      "loose files: call `ask_for_repository` with the reason, and stop. A person then connects a " +
-      "repository or decides the board keeps none."
+      "\nWhen this task cannot be done that way, because its goal changes a repository's code or " +
+      "it has to ship as a pull request, do not have an agent improvise the change as loose files: " +
+      "call `ask_for_repository` with the reason, and stop. A person then connects a repository " +
+      "or decides the board keeps none."
     );
   }
   if (state === "declined") {
@@ -585,7 +585,14 @@ export function buildOperatorSystemPrompt(
   // see and its scoping options were invented from that. Both arms carry the
   // never-describe-the-folder-as-the-repository rule, so the confabulation is
   // closed even when the checkout is missing.
-  dynamic.push(workspaceSection(workspace, isolatedWritableRoot, authority.repositoryAsk ?? null));
+  // Ruling 672: the sentence that says to ask for a repository names a tool,
+  // so it is said only to a run that mounted it: an operator whose packets
+  // are withheld has the open question and no way to put it.
+  const repositoryAsk =
+    authority.repositoryAsk === "open" && !toolkit.includes("ask_for_repository")
+      ? null
+      : (authority.repositoryAsk ?? null);
+  dynamic.push(workspaceSection(workspace, isolatedWritableRoot, repositoryAsk));
   // Ruling 176: a server whose write tools an admin marked has them removed
   // from every operator run, on both backends, so it leaves the paragraph
   // below and a plain statement of what was removed replaces it.

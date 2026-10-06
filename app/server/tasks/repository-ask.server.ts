@@ -10,7 +10,6 @@ import {
   type ControllerTurnInput,
 } from "~/server/controller/controller-run.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -23,10 +22,15 @@ import { userBackendHealth } from "~/server/runtimes/backend-credentials.server"
 import { errorMessage, toError } from "~/shared/errors";
 import type { ResolvedPacketOption } from "~/shared/packet-server-outcome";
 import { repositoryAskCause } from "~/shared/repository-ask";
+import { normalizeRepoInput } from "~/shared/repo-ref";
 import { endSentence } from "~/shared/text/sentence";
 import { siblingPacketsSharingCause } from "./packet-fanout.server";
 import { resolvePacket } from "./packet-resolution.server";
-import { autoInvokeOperator, type TaskActionContext } from "./task-action-core.server";
+import {
+  autoInvokeOperator,
+  projectRepoFor,
+  type TaskActionContext,
+} from "./task-action-core.server";
 import { appendPolicyNote, taskRef, type TaskActor } from "./task-mutation.server";
 
 /**
@@ -43,10 +47,6 @@ import { appendPolicyNote, taskRef, type TaskActor } from "./task-mutation.serve
  * the board that asked takes the same answer through ruling 319's fan-out
  * (`answeredElsewhere` below): nothing is attached or written twice.
  */
-
-function projectRepo(ctx: TaskActionContext, projectSlug: string): string | null {
-  return readProjectFile({ projectSlug, dataRoot: ctx.dataRoot })?.parsed.frontmatter.repo ?? null;
-}
 
 /** What a `connect_repository` answer settled. */
 export interface ConnectedFromPacket {
@@ -70,9 +70,21 @@ export async function connectRepositoryFromPacket(
   input: { projectSlug: string; typed: string; answeredElsewhere: boolean },
   actor: TaskActor,
 ): Promise<ConnectedFromPacket> {
-  const current = projectRepo(ctx, input.projectSlug);
+  const current = projectRepoFor(ctx, input.projectSlug);
   if (current) {
-    return { repo: current, attached: false, sentence: `\`${current}\` is connected to this board.` };
+    // Connected since this was asked, by another answer or in the project's
+    // settings. The question is settled either way; a different repository
+    // typed here is not connected, and the record says so.
+    const typed = input.answeredElsewhere ? null : normalizeRepoInput(input.typed);
+    return {
+      repo: current,
+      attached: false,
+      sentence:
+        `\`${current}\` is connected to this board.` +
+        (typed && typed.toLowerCase() !== current.toLowerCase()
+          ? ` It was connected before this answer, so \`${typed}\` was not: changing a project's repository is done in its settings.`
+          : ""),
+    };
   }
   if (input.answeredElsewhere) {
     throw AppError.conflict(
@@ -83,7 +95,14 @@ export async function connectRepositoryFromPacket(
   if (ctx.fetchImpl) options.fetchImpl = ctx.fetchImpl;
   const result = await changeProjectRepo(
     db,
-    { projectSlug: input.projectSlug, repo: input.typed, delivers: true },
+    {
+      projectSlug: input.projectSlug,
+      repo: input.typed,
+      delivers: true,
+      // The question's card states the records an earlier repository left
+      // ("Earlier records"), so confirming Connect acknowledges them.
+      confirmFootprint: true,
+    },
     actor,
     { dataRoot: ctx.dataRoot },
     options,
@@ -117,7 +136,7 @@ export async function keepWithoutRepositoryFromPacket(
   },
   actor: TaskActor,
 ): Promise<NoRepositoryRuling> {
-  const current = projectRepo(ctx, input.projectSlug);
+  const current = projectRepoFor(ctx, input.projectSlug);
   if (current) {
     throw AppError.conflict(
       `This board has ${current} now, so there is nothing to keep it without. Remove it in the project's settings if the board should have none.`,
@@ -170,7 +189,8 @@ export async function afterRepositoryConnected(
   input: {
     projectSlug: string;
     repo: string;
-    /** True when the controller made the connection in a turn of its own. */
+    /** True when the controller made the connection, for the board to deliver
+     *  through, in a turn that goes on to switch it. */
     byController: boolean;
   },
   actor: TaskActor,
@@ -237,6 +257,40 @@ export async function afterRepositoryConnected(
 }
 
 /**
+ * The repository was attached, and the write that records the decision then
+ * refused: the packet was answered or replaced while GitHub was being asked.
+ * The connection stands, so it is settled as one made outside any task (the
+ * ruling goes, every task still asking is answered), and the person is told
+ * both things instead of a bare refusal for a change that happened.
+ */
+export async function connectionOutlivedItsDecision(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  input: { projectSlug: string; taskKey: string; repo: string },
+  actor: TaskActor,
+  cause: Error,
+): Promise<AppError> {
+  try {
+    await afterRepositoryConnected(
+      db,
+      ctx,
+      { projectSlug: input.projectSlug, repo: input.repo, byController: false },
+      actor,
+    );
+  } catch (error) {
+    logger.warn("a connection whose decision was not recorded could not be settled", {
+      taskKey: input.taskKey,
+      err: toError(error),
+    });
+  }
+  const why = cause instanceof AppError ? cause.userMessage : cause.message;
+  return AppError.conflict(
+    `${input.repo} was connected to this board, but the decision could not be recorded on ${input.taskKey}: ${endSentence(why)} ` +
+      "The repository stays connected, and every task still asking was answered. If no agent here may write it yet, ask the controller to switch the board to pull requests.",
+  );
+}
+
+/**
  * Hand each task whose question a connection answered back to its operator,
  * at the moment the operator can do something with it.
  *
@@ -268,8 +322,8 @@ export async function carryOnAfterConnection(
      *  controller on the board as the person who gave it; null when the
      *  repository was connected any other way. */
     switchFrom: { userId: string; taskKey: string } | null;
-    /** The controller made the connection, in a turn that goes on to switch
-     *  the board. */
+    /** The controller made the connection for the board to deliver through,
+     *  in a turn that goes on to switch the board. */
     controllerSwitches: boolean;
     resolvedOption: ResolvedPacketOption;
   },
@@ -301,15 +355,23 @@ export async function carryOnAfterConnection(
     });
   }
   const held = !writes && (turn?.started === true || input.controllerSwitches);
-  if (!held) {
-    for (const taskKey of input.taskKeys) {
+  for (const taskKey of input.taskKeys) {
+    if (!held) {
       void autoInvokeOperator(db, ctx, input.projectSlug, taskKey, "packet-resolved", {
         resolvedOption: input.resolvedOption,
       });
+    } else if (taskKey !== input.switchFrom?.taskKey) {
+      // The answering task's note above says it; every other task that waits
+      // says it too, so none sits on "waiting on agent" with no reason given.
+      await appendPolicyNote(db, ctx, input.projectSlug, taskKey, { text: HELD_FOR_THE_SWITCH });
     }
   }
   return { turn, operatorsStarted: !held };
 }
+
+/** What a task whose operator waits for the board's switch says. */
+const HELD_FOR_THE_SWITCH =
+  "No agent on this board may write the repository yet, so the operator here starts again when the controller has switched the board to pull requests.";
 
 /** What the answered task's record says about the controller's turn. */
 function boardSwitchNote(turn: BoardSwitchTurn, writes: boolean): string {
@@ -331,7 +393,7 @@ function boardSwitchNote(turn: BoardSwitchTurn, writes: boolean): string {
 
 /** The words the board-level controller turn is started with: the person's
  *  own request, as their answer to the packet made it. */
-export function boardSwitchRequest(input: {
+function boardSwitchRequest(input: {
   repo: string;
   taskKey: string;
   /** The tasks whose operators wait for the switch; empty when none does. */
@@ -339,7 +401,7 @@ export function boardSwitchRequest(input: {
 }): string {
   return (
     `I connected \`${input.repo}\` to this board from ${input.taskKey}'s decision packet, so its tasks should ship as pull requests from here on. ` +
-    "Switch the board to pull requests: give the agent that delivers its work repo-write back, correct any ruling that still says tasks here are delivered as files, and tell me what you changed and what is left for me to decide." +
+    "Switch the board to pull requests: give the agent that delivers its work repo-write back, correct any ruling that still says tasks here are delivered as files (or name the passages, if editing the knowledge base is not mine to ask for), and tell me what you changed and what is left for me to decide." +
     (input.waiting.length > 0
       ? ` When the board is switched, start the operator again on ${input.waiting.join(", ")} with \`run_agent_on_task\`: ${input.waiting.length === 1 ? "it waits" : "they wait"} for that.`
       : "")
@@ -357,7 +419,7 @@ export type BoardSwitchTurn =
  * account (ruling 127), so with none connected nothing is started and the
  * reason comes back for the task's record.
  */
-export async function startBoardSwitchTurn(
+async function startBoardSwitchTurn(
   db: DatabaseSync,
   input: {
     projectSlug: string;
