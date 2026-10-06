@@ -538,6 +538,45 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(recorded).toContain("TAIL");
   });
 
+  it("ruling 672: keeping the board without a repository says what was recorded, not a generic decision", async () => {
+    // CANARY: let the answer fall through to "Decision recorded: …" and the
+    // person is not told the board now holds a ruling, nor that the question
+    // is closed for good.
+    const { readProjectFile, updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const { readTaskFile, updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { operatorAskForRepository } = await import("~/server/tasks/operator-packets.server");
+    const { resolveOperatorAuthority } = await import("~/server/tasks/operator-authority.server");
+    const { noRepositoryRuling } = await import("~/server/org/repository-ruling.server");
+    const ref = { projectSlug: "viberr-core", dataRoot: app.dataRoot };
+    await updateProjectFile(ref, (p) => {
+      p.frontmatter.repo = null;
+    });
+    await updateTaskFile({ ...ref, taskKey: "VIB-142" }, (t) => {
+      t.packet = null;
+    });
+    rebuildProject(app.db, "viberr-core", { dataRoot: app.dataRoot });
+    const asked = await operatorAskForRepository(
+      app.db,
+      { dataRoot: app.dataRoot },
+      { projectSlug: "viberr-core", taskKey: "VIB-142", reason: "VIB-142 changes code this board has no repository for." },
+      resolveOperatorAuthority({ dataRoot: app.dataRoot }, "viberr-core"),
+    );
+    expect(asked.outcome).toBe("done");
+
+    // SAFETY: the success arm of `resolve-packet`, as in the tests above.
+    const posted = (await postIntent("VIB-142", ids.arda, { intent: "resolve-packet", option: "1" })) as {
+      ok?: boolean;
+      toast?: string;
+      error?: string;
+    };
+    expect(posted.error).toBeUndefined();
+    expect(posted.toast).toBe("Recorded in the project's rulings · the operator does not ask again");
+    expect(noRepositoryRuling("viberr-core", { dataRoot: app.dataRoot })).not.toBeNull();
+    expect(readTaskFile({ ...ref, taskKey: "VIB-142" })!.parsed.packet).toBeNull();
+    expect(readProjectFile(ref)!.parsed.frontmatter.repo).toBeNull();
+  });
+
   it("ruling 315: a note past the shared cap is refused, and the packet stays open", async () => {
     const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
     const { readTaskFile } = await import("~/server/files/task-writer.server");

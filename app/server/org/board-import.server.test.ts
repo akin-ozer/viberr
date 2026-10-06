@@ -424,9 +424,20 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
     const into = { dataRoot: bare.dataRoot };
     const software = exported(source);
     expect(previewBoardImport(bare.db, software, into).delivers).toBe("software");
-    await expect(importBoard(bare.db, software, noRepository, actorOf(bare.users.arda), into)).rejects.toThrow(
-      "A GitHub repository is required for a board that delivers software.",
+    // Ruling 672: a board whose agents write a repository imports without
+    // one too, and says what that means; half a repository is still refused.
+    await expect(
+      importBoard(bare.db, software, { ...noRepository, owner: "acme" }, actorOf(bare.users.arda), into),
+    ).rejects.toThrow("Give both a GitHub connection and a repository name, or neither");
+    const later = await importBoard(
+      bare.db,
+      software,
+      { ...noRepository, name: "Release Train Later", key: "RTL" },
+      actorOf(bare.users.arda),
+      into,
     );
+    expect(later.repo).toBeNull();
+    expect(later.repoNote).toContain("It has no repository yet");
 
     // The same board with repo-write withheld from every agent, as a board
     // that delivers results is deployed.

@@ -447,7 +447,15 @@ anyone to push a first commit (ruling 468). A project with no repository (ruling
 no view to provision: the drive clones nothing, and the turn's workspace paragraph says
 every task on the board is delivered as the files its delivering agent saves, that
 delivery is handed with `run_agent` and `delivers: true`, and that `deliver_for_review`
-and `update_branch_from_base` are never called there.
+and `update_branch_from_base` are never called there. It also says what to do when a task
+needs a repository (ruling 672), from `OperatorAuthority.repositoryAsk`: while the question
+is `open`, call `ask_for_repository` with the reason and stop, never having an agent
+improvise the change as loose files; once a person `declined` it (the project's rulings
+hold `no-repository.md`), do not ask, say what cannot be done and deliver the rest as
+files. The tool (the Claude toolkit's, and the Codex plan's action of the same name) is
+offered on the same fact, so only where the question is open; its two answers,
+`connect_repository` and `keep_without_repository`, are never written through
+`open_decision_packet`. `docs/domain/github-delivery.md` §2 says what each answer does.
 
 **Backends.** Writes and shell are denied on both. On Claude the operator gets the
 in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org MCP servers

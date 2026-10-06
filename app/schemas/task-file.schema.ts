@@ -263,6 +263,17 @@ export const PACKET_OPTION_KINDS = [
   // instead of three ways to redo finished work. Refused at authoring unless
   // the task's head is committed and not delivered.
   "deliver_for_review",
+  // Ruling 672: the two answers to the operator's question on a board with no
+  // repository, when a task needs one. `connect_repository` takes the
+  // repository the person types (`owner/name`, the option's `repo` when the
+  // operator could name it), attaches it through the Change door's attach arm
+  // (ruling 669) under their authority, and starts the controller on the
+  // board. `keep_without_repository` writes the decision into the project's
+  // rulings knowledge base, where it stops the question being asked again.
+  // Offered only by `ask_for_repository`, never through the general packet
+  // tool, and answered for every task on the board that asked.
+  "connect_repository",
+  "keep_without_repository",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];
@@ -1055,6 +1066,11 @@ export const packetOptionSchema = z
      *  revision gets its verdict where the reviewers are eligible. Written by
      *  the branch-conflict packet; read by `resolvePacket`'s default arm. */
     rework: z.boolean().optional(),
+    /** connect_repository — ruling 672: the repository the operator believes
+     *  the task means, as `owner/name`, when its goal or a person named one.
+     *  The card opens its repository box with it; the person's own answer is
+     *  what the resolution attaches. */
+    repo: z.string().optional(),
   })
   .loose();
 export type PacketOption = z.infer<typeof packetOptionSchema>;

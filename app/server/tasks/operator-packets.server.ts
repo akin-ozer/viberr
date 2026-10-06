@@ -62,6 +62,8 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { acceptanceTerminallyBlocked } from "./task-acceptance.server";
 import { OPERATOR_AUDIT_ACTOR, recordAudit } from "~/server/audit/audit-recorder.server";
 import { completionPacketRefusal } from "./completion-packet.server";
+import { noRepositoryRuling } from "~/server/org/repository-ruling.server";
+import { isRepositoryOptionKind, repositoryAskCause } from "~/shared/repository-ask";
 import {
   type ClosedDecision,
   followClosedDecision,
@@ -480,6 +482,9 @@ export interface OperatorPacketOptionInput {
     blocks?: string[];
     labels?: string[];
   };
+  /** connect_repository only — ruling 672: the repository the task names, as
+   *  `owner/name`. The card opens its repository box with it. */
+  repo?: string;
 }
 
 export interface OperatorOpenPacketInput {
@@ -498,6 +503,10 @@ export interface OperatorOpenPacketInput {
    *  later successful run may withdraw. Set by the server only; the operator's
    *  own packet tools build their input field by field and never carry it. */
   stalled?: true;
+  /** Ruling 672: the repository question (`operatorAskForRepository`), the
+   *  one packet that may offer `connect_repository` and
+   *  `keep_without_repository`. Set by the server only, like `stalled`. */
+  repositoryAsk?: true;
 }
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
@@ -634,6 +643,25 @@ export async function operatorOpenPacket(
         // refusals so the plan narration can name the real reason.
         outcome: "noop",
         message: `Unknown packet option kind "${o.kind}". Valid kinds: ${PACKET_OPTION_KINDS.join(", ")}.`,
+      };
+    }
+  }
+
+  // Ruling 672: the two repository options are written one way, by the
+  // question that owns them. Their resolution attaches a repository or writes
+  // a standing ruling for the whole board, so an option an operator composed
+  // itself (its own title, no second option to refuse with, a board that has
+  // a repository) would promise something the resolution does not do.
+  if (!input.repositoryAsk) {
+    const stray = rawOptions.find((o) => isRepositoryOptionKind(o.kind));
+    if (stray) {
+      return {
+        outcome: "noop",
+        message:
+          `${stray.kind} is not an option you write yourself ("${stray.title}"). ` +
+          "Call ask_for_repository with the reason this task needs a repository: it opens the " +
+          "packet with both answers, and it is refused where the board has one or a person " +
+          "already decided it keeps none.",
       };
     }
   }
@@ -1151,6 +1179,12 @@ export async function operatorOpenPacket(
     // inputs first: write what to change" sat over a box marked optional, so
     // an empty confirm would have re-run the Judge with nothing to change.
     if (o.reply && (o.kind === "redirect" || o.kind === "request_edit")) option.reply = true;
+    // Ruling 672: the repository to connect is the person's typed answer, so
+    // the card requires it; the one the operator could name opens the box.
+    if (o.kind === "connect_repository") {
+      option.reply = true;
+      if (o.repo) option.repo = o.repo;
+    }
     // Ruling 164: the stage a move_stage resolution moves to, validated above.
     if (o.kind === "move_stage" && o.toStage) option.toStage = o.toStage.trim();
     // Ruling 224: only a wait_for_window carries the reset instant, and it is
@@ -1299,6 +1333,103 @@ export async function operatorOpenPacket(
     notifiedUserIds,
     message: `Opened a ${input.packetType === "blocked" ? "blocking" : "decision"} packet with ${options.length} option(s).`,
   };
+}
+
+/** `owner/name` as a person or a goal writes it (a GitHub URL too), or null. */
+function namedRepository(raw: string | null | undefined): string | null {
+  const text = (raw ?? "")
+    .trim()
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "");
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/.test(text) ? text : null;
+}
+
+export interface OperatorAskForRepositoryInput {
+  projectSlug: string;
+  taskKey: string;
+  /** Why this task needs a repository: what the person reads before deciding. */
+  reason: string;
+  /** The repository the goal or a person named, as `owner/name`. */
+  repository?: string;
+}
+
+/**
+ * Ruling 672: ask a person to connect a repository to a board that has none,
+ * because this task needs one. "Operator creates a packet to remind to user
+ * to connect a repo" (owner, 2026-10-06).
+ *
+ * The packet is the server's: one title, the operator's reason as its body,
+ * and the two answers `resolvePacket` carries out. It is refused, with nothing
+ * written, on a board that has a repository (there is nothing to connect) and
+ * on one whose rulings hold a person's decision to keep none: "never asked
+ * again" is this refusal, not a sentence the operator is trusted to remember.
+ */
+export async function operatorAskForRepository(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: OperatorAskForRepositoryInput,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const reason = input.reason.trim();
+  if (!reason) {
+    return {
+      outcome: "noop",
+      message:
+        "Say why this task needs a repository: the reason is what the person reads before they decide.",
+    };
+  }
+  const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+  if (!project) return { outcome: "noop", message: `Project ${input.projectSlug} not found.` };
+  const repo = project.parsed.frontmatter.repo;
+  if (repo) {
+    return {
+      outcome: "noop",
+      message:
+        `This board already has a repository (${repo}), so there is nothing to connect. ` +
+        "If no deployed agent may write it, that is a capability gap: say so in a decision packet, " +
+        "and a project admin or the controller grants repo-write.",
+    };
+  }
+  const ruling = noRepositoryRuling(input.projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});
+  if (ruling) {
+    return {
+      outcome: "noop",
+      message:
+        `A person already decided this board connects no repository (\`${ruling.kb}/${ruling.doc}\` in the project's rulings), ` +
+        "so the question is not asked again. Deliver what can be delivered as files, and say plainly " +
+        "what cannot be done without a repository.",
+    };
+  }
+  const named = namedRepository(input.repository);
+  const connect: OperatorPacketOptionInput = {
+    kind: "connect_repository",
+    title: "Connect a repository",
+    detail:
+      "Type it as owner/name. Viberr checks it on GitHub and attaches it, and the controller then switches this board to pull requests.",
+    recommended: true,
+  };
+  if (named) connect.repo = named;
+  const packet: OperatorOpenPacketInput = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    packetType: "input",
+    title: `Connect a repository to ${project.parsed.frontmatter.name}?`,
+    body: reason,
+    options: [
+      connect,
+      {
+        kind: "keep_without_repository",
+        title: "Keep this board without one",
+        detail:
+          "Tasks keep coming back as files. The decision goes into the project's rulings, and the operator does not ask again.",
+      },
+    ],
+    cause: repositoryAskCause(input.projectSlug),
+    repositoryAsk: true,
+  };
+  if (named) packet.observations = [{ k: "Repository named", v: named, code: true }];
+  return operatorOpenPacket(db, ctx, packet, authority);
 }
 
 /**

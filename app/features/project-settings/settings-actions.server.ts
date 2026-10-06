@@ -92,6 +92,7 @@ import {
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
+import type { RepositoryConnectedOutcome } from "~/server/tasks/repository-ask.server";
 
 /**
  * The `GET /repos/{owner}/{repo}` fields the change reads, decoded by the
@@ -836,7 +837,7 @@ interface RepoTarget {
  * base roster (`ensureBaseAgentsDeployed`), whose Developer writes. The
  * change refuses a repository its token can only read exactly then (F20-15).
  */
-function boardWritesRepo(projectSlug: string, ctx: SettingsMutationContext): boolean {
+export function boardWritesRepo(projectSlug: string, ctx: SettingsMutationContext): boolean {
   const specialists = listDeployedSpecialists(projectSlug, ctx);
   return specialists.length === 0 || specialists.some((agent) => agent.capabilities.delivery);
 }
@@ -928,7 +929,7 @@ async function probeRepoTarget(
  */
 async function changeRepoByConnection(
   db: DatabaseSync,
-  input: { projectSlug: string; from: string | null; repo: string; footprint: number },
+  input: { projectSlug: string; from: string | null; repo: string; footprint: number; delivers: boolean },
   actor: SettingsActor,
   ctx: SettingsMutationContext,
   options: { fetchImpl?: typeof fetch },
@@ -954,7 +955,7 @@ async function changeRepoByConnection(
   const { defaultBranch, reading } = await probeRepoTarget(createGithubClient(clientOptions), repo, {
     subject: `The ${connection.owner} connection's token`,
     object: `the ${connection.owner} connection's token`,
-    needsPush: boardWritesRepo(projectSlug, ctx),
+    needsPush: input.delivers || boardWritesRepo(projectSlug, ctx),
   });
 
   await updateProjectFile(projectRef(ctx, projectSlug), (parsed) => {
@@ -993,6 +994,38 @@ async function changeRepoByConnection(
   };
 }
 
+/** What {@link changeProjectRepo} did. */
+export interface ChangedRepository {
+  toast: string;
+  changed: boolean;
+  repo: string;
+  /** Ruling 672: what attaching it settled on a board that had none; absent
+   *  on every other change. */
+  settled?: RepositoryConnectedOutcome;
+}
+
+/**
+ * Ruling 672: what attaching a repository settles on a board that had none,
+ * as the words its toast adds. The ruling that the board connects no
+ * repository is removed, and every task still asking whether to connect one
+ * is answered (`afterRepositoryConnected`).
+ */
+function settledSentences(settled: RepositoryConnectedOutcome): string {
+  const parts: string[] = [];
+  if (settled.rulingRemoved) {
+    parts.push(
+      `The ruling that this board connects no repository was removed from ${settled.rulingRemoved.kb}`,
+    );
+  }
+  if (settled.answered.length > 0) {
+    parts.push(`The operator's question on ${settled.answered.join(", ")} was answered`);
+  }
+  for (const miss of settled.missed) {
+    parts.push(`${miss.taskKey}'s question is still open: ${miss.why.replace(/[.!?]$/, "")}`);
+  }
+  return parts.map((part) => `. ${part}`).join("");
+}
+
 /**
  * A project has ONE repository (owner ruling 2026-07-26), and this is the one
  * door that changes which. Ruling 539 renamed it: the owner pointed a new
@@ -1016,11 +1049,28 @@ async function changeRepoByConnection(
  */
 export async function changeProjectRepo(
   db: DatabaseSync,
-  input: { projectSlug: string; repo: string; confirmFootprint?: boolean },
+  input: {
+    projectSlug: string;
+    repo: string;
+    confirmFootprint?: boolean;
+    /** Ruling 672: the repository is connected for the board to deliver
+     *  through, so its token has to be able to push, whoever on the board
+     *  writes it today. Set by the operator's repository question and by the
+     *  controller; the settings dialog asks what the roster asks. */
+    delivers?: boolean;
+  },
   actor: SettingsActor,
   ctx: SettingsMutationContext = {},
-  options: { fetchImpl?: typeof fetch } = {},
-): Promise<{ toast: string; changed: boolean; repo: string }> {
+  options: {
+    fetchImpl?: typeof fetch;
+    /** Ruling 672: false when the caller settles the board's open repository
+     *  questions itself (the packet answer that made this change). */
+    settle?: boolean;
+    /** Ruling 672: the controller makes the change, in a turn that goes on
+     *  to switch the board. */
+    byController?: boolean;
+  } = {},
+): Promise<ChangedRepository> {
   requireProjectAction(
     db,
     ctx,
@@ -1061,12 +1111,29 @@ export async function changeProjectRepo(
   if (options.fetchImpl) ghOptions.fetchImpl = options.fetchImpl;
   const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
   if (gh.status !== "ok") {
-    return changeRepoByConnection(db, { projectSlug: input.projectSlug, from, repo, footprint }, actor, ctx, options);
+    const changed = await changeRepoByConnection(
+      db,
+      { projectSlug: input.projectSlug, from, repo, footprint, delivers: input.delivers === true },
+      actor,
+      ctx,
+      options,
+    );
+    if (from !== null || options.settle === false) return changed;
+    const { afterRepositoryConnected } = await import("~/server/tasks/repository-ask.server");
+    const taskCtx: Parameters<typeof afterRepositoryConnected>[1] = { dataRoot: ctx.dataRoot };
+    if (options.fetchImpl) taskCtx.fetchImpl = options.fetchImpl;
+    const settled = await afterRepositoryConnected(
+      db,
+      taskCtx,
+      { projectSlug: input.projectSlug, repo, byController: options.byController === true },
+      actor,
+    );
+    return { ...changed, toast: changed.toast + settledSentences(settled), settled };
   }
   const { defaultBranch, reading } = await probeRepoTarget(gh.client, repo, {
     subject: "The attached credential",
     object: "the attached credential",
-    needsPush: boardWritesRepo(input.projectSlug, ctx),
+    needsPush: input.delivers === true || boardWritesRepo(input.projectSlug, ctx),
   });
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {

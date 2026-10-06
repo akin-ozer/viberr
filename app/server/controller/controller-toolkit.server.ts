@@ -155,6 +155,7 @@ import {
 } from "~/features/agents/agents-query.server";
 import {
   addStage,
+  changeProjectRepo,
   recolorStage,
   inviteMember,
   removeStage,
@@ -1813,18 +1814,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Say what the board delivers in `delivers`, which you settled before designing it (ruling 667). `software` (the default): tasks change a repository and ship as pull requests, so it requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). A repository GitHub does not confirm refuses and no project is created (ruling 671): none by that name the connection can see, a token GitHub rejects or refuses, GitHub unreachable, or an answer naming no default branch. Relay the sentence; when it is the first and the person wants the repository made, pass `createRepository`. `results`: the no-code kind, where a person files a task and the agents hand back files on it. It needs no repository and no GitHub connection, so leave `owner` and `repoName` out; pass both only when the agents must read an existing repository, which they then read and never write. Its agents are deployed with repo-write withheld whatever their templates grant, and the one that makes the result delivers the files it saves on the task. Never ask a person for a repository a results board does not need. The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Say what the board delivers in `delivers`, which you settled before designing it (ruling 667). `software` (the default): tasks change a repository and ship as pull requests, through a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). A repository GitHub does not confirm refuses and no project is created (ruling 671): none by that name the connection can see, a token GitHub rejects or refuses, GitHub unreachable, or an answer naming no default branch. Relay the sentence; when it is the first and the person wants the repository made, pass `createRepository`. A software board can also start with NO repository (ruling 672): leave `owner` and `repoName` out when the person has none yet or wants to connect it later. Its agents keep repo-write, its tasks come back as files until one is connected, and its operator asks for one the first time a task needs a pull request; connect_project_repository attaches it. `results`: the no-code kind, where a person files a task and the agents hand back files on it. It needs no repository and no GitHub connection, so leave `owner` and `repoName` out; pass both only when the agents must read an existing repository, which they then read and never write. Its agents are deployed with repo-write withheld whatever their templates grant, and the one that makes the result delivers the files it saves on the task. Never ask a person for a repository a results board does not need. The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),
         delivers: z
           .enum(BOARD_DELIVERS)
           .optional()
-          .describe("What the board delivers: `software` (the default; needs a repository) or `results` (files saved on each task; needs none)."),
+          .describe("What the board delivers: `software` (the default; pull requests to its repository, which it may connect later) or `results` (files saved on each task; needs none)."),
         owner: z
           .string()
           .optional()
-          .describe("GitHub owner of the repo (a configured connection). Required for a software board; leave out for a results board with no repository."),
+          .describe("GitHub owner of the repo (a configured connection). Leave out, with `repoName`, for a board that starts with no repository."),
         repoName: z
           .string()
           .optional()
@@ -1957,7 +1958,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           return (
             `[done] Project ${created.name} created at ${created.storePath} (slug ${created.slug}, keys ${created.key}-n). ` +
             `You are its admin.` +
-            (created.repo === null
+            // Ruling 672: a software board made with none says so in its own
+            // note, which also says what happens next.
+            (created.repo === null && !created.repoNote
               ? " It has no repository: its tasks are delivered as the files their delivering agent saves on them."
               : "") +
             (created.repoNote ? ` ${created.repoNote}` : "") +
@@ -3459,6 +3462,66 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "update_project_settings",
+  );
+
+  add(
+    tool(
+      "connect_project_repository",
+      "Connect a GitHub repository to a project that has NONE (ruling 672). Project admin. The same door as Attach in the project's Settings: the repository is checked with its owner's GitHub connection, else the instance default (call list_github_connections first), one GitHub does not confirm is refused with nothing changed, and the project takes its default branch from GitHub and is bound to that connection. Say what it is for in `delivers`: true when the board's tasks will ship as pull requests to it, so the token must be able to push; false when the agents only read it. Connecting one removes the ruling that the board connects no repository, if a person had decided that, and answers every task still asking for one. It grants nothing: on a board whose agents were deployed with repo-write withheld, switch the delivering agent with update_agent_deployment afterwards (your guide's section on switching a board to pull requests). A project that already has a repository is refused: changing it is a person's, in the project's settings.",
+      {
+        projectSlug: z.string().optional(),
+        owner: z.string().describe("GitHub owner of the repository."),
+        repoName: z.string().describe("Repository name under that owner."),
+        delivers: z
+          .boolean()
+          .describe("true = the board delivers pull requests to it (the token must push); false = the agents only read it."),
+      },
+      runWith(
+        async (args: { projectSlug?: string; owner: string; repoName: string; delivers: boolean }) => {
+          const slug = slugOf(args.projectSlug);
+          requireVisible(slug, "change this project's repository");
+          const project = getProject(db, slug);
+          if (!project) throw new NotVisibleError(notVisible(slug));
+          if (project.repo) {
+            return (
+              `[noop] ${project.name} already has ${project.repo}; nothing was changed. Changing a project's repository is a person's, ` +
+              "in the project's settings: its tasks may hold branches and pull requests against the one it has."
+            );
+          }
+          const options: Parameters<typeof changeProjectRepo>[4] = { byController: true };
+          if (ctx.fetchImpl) options.fetchImpl = ctx.fetchImpl;
+          const result = await changeProjectRepo(
+            db,
+            {
+              projectSlug: slug,
+              repo: `${args.owner.trim()}/${args.repoName.trim()}`,
+              delivers: args.delivers,
+            },
+            actor,
+            { dataRoot },
+            options,
+          );
+          const { listDeployedSpecialists } = await import("~/server/tasks/specialist-roster.server");
+          const writers = listDeployedSpecialists(slug, { dataRoot })
+            .filter((agent) => agent.capabilities.delivery)
+            .map((agent) => agent.name);
+          // The operators of the tasks whose question this answered wait for
+          // an agent that may write the repository, so the reply says whose.
+          const waiting =
+            result.settled && !result.settled.operatorsStarted ? result.settled.answered : [];
+          return (
+            `[done] ${result.toast}. ` +
+            (writers.length > 0
+              ? `${writers.join(", ")} may write it, so tasks ship as pull requests from here on.`
+              : "No deployed agent may write it: tasks still come back as files until one is granted repo-write with update_agent_deployment.") +
+            (waiting.length > 0
+              ? ` Once one may, start the operator again on ${waiting.join(", ")} with run_agent_on_task: ${waiting.length === 1 ? "it waits" : "they wait"} for that.`
+              : "")
+          );
+        },
+      ),
+    ),
+    "connect_project_repository",
   );
 
   add(

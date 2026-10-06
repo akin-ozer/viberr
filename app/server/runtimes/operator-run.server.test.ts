@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { recordNoRepositoryRuling } from "~/server/org/repository-ruling.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import {
   updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
@@ -1552,6 +1553,42 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     expect(item.properties.taskKey.type).toEqual(["string", "null"]);
     expect(item.properties.taskKey.description).toContain("never ask a person to copy text between tasks");
     expect(item.required).toContain("taskKey");
+  });
+
+  it("ruling 672: ask_for_repository is offered only where the question can be asked, and its sentences join the schema only then", () => {
+    // CANARY: offer it on every board and a Codex operator plans a question
+    // that is refused wherever there is a repository, or a person already
+    // answered; append its sentences for everyone and every project's schema
+    // changes for a tool almost none of them has.
+    const packets = { "generate-packets": "direct" } as const;
+    const open: OperatorAuthority = { ...authority(packets), repositoryAsk: "open" };
+    expect(operatorPlanToolsFor(open)).toContain("ask_for_repository");
+    for (const repositoryAsk of ["declined", null] as const) {
+      expect(operatorPlanToolsFor({ ...authority(packets), repositoryAsk }), String(repositoryAsk)).not.toContain(
+        "ask_for_repository",
+      );
+    }
+    expect(operatorPlanToolsFor(authority(packets))).not.toContain("ask_for_repository");
+    expect(
+      operatorPlanToolsFor({ ...authority({ "generate-packets": "off", "append-typed-events": "direct" }), repositoryAsk: "open" }),
+    ).not.toContain("ask_for_repository");
+    // An operator with nothing granted (none is deployed, so every gate
+    // denies) is advertised the full list, less the tools that are offered on
+    // a condition of their own: this one is not advertised even where the
+    // question is open.
+    const undeployed: OperatorAuthority = { ...authority({}), deployed: false, repositoryAsk: "open" };
+    expect(operatorPlanToolsFor(undeployed)).toContain("post_comment");
+    expect(operatorPlanToolsFor(undeployed)).not.toContain("ask_for_repository");
+
+    const asked = operatorPlanSchemaFor(open).properties.actions.items.properties;
+    expect(asked.reason.description).toContain("For ask_for_repository: why THIS task needs a repository");
+    expect(asked.text.description).toContain("For ask_for_repository: the repository the goal or a person named, as owner/name");
+    const plain = operatorPlanSchemaFor(authority(packets)).properties.actions.items.properties;
+    expect(plain.reason.description).not.toContain("ask_for_repository");
+    expect(plain.text.description).not.toContain("ask_for_repository");
+    expect(operatorPlanSchemaFor({ ...authority(packets), repositoryAsk: "declined" })).toEqual(
+      operatorPlanSchemaFor(authority(packets)),
+    );
   });
 
   it("ruling 487: the schedule verbs are offered on a DIRECT dispatch grant only, and the plan carries their fields", () => {
@@ -6214,6 +6251,45 @@ describe("R19-1 — the operator's read-only repository view", () => {
     expect(prompt).toContain(
       "Every task on it is delivered as the files its delivering agent saves on the task, so hand delivery to an agent that can save files (`run_agent` with `delivers: true`), and never call `deliver_for_review` or `update_branch_from_base`",
     );
+    // Ruling 672: and what to do when a task needs a repository. The tool is
+    // offered on the same fact as the sentence that names it. CANARY: drop
+    // the sentence and the operator has an agent improvise the change as
+    // loose files; offer the tool without it and nothing says when to ask.
+    expect(prompt).toContain(
+      "do not have an agent improvise the change as loose files: call `ask_for_repository` with the reason, and stop.",
+    );
+    expect(adapter7.pending?.spec.allowedTools).toContain("mcp__viberr__ask_for_repository");
+  });
+
+  it("ruling 672: once a person decided the board keeps no repository, the run is told not to ask and has no tool to ask with", async () => {
+    // CANARY: read the standing ruling as an open question and the operator
+    // is handed the tool, and the sentence, for a question already answered.
+    deploy(null);
+    await recordNoRepositoryRuling(
+      store7.db,
+      { projectSlug: store7.slug, byName: "Arda Test", taskKey: "VIB-1", at: "2026-10-06T18:00:00.000Z" },
+      { userId: store7.users.arda.id, label: store7.users.arda.email },
+      { dataRoot: store7.dataRoot },
+    );
+
+    await drive();
+
+    const prompt = systemPrompt();
+    expect(prompt).toContain(
+      "A person decided this board connects no repository, and the project's rulings hold that decision. Do not ask for one.",
+    );
+    expect(prompt).not.toContain("When this task cannot be done that way");
+    expect(adapter7.pending?.spec.allowedTools).not.toContain("mcp__viberr__ask_for_repository");
+  });
+
+  it("ruling 672: a project with a repository is offered no repository question", async () => {
+    // CANARY: build the tool whatever the project has and every operator
+    // carries a question that can only be refused.
+    deploy("acme/widgets");
+    await makeOrigin();
+    await withLocalGithub(origins, () => drive());
+    expect(adapter7.pending?.spec.allowedTools).not.toContain("mcp__viberr__ask_for_repository");
+    expect(systemPrompt()).not.toContain("When this task cannot be done that way");
   });
 
   /**

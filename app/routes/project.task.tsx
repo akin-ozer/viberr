@@ -377,6 +377,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
           projectSlug: params.slug,
           taskKey: params.key,
         }),
+        packetCause,
       );
     } catch (error) {
       logger.warn("ruling 319 fan-out disclosure failed", {
@@ -925,7 +926,13 @@ export async function action({ request, params }: Route.ActionArgs) {
                     : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded · type the new goal; the packet clears when it lands"
-                    : `Decision recorded: ${option.t}`;
+                    : // Ruling 672: both answers to the repository question
+                      // act on the board, so each says what it did there.
+                      option.kind === "connect_repository"
+                      ? `${getProject(db, projectSlug)?.repo ?? "The repository"} is connected to this board · the operator re-runs`
+                      : option.kind === "keep_without_repository"
+                        ? "Recorded in the project's rulings · the operator does not ask again"
+                        : `Decision recorded: ${option.t}`;
         const resolved = {
           ok: true as const,
           intent,

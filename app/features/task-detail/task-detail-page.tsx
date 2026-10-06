@@ -937,6 +937,9 @@ export function TaskDetailPage({
             // picker's move, so each carries that control's own tier.
             canForceAccept={canForceAcceptViaPacket}
             canMoveStage={canArchiveViaPacket}
+            // Ruling 672: both answers to the repository question decide the
+            // board, on the tier its repository setting holds.
+            canEditPolicy={roleCan(role, "edit-policy")}
             // UX19-9: what an `archive_task` resolution destroys — the branch
             // its `deleteBranch` variant deletes permanently, and the
             // recommendations the archive withdraws. The same two facts

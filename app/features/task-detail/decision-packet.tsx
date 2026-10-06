@@ -672,6 +672,9 @@ interface PacketTierGrants {
   canForceAccept: boolean;
   /** Ruling 164: `approve-transition`, the tier the stage picker holds. */
   canMoveStage: boolean;
+  /** Ruling 672: `edit-policy`, the tier the project's repository setting
+   *  holds. Both answers to the repository question decide the board. */
+  canEditPolicy: boolean;
 }
 
 /** One gated option kind: the grant it needs and how a refusal is stated. */
@@ -792,6 +795,31 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
       },
     },
   ],
+  [
+    "connect_repository",
+    {
+      // Ruling 672: the resolution attaches the repository through the
+      // settings door, so the option carries that door's tier.
+      held: (grants) => grants.canEditPolicy,
+      denyNote: "Connecting a repository to the board is reserved for project admins.",
+      option: {
+        title: "Connecting a repository to the board is reserved for project admins",
+        note: " · your role can't connect one (a project admin must)",
+      },
+    },
+  ],
+  [
+    "keep_without_repository",
+    {
+      // Ruling 672: it writes a standing ruling for the whole board.
+      held: (grants) => grants.canEditPolicy,
+      denyNote: "Deciding that the board keeps no repository is reserved for project admins.",
+      option: {
+        title: "Deciding that the board keeps no repository is reserved for project admins",
+        note: " · your role can't decide this for the board (a project admin must)",
+      },
+    },
+  ],
 ]);
 
 /**
@@ -873,6 +901,7 @@ export function DecisionPacket({
   canDiscardBranch = false,
   canForceAccept = false,
   canMoveStage = false,
+  canEditPolicy = false,
   archiveDisclosure,
   alsoAnswers = null,
   createTaskEchoes = {},
@@ -926,6 +955,9 @@ export function DecisionPacket({
   /** Ruling 164: whether the viewer holds `approve-transition`, the tier a
    *  `move_stage` option re-checks (it is the stage picker's own move). */
   canMoveStage?: boolean;
+  /** Ruling 672: whether the viewer holds `edit-policy`, the tier both
+   *  answers to the repository question re-check. */
+  canEditPolicy?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   /**
@@ -997,6 +1029,13 @@ export function DecisionPacket({
   // unstated reading. Recorded on the decision event. Ruling 478(e): required
   // when the chosen option is one the asking agent marked `reply`.
   const [note, setNote] = useState("");
+  // Ruling 672: the repository a `connect_repository` answer attaches is the
+  // person's typed answer, kept apart from the note so choosing the other
+  // answer does not carry a repository name into its record. It opens with
+  // the repository the operator could name.
+  const [repository, setRepository] = useState(
+    () => p.options.find((o) => o.kind === "connect_repository")?.repo ?? "",
+  );
   // Questionnaire shape (shadcn base/questionnaire): a free-text input composed
   // WITH the fixed choices, as its own last choice. Selecting it reveals the
   // directive input; the note field steps aside (the directive IS the message).
@@ -1102,6 +1141,7 @@ export function DecisionPacket({
     canDiscardBranch,
     canForceAccept,
     canMoveStage,
+    canEditPolicy,
   };
   /** The gate a kind TRIPS, or null when this viewer holds its tier (or it has
    *  no tier at all: `custom`, `request_edit`, the rest). */
@@ -1122,7 +1162,11 @@ export function DecisionPacket({
   const noChoice = sel < 0;
   const needsReply = selected?.reply === true;
   const choiceInvalid = refused > 0 && noChoice;
-  const replyInvalid = refused > 0 && needsReply && note.trim() === "";
+  // Ruling 672: which text the box under the options holds, and sends.
+  const connectsRepository = selected?.kind === "connect_repository";
+  const answer = connectsRepository ? repository : note;
+  const setAnswer = connectsRepository ? setRepository : setNote;
+  const replyInvalid = refused > 0 && needsReply && answer.trim() === "";
   // Roving tabindex: with nothing chosen yet, the first choice is the group's
   // one tab stop (APG radio group).
   const tabStop = noChoice ? 0 : sel;
@@ -1146,7 +1190,7 @@ export function DecisionPacket({
     if (pendingConfirm === null) return;
     // No setPendingConfirm(null): the dialog plays its exit, then
     // cancelConfirm clears it (ruling 459).
-    onResolve(pendingConfirm, note);
+    onResolve(pendingConfirm, answer);
   };
 
   // UI-44: roving tabindex + real focus movement. Every `role="radio"` used to
@@ -1538,7 +1582,11 @@ export function DecisionPacket({
                   reply was a side note for someone else, and a note that named
                   the operator, as the label invited, re-routed the answer away
                   from the agent that asked (ruling 447). */}
-              {answerTo ? `Your answer to ${answerTo}` : "Note for the operator"}
+              {connectsRepository
+                ? "Repository to connect"
+                : answerTo
+                  ? `Your answer to ${answerTo}`
+                  : "Note for the operator"}
               {needsReply && <span className="req">*</span>}
               <span className="fhint">
                 {/* Ruling 315: the length is stated BEFORE it matters. The route
@@ -1546,17 +1594,25 @@ export function DecisionPacket({
                     saying so, and the server now refuses instead — a refusal a
                     person could not see coming is a worse trade than the cut it
                     replaced unless the box says the number. */}
-                {needsReply ? "required" : "optional"} ·{" "}
-                {answerTo ? `goes back to ${answerTo} with your choice` : "recorded on the decision"} ·{" "}
-                {PACKET_NOTE_MAX.toLocaleString("en-US")} characters max
+                {connectsRepository ? (
+                  // Ruling 672: what the box is, and that nothing changes
+                  // until GitHub answers for the repository.
+                  "required · owner/name · checked on GitHub before anything changes"
+                ) : (
+                  <>
+                    {needsReply ? "required" : "optional"} ·{" "}
+                    {answerTo ? `goes back to ${answerTo} with your choice` : "recorded on the decision"} ·{" "}
+                    {PACKET_NOTE_MAX.toLocaleString("en-US")} characters max
+                  </>
+                )}
               </span>
             </label>
             <textarea
               id="pkt-note"
               ref={noteRef}
               className="packet-note"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
               aria-invalid={replyInvalid || undefined}
               aria-describedby={replyInvalid ? REPLY_ERR_ID : undefined}
               // U39-7: this box sits under every packet, and "before
@@ -1566,11 +1622,13 @@ export function DecisionPacket({
               // exactly as you see it") fitted only a question about a value
               // on the person's screen.
               placeholder={
-                answerTo
-                  ? needsReply
-                    ? undefined
-                    : `e.g. anything ${answerTo} should also know`
-                  : "e.g. anything the operator should also know"
+                connectsRepository
+                  ? "owner/name"
+                  : answerTo
+                    ? needsReply
+                      ? undefined
+                      : `e.g. anything ${answerTo} should also know`
+                    : "e.g. anything the operator should also know"
               }
               rows={1}
               // The browser stops the paste at the cap rather than letting the
@@ -1586,12 +1644,16 @@ export function DecisionPacket({
                 role="alert"
               >
                 <Icon name="alert" />
-                {answerTo ? `Write your answer to ${answerTo} first.` : "Write your answer first."}
+                {connectsRepository
+                  ? "Enter the repository as owner/name first."
+                  : answerTo
+                    ? `Write your answer to ${answerTo} first.`
+                    : "Write your answer first."}
               </p>
             )}
-            {note.length > PACKET_NOTE_MAX - 200 && (
+            {answer.length > PACKET_NOTE_MAX - 200 && (
               <p className="fine dim">
-                {note.length.toLocaleString("en-US")} of{" "}
+                {answer.length.toLocaleString("en-US")} of{" "}
                 {PACKET_NOTE_MAX.toLocaleString("en-US")} characters.
               </p>
             )}
@@ -1721,7 +1783,7 @@ export function DecisionPacket({
                   optionRefs.current[tabStop]?.focus();
                   return;
                 }
-                if (needsReply && note.trim() === "") {
+                if (needsReply && answer.trim() === "") {
                   setRefused((n) => n + 1);
                   noteRef.current?.focus();
                   return;
@@ -1734,7 +1796,7 @@ export function DecisionPacket({
                   setPendingConfirm(sel);
                   return;
                 }
-                onResolve(sel, note);
+                onResolve(sel, answer);
               }}
             >
               <Icon name="check" />

@@ -63,6 +63,11 @@ run on the board reads what you set here.
   repository it will not use. Its agents are deployed with repo-write withheld, whatever
   their templates grant. Pass a repository for a results board only when its agents must
   read one that already exists; they read it and commit nothing to it.
+- **A software board can start without its repository** (ruling 672). When the person has
+  none yet, or wants to connect it later, create the board with `delivers: "software"` and
+  no `owner` or `repoName`. Its agents keep repo-write, its tasks come back as files until a
+  repository is connected, and its operator asks for one the first time a task needs a pull
+  request. Do not hold a board back for a repository the person did not bring.
 - **For a software board, read the GitHub connections before you create anything.**
   `create_project` needs a connection for the repository's owner. Call
   `list_github_connections` first: it names every
@@ -155,6 +160,34 @@ software to do the agents' work.
   an app the person did not ask for, and so are the gates and the Developer and Reviewer that
   would build it. An agent may still write a throwaway script inside its own run to make one
   result.
+
+## Switching a board to pull requests
+
+A board with no repository delivers every task as the files its delivering agent saves on it
+(ruling 672). Its operator asks a person for a repository the first time a task needs one, and
+the person answers once: connect one, or keep the board without. A decision to keep none is a
+document in the project's rulings knowledge base, `no-repository.md`, and while it stands
+nobody asks again.
+
+You switch a board when a person asks you to ("make this board ship pull requests"), and when
+you are started on a board because a person connected a repository from a task's decision
+packet. Do these, and nothing else:
+
+- **Make sure the repository is connected.** `get_project` shows `repo`. With none, ask the
+  person which repository, read `list_github_connections`, and connect it with
+  `connect_project_repository` (`delivers: true`). Connecting one removes `no-repository.md`
+  and answers every task still asking. Never connect a repository the person did not name.
+- **Give the delivering agent repo-write back.** A board made to deliver results has every
+  agent's repo-write withheld. On the agent that makes the board's work, and only that one,
+  set `execute-code-or-write-repo`, `create-task-branch`, `commit-push-branch` and
+  `open-review-pr` to `direct` with `update_agent_deployment`. Reviewers and agents that only
+  read stay as they are. A board made for software and connected later needs nothing here:
+  read each agent's grants in `get_project` before you change one.
+- **Correct the rulings.** Read the project's rulings knowledge base and amend, in place with
+  `edit_knowledge_base_doc`, every passage that still says tasks on this board are delivered
+  as files or that it has no repository.
+- **Say what you changed, and what is the person's.** Gates (`set_project_gates`) wait until
+  a task has measured them on this host, and a required reviewer is the person's to name.
 
 ## Keeping a project's rulings current
 

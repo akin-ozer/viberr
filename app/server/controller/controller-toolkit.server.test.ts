@@ -1612,6 +1612,97 @@ describe("ruling 463: list_github_connections", () => {
       readProjectFile({ projectSlug: "supplier-invoices", dataRoot: app.dataRoot })!.parsed.frontmatter.repo,
     ).toBeNull();
   });
+
+  /**
+   * Ruling 672 (owner, 2026-10-06): "repoless boards should exist … at
+   * creation", and "Users may manually ask to controller to change the board
+   * behaviour to PRs as well." So the controller makes a software board with
+   * no repository, and connects one to a board that has none.
+   */
+  it("ruling 672: create_project makes a software board with no repository, and connect_project_repository connects one later", async () => {
+    // CANARY: keep a repository required of a software board and the first
+    // call is refused; attach without the probe and a token that can only
+    // read is accepted for a board whose Developer pushes; let the tool
+    // change a repository a project has and it bypasses the settings door's
+    // footprint confirmation.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    await connectOwner("later-owner", "ghp_ctlconnectlater0000000000000000000");
+    let push = false;
+    const gh = fakeGithubFetch({
+      "GET /repos/later-owner/checkout": () => ({
+        body: { full_name: "later-owner/checkout", default_branch: "trunk", permissions: { push } },
+      }),
+    });
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: null,
+    });
+    const created = await callToolText(toolkit.tools, "create_project", {
+      name: "Checkout Later",
+      key: "CKL",
+      policy: "balanced",
+    });
+    expect(created).toContain("[done] Project Checkout Later created");
+    expect(created).toContain("It has no repository yet: tasks come back as files until one is connected.");
+    expect(created).not.toContain("It has no repository: its tasks are delivered");
+    expect(gh.calls).toHaveLength(0);
+    const projectOf = () =>
+      readProjectFile({ projectSlug: "checkout-later", dataRoot: app.dataRoot })!.parsed.frontmatter;
+    expect(projectOf().repo).toBeNull();
+
+    const connectArgs = { projectSlug: "checkout-later", owner: "later-owner", repoName: "checkout", delivers: true };
+    // A token that can only read is refused for a board that delivers through it.
+    const readOnly = await callToolText(toolkit.tools, "connect_project_repository", connectArgs);
+    expect(readOnly).toContain("cannot push");
+    expect(projectOf().repo).toBeNull();
+
+    push = true;
+    const connected = await callToolText(toolkit.tools, "connect_project_repository", connectArgs);
+    expect(connected).toContain(
+      "[done] Repository attached: later-owner/checkout (default branch trunk), checked and bound with later-owner's connection.",
+    );
+    expect(connected).toContain("Developer may write it, so tasks ship as pull requests from here on.");
+    expect(projectOf()).toMatchObject({ repo: "later-owner/checkout", defaultBranch: "trunk" });
+
+    const again = await callToolText(toolkit.tools, "connect_project_repository", {
+      ...connectArgs,
+      repoName: "other",
+    });
+    expect(again).toContain("[noop] Checkout Later already has later-owner/checkout; nothing was changed.");
+    expect(projectOf().repo).toBe("later-owner/checkout");
+  });
+
+  it("ruling 672: connect_project_repository is a project admin's, like the settings door it is", async () => {
+    // CANARY: gate it on visibility alone and a maintainer changes the
+    // board's repository by asking the controller.
+    const { readProjectFile, updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const before = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.repo;
+    await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+      p.frontmatter.repo = null;
+    });
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const reply = await call(ids.maintainer, "connect_project_repository", {
+        owner: "later-owner",
+        repoName: "checkout",
+        delivers: true,
+      });
+      expect(reply).toContain("[denied]");
+      expect(readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.repo).toBeNull();
+    } finally {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.repo = before;
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
 });
 
 /**

@@ -6,6 +6,8 @@ import {
   NewProjectConnectionField,
   NewProjectNameFields,
   NewProjectRepoField,
+  RepoLaterLine,
+  SOFTWARE_REPO_LATER_HINT,
   type BlockedField,
 } from "~/features/home/project-fields";
 import { keyFromName, projectNameFromRepo } from "~/features/home/project-name";
@@ -273,7 +275,9 @@ export function BoardImportDialog({
   // Ruling 667: a board none of whose agents writes a repository needs none,
   // and takes one only when the person attaches it.
   const [attachRepo, setAttachRepo] = useState(false);
-  const needsRepo = preview.delivers === "software" || attachRepo;
+  // Ruling 672: a board whose agents write a repository may start without one.
+  const [repoLater, setRepoLater] = useState(false);
+  const needsRepo = preview.delivers === "software" ? !repoLater : attachRepo;
   const [choices, setChoices] = useState<ReadonlyMap<string, BoardResourceChoice>>(() => new Map());
   const [attempted, setAttempted] = useState(0);
   const refusalShake = useRefusalShake(attempted);
@@ -428,13 +432,23 @@ export function BoardImportDialog({
               keyInUse={keyInUse}
               submit={submit}
             />
-            {preview.delivers === "results" && (
+            {preview.delivers === "results" ? (
               <div className="field">
                 <span className="flabel">Repository</span>
                 <span className="fhint flush">
                   None of this board&apos;s agents writes a repository, so it needs none.
                 </span>
                 <AttachRepoLine attachRepo={attachRepo} setAttachRepo={setAttachRepo} />
+              </div>
+            ) : (
+              <div className="field">
+                <span className="flabel">Repository</span>
+                <span className="fhint flush">
+                  {repoLater
+                    ? SOFTWARE_REPO_LATER_HINT
+                    : "This board's agents write a repository, and each task ships as a pull request."}
+                </span>
+                <RepoLaterLine repoLater={repoLater} setRepoLater={setRepoLater} />
               </div>
             )}
             {needsRepo && (

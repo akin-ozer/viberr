@@ -20,6 +20,7 @@ import {
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { isStageColor } from "~/shared/workflow/stage-colors";
 import { createProject, type CreateProjectInput } from "./project-create.server";
+import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 
 /** The single columns these tests read back off a just-written row. */
 const defaultBranchRow = z.object({ default_branch: z.string() });
@@ -73,29 +74,30 @@ describe("createProject refuses a repository GitHub does not confirm (ruling 671
     // CANARY: let any of them through and a project is written against a
     // repository nobody confirmed, with a default branch nobody read; call a
     // 403 a bad token and a person replaces a token that single sign-on, not
-    // its age, is holding back.
+    // its age, is holding back. Ruling 672: each one names the way on, so
+    // dropping `START_WITHOUT_REPOSITORY` leaves the person at a dead end.
     const answered = (spec: Parameters<typeof fakeGithubFetch>[0][string]) =>
       fakeGithubFetch({ "GET /repos/akin-ozer/ghost": spec }).fetchImpl;
     const rows: [typeof fetch, string][] = [
       [
         answered({ status: 404, body: { message: "Not Found" } }),
-        "GitHub has no repository akin-ozer/ghost that the akin-ozer connection can see. Check the owner and the name, give the connection's token access to it, or have Viberr create it with the project. No project was created.",
+        "GitHub has no repository akin-ozer/ghost that the akin-ozer connection can see. Check the owner and the name, give the connection's token access to it, or have Viberr create it with the project. No project was created. A project can also start without a repository and connect it later.",
       ],
       [
         answered({ status: 401, body: { message: "Bad credentials" } }),
-        "GitHub rejected the akin-ozer connection's token, so Viberr cannot confirm akin-ozer/ghost. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.",
+        "GitHub rejected the akin-ozer connection's token, so Viberr cannot confirm akin-ozer/ghost. Replace the token in Instance settings → GitHub connections, then create the project. No project was created. A project can also start without a repository and connect it later.",
       ],
       [
         answered({ status: 403, body: { message: "Resource protected by organization SAML enforcement." } }),
-        "GitHub refused the akin-ozer connection's token for akin-ozer/ghost (Resource protected by organization SAML enforcement), so Viberr cannot confirm the repository. Clear what GitHub names, then create the project. No project was created.",
+        "GitHub refused the akin-ozer connection's token for akin-ozer/ghost (Resource protected by organization SAML enforcement), so Viberr cannot confirm the repository. Clear what GitHub names, then create the project. No project was created. A project can also start without a repository and connect it later.",
       ],
       [
         unreachableFetch(),
-        "Couldn't reach GitHub to confirm akin-ozer/ghost, so no project was created. Try again once GitHub answers.",
+        "Couldn't reach GitHub to confirm akin-ozer/ghost, so no project was created. Try again once GitHub answers. A project can also start without a repository and connect it later.",
       ],
       [
         answered({ body: { full_name: "akin-ozer/ghost" } }),
-        "GitHub named no default branch for akin-ozer/ghost, so Viberr cannot tell which branch tasks start from. Check the repository on GitHub, then try again. No project was created.",
+        "GitHub named no default branch for akin-ozer/ghost, so Viberr cannot tell which branch tasks start from. Check the repository on GitHub, then try again. No project was created. A project can also start without a repository and connect it later.",
       ],
     ];
     for (const [fetchImpl, userMessage] of rows) {
@@ -494,15 +496,16 @@ describe("createProject — policy preset shapes REAL governance", () => {
     }
   });
 
-  // A board that delivers software is repo-bound (2026-07-17 ruling, reverses
-  // F10): a repository and a PAT connection are mandatory, in every form the
-  // field can be left empty. Ruling 667 keeps that for software and lifts it
-  // for a board that delivers results (its own suite below).
+  // Ruling 672: a repository is named whole, connection and name, or not at
+  // all, whatever the board delivers. (Every project took one under the
+  // 2026-07-17 ruling; ruling 667 lifted that for a board that delivers
+  // results, and 672 for one that delivers software.)
   it.each([
     ["a blank repository name", "akin-ozer", "   "],
-    ["no owner and no repository", "", ""],
     ["a repository name with no owner", "", "some-repo"],
-  ])("refuses a software board with %s", async (_label, owner, repoName) => {
+  ])("refuses a software board with %s, half a repository", async (_label, owner, repoName) => {
+    // CANARY: take the half that was given and a project is written with a
+    // repository nobody named, or probed against one that names no owner.
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
@@ -514,7 +517,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(
-      "A GitHub repository is required for a board that delivers software. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first. A board that delivers results needs none.",
+      "Give both a GitHub connection and a repository name, or neither: a board can start without a repository and connect one later.",
     );
     expect(existsSync(join(store.dataRoot, "projects", "repoless"))).toBe(false);
   });
@@ -536,6 +539,47 @@ describe("createProject — policy preset shapes REAL governance", () => {
     // Nothing was created, and no repo call was attempted.
     expect(existsSync(join(store.dataRoot, "projects", "epic-keeper"))).toBe(false);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Ruling 672 (owner, 2026-10-06): "repoless boards should exist … at
+ * creation". A board that delivers software may start with no repository:
+ * the dead end the 2026-07-17 ruling closed is gone, because the operator
+ * asks for one the first time a task needs it.
+ */
+describe("ruling 672: a board that delivers software can start with no repository", () => {
+  it("is created with none, reaches GitHub for nothing, keeps its agents' repo-write and says what happens next", async () => {
+    // CANARY: require a repository of a software board and this throws;
+    // withhold repo-write as a results board does and connecting a repository
+    // later leaves a Developer that cannot write it.
+    const store = setupTestStore(ctx);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await createProject(
+      store.db,
+      { name: "Later", key: "LAT", owner: "", repoName: "", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toMatchObject({
+      slug: "later",
+      repo: null,
+      repoWarning: null,
+      repoNote:
+        "It has no repository yet: tasks come back as files until one is connected. The operator asks for it the first time a task needs a pull request, and it can be attached any time in the project's settings.",
+    });
+    const fm = readProjectFile({ projectSlug: "later", dataRoot: store.dataRoot })!.parsed.frontmatter;
+    expect(fm.repo).toBeNull();
+    expect(getProjectCredential(store.db, "later")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      listDeployedSpecialists("later", { dataRoot: store.dataRoot }).map((a) => [a.id, a.capabilities.delivery]),
+    ).toContainEqual(["developer", true]);
+    expect(listAuditEvents(store.db).find((e) => e.action === "project.created")!.details).toMatchObject({
+      delivers: "software",
+      repo: null,
+    });
   });
 });
 
@@ -617,7 +661,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
     [
       "half a repository",
       { owner: "akin-ozer", repoName: "" },
-      "Give both a GitHub connection and a repository name, or neither: a board that delivers results needs no repository.",
+      "Give both a GitHub connection and a repository name, or neither: a board can start without a repository and connect one later.",
     ],
     [
       "a repository to create that it does not name",

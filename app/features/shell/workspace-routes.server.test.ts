@@ -639,19 +639,20 @@ describe("create-project action (home)", () => {
     expect(result.error).toContain("already exists");
   });
 
-  it("ruling 667: the form's `delivers=results` creates a project with no repository; the same form without it is refused", async () => {
-    // CANARY: stop reading `delivers` in the route and the dialog's "Results ·
-    // no code" choice is refused for want of a repository it said it does not
-    // need.
+  it("rulings 667 and 672: the form creates a project with no repository, as the board it says it is; half a repository is refused", async () => {
+    // CANARY: stop reading `delivers` in the route and "Results · no code"
+    // is written as a software board, its Developer able to write a
+    // repository the board will never have; require a repository of a
+    // software board and "Connect the repository later" is refused.
     const { action } = await import("~/routes/_index");
-    const post = async (name: string, key: string, delivers: string | null) => {
+    const post = async (name: string, key: string, delivers: string | null, owner = "") => {
       const { cookie, sessionId } = await app.cookieFor(seedIds.arda);
       const fields = new URLSearchParams({
         _csrf: await app.csrfFor(sessionId),
         intent: "create-project",
         name,
         key,
-        owner: "",
+        owner,
         repoName: "",
         policy: "balanced",
       });
@@ -667,14 +668,26 @@ describe("create-project action (home)", () => {
         }),
       );
     };
-    const refused = await post("Supplier Invoices", "INV", null);
+    const refused = await post("Half Named", "HLF", null, "akin-ozer");
     expect(refused.status).toBe(400);
-    expect(refused.error).toContain("A GitHub repository is required for a board that delivers software.");
+    expect(refused.error).toContain("Give both a GitHub connection and a repository name, or neither");
 
-    const created = await post("Supplier Invoices", "INV", "results");
-    expect(created.ok).toBe(true);
     const { getProject } = await import("~/server/projections/board-query.server");
+    const { listDeployedSpecialists } = await import("~/server/tasks/specialist-roster.server");
+    const writers = (slug: string) =>
+      listDeployedSpecialists(slug, { dataRoot: app.dataRoot })
+        .filter((agent) => agent.capabilities.delivery)
+        .map((agent) => agent.id);
+
+    const results = await post("Supplier Invoices", "INV", "results");
+    expect(results.ok).toBe(true);
     expect(getProject(app.db, "supplier-invoices")!.repo).toBeNull();
+    expect(writers("supplier-invoices")).toEqual([]);
+
+    const software = await post("Checkout Service", "CHK", null);
+    expect(software.ok).toBe(true);
+    expect(getProject(app.db, "checkout-service")!.repo).toBeNull();
+    expect(writers("checkout-service")).toEqual(["developer"]);
   });
 
   it("RBAC decision (pinned): any org MEMBER may create a project and is seeded its admin", async () => {

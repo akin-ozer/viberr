@@ -6,6 +6,7 @@
  */
 
 import { projectRulingsKb, withProjectRulings } from "~/server/files/project-rulings.server";
+import { repositoryAskState, type RepositoryAskState } from "~/server/org/repository-ruling.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentDeploymentDefinition, CapabilityMode } from "~/schemas/project-file.schema";
 import { absentDeliverReviewPrMode } from "~/shared/capabilities";
@@ -83,6 +84,14 @@ export interface OperatorAuthority {
    * capability the deployment never persisted; an explicit grant always wins.
    */
   humanGatedBeforeWork: boolean;
+  /**
+   * Ruling 672: whether this run may ask a person to connect a repository.
+   * `open` on a project with none, `declined` once a person decided the board
+   * keeps none, null (or absent, on a hand-built literal) for a project that
+   * has one. It offers `ask_for_repository` on both backends and words the
+   * run's workspace section, so the tool and the sentence cannot disagree.
+   */
+  repositoryAsk?: RepositoryAskState | null;
 }
 
 /** How a gated capability resolves for the current authority. */
@@ -373,6 +382,7 @@ export function resolveOperatorAuthority(
       mcps: [],
       deployed: false,
       humanGatedBeforeWork,
+      repositoryAsk: repositoryAskState(file.parsed.frontmatter, ctx),
     };
   }
 
@@ -424,6 +434,7 @@ export function resolveOperatorAuthority(
     persona: definition?.persona?.trim() || null,
     deployed: true,
     humanGatedBeforeWork,
+    repositoryAsk: repositoryAskState(file.parsed.frontmatter, ctx),
   };
 }
 

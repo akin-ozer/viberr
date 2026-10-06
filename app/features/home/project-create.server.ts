@@ -473,12 +473,14 @@ export interface CreateProjectInput {
   name: string;
   /** Task key prefix, 2–4 uppercase letters. */
   key: string;
-  /** Ruling 667: what the board delivers; `software` when left out. A board
-   *  that delivers results needs no repository: `owner` and `repoName` may
-   *  both be empty, and its agents are deployed with repo-write withheld. */
+  /** Ruling 667: what the board delivers; `software` when left out. The
+   *  agents of a board that delivers results are deployed with repo-write
+   *  withheld. Ruling 672: either kind may start with no repository, `owner`
+   *  and `repoName` both empty; a software board's agents keep repo-write for
+   *  the one it connects later. */
   delivers?: BoardDelivers;
   /** Connection owner (repo account) — Phase-4 stand-in list. Empty for a
-   *  results board with no repository. */
+   *  project that starts with no repository. */
   owner: string;
   /** Repo name under the owner (already slugified by the modal). */
   repoName: string;
@@ -610,9 +612,11 @@ export interface NewProjectIdentity {
   key: string;
   owner: string;
   repoName: string;
-  /** `<owner>/<repoName>`, or null for a results board with no repository
-   *  (ruling 667). */
+  /** `<owner>/<repoName>`, or null for a project that starts with no
+   *  repository (rulings 667 and 672). */
   repo: string | null;
+  /** What the board delivers, `software` when the request did not say. */
+  delivers: BoardDelivers;
   slug: string;
 }
 
@@ -637,21 +641,17 @@ export function checkNewProjectIdentity(
   if (isReservedTaskPrefix(key)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
-  // Repo-bound projects (owner ruling 2026-07-17, reverses F10): a board that
-  // delivers software needs `<owner>/<name>`, because its agents deliver
-  // through GitHub and a repo-less one dead-ends the moment execution starts.
-  // Ruling 667 (owner, 2026-10-06) narrows that to the boards it was written
-  // for: a board that delivers results hands back files saved on the task, so
-  // its repository is optional and creation needs no connection.
-  const results = input.delivers === "results";
-  if (!results && (!owner || !repoName)) {
+  // Every project took a repository once (owner ruling 2026-07-17, which
+  // reversed F10): a board that delivers software hands its work over through
+  // GitHub, "and a repo-less one dead-ends the moment execution starts".
+  // Ruling 667 let a board that delivers results go without. Ruling 672
+  // (owner, 2026-10-06: "repoless boards should exist … at creation") lets
+  // every board start without: the dead end is gone, because the operator
+  // asks for a repository the first time a task needs one. So a repository is
+  // named whole, connection and name, or not at all.
+  if (Boolean(owner) !== Boolean(repoName)) {
     throw AppError.validation(
-      "A GitHub repository is required for a board that delivers software. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first. A board that delivers results needs none.",
-    );
-  }
-  if (results && Boolean(owner) !== Boolean(repoName)) {
-    throw AppError.validation(
-      "Give both a GitHub connection and a repository name, or neither: a board that delivers results needs no repository.",
+      "Give both a GitHub connection and a repository name, or neither: a board can start without a repository and connect one later.",
     );
   }
   const repo = owner && repoName ? `${owner}/${repoName}` : null;
@@ -679,7 +679,7 @@ export function checkNewProjectIdentity(
       userMessage: `A project at projects/${slug} already exists.`,
     });
   }
-  return { name, key, owner, repoName, repo, slug };
+  return { name, key, owner, repoName, repo, delivers: input.delivers ?? "software", slug };
 }
 
 async function createProjectImpl(
@@ -782,6 +782,22 @@ async function createProjectImpl(
   );
 }
 
+/**
+ * Ruling 672: the way on from a repository GitHub does not confirm (ruling
+ * 671). Creation still refuses to write one, and the person is not stopped:
+ * the same project can be made with no repository now.
+ */
+const START_WITHOUT_REPOSITORY =
+  "A project can also start without a repository and connect it later.";
+
+/**
+ * Ruling 672: what a board that delivers software is told when it is made
+ * with no repository. Its agents keep repo-write, so connecting one is all it
+ * takes for tasks to ship as pull requests.
+ */
+export const SOFTWARE_WITHOUT_REPOSITORY_NOTE =
+  "It has no repository yet: tasks come back as files until one is connected. The operator asks for it the first time a task needs a pull request, and it can be attached any time in the project's settings.";
+
 /** What the repository probe (and, asked for, its creation) settled before
  *  anything is written: ruling 653 shares it with a board import. */
 export interface ReachedRepository {
@@ -812,8 +828,16 @@ export async function reachProjectRepository(
   const { owner, repoName, repo, slug } = identity;
   // Ruling 667: no repository, so no connection to resolve and nothing to
   // probe. `defaultBranch` keeps the schema's own fallback and names nothing.
+  // Ruling 672: a software board made with none says what that means, on
+  // every door that reports a creation.
   if (repo === null) {
-    return { patId: null, defaultBranch: "main", repoWarning: null, repoNote: null, repoAccess: null };
+    return {
+      patId: null,
+      defaultBranch: "main",
+      repoWarning: null,
+      repoNote: identity.delivers === "results" ? null : SOFTWARE_WITHOUT_REPOSITORY_NOTE,
+      repoAccess: null,
+    };
   }
   // Resolve the selected connection so we can (a) fetch the repo's real
   // default branch and (b) bind its PAT to the project — a project isn't
@@ -878,24 +902,24 @@ export async function reachProjectRepository(
   }
   if (probe.status === "not_found") {
     throw AppError.validation(
-      `GitHub has no repository ${repo} that the ${owner} connection can see. Check the owner and the name, give the connection's token access to it, or have Viberr create it with the project. No project was created.`,
+      `GitHub has no repository ${repo} that the ${owner} connection can see. Check the owner and the name, give the connection's token access to it, or have Viberr create it with the project. No project was created. ${START_WITHOUT_REPOSITORY}`,
     );
   }
   if (probe.status === "forbidden") {
     throw AppError.validation(
       probe.code === 401
-        ? `GitHub rejected the ${owner} connection's token, so Viberr cannot confirm ${repo}. Replace the token in Instance settings → GitHub connections, then create the project. No project was created.`
-        : `GitHub refused the ${owner} connection's token for ${repo}${probe.said ? ` (${probe.said.replace(/\.$/, "")})` : ""}, so Viberr cannot confirm the repository. Clear what GitHub names, then create the project. No project was created.`,
+        ? `GitHub rejected the ${owner} connection's token, so Viberr cannot confirm ${repo}. Replace the token in Instance settings → GitHub connections, then create the project. No project was created. ${START_WITHOUT_REPOSITORY}`
+        : `GitHub refused the ${owner} connection's token for ${repo}${probe.said ? ` (${probe.said.replace(/\.$/, "")})` : ""}, so Viberr cannot confirm the repository. Clear what GitHub names, then create the project. No project was created. ${START_WITHOUT_REPOSITORY}`,
     );
   }
   if (probe.status === "unreachable") {
     throw AppError.validation(
-      `Couldn't reach GitHub to confirm ${repo}, so no project was created. Try again once GitHub answers.`,
+      `Couldn't reach GitHub to confirm ${repo}, so no project was created. Try again once GitHub answers. ${START_WITHOUT_REPOSITORY}`,
     );
   }
   if (!probe.defaultBranch) {
     throw AppError.validation(
-      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. Check the repository on GitHub, then try again. No project was created.`,
+      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. Check the repository on GitHub, then try again. No project was created. ${START_WITHOUT_REPOSITORY}`,
     );
   }
   const defaultBranch = probe.defaultBranch;

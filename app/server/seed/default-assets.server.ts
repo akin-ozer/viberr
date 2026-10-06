@@ -115,7 +115,8 @@ work and the result comes back on that task (ruling 530).
   (admin, maintainer, contributor, viewer). Org admins pass project gates
   through an audited override.
 - Projects carry stages, workflow boundaries (auto, approval, human), members,
-  deployed agents and, on a board that delivers software, a GitHub repository;
+  deployed agents and, on a board that delivers software, a GitHub repository,
+  which it may connect later (ruling 672);
   a board that delivers results needs none (ruling 667). The move into the
   final stage is always a human decision.
 - Knowledge bases, skills and MCP connections are org resources granted to
@@ -192,6 +193,10 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
+    // Ruling 672 (owner, 2026-10-06): before the doctrine said a board that
+    // builds software can start with no repository, and named the guide's
+    // section on switching a board to pull requests.
+    "e69d11e6bc8cf0f4d49b4716e2450d5030968978222e057ff0cb1aceb86559cb",
     // Ruling 667 (owner, 2026-10-06): before the doctrine said to state what
     // the board delivers at creation and that a results board needs no
     // repository. Every project took one, and the AWS calculator board kept a
@@ -227,6 +232,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 672 (owner, 2026-10-06): before "Bringing up a new project" said
+    // a software board can start without its repository, and before
+    // "Switching a board to pull requests" existed.
+    "7dcc5f4f84cd603a5614931b99c860d79f1456f75c7c12fec186d44cd608a46f",
     // Rulings 667 and 668 (owner, 2026-10-06): before "Bringing up a new
     // project" said a results board is created with no repository, and "A
     // board that delivers results" said the operator summarizes the result
@@ -299,6 +308,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 672 (owner, 2026-10-06): before the doctrine said what to do
+    // when a task on a board with no repository needs one: ask once with
+    // `ask_for_repository`, and never again once a person decided to keep none.
+    "5bdfa3077e700e497b231676e45c41e6005c91a5cb1b689eee7b614f21aaadf8",
     // Rulings 667 and 668 (owner, 2026-10-06): before the doctrine knew a
     // project with no repository, and before the completion packet said what
     // to weigh, what was assumed and what is missing, named the result's files
@@ -444,6 +457,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 672 (owner, 2026-10-06): before the tool list named
+    // `ask_for_repository`.
+    "3b3e4bb97fb8650b7964288219708e54879d83b756875bce13fea009bdaa2b3b",
     // Ruling 619 (AWSC-75, 2026-10-01): before a rework that passes a later
     // stage carried an earlier stage's fix through that stage's own file.
     "c58c22c5e04de01ae5ccd0114869c560e1a16376a4be2420b6ce5cb618dfa3d4",
@@ -556,6 +572,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // Ruling 667 (owner, 2026-10-06): before "The pieces you manage" said a
     // board that delivers results needs no repository.
     "864b8434eebe1577e1420d218e6136298c4d8ff9c2fe2fae2f9509a31662cf95",
+    // Ruling 672 (owner, 2026-10-06): before it said a board that delivers
+    // software may connect its repository later.
+    "627b7bdd1cf2eeedc3ece72bd1d713918054e5243059a18d312d7d6d8335b746",
   ],
   [path.join("agents", "profiles", "developer.md")]: [
     "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",

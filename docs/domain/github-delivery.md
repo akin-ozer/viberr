@@ -134,8 +134,8 @@ characters; last 8 lines, 600 characters.
 
 ## 2. Attaching a repository
 
-- **A board that delivers software needs a repository GitHub confirms at project
-  creation** (ruling 671): `owner/name` plus an existing connection for that owner. The
+- **A repository named at project creation is one GitHub confirms** (ruling 671):
+  `owner/name` plus an existing connection for that owner. The
   connection's token probes the repo, and creation goes on only when GitHub answers
   with the repository's default branch, which the project takes; a read-only repo still
   creates with a warning. Each of these refuses on all three doors, and nothing is
@@ -146,10 +146,42 @@ characters; last 8 lines, 600 characters.
   checked against GitHub's alphabet first, so the name written is the name confirmed.
   A results board that attaches a repository for reading is held to the same. So a
   board that names a repository cannot be made while GitHub is unreachable, or before
-  the repository exists unless it is made with the project. The connection's PAT is
+  the repository exists unless it is made with the project; each refusal ends by saying
+  the project can start without one (ruling 672, below). The connection's PAT is
   bound to the project and proved against the repo. Until ruling 671 the first four
   created the project with a warning and `defaultBranch: main`, a guess nothing
   confirmed.
+- **Any board can start with no repository** (ruling 672). The owner and the repository
+  name are given together or not at all, whatever the board delivers. A board that
+  delivers software and names none is written with `repo: null`, no connection and no
+  credential, and its agents keep repo-write: its tasks come back as files until a
+  repository is connected, and connecting one is all it takes for them to ship as pull
+  requests. The dialog's control is "Connect the repository later" under Software (the
+  board import dialog has the same one); the controller leaves `owner` and `repoName`
+  out. Creation's reply says so (`SOFTWARE_WITHOUT_REPOSITORY_NOTE`).
+- **The operator asks for a repository once** (ruling 672). On a project with no
+  repository, an operator whose task needs one (its goal changes a codebase or names a
+  repository, or a person wants a pull request) calls `ask_for_repository`. It opens the
+  one packet whose answers act on the board, with `cause: repository:<slug>`, so an
+  answer on one task reaches every task that asked. Both answers take `edit-policy`:
+  - `connect_repository`: the person types `owner/name` (the card's box, opened with the
+    repository the operator could name). The resolution attaches it through the Change
+    door as a repository the board delivers through, so its token has to push; a refusal
+    of that door leaves the question open. Then the controller is started on the board,
+    as that person, in a new board conversation, asked to switch the board to pull
+    requests. Each answered task's operator is started again when the board can write
+    its repository, or at once when no controller turn started; where the controller is
+    switching a board nobody may write yet, it starts them (ruling 330's sweep is the
+    net).
+  - `keep_without_repository`: the decision is written as `no-repository.md` in the
+    project's rulings knowledge base (one is created and named, `<slug>-rulings`, when
+    the project names none), audited as `project.repo.ruling_recorded`. While that
+    document stands `ask_for_repository` is refused, the operator has no such tool and
+    its workspace section says not to ask. Deleting the document makes the question
+    askable again.
+  A repository attached any other way (project settings, the controller's
+  `connect_project_repository`) removes that document (`project.repo.ruling_removed`)
+  and answers every task still asking.
 - **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
   software | results` on all three doors (the New project dialog's "This board
   delivers", the controller's `create_project`, and a board import, which reads it off
@@ -176,7 +208,8 @@ characters; last 8 lines, 600 characters.
   ruling 128's bootstrap would create that branch on a repository whose default is
   another), binds that connection's credential and proves it, and records the reading.
   A token that can only read is accepted when the board's agents are deployed and none
-  of them writes the repository.
+  of them writes the repository, unless the repository is connected to deliver through
+  (the packet's answer, and the controller's `delivers: true`; ruling 672).
 - **Creation can create the repository** (ruling 462). With `createRepository`
   (`{ private, description? }`: the controller's `create_project` argument, or the New
   project modal's "Create this repository on GitHub if it does not exist") a 404 probe
@@ -928,7 +961,9 @@ credential handed to a model.
 ## 9. Identifiers and knobs
 
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
-  `project.repo.updated`, `project.repo.removed` (ruling 667), `project.repository.created`
+  `project.repo.updated`, `project.repo.removed` (ruling 667),
+  `project.repo.ruling_recorded|ruling_removed` (ruling 672, the decision that a board
+  connects no repository), `project.repository.created`
   (ruling 462, a repository made at project creation), `github.repo.bootstrapped` (ruling 128, a repository-level
   change like `github.credential.assigned`), `project.default_branch.adopted` (ruling 670),
   `github.branch.created|deleted`,

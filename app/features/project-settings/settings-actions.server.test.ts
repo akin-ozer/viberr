@@ -1081,6 +1081,8 @@ describe("changeProjectRepo attaches a repository to a project that has none (ru
       toast: "Repository attached: acme/site (default branch master), checked and bound with acme's connection",
       changed: true,
       repo: REPO,
+      // Ruling 672: nothing on this board was waiting on a repository.
+      settled: { rulingRemoved: null, answered: [], missed: [], operatorsStarted: true },
     });
     expect(projectOf(store)).toMatchObject({ repo: REPO, defaultBranch: "master" });
     expect(

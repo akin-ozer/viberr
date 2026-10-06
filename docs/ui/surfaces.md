@@ -334,10 +334,14 @@ Intents behind `project.task.tsx` are explained in
   The dialog asks what the board delivers (ruling 667): "This board delivers", Software
   or "Results · no code", travelling as `delivers=software|results`. It opens on
   results where the instance has no GitHub connection. Software shows the connection
-  and repository fields, both required. Results shows neither until "Attach a
+  and repository fields, both required unless "Connect the repository later" is ticked
+  (ruling 672): the fields then go, the hint says the board starts with no repository
+  and that the operator asks for one when a task needs a pull request, and an empty
+  `owner` and `repoName` are posted. Results shows neither until "Attach a
   repository for the agents to read" is ticked, and posts an empty `owner` and
   `repoName` otherwise. The board import dialog reads the same from the file: a board
-  none of whose agents writes a repository says so and offers the same tick.
+  none of whose agents writes a repository says so and offers the results tick, and any
+  other offers the software one.
   Under its repository field, once a connection is picked, the dialog offers
   "Create this repository on GitHub if it does not exist" (ruling 462), unchecked by
   default so a typo never becomes a repository; checking it shows "Create it as a

@@ -167,6 +167,25 @@ describe("ruling 653: the board import dialog", () => {
     expect([posts[1]!.get("owner"), posts[1]!.get("repoName")]).toEqual(["acme", "release-train"]);
   });
 
+  it("ruling 672: a board whose agents write a repository imports without one when the person connects it later", async () => {
+    // CANARY: require a repository of every software board and one exported
+    // from an instance cannot be brought up before its repository exists.
+    await postsLikeABrowser();
+    const posts: FormData[] = [];
+    const { container, getByRole, getByLabelText } = renderDialog(PREVIEW, async ({ request }) => {
+      posts.push(await request.formData());
+      return { ok: false, error: "held for the test" };
+    });
+    expect(container.textContent).toContain("This board's agents write a repository, and each task ships as a pull request.");
+    expect(container.querySelector("#np-repo")).not.toBeNull();
+    fireEvent.click(getByLabelText("Connect the repository later"));
+    expect(container.querySelector("#np-repo")).toBeNull();
+    expect(container.textContent).toContain("The board starts with no repository.");
+    fireEvent.click(getByRole("button", { name: "Import board" }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect([posts[0]!.get("owner"), posts[0]!.get("repoName"), posts[0]!.get("createRepository")]).toEqual(["", "", null]);
+  });
+
   it("refuses a name whose project already exists, sending nothing", async () => {
     // CANARY: drop the taken-slug check and the server's 409 is the person's
     // first word of it, after the upload.

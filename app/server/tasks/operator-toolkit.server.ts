@@ -55,6 +55,7 @@ import {
 } from "./operator-snapshot.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  operatorAskForRepository,
   operatorOpenPacket,
   operatorResolvePacket,
   type OperatorOpenPacketInput,
@@ -1059,6 +1060,35 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       ),
       "set_dependencies",
     );
+    // Ruling 672: offered only where the question can be asked, a board with
+    // no repository whose rulings hold no decision to keep none. Anywhere
+    // else the tool would answer with a refusal every time.
+    if (authority.repositoryAsk === "open") {
+      add(
+        tool(
+          "ask_for_repository",
+          "Ask a person to connect a repository to this board, which has none, because THIS task needs one: its goal changes a codebase or names a repository, or it has to ship as a pull request. Give the `reason` in a sentence or two a person reads before deciding, and the `repository` (owner/name) when the goal or a person named it. It opens a decision packet with two answers and you stop there: connecting one attaches it and starts the controller on the board; keeping the board without one is written into the project's rulings and the question is never asked again. Do not have an agent improvise a code change as loose files while the question is open, and never write these two answers as options of open_decision_packet. ONE packet stands at a time, so this is refused while another is open.",
+          {
+            reason: z
+              .string()
+              .describe("Why this task needs a repository: what it has to change, or that it must ship as a pull request."),
+            repository: z
+              .string()
+              .optional()
+              .describe("The repository the goal or a person named, as owner/name. Omit when none was named."),
+          },
+          async (args) => {
+            const ask: Parameters<typeof operatorAskForRepository>[2] = {
+              ...base,
+              reason: prose(args.reason),
+            };
+            if (args.repository) ask.repository = args.repository;
+            return resultText(await operatorAskForRepository(db, ctx, ask, authority));
+          },
+        ),
+        "ask_for_repository",
+      );
+    }
     add(
       tool(
         "resolve_decision_packet",
