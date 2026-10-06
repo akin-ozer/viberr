@@ -1982,7 +1982,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    state panel's own row keys), so a stage NAMED Ready can no longer be read as
    a status word beside "blocked". The label is the house field label
    (.rs-lbl / .res-group .lbl): .69rem caps on --faint (ruling 625). */
-.hero-field { display: inline-flex; align-items: center; gap: .375rem; }
+/* Ruling 666: a field gives way before the column does. Without `min-width: 0`
+   the Epic field kept the whole width of its epic's name (the chip inside can
+   only shorten once its parent may), and a long name made the task page scroll
+   sideways on a phone. */
+.hero-field { display: inline-flex; align-items: center; gap: .375rem; min-width: 0; }
 .hero-field-lbl { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 .hero-file {
   display: inline-flex; align-items: center; gap: .375rem;

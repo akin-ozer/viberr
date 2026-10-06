@@ -1379,7 +1379,8 @@ comment as a partial success. That door first refuses a closed task (ruling 177)
 held one (ruling 186) with the same sentences as every other door.
 
 Before a delivering dispatch on a task with no recorded branch (ruling 122),
-`ensureTaskBranchBestEffort` prepares the task branch; a
+`ensureTaskBranchBestEffort` prepares the task branch, for a deliverer that writes the
+repository only (ruling 665: one that delivers files gets none); a
 failure it cannot fix (credential rejected, GitHub unreachable, base branch missing and
 not creatable, or an unexpected throw) is disclosed once on the task timeline as a
 `github` event by `system:delivery`, audited as `github.branch.prepare_failed`, and logged

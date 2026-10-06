@@ -132,6 +132,7 @@ export function GithubTrace({
   onRunGates,
   runningGates = false,
   attachmentsBase = null,
+  filesDelivery = null,
 }: {
   task: TaskDetail;
   /** GitHub web host for browse links — always the loader's `githubWebHost()`
@@ -200,6 +201,11 @@ export function GithubTrace({
   /** The attachments route's base, so each gate's log opens where it lives.
    *  Null renders the log names as text. */
   attachmentsBase?: string | null;
+  /** Ruling 665: this task's delivery is the files its deliverer saves on it
+   *  (ruling 535), so it never has a branch: `expected` once that agent holds
+   *  the delivery, `delivered` once its files are the task's delivery. Null
+   *  for a task delivered on a branch, or with no deliverer yet. */
+  filesDelivery?: "expected" | "delivered" | null;
 }) {
   const merging = runIntent !== null;
   const completingMerge = runIntent === "complete-merge";
@@ -248,11 +254,11 @@ export function GithubTrace({
   // workflow first". "Escapable" is the test, so a task that IS wedged still
   // offers it with no branch at all: an open BLOCKED packet is a wedge (a
   // crashed run's recovery packet), and so is any work to accept — a branch, a
-  // pull request, or a delivered revision. What goes away is the standing offer
-  // on a task where nothing has happened yet.
+  // pull request, a delivered revision, or (ruling 665) delivered files. What
+  // goes away is the standing offer on a task where nothing has happened yet.
   const wedgedOrDelivering = Boolean(
     task.branch ?? task.pr ?? task.workRevisionSha ?? null,
-  ) || task.packet?.type === "blocked";
+  ) || filesDelivery === "delivered" || task.packet?.type === "blocked";
   const forceAcceptReason =
     isTerminal || acceptance.terminallyBlocked || !wedgedOrDelivering
       ? null
@@ -308,7 +314,9 @@ export function GithubTrace({
           <h2>GitHub</h2>
         </div>
         <div className="empty sm">
-          No branch yet. A task-key branch is created when execution starts.
+          {filesDelivery
+            ? "No branch. This task is delivered as the files saved on it."
+            : "No branch yet. A task-key branch is created when an agent that writes the repository starts delivering."}
         </div>
         {forceAcceptRow && <div className="pr-acts">{forceAcceptRow}</div>}
       </div>

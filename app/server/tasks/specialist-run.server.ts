@@ -538,7 +538,17 @@ async function dispatchAgentRun(
   // one name a reused task key can already have a stranger's pull request on.
   // Best-effort by the same reasoning as the operator's: a task that cannot
   // reach GitHub still runs, and delivery re-checks the name.
-  if (delivers && !existing.parsed.frontmatter.branch) {
+  // Ruling 665: and only for a deliverer that writes the repository. One whose
+  // delivery is the files it saves on the task (ruling 535) never commits, so
+  // a branch made for it stays empty on the repository for good. A profile
+  // undeployed since it was engaged has no grants to read, and keeps the hook.
+  const delivererId = engagement.profileId;
+  const ownsBranch =
+    delivers &&
+    (listDeployedSpecialists(input.projectSlug, ctx).find((s) => s.id === delivererId)
+      ?.capabilities.delivery ??
+      true);
+  if (ownsBranch && !existing.parsed.frontmatter.branch) {
     await ensureTaskBranchBestEffort(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey },

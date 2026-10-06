@@ -2338,6 +2338,33 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(onForceAccept).toHaveBeenCalled();
   });
 
+  it("ruling 665: a task delivered as files says it has no branch, and its delivered files are work to accept", () => {
+    // CANARY: drop `filesDelivery === "delivered"` from `wedgedOrDelivering`
+    // and a files-delivered task that review has stalled on loses the admin's
+    // way out along with the branch it no longer has.
+    const view = (filesDelivery: "expected" | "delivered") =>
+      render(
+        <MemoryRouter>
+          <GithubTrace
+            githubHost={GH_HOST}
+            task={traceTask({ branch: null, pr: null, blockReason: null, packet: null })}
+            acceptance={traceAcceptance({ blockedReason: "No approving verdict yet." })}
+            onForceAccept={vi.fn()}
+            filesDelivery={filesDelivery}
+          />
+        </MemoryRouter>,
+      );
+    const expected = view("expected");
+    expect(expected.getByText(/delivered as the files saved on it/)).toBeTruthy();
+    // No promise of a branch that will never be made, and nothing to accept yet.
+    expect(expected.queryByText(/branch is created/)).toBeNull();
+    expect(expected.queryByText(/Force accept/)).toBeNull();
+    expected.unmount();
+    const delivered = view("delivered");
+    expect(delivered.getByText(/delivered as the files saved on it/)).toBeTruthy();
+    expect(delivered.getByText(/Force accept/)).toBeTruthy();
+  });
+
   it("ruling 124: NO force-accept on a task with nothing to accept and no wedge", () => {
     // The standing offer this removes: a task created seconds ago — no branch,
     // no PR, no revision, no blocked packet — showed an admin "skips the

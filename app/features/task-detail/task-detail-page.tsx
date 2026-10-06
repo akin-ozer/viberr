@@ -424,6 +424,14 @@ export function TaskDetailPage({
     task.displayReadiness === "accepted" ||
     task.displayReadiness === "merged" ||
     archived;
+  // Ruling 665: a task whose deliverer cannot write the repository is
+  // delivered as files and has no branch, before the delivery as after it.
+  const deliverer = deployedSpecialists.find((s) => s.id === task.specialist?.profileId);
+  const filesDelivery = filesDeliveredAt
+    ? ("delivered" as const)
+    : deliverer?.capabilities?.delivery === false
+      ? ("expected" as const)
+      : null;
 
   // F15-10/R15-1: accepting merges the PR — it fires only through the confirm
   // dialog (which states PR, revision, merge head, verdict state and target
@@ -975,6 +983,7 @@ export function TaskDetailPage({
           runIntent={runIntent}
           runningGates={gatesBusy}
           attachmentsBase={attachmentsBase}
+          filesDelivery={filesDelivery}
         />
         <CurrentStatePanel
           task={task}
