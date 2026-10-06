@@ -157,14 +157,15 @@ characters; last 8 lines, 600 characters.
   deletes the repository's reading and audits `project.repo.removed {from,
   credentialUnbound}`. Tasks keep their branch and pull request records.
 - **A project with no repository attaches one** (**Attach…** in the same row, the Change
-  dialog under that name; `change-repo`, `attachProjectRepo`, ruling 667). It has no
+  dialog under that name; `change-repo`, `changeRepoByConnection`, ruling 667). It has no
   credential to probe with, so the attach is checked with the repository owner's
   connection, else the instance default. With no connection, or on a repository that
   token cannot see, it refuses and writes nothing. Otherwise it takes the repository's
   default branch from GitHub (an unprobed attach would keep the placeholder `main`, and
   ruling 128's bootstrap would create that branch on a repository whose default is
   another), binds that connection's credential and proves it, and records the reading.
-  A token that can only read is accepted when no deployed agent writes the repository.
+  A token that can only read is accepted when the board's agents are deployed and none
+  of them writes the repository.
 - **Creation can create the repository** (ruling 462). With `createRepository`
   (`{ private, description? }`: the controller's `create_project` argument, or the New
   project modal's "Create this repository on GitHub if it does not exist") a 404 probe
@@ -186,10 +187,19 @@ characters; last 8 lines, 600 characters.
   recorded as soon as GitHub is known to have made it.
 - **Changing the repo later** (**Change…** in project settings, `change-repo`,
   `edit-policy`; ruling 539 renamed it from "repair"): normalizes `owner/name` or a URL,
-  demands `confirmFootprint` when tasks already carry GitHub records, probes with the
-  bound credential and refuses 404/401/403 or a read-only repo. A change that lands records
-  its probe as the new repository's reading, and a reading of the repository the project
-  left no longer counts (ruling 517). Audit `project.repo.updated`.
+  demands `confirmFootprint` when tasks already carry GitHub records, and writes nothing
+  it has not checked (ruling 669). The bound credential probes the new repository; a
+  project with none bound (cleared since) is checked with the new owner's connection,
+  else the instance default, exactly as an attach is, and leaves bound to it; with no
+  connection the change is refused. A probe refuses everything but an answer (an
+  unreachable GitHub, 404, 401, any other refusal), an answer that names no default
+  branch, and, where the board writes its repository, one the token can only read. The
+  board writes it when a deployed agent has `capabilities.delivery`, and when no
+  specialist is deployed at all, since boot then deploys the base roster. A change that
+  lands writes the repository with GitHub's default branch, records its probe as the new
+  repository's reading, and a reading of the repository the project left no longer
+  counts (ruling 517). Audit `project.repo.updated {from, to, probed: true,
+  defaultBranch, connection?, footprintTasks?}`.
 - **Attach, re-attach or clear the credential** (`set-credential` / `clear-credential`,
   `grant-github-scope`): prefers the connection whose owner matches the repo, else
   the default; a borrowed connection is probed against the repo first. Audit

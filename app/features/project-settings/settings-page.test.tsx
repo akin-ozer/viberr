@@ -1100,11 +1100,27 @@ describe("RepoPanel", () => {
     fireEvent.click(getByText("Attach…"));
     expect(container.querySelector("dialog h3")!.textContent).toBe("Attach repository");
     expect(container.textContent).toContain("This project has no repository. Enter the one to attach, as owner/name.");
-    // The attach checks the repository itself: no "can't be verified" here.
+    // The attach checks the repository itself, and says so.
     expect(container.textContent).toContain(
       "takes the repository's default branch from GitHub, and binds that connection to this project",
     );
-    expect(container.textContent).not.toContain("can't be verified until one is");
+  });
+
+  it("ruling 669: the Change dialog names the token that checks the repository, the attached credential or a connection it then binds", () => {
+    // Every change is checked before it is written. CANARY: restore "can't be
+    // verified until one is" for a project with no credential and the dialog
+    // promises an unchecked write the server refuses to make.
+    const note = (credential: SettingsViewData["credential"]) => {
+      const { container, getByText } = render(repoPanel({ credential }));
+      fireEvent.click(getByText("Change…"));
+      const text = container.querySelector("dialog .repo-note")!.textContent;
+      cleanup();
+      return text;
+    };
+    expect(note(CREDENTIAL)).toContain("checks it with the attached credential first");
+    const unbound = note(NO_CREDENTIAL);
+    expect(unbound).toContain("No credential is attached, so Viberr checks it first with the GitHub connection for its owner");
+    expect(unbound).toContain("binds that connection to this project");
   });
 
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {

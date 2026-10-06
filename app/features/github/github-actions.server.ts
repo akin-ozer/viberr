@@ -261,7 +261,8 @@ async function probeRepoWithConnection(
  * It is not REQUIRED, though: owner-matching was briefly a hard refusal, which
  * stranded the entirely legitimate one-PAT-many-owners setup (org repos,
  * collaborator repos) that `changeProjectRepo` explicitly supports — it accepts
- * any `owner/name` and infers nothing from connection owners. So a project with
+ * any `owner/name`, and with no credential bound makes this same choice of
+ * connection (ruling 669). So a project with
  * no owner-matched connection falls back to the org default and asks GitHub
  * whether that token reaches the repo; only a real access miss refuses.
  */

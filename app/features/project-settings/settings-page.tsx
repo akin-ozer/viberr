@@ -1979,8 +1979,8 @@ export function MembersPanel({
  * the one door that changes which (ruling 539 named it Change: "repair" was
  * the wrong word for pointing a project at the repository it should have had).
  * The human TYPES the new target; the server probes it with the bound
- * credential and refuses misses. Nothing is inferred and there is no
- * automatic failover.
+ * credential, or with a connection when none is bound (rulings 667 and 669),
+ * and refuses misses. The repository itself is never inferred.
  */
 function ChangeRepoDialog({
   current,
@@ -2068,12 +2068,12 @@ function ChangeRepoDialog({
         />
       </div>
       <p className="repo-note">
-        {!current
-          ? // Ruling 667: an attach finds its own token to check with.
-            "Viberr checks it first with the GitHub connection for its owner, or the instance's default one, takes the repository's default branch from GitHub, and binds that connection to this project. Nothing changes if the check fails."
-          : hasCredential
-            ? "Viberr checks it with the attached credential first, and changes nothing if the token can't push to it."
-            : "No credential is attached, so the new repository can't be verified until one is."}
+        {current && hasCredential
+          ? "Viberr checks it with the attached credential first. Nothing changes if the check fails."
+          : // Rulings 667 and 669: with no credential of the project's to ask
+            // with, the change finds a connection's token and binds it.
+            (current ? "No credential is attached, so " : "") +
+            "Viberr checks it first with the GitHub connection for its owner, or the instance's default one, takes the repository's default branch from GitHub, and binds that connection to this project. Nothing changes if the check fails."}
       </p>
       {footprintTasks > 0 && (
         <label

@@ -263,9 +263,9 @@ async function probeRemoteRepo(
     // a README. `size: 0` is the cue, the 409 on the commits read the proof.
     const empty = await repositoryIsEmpty(createGithubClient({ token, fetchImpl }), repo, data.size);
     // F20-14/F20-15: Change repository refuses a repo the credential can only
-    // read; the same check belongs at create time (live: creating against a
-    // read-only-visible repo was silently accepted and failed only at first
-    // delivery).
+    // read where the board writes it (ruling 669); the same check belongs at
+    // create time (live: creating against a read-only-visible repo was
+    // silently accepted and failed only at first delivery).
     const canPush = repoWritable(data.permissions);
     if (canPush === false) {
       return { status: "read_only", defaultBranch, empty };
