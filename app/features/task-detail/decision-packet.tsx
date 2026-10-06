@@ -684,10 +684,8 @@ interface PacketTierGrants {
 interface PacketTierGate {
   /** The grant this kind needs, which `resolvePacket` re-checks server-side. */
   held: (grants: PacketTierGrants) => boolean;
-  /** Card-level refusal beside Confirm, when this kind is the SELECTED option.
-   *  The repository question's two kinds have none (ruling 673): the card's
-   *  one note under the options is the refusal, for both. */
-  denyNote?: string;
+  /** Card-level refusal beside Confirm, when this kind is the SELECTED option. */
+  denyNote: string;
   /**
    * Per-option treatment: the option itself goes inert, carries this hover
    * title, and appends this clause to its description.
@@ -696,11 +694,13 @@ interface PacketTierGate {
    * else's task keeps that option selectable and blocks the Confirm button
    * instead of 403ing on click (adversarial-review #15).
    *
-   * The repository question's two kinds have no `note` (ruling 673): they
-   * only ever stand together, on a card whose one note under the options
-   * says who answers, and each inert option is described by that note.
+   * The repository question's two kinds have neither a title nor a note
+   * (ruling 673): they stand together, on a card whose one note under the
+   * options says who answers, and each inert option is described by that
+   * note. Their `denyNote` is printed only on a packet that is not that
+   * card, which no writer in the app makes.
    */
-  option: { title: string; note?: string } | null;
+  option: { title?: string; note?: string } | null;
 }
 
 /**
@@ -810,7 +810,8 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
       // Ruling 672: the resolution attaches the repository through the
       // settings door, so the option carries that door's tier.
       held: (grants) => grants.canEditPolicy,
-      option: { title: "Connecting a repository to the board is reserved for project admins" },
+      denyNote: "Connecting a repository to the board is reserved for project admins.",
+      option: {},
     },
   ],
   [
@@ -818,7 +819,8 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
     {
       // Ruling 672: it writes a standing ruling for the whole board.
       held: (grants) => grants.canEditPolicy,
-      option: { title: "Deciding that the board keeps no repository is reserved for project admins" },
+      denyNote: "Deciding that the board keeps no repository is reserved for project admins.",
+      option: {},
     },
   ],
 ]);
@@ -1159,8 +1161,6 @@ export function DecisionPacket({
   // that grant leaves the packet open with no way to type the new goal), and
   // R14-3 / F20-6 / F31-6 the three that touch a branch.
   const selectedGate = selected ? gateFor(selected.kind) : null;
-  // The refusal printed beside Confirm. A kind with none of its own (ruling
-  // 673) is refused all the same: `selectedGate` is what blocks.
   const blockReason = selectedGate?.denyNote ?? null;
   // Ruling 478(e): the two refusals a Confirm can meet before any request.
   // Both clear the moment the person does what they name.
@@ -1189,10 +1189,10 @@ export function DecisionPacket({
   const boardDecision = p.options.length > 0 && p.options.every((o) => isRepositoryOptionKind(o.kind));
   // Ruling 673 (owner, 2026-10-06: "trim the repeated \"project admin\"
   // wording on the card"): that card says who answers ONCE, in the note under
-  // the options. Its two kinds carry no clause and no refusal line of their
-  // own in `PACKET_TIER_GATES`; the note takes that line's id, so it describes
-  // the refused Confirm and each dimmed option, and a screen reader on one
-  // still hears why.
+  // the options. Its answers carry no clause and no hover title of their own
+  // and the selected one's refusal is not printed beside it; the note takes
+  // that line's id, so it describes the refused Confirm and each dimmed
+  // option, and a screen reader on one still hears why.
   const saidOnce = boardDecision && (everyOptionForbidden || !canResolve);
 
   // The open ask-first ceremony, chosen by the pending option's own `kind`. The
@@ -1700,7 +1700,7 @@ export function DecisionPacket({
           </div>
         )}
 
-        {canResolve && blockReason && (
+        {canResolve && blockReason && !saidOnce && (
           <p className="deny-note spaced" id={BLOCK_REASON_ID}>
             <Icon name="lock" />
             {blockReason}
@@ -1787,8 +1787,8 @@ export function DecisionPacket({
               // sheet dims it (`.btn[aria-disabled="true"]`, ruling 459) and
               // keeps it from hovering or pressing like a live button.
               disabled={busy}
-              aria-disabled={selectedGate !== null || undefined}
-              aria-describedby={selectedGate ? BLOCK_REASON_ID : undefined}
+              aria-disabled={blockReason !== null || undefined}
+              aria-describedby={blockReason ? BLOCK_REASON_ID : undefined}
               aria-busy={busy}
               // F17-L8: the visible label stays concise (echoing a multi-line
               // option title overflowed the flex button — F-UI1), but the
@@ -1802,7 +1802,7 @@ export function DecisionPacket({
                     : "Confirm decision"
               }
               onClick={() => {
-                if (selectedGate) return;
+                if (blockReason) return;
                 // The custom choice resolves with the typed directive — it
                 // never accepts, archives or merges, so no ceremony interposes.
                 if (customSelected) {

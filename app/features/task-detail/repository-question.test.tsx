@@ -111,11 +111,10 @@ describe("ruling 672: the repository question's card", () => {
 
   it("is a project admin's to answer: both answers are inert for anyone else, and the card says who answers once", () => {
     // CANARY: drop either row from PACKET_TIER_GATES and a maintainer is
-    // handed a Confirm the server refuses. Ruling 673: put a clause back on
-    // each answer, or give the selected one a refusal line of its own, and
-    // the card names a project admin three ways; block Confirm on that line
-    // instead of on the gate and a kind without one goes through; drop
-    // `aria-describedby` and a screen reader on a dimmed answer hears no
+    // handed a Confirm the server refuses. Ruling 673: put a clause or a
+    // hover title back on each answer, or print the selected one's refusal
+    // beside the note, and the card names a project admin again and again;
+    // drop `aria-describedby` and a screen reader on a dimmed answer hears no
     // reason at all.
     const onResolve = vi.fn();
     const { container } = renderQuestion(QUESTION, false, onResolve);
@@ -124,8 +123,8 @@ describe("ruling 672: the repository question's card", () => {
       expect(answer.getAttribute("aria-disabled")).toBe("true");
       expect(answer.getAttribute("aria-describedby")).toBe("pkt-block-reason");
       expect(answer.textContent).not.toContain("project admin");
+      expect(answer.getAttribute("title")).toBeNull();
     }
-    expect(connect!.getAttribute("title")).toBe("Connecting a repository to the board is reserved for project admins");
     expect(container.querySelector("#pkt-block-reason")!.textContent).toContain(
       "Both answers decide the board, so a project admin gives one.",
     );
@@ -153,6 +152,28 @@ describe("ruling 672: the repository question's card", () => {
     const admin = renderQuestion(QUESTION, true, () => {}, send);
     expect(admin.container.textContent).not.toContain("a project admin gives one");
     expect(admin.queryByRole("button", { name: "Send to a project admin" })).toBeNull();
+  });
+
+  it("still says why a repository answer is refused on a packet that is not the question's own card", () => {
+    // No writer in the app makes such a packet; a task file edited by hand
+    // can. There the card has no note for both answers, so the selected one
+    // prints its own refusal, as every other gated kind does. CANARY: drop
+    // the kind's `denyNote` as text nobody reads and Confirm is refused there
+    // in silence, described by an element that is not on the page.
+    const { options } = QUESTION;
+    const mixed: PacketRender = {
+      ...QUESTION,
+      options: [options[0]!, { kind: "custom", t: "Something else", d: "", rec: false }],
+    };
+    const onResolve = vi.fn();
+    const { container } = renderQuestion(mixed, false, onResolve);
+    expect(container.querySelector("#pkt-block-reason")!.textContent).toBe(
+      "Connecting a repository to the board is reserved for project admins.",
+    );
+    const confirm = confirmButton(container);
+    expect(confirm.getAttribute("aria-describedby")).toBe("pkt-block-reason");
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("tells a person who resolves no packets that a project admin answers, not a maintainer or the task's owner", () => {
