@@ -129,6 +129,11 @@ describe("ruling 672: the repository question's card", () => {
       "Both answers decide the board, so a project admin gives one.",
     );
     expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
+    // Ruling 674: and no box asks them for the repository. CANARY: show it
+    // under an answer the person cannot give and a maintainer is asked for a
+    // required value that nothing will read.
+    expect(container.querySelector("#pkt-note")).toBeNull();
+    expect(container.textContent).not.toContain("Repository to connect");
     const confirm = confirmButton(container);
     expect(confirm.getAttribute("aria-describedby")).toBe("pkt-block-reason");
     fireEvent.click(confirm);
