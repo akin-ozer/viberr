@@ -10,7 +10,7 @@ import {
   readRequiredReviewers,
   type RequiredReviewerView,
 } from "~/server/tasks/required-reviewers.server";
-import { repoFootprintTasks } from "./settings-actions.server";
+import { repoFootprintTasks } from "~/server/projections/repo-footprint.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { staleFileLeases } from "~/server/tasks/file-leases.server";
 import type { ProjectGate } from "~/schemas/project-file.schema";

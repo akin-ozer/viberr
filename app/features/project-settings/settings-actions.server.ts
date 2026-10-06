@@ -64,6 +64,7 @@ import { releaseProjectConversations } from "~/server/controller/controller-conv
 import { overlappingLeases } from "~/server/tasks/file-leases.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, reprojectProject } from "~/server/projections/rebuilder.server";
+import { repoFootprintTasks } from "~/server/projections/repo-footprint.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { generateTempPassword } from "~/server/auth/password.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
@@ -805,22 +806,6 @@ export async function setProjectGates(
 }
 
 // -------------------------------------------------------- repository change
-
-/** Tasks whose GitHub records point at the CURRENT repo: a linked PR, or
- * commits observed on a pushed branch. A project that never reached its
- * repository has zero (every push failed), which is what keeps changing it
- * friction-free. */
-export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): number {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM task_projections
-       WHERE project_slug = ?
-         AND (pr_json IS NOT NULL
-              OR COALESCE(json_array_length(json_extract(github_json, '$.commits')), 0) > 0)`,
-    )
-    .get(projectSlug);
-  return countRow.parse(row).n;
-}
 
 /** What a probe of the repository a project is about to point at found. */
 interface RepoTarget {

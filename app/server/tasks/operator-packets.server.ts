@@ -63,6 +63,7 @@ import { acceptanceTerminallyBlocked } from "./task-acceptance.server";
 import { OPERATOR_AUDIT_ACTOR, recordAudit } from "~/server/audit/audit-recorder.server";
 import { completionPacketRefusal } from "./completion-packet.server";
 import { noRepositoryRuling } from "~/server/org/repository-ruling.server";
+import { repoFootprintTasks } from "~/server/projections/repo-footprint.server";
 import { isRepositoryOptionKind, repositoryAskCause } from "~/shared/repository-ask";
 import { normalizeRepoInput } from "~/shared/repo-ref";
 import { countLabel } from "~/shared/text/plural";
@@ -1419,7 +1420,6 @@ export async function operatorAskForRepository(
   // The settings door asks a person to acknowledge the records an earlier
   // repository left before it attaches another. Here the card states them
   // beside the answers, and confirming Connect is that acknowledgement.
-  const { repoFootprintTasks } = await import("~/features/project-settings/settings-actions.server");
   const footprint = repoFootprintTasks(db, input.projectSlug);
   const observations: NonNullable<OperatorOpenPacketInput["observations"]> = [];
   if (named) observations.push({ k: "Repository named", v: named, code: true });
