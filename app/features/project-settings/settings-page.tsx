@@ -1979,8 +1979,8 @@ export function MembersPanel({
  * the one door that changes which (ruling 539 named it Change: "repair" was
  * the wrong word for pointing a project at the repository it should have had).
  * The human TYPES the new target; the server probes it with the bound
- * credential and refuses misses. Nothing is inferred and there is no
- * automatic failover.
+ * credential, or with a connection when none is bound (rulings 667 and 669),
+ * and refuses misses. The repository itself is never inferred.
  */
 function ChangeRepoDialog({
   current,

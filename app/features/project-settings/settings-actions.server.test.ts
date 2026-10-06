@@ -502,20 +502,20 @@ function deploy(store: TestStore, mode: "direct" | "off"): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-/** A GitHub connection under `owner`, the instance default. Returns its PAT's id. */
-function connect(store: TestStore, owner: string): string {
+/** A GitHub connection under `owner`, the instance default unless told otherwise. Returns its PAT's id. */
+function connect(store: TestStore, owner: string, isDefault = true): string {
   const pat = createPat(
     store.db,
-    { userId: store.users.arda.id, label: `connection · ${owner}`, token: "github_pat_connect01" },
+    { userId: store.users.arda.id, label: `connection · ${owner}`, token: `github_pat_${owner.replace(/\W/g, "")}01` },
     admin(store),
   );
   const now = new Date().toISOString();
   store.db
     .prepare(
       `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(owner, owner, pat.id, now, now);
+    .run(owner, owner, pat.id, isDefault ? 1 : 0, now, now);
   return pat.id;
 }
 
@@ -637,7 +637,9 @@ describe("changeProjectRepo — the one door that changes a project's repository
     // board that delivers through its repository. CANARY: require push of
     // every board and a results board cannot change the repository its agents
     // only read, though it could attach it; require it of none and a board
-    // whose agent commits adopts a repository it cannot push to.
+    // whose agent commits adopts a repository it cannot push to; stop
+    // counting a board with no specialist as one that writes and it adopts
+    // one too, a boot before the base roster's Developer is deployed on it.
     const gh = fakeGithubFetch({
       [`GET /repos/octocat/Hello-World`]: {
         body: {
@@ -682,11 +684,18 @@ describe("changeProjectRepo — the one door that changes a project's repository
       repo: "octocat/Hello-World",
       readOnly: true,
     });
+
+    // The fixture's own roster: no specialist at all.
+    const rosterless = setupTestStore(ctx);
+    await misconfigure(rosterless);
+    bindCredential(rosterless);
+    await expect(change(rosterless)).rejects.toMatchObject({ status: 400 });
   });
 
   it("F20-15: ACCEPTS a repo the credential can push to (permissions.push true)", async () => {
     const store = setupTestStore(ctx);
     await misconfigure(store);
+    deploy(store, "direct");
     bindCredential(store);
     const gh = fakeGithubFetch({
       [`GET /repos/${REPO_OK}`]: {
@@ -753,6 +762,40 @@ describe("changeProjectRepo — the one door that changes a project's repository
       defaultBranch: "trunk",
       connection: "akin-ozer",
     });
+  });
+
+  it("ruling 669: the connection that checks is the new owner's, matched as GitHub matches names, and the instance default only when that owner has none", async () => {
+    // B-GH3's rule, at this door. CANARY: always take the default and a
+    // project is bound to another owner's token; take the owner's alone and
+    // one token that reaches several owners' repositories cannot be used;
+    // compare owners by case and `Akin-Ozer` finds no `akin-ozer` connection.
+    const typed = "Akin-Ozer/viberr";
+    const routes = {
+      [`GET /repos/${typed}`]: { body: { full_name: REPO_OK, default_branch: "main", permissions: { push: true } } },
+    };
+    const change = (store: TestStore) =>
+      changeProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: typed },
+        admin(store),
+        { dataRoot: store.dataRoot },
+        { fetchImpl: fakeGithubFetch(routes).fetchImpl },
+      );
+    const bound = (store: TestStore) =>
+      store.db.prepare(`SELECT pat_id FROM project_github_credentials WHERE project_slug = ?`).get(store.slug);
+
+    const both = setupTestStore(ctx);
+    await misconfigure(both);
+    connect(both, "elsewhere");
+    const owners = connect(both, "akin-ozer", false);
+    expect((await change(both)).toast).toContain("checked and bound with akin-ozer's connection");
+    expect(bound(both)).toEqual({ pat_id: owners });
+
+    const borrowed = setupTestStore(ctx);
+    await misconfigure(borrowed);
+    const defaults = connect(borrowed, "elsewhere");
+    expect((await change(borrowed)).toast).toContain("checked and bound with elsewhere's connection");
+    expect(bound(borrowed)).toEqual({ pat_id: defaults });
   });
 
   it("ruling 669: REFUSES with no credential and no connection to check it with, and a repository GitHub names no default branch for", async () => {
@@ -1084,6 +1127,7 @@ describe("changeProjectRepo attaches a repository to a project that has none (ru
       [`GET /repos/${REPO}`]: { body: { full_name: REPO, default_branch: "main", permissions: { push: false, admin: false, maintain: false } } },
     };
     const { store } = repoLess();
+    deploy(store, "off");
     expect((await attach(store, readOnly)).changed).toBe(true);
     expect(readRepoHealth(store.db, store.slug)?.result).toMatchObject({ status: "connected", readOnly: true });
 

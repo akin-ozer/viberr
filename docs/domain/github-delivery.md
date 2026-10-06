@@ -164,7 +164,8 @@ characters; last 8 lines, 600 characters.
   default branch from GitHub (an unprobed attach would keep the placeholder `main`, and
   ruling 128's bootstrap would create that branch on a repository whose default is
   another), binds that connection's credential and proves it, and records the reading.
-  A token that can only read is accepted when no deployed agent writes the repository.
+  A token that can only read is accepted when the board's agents are deployed and none
+  of them writes the repository.
 - **Creation can create the repository** (ruling 462). With `createRepository`
   (`{ private, description? }`: the controller's `create_project` argument, or the New
   project modal's "Create this repository on GitHub if it does not exist") a 404 probe
@@ -188,15 +189,17 @@ characters; last 8 lines, 600 characters.
   `edit-policy`; ruling 539 renamed it from "repair"): normalizes `owner/name` or a URL,
   demands `confirmFootprint` when tasks already carry GitHub records, and writes nothing
   it has not checked (ruling 669). The bound credential probes the new repository; a
-  project with none bound (cleared since, or its token unreadable) is checked with the
-  new owner's connection, else the instance default, exactly as an attach is, and leaves
-  bound to it; with no connection the change is refused. A probe refuses 404/401/403, an
-  answer that names no default branch, and, where a deployed agent writes the repository
-  (`capabilities.delivery`), one the token can only read. A change that lands writes the
-  repository with GitHub's default branch, records its probe as the new repository's
-  reading, and a reading of the repository the project left no longer counts (ruling
-  517). Audit `project.repo.updated {from, to, probed: true, defaultBranch,
-  connection?, footprintTasks?}`.
+  project with none bound (cleared since) is checked with the new owner's connection,
+  else the instance default, exactly as an attach is, and leaves bound to it; with no
+  connection the change is refused. A probe refuses everything but an answer (an
+  unreachable GitHub, 404, 401, any other refusal), an answer that names no default
+  branch, and, where the board writes its repository, one the token can only read. The
+  board writes it when a deployed agent has `capabilities.delivery`, and when no
+  specialist is deployed at all, since boot then deploys the base roster. A change that
+  lands writes the repository with GitHub's default branch, records its probe as the new
+  repository's reading, and a reading of the repository the project left no longer
+  counts (ruling 517). Audit `project.repo.updated {from, to, probed: true,
+  defaultBranch, connection?, footprintTasks?}`.
 - **Attach, re-attach or clear the credential** (`set-credential` / `clear-credential`,
   `grant-github-scope`): prefers the connection whose owner matches the repo, else
   the default; a borrowed connection is probed against the repo first. Audit

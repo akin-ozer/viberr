@@ -134,8 +134,9 @@ const repoResponseSchema = z.object({
  *  answers, and `push === false` among them is the proven read-only repo.
  *
  *  F20-15: a project exists to push branches and open PRs, so a repo the
- *  credential can only READ is not deliverable — on `false` the repair probe
- *  refuses and the create probe warns. The third state is on purpose: absent or
+ *  credential can only READ is not deliverable — on `false` the Change probe
+ *  refuses where the board writes its repository (ruling 669) and the create
+ *  probe warns. The third state is on purpose: absent or
  *  unreadable is "unknown", never a refusal; only a PROVEN read-only repo is.
  *  `admin` and `maintain` need no third state: either GitHub asserted one or it
  *  did not. */

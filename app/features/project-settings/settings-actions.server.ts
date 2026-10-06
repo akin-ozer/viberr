@@ -94,11 +94,12 @@ import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
 
 /**
- * The two `GET /repos/{owner}/{repo}` fields the change reads, decoded by the
- * probe's `request`. Tolerant at every level — an unreadable field reads as
- * "unknown" and the change falls back to the same behaviour it had before the
- * probe existed; the object-level catch means a 2xx never comes back as a
- * `decode` failure, so a reachable repo always reaches the write check.
+ * The `GET /repos/{owner}/{repo}` fields the change reads, decoded by the
+ * probe's `request`. Tolerant at every level: unreadable `permissions` or
+ * `private` read as "unknown" and pass, and an unreadable `default_branch`
+ * reads as none, which the probe refuses (ruling 669). The object-level catch
+ * means a 2xx never comes back as a `decode` failure, so a reachable repo
+ * always reaches those checks.
  * The `permissions` block (F20-15, the read-only proof of write access) is
  * decoded and judged by pat-validator.server.ts's `repoPermissionsSchema` /
  * `repoWritable`.
@@ -831,11 +832,13 @@ interface RepoTarget {
 
 /**
  * Whether the board delivers through its repository: a deployed agent may
- * write it. The change refuses a repository its token can only read exactly
- * then (F20-15), and the removal refuses on the same fact.
+ * write it. So may a board with no specialist deployed: boot gives it the
+ * base roster (`ensureBaseAgentsDeployed`), whose Developer writes. The
+ * change refuses a repository its token can only read exactly then (F20-15).
  */
 function boardWritesRepo(projectSlug: string, ctx: SettingsMutationContext): boolean {
-  return listDeployedSpecialists(projectSlug, ctx).some((agent) => agent.capabilities.delivery);
+  const specialists = listDeployedSpecialists(projectSlug, ctx);
+  return specialists.length === 0 || specialists.some((agent) => agent.capabilities.delivery);
 }
 
 /**
@@ -907,20 +910,21 @@ async function probeRepoTarget(
  * GitHub with.
  *
  * That is a project with no repository (creation bound none, and removing a
- * repository unbinds its credential), and one whose credential was cleared or
- * whose token can no longer be read. The bound-credential probe has nothing
- * to ask with there, and a change that skipped it kept the `defaultBranch` on
- * file: the placeholder `main`, or the default of the repository the project
- * left. On a repository whose default is another branch the next branch
- * preparation would find no such ref, and ruling 128's bootstrap would create
- * it from the root commit and make it the repository's default branch.
+ * repository unbinds its credential), and one whose credential was cleared.
+ * The bound-credential probe has nothing to ask with there, and a change that
+ * skipped it kept the `defaultBranch` on file: the placeholder `main`, or the
+ * default of the repository the project left. On a repository whose default
+ * is another branch the next branch preparation would find no such ref, and
+ * ruling 128's bootstrap would create it from the root commit and make it the
+ * repository's default branch.
  *
  * So the change is checked with the connection the project is about to be
  * given: the repository owner's, else the instance default (the choice
  * `runSetCredential` makes). It refuses with no connection and on a miss,
  * adopts the repository's own default branch, and binds that connection, so
- * the project leaves this door as creation would have left it. A board none
- * of whose agents writes the repository may take one its token can only read.
+ * the project leaves this door as creation would have left it. A board whose
+ * agents are deployed and none of them writes the repository may take one its
+ * token can only read.
  */
 async function changeRepoByConnection(
   db: DatabaseSync,

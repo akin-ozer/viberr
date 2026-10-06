@@ -1100,11 +1100,10 @@ describe("RepoPanel", () => {
     fireEvent.click(getByText("Attach…"));
     expect(container.querySelector("dialog h3")!.textContent).toBe("Attach repository");
     expect(container.textContent).toContain("This project has no repository. Enter the one to attach, as owner/name.");
-    // The attach checks the repository itself: no "can't be verified" here.
+    // The attach checks the repository itself, and says so.
     expect(container.textContent).toContain(
       "takes the repository's default branch from GitHub, and binds that connection to this project",
     );
-    expect(container.textContent).not.toContain("can't be verified until one is");
   });
 
   it("ruling 669: the Change dialog names the token that checks the repository, the attached credential or a connection it then binds", () => {
