@@ -288,11 +288,13 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   names the one case that needs a person: the credential cannot write the repository
   (a `repo` scope violation opens) or GitHub refused the create; fix that, then deliver
   again. A delivery never pushes a task branch as the repository's first ref.
-  A repository that has a default branch of its own is never given another (ruling
-  670): when the project names a branch the repository does not have (written
-  unconfirmed while GitHub was unreachable, or renamed on GitHub since), the project
-  takes the repository's default, the task's timeline says so, and the audit row is
-  `project.default_branch.adopted`.
+  A repository whose default branch is not named for one of the project's tasks is
+  not given another (ruling 670): when the project names a branch the repository does
+  not have (written unconfirmed while GitHub was unreachable, or renamed on GitHub
+  since), the project takes the repository's default, the task's timeline says so, and
+  the audit row is `project.default_branch.adopted`. After a rename, a workspace that
+  already has commits on the old name stays on it: rename that branch in the workspace,
+  or let the task finish there.
 - **A branch collision packet whose PR is the task's own** (ruling 136): the
   `resolve_remote_collision` option performs the push the person asked for when origin's
   copy is behind or absent, keeps the block only for a diverged remote, and every branch

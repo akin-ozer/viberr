@@ -42,8 +42,9 @@ const EMPTY = { status: 409, body: { message: "Git Repository is empty." } };
 interface FakeRepoState {
   /** The first-commit write fails, the way a GitHub outage does. */
   refuse: boolean;
-  /** The branch a person pushed first, which GitHub then calls the default. */
-  own: string | null;
+  /** The branch a person pushed first, which GitHub then calls the default,
+   *  and its head. */
+  own: { branch: string; sha: string } | null;
 }
 
 async function emptyRepoTask() {
@@ -73,9 +74,13 @@ async function emptyRepoTask() {
         : head
           ? { body: { object: { sha: head } } }
           : EMPTY,
+    [`GET ${REPO_PATH}/git/ref/heads/master`]: () =>
+      control.own?.branch === "master"
+        ? { body: { object: { sha: control.own.sha } } }
+        : { status: 404, body: { message: "Not Found" } },
     [`GET ${REPO_PATH}/branches`]: () =>
-      control.own ? { body: [{ name: control.own }] } : head ? { body: [{ name: "main" }] } : EMPTY,
-    [`GET ${REPO_PATH}`]: () => ({ body: { default_branch: control.own ?? "main" } }),
+      control.own ? { body: [{ name: control.own.branch }] } : head ? { body: [{ name: "main" }] } : EMPTY,
+    [`GET ${REPO_PATH}`]: () => ({ body: { default_branch: control.own?.branch ?? "main" } }),
     [`PUT ${REPO_PATH}/contents/README.md`]: (call) => {
       if (control.refuse) return { status: 502, body: { message: "Bad Gateway" } };
       // SAFETY: the bootstrap sends the Contents API's JSON body; `content`
@@ -89,11 +94,11 @@ async function emptyRepoTask() {
       return { status: 201, body: { commit: { sha: head } } };
     },
   });
-  const checkout = () =>
+  const checkout = (taskKey = "VIB-1") =>
     withLocalGithub(origins, () =>
       ensureOperatorRepoCheckout(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey, dataRoot: store.dataRoot },
         undefined,
         { fetchImpl: gh.fetchImpl },
       ),
@@ -104,8 +109,9 @@ async function emptyRepoTask() {
     gitOutSync(origin.seed, ["add", "-A"]);
     gitOutSync(origin.seed, ["commit", "-qm", "Their first commit"]);
     gitOutSync(origin.seed, ["push", "-q", origin.bare, `HEAD:refs/heads/${branch}`]);
-    control.own = branch;
-    return gitOutSync(origin.seed, ["rev-parse", "HEAD"]);
+    const sha = gitOutSync(origin.seed, ["rev-parse", "HEAD"]);
+    control.own = { branch, sha };
+    return sha;
   };
   return { store, gh, checkout, control, pushOwn, head: () => head };
 }
@@ -156,14 +162,22 @@ describe("the operator's checkout of an empty repository (ruling 468)", () => {
     expect(existsSync(path.join(again.dir, "README.md"))).toBe(true);
   });
 
-  it("ruling 670: a repository whose first push was a person's own branch is not given a `main`: the project takes that branch and the checkout moves onto it", async () => {
+  it("ruling 670: a repository whose first push was a person's own branch is not given a `main`: the project takes that branch and every unborn checkout moves onto it", async () => {
     const { store, gh, checkout, control, pushOwn } = await emptyRepoTask();
-    // The first clone lands on the empty repository while the first commit
-    // cannot be made, so the checkout is unborn. Then a person pushes their
-    // code on `master`, and GitHub makes it the default branch.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),
+      goal: "Build the other half.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // Two tasks' first clones land on the empty repository while the first
+    // commit cannot be made, so both checkouts are unborn. Then a person
+    // pushes their code on `master`, and GitHub makes it the default branch.
     control.refuse = true;
-    const first = await checkout();
-    if (first.kind !== "checkout") throw new Error(first.kind);
+    for (const key of ["VIB-1", "VIB-2"]) {
+      const first = await checkout(key);
+      if (first.kind !== "checkout") throw new Error(first.kind);
+    }
+    const refused = gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`).length;
     const theirs = pushOwn("master");
     control.refuse = false;
 
@@ -175,9 +189,17 @@ describe("the operator's checkout of an empty repository (ruling 468)", () => {
     expect(again.defaultBranch).toBe("master");
     expect(await gitOut(again.dir, ["rev-parse", "HEAD"])).toBe(theirs);
     expect(await gitOut(again.dir, ["symbolic-ref", "--short", "HEAD"])).toBe("master");
-    // Nothing was written to their repository: the one Contents call is the
-    // refused first commit, made while it was empty.
-    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    // The second task's run finds the project already on `master`: its
+    // bootstrap answers `exists`, and its checkout moves all the same.
+    // CANARY: move only the checkout whose own run took the branch and this
+    // one stays unborn on `main` for good.
+    const other = await checkout("VIB-2");
+    if (other.kind !== "checkout") throw new Error(other.kind);
+    expect(await gitOut(other.dir, ["rev-parse", "HEAD"])).toBe(theirs);
+    expect(listAuditEvents(store.db, { action: "project.default_branch.adopted" })).toHaveLength(1);
+    // Nothing was written to their repository: the only Contents calls are
+    // the refused first commits, made while it was empty.
+    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(refused);
     expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
     expect(gh.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
     expect(

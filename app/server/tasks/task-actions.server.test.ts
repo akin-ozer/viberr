@@ -4046,6 +4046,29 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     expect(timeline[1]!.text).toContain("`d2e0fb0`");
   });
 
+  it("ruling 670: a base the project just took from the repository is pushed against and is the pull request's base", async () => {
+    // The gate finds no `main`, a repository with a `master` of its own, and
+    // moves the project onto it. CANARY: refuse an adopted base and nothing is
+    // pushed; open the pull request against the branch read before the gate
+    // and GitHub answers 422 `base: invalid`.
+    pushMock.mockClear();
+    const store = setupProjectedStore(ctx);
+    seedDeliverable(store);
+    github = fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: { status: 404, body: { message: "Not Found" } },
+      [`GET ${REPO_PATH}/branches`]: { body: [{ name: "master" }] },
+      [`GET ${REPO_PATH}`]: { body: { default_branch: "master" } },
+      [`POST ${REPO_PATH}/pulls`]: { status: 201, body: { number: 1, html_url: "https://x/pull/1", title: "t", state: "open" } },
+    });
+    pushMock.mockResolvedValueOnce({ status: "pushed", branch: "vib-1", commits: 1, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
+    const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actorOf(store.users.arda));
+    expect(outcome.status).toBe("delivered");
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(github.callsTo(`POST ${REPO_PATH}/pulls`).map((call) => call.body)).toMatchObject([{ base: "master", head: "vib-1" }]);
+    expect(github.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
+    expect(github.callsTo(`PATCH ${REPO_PATH}`)).toHaveLength(0);
+  });
+
   it("refuses to push when the base cannot be CREATED, and pushes anyway when the probe merely could not be READ", async () => {
     // Canary: route `network_unavailable` into the refusing arm and the second
     // half fails (no push, and a sentence claiming the base is missing).
