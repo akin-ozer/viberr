@@ -416,10 +416,13 @@ raw vendor line never reach an audit row.
   rulings or whose deployed agents hold it, as they stood at the write. That is every
   `org.store.*` row (which before named only a row id and a path inside the folder), a
   knowledge base's rename (`renamedFrom`), `org.kb.privacy` and `org.kb.deleted`, a
-  skill's rewrite or rename and `org.skill.deleted`, and `org.mcp.updated`,
+  skill's rewrite (`rewritten`) or rename and `org.skill.deleted`, and `org.mcp.updated`,
   `org.mcp.tool_policy.changed` (on a server that exists) and `org.mcp.removed`. A
-  delete asks before it drops the grants. A save that changes only a knowledge base's
-  display name or refresh mode, or a skill's summary, carries none.
+  delete asks before it drops the grants. A save that changes nothing a run is given
+  carries none: a knowledge base's display name or refresh mode, a skill's summary
+  (its text on disk is compared with what the save sent), an MCP server saved with the
+  name, the address and the credential it had. A document that is one board's own and
+  named after it (`no-repository-<slug>.md`, ruling 672) names that board alone.
   `org.store.doc_written` also carries `task {project, key}` when the write is an
   agent's correction or its undo (ruling 498).
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),

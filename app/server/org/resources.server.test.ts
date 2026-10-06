@@ -1621,9 +1621,11 @@ describe("resource reference integrity", () => {
 
   // CANARY: ask a knowledge base's rename by its new name, which no grant
   // carries until the rewrite after the row, and its row names no board;
-  // stamp every save, and the two saves that change nothing a run reads (a
-  // refresh mode, a skill's summary) land on the board's Activity.
-  it("ruling 681: a rename's row names the boards under the name it took, and a save that changes nothing a run reads names none", async () => {
+  // name the boards whenever a save arrives with a body, or whenever a server
+  // is saved, and the three saves that change nothing a run is given (a
+  // refresh mode, a skill's summary sent with the body its editor loaded, a
+  // server saved as it was) land on the board's Activity.
+  it("ruling 681: a rename's row names the boards under the name it took, and a save that changes nothing a run is given names none", async () => {
     const { db, dataRoot, ctx } = setup();
     const { kb } = await saveKnowledgeBase(db, { name: "Old rules", refresh: "manual" }, ACTOR, ctx);
     const { skill } = await saveSkill(db, { name: "old-craft", summary: "Old craft.", body: "# old" }, ACTOR, ctx);
@@ -1641,11 +1643,15 @@ describe("resource reference integrity", () => {
       { rulingsKb: "old-rules" },
     );
 
-    // Neither save changes what a run is given.
+    // None of these saves changes what a run is given. The skill editor sends
+    // back the body it loaded with every save.
+    const sameServer = { id: mcp.id, name: "vm-memory", transport: "stdio", target: "node /tmp/mem.mjs", cred: "" };
     await saveKnowledgeBase(db, { id: kb.id, name: "Old rules", refresh: "nightly" }, ACTOR, ctx);
-    await saveSkill(db, { id: skill.id, name: "old-craft", summary: "Older craft.", body: "" }, ACTOR, ctx);
+    await saveSkill(db, { id: skill.id, name: "old-craft", summary: "Older craft.", body: "# old" }, ACTOR, ctx);
+    await saveMcpServer(db, sameServer, ACTOR, { spawnImpl: fakeMcpSpawn(2) }, ctx);
     expect(resourceOf(db, "org.kb.updated")).toBeUndefined();
     expect(resourceOf(db, "org.skill.updated")).toBeUndefined();
+    expect(resourceOf(db, "org.mcp.updated")).toBeUndefined();
 
     await saveKnowledgeBase(db, { id: kb.id, name: "New rules", refresh: "nightly" }, ACTOR, ctx);
     await saveSkill(db, { id: skill.id, name: "new-craft", summary: "New craft.", body: "" }, ACTOR, ctx);
@@ -1669,6 +1675,13 @@ describe("resource reference integrity", () => {
     expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]!.details).toMatchObject({
       renamedFrom: "vm-memory",
       resource: { kind: "mcp", key: "vm-graph-memory", boards: [{ project: "calc", rulings: false, agents: ["Scout"] }] },
+    });
+
+    // A save that changes the skill's text says so.
+    await saveSkill(db, { id: skill.id, name: "new-craft", summary: "New craft.", body: "# new" }, ACTOR, ctx);
+    expect(listAuditEvents(db, { action: "org.skill.updated" })[0]!.details).toMatchObject({
+      rewritten: true,
+      resource: { key: "new-craft", boards: [{ project: "calc", rulings: false, agents: ["Scout"] }] },
     });
   });
 });

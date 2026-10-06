@@ -134,22 +134,17 @@ describe("/projects/:slug/activity", () => {
   // Instance settings is given its link; send the row as the read model built
   // it and `doc` rides along to everyone.
   it("ruling 681: a row that wrote a knowledge-base document links it for an org admin, and for nobody else", async () => {
-    const { recordAudit } = await import("~/server/audit/audit-recorder.server");
-    recordAudit(app.db, {
-      action: "org.store.doc_written",
-      actor: { userId: ardaId, label: "arda@viberr.dev" },
-      subjectKind: "org_kb",
-      subjectId: "kb_house_rules",
-      details: {
-        path: "rules.md",
-        replaced: true,
-        resource: {
-          kind: "kb",
-          key: "house-rules",
-          boards: [{ project: "viberr-core", rulings: true, agents: [] }],
-        },
-      },
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { resolveStoreTarget, saveKnowledgeBase } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const where = { dataRoot: app.dataRoot };
+    const actor = { userId: ardaId, label: "arda@viberr.dev" };
+    const { kb } = await saveKnowledgeBase(app.db, { name: "House rules", refresh: "manual" }, actor, where);
+    await updateProjectFile({ projectSlug: "viberr-core", dataRoot: app.dataRoot }, (parsed) => {
+      parsed.frontmatter.rulingsKb = "house-rules";
     });
+    writeStoreDoc(app.db, resolveStoreTarget(app.db, "kb", kb.id, where)!, [], "rules.md", "# Rules\n", actor);
+
     const rowFor = async (userId: string) => {
       const { cookie } = await app.cookieFor(userId);
       const { audit } = await runLoader("viberr-core", cookie);
@@ -158,7 +153,7 @@ describe("/projects/:slug/activity", () => {
 
     const admin = await rowFor(ardaId);
     expect(admin.text).toBe(
-      "Arda Kaya replaced **rules.md** in the project's rulings **house-rules**.",
+      "Arda Kaya added the document **rules.md** to the project's rulings **house-rules**.",
     );
     expect(admin).toMatchObject({
       docHref: "/org/settings?tab=resources&kb=house-rules&doc=rules.md",

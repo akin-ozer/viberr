@@ -792,13 +792,17 @@ const DETAILS_JSON = "CASE WHEN json_valid(a.details_json) THEN a.details_json E
  * its undo, on one of the board's own tasks is left out, because that task's
  * timeline entry is on the Stream beside this panel (ruling 498); another
  * board given the same knowledge base has no such entry, and sees the row.
+ *
+ * Only a member of `boards` that is an object is asked for its project: a
+ * string there is not JSON to `json_extract`, which raises, and one such row
+ * would take every board's panel down with it.
  */
 function resourceRowsWhere(slug: string) {
   return {
     sql:
       `a.project_slug IS NULL AND a.action IN (${RESOURCE_ACTIONS.map(() => "?").join(", ")}) ` +
       `AND EXISTS (SELECT 1 FROM json_each(${DETAILS_JSON}, '$.resource.boards') AS board ` +
-      `WHERE json_extract(board.value, '$.project') = ?) ` +
+      `WHERE CASE WHEN board.type = 'object' THEN json_extract(board.value, '$.project') END = ?) ` +
       `AND COALESCE(json_extract(${DETAILS_JSON}, '$.task.project'), '') <> ?`,
     args: [...RESOURCE_ACTIONS, slug, slug],
   };
@@ -842,7 +846,7 @@ const resourceDetailsSchema = z.object({
   fileCount: z.number().optional().catch(undefined),
   private: z.boolean().catch(false),
   renamedFrom: detailText,
-  bodyKept: z.boolean().catch(false),
+  rewritten: z.boolean().catch(false),
 });
 
 const resourceDetails = resourceDetailsSchema.catch(() => resourceDetailsSchema.parse({}));
@@ -916,7 +920,7 @@ function resourceEntry(row: AuditRow, slug: string): AuditLogEntry {
     case "org.mcp.updated": {
       const skill = row.action === "org.skill.updated";
       entry.text = d.renamedFrom
-        ? `${actor} renamed ${thing(d.renamedFrom)}${aside} to **${resource.key}**${skill && !d.bodyKept ? " and rewrote it" : ""}.`
+        ? `${actor} renamed ${thing(d.renamedFrom)}${aside} to **${resource.key}**${skill && d.rewritten ? " and rewrote it" : ""}.`
         : `${actor} ${skill ? "rewrote" : "changed"} ${thing()}${held()}.`;
       break;
     }

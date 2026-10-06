@@ -164,8 +164,11 @@ export async function recordNoRepositoryRuling(
     );
   }
   const doc = noRepositoryRulingDoc(input.projectSlug);
+  // Ruling 681: the document is this board's own and is named after it, so
+  // no other board given the knowledge base is shown the write.
   writeStoreDoc(db, target, [], doc, rulingText(input, project.parsed.frontmatter.name), actor, {
     overwrite: true,
+    ofBoard: input.projectSlug,
   });
   publishResourceUpdated("kb", target.id);
   recordAudit(db, {
@@ -205,10 +208,13 @@ export function moveNoRepositoryRuling(
     const to = kbStoreTargetForDir(db, input.toKb, ctx);
     if (!to) return;
     const text = readFileSync(path.join(from.rootAbs, standing.doc), "utf8");
-    writeStoreDoc(db, to, [], standing.doc, text, actor, { overwrite: true });
+    writeStoreDoc(db, to, [], standing.doc, text, actor, {
+      overwrite: true,
+      ofBoard: input.projectSlug,
+    });
     publishResourceUpdated("kb", to.id);
   }
-  deleteStoreNode(db, from, [standing.doc], actor);
+  deleteStoreNode(db, from, [standing.doc], actor, { ofBoard: input.projectSlug });
   publishResourceUpdated("kb", from.id);
   if (input.toKb === null) {
     recordAudit(db, {
@@ -238,7 +244,7 @@ export function removeNoRepositoryRuling(
   if (!standing) return null;
   const target = kbStoreTargetForDir(db, standing.kb, ctx);
   if (!target) return null;
-  deleteStoreNode(db, target, [standing.doc], actor);
+  deleteStoreNode(db, target, [standing.doc], actor, { ofBoard: input.projectSlug });
   publishResourceUpdated("kb", target.id);
   recordAudit(db, {
     action: "project.repo.ruling_removed",

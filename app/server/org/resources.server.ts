@@ -2009,14 +2009,14 @@ export async function saveMcpServer(
       await updateResourceReferences("mcps", existing.name, name, ctx.dataRoot);
     }
     // Ruling 681: the boards whose agents are given this server see a change
-    // to it. Asked after the rename above rewrote the grants.
+    // to it. Asked after the rename above rewrote the grants. A save names
+    // them when it changed what a run reaches (the name, where it points, or
+    // how it signs in); one that changed nothing of those says nothing.
     const held = auditedResource("mcp", name, ctx.dataRoot);
-    const details: McpSaveAudit = {
-      name,
-      transport,
-      renamed: existing.name !== name,
-      resource: held,
-    };
+    const details: McpSaveAudit = { name, transport, renamed: existing.name !== name };
+    const reachChanged =
+      existing.name !== name || repointed || rawCred !== "" || input.clearCred === true || oauthDropped;
+    if (reachChanged) details.resource = held;
     if (existing.name !== name) details.renamedFrom = existing.name;
     if (oauthDropped) details.oauthDropped = true;
     // Ruling 486(c): what the next sign-in asks for, when this save changed it.
@@ -2615,20 +2615,29 @@ export async function saveSkill(
   // files-mode create: the folder is the deliverable — SKILL.md arrives via
   // the store browser (upload / GitHub import / New document), so writing an
   // empty one here would only trigger the overwrite-confirm on that upload.
-  if (!keepExistingBody && !filesMode) {
+  //
+  // Ruling 681: whether the write changes the text. The editor sends back the
+  // body it loaded with every save, so a save of the summary alone rewrites
+  // the file with what it already held. Read after the rename above, which
+  // moved the folder, and whole: a body is refused above when the file on
+  // disk is longer than this reader's cap.
+  const writesBody = !keepExistingBody && !filesMode;
+  const rewritten = writesBody && readSkillBody(name, ctx) !== body;
+  if (writesBody) {
     writeFileSync(path.join(dir, "SKILL.md"), body);
   }
   const updatedToast = keepExistingBody
     ? `Skill ${name} updated. Existing SKILL.md kept`
     : `Skill ${name} updated. SKILL.md rewritten`;
-  // Ruling 681: a save that rewrote SKILL.md or renamed the skill changes what
-  // the agents holding it are given, so the boards they are on see it. Asked
-  // after the rename above rewrote the grants. A save that only changed the
-  // summary changes nothing a run reads.
+  // Ruling 681: a save that changed SKILL.md's text or renamed the skill
+  // changes what the agents holding it are given, so the boards they are on
+  // see it. Asked after the rename above rewrote the grants. A save that only
+  // changed the summary changes nothing a run reads.
   const renamedFrom = oldName && name !== oldName ? oldName : null;
   const stamp: AuditDetails = {};
-  if (oldName && (renamedFrom || !keepExistingBody)) {
+  if (oldName && (renamedFrom || rewritten)) {
     if (renamedFrom) stamp.renamedFrom = renamedFrom;
+    if (rewritten) stamp.rewritten = true;
     stamp.resource = auditedResource("skill", name, ctx.dataRoot);
   }
 
@@ -2662,10 +2671,7 @@ export async function saveSkill(
   // Each key is present only when it is true of THIS create: `adopted` when it
   // took over a folder already on disk, `filesMode` when no SKILL.md was written.
   const details: SkillCreateAudit = { name, ...stamp };
-  if (oldName) {
-    details.adopted = true;
-    details.bodyKept = keepExistingBody;
-  }
+  if (oldName) details.adopted = true;
   if (filesMode) details.filesMode = true;
   recordAudit(db, {
     action: oldName ? "org.skill.updated" : "org.skill.created",

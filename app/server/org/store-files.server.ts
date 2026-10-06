@@ -92,17 +92,29 @@ function recordStoreWrite(
   action: string,
   actor: AuditActor,
   details: AuditDetails,
+  ofBoard?: string,
 ): void {
+  const resource = auditedResource(target.kind, target.key, target.dataRoot);
+  if (ofBoard !== undefined) {
+    resource.boards = resource.boards.filter((board) => board.project === ofBoard);
+  }
   recordAudit(db, {
     action,
     actor,
     subjectKind: `org_${target.kind}`,
     subjectId: target.id,
-    details: {
-      ...details,
-      resource: auditedResource(target.kind, target.key, target.dataRoot),
-    },
+    details: { ...details, resource },
   });
+}
+
+/**
+ * Ruling 681: the one board a document is about, when it is one board's own
+ * (its "no repository" ruling, whose name carries the board's slug). The write
+ * is on that board's Activity alone: two boards can name one knowledge base as
+ * their rulings, and the other is not shown a document named after this one.
+ */
+export interface OwnBoardWrite {
+  ofBoard?: string;
 }
 
 // ------------------------------------------------------------------ scan
@@ -618,7 +630,7 @@ export function writeStoreDoc(
      * board's Activity does not show the write a second time.
      */
     onTask?: { projectSlug: string; taskKey: string };
-  } = {},
+  } & OwnBoardWrite = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = name.trim().replace(/[\\/]/g, "-");
@@ -680,7 +692,7 @@ export function writeStoreDoc(
   if (appendedBytes !== undefined) details.appended = appendedBytes;
   if (opts.edit) details.edited = { replaced: opts.edit.replaced, text: opts.edit.text };
   if (opts.onTask) details.task = { project: opts.onTask.projectSlug, key: opts.onTask.taskKey };
-  recordStoreWrite(db, target, "org.store.doc_written", actor, details);
+  recordStoreWrite(db, target, "org.store.doc_written", actor, details, opts.ofBoard);
   const result: StoreDocResult = {
     path: [...base, withExt],
     bytes: written.length,
@@ -705,6 +717,7 @@ export function deleteStoreNode(
   target: StoreTarget,
   nodePath: string[],
   actor: AuditActor,
+  opts: OwnBoardWrite = {},
 ): DeleteNodeResult {
   const parts = sanitizeDirPath(nodePath);
   if (parts.length === 0) {
@@ -725,6 +738,7 @@ export function deleteStoreNode(
     wasDir ? "org.store.folder_deleted" : "org.store.file_deleted",
     actor,
     { path: parts.join("/"), filesRemoved },
+    opts.ofBoard,
   );
   return { name: parts[parts.length - 1]!, wasDir, filesRemoved };
 }
